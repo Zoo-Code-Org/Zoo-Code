@@ -4,6 +4,7 @@ import type { HistoryItem, ProviderSettings } from "@roo-code/types"
 
 import { selectHandoffExecutionContext } from "../src/core/task/providerHandoff"
 import {
+	abandonDelegatedChild,
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
@@ -23,6 +24,7 @@ type Policy = {
 	staleConcurrentCommits?: boolean
 	releaseParentTransitionAfterPublication?: boolean
 	startAfterCancellation?: boolean
+	interruptCancelledChild?: boolean
 }
 
 type ModelState = {
@@ -97,6 +99,11 @@ const LEGACY_POLICIES: Array<Policy & { expectedViolation: string }> = [
 		name: "start-after-cancellation",
 		startAfterCancellation: true,
 		expectedViolation: "child started after cancellation",
+	},
+	{
+		name: "interrupt-cancelled-child",
+		interruptCancelledChild: true,
+		expectedViolation: "cancelled handoff left the parent awaiting an unstarted child",
 	},
 	{ name: "start-before-commit", startBeforeCommit: true, expectedViolation: "child started without exact commit" },
 	{
@@ -283,7 +290,19 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 				next.publishedTask = undefined
 				if (state.commitOwner) {
 					const childId = childIdFor(state.generation, state.commitOwner)
-					next.children[childId] = interruptDelegatedChild(state.parent, state.children[childId]!)
+					if (policy.interruptCancelledChild) {
+						next.children[childId] = interruptDelegatedChild(state.parent, state.children[childId]!)
+					} else {
+						// A never-started child has no conversation to resume: release the parent
+						// through the abandon reducer and delete the empty child.
+						if (state.parent.status === "delegated" && state.parent.awaitingChildId === childId) {
+							next.parent = abandonDelegatedChild(state.parent, {
+								...state.children[childId]!,
+								status: "interrupted",
+							}).parent
+						}
+						delete next.children[childId]
+					}
 				}
 				if (state.prepared) {
 					delete next.children[childIdFor(state.generation, state.prepared.provider)]
@@ -451,6 +470,9 @@ function invariantViolations(state: ModelState): string[] {
 	if (state.cancelled && state.startedProviders.length > 0) violations.push("child started after cancellation")
 	if (state.cancelled && Object.values(state.children).some((child) => child?.status === "active")) {
 		violations.push("cancelled handoff retained an active child")
+	}
+	if (state.cancelled && state.startedProviders.length === 0 && state.parent.awaitingChildId !== undefined) {
+		violations.push("cancelled handoff left the parent awaiting an unstarted child")
 	}
 	if (!state.publishedTask && !state.cancelled) violations.push("observable current task is empty")
 	if (state.startedProviders.length > 1) violations.push("multiple child starts for one parent generation")

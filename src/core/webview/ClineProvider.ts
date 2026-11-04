@@ -4912,50 +4912,31 @@ export class ClineProvider
 		} catch (err) {
 			const cancelled = this._disposed || child.abort || child.abandoned
 			if (cancelled && delegationCommitted) {
-				// Keep a committed handoff recoverable, but never start it after teardown.
+				// The child is never scheduled after cancellation, so it has no API conversation
+				// to resume. Release the parent through the abandon transition and delete the
+				// empty child instead of leaving the parent awaiting a child that cannot reopen.
 				// We already own the parent transition lock, so do not call eviction's
 				// lock-taking interruption helper here.
 				if (this.getCurrentTask()?.taskId === child.taskId) await this.removeClineFromStack()
+				// Drain abort's final save before deleting so it cannot recreate the child record.
 				await ClineProvider.prototype.drainTaskDisposal.call(this, child)
-				const parentHistory = this.taskHistoryStore.get(parentTaskId)
-				if (parentHistory?.awaitingChildId === child.taskId) {
-					// The child was deleted concurrently; release the parent through the abandon
-					// transition. Only id and status of the stand-in child are read.
-					const releaseParentFromMissingChild = () =>
-						this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (current) =>
-							current.status === "delegated" && current.awaitingChildId === child.taskId
-								? abandonDelegatedChild(current, {
-										...current,
-										id: child.taskId,
-										status: "interrupted",
-									}).parent
-								: current,
-						)
-					try {
-						if (this.taskHistoryStore.get(child.taskId)) {
-							try {
-								await this.taskHistoryStore.atomicReadAndUpdate(child.taskId, (historyItem) =>
-									historyItem.status === "active"
-										? interruptDelegatedChild(parentHistory, historyItem)
-										: historyItem,
-								)
-							} catch (updateError) {
-								// Deleted between the check above and the update: repair the parent instead.
-								// Any other failure is unrelated to a missing child and is reported below.
-								if (this.taskHistoryStore.get(child.taskId)) throw updateError
-								await releaseParentFromMissingChild()
-							}
-						} else {
-							await releaseParentFromMissingChild()
-						}
-					} catch (cleanupError) {
-						// Never let a cleanup failure replace the cancellation error.
-						this.log(
-							`[delegateParentAndOpenChild] Failed to repair cancelled handoff ${parentTaskId} -> ${child.taskId}: ${
-								(cleanupError as Error)?.message ?? String(cleanupError)
-							}`,
-						)
-					}
+				try {
+					// Only id and status of the stand-in child are read by the abandon transition.
+					await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (current) =>
+						current.status === "delegated" && current.awaitingChildId === child.taskId
+							? abandonDelegatedChild(current, { ...current, id: child.taskId, status: "interrupted" })
+									.parent
+							: current,
+					)
+					this.recentTasksCache = undefined
+					await this.deleteTaskWithId(child.taskId, false)
+				} catch (cleanupError) {
+					// Never let a cleanup failure replace the cancellation error.
+					this.log(
+						`[delegateParentAndOpenChild] Failed to repair cancelled handoff ${parentTaskId} -> ${child.taskId}: ${
+							(cleanupError as Error)?.message ?? String(cleanupError)
+						}`,
+					)
 				}
 				throw err
 			}

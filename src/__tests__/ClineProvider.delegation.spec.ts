@@ -50,6 +50,8 @@ function makeStoreStub(
  */
 const makeParentTask = () => ({
 	taskId: "parent-1",
+	abort: false,
+	abandoned: false,
 	apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
 	getTaskMode: vi.fn().mockResolvedValue("code"),
 	getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
@@ -122,7 +124,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			postMessageToWebview: vi.fn(async () => {
 				if (phase.startsWith("publish")) cancel()
 			}),
-			deleteTaskWithId: vi.fn(async (id: string) => {
+			deleteTaskWithId: vi.fn(async (id: string, cascadeSubtasks?: boolean) => {
+				expect(cascadeSubtasks).toBe(false)
 				records.delete(id)
 			}),
 			removeClineFromStack: vi.fn(async () => {
@@ -153,9 +156,12 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(restore).not.toHaveBeenCalled()
 		if (created) expect(child.dispose).toHaveBeenCalledOnce()
 		if (committed) {
-			expect(records.get("parent-1")).toMatchObject({ status: "delegated", awaitingChildId: "child-1" })
-			expect(records.get("child-1")).toMatchObject({ status: "interrupted", parentTaskId: "parent-1" })
-		} else expect(records.has("child-1")).toBe(false)
+			// The never-started child has no conversation to reopen: the parent is released through
+			// the abandon transition and the empty child is deleted instead of being interrupted.
+			expect(records.get("parent-1")).toMatchObject({ status: "active", awaitingChildId: undefined })
+			expect(records.get("parent-1")?.delegatedToId).toBeUndefined()
+		}
+		expect(records.has("child-1")).toBe(false)
 	})
 
 	it("releases the parent and rethrows the cancellation when the committed child was deleted", async () => {
@@ -219,16 +225,16 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 	it.each([
 		{
-			name: "the child is deleted between the existence check and the update",
-			deleteBeforeUpdate: true,
-			expected: { status: "active", awaitingChildId: undefined },
-		},
-		{
-			name: "the child update fails for a reason other than deletion",
-			deleteBeforeUpdate: false,
+			name: "releasing the parent fails",
+			failParent: true,
 			expected: { status: "delegated", awaitingChildId: "child-1" },
 		},
-	])("when $name, still rethrows the cancellation", async ({ deleteBeforeUpdate, expected }) => {
+		{
+			name: "deleting the never-started child fails",
+			failParent: false,
+			expected: { status: "active", awaitingChildId: undefined },
+		},
+	])("when $name, logs and still rethrows the cancellation", async ({ failParent, expected }) => {
 		const parent = makeParentTask()
 		const child = {
 			taskId: "child-1",
@@ -239,23 +245,24 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		let current: { taskId: string } | undefined = parent
 		const records = new Map<string, HistoryItem>([["parent-1", { ...parentHistoryItem, status: "interrupted" }]])
+		let parentUpdates = 0
 		const store = {
 			invalidate: vi.fn().mockResolvedValue(undefined),
 			get: (id: string) => records.get(id),
 			atomicReadAndUpdate: vi.fn(async (id: string, update: (item: HistoryItem) => HistoryItem) => {
-				if (id === "child-1") {
-					// The child is still stored when checked, then fails to update.
-					if (deleteBeforeUpdate) records.delete(id)
-					throw new Error(`cannot update ${id}`)
-				}
 				const item = records.get(id)
 				if (!item) throw new Error(`missing ${id}`)
+				// The first parent update commits the delegation; the second releases it.
+				if (id === "parent-1" && ++parentUpdates === 2 && failParent) throw new Error("release failed")
 				records.set(id, update(item))
 				if (id === "parent-1") child.abort = true
 				return [...records.values()]
 			}),
 		}
 		const log = vi.fn()
+		const deleteTaskWithId = vi.fn(async () => {
+			throw new Error("delete failed")
+		})
 		const provider = makeProviderStub({
 			taskHistoryStore: store,
 			taskScheduler: { schedule: vi.fn() },
@@ -274,7 +281,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: true,
 			emit: vi.fn(),
 			postMessageToWebview: vi.fn(),
-			deleteTaskWithId: vi.fn(),
+			deleteTaskWithId,
 			removeClineFromStack: vi.fn(async () => {
 				current = undefined
 			}),
@@ -291,10 +298,11 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		).rejects.toThrow(/cancelled/)
 
 		expect(records.get("parent-1")).toMatchObject(expected)
-		// A cleanup failure that is not a missing child is logged, never allowed to replace the error.
-		if (!deleteBeforeUpdate) {
-			expect(log).toHaveBeenCalledWith(expect.stringContaining("Failed to repair cancelled handoff"))
-		}
+		expect(records.has("child-1")).toBe(true)
+		// A failed release never deletes the child the parent still awaits.
+		expect(deleteTaskWithId).toHaveBeenCalledTimes(failParent ? 0 : 1)
+		// A cleanup failure is logged, never allowed to replace the cancellation error.
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("Failed to repair cancelled handoff"))
 	})
 
 	it("stops before delegation when refreshing the interrupted task's owner fails", async () => {
