@@ -20,7 +20,7 @@ import {
 } from "../extract-text"
 
 const { parsePdf } = vi.hoisted(() => ({
-	parsePdf: vi.fn<(source: Buffer) => Promise<{ text: string }>>(),
+	parsePdf: vi.fn<(source: Uint8Array) => Promise<{ text: string }>>(),
 }))
 
 vi.mock("pdf-parse/lib/pdf-parse", () => ({ default: parsePdf }))
@@ -48,8 +48,8 @@ describe("document decoders", () => {
 		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
 
 		expect(await extractTextFromBuffer(source, "missing.PDF")).toBe(expected)
-		expect(parsePdf).toHaveBeenCalledExactlyOnceWith(source)
-		expect(parsePdf.mock.calls[0][0]).toBe(source)
+		expect(parsePdf).toHaveBeenCalledExactlyOnceWith(new Uint8Array(source))
+		expect(Buffer.isBuffer(parsePdf.mock.calls[0][0])).toBe(false)
 		expect(access).not.toHaveBeenCalled()
 		expect(readFile).not.toHaveBeenCalled()
 	})
@@ -78,7 +78,7 @@ describe("document decoders", () => {
 		const probe = vi.spyOn(binaryFile, "isBinaryFile")
 
 		await expect(extractTextFromBuffer(source, "corrupted.pdf")).rejects.toBe(failure)
-		expect(parsePdf).toHaveBeenCalledExactlyOnceWith(source)
+		expect(parsePdf).toHaveBeenCalledExactlyOnceWith(new Uint8Array(source))
 		expect(probe).not.toHaveBeenCalled()
 	})
 

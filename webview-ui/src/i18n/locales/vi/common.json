@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Có",
-		"no": "Không",
-		"cancel": "Hủy",
-		"remove": "Xóa",
-		"keep": "Giữ"
+		"cancel": "Hủy"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Sao chép",
 			"save": "Lưu hình ảnh",
 			"viewCode": "Xem mã",
-			"viewDiagram": "Xem biểu đồ",
 			"close": "Đóng"
-		},
-		"modal": {
-			"codeTitle": "Mã Mermaid"
 		},
 		"tabs": {
 			"diagram": "Biểu đồ",
 			"code": "Mã"
-		},
-		"feedback": {
-			"imageCopied": "Hình ảnh đã được sao chép vào clipboard",
-			"copyError": "Lỗi sao chép hình ảnh"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Hình ảnh"
 		},
 		"noData": "Không có dữ liệu hình ảnh"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Định dạng URI dữ liệu không hợp lệ",
-			"copyingImage": "Lỗi sao chép hình ảnh: {{error}}",
-			"openingImage": "Lỗi mở hình ảnh: {{error}}",
-			"pathNotExists": "Đường dẫn không tồn tại: {{path}}",
-			"couldNotOpen": "Không thể mở tệp: {{error}}",
-			"couldNotOpenGeneric": "Không thể mở tệp!"
-		},
-		"success": {
-			"imageDataUriCopied": "URI dữ liệu hình ảnh đã được sao chép vào clipboard"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Xóa Tin Nhắn",
@@ -77,8 +53,7 @@
 		"editOnly": "Không, chỉ chỉnh sửa tin nhắn",
 		"deleteOnly": "Không, chỉ xóa tin nhắn",
 		"restoreToCheckpoint": "Có, khôi phục checkpoint",
-		"proceed": "Tiếp Tục",
-		"dontShowAgain": "Không hiển thị lại"
+		"proceed": "Tiếp Tục"
 	},
 	"time_ago": {
 		"just_now": "vừa xong",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "Bạn đã chờ {{timeout}} giây để khởi tạo điểm kiểm tra. Nếu không cần chức năng này, hãy tắt nó trong <settingsLink>cài đặt điểm kiểm tra</settingsLink>.",
 		"init_checkpoint_fail_long_time": "Khởi tạo điểm kiểm tra mất hơn {{timeout}} giây, vì vậy các điểm kiểm tra đã bị vô hiệu hóa cho tác vụ này. Bạn có thể tắt các điểm kiểm tra hoặc tăng thời gian chờ trong <settingsLink>cài đặt điểm kiểm tra</settingsLink>.",
 		"attempt_completion_tool_failed": "Không thể thực thi attempt_completion vì một lệnh gọi công cụ trước đó đã thất bại trong lượt này. Vui lòng giải quyết lỗi công cụ trước khi cố gắng hoàn thành."
-	},
-	"tasks": {
-		"delegated": "Ủy quyền cho nhiệm vụ con",
-		"delegated_to": "Ủy quyền cho nhiệm vụ {{childId}}",
-		"delegation_completed": "Nhiệm vụ con hoàn thành, tiếp tục nhiệm vụ cha",
-		"awaiting_child": "Đang chờ nhiệm vụ con {{childId}}"
 	},
 	"costs": {
 		"own": "Riêng",

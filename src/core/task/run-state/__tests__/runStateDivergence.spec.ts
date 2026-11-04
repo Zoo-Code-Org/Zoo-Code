@@ -85,6 +85,25 @@ describe("findDivergences", () => {
 		expect(divergence.raceId).toBeUndefined()
 	})
 
+	it("compares the latch and phase fields by default and skips the stream fields", () => {
+		const [divergence, ...rest] = findDivergences({
+			event: { tag: "initialized" },
+			state: initialRunState,
+			fields: {
+				abort: true,
+				abandoned: true,
+				abortReason: "user_cancelled",
+				isInitialized: true,
+				isStreaming: true,
+				didFinishAbortingStream: true,
+			},
+			rejected: false,
+		})
+		expect(rest).toEqual([])
+		expect(divergence).toMatchObject({ kind: "mismatch" })
+		expect([...divergence.mismatched].sort()).toEqual(["abandoned", "abort", "abortReason", "isInitialized"])
+	})
+
 	it("ignores a field that is not routed", () => {
 		const divergences = findDivergences({
 			event: { tag: "initialized" },

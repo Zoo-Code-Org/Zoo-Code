@@ -33,6 +33,12 @@ vi.mock("../ApiOptions", () => ({
 				data-testid="set-other-field"
 				onClick={() => setApiConfigurationField("openAiBaseUrl", "https://example.test")}
 			/>
+			<span data-testid="received-ttl">{String(apiConfiguration?.promptCacheTtl)}</span>
+			<button data-testid="set-ttl-1h" onClick={() => setApiConfigurationField("promptCacheTtl", "1h")} />
+			<button
+				data-testid="set-ttl-default"
+				onClick={() => setApiConfigurationField("promptCacheTtl", undefined)}
+			/>
 		</div>
 	),
 }))
@@ -428,6 +434,47 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	it.each([true, false, undefined])("buffers the output collapse preference (%s) until Save", (savedValue) => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="terminal" />, {
+			state: { collapseCommandOutputByDefault: savedValue, terminalShellIntegrationDisabled: true },
+		})
+		const checkbox = within(screen.getByTestId("settings-content")).getByTestId(
+			"terminal-collapse-command-output-checkbox",
+		)
+		expect(checkbox).toHaveProperty("checked", savedValue ?? false)
+		vi.mocked(vscode.postMessage).mockClear()
+		fireEvent.click(checkbox)
+		expect(checkbox).toHaveProperty("checked", !(savedValue ?? false))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					collapseCommandOutputByDefault: !(savedValue ?? false),
+					terminalShellIntegrationDisabled: true,
+				}),
+			}),
+		)
+	})
+
+	it("keeps the buffered collapse preference during an unrelated live state refresh", async () => {
+		const { getSettingsContent, activateTab } = renderSettingsView({ settingsImportedAt: "initial-collapse-state" })
+		activateTab("terminal")
+		const checkbox = await within(getSettingsContent()).findByTestId("terminal-collapse-command-output-checkbox")
+		fireEvent.click(checkbox)
+		act(() =>
+			mockPostMessage({ collapseCommandOutputByDefault: false, settingsImportedAt: "initial-collapse-state" }),
+		)
+		expect(checkbox).toHaveProperty("checked", true)
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ collapseCommandOutputByDefault: true }),
+			}),
+		)
+	})
 	it("saves the selected chat font size and persists null on reset", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView()
 
@@ -1006,5 +1053,77 @@ describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(posted()?.apiConfiguration?.openAiBaseUrl).toBe("https://example.test")
 		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBeUndefined()
+	})
+})
+
+describe("SettingsView - promptCacheTtl save round trip", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	const renderWithConfig = (apiConfiguration: ProviderSettings) => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection={"providers"} />, {
+			state: { currentApiConfigName: "test-config", apiConfiguration },
+		})
+	}
+
+	const posted = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0])
+			.find((message) => message?.type === "upsertApiConfiguration")
+
+	it("restores a saved 1h from a loaded API configuration", () => {
+		// The saved value must survive a reload rather than reverting to the display
+		// default, which is what the "control reverts visually" regression looks like.
+		renderWithConfig({ promptCacheTtl: "1h" })
+
+		expect(screen.getByTestId("received-ttl").textContent).toBe("1h")
+	})
+
+	it("shows an unset knob as unset, not as a stored 5m", () => {
+		renderWithConfig({})
+
+		expect(screen.getByTestId("received-ttl").textContent).toBe("undefined")
+	})
+
+	it("buffers the change and persists 1h only on Save", () => {
+		renderWithConfig({})
+		fireEvent.click(screen.getByTestId("set-ttl-1h"))
+
+		// Toggling buffers in cachedState; nothing is persisted before Save.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(posted()).toEqual(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				text: "test-config",
+				apiConfiguration: expect.objectContaining({ promptCacheTtl: "1h" }),
+			}),
+		)
+	})
+
+	it("persists a return to the default as absence, not as an explicit 5m", () => {
+		renderWithConfig({ promptCacheTtl: "1h" })
+		fireEvent.click(screen.getByTestId("set-ttl-default"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		// Consumers apply the vendor default, so the payload must not carry "5m".
+		expect(posted()?.apiConfiguration?.promptCacheTtl).toBeUndefined()
+	})
+
+	it("preserves an explicitly stored 5m rather than collapsing it to unset", () => {
+		// "5m" and unset are different stored states even though both emit no ttl
+		// key, so the save path must not rewrite one into the other.
+		renderWithConfig({ promptCacheTtl: "5m" })
+
+		expect(screen.getByTestId("received-ttl").textContent).toBe("5m")
+
+		fireEvent.click(screen.getByTestId("set-ttl-1h"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(posted()?.apiConfiguration?.promptCacheTtl).toBe("1h")
 	})
 })

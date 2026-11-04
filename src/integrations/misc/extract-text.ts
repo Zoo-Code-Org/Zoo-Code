@@ -9,7 +9,8 @@ import { readWithSlice } from "./indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../../core/prompts/tools/native-tools/read_file"
 
 async function extractTextFromPDF(source: Buffer): Promise<string> {
-	const data = await pdf(source)
+	// PDF.js requires plain byte-array semantics; passing a Node Buffer can corrupt XRef parsing.
+	const data = await pdf(new Uint8Array(source))
 	return addLineNumbers(data.text)
 }
 
