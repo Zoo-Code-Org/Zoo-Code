@@ -608,12 +608,15 @@ export interface ProfileSource {
 const PROFILE_READ_TIMEOUT_MS = 10_000
 
 /**
- * Rejects with `message` if `work` has not settled within `ms`, and with an AbortError as soon as `signal` aborts.
- * The timer and the abort listener are released whichever way it ends, so a request that is abandoned leaves nothing
- * behind while `work` (which cannot be cancelled) is still pending.
+ * Runs `start` and rejects with `message` if it has not settled within `ms`, and with an AbortError as soon as
+ * `signal` aborts. Nothing is started for a signal that is already aborted. The timer and the abort listener are
+ * released whichever way it ends, so a request that is abandoned leaves nothing behind while the work (which cannot be
+ * cancelled) is still pending.
  */
-function withDeadline<T>(work: Promise<T>, ms: number, message: string, signal?: AbortSignal): Promise<T> {
+function withDeadline<T>(start: () => PromiseLike<T>, ms: number, message: string, signal?: AbortSignal): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
+		if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"))
+
 		const done = () => {
 			clearTimeout(timer)
 			signal?.removeEventListener("abort", onAbort)
@@ -626,12 +629,15 @@ function withDeadline<T>(work: Promise<T>, ms: number, message: string, signal?:
 			done()
 			reject(new Error(message))
 		}, ms)
-		if (signal?.aborted) {
-			// Nobody will wait for `work`, so its own rejection must not go unhandled.
-			work.catch(() => undefined)
-			return onAbort()
-		}
 		signal?.addEventListener("abort", onAbort, { once: true })
+
+		let work: PromiseLike<T>
+		try {
+			work = start()
+		} catch (error) {
+			done()
+			return reject(error)
+		}
 		work.then(
 			(value) => {
 				done()
@@ -648,7 +654,7 @@ function withDeadline<T>(work: Promise<T>, ms: number, message: string, signal?:
 /** Reads one profile; one that fails, takes too long, or is abandoned (`signal` aborts) reads as missing. */
 function readProfile(source: ProfileSource, id: string, signal?: AbortSignal): Promise<ProviderSettings | undefined> {
 	return withDeadline(
-		source.getProfile({ id }),
+		() => source.getProfile({ id }),
 		PROFILE_READ_TIMEOUT_MS,
 		"Reading a profile timed out",
 		signal,
@@ -667,10 +673,15 @@ export async function loadProfilesWithActive(
 	signal?: AbortSignal,
 	activeName?: string,
 ): Promise<{ profiles: ProviderSettings[]; activeProfileId?: string }> {
-	// Stops waiting as soon as `signal` aborts. The reads themselves cannot be cancelled, but the profile reads
-	// are not started once the list wait has been abandoned.
+	// Stops waiting as soon as `signal` aborts. The reads themselves cannot be cancelled, but none is started for a
+	// request that was already cancelled, and the profile reads are not started once the list wait has been abandoned.
 	const listed = await until(
-		withDeadline(source.listConfig(), PROFILE_READ_TIMEOUT_MS, "Reading the saved profiles timed out", signal),
+		withDeadline(
+			() => source.listConfig(),
+			PROFILE_READ_TIMEOUT_MS,
+			"Reading the saved profiles timed out",
+			signal,
+		),
 		signal,
 		() => {},
 	)

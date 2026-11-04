@@ -1450,7 +1450,7 @@ describe("loadProfiles", () => {
 			expect(live()).toBe(0)
 		})
 
-		it("does not read a profile when the signal is already aborted", async () => {
+		it("starts no read at all when the signal is already aborted: not the list, not a profile", async () => {
 			const controller = new AbortController()
 			controller.abort()
 			const source = { listConfig: vi.fn(async () => [{ id: "a" }]), getProfile: vi.fn() }
@@ -1459,6 +1459,7 @@ describe("loadProfiles", () => {
 				name: "AbortError",
 			})
 
+			expect(source.listConfig).not.toHaveBeenCalled()
 			expect(source.getProfile).not.toHaveBeenCalled()
 			expect(vi.getTimerCount()).toBe(0)
 		})
@@ -1469,16 +1470,15 @@ describe("loadProfiles", () => {
 			const unhandled = vi.fn()
 			process.on("unhandledRejection", unhandled)
 			try {
-				// A plain function: a `vi.fn` attaches handlers to the promises it returns, which would hide the problem.
-				const source = {
-					listConfig: () => Promise.reject(new Error("corrupt secret storage")),
-					getProfile: vi.fn(),
-				}
+				// The read is never started, so there is no promise whose rejection nobody handles.
+				const listConfig = vi.fn(() => Promise.reject(new Error("corrupt secret storage")))
+				const source = { listConfig, getProfile: vi.fn() }
 
 				await expect(loadProfilesWithActive(source, controller.signal)).rejects.toMatchObject({
 					name: "AbortError",
 				})
 
+				expect(listConfig).not.toHaveBeenCalled()
 				expect(source.getProfile).not.toHaveBeenCalled()
 				expect(vi.getTimerCount()).toBe(0)
 				// Let a stray rejection surface: Node reports it after the microtask queue has drained, in a later turn.
@@ -1488,6 +1488,29 @@ describe("loadProfiles", () => {
 			} finally {
 				process.off("unhandledRejection", unhandled)
 			}
+		})
+		it("turns a source that throws at once into a failure, and a profile read that throws into a missing profile", async () => {
+			const throwing = {
+				listConfig: () => {
+					throw new Error("secret storage unavailable")
+				},
+				getProfile: vi.fn(),
+			}
+			await expect(loadProfilesWithActive(throwing)).rejects.toThrow("secret storage unavailable")
+			expect(throwing.getProfile).not.toHaveBeenCalled()
+			expect(vi.getTimerCount()).toBe(0)
+
+			const partly = {
+				listConfig: async () => [{ id: "bad" }, { id: "good" }],
+				getProfile: (params: { id: string }) => {
+					if (params.id === "bad") throw new Error("unreadable")
+					return Promise.resolve({ apiProvider: "openrouter" } as never)
+				},
+			}
+			await expect(loadProfilesWithActive(partly)).resolves.toMatchObject({
+				profiles: [{ apiProvider: "openrouter" }],
+			})
+			expect(vi.getTimerCount()).toBe(0)
 		})
 
 		it("releases its timers and listener when everything settles normally", async () => {

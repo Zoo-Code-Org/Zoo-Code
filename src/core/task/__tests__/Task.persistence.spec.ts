@@ -1164,6 +1164,39 @@ describe("Task persistence", () => {
 			expect(updateTaskHistory.mock.calls.map(([item]) => item.usage)).toEqual([false, true])
 		})
 
+		it("orders the saves of two instances of the same task, so the older one's metadata cannot replace the newer one's", async () => {
+			const events: string[] = []
+			const firstMetadata = createDeferred<ReturnType<typeof metadataFor>>()
+			mockSaveTaskMessages.mockResolvedValue([])
+			mockTaskMetadata
+				.mockImplementationOnce(() => firstMetadata.promise)
+				.mockImplementationOnce(async () => metadataFor(true))
+			const updateTaskHistory = vi.fn(
+				async (item: { usage: boolean }) => void events.push(`history ${item.usage}`),
+			)
+			const provider = { ...mockProvider, updateTaskHistory } as unknown as ClineProvider
+			const instance = () =>
+				new Task({
+					provider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					taskId: "shared-task",
+					startTask: false,
+				})
+			const older = instance() // for instance, a task that was reopened while the old one still saves
+			const newer = instance()
+
+			const olderSave = getTaskPersistenceAccess(older).saveClineMessages()
+			const newerSave = getTaskPersistenceAccess(newer).saveClineMessages()
+			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1))
+			expect(updateTaskHistory).not.toHaveBeenCalled() // the newer metadata is queued behind the older one
+
+			firstMetadata.resolve(metadataFor(false))
+			await Promise.all([olderSave, newerSave])
+
+			expect(events).toEqual(["history false", "history true"])
+		})
+
 		it("does not make a message write wait for the metadata stage of the save before it", async () => {
 			const slowMetadata = createDeferred<ReturnType<typeof metadataFor>>()
 			mockSaveTaskMessages.mockResolvedValue([])

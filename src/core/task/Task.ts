@@ -124,6 +124,7 @@ import {
 	saveTaskMessages,
 	taskMetadata,
 } from "../task-persistence"
+import { createTaskSaveQueues, enqueueTaskSave } from "./taskSaveQueue"
 import { bindRequestToHandler, resolveRecordedModelId } from "../task-persistence/usageByModel"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
@@ -153,6 +154,10 @@ import {
 	isDivergenceCheckEnabled,
 	reportDivergence,
 } from "./run-state/runStateDivergence"
+
+// The save queues of every task of this extension host: see `taskSaveQueue.ts`.
+const messageWriteQueues = createTaskSaveQueues()
+const taskMetadataQueues = createTaskSaveQueues()
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -1786,32 +1791,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * to replace the stored messages outright.
 	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
-		// Two queues. The message writes go one at a time, and a write never waits for the metadata of the save before
-		// it: the messages are what must reach the disk, so a slow history write cannot delay them. The metadata stage
-		// (the history entry, derived from the messages that save persisted) also goes one at a time, in the order the
-		// message writes finished, which is the order the saves were asked for: callers that do not wait for a save (the
-		// fire-and-forget ones) would otherwise let an older save's metadata land after a newer save's and replace it,
-		// an explicit clear of the usage breakdown included. A save that fails does not hold up the next one.
-		const written = this.saveClineMessagesQueue.then(
-			() => this.writeClineMessages(merge),
-			() => this.writeClineMessages(merge),
-		)
-		this.saveClineMessagesQueue = written.then(
-			() => undefined,
-			() => undefined,
-		)
+		// Two queues per task, shared by every instance of the task. The message writes go one at a time, and a write
+		// never waits for the metadata of the save before it: the messages are what must reach the disk, so a slow
+		// history write cannot delay them. The metadata stage (the history entry, derived from the messages that save
+		// persisted) also goes one at a time, in the order the message writes finished, which is the order the saves
+		// were asked for: callers that do not wait for a save (the fire-and-forget ones) would otherwise let an older
+		// save's metadata land after a newer save's and replace it, an explicit clear of the usage breakdown included.
+		// A save that fails does not hold up the next one.
+		const result = await enqueueTaskSave(messageWriteQueues, this.taskId, () => this.writeClineMessages(merge))
+		if (!result.saved) return false
 
-		return written.then(async (result) => {
-			if (!result.saved) return false
-			const metadata = this.saveTaskMetadataQueue.then(() => this.writeTaskMetadata(result.persistedMessages))
-			this.saveTaskMetadataQueue = metadata
-			await metadata
-			return true
-		})
+		await enqueueTaskSave(taskMetadataQueues, this.taskId, () => this.writeTaskMetadata(result.persistedMessages))
+		return true
 	}
-
-	private saveClineMessagesQueue: Promise<void> = Promise.resolve()
-	private saveTaskMetadataQueue: Promise<void> = Promise.resolve()
 
 	/** The message write: `saved` is whether it reached the disk, and `persistedMessages` what was actually stored. */
 	private async writeClineMessages(

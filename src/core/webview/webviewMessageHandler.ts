@@ -1137,15 +1137,15 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
+		case "exportUsageCsv":
+			await exportUsageCsv(message.text, message.values?.range)
+			break
 		case "exportSettings":
 			await exportSettings({
 				providerSettingsManager: provider.providerSettingsManager,
 				contextProxy: provider.contextProxy,
 			})
 
-			break
-		case "exportUsageCsv":
-			await exportUsageCsv(message.text, message.values?.range)
 			break
 		case "resetState":
 			await provider.resetState()
