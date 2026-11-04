@@ -1,6 +1,13 @@
 import { z } from "zod"
 
-import type { ModelInfo } from "../model.js"
+import { modelInfoSchema, type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	baseProviderSettingsShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+	NO_DEFAULT_MODEL_ID,
+} from "./common.js"
 
 // https://openai.com/api/pricing/
 export const openAiModelsMessageTypes = ["requestOpenAiModels", "openAiModels"] as const
@@ -31,6 +38,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 10.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.1,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -75,6 +83,7 @@ export const openAiNativeModels = {
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice12h: 25, // $25.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 1.0,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -117,6 +126,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 10.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.2,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -160,6 +170,7 @@ export const openAiNativeModels = {
 		inputPrice: 0.1,
 		outputPrice: 0.5,
 		cacheWritesPrice: 0.125,
+		cacheWritesPrice12h: 0.25, // $0.25 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.01,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -203,6 +214,7 @@ export const openAiNativeModels = {
 		inputPrice: 4.0,
 		outputPrice: 20.0,
 		cacheWritesPrice: 5.0,
+		cacheWritesPrice12h: 10, // $10.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.4,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -246,6 +258,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 12.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.2,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -289,6 +302,7 @@ export const openAiNativeModels = {
 		inputPrice: 0.2,
 		outputPrice: 1.2,
 		cacheWritesPrice: 0.25,
+		cacheWritesPrice12h: 0.5, // $0.50 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.02,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -978,3 +992,104 @@ export function isAzureOpenAiBaseUrl(baseUrl?: string, useAzure?: boolean): bool
 		return false
 	}
 }
+
+export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
+
+/**
+ * Default for the OpenAI `openAiStrictToolSchemas` setting.
+ * When true (default), non-MCP tools are sent with strict: true and their
+ * schemas are normalized for OpenAI strict mode. Some OpenAI-compatible
+ * proxies reject strict: true; set this to false for those endpoints.
+ */
+export const DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS = true
+
+const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
+	// Prototype-pollution defenses; remaining keys are request-owned, including tool-call protocol controls.
+	"__proto__",
+	"constructor",
+	"prototype",
+	"max_completion_tokens",
+	"max_tokens",
+	"messages",
+	"model",
+	"parallel_tool_calls",
+	"reasoning",
+	"reasoning_effort",
+	"response_format",
+	"stream",
+	"stream_options",
+	"temperature",
+	"tool_choice",
+	"tools",
+] as const
+
+type OpenAiExtraBodyParseResult =
+	| { success: true; data: Record<string, unknown> }
+	| {
+			success: false
+			reason: "invalidJson" | "objectRequired" | "reservedKeys"
+			data: Record<string, unknown>
+			reservedKeys?: string[]
+	  }
+
+export function parseOpenAiExtraBody(value: string | undefined): OpenAiExtraBodyParseResult {
+	if (!value?.trim()) {
+		return { success: true, data: {} }
+	}
+
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(value)
+	} catch {
+		return { success: false, reason: "invalidJson", data: {} }
+	}
+
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { success: false, reason: "objectRequired", data: {} }
+	}
+
+	const entries = Object.entries(parsed)
+	const reservedKeys = entries
+		.map(([key]) => key)
+		.filter((key) => (OPENAI_EXTRA_BODY_RESERVED_KEYS as readonly string[]).includes(key))
+	const data = Object.fromEntries(entries.filter(([key]) => !reservedKeys.includes(key)))
+
+	if (reservedKeys.length > 0) {
+		return { success: false, reason: "reservedKeys", reservedKeys, data }
+	}
+
+	return { success: true, data }
+}
+
+const openAiExtraBodySchema = z
+	.string()
+	.superRefine((value, ctx) => {
+		const result = parseOpenAiExtraBody(value)
+		if (!result.success) {
+			ctx.addIssue({ code: "custom", message: result.reason })
+		}
+	})
+	.optional()
+
+export const openAiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.openai,
+	modelIdKey: OPEN_AI_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(OPEN_AI_MODEL_ID_FIELD),
+	// OpenAI-compatible endpoints are fully user-configured, so there is no default.
+	getDefaultModelId: () => NO_DEFAULT_MODEL_ID,
+	schema: {
+		...baseProviderSettingsShape,
+		openAiBaseUrl: z.string().optional(),
+		openAiApiKey: z.string().optional(),
+		openAiR1FormatEnabled: z.boolean().optional(),
+		openAiStrictToolSchemas: z.boolean().optional(),
+		[OPEN_AI_MODEL_ID_FIELD]: z.string().optional(),
+		openAiCustomModelInfo: modelInfoSchema.nullish(),
+		openAiUseAzure: z.boolean().optional(),
+		azureApiVersion: z.string().optional(),
+		openAiStreamingEnabled: z.boolean().optional(),
+		openAiHostHeader: z.string().optional(), // Keep temporarily for backward compatibility during migration.
+		openAiHeaders: z.record(z.string(), z.string()).optional(),
+		openAiExtraBody: openAiExtraBodySchema,
+	},
+})
