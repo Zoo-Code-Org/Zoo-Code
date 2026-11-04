@@ -3229,8 +3229,9 @@ describe("ClineProvider", () => {
 
 		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
 
-		// Should not throw
-		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+		// Should not throw, and must report the failed delivery rather than resolving as if the
+		// webview had taken the message.
+		await expect(provider.postMessageToWebview(message)).resolves.toBe(false)
 	})
 
 	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
@@ -3315,7 +3316,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("posts a request and resolves the matching response", async () => {
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture()
 			await Promise.resolve()
 			const requestId = postMessageSpy.mock.calls[0]?.[0].requestId
@@ -3331,7 +3332,7 @@ describe("ClineProvider", () => {
 
 		test("rejects a request after its timeout", async () => {
 			vi.useFakeTimers()
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture(100)
 			const rejection = expect(request).rejects.toThrow("Theme fixture probe timed out after 100ms")
 
@@ -3340,7 +3341,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("rejects pending requests when webview resources are cleared", async () => {
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture()
 			const rejection = expect(request).rejects.toThrow(
 				"Webview was disposed before the theme fixture probe completed",
@@ -3366,7 +3367,7 @@ describe("ClineProvider", () => {
 			mdmService,
 		)
 
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => true)
 		vi.spyOn(provider as any, "getStateToPostToWebview").mockResolvedValue({ version: "1.0.0" })
 
 		await provider.postStateToWebview()
@@ -3376,8 +3377,8 @@ describe("ClineProvider", () => {
 	})
 
 	test("postStateToWebviewWithoutTaskHistory waits for the webview post boundary", async () => {
-		let releasePost!: () => void
-		const pendingPost = new Promise<void>((resolve) => {
+		let releasePost!: (delivered: boolean) => void
+		const pendingPost = new Promise<boolean>((resolve) => {
 			releasePost = resolve
 		})
 		let statePostSettled = false
@@ -3396,7 +3397,7 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy).toHaveBeenCalledOnce()
 		expect(statePostSettled).toBe(false)
 
-		releasePost()
+		releasePost(true)
 		await statePost
 		expect(statePostSettled).toBe(true)
 	})
@@ -3423,7 +3424,7 @@ describe("ClineProvider", () => {
 		vi.spyOn(provider, "getStateToPostToWebview")
 			.mockReturnValueOnce(olderSnapshot)
 			.mockResolvedValueOnce(readyState)
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 		const olderPost = postState(provider)
 		await Promise.resolve()
@@ -3450,7 +3451,7 @@ describe("ClineProvider", () => {
 		],
 	])("%s skips task history computation", async (_methodName, postState) => {
 		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll")
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 		await postState(provider)
 
@@ -5643,7 +5644,7 @@ describe("ClineProvider", () => {
 			// value, so the double assertion here is the crafted payload, not the call site.
 			const crafted = JSON.parse('{"viewStateId": 42}') as { viewStateId: string }
 			const statesBefore = mockContext.globalState.get("viewStates")
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const loggedBefore = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls.length
 
 			await provider["setViewStateId"](crafted.viewStateId)
@@ -5677,7 +5678,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const statesBefore = mockContext.globalState.get("viewStates")
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 			await provider["setViewStateId"]("")
 
@@ -5705,7 +5706,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const statesBefore = mockContext.globalState.get("viewStates")
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 			// Whitespace normalizes to the empty string, which is the same rejection.
 			await provider["setViewStateId"]("   ")
@@ -5732,7 +5733,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const statesBefore = mockContext.globalState.get("viewStates")
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const loggedBefore = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls.length
 
 			// The webview generates a UUID; a 65-character value is not a view id and an
@@ -5929,7 +5930,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const beforeViewStateId = provider["viewStateId"]
-			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			// A claim-less entry is adoptable at the first read, but a concurrent registration
 			// binds the key while this launch's queued re-bind is waiting its turn.
 			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
@@ -6007,7 +6008,7 @@ describe("ClineProvider", () => {
 			await owner.dispose()
 
 			const intruder = createProvider()
-			const postMessageSpy = vi.spyOn(intruder, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(intruder, "postMessageToWebview").mockResolvedValue(true)
 
 			await intruder["setViewStateId"]("closed-view")
 
@@ -6036,7 +6037,7 @@ describe("ClineProvider", () => {
 			await owner.dispose()
 
 			const intruder = createProvider()
-			const postMessageSpy = vi.spyOn(intruder, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(intruder, "postMessageToWebview").mockResolvedValue(true)
 
 			// A webview-generated value is not a claim: only the token the host minted matches.
 			await intruder["setViewStateId"]("closed-view", "webview-chosen-claim")
@@ -6049,7 +6050,11 @@ describe("ClineProvider", () => {
 		})
 
 		test("does not churn the claim on later writes to the same entry", async () => {
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			// Claims go to the view's webview: attach the shared double so this exercises delivery
+			// rather than the no-view path. The post itself is spied below.
+			provider["view"] = mockWebviewView
+
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			await provider["setViewStateId"]("minted-view")
 			await provider.saveViewState("mode", "architect")
 
@@ -6068,12 +6073,17 @@ describe("ClineProvider", () => {
 
 		test("resolves the persistence write only after the minted claim has been posted", async () => {
 			const gated = createProvider()
+			// The claim is posted to this view's webview: attach the shared double so the write resolves
+			// after a real delivery attempt. The post itself is spied below.
+			gated["view"] = mockWebviewView
+
 			let posted = false
 			const postSpy = vi.spyOn(gated, "postMessageToWebview").mockImplementation(async () => {
 				// A real webview post settles on a later turn: a write that reported success before
 				// this resolved would leave the view without the claim it just made durable.
 				await new Promise((resolve) => setTimeout(resolve, 0))
 				posted = true
+				return true
 			})
 
 			await gated.saveViewState("mode", "architect")
@@ -6104,6 +6114,72 @@ describe("ClineProvider", () => {
 			await detached.dispose()
 		})
 
+		test("reports a claim as undelivered when the attached webview rejects the message", async () => {
+			// A hidden or closing webview resolves postMessage as false: the claim must be reported as
+			// not delivered and kept for retry, because the durable entry already carries this token.
+			const rejecting = createProvider()
+			const hiddenView = {
+				...mockWebviewView,
+				webview: { ...mockWebviewView.webview, postMessage: vi.fn().mockResolvedValue(false) },
+			}
+			rejecting["view"] = hiddenView
+			const loggedBefore = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls.length
+
+			const delivered = await rejecting["postViewStateClaimToWebview"]("hidden-view", "host-minted-token")
+
+			expect(delivered).toBe(false)
+			expect(hiddenView.webview.postMessage).toHaveBeenCalledWith({
+				type: "viewStateClaim",
+				viewStateId: "hidden-view",
+				viewStateClaim: "host-minted-token",
+			})
+			const loggedLines: string[] = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls
+				.slice(loggedBefore)
+				.map((call: unknown[]) => String(call[0]))
+			expect(loggedLines.some((line) => line.includes("[viewStateClaim] Claim for hidden-view"))).toBe(true)
+			expect(loggedLines.some((line) => line.includes("the webview rejected the message"))).toBe(true)
+			expect(rejecting["pendingViewStateClaims"].get("hidden-view")).toBe("host-minted-token")
+
+			await rejecting.dispose()
+		})
+
+		test("redelivers the queued claim with the same token when a webview attaches", async () => {
+			// Nothing is attached yet: the claim is durable but undelivered, so it is queued. Once a
+			// webview attaches it must receive the exact token the entry stores, not a re-minted one.
+			const detached = createProvider()
+			expect(detached["view"]).toBeUndefined()
+
+			await detached.saveViewState("mode", "architect")
+
+			const storedClaim = storedEntries()[detached.viewId]?.claimToken
+			expect(storedClaim).toEqual(expect.any(String))
+			expect(detached["pendingViewStateClaims"].get(detached.viewId)).toBe(storedClaim)
+
+			const attachedView = {
+				...mockWebviewView,
+				webview: { ...mockWebviewView.webview, postMessage: vi.fn().mockResolvedValue(true) },
+			}
+			await detached.resolveWebviewView(attachedView)
+
+			const claimPosts = attachedView.webview.postMessage.mock.calls
+				.map((call: unknown[]) => call[0])
+				.filter(
+					(message: unknown): message is { type: string; viewStateId: string; viewStateClaim: string } =>
+						typeof message === "object" &&
+						message !== null &&
+						(message as { type?: unknown }).type === "viewStateClaim",
+				)
+			expect(claimPosts).toHaveLength(1)
+			expect(claimPosts[0]).toEqual({
+				type: "viewStateClaim",
+				viewStateId: detached.viewId,
+				viewStateClaim: storedClaim,
+			})
+			expect(detached["pendingViewStateClaims"].size).toBe(0)
+
+			await detached.dispose()
+		})
+
 		test("re-binds a claim-less legacy entry instead of loading its selections", async () => {
 			// An entry written before claims existed cannot be attributed to any webview: its
 			// selections are refused, and the key is re-bound with a fresh host-minted claim so
@@ -6112,7 +6188,11 @@ describe("ClineProvider", () => {
 				"legacy-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
 			})
 
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			// Claims go to the view's webview: attach the shared double so this exercises delivery
+			// rather than the no-view path. The post itself is spied below.
+			provider["view"] = mockWebviewView
+
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 			await provider["setViewStateId"]("legacy-view")
 
@@ -6225,7 +6305,7 @@ describe("ClineProvider", () => {
 
 			const victim = createProvider()
 			const victimWriteSpy = vi.spyOn(victim.contextProxy, "setValue")
-			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(undefined)
+			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(true)
 
 			const blockedWrite = blocked.saveViewState("mode", "plan")
 			// Queued behind the stalled write: none of the victim's work has started yet.
@@ -6299,7 +6379,7 @@ describe("ClineProvider", () => {
 					await writeGate
 				}
 			})
-			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(undefined)
+			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(true)
 
 			const save = victim.saveViewState("mode", "architect")
 			// Let the queued closure reach its storage write, then dispose while it is in
@@ -8647,7 +8727,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				} as any)
 				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
@@ -8751,7 +8831,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
 				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi

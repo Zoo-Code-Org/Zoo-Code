@@ -451,6 +451,14 @@ export class ClineProvider
 	private wroteUnderTemporaryViewStateId = false
 
 	/**
+	 * Claims this view minted that its webview has not accepted yet, keyed by view id and holding
+	 * the exact token the durable entry carries. A claim is host-owned: the webview can never present
+	 * an identity the host did not hand it, so an undelivered claim is retried when a webview attaches
+	 * instead of being dropped, and nothing re-mints it in the meantime.
+	 */
+	private pendingViewStateClaims = new Map<string, string>()
+
+	/**
 	 * Bumped at the start of dispose(). View-state persistence is serialized on a
 	 * static queue shared by every provider, so a closure this instance scheduled can
 	 * start after the view is gone - behind another provider's write. Each closure
@@ -855,33 +863,71 @@ export class ClineProvider
 	}
 
 	/**
-	 * Delivers the host-minted claim that governs a durable viewStates key to this view's
-	 * webview. The webview only stores it and echoes it back on the next launch: it can
-	 * never mint or choose a claim itself.
+	 * Delivers the host-minted claim that governs a durable viewStates key to this view's webview
+	 * and reports whether the webview accepted it. The webview only stores the token and echoes it
+	 * back on the next launch: it can never mint or choose a claim itself.
 	 *
-	 * Awaited rather than fired and forgotten: the entry already carries this claim once the
-	 * write lands, so a view that never receives it would be missing an identity the host
-	 * believes it holds. `postMessageToWebview` drops a message silently while no webview is
-	 * attached (or once the provider is disposed), so the gap is reported here; the post
-	 * itself stays the single place that records the webview-out diagnostic.
+	 * Awaited rather than fired and forgotten: the entry already carries this claim once the write
+	 * lands, so a view that never receives it would be missing an identity the host believes it
+	 * holds. Every delivery failure is reported - no webview attached, the post rejected, or the
+	 * webview resolving the post as not delivered - and the exact claim is queued for the next
+	 * attach instead of dropped. The post itself stays the single place that records the
+	 * webview-out diagnostic.
 	 */
 	private async postViewStateClaimToWebview(viewStateId: string, claimToken: string): Promise<boolean> {
-		try {
-			await this.postMessageToWebview({ type: "viewStateClaim", viewStateId, viewStateClaim: claimToken })
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error)
-			this.log(`[viewStateClaim] Delivery for ${viewStateId} to view ${this.viewId} failed: ${reason}`)
-			return false
-		}
-
-		if (!this.view) {
+		if (!this.view || this._disposed) {
+			this.pendingViewStateClaims.set(viewStateId, claimToken)
 			this.log(
 				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: no webview attached.`,
 			)
 			return false
 		}
 
+		let delivered: boolean
+		try {
+			delivered = await this.postMessageToWebview({
+				type: "viewStateClaim",
+				viewStateId,
+				viewStateClaim: claimToken,
+			})
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error)
+			this.pendingViewStateClaims.set(viewStateId, claimToken)
+			this.log(`[viewStateClaim] Delivery for ${viewStateId} to view ${this.viewId} failed: ${reason}`)
+			return false
+		}
+
+		if (!delivered) {
+			// A hidden or closing webview resolves the post as not delivered: the claim stays queued so
+			// the same token reaches the webview once it can accept messages again.
+			this.pendingViewStateClaims.set(viewStateId, claimToken)
+			this.log(
+				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: the webview rejected the message.`,
+			)
+			return false
+		}
+
+		this.pendingViewStateClaims.delete(viewStateId)
 		return true
+	}
+
+	/**
+	 * Re-delivers the claims this view minted that no webview accepted yet, called when a webview
+	 * attaches. Each queued entry keeps the exact token the durable entry stores, so a webview that
+	 * missed a delivery still gets the identity it has to present on the next launch; an entry that
+	 * fails again is re-queued for the next attach.
+	 */
+	private async deliverPendingViewStateClaims(): Promise<void> {
+		if (this._disposed || !this.view || this.pendingViewStateClaims.size === 0) {
+			return
+		}
+
+		const pending = [...this.pendingViewStateClaims.entries()]
+		this.pendingViewStateClaims.clear()
+
+		for (const [viewStateId, claimToken] of pending) {
+			await this.postViewStateClaimToWebview(viewStateId, claimToken)
+		}
 	}
 
 	/**
@@ -1440,6 +1486,8 @@ export class ClineProvider
 		// after this provider is gone.
 		this.viewStateGeneration++
 		this._disposed = true
+		// A claim that never reached a webview dies with this view: nothing may re-post it later.
+		this.pendingViewStateClaims.clear()
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
@@ -1683,6 +1731,18 @@ export class ClineProvider
 			// the view is disposed and when a different view replaces it.
 			this.webviewDisposables,
 		)
+
+		// A claim minted while no webview was attached, or while its post was rejected, is delivered
+		// now that this view exists: the durable entry already carries that token, and the webview
+		// cannot present an identity the host never handed it. A failed retry must not fail
+		// initialization, so it is contained here.
+		try {
+			await this.deliverPendingViewStateClaims()
+		} catch (error) {
+			this.log(
+				`[viewStateClaim] Retrying pending claims for view ${this.viewId} failed: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
@@ -2186,7 +2246,14 @@ export class ClineProvider
 
 		return task
 	}
-	public async postMessageToWebview(message: ExtensionMessage) {
+	/**
+	 * Posts a message to this view's webview and reports whether the webview accepted it.
+	 *
+	 * Callers that only fire a notification may ignore the result. Callers that act on delivery must
+	 * await it: `postMessage` resolves false when the webview is hidden or its panel is gone, and a
+	 * void return cannot tell a delivered message from a dropped one.
+	 */
+	public async postMessageToWebview(message: ExtensionMessage): Promise<boolean> {
 		const startedAt = Date.now()
 		const taskId = this.getCurrentTask()?.taskId
 		this.diagnosticsRecorder.record({
@@ -2206,7 +2273,7 @@ export class ClineProvider
 				elapsedMs: Date.now() - startedAt,
 				taskId,
 			})
-			return
+			return false
 		}
 
 		try {
@@ -2220,6 +2287,8 @@ export class ClineProvider
 				stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
 				taskId,
 			})
+
+			return delivered === true
 		} catch {
 			this.diagnosticsRecorder.record({
 				boundary: "webview-out",
@@ -2229,8 +2298,11 @@ export class ClineProvider
 				elapsedMs: Date.now() - startedAt,
 				taskId,
 			})
-			// View disposed, drop message silently
+			// View disposed, or the webview rejected the message: callers that act on delivery
+			// need the failure, so it is reported instead of swallowed.
 		}
+
+		return false
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
@@ -2292,10 +2364,9 @@ export class ClineProvider
 
 	public requestWebviewDiagnostics(timeoutMs = 1_000): Promise<WebviewDiagnosticsSnapshot | undefined> {
 		if (this._disposed || !this.view) return Promise.resolve(undefined)
-		return this.diagnosticsRequestBroker.request(
-			(requestId) => this.postMessageToWebview({ type: "diagnosticsRequest", requestId }),
-			timeoutMs,
-		)
+		return this.diagnosticsRequestBroker.request(async (requestId) => {
+			await this.postMessageToWebview({ type: "diagnosticsRequest", requestId })
+		}, timeoutMs)
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
