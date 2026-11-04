@@ -15,6 +15,8 @@ import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import axios from "axios"
+import * as fs from "fs"
+import * as path from "path"
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
@@ -987,11 +989,27 @@ describe("OpenAiHandler", () => {
 
 				expect(error).toBeInstanceOf(Error)
 				expect(error).toMatchObject({ status: 404 })
-				expect((error as Error).message).toContain(
-					`errors.api.azureDeploymentNotFound ${JSON.stringify({ deployment, message: "404 Resource not found" })}`,
+				expect((error as Error).message).toBe(
+					`OpenAI completion error: common:errors.api.azureDeploymentNotFound ${JSON.stringify({ deployment, message: "404 Resource not found" })}`,
 				)
 			},
 		)
+
+		it("points to the base URL as another cause of Azure 404s in every locale", () => {
+			const localesDir = path.join(__dirname, "../../../i18n/locales")
+			const locales = fs.readdirSync(localesDir)
+
+			expect(locales.length).toBeGreaterThan(1)
+			for (const locale of locales) {
+				const common = JSON.parse(fs.readFileSync(path.join(localesDir, locale, "common.json"), "utf8"))
+				const message: string = common.errors.api.azureDeploymentNotFound
+
+				expect(message, locale).toContain("{{deployment}}")
+				expect(message, locale).toContain("{{message}}")
+				expect(message, locale).toContain("https://<resource>.openai.azure.com")
+				expect(message, locale).toContain("/openai/v1")
+			}
+		})
 
 		it.each([
 			{ name: "a non-404 Azure error", options: azureOptions, status: 401 },
@@ -1038,7 +1056,9 @@ describe("OpenAiHandler", () => {
 
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
-			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error: API Error")
+			await expect(handler.completePrompt("Test prompt")).rejects.toMatchObject({
+				message: "OpenAI completion error: API Error",
+			})
 		})
 
 		it("should preserve HTTP status when wrapping completion errors", async () => {

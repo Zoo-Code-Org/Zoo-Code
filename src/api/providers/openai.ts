@@ -385,8 +385,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			if (error instanceof Error) {
-				const wrapped = new Error(`${this.providerName} completion error: ${error.message}`, { cause: error })
+			const prefix = `${this.providerName} completion error:`
+			if (error instanceof Error && !error.message.startsWith(prefix)) {
+				const wrapped = new Error(`${prefix} ${error.message}`, { cause: error })
 				const source = error as Error & { status?: number; errorDetails?: unknown; code?: unknown }
 				const target = wrapped as Error & { status?: number; errorDetails?: unknown; code?: unknown }
 				if (source.status !== undefined) target.status = source.status

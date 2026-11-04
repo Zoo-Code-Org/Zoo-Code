@@ -1007,7 +1007,7 @@ export function getAzureOpenAiBaseUrl(baseUrl: string): string {
  */
 export function getAzureOpenAiChatCompletionsUrl(baseUrl: string, deployment: string, apiVersion?: string): string {
 	const version = apiVersion || azureOpenAiDefaultApiVersion
-	return `${getAzureOpenAiBaseUrl(baseUrl)}/deployments/${deployment}/chat/completions?api-version=${version}`
+	return `${getAzureOpenAiBaseUrl(baseUrl)}/deployments/${deployment}/chat/completions?api-version=${encodeURIComponent(version)}`
 }
 export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
 

@@ -29,6 +29,11 @@ describe("Azure OpenAI URLs", () => {
 			apiVersion: "",
 			expected: `https://resource.openai.azure.com/openai/deployments/brotherhood/chat/completions?api-version=${azureOpenAiDefaultApiVersion}`,
 		},
+		{
+			apiVersion: "2025-01-01&x=1#frag",
+			expected:
+				"https://resource.openai.azure.com/openai/deployments/brotherhood/chat/completions?api-version=2025-01-01%26x%3D1%23frag",
+		},
 	])("builds the deployment chat completions URL for API version $apiVersion", ({ apiVersion, expected }) => {
 		expect(getAzureOpenAiChatCompletionsUrl("https://resource.openai.azure.com/", "brotherhood", apiVersion)).toBe(
 			expected,
