@@ -1,6 +1,4 @@
 {
-	"title": "Tryby",
-	"done": "Gotowe",
 	"modes": {
 		"title": "Tryby",
 		"createNewMode": "Utwórz nowy tryb",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Eksportuj tryb",
-		"description": "Eksportuj ten tryb do pliku YAML ze wszystkimi regułami w celu łatwego udostępniania innym.",
-		"export": "Eksportuj tryb",
-		"exporting": "Eksportowanie..."
+		"export": "Eksportuj tryb"
 	},
 	"importMode": {
 		"selectLevel": "Wybierz, gdzie zaimportować ten tryb:",
@@ -81,7 +77,6 @@
 		"title": "Podpowiedź systemowa (tryb {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Podpowiedzi pomocnicze",
 		"resetPrompt": "Zresetuj podpowiedź {{promptType}} do domyślnej",
 		"prompt": "Podpowiedź",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Testuj ulepszenie",
 			"includeTaskHistory": "Uwzględnij historię zadań jako kontekst",
 			"includeTaskHistoryDescription": "Gdy włączone, ostatnie 10 wiadomości z bieżącej rozmowy zostanie uwzględnione jako kontekst podczas ulepszania podpowiedzi, pomagając generować bardziej trafne i świadome kontekstu sugestie."
-		},
-		"condense": {
-			"apiConfiguration": "Konfiguracja API do kondensacji kontekstu",
-			"apiConfigDescription": "Wybierz, której konfiguracji API użyć do operacji kondensacji kontekstu. Pozostaw niewybrane, aby użyć bieżącej aktywnej konfiguracji.",
-			"useCurrentConfig": "Użyj aktualnie wybranej konfiguracji API"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Usuń tryb",
 		"message": "Czy na pewno chcesz usunąć tryb \"{{modeName}}\"?",
 		"rulesFolder": "Ten tryb ma folder z regułami w {{folderPath}}, który również zostanie usunięty.",
-		"descriptionNoRules": "Czy na pewno chcesz usunąć ten niestandardowy tryb?",
 		"confirm": "Usuń",
 		"cancel": "Anuluj"
 	}
