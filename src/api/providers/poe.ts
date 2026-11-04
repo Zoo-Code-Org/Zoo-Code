@@ -252,23 +252,15 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		const abortedByTimeout = () =>
 			Boolean(mergedAbortSignal?.aborted) &&
 			(mergedAbortSignal?.reason as { name?: string } | undefined)?.name === "TimeoutError"
+		let text: string
 		try {
-			const { text } = await generateText({
-				model: this.poe(id),
-				prompt,
-				...(mergedAbortSignal && { abortSignal: mergedAbortSignal }),
-			})
-
-			if (mergedAbortSignal?.aborted) {
-				// The response resolved after the request was aborted: do not return the late result.
-				// Classify by the first abort cause: a timeout that fired first stays a TimeoutError
-				// even if the caller signal aborted before the late result settled.
-				if (abortedByTimeout()) {
-					throw createTimeoutError("Poe", "completion request")
-				}
-				throw createAbortError("Poe")
-			}
-			return text
+			text = (
+				await generateText({
+					model: this.poe(id),
+					prompt,
+					...(mergedAbortSignal && { abortSignal: mergedAbortSignal }),
+				})
+			).text
 		} catch (error) {
 			// A caller abort is user-initiated: surface it as the contract AbortError and do not
 			// report it as a provider failure. A per-request timeout that the caller's signal did
@@ -286,5 +278,17 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			)
 			throw new Error(`Poe completion error: ${errorMessage}`)
 		}
+
+		// The response resolved after the request was cancelled: do not return the late result.
+		// This check lives after the catch on purpose - a cancellation error raised inside the try
+		// would be caught below and replaced by an identical one, which makes the error built here
+		// unobservable to tests (and to callers who inspect it).
+		if (mergedAbortSignal?.aborted) {
+			if (abortedByTimeout()) {
+				throw createTimeoutError("Poe", "completion request")
+			}
+			throw createAbortError("Poe")
+		}
+		return text
 	}
 }
