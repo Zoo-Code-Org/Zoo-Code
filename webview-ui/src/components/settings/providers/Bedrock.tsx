@@ -45,7 +45,7 @@ export const Bedrock = ({
 		organizationAllowList.providers[providerIdentifiers.bedrock]?.allowAll
 	const customArn = apiConfiguration.awsCustomArn
 	// The "custom-arn" sentinel is not a request model ID; show a placeholder until an ARN is entered.
-	const awaitingArn = !customArn && apiConfiguration.apiModelId === "custom-arn"
+	const awaitingArn = !customArn?.trim() && apiConfiguration.apiModelId === "custom-arn"
 	const requestModelId = awaitingArn
 		? "—"
 		: customArn

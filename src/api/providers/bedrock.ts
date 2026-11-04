@@ -1204,6 +1204,11 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 	//Prompt Router responses come back in a different sequence and the model used is in the response and must be fetched by name
 	getModelById(modelId: string, modelType?: string): { id: BedrockModelId | string; info: ModelInfo } {
+		// An unset apiModelId selects the default model through the normal lookup path.
+		if (!modelId) {
+			return this.getModelById(bedrockDefaultModelId, modelType)
+		}
+
 		// Try to find the model in bedrockModels
 		const baseModelId = this.parseBaseModelId(modelId) as BedrockModelId
 
@@ -1222,7 +1227,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			// Use heuristics for model info, then allow overrides from ProviderSettings
 			const guessed = this.guessModelInfoFromId(modelId)
 			model = {
-				id: modelId || bedrockDefaultModelId,
+				id: modelId,
 				info: {
 					...guessed,
 				},

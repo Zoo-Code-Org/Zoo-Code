@@ -58,6 +58,7 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	bedrockModels,
+	bedrockDefaultModelId,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
 	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
@@ -957,6 +958,15 @@ describe("AwsBedrockHandler", () => {
 			expect(model.info.contextWindow).toBeDefined()
 			expect(typeof model.info.supportsImages).toBe("boolean")
 			expect(typeof model.info.supportsPromptCache).toBe("boolean")
+		})
+
+		it("selects the default model when no model ID is configured", () => {
+			const handler = new AwsBedrockHandler({ awsRegion: "us-east-1" })
+
+			const model = handler.getModel()
+
+			expect(model.id).toBe(bedrockDefaultModelId)
+			expect(model.info.contextWindow).toBe(bedrockModels[bedrockDefaultModelId].contextWindow)
 		})
 
 		it("should return Claude Fable 5 model info", () => {
