@@ -308,6 +308,7 @@ describe("ContextProxy", () => {
 				.catch((e: unknown) => e)
 
 			expect(error).toBeInstanceOf(SettingsWriteError)
+			expect((error as Error).name).toBe("SettingsWriteError")
 			expect(error).toMatchObject({
 				committed: ["timeFormat", "showRelativeTimes"],
 				failed: ["dateFormat"],
@@ -350,6 +351,97 @@ describe("ContextProxy", () => {
 			expect(error).toMatchObject({ committed: [], failed: ["openAiApiKey"] })
 			// The cache shows what the keychain holds, not the key that was never saved.
 			expect(proxy.getSecret("openAiApiKey")).toBe("stored-key")
+		})
+
+		it("reports a failed secret delete with the delete error, and reads the secret back into the cache", async () => {
+			mockSecrets.get.mockResolvedValue("stored-key") // the delete did not take effect
+			await proxy.initialize()
+			const failure = new Error("keychain locked")
+			mockSecrets.delete.mockRejectedValue(failure)
+
+			await expect(proxy.storeSecret("openAiApiKey", undefined)).rejects.toBe(failure)
+
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+			// The cache shows what the keychain still holds, not the deletion that never happened.
+			expect(proxy.getSecret("openAiApiKey")).toBe("stored-key")
+			expect(proxy["secretWriteOwner"].size).toBe(0)
+		})
+
+		it("turns a store that throws at once into a rejection, and corrects the cache", async () => {
+			mockSecrets.get.mockResolvedValue("stored-key")
+			await proxy.initialize()
+			const failure = new Error("keychain unavailable")
+			mockSecrets.store.mockImplementation(() => {
+				throw failure
+			})
+
+			await expect(proxy.storeSecret("openAiApiKey", "new-key")).rejects.toBe(failure)
+
+			expect(proxy.getSecret("openAiApiKey")).toBe("stored-key")
+			expect(proxy["secretWriteOwner"].size).toBe(0)
+		})
+
+		it("turns a global state update that throws at once into a rejection, and corrects the cache", async () => {
+			mockGlobalState.get.mockImplementation((key: string) => (key === "dateFormat" ? "auto" : undefined))
+			await proxy.initialize()
+			const failure = new Error("storage unavailable")
+			mockGlobalState.update.mockImplementation(() => {
+				throw failure
+			})
+
+			await expect(proxy.updateGlobalState("dateFormat", "ymd")).rejects.toBe(failure)
+
+			expect(proxy.getGlobalState("dateFormat")).toBe("auto")
+			expect(proxy["stateWriteOwner"].size).toBe(0)
+		})
+
+		it.each([
+			["succeeds", false],
+			["fails", true],
+		])("keeps no write owner once a write of a setting or a secret %s", async (_name, fails) => {
+			await proxy.initialize()
+			if (fails) {
+				mockGlobalState.update.mockRejectedValue(new Error("no"))
+				mockSecrets.store.mockRejectedValue(new Error("no"))
+			}
+
+			const writes = [proxy.updateGlobalState("dateFormat", "ymd"), proxy.storeSecret("openAiApiKey", "key")]
+			expect(proxy["stateWriteOwner"].size).toBe(1) // while the writes are in flight
+			expect(proxy["secretWriteOwner"].size).toBe(1)
+			await Promise.allSettled(writes)
+
+			expect(proxy["stateWriteOwner"].size).toBe(0)
+			expect(proxy["secretWriteOwner"].size).toBe(0)
+		})
+
+		it("keeps the owner of a newer secret write when an older write of the key finishes first", async () => {
+			let finishOlder: () => void = () => {}
+			mockSecrets.store
+				.mockImplementationOnce(() => new Promise<void>((resolve) => (finishOlder = resolve)))
+				.mockImplementationOnce(() => new Promise<void>(() => {})) // the newer write is still in flight
+			await proxy.initialize()
+
+			const older = proxy.storeSecret("openAiApiKey", "older")
+			void proxy.storeSecret("openAiApiKey", "newer")
+			finishOlder()
+			await older
+
+			expect(proxy["secretWriteOwner"].size).toBe(1)
+		})
+
+		it("keeps the owner of a newer write when an older write of the key finishes first", async () => {
+			let finishOlder: () => void = () => {}
+			mockGlobalState.update
+				.mockImplementationOnce(() => new Promise<void>((resolve) => (finishOlder = resolve)))
+				.mockImplementationOnce(() => new Promise<void>(() => {})) // the newer write is still in flight
+			await proxy.initialize()
+
+			const older = proxy.updateGlobalState("dateFormat", "ymd")
+			void proxy.updateGlobalState("dateFormat", "dmy")
+			finishOlder()
+			await older
+
+			expect(proxy["stateWriteOwner"].size).toBe(1)
 		})
 
 		it("still reports the failure when the secret cannot be read back either", async () => {
@@ -462,6 +554,7 @@ describe("ContextProxy", () => {
 			await proxy.initialize()
 			let readBack: (value: string | undefined) => void = () => {}
 			mockSecrets.get.mockImplementation(() => new Promise((resolve) => (readBack = resolve)))
+			mockSecrets.get.mockClear() // initialize() read the secrets too: wait for the read-back of this write
 
 			const failing = proxy.setValues({ openAiApiKey: "old-attempt" }).catch((e: unknown) => e)
 			await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalled())
@@ -479,6 +572,7 @@ describe("ContextProxy", () => {
 			mockSecrets.get.mockImplementation(
 				() => new Promise((_resolve, reject) => (failReadBack = () => reject(new Error("keychain locked")))),
 			)
+			mockSecrets.get.mockClear() // initialize() read the secrets too: wait for the read-back of this write
 			const logged = vi.spyOn(logger, "error").mockImplementation(() => {})
 
 			const failing = proxy.setValues({ openAiApiKey: "same-value" }).catch((e: unknown) => e)

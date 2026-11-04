@@ -407,12 +407,21 @@ export class ContextProxy {
 		// read back from the Memento (`globalState.get`) so that it shows what the Memento holds. This is best effort: a
 		// Memento can keep the attempted value in memory after a rejected update, in which case the cache and the
 		// Memento agree and only the durable copy, which cannot be read, may differ until the key is written again.
+		// The entry of the key is removed when the write is over (if it is still the latest), so the map only holds the
+		// writes that are in flight. An update that throws at once is turned into a rejection, so it is handled the same.
 		const owner = {}
 		this.stateWriteOwner.set(key, owner)
 		this.stateCache[key] = value
-		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error: unknown) => {
-			if (this.stateWriteOwner.get(key) === owner) {
-				this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
+		const release = () => {
+			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
+		}
+		return (async () => this.originalContext.globalState.update(key, value))().then(release, (error: unknown) => {
+			try {
+				if (this.stateWriteOwner.get(key) === owner) {
+					this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
+				}
+			} finally {
+				release()
 			}
 			throw error
 		})
@@ -440,21 +449,30 @@ export class ContextProxy {
 		// Write directly to context. If the write rejects, the cache is read back from the secret storage while this
 		// write is still the latest of the key; if that fails too, the value that was never stored is dropped from the
 		// cache (it stays empty until the next write, `refreshSecrets` or a restart) rather than being served.
-		const stored =
+		// The entry of the key is removed when the write and its read-back are over (if it is still the latest). A store
+		// that throws at once is turned into a rejection, so it is handled the same.
+		const release = () => {
+			if (this.secretWriteOwner.get(key) === owner) this.secretWriteOwner.delete(key)
+		}
+		const stored = (async () =>
 			value === undefined
 				? this.originalContext.secrets.delete(key)
-				: this.originalContext.secrets.store(key, value)
-		return Promise.resolve(stored).catch(async (error: unknown) => {
-			if (this.secretWriteOwner.get(key) === owner) {
-				try {
-					const readBack = await withinReadBackDeadline(this.originalContext.secrets.get(key), key)
-					if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = readBack
-				} catch (readError) {
-					logger.error(
-						`Error reading back secret ${key}: ${readError instanceof Error ? readError.message : String(readError)}`,
-					)
-					if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = undefined
+				: this.originalContext.secrets.store(key, value))()
+		return stored.then(release, async (error: unknown) => {
+			try {
+				if (this.secretWriteOwner.get(key) === owner) {
+					try {
+						const readBack = await withinReadBackDeadline(this.originalContext.secrets.get(key), key)
+						if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = readBack
+					} catch (readError) {
+						logger.error(
+							`Error reading back secret ${key}: ${readError instanceof Error ? readError.message : String(readError)}`,
+						)
+						if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = undefined
+					}
 				}
+			} finally {
+				release()
 			}
 			throw error
 		})
