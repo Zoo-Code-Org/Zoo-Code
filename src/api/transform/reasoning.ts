@@ -56,10 +56,14 @@ export const ADAPTIVE_OUTPUT_CONFIG_EFFORTS: readonly ReasoningEffortExtended[] 
  * 2. `settingsReasoningEffort` — the settings-derived value,
  * 3. `modelDefaultEffort` — the model's default effort.
  *
- * This is the single shared resolution point for the per-request override:
- * providers that resolve the effective effort through it inherit the override
- * without duplicating precedence logic. The override is transient (next request
- * only) and never persisted to settings.
+ * This is the shared resolution point for the per-request override: a provider
+ * that resolves its effective effort through this function applies the override
+ * there instead of duplicating precedence logic. Nothing calls it in this unit
+ * yet - the caller-side wiring arrives later in the series (the task supplies
+ * `reasoningEffort` in request metadata, the Anthropic provider resolves here),
+ * so this states what a caller gets rather than claiming providers already
+ * apply an override. The override is transient (next request only) and is never
+ * persisted to settings.
  * @internal Exported for focused implementation tests.
  */
 export const resolveEffectiveReasoningEffort = ({
