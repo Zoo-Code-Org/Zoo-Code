@@ -1099,7 +1099,18 @@ describe("safeWriteJson", () => {
 			// scope root down to the target's parent.
 			const ancestors = options.expectedAncestorIdentities as { dir: string; dev: bigint; ino: bigint }[]
 			const pinnedDirs = ancestors.map((entry) => entry.dir)
-			expect(pinnedDirs).toEqual([await fs.realpath(projectDir), await fs.realpath(nested)])
+			// Both spellings of the walk have to be covered, and which strings those are depends on
+			// the host: _resolveScopeRoot answers with realpath's spelling, while the lexical chain is
+			// measured from the spelling the caller named (see _lexicalScopeRootFor). On a host where
+			// the temp directory is itself reached through a link the two spellings are different
+			// strings for the same two directories, so the pin legitimately carries four names here.
+			// Compare the directories denoted, and require the caller's own spelling to be present.
+			const realProjectDir = await fs.realpath(projectDir)
+			const realNested = await fs.realpath(nested)
+			const pinnedCanonicalDirs = await Promise.all(pinnedDirs.map((dir) => fs.realpath(dir)))
+			expect(new Set(pinnedCanonicalDirs)).toEqual(new Set([realProjectDir, realNested]))
+			expect(pinnedDirs).toContain(projectDir)
+			expect(pinnedDirs).toContain(nested)
 			for (const entry of ancestors) {
 				const stat = await fs.stat(entry.dir, { bigint: true })
 				expect(entry.dev).toBe(stat.dev)
@@ -1112,6 +1123,63 @@ describe("safeWriteJson", () => {
 			// cleaned by it; remove it rather than leave it for a later test.
 			const left = await fs.readdir(nested)
 			await Promise.all(left.map((entry) => fs.unlink(path.join(nested, entry)).catch(() => {})))
+		}
+	})
+	// The wiring check above runs where realpath's spelling of the scope root and the caller's spelling
+	// agree. They do not always agree: the directory a scope is declared in can itself be reached
+	// through a link, and then the lexical chain has to be measured from the caller's spelling or the
+	// walk silently under-pins - which is what the Windows CI lane hit.
+	test("pins both spellings of the confined walk when the scope root is named through a link", async () => {
+		vi.resetModules()
+		const projectDir = path.join(tempDir, "alias-pin-realroot")
+		const nested = path.join(projectDir, "nested")
+		await fs.mkdir(projectDir)
+		await fs.mkdir(nested)
+		// A junction is the Windows spelling of a directory alias; POSIX uses a directory symlink.
+		const linkType = process.platform === "win32" ? "junction" : "dir"
+		const rootAlias = path.join(tempDir, "alias-pin-rootalias")
+		await fs.symlink(projectDir, rootAlias, linkType)
+		const target = path.join(rootAlias, "nested", "mcp.json")
+
+		const real = await vi.importActual<typeof import("../../services/file-safety/safeWriteText")>(
+			"../../services/file-safety/safeWriteText",
+		)
+		const publishSpy = vi.fn(async (_target: string, _content: string, _options?: Record<string, unknown>) => {})
+		vi.doMock("../../services/file-safety/safeWriteText", () => ({ ...real, safeWriteText: publishSpy }))
+		const { safeWriteJson: pinnedSafeWriteJson } = await import("../safeWriteJson")
+
+		try {
+			await pinnedSafeWriteJson(target, { mcpServers: {} }, { confineTo: rootAlias })
+
+			expect(publishSpy).toHaveBeenCalledTimes(1)
+			const options = publishSpy.mock.calls[0][2] as Record<string, unknown>
+			// The pin and the publish must name the same path.
+			expect(options.expectedResolvedPath).toBe(publishSpy.mock.calls[0][0])
+			const ancestors = options.expectedAncestorIdentities as { dir: string; dev: bigint; ino: bigint }[]
+			const pinnedDirs = ancestors.map((entry) => entry.dir)
+			// The spellings this write actually walked must be pinned, not only realpath's names:
+			// they are the directories the mkdir above created and the directories a swap could move.
+			expect(pinnedDirs).toContain(rootAlias)
+			expect(pinnedDirs).toContain(path.join(rootAlias, "nested"))
+			// And every pinned name must denote one of the two authorized directories.
+			const realProjectDir = await fs.realpath(projectDir)
+			const realNested = await fs.realpath(nested)
+			const pinnedCanonicalDirs = await Promise.all(pinnedDirs.map((dir) => fs.realpath(dir)))
+			expect(new Set(pinnedCanonicalDirs)).toEqual(new Set([realProjectDir, realNested]))
+		} finally {
+			vi.doUnmock("../../services/file-safety/safeWriteText")
+			vi.resetModules()
+			if (process.platform === "win32") {
+				await fs.rmdir(rootAlias).catch(() => undefined)
+			} else {
+				await fs.unlink(rootAlias).catch(() => undefined)
+			}
+			const left = await fs.readdir(nested)
+			await Promise.all(
+				left.map((entry) =>
+					fs.rm(path.join(nested, entry), { recursive: true, force: true }).catch(() => undefined),
+				),
+			)
 		}
 	})
 
