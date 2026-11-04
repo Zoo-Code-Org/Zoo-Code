@@ -3441,7 +3441,7 @@ describe("ClineProvider", () => {
 		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 		await provider.setValues({ terminalFontSize: 14 })
-		const onDeferredSettled = spy.mock.calls[0][2]
+		const onDeferredSettled = spy.mock.calls[0][2]?.onDeferredSettled
 		expect(post).not.toHaveBeenCalled()
 		onDeferredSettled?.()
 
@@ -3455,7 +3455,7 @@ describe("ClineProvider", () => {
 
 		await provider.dispose()
 
-		expect(spy).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
+		expect(spy).toHaveBeenCalledExactlyOnceWith(provider)
 		spy.mockRestore()
 	})
 

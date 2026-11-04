@@ -1969,36 +1969,42 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 		}
 	})
 
-	it("logs when the refresh after a rollback that had to wait for a store fails", async () => {
-		vi.useFakeTimers()
-		try {
-			let landLate: () => void = () => {}
-			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
-			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
-				async (key: string, value: unknown) => {
-					if (key === "terminalFontSize" && value === 14) {
-						await new Promise<void>((resolve) => (landLate = resolve))
-					}
-					return real(key as never, value as never)
-				},
-			)
-			vi.mocked(mockClineProvider.postStateToWebview)
-				.mockResolvedValueOnce(undefined as never)
-				.mockRejectedValueOnce(new Error("webview gone"))
+	it.each([
+		["an Error", new Error("webview gone"), "webview gone"],
+		["a plain value", "webview gone", "webview gone"],
+	])(
+		"logs when the refresh after a rollback that had to wait for a store fails with %s",
+		async (_label, failure, text) => {
+			vi.useFakeTimers()
+			try {
+				let landLate: () => void = () => {}
+				const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+				vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+					async (key: string, value: unknown) => {
+						if (key === "terminalFontSize" && value === 14) {
+							await new Promise<void>((resolve) => (landLate = resolve))
+						}
+						return real(key as never, value as never)
+					},
+				)
+				vi.mocked(mockClineProvider.postStateToWebview)
+					.mockResolvedValueOnce(undefined as never)
+					.mockRejectedValueOnce(failure)
 
-			const saving = save({ terminalFontSize: 14 })
-			await vi.advanceTimersByTimeAsync(15_000)
-			await saving
-			landLate()
-			await vi.advanceTimersByTimeAsync(0)
+				const saving = save({ terminalFontSize: 14 })
+				await vi.advanceTimersByTimeAsync(15_000)
+				await saving
+				landLate()
+				await vi.advanceTimersByTimeAsync(0)
 
-			expect(mockClineProvider.log).toHaveBeenCalledWith(
-				"[updateSettings] Could not refresh the webview state: webview gone",
-			)
-		} finally {
-			vi.useRealTimers()
-		}
-	})
+				expect(mockClineProvider.log).toHaveBeenCalledWith(
+					`[updateSettings] Could not refresh the webview state: ${text}`,
+				)
+			} finally {
+				vi.useRealTimers()
+			}
+		},
+	)
 
 	it("puts back the value whose own write failed after it had changed the stored value", async () => {
 		// As a store whose cache is updated before its write to disk fails.

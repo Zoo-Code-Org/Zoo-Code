@@ -630,11 +630,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await setValuesThroughWriteChain(
-			this.sidebarProvider.contextProxy,
-			values,
-			() => void this.sidebarProvider.postStateToWebview().catch(() => undefined),
-		)
+		await setValuesThroughWriteChain(this.sidebarProvider.contextProxy, values, {
+			owner: this.sidebarProvider,
+			onDeferredSettled: () => void this.sidebarProvider.postStateToWebview().catch(() => undefined),
+		})
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
 			await Promise.all(

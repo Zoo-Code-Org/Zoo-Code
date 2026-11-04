@@ -129,7 +129,7 @@ describe("API - configuration", () => {
 
 		await api.setConfiguration({ terminalFontSize: 14 })
 		expect(postStateToWebview).toHaveBeenCalledTimes(1) // the one after the write
-		spy.mock.calls[0][2]?.() // the rollback of a timed-out write is over
+		spy.mock.calls[0][2]?.onDeferredSettled?.() // the rollback of a timed-out write is over
 
 		expect(postStateToWebview).toHaveBeenCalledTimes(2)
 		spy.mockRestore()

@@ -924,7 +924,7 @@ export const webviewMessageHandler = async (
 					if (isAppearanceSetting(key)) {
 						const write = beginSettingWrite(key, previous, newValue)
 						written.push(write)
-						await performSettingWrite(provider.contextProxy, write)
+						await performSettingWrite(provider.contextProxy, write, provider)
 						continue
 					}
 
@@ -937,15 +937,18 @@ export const webviewMessageHandler = async (
 
 				for (const write of written.reverse()) {
 					try {
-						await undoSettingWrite(provider.contextProxy, write, () => {
-							// A store that timed out has settled and its rollback has run: show what is really stored.
-							provider
-								.postStateToWebview()
-								.catch((error: unknown) =>
-									provider.log(
-										`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
-									),
-								)
+						await undoSettingWrite(provider.contextProxy, write, {
+							owner: provider,
+							onDeferredSettled: () => {
+								// A store that timed out has settled and its rollback has run: show what is really stored.
+								provider
+									.postStateToWebview()
+									.catch((error: unknown) =>
+										provider.log(
+											`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+										),
+									)
+							},
 						})
 					} catch (rollbackError) {
 						provider.log(

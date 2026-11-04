@@ -963,7 +963,7 @@ export class ClineProvider
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
 		// Appearance writes that have not started are dropped; one whose store has started cannot be cancelled.
-		disposeSettingWrites(this.contextProxy)
+		disposeSettingWrites(this)
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")
@@ -3745,11 +3745,10 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await setValuesThroughWriteChain(
-			this.contextProxy,
-			values,
-			() => void this.postStateToWebview().catch(() => undefined),
-		)
+		await setValuesThroughWriteChain(this.contextProxy, values, {
+			owner: this,
+			onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
+		})
 	}
 
 	// dev
