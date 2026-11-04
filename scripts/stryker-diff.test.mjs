@@ -1469,6 +1469,16 @@ describe("mutation comment execution", () => {
 		})
 	}
 
+	for (const reference of ["#1", "owner/repo#123", "GH-1", "abcdef1", "a".repeat(40), ":smile:"]) {
+		it(`keeps GitHub references literal in headings, paragraphs, and lists: ${reference}`, async () => {
+			const { writes } = await execute({ raw: report(`### ${reference}\n\n${reference}\n\n- ${reference}`) })
+			const body = writes[0].body
+			assert.ok(body.includes(`<h3><code>${reference}</code></h3>`))
+			assert.ok(body.includes(`<p><code>${reference}</code></p>`))
+			assert.ok(body.includes(`<li><code>${reference}</code></li>`))
+		})
+	}
+
 	it("renders summary and survivor tables with literal escaped cell contents", async () => {
 		const content = [
 			"## Changed-code mutation testing",

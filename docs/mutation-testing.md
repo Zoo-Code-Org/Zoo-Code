@@ -10,7 +10,8 @@ closed PRs are ignored. Counts remain visible; a section collapsed by default
 contains the full report, mutant details, guidance, and reproduction steps.
 The renderer supports headings, paragraphs, lists, emphasis, inline code, fenced
 code blocks, and tables using trusted HTML structure with escaped text. Table
-cells, URLs, and mentions remain literal code. Commands and code examples use
+cells, URLs, mentions, issue references, commit SHAs, and emoji shortcodes remain
+literal code. Commands and code examples use
 code blocks; guidance renders as prose. Artifact text cannot introduce active
 links, images, HTML, or mentions.
 

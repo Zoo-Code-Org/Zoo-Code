@@ -84,6 +84,7 @@ jobs:
                       }
                       prNumbers = [...new Set(prNumbers)].sort((a, b) => a - b);
 
+                      // listArtifactsForWorkflowRun is absent in the pinned github-script client; use the REST route.
                       const { data: { artifacts } } = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts', {
                         owner,
                         repo,
@@ -224,7 +225,7 @@ jobs:
                         }
                         function plain(text) {
                           const escaped = escapeHtml(text);
-                          return /@|:\/\/|www\.|!?\[[^\]]*\]\(/i.test(text)
+                          return /@|:\/\/|www\.|!?\[[^\]]*\]\(|#\d|\bGH-\d|\b[0-9a-f]{7,40}\b|:[a-z0-9_+-]+:/i.test(text)
                             ? '<code>' + escaped + '</code>' : escaped;
                         }
                         function inline(text) {
