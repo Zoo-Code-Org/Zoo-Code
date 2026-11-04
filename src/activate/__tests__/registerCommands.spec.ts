@@ -157,6 +157,8 @@ describe("registerCommands handlers", () => {
 	}
 	let mockProvider: {
 		postMessageToWebview: Mock
+		hasResolvedView: boolean
+		isDisposed: boolean
 		evictCurrentTask: Mock
 		refreshWorkspace: Mock
 		webviewFocusTracker: WebviewFocusTracker
@@ -194,6 +196,8 @@ describe("registerCommands handlers", () => {
 		// The visible-provider double supplies message posting and explicit recovery retry.
 		mockVisibleProviderInstance = mockVisibleProvider as unknown as ClineProvider
 		mockProvider = {
+			hasResolvedView: true,
+			isDisposed: false,
 			retryWebviewRecovery: vi.fn().mockResolvedValue(undefined),
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
@@ -337,6 +341,56 @@ describe("registerCommands handlers", () => {
 			action: "marketplaceButtonClicked",
 		})
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	// The base ids are not only the `view/title` menu: extension.ts's worktree auto-open
+	// executes them through `executeCommand` and the palette does not hide them, so a
+	// click can arrive while the user is looking at a tab and the sidebar provider's view
+	// has never resolved. postMessageToWebview would return without posting there, so the
+	// handlers fall back to the visible instance instead of dropping the action.
+	it("routes the title-bar commands to the visible instance when the sidebar provider cannot post", async () => {
+		const visible = {
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+		}
+		// Structural double: only the members the title-bar handlers touch.
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(visible as unknown as ClineProvider)
+		// The view has never resolved: this provider cannot receive a post.
+		mockProvider.hasResolvedView = false
+
+		const actionsByCommand: Record<string, string[]> = {
+			"zoo-code.plusButtonClicked": ["chatButtonClicked", "focusInput"],
+			"zoo-code.settingsButtonClicked": ["settingsButtonClicked", "didBecomeVisible"],
+			"zoo-code.historyButtonClicked": ["historyButtonClicked"],
+			"zoo-code.marketplaceButtonClicked": ["marketplaceButtonClicked"],
+		}
+		for (const [command, actions] of Object.entries(actionsByCommand)) {
+			await handlers[command]?.()
+			for (const action of actions) {
+				expect(visible.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action })
+			}
+			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+			expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+		}
+		expect(visible.evictCurrentTask).toHaveBeenCalledTimes(1)
+		expect(visible.refreshWorkspace).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps the action with the sidebar provider when no instance can post", () => {
+		// With no visible instance the fallback is the sidebar provider again: the post is
+		// still made by the handler that owns the command, so nothing is routed elsewhere.
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(undefined)
+		mockProvider.hasResolvedView = false
+		mockProvider.isDisposed = true
+
+		handlers["zoo-code.marketplaceButtonClicked"]?.()
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledTimes(1)
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "marketplaceButtonClicked",
+		})
 	})
 
 	// The `*InTab` handlers serve the `editor/title` menu: they target the

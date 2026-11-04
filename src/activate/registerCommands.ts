@@ -145,6 +145,21 @@ const postActions = (
 	}
 }
 
+// The `view/title` menu is scoped to the sidebar view, so these handlers target the
+// sidebar provider wired in at activation rather than the visible-instance heuristic,
+// which follows the user's focus to a tab instance. The menu is not their only origin:
+// the worktree auto-open in extension.ts executes the base ids through `executeCommand`
+// and the palette does not hide them, and either can fire while the user is looking at
+// a tab and this provider's view has never resolved - the state where
+// `postMessageToWebview` returns without posting and the click vanishes unnoticed. Fall
+// back to the visible instance only then, on the same two conditions the posting path
+// checks, so a `view/title` click never follows focus away from a sidebar that could
+// still have received it.
+const titleCommandTarget = (sidebarProvider: ClineProvider): ClineProvider =>
+	sidebarProvider.isDisposed || !sidebarProvider.hasResolvedView
+		? (ClineProvider.getVisibleInstance() ?? sidebarProvider)
+		: sidebarProvider
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -159,14 +174,15 @@ const getCommandsMap = ({
 	// variants serve the `editor/title` menu and target the tab instance
 	// through `getTabProvider()` instead.
 	plusButtonClicked: async () => {
+		const target = titleCommandTarget(provider)
 		TelemetryService.instance.captureTitleButtonClicked("plus")
 
-		await provider.evictCurrentTask()
-		await provider.refreshWorkspace()
-		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		await target.evictCurrentTask()
+		await target.refreshWorkspace()
+		await target.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		// Send focusInput action immediately after chatButtonClicked
 		// This ensures the focus happens after the view has switched
-		await provider.postMessageToWebview({ type: "action", action: "focusInput" })
+		await target.postMessageToWebview({ type: "action", action: "focusInput" })
 	},
 	plusButtonClickedInTab: async () => {
 		const tabProvider = getTabProvider()
@@ -192,7 +208,12 @@ const getCommandsMap = ({
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
 		// Also explicitly post the visibility message to trigger scroll reliably.
-		postActions(outputChannel, provider, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
+		postActions(
+			outputChannel,
+			titleCommandTarget(provider),
+			["settingsButtonClicked", "didBecomeVisible"],
+			"settingsButtonClicked",
+		)
 	},
 	settingsButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -212,7 +233,7 @@ const getCommandsMap = ({
 	historyButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		postActions(outputChannel, provider, ["historyButtonClicked"], "historyButtonClicked")
+		postActions(outputChannel, titleCommandTarget(provider), ["historyButtonClicked"], "historyButtonClicked")
 	},
 	historyButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -225,7 +246,12 @@ const getCommandsMap = ({
 		postActions(outputChannel, tabProvider, ["historyButtonClicked"], "historyButtonClickedInTab")
 	},
 	marketplaceButtonClicked: () => {
-		postActions(outputChannel, provider, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
+		postActions(
+			outputChannel,
+			titleCommandTarget(provider),
+			["marketplaceButtonClicked"],
+			"marketplaceButtonClicked",
+		)
 	},
 	marketplaceButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
