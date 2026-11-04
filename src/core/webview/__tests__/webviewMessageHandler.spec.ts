@@ -3138,7 +3138,81 @@ describe("updateSettings with the display settings", () => {
 
 		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
 		expect(written).toEqual(["timeFormat", "dateFormat"])
-		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+		// The webview is refreshed even so, to show what is really stored.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	describe("the save result", () => {
+		const saveWithId = (updatedSettings: Record<string, unknown>, requestId?: string) =>
+			webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId, updatedSettings })
+		const saveAs = (updatedSettings: Record<string, unknown>) => saveWithId(updatedSettings, "save-1")
+
+		const results = () =>
+			vi
+				.mocked(mockClineProvider.postMessageToWebview)
+				.mock.calls.map(([message]) => message)
+				.filter((message) => message.type === "settingsSaveResult")
+
+		it("reports a stored save, after the state was refreshed", async () => {
+			await saveAs({ timeFormat: "24h" })
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+			const [refreshOrder] = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
+			const [resultOrder] = vi.mocked(mockClineProvider.postMessageToWebview).mock.invocationCallOrder
+			expect(refreshOrder).toBeLessThan(resultOrder)
+		})
+
+		it.each([
+			["an Error", new Error("storage unavailable"), "storage unavailable"],
+			["something that is not an Error", "disk full", "disk full"],
+		])("reports a failed save with the reason, for %s, and still throws it", async (_name, failure, reason) => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValue(failure)
+
+			await expect(saveAs({ dateFormat: "ymd" })).rejects.toBe(failure)
+
+			expect(results()).toEqual([
+				{ type: "settingsSaveResult", requestId: "save-1", success: false, error: reason },
+			])
+		})
+
+		it("does nothing, and reports nothing, for a message that carries no settings", async () => {
+			await webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId: "save-1" })
+
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+			expect(results()).toEqual([])
+		})
+
+		it("sends no result for a save that has no request id", async () => {
+			await saveWithId({ timeFormat: "24h" })
+
+			expect(results()).toEqual([])
+		})
+
+		it("still reports a stored save when refreshing the state fails", async () => {
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce(new Error("webview gone"))
+
+			await saveAs({ timeFormat: "24h" })
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		})
+
+		it("reports a failed save when refreshing the state fails too", async () => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValue(new Error("no"))
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce("webview gone")
+
+			await expect(saveAs({ timeFormat: "24h" })).rejects.toThrow("no")
+
+			expect(results()).toEqual([
+				{ type: "settingsSaveResult", requestId: "save-1", success: false, error: "no" },
+			])
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		})
 	})
 
 	it("completes a partial save when the same values are saved again", async () => {
@@ -3157,7 +3231,7 @@ describe("updateSettings with the display settings", () => {
 
 		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
 		expect(written).toEqual(["timeFormat", "dateFormat", "showRelativeTimes"])
-		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(2) // once for the failed save, once for this one
 	})
 
 	it("does not take a key that only exists on every object for a display setting", async () => {
