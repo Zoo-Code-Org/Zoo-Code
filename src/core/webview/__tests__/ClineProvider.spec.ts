@@ -6191,6 +6191,138 @@ describe("ClineProvider", () => {
 
 		await provider.dispose()
 	})
+
+	describe("view state writes that outlive the provider", () => {
+		const createProvider = () =>
+			new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+		const storedEntries = () =>
+			mockContext.globalState.get<Record<string, { claimToken?: string; mode?: string }>>("viewStates") ?? {}
+
+		beforeEach(() => {
+			// The write queue is static and shared: start from a drained queue so a closure an
+			// earlier test left on it cannot hold this one open.
+			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve()
+		})
+
+		it("drops a queued write instead of applying it to a disposed provider", async () => {
+			const blocked = createProvider()
+			let releaseBlocked!: () => void
+			const blockedGate = new Promise<void>((resolve) => {
+				releaseBlocked = resolve
+			})
+			// The first provider's storage write stalls, so the shared queue stays taken and
+			// the second provider's closure waits behind it.
+			const blockedWriteSpy = vi.spyOn(blocked.contextProxy, "setValue").mockImplementation(async () => {
+				await blockedGate
+			})
+
+			const victim = createProvider()
+			const victimWriteSpy = vi.spyOn(victim.contextProxy, "setValue")
+			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(undefined)
+
+			const blockedWrite = blocked.saveViewState("mode", "plan")
+			// Queued behind the stalled write: none of the victim's work has started yet.
+			const victimWrite = victim.saveViewState("mode", "architect")
+
+			await victim.dispose()
+			releaseBlocked()
+			await victimWrite
+			await blockedWrite
+
+			// The queue only advances this far once the view is gone: no global-state write,
+			// no provider-field mutation, no claim handed to a webview that no longer exists,
+			// and nothing stored under the view's id.
+			expect(victimWriteSpy).not.toHaveBeenCalled()
+			expect(victim["wroteUnderTemporaryViewStateId"]).toBe(false)
+			expect(storedEntries()[victim.viewId]).toBeUndefined()
+			expect(
+				postSpy.mock.calls.map(([message]) => message).filter((message) => message.type === "viewStateClaim"),
+			).toHaveLength(0)
+
+			blockedWriteSpy.mockRestore()
+			victimWriteSpy.mockRestore()
+			postSpy.mockRestore()
+			await blocked.dispose()
+		})
+
+		it("leaves a queued re-key alone when the provider is disposed while it waits", async () => {
+			const blocked = createProvider()
+			let releaseBlocked!: () => void
+			const blockedGate = new Promise<void>((resolve) => {
+				releaseBlocked = resolve
+			})
+			const blockedWriteSpy = vi.spyOn(blocked.contextProxy, "setValue").mockImplementation(async () => {
+				await blockedGate
+			})
+
+			const victim = createProvider()
+			// Author a pre-launch entry for real, so the re-key has work to do.
+			await victim["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+			expect(storedEntries()[victim.viewId]?.mode).toBe("architect")
+			expect(victim["wroteUnderTemporaryViewStateId"]).toBe(true)
+
+			const blockedWrite = blocked.saveViewState("mode", "plan")
+			// The re-key is queued behind the stalled write and has not started yet.
+			const victimRekey = victim["rekeyPersistedViewStateEntry"]("stable-view")
+
+			await victim.dispose()
+			releaseBlocked()
+			await victimRekey
+			await blockedWrite
+
+			// Neither the move nor the authorship clearing may run after dispose: the entry
+			// stays under the id it was written under and the flag keeps its value.
+			expect(storedEntries()[victim.viewId]?.mode).toBe("architect")
+			expect(storedEntries()["stable-view"]).toBeUndefined()
+			expect(victim["wroteUnderTemporaryViewStateId"]).toBe(true)
+
+			blockedWriteSpy.mockRestore()
+			await blocked.dispose()
+		})
+
+		it("skips post-write field mutation and claim delivery for a disposed provider", async () => {
+			const victim = createProvider()
+			let releaseWrite!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			// Only the viewStates write is held open, so the rest of dispose() still runs.
+			const setValueSpy = vi.spyOn(victim.contextProxy, "setValue").mockImplementation(async (key) => {
+				if (key === "viewStates") {
+					await writeGate
+				}
+			})
+			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(undefined)
+
+			const save = victim.saveViewState("mode", "architect")
+			// Let the queued closure reach its storage write, then dispose while it is in
+			// flight: the durable write is already issued, the effects after it are not.
+			await vi.waitFor(() => {
+				expect(setValueSpy.mock.calls.some(([key]) => key === "viewStates")).toBe(true)
+			})
+
+			await victim.dispose()
+			releaseWrite()
+			await save
+
+			expect(setValueSpy.mock.calls.some(([key]) => key === "viewStates")).toBe(true)
+			// The write itself was allowed to land; nothing applied after it.
+			expect(victim["wroteUnderTemporaryViewStateId"]).toBe(false)
+			expect(
+				postSpy.mock.calls.map(([message]) => message).filter((message) => message.type === "viewStateClaim"),
+			).toHaveLength(0)
+
+			setValueSpy.mockRestore()
+			postSpy.mockRestore()
+		})
+	})
 })
 
 describe("webviewMessageHandler no-floating-promises coverage", () => {

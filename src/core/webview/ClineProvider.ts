@@ -451,6 +451,17 @@ export class ClineProvider
 	private wroteUnderTemporaryViewStateId = false
 
 	/**
+	 * Bumped at the start of dispose(). View-state persistence is serialized on a
+	 * static queue shared by every provider, so a closure this instance scheduled can
+	 * start after the view is gone - behind another provider's write. Each closure
+	 * captures the generation it was scheduled under and drops its own effects (the
+	 * global-state write, provider-field mutation, claim delivery) once the value no
+	 * longer matches, instead of applying them to a disposed provider and holding it
+	 * retained until the queue advances.
+	 */
+	private viewStateGeneration = 0
+
+	/**
 	 * Local state buffer for this specific view instance.
 	 * Used to isolate mode, apiConfiguration, and other fields from the shared ContextProxy singleton
 	 * when running in parallel (multi-tab) mode.
@@ -699,14 +710,26 @@ export class ClineProvider
 		return states
 	}
 
+	/** Whether view-state work scheduled under `generation` may still apply effects. */
+	private isViewStateGenerationLive(generation: number): boolean {
+		return !this._disposed && this.viewStateGeneration === generation
+	}
+
 	/** Persist the non-secret selections through the serialized write queue. */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
+		const generation = this.viewStateGeneration
 		// Set by the queued write when it had to mint a claim, delivered after it lands.
 		let mintedClaimToken: string | undefined
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			if (!this.isViewStateGenerationLive(generation)) {
+				// The queue advanced after this view was disposed: the entry belongs to a view
+				// that no longer exists, so the write is dropped instead of applied.
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			// The first write to an unowned temporary id claims the slot instead of merging
 			// into it: temporary names restart from 0 on every host start, so an entry under
@@ -752,6 +775,13 @@ export class ClineProvider
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+
+			if (!this.isViewStateGenerationLive(generation)) {
+				// The view went away while the write was in flight: the selections are durable,
+				// but no provider field may be touched afterwards.
+				return
+			}
+
 			// Authorship is recorded only after the durable write lands: a failed persistence
 			// must not mark the temporary id as owned, or a later load would adopt an entry
 			// that was never actually stored.
@@ -765,7 +795,8 @@ export class ClineProvider
 
 		// Delivered only once the durable write landed: a webview must never hold a claim the
 		// host did not store, or the next launch would present a token the entry cannot match.
-		if (mintedClaimToken) {
+		// A provider disposed in the meantime has no webview left to deliver it to.
+		if (mintedClaimToken && this.isViewStateGenerationLive(generation)) {
 			await this.postViewStateClaimToWebview(viewStateId, mintedClaimToken)
 		}
 	}
@@ -775,7 +806,14 @@ export class ClineProvider
 	 * Runs through the serialized write queue to avoid racing concurrent view-state writes.
 	 */
 	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
+		const generation = this.viewStateGeneration
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			if (!this.isViewStateGenerationLive(generation)) {
+				// A clear that only now reaches the queue head belongs to a disposed view:
+				// its entry is already unreferenced by this provider, so leave the map alone.
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			delete states[viewStateId]
 			await this.contextProxy.setValue("viewStates", states)
@@ -789,8 +827,15 @@ export class ClineProvider
 	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string | undefined> {
 		const claimToken = crypto.randomUUID()
 		let rebound = false
+		const generation = this.viewStateGeneration
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			if (!this.isViewStateGenerationLive(generation)) {
+				// Nothing is re-bound for a view that is gone, and the undefined return makes
+				// the caller refuse the adoption instead of delivering a claim nobody owns.
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			const current = states[viewStateId]
 			// A concurrent registration may have bound this key while this write was queued:
@@ -854,8 +899,15 @@ export class ClineProvider
 	/** Re-key this instance's authored pre-launch entry to the stable id. */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
 		const previousViewStateId = this.viewId
+		const generation = this.viewStateGeneration
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			if (!this.isViewStateGenerationLive(generation)) {
+				// A re-key that only now reaches the queue head belongs to a disposed view:
+				// the entry stays where it is for the pruning pass to collect.
+				return
+			}
+
 			// An entry under this name can belong to a different session, because temporary
 			// ids restart from 0 on every extension host start. Only re-key entries this
 			// instance wrote, otherwise a stale entry from another session is adopted.
@@ -888,6 +940,12 @@ export class ClineProvider
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+
+			if (!this.isViewStateGenerationLive(generation)) {
+				// The move landed but the view is gone: keep the authorship flag as dispose
+				// left it rather than mutating a disposed provider.
+				return
+			}
 
 			// Only a successful write clears authorship: a failed attempt leaves the entry
 			// under the temporary name, and a retry must still be able to re-key it.
@@ -995,6 +1053,7 @@ export class ClineProvider
 		}
 
 		const previousViewStateId = this.viewStateId
+		const generation = this.viewStateGeneration
 
 		this.viewStateId = normalizedViewStateId
 
@@ -1008,7 +1067,9 @@ export class ClineProvider
 			// webview is told the canonical (viewStateId, claim) pair to echo on its next launch.
 			const adoptedClaim = this.getPersistedViewStates({ fresh: true })[this.viewStateId]?.claimToken
 
-			if (adoptedClaim) {
+			// A registration whose view was disposed mid-flight must not deliver a claim to
+			// a webview that is no longer there.
+			if (adoptedClaim && this.isViewStateGenerationLive(generation)) {
 				await this.postViewStateClaimToWebview(this.viewStateId, adoptedClaim)
 			}
 
@@ -1374,6 +1435,10 @@ export class ClineProvider
 			return
 		}
 
+		// Invalidate view-state work that has not reached the queue head yet: it is
+		// serialized on the static queue with other providers' writes, so it can start
+		// after this provider is gone.
+		this.viewStateGeneration++
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
