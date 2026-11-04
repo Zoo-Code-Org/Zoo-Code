@@ -47,15 +47,6 @@ describe("TranslationProvider locale loading", () => {
 		// through the English fallback and the switch lands after the fetch.
 		expect(screen.getByTestId("error-title")).toHaveTextContent("Something went wrong")
 
-		// A locale outside the entry chunk is fetched on demand, so how long the switch
-		// takes is a property of the machine and the load on it, not of the code under
-		// test: on a contended runner the fetch can outlast any fixed wall-clock window,
-		// which is what made this suite flake. Awaiting the memoized promise the provider
-		// itself waits on - the idiom the unmount case at the end of this file uses - takes
-		// the clock out of the assertion. What `waitFor` has left to catch is the render
-		// that `languageChanged` triggers, which settles in the same task.
-		await loadLanguage("ko")
-
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("문제가 발생했습니다")
 		})
@@ -76,9 +67,6 @@ describe("TranslationProvider locale loading", () => {
 			)
 		})
 
-		// Await the fetch instead of racing a fixed window (note in the first case).
-		await loadLanguage("ja")
-
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("問題が発生しました")
 		})
@@ -95,9 +83,6 @@ describe("TranslationProvider locale loading", () => {
 
 	it("keeps English available after switching away and back", async () => {
 		const { rerender } = renderProbe("de")
-
-		// German is loaded on demand as well: await it rather than time it.
-		await loadLanguage("de")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
@@ -120,9 +105,6 @@ describe("TranslationProvider locale loading", () => {
 	it("keeps the previous locale rendered while a warm switch is still loading", async () => {
 		const { rerender } = renderProbe("de")
 
-		// The cold locale is awaited here too (see the note in the first case).
-		await loadLanguage("de")
-
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
 		})
@@ -140,10 +122,6 @@ describe("TranslationProvider locale loading", () => {
 		// switch cannot have landed yet. A `changeLanguage` fired before the fetch
 		// resolves would paint the English fallback here instead of German.
 		expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
-
-		// Awaiting the fetch through the promise the provider waits on keeps the assertion
-		// above a statement about ordering rather than about the clock.
-		await loadLanguage("fr")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Une erreur s'est produite")
