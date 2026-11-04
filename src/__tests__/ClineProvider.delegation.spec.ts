@@ -177,6 +177,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			deleteTaskWithId,
 			createTaskWithHistoryItem,
 			log: vi.fn(),
+			isTaskRunningInAnyProvider: vi.fn().mockReturnValue(false),
 			isViewLaunched: false,
 		} as unknown as ClineProvider
 		Reflect.set(provider, "taskHistoryStore", {
@@ -645,6 +646,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			createTask: vi.fn().mockResolvedValue({ taskId: "child-2", start: vi.fn(), run: () => Promise.resolve() }),
 			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 			log: vi.fn(),
+			isTaskRunningInAnyProvider: vi.fn().mockReturnValue(false),
 			isViewLaunched: false,
 			recentTasksCache: undefined,
 			taskHistoryStore,
@@ -906,6 +908,67 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		releasePersistence()
 		await Promise.all([recovery, registration])
 		expect(taskRegistry.push).toHaveBeenCalledOnce()
+	})
+
+	it("rejects re-delegation when the interrupted awaited child becomes live before the commit", async () => {
+		const oldChildId = "old-child"
+		const parent: HistoryItem = {
+			...parentHistoryItem,
+			status: "delegated",
+			awaitingChildId: oldChildId,
+			delegatedToId: oldChildId,
+			childIds: [oldChildId],
+		}
+		const records = new Map<string, HistoryItem>([
+			["parent-1", parent],
+			[oldChildId, { ...parentHistoryItem, id: oldChildId, status: "interrupted", parentTaskId: "parent-1" }],
+		])
+		let oldChildIsLive = false
+		const taskHistoryStore = makeStoreStub({
+			get: vi.fn((id: string) => records.get(id)),
+			atomicReadAndUpdate: vi.fn(async (taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+				records.set(taskId, updater(records.get(taskId)!))
+				return []
+			}),
+		})
+		const parentTask = makeParentTask()
+		const provider = {
+			_disposed: false,
+			taskScheduler: new TaskScheduler(),
+			taskRegistry: { hasRunning: vi.fn((id: string) => id === oldChildId && oldChildIsLive) },
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			// The old child is resumed elsewhere after the pre-check but before the parent commit.
+			createTask: vi.fn(async () => {
+				oldChildIsLive = true
+				return { taskId: "child-2", run: vi.fn().mockResolvedValue(undefined) }
+			}),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			getTaskWithId: vi.fn(async () => ({ historyItem: records.get("parent-1") })),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+		Object.assign(provider, {
+			isTaskRunningInAnyProvider: ClineProvider.prototype["isTaskRunningInAnyProvider"],
+		})
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Continue",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow(`awaited child ${oldChildId} became live before delegation commit`)
+		expect(records.get("parent-1")).toMatchObject({
+			status: "delegated",
+			awaitingChildId: oldChildId,
+			delegatedToId: oldChildId,
+		})
 	})
 
 	it("does not recover when a descendant is live in another provider", async () => {

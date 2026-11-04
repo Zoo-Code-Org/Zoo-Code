@@ -1661,8 +1661,18 @@ export class ClineProvider
 
 				removeTaskEventListeners(this.taskEventListeners, oldTask)
 
-				// Replace in-place: preserves stack index and current pointer
-				this.taskRegistry.replace(oldTask.taskId, task)
+				// Replace in-place (preserves stack index and current pointer). Serialized with
+				// dead-delegation recovery so its persisted write cannot interleave with this install.
+				const installed = await withTaskOwnershipReservation(async () => {
+					if (this._disposed || this.taskRegistry.current !== oldTask) return false
+					this.taskRegistry.replace(oldTask.taskId, task)
+					return true
+				})
+				if (!installed) {
+					removeTaskEventListeners(this.taskEventListeners, task)
+					await task.abortTask(true).catch(() => {})
+					return task
+				}
 			}
 
 			task.emit(RooCodeEventName.TaskFocused)
@@ -4991,24 +5001,37 @@ export class ClineProvider
 			if (this._disposed) {
 				throw new Error("[delegateParentAndOpenChild] Provider was disposed before delegation commit")
 			}
-			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
-				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
-					throw new Error(
-						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
-					)
-				}
-				const awaitedChildStatus = historyItem.awaitingChildId
-					? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
-					: undefined
-				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
-				pendingActionBeforeCommit = historyItem.pendingAction
-				parentBeforeCommit = historyItem
-				return {
-					...delegated,
-					pendingAction:
-						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
-				}
-			})
+			// Hold the ownership reservation across the commit so the awaited child cannot register
+			// between the liveness check and the write; only the commit is reserved (non-reentrant).
+			await withTaskOwnershipReservation(() =>
+				this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
+					if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
+						throw new Error(
+							`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
+						)
+					}
+					if (
+						historyItem.status === "delegated" &&
+						historyItem.awaitingChildId &&
+						this.isTaskRunningInAnyProvider(historyItem.awaitingChildId)
+					) {
+						throw new LifecycleTransitionError(
+							`Cannot re-delegate task ${parentTaskId}: awaited child ${historyItem.awaitingChildId} became live before delegation commit`,
+						)
+					}
+					const awaitedChildStatus = historyItem.awaitingChildId
+						? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
+						: undefined
+					const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
+					pendingActionBeforeCommit = historyItem.pendingAction
+					parentBeforeCommit = historyItem
+					return {
+						...delegated,
+						pendingAction:
+							delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
+					}
+				}),
+			)
 			parentCommitted = true
 			if (this._disposed) {
 				throw new Error("[delegateParentAndOpenChild] Provider was disposed before child scheduling")

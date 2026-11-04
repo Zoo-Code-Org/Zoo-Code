@@ -7,6 +7,7 @@ import { ClineProvider } from "../ClineProvider"
 import { Task } from "../../task/Task"
 import { TaskRegistry } from "../../task/TaskRegistry"
 import { ContextProxy } from "../../config/ContextProxy"
+import { withTaskOwnershipReservation } from "../../task-persistence"
 import type { ProviderSettings, HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -461,6 +462,40 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Verify new task received focus event
 		expect(mockTask2.emit).toHaveBeenCalledWith("taskFocused")
+	})
+
+	it("serializes the in-place rehydration install with dead-delegation recovery", async () => {
+		seedRegistry(provider, mockTask1)
+		let release!: () => void
+		const reservation = withTaskOwnershipReservation(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
+		await vi.waitFor(() => expect(release).toBeDefined())
+
+		const rehydration = provider.createTaskWithHistoryItem({
+			id: "task-1",
+			number: 1,
+			task: "test task",
+			ts: Date.now(),
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			workspace: "/test/workspace",
+		})
+		try {
+			await vi.waitFor(() => expect(mockTask1.abortTask).toHaveBeenCalled())
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			// The recovery reservation is held: the aborted task must not be replaced yet.
+			expect(provider["taskRegistry"].current).toBe(mockTask1)
+		} finally {
+			release()
+		}
+		await reservation
+		await rehydration
+		expect(provider["taskRegistry"].current).toBe(mockTask2)
 	})
 
 	it("should remove task from stack when creating different task", async () => {
