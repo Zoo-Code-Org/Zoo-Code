@@ -192,14 +192,19 @@ export function parseZaiQuota(payload: unknown): ProviderQuotaWindow[] | undefin
 					? clampPercent((consumed / total) * 100)
 					: undefined
 
+		const resetAt = toEpochMs(limit.nextResetTime)
+		const creditFigures = limit.type === "CREDIT_LIMIT" && total !== undefined && consumed !== undefined
+		// A window with neither a figure nor a reset time would show a label with no value. (The credit counts are in
+		// the label itself, so such a window does show a value.)
+		if (usedPercent === undefined && resetAt === undefined && !creditFigures) continue
+
 		windows.push({
 			id: `limit_${windows.length}`,
-			valueLabel:
-				limit.type === "CREDIT_LIMIT" && total !== undefined && consumed !== undefined
-					? `${windowLabel(seconds, "Credits")}: ${formatCredits(consumed)} / ${formatCredits(total)} credits`
-					: windowLabel(seconds, "Tokens"),
+			valueLabel: creditFigures
+				? `${windowLabel(seconds, "Credits")}: ${formatCredits(consumed)} / ${formatCredits(total)} credits`
+				: windowLabel(seconds, "Tokens"),
 			usedPercent,
-			resetAt: toEpochMs(limit.nextResetTime),
+			resetAt,
 		})
 	}
 	return windows.length ? windows : undefined
@@ -313,11 +318,16 @@ export function parseNanoGptUsage(payload: unknown): ProviderQuotaWindow[] | und
 			if (fraction !== undefined) usedPercent = clampPercent(fraction * 100)
 			else if (used !== undefined && cap !== undefined && cap > 0) usedPercent = clampPercent((used / cap) * 100)
 		}
+		const reset = toEpochMs(resetAt)
+		// A window with neither a figure nor a reset time would show a label with no value. A degraded window is kept:
+		// its label carries the state.
+		if (usedPercent === undefined && reset === undefined && state === "active" && !q.degraded) continue
+
 		windows.push({
 			id,
 			valueLabel: state !== "active" ? `${label} (${state})` : label,
 			usedPercent,
-			resetAt: toEpochMs(resetAt),
+			resetAt: reset,
 		})
 	}
 	return windows.length ? windows : undefined

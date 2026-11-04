@@ -181,6 +181,30 @@ describe("parseZaiQuota", () => {
 		])
 	})
 
+	it("skips a window that has neither a figure nor a reset time, and keeps one that has either", () => {
+		const parse = (limit: Record<string, unknown>) => parseZaiQuota({ code: 200, data: { limits: [limit] } })
+
+		expect(parse({ type: "TOKENS_LIMIT", unit: 3, number: 5 })).toBeUndefined() // nothing to show next to the label
+		expect(parse({ type: "TOKENS_LIMIT", unit: 3, number: 5, nextResetTime: 1_800_000_000_000 })).toEqual([
+			{ id: "limit_0", valueLabel: "5-hour", usedPercent: undefined, resetAt: 1_800_000_000_000 },
+		])
+		expect(parse({ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 0 })?.[0].usedPercent).toBe(0)
+		// The credit counts are in the label, so that window does show a value.
+		expect(parse({ type: "CREDIT_LIMIT", unit: 6, number: 1, usage: 2000, currentValue: 500 })).toHaveLength(1)
+		// Only the empty window is dropped, and the ids keep counting the windows that are shown.
+		expect(
+			parseZaiQuota({
+				code: 200,
+				data: {
+					limits: [
+						{ type: "TOKENS_LIMIT", unit: 3, number: 5 },
+						{ type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 7 },
+					],
+				},
+			}),
+		).toEqual([{ id: "limit_0", valueLabel: "Weekly", usedPercent: 7, resetAt: undefined }])
+	})
+
 	it("treats a business failure inside HTTP 200 as no data", () => {
 		expect(parseZaiQuota({ success: false, code: 1001, msg: "expired", data: { limits: [] } })).toBeUndefined()
 		expect(parseZaiQuota({ code: 1001, data: { limits: [{ type: "TOKENS_LIMIT" }] } })).toBeUndefined()
@@ -247,6 +271,19 @@ describe("parseNanoGptUsage", () => {
 		).toEqual([
 			{ id: "daily", valueLabel: "Daily (grace)", usedPercent: 25, resetAt: undefined },
 			{ id: "monthly", valueLabel: "Monthly (grace)", usedPercent: 40, resetAt: 1_800_000_000_000 },
+		])
+	})
+
+	it("keeps an empty window only when its label carries a state, and a window that has a reset time", () => {
+		expect(parseNanoGptUsage({ state: "grace", monthly: {} })).toEqual([
+			{ id: "monthly", valueLabel: "Monthly (grace)", usedPercent: undefined, resetAt: undefined },
+		])
+		expect(parseNanoGptUsage({ monthly: { resetAt: 1_800_000_000 } })).toEqual([
+			{ id: "monthly", valueLabel: "Monthly", usedPercent: undefined, resetAt: 1_800_000_000_000 },
+		])
+		// An empty window is dropped, the others stay.
+		expect(parseNanoGptUsage({ daily: {}, monthly: { used: 10, limit: 100 } })).toEqual([
+			{ id: "monthly", valueLabel: "Monthly", usedPercent: 10, resetAt: undefined },
 		])
 	})
 
@@ -401,7 +438,7 @@ describe("parser edge cases", () => {
 		])
 		expect(parseNanoGptUsage({ daily: { used: 30, limits: { daily: 60 } } })?.[0].usedPercent).toBe(50)
 		expect(parseNanoGptUsage({ monthly: { used: 5, limit: 0 } })?.[0].usedPercent).toBeUndefined()
-		expect(parseNanoGptUsage({ monthly: {} })?.[0].usedPercent).toBeUndefined()
+		expect(parseNanoGptUsage({ monthly: {} })).toBeUndefined() // no figure and no reset time: nothing to show
 	})
 
 	it("OpenCode Go: returns undefined without a usage block or with no usable window", () => {
