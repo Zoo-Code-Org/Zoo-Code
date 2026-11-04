@@ -148,8 +148,10 @@ const getCommandsMap = ({
 			// The focus command settles when VS Code opens the pane, not when resolveWebviewView
 			// hands this provider its view, and postMessageToWebview returns without sending while the
 			// view is unset - both actions below would be dropped. Wait for the resolution that this
-			// command just asked VS Code to start; the wait also ends if the view never arrives, so the
-			// command cannot hang.
+			// command just asked VS Code to start. The wait releases on one of three things: this
+			// provider receives its view, the sidebar view is disposed (the pane was closed before
+			// resolving), or the provider is disposed. It has no clock of its own, so a view that is
+			// neither resolved nor torn down leaves this command pending until one of those happens.
 			await provider.whenViewResolved()
 		}
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
@@ -344,12 +346,10 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	} finally {
 		// Clear once settled (success or failure) so the next call starts
 		// fresh: the reuse path in createTabPanelUnlocked then takes over
-		// for the tracked panel. Guard the clear so this settlement cannot
-		// clobber a replacement already stored in the slot. That clobber is
-		// unreachable in single-threaded settlement order: while the slot
-		// holds this in-flight creation, every other caller receives that
-		// same promise (guard above), so no replacement can be stored before
-		// this finally block runs — the equality check pins the invariant.
+		// for the tracked panel. The equality check keeps this settlement from
+		// clearing a slot it does not own, which is the normal outcome for a
+		// forced call that started while an ordinary creation held the slot: that
+		// forced call never stored anything, so the ordinary creation stays.
 		if (pendingTabPanelCreation === creation) {
 			pendingTabPanelCreation = undefined
 		}
