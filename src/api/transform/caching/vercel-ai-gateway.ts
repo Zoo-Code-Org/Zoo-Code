@@ -1,12 +1,22 @@
 import OpenAI from "openai"
 
-export function addCacheBreakpoints(systemPrompt: string, messages: OpenAI.Chat.ChatCompletionMessageParam[]) {
+import type { PromptCacheTtl } from "@roo-code/types"
+
+import { cacheControl } from "./ttl"
+
+export function addCacheBreakpoints(
+	systemPrompt: string,
+	messages: OpenAI.Chat.ChatCompletionMessageParam[],
+	ttl?: PromptCacheTtl,
+) {
+	const control = cacheControl(ttl)
+
 	// Apply cache_control to system message at the message level
 	messages[0] = {
 		role: "system",
 		content: systemPrompt,
 		// @ts-ignore-next-line
-		cache_control: { type: "ephemeral" },
+		cache_control: control,
 	}
 
 	// Add cache_control to the last two user messages for conversation context caching
@@ -23,7 +33,7 @@ export function addCacheBreakpoints(systemPrompt: string, messages: OpenAI.Chat.
 
 			if (lastTextPart && lastTextPart.text && lastTextPart.text.length > 0) {
 				// @ts-ignore-next-line
-				lastTextPart["cache_control"] = { type: "ephemeral" }
+				lastTextPart["cache_control"] = control
 			}
 		}
 	})

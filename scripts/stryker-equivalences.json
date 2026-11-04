@@ -12,7 +12,7 @@
 		},
 		{
 			"file": "src/api/providers/openai.ts",
-			"line": 94,
+			"line": 105,
 			"mutator": "LogicalOperator",
 			"replacement": "this.options.openAiStrictToolSchemas && DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS",
 			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??",
@@ -21,7 +21,7 @@
 		},
 		{
 			"file": "src/api/providers/openai.ts",
-			"line": 379,
+			"line": 403,
 			"mutator": "LogicalOperator",
 			"replacement": "this.options.openAiStrictToolSchemas && DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS",
 			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??",
@@ -30,7 +30,7 @@
 		},
 		{
 			"file": "src/api/providers/utils/abort-signal.ts",
-			"line": 112,
+			"line": 203,
 			"mutator": "BooleanLiteral",
 			"replacement": "false",
 			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable",
@@ -39,7 +39,7 @@
 		},
 		{
 			"file": "src/api/providers/utils/abort-signal.ts",
-			"line": 112,
+			"line": 203,
 			"mutator": "ObjectLiteral",
 			"replacement": "{}",
 			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable",
@@ -66,7 +66,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4268,
+			"line": 4288,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "only tool_use and mcp_tool_use entries ever carry an id, so the guard is always true on this path",
@@ -75,7 +75,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4320,
+			"line": 4340,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "event.name is always a string on this path; delta events carry the tracked start name",
@@ -84,7 +84,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4336,
+			"line": 4356,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "makeStreamingKey always returns a string and the legacy lookup branch is unreachable",
@@ -93,7 +93,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4344,
+			"line": 4364,
 			"mutator": "EqualityOperator",
 			"replacement": "streamingKey === undefined",
 			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)",
@@ -102,7 +102,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4740,
+			"line": 4782,
 			"mutator": "LogicalOperator",
 			"replacement": "event.name && event.id",
 			"reason": "finalizeRawChunks emits end events with the tracked start name, so the ?? fallback is unreachable",
@@ -111,7 +111,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -120,7 +120,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -129,7 +129,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -138,7 +138,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -147,7 +147,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "EqualityOperator",
 			"replacement": "finalToolUse !== null",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -156,7 +156,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "EqualityOperator",
 			"replacement": "toolUseIndex !== undefined",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -165,7 +165,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4756,
+			"line": 4798,
 			"mutator": "LogicalOperator",
 			"replacement": "finalToolUse === null || toolUseIndex === undefined",
 			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves",
@@ -174,7 +174,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4761,
+			"line": 4803,
 			"mutator": "ConditionalExpression",
 			"replacement": "false",
 			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable",
@@ -183,7 +183,7 @@
 		},
 		{
 			"file": "src/core/task/Task.ts",
-			"line": 4761,
+			"line": 4803,
 			"mutator": "ConditionalExpression",
 			"replacement": "true",
 			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable",

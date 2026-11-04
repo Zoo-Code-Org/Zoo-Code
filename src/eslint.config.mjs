@@ -2,8 +2,10 @@ import { config } from "@roo-code/config-eslint/base"
 import {
 	apiProviderHygieneConfig,
 	apiProviderTestSelectors,
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 } from "@roo-code/config-eslint/api-provider-hygiene"
+import { createI18nDotKeyConfig, getI18nDotKeySelectors } from "@roo-code/config-eslint/i18n-keys"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -27,11 +29,34 @@ const testPathTraversalSelectors = [
 	},
 ]
 
+const i18nDotKeyConfig = createI18nDotKeyConfig(`${import.meta.dirname}/i18n/locales/en`)
+
+// Test-utils rollout guardrail: lanes converted to the shared reset helper
+// stay converted. Use clearAllMocks from test-utils/reset.
+const testResetHelperSelector = {
+	selector:
+		"CallExpression[callee.object.name='vi'][callee.property.name='clearAllMocks'], CallExpression[callee.object.name='vitest'][callee.property.name='clearAllMocks']",
+	message:
+		"Use the shared clearAllMocks() helper from src/test-utils/reset instead of calling vi.clearAllMocks() directly.",
+}
+
 /** @type {import("eslint").Linter.Config} */
 export default [
 	...config,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
+	i18nDotKeyConfig,
 	apiProviderHygieneConfig,
+	{
+		// A later block replaces no-restricted-syntax for the same files, so repeat the i18n selectors.
+		...apiProviderHygieneConfig,
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				...apiProviderHygieneConfig.rules["no-restricted-syntax"].slice(1),
+				...getI18nDotKeySelectors(i18nDotKeyConfig),
+			],
+		},
+	},
 	{
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
@@ -42,6 +67,7 @@ export default [
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
 	},
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 	{
 		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
@@ -86,7 +112,19 @@ export default [
 		},
 	},
 	{
-		ignores: [".stryker-tmp", "webview-ui", "out"],
+		// Ratchet: flag type assertions (`as X`, `!`) that do not change the type.
+		// They hide type errors once an SDK type narrows. Tests are not covered yet.
+		files: ["api/**/*.ts"],
+		ignores: ["api/**/__tests__/**"],
+		languageOptions: {
+			parserOptions: {
+				project: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-unnecessary-type-assertion": "error",
+		},
 	},
 	{
 		// Tests inside __tests__/ directories must not traverse 3+ levels above
@@ -111,5 +149,35 @@ export default [
 		rules: {
 			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, ...apiProviderTestSelectors],
 		},
+	},
+	{
+		// Test-utils rollout guardrail: lanes converted to the shared reset
+		// helpers stay converted. Use clearAllMocks from test-utils/reset.
+		// no-restricted-syntax replaces earlier blocks for the same files, so
+		// repeat the traversal selectors here.
+		files: [
+			"core/config/__tests__/**/*.ts",
+			"services/code-index/**/__tests__/**/*.ts",
+			"integrations/terminal/**/__tests__/**/*.ts",
+		],
+		rules: {
+			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, testResetHelperSelector],
+		},
+	},
+	{
+		// Same guardrail for the API provider lane; this block also replaces the
+		// API provider hygiene selectors, so repeat those too.
+		files: ["api/providers/__tests__/**/*.ts"],
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				...testPathTraversalSelectors,
+				...apiProviderTestSelectors,
+				testResetHelperSelector,
+			],
+		},
+	},
+	{
+		ignores: [".stryker-tmp", "webview-ui", "out"],
 	},
 ]
