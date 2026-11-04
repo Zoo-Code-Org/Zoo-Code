@@ -22,6 +22,9 @@ function createProvider(taskId: string) {
 		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined),
 		createTask: vi.fn<ClineProvider["createTask"]>().mockResolvedValue(task),
 		dispose: vi.fn<ClineProvider["dispose"]>().mockResolvedValue(undefined),
+		// Plain property, not the real getter: ClineProvider is mocked in this file, so the
+		// prototype carries no accessor to shadow. startNewTask's teardown guard reads this.
+		isDisposed: false,
 	})
 }
 
@@ -120,6 +123,46 @@ describe("API - startNewTask routing", () => {
 		// The provider this call created must not linger in the active-instance list; the
 		// pre-existing sidebar provider is not this call's to tear down.
 		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
+	it("rethrows the startup error when tearing down the aborted new tab fails", async () => {
+		const startupError = new Error("webview post failed")
+		const teardownError = new Error("provider teardown failed")
+		editor.postMessageToWebview.mockRejectedValueOnce(startupError)
+		editor.dispose.mockRejectedValueOnce(teardownError)
+		// enableLogging is what routes API logging to the output channel; the teardown failure
+		// has to stay visible there.
+		const loggingApi = new API(outputChannel, sidebar, providerFactory, undefined, true)
+
+		const thrown = await loggingApi
+			.startNewTask({ text: "new task", newTab: true })
+			.catch((error: unknown) => error)
+
+		// The teardown failure is logged beside the startup error and never substituted for
+		// it: the caller has to see why the task never started, not why cleanup failed.
+		expect(thrown).toBe(startupError)
+		expect(String(thrown)).not.toContain("provider teardown failed")
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"[API#startNewTask] failed to dispose the aborted new-tab provider: provider teardown failed",
+			),
+		)
+		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
+	it("does not dispose an already disposed new-tab provider when the call fails", async () => {
+		// Disposal can win the race against the call - a tab the user closed mid-flight - and
+		// the flag is consulted twice: before starting the task, and again by the teardown
+		// guard. A second dispose would re-enter teardown on a provider that already tore its
+		// state down.
+		editor.isDisposed = true
+
+		await expect(api.startNewTask({ text: "new task", newTab: true })).rejects.toThrow("The provider was disposed")
+
+		expect(editor.createTask).not.toHaveBeenCalled()
+		expect(editor.dispose).not.toHaveBeenCalled()
 		expect(sidebar.dispose).not.toHaveBeenCalled()
 	})
 
