@@ -6414,6 +6414,31 @@ describe("ClineProvider", () => {
 			expect(ClineProvider.getAllInstances()).not.toContain(provider)
 		})
 
+		it("releases a pending webview diagnostics request even when teardown throws", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The request is addressed to an attached view; the shared double stands in for one.
+			provider["view"] = mockWebviewView
+			const disposeSpy = vi.spyOn(provider["diagnosticsRequestBroker"], "dispose")
+
+			// A long timeout keeps this a test about disposal rather than about the request timing
+			// itself: only disposal may settle the promise.
+			const pending = provider.requestWebviewDiagnostics(60_000)
+
+			provider["mcpHub"] = {
+				unregisterClient: vi.fn().mockRejectedValue(new Error("mcp disposal down")),
+			} as unknown as ClineProvider["mcpHub"]
+
+			await expect(provider.dispose()).rejects.toThrow("mcp disposal down")
+
+			expect(disposeSpy).toHaveBeenCalledTimes(1)
+			await expect(pending).resolves.toBeUndefined()
+		})
 		it("restores the previous mode when custom-mode registration fails during createTask", async () => {
 			await provider.setValues({ mode: "architect" })
 			// setValues mirrors the write into the view buffer; drop it so this case

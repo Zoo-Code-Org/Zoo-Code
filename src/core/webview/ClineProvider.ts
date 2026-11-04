@@ -1509,6 +1509,11 @@ export class ClineProvider
 		try {
 			await this.disposeInternal()
 		} finally {
+			// Released here rather than in the teardown body: a pending webview diagnostics
+			// request holds a resolver and a timeout that close over this provider, so a view that
+			// goes away mid-request must release them even when an earlier cleanup step threw.
+			this.diagnosticsRequestBroker.dispose()
+
 			// Deregistration must not depend on the teardown completing: a failing task
 			// eviction, a throwing disposable or a rejecting MCP client would otherwise
 			// leave this provider registered while _disposed is already set, and the early
