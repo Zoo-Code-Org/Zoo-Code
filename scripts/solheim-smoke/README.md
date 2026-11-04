@@ -38,7 +38,10 @@ Activation and completion each have a 120-second limit; task-start acknowledgmen
 in the controller. The extension awaits startup and configuration persistence without racing shared-profile
 writes against a timer. If the controller times out, it tears down its isolated VS Code process rather than
 trying to roll back shared settings or remove a possibly unrelated task. The live CI step has an eight-minute outer timeout.
-Teardown escalates through close, terminate, and kill within independent five-second windows. A non-empty
+Teardown escalates through close, terminate, and kill within independent five-second windows. After the
+completion message, the driver first holds the finished task on screen for three seconds, so the recording ends
+on the completed chat before teardown clears it. The display dependency install step in the workflow is bounded
+at five minutes, so a slow apt mirror fails the job instead of consuming it. A non-empty
 completion and actual output-token usage must belong to the accepted task. Activation alone cannot pass.
 The driver never approves dialogs or tool execution; it closes the task during teardown.
 
@@ -53,7 +56,10 @@ It does not contradict the `OK` verdict. See
 The action uploads `verdict.json` (fixed failure code, boolean gates, duration and provider/model names),
 `trace.json` (versioned metadata-only structured trace from the shared substrate; see
 [`scripts/agent-evals/README.md`](../agent-evals/README.md) for its accounting limits), and `smoke.mp4`,
-a 1280×720, 12 fps screen recording of the fresh CI virtual display. It records up to
+a 1280×720, 12 fps screen recording of the fresh CI virtual display. The recording shows the Zoo Code chat
+panel: `sidebar-runner.cjs` runs inside the extension host through `--extensionTestsPath`, focuses the Zoo Code
+sidebar, and then keeps its `run()` pending for the whole smoke, because VS Code exits once that `run()` settles.
+It records up to
 eight minutes / approximately 120 MiB, with bounded shutdown and seven-day artifact retention. Video
 contains the visible smoke UI, potentially including the fixed prompt and model answer; unlike the verdict
 and the trace, it is not text-redacted. No settings screen is opened, and no host logs, storage, task

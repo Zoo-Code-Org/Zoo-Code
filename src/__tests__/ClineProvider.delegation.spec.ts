@@ -40,16 +40,15 @@ function makeStoreStub(
  * `parent`. Without flushPendingToolResultsToHistory the method hits its
  * non-fatal flush-error branch and never reaches the happy delegation path.
  */
-const makeParentTask = () =>
-	({
-		taskId: "parent-1",
-		apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
-		getTaskMode: vi.fn().mockResolvedValue("code"),
-		getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
-		emit: vi.fn(),
-		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
-		retrySaveApiConversationHistory: vi.fn(),
-	}) as any
+const makeParentTask = () => ({
+	taskId: "parent-1",
+	apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
+	getTaskMode: vi.fn().mockResolvedValue("code"),
+	getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
+	emit: vi.fn(),
+	flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+	retrySaveApiConversationHistory: vi.fn(),
+})
 
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("rejects a stale restored action before delegation side effects", async () => {
@@ -150,7 +149,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		const parentTask = makeParentTask()
 		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
-		const getCurrentTask = vi.fn(() => parentTask)
+		const getCurrentTask = vi.fn((): { taskId: string } => parentTask)
 		const createTask = vi.fn(async () => {
 			getCurrentTask.mockReturnValue(child)
 			return child
@@ -218,7 +217,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		const child = await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		const child = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -465,7 +464,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -499,7 +498,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -540,7 +539,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -587,7 +586,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Continue",
 			initialTodos: [],
@@ -652,7 +651,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		} as unknown as ClineProvider
 
 		await expect(
-			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 				parentTaskId: "parent-1",
 				message: "Continue",
 				initialTodos: [],
@@ -663,7 +662,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		// The authoritative preflight rejects before either provider mutates its stack.
 		expect(child.run).not.toHaveBeenCalled()
 		expect(createTask).not.toHaveBeenCalled()
-		expect((provider as any).deleteTaskWithId).not.toHaveBeenCalled()
+		expect(provider.deleteTaskWithId).not.toHaveBeenCalled()
 	})
 
 	it("rejects a delegated parent whose awaited-child identity is missing", async () => {
@@ -793,7 +792,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		} as unknown as ClineProvider
 
 		await expect(
-			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 				parentTaskId: "parent-1",
 				message: "Do something",
 				initialTodos: [],

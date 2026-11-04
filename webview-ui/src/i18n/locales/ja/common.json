@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "はい",
-		"no": "いいえ",
-		"cancel": "キャンセル",
-		"remove": "削除",
-		"keep": "保持"
+		"cancel": "キャンセル"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "コピー",
 			"save": "画像を保存",
 			"viewCode": "コードを表示",
-			"viewDiagram": "ダイアグラムを表示",
 			"close": "閉じる"
-		},
-		"modal": {
-			"codeTitle": "Mermaidコード"
 		},
 		"tabs": {
 			"diagram": "ダイアグラム",
 			"code": "コード"
-		},
-		"feedback": {
-			"imageCopied": "画像をクリップボードにコピーしました",
-			"copyError": "画像のコピーエラー"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "画像"
 		},
 		"noData": "画像データなし"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "無効なデータURI形式",
-			"copyingImage": "画像のコピーエラー: {{error}}",
-			"openingImage": "画像を開く際のエラー: {{error}}",
-			"pathNotExists": "パスが存在しません: {{path}}",
-			"couldNotOpen": "ファイルを開けませんでした: {{error}}",
-			"couldNotOpenGeneric": "ファイルを開けませんでした！"
-		},
-		"success": {
-			"imageDataUriCopied": "画像データURIをクリップボードにコピーしました"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "メッセージを削除",
@@ -77,8 +53,7 @@
 		"editOnly": "いいえ、メッセージのみ編集",
 		"deleteOnly": "いいえ、メッセージのみ削除",
 		"restoreToCheckpoint": "はい、チェックポイントを復元",
-		"proceed": "続行",
-		"dontShowAgain": "今後表示しない"
+		"proceed": "続行"
 	},
 	"time_ago": {
 		"just_now": "たった今",
@@ -100,12 +75,6 @@
 		"wait_checkpoint_long_time": "{{timeout}} 秒間チェックポイントの初期化を待機しました。チェックポイント機能が不要な場合は、<settingsLink>チェックポイント設定</settingsLink>でオフにしてください。",
 		"init_checkpoint_fail_long_time": "チェックポイントの初期化が {{timeout}} 秒以上かかったため、このタスクではチェックポイントが無効化されました。チェックポイントをオフにするか、<settingsLink>チェックポイント設定</settingsLink>で待機時間を延長できます。",
 		"attempt_completion_tool_failed": "前回のツール呼び出しがこのターンで失敗したため、attempt_completionを実行できません。完了を試みる前にツールの失敗に対処してください。"
-	},
-	"tasks": {
-		"delegated": "サブタスクに委任",
-		"delegated_to": "タスク{{childId}}に委任",
-		"delegation_completed": "サブタスク完了、親タスクを再開",
-		"awaiting_child": "子タスク{{childId}}を待機中"
 	},
 	"costs": {
 		"own": "自身",
