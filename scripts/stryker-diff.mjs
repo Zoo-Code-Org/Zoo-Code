@@ -57,12 +57,11 @@ export const PACKAGE_CONFIGS = [
 		root: "src",
 		sourceRoot: "src/",
 		vitestConfig: "vitest.config.ts",
-
-		// Use plugin-side related-test discovery: with an explicit STRYKER_TEST_FILES
-		// list, stryker-js 10.0.0 plans static mutants with runtime activation
-		// (stryker-mutator/stryker-js#6144, #6209), which the vitest plugin can only
-		// apply after top-level code has run, producing false Survived results.
-		// Revert to vitestRelated: false / discoverRelatedTests: true once the
+		// Use plugin-side related-test discovery for the extension package: with an
+		// explicit STRYKER_TEST_FILES list, stryker-js 10.0.0 plans static mutants with
+		// runtime activation (stryker-mutator/stryker-js#6144, #6209), which the vitest
+		// plugin can only apply after top-level code has run, producing false Survived
+		// results. Revert to vitestRelated: false / discoverRelatedTests: true once the
 		// upstream planner fix lands.
 		vitestRelated: true,
 		discoverRelatedTests: false,

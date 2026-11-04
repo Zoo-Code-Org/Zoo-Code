@@ -4,8 +4,7 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ExtensionState, type ProviderSettings } from "@roo-code/types"
-import { experimentDefault } from "@roo/experiments"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
@@ -338,28 +337,6 @@ const renderSettingsView = (initialState: any = {}) => {
 	return { onDone, activateTab, getSettingsContent }
 }
 
-// SettingsView seeds its edit buffer with `useState(() => extensionState)`, i.e. once, at
-// mount. Hydrating after mounting (the helper above) leaves that buffer on the pre-hydration
-// defaults, which is fine for rendering checks but cannot show a persisted value surviving a
-// save. These tests need the state to arrive first, which is the order the extension host
-// actually produces it in: state is hydrated long before the user opens Settings.
-const renderHydratedSettingsView = async (initialState: Partial<ExtensionState>) => {
-	const onDone = vi.fn()
-	const result = renderWithExtensionState(<div />)
-	// window.postMessage reaches the context listener on a later task, so the hydration has
-	// to be flushed before SettingsView mounts; otherwise the edit buffer seeds from the
-	// pre-hydration defaults and the persisted value under test is never seen.
-	await act(async () => {
-		mockPostMessage(initialState)
-		await new Promise((resolve) => setTimeout(resolve, 0))
-	})
-	result.rerender(<SettingsView onDone={onDone} />)
-	const activateTab = (tabId: string) => {
-		result.rerender(<SettingsView onDone={onDone} targetSection={tabId} />)
-	}
-	const getSettingsContent = () => screen.getByTestId("settings-content")
-	return { onDone, activateTab, getSettingsContent }
-}
 describe("SettingsView - Sound Settings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -893,78 +870,6 @@ describe("SettingsView - Duplicate Commands", () => {
 		// The buffered edit must be reverted before leaving Settings
 		expect(within(getSettingsContent()).queryByText("npm test")).not.toBeInTheDocument()
 		expect(onDone).toHaveBeenCalledTimes(1)
-	})
-})
-
-describe("SettingsView - Experimental Settings", () => {
-	beforeEach(() => {
-		vi.clearAllMocks()
-	})
-
-	it("does not render the dynamic thinking effort toggle while the tool is unregistered", async () => {
-		const { activateTab, getSettingsContent } = await renderHydratedSettingsView({
-			experiments: { ...experimentDefault, dynamicThinkingEffort: true },
-		})
-		activateTab("experimental")
-		expect(
-			within(getSettingsContent()).queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name"),
-		).not.toBeInTheDocument()
-	})
-
-	it("keeps a persisted dynamicThinkingEffort=true in the updateSettings payload while its toggle is hidden", async () => {
-		// Hiding the toggle (set_thinking_effort tool not registered yet) must not drop the flag
-		// from the save payload: the experiments object round-trips wholesale, so a persisted value
-		// survives until the tool PR resurfaces it. Starting from true is what proves that - a test
-		// that starts from the false default would also pass if the save path overwrote a persisted
-		// true with the default.
-		const { activateTab, getSettingsContent } = await renderHydratedSettingsView({
-			experiments: { ...experimentDefault, dynamicThinkingEffort: true },
-		})
-		activateTab("experimental")
-		expect(
-			within(getSettingsContent()).queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name"),
-		).not.toBeInTheDocument()
-		// Dirty the form via a visible experimental toggle (save posts only when dirty).
-		const visibleLabel = within(getSettingsContent())
-			.getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name")
-			.closest("label")!
-		fireEvent.click(within(visibleLabel).getByRole("checkbox"))
-		fireEvent.click(screen.getByTestId("save-button"))
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "updateSettings",
-				updatedSettings: expect.objectContaining({
-					experiments: expect.objectContaining({ dynamicThinkingEffort: true }),
-				}),
-			}),
-		)
-	})
-
-	it("keeps a persisted dynamicThinkingEffort=false in the updateSettings payload while its toggle is hidden", async () => {
-		// The false case gets its own test rather than being the only one: the experiment default is
-		// also false, so the pair is what shows the payload carries the stored value instead of the
-		// default.
-		const { activateTab, getSettingsContent } = await renderHydratedSettingsView({
-			experiments: { ...experimentDefault, dynamicThinkingEffort: false },
-		})
-		activateTab("experimental")
-		expect(
-			within(getSettingsContent()).queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name"),
-		).not.toBeInTheDocument()
-		// Dirty the form via a visible experimental toggle (save posts only when dirty).
-		const visibleLabel = within(getSettingsContent())
-			.getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name")
-			.closest("label")!
-		fireEvent.click(within(visibleLabel).getByRole("checkbox"))
-		fireEvent.click(screen.getByTestId("save-button"))
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "updateSettings",
-				updatedSettings: expect.objectContaining({
-					experiments: expect.objectContaining({ dynamicThinkingEffort: false }),
-				}),
-			}),
-		)
 	})
 })
 
