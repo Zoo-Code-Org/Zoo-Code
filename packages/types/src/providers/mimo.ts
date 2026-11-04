@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
 // https://developer.puter.com/ai/xiaomi/mimo-v2.5/
@@ -60,3 +69,22 @@ export const mimoModels = {
 export const mimoDefaultModelInfo: ModelInfo = mimoModels[mimoDefaultModelId]
 
 export const MIMO_DEFAULT_TEMPERATURE = 1.0
+
+export const mimoProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.mimo,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => mimoDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		mimoBaseUrl: z
+			.union([
+				z.literal("https://api.xiaomimimo.com/v1"),
+				z.literal("https://token-plan-cn.xiaomimimo.com/v1"),
+				z.literal("https://token-plan-sgp.xiaomimimo.com/v1"),
+				z.literal("https://token-plan-ams.xiaomimimo.com/v1"),
+			])
+			.optional(),
+		mimoApiKey: z.string().optional(),
+	},
+})

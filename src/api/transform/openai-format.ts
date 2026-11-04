@@ -465,7 +465,7 @@ export function convertToOpenAiMessages(
 						] as OpenAI.Chat.ChatCompletionToolMessageParam
 						if (lastToolMessage?.role === "tool") {
 							const additionalText = filteredNonToolMessages
-								.map((part) => sanitizeSurrogates((part as Anthropic.TextBlockParam).text))
+								.map((part) => sanitizeSurrogates(part.text))
 								.join("\n")
 							lastToolMessage.content = `${lastToolMessage.content}\n\n${additionalText}`
 						}

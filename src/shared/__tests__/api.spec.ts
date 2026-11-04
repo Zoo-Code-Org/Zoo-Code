@@ -261,6 +261,37 @@ describe("getModelMaxOutputTokens", () => {
 		).toBe(32_768)
 	})
 
+	test("should preserve Anthropic hybrid token handling for Claude Haiku 5.5", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			supportsReasoningBinary: true,
+			supportsTemperature: false,
+			maxTokens: 128_000,
+		}
+
+		expect(
+			getModelMaxOutputTokens({
+				modelId: "claude-haiku-5-5",
+				model,
+				settings: { apiProvider: providerIdentifiers.anthropic, enableReasoningEffort: false },
+			}),
+		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+
+		expect(
+			getModelMaxOutputTokens({
+				modelId: "claude-haiku-5-5",
+				model,
+				settings: {
+					apiProvider: providerIdentifiers.anthropic,
+					enableReasoningEffort: true,
+					modelMaxTokens: 32_768,
+				},
+			}),
+		).toBe(32_768)
+	})
+
 	test("should return model.maxTokens for non-Anthropic models that support reasoning budget but aren't using it", () => {
 		const geminiModelId = "gemini-2.5-flash-preview-04-17"
 		const model: ModelInfo = {
@@ -694,9 +725,9 @@ describe("shouldUseReasoningEffort", () => {
 		const model: ModelInfo = {
 			contextWindow: 100_000,
 			supportsPromptCache: true,
-			supportsReasoningEffort: ["disable", "low", "medium", "high"] as unknown as any,
+			supportsReasoningEffort: ["disable", "low", "medium", "high"],
 		}
-		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "disable" as any }
+		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "disable" }
 		expect(shouldUseReasoningEffort({ model, settings })).toBe(false)
 	})
 
@@ -704,9 +735,9 @@ describe("shouldUseReasoningEffort", () => {
 		const model: ModelInfo = {
 			contextWindow: 100_000,
 			supportsPromptCache: true,
-			supportsReasoningEffort: ["none", "minimal", "low", "medium", "high"] as unknown as any,
+			supportsReasoningEffort: ["none", "minimal", "low", "medium", "high"],
 		}
-		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "none" as any }
+		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "none" }
 		expect(shouldUseReasoningEffort({ model, settings })).toBe(true)
 	})
 
@@ -714,9 +745,9 @@ describe("shouldUseReasoningEffort", () => {
 		const model: ModelInfo = {
 			contextWindow: 100_000,
 			supportsPromptCache: true,
-			supportsReasoningEffort: ["none", "minimal", "low", "medium", "high"] as unknown as any,
+			supportsReasoningEffort: ["none", "minimal", "low", "medium", "high"],
 		}
-		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "minimal" as any }
+		const settings: ProviderSettings = { enableReasoningEffort: true, reasoningEffort: "minimal" }
 		expect(shouldUseReasoningEffort({ model, settings })).toBe(true)
 	})
 
@@ -726,8 +757,8 @@ describe("shouldUseReasoningEffort", () => {
 			supportsPromptCache: true,
 			supportsReasoningEffort: true,
 		}
-		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "none" as any } })).toBe(true)
-		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "minimal" as any } })).toBe(true)
+		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "none" } })).toBe(true)
+		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "minimal" } })).toBe(true)
 	})
 
 	test("array capability with model default effort and no settings -> true when default is in the ladder", () => {
