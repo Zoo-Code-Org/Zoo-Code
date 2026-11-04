@@ -145,6 +145,11 @@ vi.mock("@roo-code/cloud", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
+// A same-name profile save joins the manager's cross-instance critical section, so a
+// double that stubs the manager must still run the callback inline: the real lock does
+// that whenever no other view holds the section.
+const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
+
 describe("ClineProvider - API Handler Rebuild Guard", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
@@ -245,6 +250,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		// persistProviderProfile builds its activation writes from that read-back.
 		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
 			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
 				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
 				return "test-id"

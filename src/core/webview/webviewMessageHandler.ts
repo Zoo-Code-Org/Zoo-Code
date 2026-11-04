@@ -2496,10 +2496,19 @@ export const webviewMessageHandler = async (
 		}
 		case "saveApiConfiguration":
 			if (message.text && message.apiConfiguration) {
+				const profileName = message.text
+				const profileSettings = message.apiConfiguration
 				try {
-					await provider.providerSettingsManager.saveConfig(message.text, message.apiConfiguration)
-					const listApiConfig = await provider.providerSettingsManager.listConfig()
-					await updateGlobalState("listApiConfigMeta", listApiConfig)
+					// The profile rename holds the manager's cross-instance critical section across its
+					// existence check, its save, and its compensation delete. A same-name save that
+					// skipped that section can land between another view's check and its save and then
+					// be removed by that rename's compensation, so this write joins the same section.
+					// The rename callback never calls this writer, so the wrap cannot nest on itself.
+					await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
+						await provider.providerSettingsManager.saveConfig(profileName, profileSettings)
+						const listApiConfig = await provider.providerSettingsManager.listConfig()
+						await updateGlobalState("listApiConfigMeta", listApiConfig)
+					})
 				} catch (error) {
 					provider.log(
 						`Error save api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

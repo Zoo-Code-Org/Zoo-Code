@@ -525,6 +525,9 @@ vi.mock("../../config/ProviderSettingsManager", async (importOriginal) => {
 		ProviderSettingsNotFoundError: actual.ProviderSettingsNotFoundError,
 		ProviderSettingsManager: vi.fn().mockImplementation(function () {
 			return {
+				// persistProviderProfile joins the manager's cross-instance section around the store
+				// write; this mock runs the callback inline because no second view competes here.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				saveConfig: vi.fn().mockResolvedValue("test-id"),
 				listConfig: vi.fn().mockResolvedValue([]),
 				getProfile: vi.fn().mockResolvedValue({}),
