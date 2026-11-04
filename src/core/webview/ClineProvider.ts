@@ -511,11 +511,13 @@ export class ClineProvider
 	private viewStateId: string
 
 	/**
-	 * Whether this instance wrote an entry under its own session-local temporary id.
-	 * Temporary ids restart from 0 on every extension host start, so an entry under the
-	 * same name can belong to a different session. Only re-key entries this instance wrote.
+	 * Selections made before the webview registered its stable id. The session-local id cannot
+	 * serve as a persisted key: it restarts from 0 on every host start, so an entry written under
+	 * it is not attributable to this view and is never loadable by the next session's provider. The
+	 * change waits here and is written by the registration flush, under the name a later session
+	 * can actually read.
 	 */
-	private wroteUnderTemporaryViewStateId = false
+	private pendingViewState: Partial<PersistedViewState> | undefined
 
 	/**
 	 * Local state buffer for this specific view instance.
@@ -765,24 +767,33 @@ export class ClineProvider
 	 * Persists this view's non-secret selections through the serialized write queue.
 	 * The write re-reads the map fresh and merges into the existing entry, removing the
 	 * entry entirely when nothing persistable remains, so concurrent views cannot clobber it.
-	 * The entry is keyed by the view id active when the change was made. Writes captured
-	 * while the provider still holds its temporary (pre-launch) id persist under that id
-	 * and are re-keyed to the stable view id when the webview registers one, so a change
-	 * that lands before the launch message stays durable instead of being lost.
+	 * The entry is keyed by the view id active when the change was made. A change captured while
+	 * the provider still holds its session-local (pre-registration) id is not written at all:
+	 * temporary ids restart from 0 on every host start, so an entry under one is not attributable
+	 * to this view and no later session can load it, yet it would occupy a slot in the shared map
+	 * and outrank loadable entries when the map is pruned. Such a change waits in pendingViewState
+	 * and is written by the registration flush under the stable id, which is the only name another
+	 * session could load it under.
 	 */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
+
+		// Pre-registration change: hold it for the flush instead of persisting it under the
+		// session-local id. Spreading keeps a key the change explicitly cleared present with an
+		// undefined value, which is what the write below turns back into a deletion.
+		if (viewStateId === this.viewId) {
+			this.pendingViewState = { ...this.pendingViewState, ...values }
+			return
+		}
+
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
-			// The first write to an unowned temporary id claims the slot instead of merging
-			// into it: temporary names restart from 0 on every host start, so an entry under
-			// this name can be a leftover from an earlier session, and merging would adopt its
-			// fields and later re-key them under the stable id. Entries under a stable id, or
-			// under the temporary id this instance already authored, keep the merge semantics.
-			const ownsTargetEntry = viewStateId !== this.viewId || this.wroteUnderTemporaryViewStateId
-			const current = ownsTargetEntry ? (states[viewStateId] ?? {}) : {}
+			// Merge onto what the entry holds now. The guard above means the id is a stable one, so
+			// the entry under it belongs to this view, while another view's concurrent write to the
+			// shared map must survive this one.
+			const current = states[viewStateId] ?? {}
 			const next: PersistedViewState = { ...current }
 
 			if ("mode" in values) {
@@ -801,7 +812,6 @@ export class ClineProvider
 				}
 			}
 
-			let wroteEntry = false
 			if (!next.mode && !next.currentApiConfigName) {
 				delete states[viewStateId]
 				ClineProvider.clearedViewStateIds.add(viewStateId)
@@ -809,7 +819,6 @@ export class ClineProvider
 				next.updatedAt = values.updatedAt ?? Date.now()
 				states[viewStateId] = next
 				ClineProvider.clearedViewStateIds.delete(viewStateId)
-				wroteEntry = true
 			}
 
 			const pruned = this.prunePersistedViewStates(states)
@@ -834,12 +843,6 @@ export class ClineProvider
 					// durable value regardless of whether this restore write landed.
 				}
 				throw error
-			}
-			// Authorship is recorded only after the durable write lands: a failed persistence
-			// must not mark the temporary id as owned, or a later load would adopt an entry
-			// that was never actually stored.
-			if (wroteEntry && viewStateId === this.viewId) {
-				this.wroteUnderTemporaryViewStateId = true
 			}
 		})
 
@@ -950,76 +953,6 @@ export class ClineProvider
 				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
 		)
 	}
-
-	/**
-	 * Re-keys this provider's temporary pre-launch viewStates entry to the newly
-	 * registered stable id so pre-launch writes become durable under the stable key
-	 * instead of orphaning under a session-local temporary id. Only the provider's own
-	 * temporary id is eligible: an entry under a previously registered stable id belongs
-	 * to that webview's storage and is left alone. When the stable entry already exists
-	 * it wins and the temporary entry is dropped, because temporary ids are session
-	 * counters that can collide across window reloads. Runs through the serialized write
-	 * queue like every other viewStates mutation.
-	 */
-	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
-		const previousViewStateId = this.viewId
-
-		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-			// An entry under this name can belong to a different session, because temporary
-			// ids restart from 0 on every extension host start. Only re-key entries this
-			// instance wrote, otherwise a stale entry from another session is adopted.
-			if (!this.wroteUnderTemporaryViewStateId) {
-				return
-			}
-
-			const states = this.getPersistedViewStates({ fresh: true })
-			const previous = states[previousViewStateId]
-
-			if (!previous) {
-				return
-			}
-
-			delete states[previousViewStateId]
-			ClineProvider.clearedViewStateIds.add(previousViewStateId)
-
-			if (!states[nextViewStateId]) {
-				states[nextViewStateId] = previous
-				ClineProvider.clearedViewStateIds.delete(nextViewStateId)
-			}
-
-			const pruned = this.prunePersistedViewStates(states)
-			const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
-			if (evicted.length > 0) {
-				this.prunedViewIdsDuringActivation.push(...evicted)
-			}
-
-			try {
-				await this.contextProxy.setValue("viewStates", pruned)
-			} catch (error) {
-				// updateGlobalState applies the new map to the in-memory cache before
-				// the durable write, so a rejected re-key would leave the cache serving
-				// the stable entry while durable storage still holds the temporary one.
-				// Restore the cache to the value durable storage actually holds (the same
-				// rollback savePersistedViewState applies), so a later load or a retry of
-				// the registration sees the pre-rekey entry.
-				try {
-					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
-				} catch {
-					// The cache is updated before the durable attempt: it matches the
-					// durable value regardless of whether this restore write landed.
-				}
-				throw error
-			}
-
-			// Only a successful write clears authorship: a failed attempt leaves the entry
-			// under the temporary name, and a retry must still be able to re-key it.
-			this.wroteUnderTemporaryViewStateId = false
-		})
-
-		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
-		await write
-	}
-
 	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
@@ -1076,16 +1009,23 @@ export class ClineProvider
 		this.viewStateId = normalizedViewStateId
 
 		try {
-			// Re-key any durable entry written under the temporary pre-launch id before
-			// loading, so the load sees the view's own pre-registration selections.
-			await this.rekeyPersistedViewStateEntry(this.viewStateId)
+			// Flush the selections that were held back while the view was unregistered, now that the
+			// name they will be read under is known. The buffer is cleared only after the write lands,
+			// so a registration that fails and restores the previous id can retry the flush instead of
+			// dropping the user's change.
+			const pendingViewState = this.pendingViewState
+
+			if (pendingViewState) {
+				await this.savePersistedViewState(pendingViewState)
+				this.pendingViewState = undefined
+			}
 
 			await this.loadViewState()
 		} catch (error) {
-			// A persistence failure must not leave the provider holding an id that was
-			// never registered: restore the previous id so a later launch retries the
-			// registration and the load instead of the guard above early-returning for
-			// the failed id.
+			// A persistence failure must not leave the provider holding an id that was never
+			// registered: restore the previous id so a later launch retries the registration, the
+			// flush and the load instead of the guard above early-returning for the failed id. The
+			// held selections stay in pendingViewState for the same reason.
 			this.viewStateId = previousViewStateId
 			throw error
 		}
@@ -1102,11 +1042,11 @@ export class ClineProvider
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
 
-		// While the stable id has not been registered yet, the key is this instance's
-		// session-local name. Temporary names restart from 0 on every host start, so an
-		// entry under the same name can belong to a different session. Load only entries
-		// this instance authored.
-		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) {
+		// Until the stable id is registered the only name available is this instance's session-local
+		// one, and temporary ids restart from 0 on every host start, so an entry under it cannot be
+		// attributed to this view. There is nothing to load: pre-registration selections live in
+		// pendingViewState and the in-memory buffer until the registration flush lands them.
+		if (loadedForViewId === this.viewId) {
 			return
 		}
 		try {
@@ -1208,8 +1148,8 @@ export class ClineProvider
 
 	/**
 	 * Saves a single view-local state value. The in-memory buffer is always updated; the
-	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
-	 * id active when the change was made, re-keyed to the stable id on registration.
+	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the stable
+	 * view id, or held in pendingViewState until the webview registers one.
 	 *
 	 * Only the three per-view fields are accepted: the mutation helper applies exactly
 	 * those, so any other key would leave both the buffer and the persisted store
@@ -4012,6 +3952,10 @@ export class ClineProvider
 	 * whose buffer loaded the profile earlier keeps shadowing the stale
 	 * settings in its getState() until its own next mutation. The originating
 	 * view refreshes its buffer at the mutation site itself.
+	 *
+	 * A failure part-way through is compensated here: the caller's rollback cannot reach another
+	 * view's in-memory buffer, so every sibling this refresh already moved is put back, unless it
+	 * has since taken a newer change of its own.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
@@ -4025,10 +3969,30 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
-			affected.map(async (instance) => {
+		// Each sibling's write is independent, so a later sibling can fail after earlier ones already
+		// took the saved settings. The caller's activation rollback only reaches this view's own overlay
+		// plus the durable maps, so anything this refresh already applied to another view has to be
+		// undone here: otherwise a sibling keeps serving the settings of a refresh the caller reports as
+		// failed. Sequential application is what makes the order below a real apply order.
+		const applied: {
+			instance: ClineProvider
+			task: Task | undefined
+			previousApiConfiguration: ProviderSettings | undefined
+			previousTaskApiConfiguration: ProviderSettings | undefined
+		}[] = []
+
+		try {
+			for (const instance of affected) {
 				// Direct private access: compile-time safe across sibling instances.
+				const task = instance.getCurrentTask()
+				const { apiConfiguration: previousApiConfiguration } = instance.viewLocalState
+				// The task's own handler was built from these settings and the rebuild below replaces
+				// them, so they have to be remembered here rather than read back afterwards.
+				const previousTaskApiConfiguration =
+					task?.taskApiConfigName === name ? task.apiConfiguration : undefined
+
 				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				applied.push({ instance, task, previousApiConfiguration, previousTaskApiConfiguration })
 
 				// The active task of a pinned view holds its own API handler built from
 				// the profile's settings: rebuild it with the saved settings or the
@@ -4037,12 +4001,47 @@ export class ClineProvider
 				// under the saved profile: a task that follows a different sticky
 				// profile must keep its own settings. Direct private access across
 				// sibling instances of the same class is compile-time safe.
-				if (instance.getCurrentTask()?.taskApiConfigName === name) {
+				if (task && task.taskApiConfigName === name) {
 					instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 				}
 				await instance.postStateToWebview()
-			}),
-		)
+			}
+		} catch (error) {
+			// Undo in reverse, and only where this refresh's values are still in place: a sibling that
+			// moved its own overlay afterwards is newer than this operation, and overwriting it would
+			// drop the sibling's own change instead of this one. Each restore is logged and swallowed:
+			// a failed restore must not strand the remaining siblings, and the caller rethrows the
+			// original failure.
+			for (const { instance, task, previousApiConfiguration, previousTaskApiConfiguration } of [
+				...applied,
+			].reverse()) {
+				if (instance.viewLocalState.apiConfiguration !== providerSettings) {
+					continue
+				}
+
+				try {
+					await instance._saveViewLocalStateFromMutation({ apiConfiguration: previousApiConfiguration })
+
+					// The same guard on the task side: only a handler this refresh rebuilt, on a task that
+					// still runs under the saved profile, may be rebuilt back to the previous settings.
+					if (
+						previousTaskApiConfiguration &&
+						instance.getCurrentTask() === task &&
+						task?.taskApiConfigName === name
+					) {
+						instance.updateTaskApiHandlerIfNeeded(previousTaskApiConfiguration, { forceRebuild: true })
+					}
+
+					await instance.postStateToWebview()
+				} catch (restoreError) {
+					this.log(
+						`[refreshViewLocalStateForUpdatedProfile] Unable to restore the overlay of view ${instance.viewId} after the refresh of profile '${name}' failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+					)
+				}
+			}
+
+			throw error
+		}
 	}
 
 	/**

@@ -473,6 +473,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Simulate the history-restore path: saveViewState is what
 			// createTaskWithHistoryItem uses to pin a saved mode into the
 			// view-local buffer, leaving a stale mode there until the next mutation.
+			// The view is registered first, because that is what makes the restored mode a
+			// durable entry rather than a held change. The id is unique to this test: the
+			// describe-level provider is never disposed, so a shared id would stay claimed.
+			await provider["setViewStateId"]("stable-mode-sync-view")
 			await provider.saveViewState("mode", "code")
 
 			// Global-only mode switch with no active task.
@@ -1388,10 +1392,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(state.currentApiConfigName).not.toBe("stale-profile")
 		})
 
-		it("does not merge a stale temporary-id entry into this instance's first durable write", async () => {
-			// A first write under an unowned temporary id claims the slot: fields left by an
-			// earlier session under the same name must not be adopted (and later re-keyed to
-			// the stable id) by merging into the colliding entry.
+		it("leaves a stale temporary-id entry untouched and flushes the change under the stable id", async () => {
+			// Temporary ids restart from 0 on every host start, so an entry under this name can be a
+			// leftover from an earlier session. Nothing is written under the session-local id, so the
+			// leftover is neither adopted nor merged into it; the change waits for the stable id.
 			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
 			const proxy = new ContextProxy(mockContext)
 			await proxy.setValue("viewStates", { [tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 } })
@@ -1401,15 +1405,25 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			await fresh.saveViewState("mode", "code")
 
-			const states = fresh["getPersistedViewStates"]({ fresh: true })
-			expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
+			expect(fresh["getPersistedViewStates"]({ fresh: true })).toEqual({
+				[tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 },
+			})
+			expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
+
+			await fresh["setViewStateId"]("stable-stale-leftover-view")
+
+			expect(fresh["getPersistedViewStates"]({ fresh: true })).toEqual({
+				[tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 },
+				"stable-stale-leftover-view": { mode: "code", updatedAt: expect.any(Number) },
+			})
+			// Adopting the leftover would have pinned this view to the earlier session's profile.
 			expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
 		})
 
-		it("does not mark the temporary id as authored when the durable write fails", async () => {
-			// Authorship must be recorded only after the write lands: a failed persistence
-			// that still marked the id owned would let a later load adopt an entry that was
-			// never actually stored.
+		it("keeps a pre-registration change retryable when the registration flush fails", async () => {
+			// A change made before registration is only buffered, so a storage backend that rejects
+			// every write cannot leave a half-written entry under a name no later session could
+			// load. The failure lands on the flush instead, and the change stays held for a retry.
 			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
 			const proxy = new ContextProxy(mockContext)
 			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
@@ -1423,10 +1437,19 @@ describe("ClineProvider - Sticky Mode", () => {
 				return Promise.resolve()
 			})
 
-			await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
-			expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
+			await fresh.saveViewState("mode", "code")
+			expect(fresh["getPersistedViewStates"]({ fresh: true })).toEqual({})
+
+			await expect(fresh["setViewStateId"]("stable-flush-retry-view")).rejects.toThrow("storage unavailable")
+			expect(fresh["viewStateId"]).toBe(tempId)
+			expect(fresh["pendingViewState"]).toEqual({ mode: "code" })
 
 			mockContext.globalState.update = originalUpdate
+
+			await fresh["setViewStateId"]("stable-flush-retry-view")
+			expect(fresh["getPersistedViewStates"]({ fresh: true })).toEqual({
+				"stable-flush-retry-view": { mode: "code", updatedAt: expect.any(Number) },
+			})
 		})
 
 		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {

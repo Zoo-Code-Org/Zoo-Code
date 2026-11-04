@@ -4076,7 +4076,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should keep the stable entry and drop the temporary entry when both exist", async () => {
+		it("holds a change made before registration in memory instead of writing it under the session-local id", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -4084,16 +4084,48 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			// Author the temporary entry through the write path so this instance owns it,
-			// then add a stable entry that already exists in storage.
+
+			await provider.saveViewState("mode", "architect")
+
+			// The temporary id restarts from 0 on the next host start, so an entry written under it
+			// is neither loadable by the next session's provider nor attributable to this view. It
+			// is held in memory instead, and getState() still serves the change from the buffer.
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("viewStates", expect.anything())
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			expect((await provider.getState()).mode).toBe("architect")
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			// The registration flush writes the held change under the registered name, the only key
+			// another session could load it under.
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("viewStates", {
+				"stable-sidebar-view": { mode: "architect", updatedAt: expect.any(Number) },
+			})
+			expect(provider["pendingViewState"]).toBeUndefined()
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			await provider.dispose()
+		})
+
+		it("merges a held pre-registration change into the stable entry it lands on", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Hold the change while the provider is unregistered, then let storage gain the stable
+			// entry an earlier session of this view left behind.
 			await provider["savePersistedViewState"]({ mode: "temp-mode", updatedAt: 1 })
 			await provider.contextProxy.setValue("viewStates", {
-				[provider.viewId]: { mode: "temp-mode", updatedAt: 1 },
 				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
 			})
 			await provider["setViewStateId"]("stable-sidebar-view")
+
+			// The held change is the newer selection, so it lands on the stable entry field by
+			// field, and nothing occupies a slot under the session-local id.
 			expect(mockContext.globalState.get("viewStates")).toEqual({
-				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
+				"stable-sidebar-view": { mode: "temp-mode", updatedAt: 1 },
 			})
 			await provider.dispose()
 		})
@@ -4695,6 +4727,10 @@ describe("ClineProvider", () => {
 				return Promise.resolve()
 			})
 
+			// Register first: an unregistered provider holds the change instead of writing it, so
+			// there would be no durable write left to fail.
+			await provider["setViewStateId"]("stable-sidebar-view")
+
 			await expect(provider.setValue("mode", "code")).rejects.toThrow("storage unavailable")
 			// The shared store must not move ahead of the per-view record that failed.
 			expect(provider.getValue("mode")).toBe("architect")
@@ -4720,6 +4756,10 @@ describe("ClineProvider", () => {
 				}
 				return Promise.resolve()
 			})
+
+			// Register first: an unregistered provider holds the change instead of writing it, so
+			// there would be no durable write left to fail.
+			await provider["setViewStateId"]("stable-sidebar-view")
 
 			await expect(provider.setValues({ mode: "code", currentApiConfigName: "other-config" })).rejects.toThrow(
 				"storage unavailable",
@@ -6676,6 +6716,189 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("compensates the siblings that already took the settings when a later sibling refresh fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const firstSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const lastSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const profileName = "profile-sibling-refresh"
+			// Each view pinned the profile earlier and holds its own copy of the settings it
+			// loaded then; the refresh replaces those copies with the saved settings.
+			const firstOverlay: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "first" }
+			const lastOverlay: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "last" }
+			const savedSettings: ProviderSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "saved" }
+
+			for (const [index, instance] of [provider, firstSibling, lastSibling].entries()) {
+				await instance.saveViewState("currentApiConfigName", profileName)
+				await instance["_updateViewLocalStateFromMutation"]({
+					apiConfiguration: index === 0 ? undefined : index === 1 ? firstOverlay : lastOverlay,
+				})
+				// The originating view keeps its own overlay; only the siblings are refreshed.
+				if (index === 0) {
+					await instance["_updateViewLocalStateFromMutation"]({
+						apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "origin" },
+					})
+				}
+			}
+
+			// The second sibling's post is what fails, so the first sibling has already taken the
+			// saved settings by the time the caller is told the refresh failed.
+			vi.spyOn(firstSibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(lastSibling, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
+
+			await expect(
+				provider["refreshViewLocalStateForUpdatedProfile"](profileName, savedSettings),
+			).rejects.toThrow("webview gone")
+
+			// The activation rollback only reaches this view's own overlay and the durable maps, so
+			// the sibling that already applied the saved settings must be put back: leaving it there
+			// serves the settings of a refresh the caller saw fail.
+			expect(firstSibling["viewLocalState"].apiConfiguration).toEqual(firstOverlay)
+			expect(lastSibling["viewLocalState"].apiConfiguration).toEqual(lastOverlay)
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({ apiKey: "origin" })
+
+			await provider.dispose()
+			await firstSibling.dispose()
+			await lastSibling.dispose()
+		})
+
+		it("leaves a newer sibling mutation alone when compensating a failed profile refresh", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const firstSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const lastSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const profileName = "profile-sibling-refresh-newer"
+			const firstOverlay: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "first" }
+			const lastOverlay: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "last" }
+			const savedSettings: ProviderSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "saved" }
+			const newerSiblingSettings: ProviderSettings = { apiProvider: providerIdentifiers.openai, apiKey: "newer" }
+
+			for (const [index, instance] of [provider, firstSibling, lastSibling].entries()) {
+				await instance.saveViewState("currentApiConfigName", profileName)
+				await instance["_updateViewLocalStateFromMutation"]({
+					apiConfiguration: index === 0 ? undefined : index === 1 ? firstOverlay : lastOverlay,
+				})
+			}
+
+			vi.spyOn(firstSibling, "postStateToWebview").mockImplementation(async () => {
+				// The sibling moves its own overlay right after the refresh wrote the saved
+				// settings, so that change is newer than this operation.
+				await firstSibling["_updateViewLocalStateFromMutation"]({ apiConfiguration: newerSiblingSettings })
+			})
+			vi.spyOn(lastSibling, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
+
+			await expect(
+				provider["refreshViewLocalStateForUpdatedProfile"](profileName, savedSettings),
+			).rejects.toThrow("webview gone")
+
+			expect(firstSibling["viewLocalState"].apiConfiguration).toEqual(newerSiblingSettings)
+			expect(lastSibling["viewLocalState"].apiConfiguration).toEqual(lastOverlay)
+
+			await provider.dispose()
+			await firstSibling.dispose()
+			await lastSibling.dispose()
+		})
+
+		it("restores the rebuilt task handler of a sibling when a later sibling refresh fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const firstSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const lastSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const profileName = "profile-sibling-refresh-task"
+			const firstOverlay: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "first" }
+			const lastOverlay: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "last" }
+			const savedSettings: ProviderSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "saved" }
+			const taskSettings: ProviderSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "task" }
+
+			for (const [index, instance] of [provider, firstSibling, lastSibling].entries()) {
+				await instance.saveViewState("currentApiConfigName", profileName)
+				await instance["_updateViewLocalStateFromMutation"]({
+					apiConfiguration: index === 0 ? undefined : index === 1 ? firstOverlay : lastOverlay,
+				})
+			}
+
+			// The first sibling's task runs under the profile, so the refresh rebuilds its API
+			// handler with the saved settings; the double keeps the calls observable.
+			const task = Object.assign(
+				{} as Task,
+				{
+					taskId: "sibling-refresh-task",
+					taskApiConfigName: profileName,
+					apiConfiguration: taskSettings,
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			vi.spyOn(firstSibling, "getCurrentTask").mockReturnValue(task)
+			vi.spyOn(firstSibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(lastSibling, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
+
+			await expect(
+				provider["refreshViewLocalStateForUpdatedProfile"](profileName, savedSettings),
+			).rejects.toThrow("webview gone")
+
+			// Rebuilt with the saved settings, then put back: a conversation that keeps running on
+			// the saved token after the caller was told the refresh failed is the bug this covers.
+			expect(task.updateApiConfiguration).toHaveBeenCalledTimes(2)
+			expect(task.updateApiConfiguration).toHaveBeenNthCalledWith(1, savedSettings)
+			expect(task.updateApiConfiguration).toHaveBeenNthCalledWith(2, taskSettings)
+			expect(firstSibling["viewLocalState"].apiConfiguration).toEqual(firstOverlay)
+
+			await provider.dispose()
+			await firstSibling.dispose()
+			await lastSibling.dispose()
+		})
+
 		it("keeps this view's own profile pin when an activation rollback restores the shared selection", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -6754,7 +6977,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("restores the cached viewStates map when a re-key write fails durably", async () => {
+		it("restores the cached viewStates map when the registration flush fails durably", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -6762,27 +6985,33 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			// Seed a pre-launch entry under the temporary id through the real write
-			// path, so the re-key has a real entry to move and this instance authored it.
+			// The change is made while the provider is still unregistered, so the registration
+			// flush is the write that has to survive.
 			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
 
-			// The re-key's durable write fails; the cache was already updated optimistically.
-			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementationOnce(async () => {
-				throw new Error("durable write failed")
+			// The flush's durable write fails; the cache was already updated optimistically.
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					return Promise.reject(new Error("durable write failed"))
+				}
+				return Promise.resolve()
 			})
 
-			await expect(provider["rekeyPersistedViewStateEntry"]("stable-sidebar-view")).rejects.toThrow(
-				"durable write failed",
-			)
+			await expect(provider["setViewStateId"]("stable-sidebar-view")).rejects.toThrow("durable write failed")
 
-			// The cache must match durable storage: the stable entry never reached disk,
-			// and the retry path depends on the temporary entry still being visible.
-			expect(provider.contextProxy.getValue("viewStates")).toEqual({
-				[provider.viewId]: { mode: "architect", updatedAt: 1 },
+			// The cache must match durable storage: the stable entry never reached disk.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			// The registration rolled the id back and kept the held selection, so a retried
+			// registration can still land it instead of dropping the user's change.
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			mockContext.globalState.update = originalUpdate
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({
+				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
 			})
-			// Authorship survives the failure so a later registration can re-key again.
-			expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
-			updateSpy.mockRestore()
 			await provider.dispose()
 		})
 
@@ -7363,7 +7592,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should re-key durable viewStates entries from the temporary pre-launch view id", async () => {
+		it("persists a pre-registration change under the registered view id instead of the temporary one", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -7372,14 +7601,12 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// A change made before the stable id is registered persists under the
-			// temporary id so it is not lost; registration re-keys it to the stable id.
+			// A change made before the stable id is registered waits in memory: the temporary id
+			// is not a key the next session's provider could load it under.
 			await provider.saveViewState("mode", "architect")
 
 			expect(provider["viewLocalState"].mode).toBe("architect")
-			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
-				[provider.viewId]: { mode: "architect" },
-			})
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
 
 			await provider["setViewStateId"]("stable-sidebar-view")
 			await provider.saveViewState("mode", "debugger")
@@ -7391,7 +7618,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("should drop the temporary viewStates entry when a stable entry already exists", async () => {
+		it("keeps the held pre-registration change over the older stable entry it lands on", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -7400,22 +7627,23 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// A stable entry already exists (e.g. persisted by an earlier registration);
-			// it must win over this instance's temporary entry.
+			// A stable entry already exists (e.g. persisted by an earlier session of this
+			// view) and holds an older selection than the change this view is holding.
 			await provider.contextProxy.setValue("viewStates", {
 				"stable-sidebar-view": { mode: "debugger", updatedAt: 2 },
 			})
 
-			// Author the temporary entry through the real write path so this instance
-			// owns it: unowned entries are never re-keyed.
+			// The user picked architect in this window before the id was registered.
 			await provider.saveViewState("mode", "architect")
 
 			await provider["setViewStateId"]("stable-sidebar-view")
 
 			const viewStates = provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }>
-			expect(viewStates["stable-sidebar-view"]).toMatchObject({ mode: "debugger" })
+			// The held change is the newer selection, and the load that follows the flush must
+			// not roll the view back to the older persisted one.
+			expect(viewStates["stable-sidebar-view"]).toMatchObject({ mode: "architect" })
 			expect(viewStates[provider.viewId]).toBeUndefined()
-			expect(provider["viewLocalState"].mode).toBe("debugger")
+			expect(provider["viewLocalState"].mode).toBe("architect")
 
 			await provider.dispose()
 		})
@@ -7429,18 +7657,13 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// Seed persisted entries under both ids through the proxy so the loads
-			// observe them via the cached read path: the temporary entry holds a
-			// pre-registration selection, the stable entry the post-registration one.
+			// Seed persisted entries under both registered ids through the proxy so the loads
+			// observe them via the cached read path: the first id's entry pins a profile whose
+			// lookup is hung below, the second id's entry is the one that must survive.
 			await provider.contextProxy.setValue("viewStates", {
-				[provider.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
+				"first-sidebar-view": { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
 				"stable-sidebar-view": { mode: "debug", updatedAt: 2 },
 			})
-
-			// Author the temporary entry through the real write path so this instance owns it: an
-			// unowned temporary entry makes loadViewState bail before the profile lookup, so the
-			// stale check below would never be reached.
-			await provider.saveViewState("currentApiConfigName", "ghost-profile")
 
 			// Hang the temporary entry's profile lookup so that load is still in flight
 			// when the stable id is registered.
@@ -7458,23 +7681,23 @@ describe("ClineProvider", () => {
 				),
 			)
 
-			const staleLoad = provider["loadViewState"]()
+			// Register the first id and leave its load in flight: the profile lookup below is
+			// what keeps this load open across the newer registration.
+			const staleLoad = provider["setViewStateId"]("first-sidebar-view")
 
-			// The lookup has to be in flight before the stable id is registered; asserting only
+			// The lookup has to be in flight before the newer id is registered; asserting only
 			// after the call completes cannot prove the stale check fires mid-load.
 			await vi.waitFor(() => expect(ghostGetProfile).toHaveBeenCalledTimes(1))
 
-			// Register the stable id without awaiting its load: the re-key drops the
-			// temporary entry (the stable one already exists) and the registration's own
-			// load settles on the stable entry immediately.
 			const register = provider["setViewStateId"]("stable-sidebar-view")
 			await register
 
 			releaseGhost()
 			await staleLoad
 
-			// The stale (temporary-id) load must not overwrite the stable id's load.
+			// The stale (superseded-id) load must not overwrite the newer id's load.
 			expect(provider["viewLocalState"]).toEqual({ mode: "debug" })
+			expect(provider["viewStateId"]).toBe("stable-sidebar-view")
 
 			await provider.dispose()
 		})
