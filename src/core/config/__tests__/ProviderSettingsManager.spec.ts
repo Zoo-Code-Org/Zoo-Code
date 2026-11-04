@@ -936,6 +936,45 @@ describe("ProviderSettingsManager", () => {
 		})
 	})
 
+	describe("GetProfile", () => {
+		it("rejects a missing profile name with the typed not-found signal", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { id: "default-id" } },
+				}),
+			)
+
+			// Callers branch on the error type to treat an already-deleted profile as an idempotent
+			// no-op, so the not-found type and its message both have to survive getProfile's own
+			// catch instead of being rewrapped in a generic failure.
+			await expect(providerSettingsManager.getProfile({ name: "gone" })).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
+			await expect(providerSettingsManager.getProfile({ name: "gone" })).rejects.toThrow(
+				"Config with name 'gone' not found",
+			)
+		})
+
+		it("rejects a missing profile id with the typed not-found signal", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { id: "default-id" } },
+				}),
+			)
+
+			// The id lookup has its own not-found branch: a caller that resolved an id earlier and
+			// finds the profile gone has to be able to tell that from a storage failure too.
+			await expect(providerSettingsManager.getProfile({ id: "vanished-id" })).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
+			await expect(providerSettingsManager.getProfile({ id: "vanished-id" })).rejects.toThrow(
+				"Config with ID 'vanished-id' not found",
+			)
+		})
+	})
+
 	describe("DeleteConfig", () => {
 		it("should delete existing config", async () => {
 			const existingConfig: ProviderProfiles = {
