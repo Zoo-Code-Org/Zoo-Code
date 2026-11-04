@@ -1007,6 +1007,42 @@ describe("RequestyHandler", () => {
 			})
 		})
 
+		it("discards a completion that resolves in the same turn the caller aborts", async () => {
+			// The race above settles at the abort, so the post-completion check is reached only when the
+			// SDK wins the race outright: the response promise resolves, the abort lands before the
+			// provider continues with the value, and the value must still be discarded. Aborting from a
+			// handler on the response promise - queued one step ahead of the provider's race handler -
+			// pins that interleaving without timing it.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => {
+				const response = Promise.resolve({ choices: [{ message: { content: "late" } }] })
+				void response.then(() => {
+					queueMicrotask(() => controller.abort())
+				})
+				return response
+			})
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+
+		it.each([
+			["an empty message content", { choices: [{ message: { content: "" } }] }],
+			["no choices at all", { choices: [] }],
+		])("returns an empty string when the completion carries %s", async (_label: string, response: unknown) => {
+			// The fallback is what makes completePrompt return "" rather than an empty value or a
+			// TypeError, and callers render the result directly.
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce(response)
+
+			await expect(handler.completePrompt("test prompt")).resolves.toBe("")
+		})
+
 		it("does not forward a non-positive timeout to the client", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
