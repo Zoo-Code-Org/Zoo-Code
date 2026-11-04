@@ -5631,6 +5631,133 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("rejects a non-string viewStateId from a crafted message and stays on the temporary id", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The message type declares a string, but a crafted postMessage can carry any JSON
+			// value, so the double assertion here is the crafted payload, not the call site.
+			const crafted = JSON.parse('{"viewStateId": 42}') as { viewStateId: string }
+			const statesBefore = mockContext.globalState.get("viewStates")
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const loggedBefore = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls.length
+
+			await provider["setViewStateId"](crafted.viewStateId)
+
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			// Nothing registered means nothing persisted, nothing loaded, and no claim posted.
+			expect(mockContext.globalState.get("viewStates")).toBe(statesBefore)
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(
+				postMessageSpy.mock.calls
+					.map(([message]) => message)
+					.filter((message) => message.type === "viewStateClaim"),
+			).toHaveLength(0)
+			const loggedLines = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls
+				.slice(loggedBefore)
+				.map((call: unknown[]) => String(call[0]))
+			expect(
+				loggedLines.some((line) => line.includes("[setViewStateId] Ignoring a non-string viewStateId")),
+			).toBe(true)
+
+			postMessageSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("rejects an empty viewStateId and keeps the temporary viewId", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const statesBefore = mockContext.globalState.get("viewStates")
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider["setViewStateId"]("")
+
+			// The empty id returns without a log line; the absence of every side effect is the
+			// evidence that registration never happened.
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			// Nothing registered means nothing persisted, nothing loaded, and no claim posted.
+			expect(mockContext.globalState.get("viewStates")).toBe(statesBefore)
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(
+				postMessageSpy.mock.calls
+					.map(([message]) => message)
+					.filter((message) => message.type === "viewStateClaim"),
+			).toHaveLength(0)
+			postMessageSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("rejects a whitespace-only viewStateId that normalizes to empty", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const statesBefore = mockContext.globalState.get("viewStates")
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			// Whitespace normalizes to the empty string, which is the same rejection.
+			await provider["setViewStateId"]("   ")
+
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			// Nothing registered means nothing persisted, nothing loaded, and no claim posted.
+			expect(mockContext.globalState.get("viewStates")).toBe(statesBefore)
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(
+				postMessageSpy.mock.calls
+					.map(([message]) => message)
+					.filter((message) => message.type === "viewStateClaim"),
+			).toHaveLength(0)
+			postMessageSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("rejects a viewStateId longer than the bound and logs the length", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const statesBefore = mockContext.globalState.get("viewStates")
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const loggedBefore = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls.length
+
+			// The webview generates a UUID; a 65-character value is not a view id and an
+			// unbounded key is unbounded growth in the shared viewStates map.
+			await provider["setViewStateId"]("v".repeat(65))
+
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			// Nothing registered means nothing persisted, nothing loaded, and no claim posted.
+			expect(mockContext.globalState.get("viewStates")).toBe(statesBefore)
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(
+				postMessageSpy.mock.calls
+					.map(([message]) => message)
+					.filter((message) => message.type === "viewStateClaim"),
+			).toHaveLength(0)
+			const loggedLines = (mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mock.calls
+				.slice(loggedBefore)
+				.map((call: unknown[]) => String(call[0]))
+			expect(loggedLines.some((line) => line.includes("Ignoring an oversized viewStateId (65 chars)"))).toBe(true)
+			expect(mockContext.globalState.get("viewStates")).toBe(statesBefore)
+
+			postMessageSpy.mockRestore()
+			await provider.dispose()
+		})
+
 		it("loads the persisted selections of the registered view", async () => {
 			const provider = new ClineProvider(
 				mockContext,
