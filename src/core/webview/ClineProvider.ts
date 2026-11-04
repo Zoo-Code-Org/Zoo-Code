@@ -3144,8 +3144,15 @@ export class ClineProvider
 		let previousRecord: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
 		try {
 			previousRecord = await this.providerSettingsManager.getProfile({ name })
-		} catch {
-			// Absent record: compensation deletes the landed create instead.
+		} catch (error) {
+			// getProfile wraps a missing record and a storage read failure in the same plain
+			// Error, so absence is classified with hasConfig instead of by message text. A read
+			// failure that is not absence must not be mistaken for a create: the compensation
+			// below would then deleteConfig a profile that exists and take its credentials with
+			// it. Fail closed before saveConfig runs; a failing hasConfig fails closed too.
+			if (await this.providerSettingsManager.hasConfig(name)) {
+				throw error
+			}
 		}
 
 		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
@@ -3287,9 +3294,15 @@ export class ClineProvider
 		let previousRecord: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
 		try {
 			previousRecord = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
-		} catch {
-			// Absent record: the idempotent not-found path below still prunes the
-			// stale list entry, and compensation skips the record restore.
+		} catch (error) {
+			// Absence is classified with hasConfig, not by message text: getProfile wraps both
+			// a missing record and a storage read failure in one plain Error. Only an absent
+			// record may proceed name-only - the idempotent not-found path below still prunes
+			// the stale list entry, and compensation skips the record restore. Continuing past
+			// a read failure would delete the secrets-backed record and then skip its restore.
+			if (await this.providerSettingsManager.hasConfig(profileToDelete.name)) {
+				throw error
+			}
 		}
 		const previousEntries = this.getProviderProfileEntries()
 		const previousSelection = globalSettings.currentApiConfigName
@@ -3425,7 +3438,10 @@ export class ClineProvider
 			// failure is what the caller sees.
 			if (previousRecord) {
 				try {
-					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+					// Restore with the record's original id: the record is absent at this point (the
+					// delete committed), so saveConfig would otherwise mint a new one while the
+					// mode mappings and task pins still name the original. Only the name is dropped.
+					const { name: _previousName, ...previousSettings } = previousRecord
 					await this.providerSettingsManager.saveConfig(profileToDelete.name, previousSettings)
 				} catch (restoreError) {
 					this.log(

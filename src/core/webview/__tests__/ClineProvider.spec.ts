@@ -5170,6 +5170,12 @@ describe("ClineProvider", () => {
 			// current profile now activates the fallback, which reads its settings.
 			provider.providerSettingsManager = {
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi
+					.fn()
+					.mockRejectedValue(new Error("Failed to get profile: Config with name 'old-profile' not found")),
+				// getProfile wraps absence and a storage read failure in one plain Error, so the
+				// deletion classifies absence with hasConfig: the record here is absent.
+				hasConfig: vi.fn().mockResolvedValue(false),
 				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
 				setModeConfig: vi.fn(),
@@ -5233,6 +5239,79 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("aborts the save when the pre-save profile lookup fails for a reason other than absence", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The record exists but its storage read fails. getProfile wraps absence and read
+			// failure in one plain Error, so treating every rejection as absence would take the
+			// create path here, and the compensation below would then deleteConfig a profile
+			// that exists and take its credentials with it.
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("Failed to get profile: secret store read down"),
+			)
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("p-id")
+			const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+
+			await expect(
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("secret store read down")
+
+			// Nothing was written and nothing was compensated: the failure surfaced before
+			// saveConfig, so there was no landed save to roll back.
+			expect(saveSpy).not.toHaveBeenCalled()
+			expect(deleteSpy).not.toHaveBeenCalled()
+
+			await provider.dispose()
+		})
+
+		it("aborts the deletion when the pre-delete lookup fails for a reason other than absence", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "old-profile")
+			// The record is present but unreadable: continuing would delete the secrets-backed
+			// record and then skip its restore, because the snapshot came back empty.
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("Failed to get profile: secret store read down"),
+			)
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("x")
+
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("secret store read down")
+
+			expect(deleteSpy).not.toHaveBeenCalled()
+			expect(saveSpy).not.toHaveBeenCalled()
+
+			await provider.dispose()
+		})
+
 		it("restores the manager record and shared state when a post-delete write fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -5282,8 +5361,13 @@ describe("ClineProvider", () => {
 
 			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("state write down")
 
-			// The secrets-backed record was restored with its pre-delete settings.
-			expect(saveSpy).toHaveBeenCalledWith("old-profile", expect.objectContaining({ apiKey: "old-key" }))
+			// The secrets-backed record was restored with its pre-delete settings and its
+			// original id: the record is gone at that point, so a save that drops the id mints a
+			// new one while mode mappings and task pins still name the original.
+			expect(saveSpy).toHaveBeenCalledWith(
+				"old-profile",
+				expect.objectContaining({ apiKey: "old-key", id: "old-id" }),
+			)
 
 			await provider.dispose()
 		})
@@ -5356,6 +5440,12 @@ describe("ClineProvider", () => {
 			// reads the survivor's settings through activateProfile.
 			provider.providerSettingsManager = {
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi
+					.fn()
+					.mockRejectedValue(new Error("Failed to get profile: Config with name 'old-profile' not found")),
+				// getProfile wraps a missing record and a storage read failure in one plain Error,
+				// so the deletion classifies absence with hasConfig: this record is absent.
+				hasConfig: vi.fn().mockResolvedValue(false),
 				activateProfile: vi
 					.fn()
 					.mockResolvedValue({ name: "keeper-profile", id: "keeper-id", ...keeperSettings }),
@@ -5501,6 +5591,12 @@ describe("ClineProvider", () => {
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
 				setModeConfig: vi.fn(),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi
+					.fn()
+					.mockRejectedValue(new Error("Failed to get profile: Config with name 'old-profile' not found")),
+				// getProfile wraps a missing record and a storage read failure in one plain Error,
+				// so the deletion classifies absence with hasConfig: this record is absent.
+				hasConfig: vi.fn().mockResolvedValue(false),
 			}
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
