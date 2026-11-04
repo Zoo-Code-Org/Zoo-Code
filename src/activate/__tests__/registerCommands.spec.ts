@@ -1263,6 +1263,42 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 
+	it("starts a fresh creation when the pending one resolves to a disposed provider", async () => {
+		// The panel closes while the creation is still awaiting its post-creation work, and a
+		// closing panel disposes its provider: the shared promise then resolves to a provider that
+		// can open no tab, so a later call must start its own creation instead of joining it.
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockImplementation(async function (
+			this: ClineProvider,
+		) {
+			this["_disposed"] = true
+		})
+
+		const [first, second] = await Promise.all([
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		])
+
+		const ctor = vi.mocked(ClineProvider)
+		const disposedProvider = ctor.mock.instances[0]
+		expect(first).toBe(disposedProvider)
+
+		// The joined call saw a disposed provider and re-ran the creation: a second panel exists and
+		// the caller receives the live provider, not the closed tab's one.
+		expect(second).not.toBe(disposedProvider)
+		expect(second).toBe(ctor.mock.instances[1])
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+
+		resolveSpy.mockRestore()
+	})
+
 	it("shares one in-flight creation when openInNewTab and popoutButtonClicked start before it resolves", async () => {
 		// Defer the first creation at ContextProxy.getInstance so both command
 		// handlers can start while the creation is still in flight.

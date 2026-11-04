@@ -324,8 +324,23 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// is in flight — openInNewTab and popoutButtonClicked both dispatch
 	// through here — awaits it instead of creating a second panel: exactly
 	// one panel is created and every caller receives the same provider.
-	if (pendingTabPanelCreation) {
-		return pendingTabPanelCreation
+	const pendingCreation = pendingTabPanelCreation
+
+	if (pendingCreation) {
+		// The panel can close while the creation is still awaiting its post-creation delay or the
+		// editor-group lock, and a closing panel disposes its provider: a caller that arrives then
+		// would receive that disposed provider from the shared promise and open no editor tab at
+		// all. Reuse the in-flight creation only when the provider it resolves to is still live -
+		// bracket access: _disposed is the only liveness signal ClineProvider exposes.
+		const resolvedProvider = await pendingCreation
+
+		if (!resolvedProvider["_disposed"]) {
+			return resolvedProvider
+		}
+
+		if (pendingTabPanelCreation === pendingCreation) {
+			pendingTabPanelCreation = undefined
+		}
 	}
 
 	const creation = createTabPanelUnlocked(options)
