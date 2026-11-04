@@ -5,13 +5,15 @@
 // effective-effort handler rebuild (the profile-derived apiConfiguration
 // projection never carries the override).
 
-import { ProviderSettings, type ReasoningEffortExtended } from "@roo-code/types"
+import { ProviderSettings, type ModelInfo, type ReasoningEffortExtended } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { buildApiHandler } from "../../../api"
 import { disposeApiHandler } from "../../../api/dispose-api-handler"
+import { summarizeConversation } from "../../condense"
+import { ApiStreamChunk } from "../../../api/transform/stream"
 
 // Mock dependencies (same lightweight set as Task.throttle.test.ts)
 vi.mock("../../webview/ClineProvider")
@@ -31,7 +33,34 @@ vi.mock("../../../api", () => ({
 	// configuration each rebuild received (via vi.mocked(buildApiHandler).mock.calls).
 	buildApiHandler: vi.fn((configuration: { apiModelId?: string }) => ({
 		getModel: () => ({ info: {}, id: configuration.apiModelId ?? "test-model" }),
+		countTokens: vi.fn().mockResolvedValue(0),
+		createMessage: vi.fn(),
 	})),
+}))
+
+// Request-path tests below: the summarization and tool-array collaborators are replaced so the
+// four request sites are reachable without MCP or condensing machinery, while the real
+// willManageContext/manageContext still decide the branch and hand the same metadata object to
+// summarizeConversation - which is where the assertions read it.
+vi.mock("../../condense", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../condense")>()
+	return {
+		...actual,
+		summarizeConversation: vi.fn().mockResolvedValue({
+			messages: [{ role: "user", content: [{ type: "text", text: "condensed" }], ts: 1 }],
+			summary: "summary",
+			cost: 0,
+			newContextTokens: 1,
+		}),
+	}
+})
+
+vi.mock("../build-tools", () => ({
+	buildNativeToolsArrayWithRestrictions: vi.fn().mockResolvedValue({ tools: [], allowedFunctionNames: undefined }),
+}))
+
+vi.mock("../../environment/getEnvironmentDetails", () => ({
+	getEnvironmentDetails: vi.fn().mockResolvedValue("environment details"),
 }))
 
 // Mock TelemetryService
@@ -40,6 +69,9 @@ vi.mock("@roo-code/telemetry", () => ({
 		instance: {
 			captureTaskCreated: vi.fn(),
 			captureTaskRestarted: vi.fn(),
+			captureTaskCompleted: vi.fn(),
+			captureLlmCompletion: vi.fn(),
+			captureConsecutiveMistakeError: vi.fn(),
 		},
 	},
 }))
@@ -78,6 +110,8 @@ type RuntimeThinkingEffortAccess = {
 	runtimeThinkingEffort?: ReasoningEffortExtended
 	runtimeThinkingEffortSource?: string
 	getRuntimeThinkingEffortMetadata: () => { reasoningEffort?: ReasoningEffortExtended }
+	getSystemPrompt: (state: unknown, modelInfo: ModelInfo | undefined) => Promise<string>
+	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
 }
 
 function getPrivateAccess(task: Task): RuntimeThinkingEffortAccess {
@@ -343,6 +377,131 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			expect(access.runtimeThinkingEffort).toBeUndefined()
 			expect(access.runtimeThinkingEffortSource).toBeUndefined()
 			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
+		})
+	})
+
+	describe("disposal race (lifecycle guard)", () => {
+		it("drops a runtime-effort update once disposal has started", async () => {
+			task.setRuntimeThinkingEffort("xhigh", "test-source")
+			const access = getPrivateAccess(task)
+			const handlerAtDisposal = (task as unknown as { api: unknown }).api
+			const buildsAtDisposal = vi.mocked(buildApiHandler).mock.calls.length
+			vi.mocked(disposeApiHandler).mockClear()
+
+			const disposing = task.dispose()
+			// Both handler-rebuilding entry points, called while disposal is in flight.
+			task.setRuntimeThinkingEffort("max", "during-disposal")
+			task.updateApiConfiguration({ ...mockApiConfiguration, apiModelId: "claude-sonnet-4-6" })
+
+			await disposing
+
+			// No handler was constructed after the disposal snapshot and the task still points at
+			// the handler that snapshot collected, so nothing built during disposal is left without
+			// an owner, and the collected handler is disposed exactly once.
+			expect(vi.mocked(buildApiHandler).mock.calls.length).toBe(buildsAtDisposal)
+			expect((task as unknown as { api: unknown }).api).toBe(handlerAtDisposal)
+			const disposedHandlers = vi.mocked(disposeApiHandler).mock.calls.map(([api]) => api)
+			expect(disposedHandlers.filter((api) => api === handlerAtDisposal)).toHaveLength(1)
+			// The dropped call left no state behind: neither the override nor the projection moved.
+			expect(access.runtimeThinkingEffort).toBeUndefined()
+			expect(task.apiConfiguration.apiModelId).toBe("claude-opus-4-7")
+		})
+	})
+
+	describe("request paths (all four metadata sites)", () => {
+		const MODEL_INFO: ModelInfo = { contextWindow: 50_000, maxTokens: 1024, supportsPromptCache: false }
+
+		function oneChunkStream(text: string): AsyncGenerator<ApiStreamChunk> {
+			return (async function* () {
+				yield { type: "text", text }
+			})()
+		}
+
+		// Called after every rebuild: setRuntimeThinkingEffort replaces this.api, so a spy installed on
+		// the previous handler would never see the request.
+		function attachRequestDoubles() {
+			vi.spyOn(task.api, "getModel").mockReturnValue({ id: "dte-model", info: MODEL_INFO })
+			Object.assign(task.api, {
+				ensureModelFetched: vi.fn().mockResolvedValue(undefined),
+				countTokens: vi.fn().mockResolvedValue(10),
+			})
+			mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
+			return vi.spyOn(task.api, "createMessage").mockImplementation(() => oneChunkStream("response"))
+		}
+
+		const lastSummarizeMetadata = () => vi.mocked(summarizeConversation).mock.calls.at(-1)?.[0].metadata
+
+		beforeEach(() => {
+			// Real timers: these paths await abort-aware delays that fake timers would park.
+			vi.useRealTimers()
+			mockProvider.getState = vi.fn().mockResolvedValue({
+				mode: "code",
+				apiConfiguration: mockApiConfiguration,
+				autoApprovalEnabled: true,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 80,
+				requestDelaySeconds: 0,
+				profileThresholds: {},
+				customModes: [],
+				experiments: {},
+				disabledTools: [],
+				customSupportPrompts: {},
+			})
+			// 90% of the 50k window against an 80% threshold: the automatic trigger fires.
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 45_000,
+			})
+			vi.spyOn(getPrivateAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "task history" }], ts: 1 }]
+		})
+
+		it("carries the override into the manual condense request and drops it once cleared", async () => {
+			task.setRuntimeThinkingEffort("xhigh", "test-source")
+			attachRequestDoubles()
+			await task.condenseContext()
+			expect(lastSummarizeMetadata()?.reasoningEffort).toBe("xhigh")
+
+			task.setRuntimeThinkingEffort(undefined)
+			attachRequestDoubles()
+			await task.condenseContext()
+			expect(lastSummarizeMetadata()).not.toHaveProperty("reasoningEffort")
+		})
+
+		it("carries the override into the forced context-management request and drops it once cleared", async () => {
+			const access = getPrivateAccess(task)
+			task.setRuntimeThinkingEffort("xhigh", "test-source")
+			attachRequestDoubles()
+			await access.handleContextWindowExceededError(MODEL_INFO)
+			expect(lastSummarizeMetadata()?.reasoningEffort).toBe("xhigh")
+
+			task.setRuntimeThinkingEffort(undefined)
+			attachRequestDoubles()
+			await access.handleContextWindowExceededError(MODEL_INFO)
+			expect(lastSummarizeMetadata()).not.toHaveProperty("reasoningEffort")
+		})
+
+		it("carries the override into automatic context management and the request stream, and drops both", async () => {
+			task.setRuntimeThinkingEffort("xhigh", "test-source")
+			const createMessage = attachRequestDoubles()
+
+			const iterator = task.attemptApiRequest(0, { skipProviderRateLimit: true })
+			await iterator.next()
+			await iterator.return(undefined)
+
+			expect(lastSummarizeMetadata()?.reasoningEffort).toBe("xhigh")
+			expect(createMessage.mock.calls.at(-1)?.[2]).toHaveProperty("reasoningEffort", "xhigh")
+
+			task.setRuntimeThinkingEffort(undefined)
+			const cleared = attachRequestDoubles()
+			const secondIterator = task.attemptApiRequest(0, { skipProviderRateLimit: true })
+			await secondIterator.next()
+			await secondIterator.return(undefined)
+
+			expect(lastSummarizeMetadata()).not.toHaveProperty("reasoningEffort")
+			expect(cleared.mock.calls.at(-1)?.[2]).not.toHaveProperty("reasoningEffort")
 		})
 	})
 })

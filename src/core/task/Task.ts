@@ -2511,6 +2511,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// an active task-local override is applied to the rebuilt handler only, so
 		// a profile switch keeps the override live and clearing it later restores
 		// the NEW profile's value (it is the configuration itself now).
+		//
+		// Same disposal guard as setRuntimeThinkingEffort: this is the other path that rebuilds the
+		// handler, and once disposal has started its handler set is already collected, so a rebuild
+		// would strand the replacement and re-retire a disposed handler. The task is going away, so
+		// there is nothing left to re-project either.
+		if (this.disposalPromise !== undefined) {
+			return
+		}
+
 		const previousApi = this.api
 		this.apiConfiguration = newApiConfiguration
 		this.api = buildApiHandler(
@@ -2552,6 +2561,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param source - Optional provenance label (UI wiring lands in a later PR).
 	 */
 	public setRuntimeThinkingEffort(effort: ReasoningEffortExtended | undefined, source?: string): void {
+		// Disposal has started (or finished): `disposalPromise` is set once and never cleared, so it
+		// is the liveness signal. The override is dropped rather than applied — the task serves no
+		// further request, and the handler set that dispose collects was already snapshotted, so
+		// rebuilding here would produce a handler nobody owns (still holding its configuration
+		// listeners) and retire the handler disposal has just disposed.
+		if (this.disposalPromise !== undefined) {
+			return
+		}
+
 		const wasActive = this.runtimeThinkingEffort !== undefined
 		this.runtimeThinkingEffort = effort
 		this.runtimeThinkingEffortSource = effort === undefined ? undefined : source
