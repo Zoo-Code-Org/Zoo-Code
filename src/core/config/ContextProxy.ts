@@ -376,13 +376,29 @@ export class ContextProxy {
 		return value !== undefined ? value : defaultValue
 	}
 
+	/**
+	 * The write that last set each cached key, so a failed write only corrects the cache while it is still the latest:
+	 * a newer write of the key has its own outcome, and an older failure must not replace its value.
+	 */
+	private readonly stateWriteOwner = new Map<string, object>()
+	private readonly secretWriteOwner = new Map<string, object>()
+
 	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		// The cache is updated first, so a read right after the call sees the value. If the store rejects, the cache is
+		// read back from storage, so it never runs ahead of what was stored.
+		const owner = {}
+		this.stateWriteOwner.set(key, owner)
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
+		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error: unknown) => {
+			if (this.stateWriteOwner.get(key) === owner) {
+				this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
+			}
+			throw error
+		})
 	}
 
 	private getAllGlobalState(): GlobalState {
@@ -400,12 +416,31 @@ export class ContextProxy {
 
 	storeSecret(key: SecretStateKey, value?: string) {
 		// Update cache.
+		const owner = {}
+		this.secretWriteOwner.set(key, owner)
 		this.secretCache[key] = value
 
-		// Write directly to context.
-		return value === undefined
-			? this.originalContext.secrets.delete(key)
-			: this.originalContext.secrets.store(key, value)
+		// Write directly to context. If the write rejects, the cache is read back from the secret storage while this
+		// write is still the latest of the key; if that fails too, the value that was never stored is dropped from the
+		// cache (it stays empty until the next write, `refreshSecrets` or a restart) rather than being served.
+		const stored =
+			value === undefined
+				? this.originalContext.secrets.delete(key)
+				: this.originalContext.secrets.store(key, value)
+		return Promise.resolve(stored).catch(async (error: unknown) => {
+			if (this.secretWriteOwner.get(key) === owner) {
+				try {
+					const readBack = await this.originalContext.secrets.get(key)
+					if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = readBack
+				} catch (readError) {
+					logger.error(
+						`Error reading back secret ${key}: ${readError instanceof Error ? readError.message : String(readError)}`,
+					)
+					if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = undefined
+				}
+			}
+			throw error
+		})
 	}
 
 	/**
@@ -573,10 +608,11 @@ export class ContextProxy {
 
 	/**
 	 * Writes every value at once. This is not a transaction, for any setting: each key is stored on its own, and the
-	 * stores that completed are not undone. If any store rejects, every store is still awaited, the cache of each
-	 * failed key (secrets included) is read back from storage (so it never runs ahead of what was stored), and the call rejects with a
-	 * `SettingsWriteError` that says which keys were stored and which were not. Callers that need more than this,
-	 * such as a rollback, must provide it themselves.
+	 * stores that completed are not undone. If any store rejects, every store is still awaited (the call stays pending
+	 * until the last one has settled) and then rejects with a `SettingsWriteError` that says which keys were stored and
+	 * which were not. A failed store has already read its key back into the cache (see `updateGlobalState` and
+	 * `storeSecret`), so the cache never runs ahead of what was stored. Callers that need more than this, such as a
+	 * rollback, must provide it themselves.
 	 */
 	public async setValues(values: RooCodeSettings) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
@@ -584,31 +620,20 @@ export class ContextProxy {
 
 		const committed: string[] = []
 		const failed: string[] = []
-		const secretsToReread: SecretStateKey[] = []
 		let cause: unknown
+		let hasCause = false
 		for (const [index, [key]] of entries.entries()) {
 			const result = results[index]
 			if (result.status === "fulfilled") {
 				committed.push(key)
 				continue
 			}
-			cause ??= result.reason
+			// The first failure is the cause, even when it was rejected without a reason.
+			if (!hasCause) {
+				cause = result.reason
+				hasCause = true
+			}
 			failed.push(key)
-			if (isSecretStateKey(key)) {
-				secretsToReread.push(key as SecretStateKey)
-			} else if (!isPassThroughStateKey(key)) {
-				this.stateCache[key as GlobalStateKey] = this.originalContext.globalState.get(key)
-			}
-		}
-		// A secret is cached before its store settles, so a failed one is read back too (as `refreshSecrets` does).
-		for (const key of secretsToReread) {
-			try {
-				this.secretCache[key] = await this.originalContext.secrets.get(key)
-			} catch (error) {
-				logger.error(
-					`Error reading back secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
 		}
 		if (failed.length > 0) throw new SettingsWriteError(committed, failed, cause)
 	}

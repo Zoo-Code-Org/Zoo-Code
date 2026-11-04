@@ -7,6 +7,7 @@ import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-c
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 
+import { logger } from "../../../utils/logging"
 import { ContextProxy, SettingsWriteError } from "../ContextProxy"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -357,6 +358,9 @@ describe("ContextProxy", () => {
 			mockSecrets.get.mockRejectedValue(new Error("keychain locked"))
 
 			await expect(proxy.setValues({ openAiApiKey: "new-key" })).rejects.toBeInstanceOf(SettingsWriteError)
+
+			// The key that was never saved is not served: the cache is empty until the next write or a refresh.
+			expect(proxy.getSecret("openAiApiKey")).toBeUndefined()
 		})
 
 		it("words the report for a failure that is not an Error, and when nothing was stored", async () => {
@@ -384,8 +388,119 @@ describe("ContextProxy", () => {
 			mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
 			await proxy.initialize()
 			mockSecrets.get.mockRejectedValue("locked")
+			const logged = vi.spyOn(logger, "error").mockImplementation(() => {})
 
 			await expect(proxy.setValues({ openAiApiKey: "new-key" })).rejects.toBeInstanceOf(SettingsWriteError)
+
+			expect(logged).toHaveBeenCalledWith("Error reading back secret openAiApiKey: locked")
+			logged.mockRestore()
+		})
+
+		it("keeps a newer value written while a failed secret is being read back", async () => {
+			mockSecrets.store.mockRejectedValueOnce(new Error("keychain locked")).mockResolvedValue(undefined)
+			await proxy.initialize()
+			let readBack: (value: string | undefined) => void = () => {}
+			mockSecrets.get.mockImplementation(() => new Promise((resolve) => (readBack = resolve)))
+
+			const failing = proxy.setValues({ openAiApiKey: "old-attempt" }).catch((e: unknown) => e)
+			await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalled())
+			await proxy.setValues({ openAiApiKey: "newer-key" }) // starts and succeeds during the read-back
+			readBack("stale-from-storage")
+			await failing
+
+			expect(proxy.getSecret("openAiApiKey")).toBe("newer-key")
+		})
+
+		it("does not clear a newer value of the same key when an older write's read-back fails", async () => {
+			mockSecrets.store.mockRejectedValueOnce(new Error("keychain locked")).mockResolvedValue(undefined)
+			await proxy.initialize()
+			let failReadBack: () => void = () => {}
+			mockSecrets.get.mockImplementation(
+				() => new Promise((_resolve, reject) => (failReadBack = () => reject(new Error("keychain locked")))),
+			)
+			const logged = vi.spyOn(logger, "error").mockImplementation(() => {})
+
+			const failing = proxy.setValues({ openAiApiKey: "same-value" }).catch((e: unknown) => e)
+			await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalled())
+			await proxy.setValues({ openAiApiKey: "same-value" }) // a newer write of the same value succeeds
+			failReadBack()
+			await failing
+
+			expect(proxy.getSecret("openAiApiKey")).toBe("same-value")
+			logged.mockRestore()
+		})
+
+		it("reads a global setting back when a single setValue fails, not only setValues", async () => {
+			const storage = new Map<string, unknown>([["dateFormat", "auto"]])
+			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
+			mockGlobalState.update.mockRejectedValue(new Error("storage unavailable"))
+			await proxy.initialize()
+
+			await expect(proxy.setValue("dateFormat", "ymd")).rejects.toThrow("storage unavailable")
+
+			expect(proxy.getGlobalState("dateFormat")).toBe("auto") // not the value that was never stored
+		})
+
+		it("does not let an older failed write replace the value of a newer write of the same key that is still being stored", async () => {
+			const storage = new Map<string, unknown>([["dateFormat", "auto"]])
+			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
+			let failOlder: () => void = () => {}
+			let landNewer: () => void = () => {}
+			mockGlobalState.update
+				.mockImplementationOnce(
+					() => new Promise((_resolve, reject) => (failOlder = () => reject(new Error("no")))),
+				)
+				.mockImplementationOnce(
+					(key: string, value: unknown) =>
+						new Promise<void>((resolve) => (landNewer = () => (storage.set(key, value), resolve()))),
+				)
+			await proxy.initialize()
+
+			const older = proxy.setValue("dateFormat", "dmy").catch((e: unknown) => e)
+			const newer = proxy.setValue("dateFormat", "ymd") // still being stored
+			failOlder()
+			await older
+
+			// Storage still holds "auto", but the newer write has its own outcome: its value stays in the cache.
+			expect(proxy.getGlobalState("dateFormat")).toBe("ymd")
+			landNewer()
+			await newer
+			expect(proxy.getGlobalState("dateFormat")).toBe("ymd")
+		})
+
+		it("stays pending until every store has settled, then reports the committed and failed keys", async () => {
+			let settleSlow: () => void = () => {}
+			mockGlobalState.update.mockImplementation((key: string) => {
+				if (key === "dateFormat") return Promise.reject(new Error("storage unavailable")) // fails at once
+				return new Promise<void>((resolve) => (settleSlow = resolve)) // the others are slow
+			})
+			await proxy.initialize()
+			let outcome: unknown = "pending"
+			const writing = proxy
+				.setValues({ dateFormat: "ymd", timeFormat: "24h" })
+				.catch((e: unknown) => (outcome = e))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(outcome).toBe("pending") // the rejection has happened, the slow store has not settled
+
+			settleSlow()
+			await writing
+
+			expect(outcome).toBeInstanceOf(SettingsWriteError)
+			expect(outcome).toMatchObject({ committed: ["timeFormat"], failed: ["dateFormat"] })
+		})
+
+		it("keeps the first failure as the cause even when it was rejected without a reason", async () => {
+			mockGlobalState.update.mockImplementation((key: string) =>
+				key === "dateFormat" ? Promise.reject(undefined) : Promise.reject(new Error("later failure")),
+			)
+			await proxy.initialize()
+
+			const error = await proxy.setValues({ dateFormat: "ymd", timeFormat: "24h" }).catch((e: unknown) => e)
+
+			expect(error).toMatchObject({ failed: ["dateFormat", "timeFormat"], cause: undefined })
+			expect((error as Error).message).toContain("undefined")
+			expect((error as Error).message).not.toContain("later failure")
 		})
 
 		it("does not report a failure when every store succeeds", async () => {
