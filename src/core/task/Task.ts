@@ -535,12 +535,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Set to `true` only after the assistant message is durably saved.
 	 */
 	assistantMessageSavedToHistory = false
-	/**
-	 * True when the pending tool results were already appended to `apiConversationHistory` but the
-	 * save failed. `userMessageContent` is kept for recovery, so a repeat flush must save the history
-	 * as it is instead of appending the same user message again.
-	 */
-	private pendingToolResultsInHistory = false
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
@@ -1552,16 +1546,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return false
 		}
 
-		if (this.pendingToolResultsInHistory) {
-			// A previous flush appended the results but could not save them; save, never append twice.
-			const saved = await this.saveApiConversationHistory()
-			if (saved) {
-				this.userMessageContent = []
-				this.pendingToolResultsInHistory = false
-			}
-			return saved
-		}
-
 		// CRITICAL: Wait for the assistant message to be saved to API history first.
 		// Without this, tool_result blocks would appear BEFORE tool_use blocks in the
 		// conversation history, causing API errors like:
@@ -1614,7 +1598,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Clear the pending content since it's now saved
 			this.userMessageContent = []
 		} else {
-			this.pendingToolResultsInHistory = true
+			// Undo the in-memory append: `userMessageContent` stays the only pending copy, so a retry
+			// flush or the next request appends these results exactly once.
+			const appendedIndex = this.apiConversationHistory.indexOf(userMessageWithTs as ApiMessage)
+			if (appendedIndex !== -1) {
+				this.apiConversationHistory.splice(appendedIndex, 1)
+			}
 			console.warn(
 				`[Task#${this.taskId}] flushPendingToolResultsToHistory: save failed, retaining pending tool results in memory`,
 			)
@@ -4148,7 +4137,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.assistantMessageContent = []
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
-				this.pendingToolResultsInHistory = false
 				this.userMessageContentReady = false
 				this.activeToolContexts.clear()
 				this.didRejectTool = false

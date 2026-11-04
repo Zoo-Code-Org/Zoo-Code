@@ -2476,8 +2476,11 @@ describe("Task persistence", () => {
 					message.content.some((block) => block.type === "tool_result"),
 			)
 
-		it("saves, without appending again, results that were added to history but not saved", async () => {
-			mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full")).mockResolvedValueOnce([])
+		it("keeps an unsaved flush out of history so retries and the next request append the results once", async () => {
+			mockSaveApiMessages
+				.mockRejectedValueOnce(new Error("disk full"))
+				.mockRejectedValueOnce(new Error("disk full"))
+				.mockResolvedValueOnce([])
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2485,17 +2488,25 @@ describe("Task persistence", () => {
 				startTask: false,
 			})
 			task.assistantMessageSavedToHistory = true
-			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+			const pending = [{ type: "tool_result" as const, tool_use_id: "tool-1", content: "done" }]
+			task.userMessageContent = [...pending]
 
+			// Repeated failures leave history untouched and keep the results pending in memory, so the
+			// request loop (which appends userMessageContent) cannot add a second copy.
 			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
-			expect(toolResultMessages(task)).toHaveLength(1)
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(toolResultMessages(task)).toHaveLength(0)
+			expect(task.userMessageContent).toEqual(pending)
 
 			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
-
-			// The retry saved the history as it was; it did not append a second copy of the results.
 			expect(toolResultMessages(task)).toHaveLength(1)
 			expect(task.userMessageContent).toEqual([])
-			expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+
+			// New results after the successful retry append as their own message.
+			mockSaveApiMessages.mockResolvedValueOnce([])
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-2", content: "done" }]
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
+			expect(toolResultMessages(task)).toHaveLength(2)
 		})
 
 		it("keeps results that never reached history so a later flush can still add them", async () => {
