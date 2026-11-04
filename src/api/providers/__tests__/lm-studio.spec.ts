@@ -54,15 +54,8 @@ describe("LmStudioHandler abort wiring", () => {
 		return err
 	}
 
-	const waitForCreateCall = async (create: { mock: { calls: unknown[][] } }, timeoutMs = 5000): Promise<void> => {
-		const start = Date.now()
-		while (create.mock.calls.length === 0) {
-			if (Date.now() - start > timeoutMs) {
-				throw new Error("timed out waiting for the SDK create call")
-			}
-			await new Promise((resolve) => setTimeout(resolve, 5))
-		}
-	}
+	const waitForCreateCall = (create: { mock: { calls: unknown[][] } }): Promise<void> =>
+		vitest.waitFor(() => expect(create.mock.calls.length).toBeGreaterThan(0))
 
 	const waitForSignalAbort = (signal: AbortSignal | undefined): Promise<void> => {
 		return new Promise((resolve, reject) => {
@@ -184,7 +177,6 @@ describe("LmStudioHandler abort wiring", () => {
 						return
 					}
 					opts.signal.addEventListener("abort", () => reject(sdkAbortError()), { once: true })
-					setTimeout(() => resolve(asyncStreamFrom([])), 300)
 				})
 			})
 
@@ -250,7 +242,7 @@ describe("LmStudioHandler abort wiring", () => {
 			const external = new AbortController()
 			const stream = handler.createMessage("system", [], { taskId: "t1", abortSignal: external.signal })
 			const pending = stream.next()
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending count
+			await vitest.waitFor(() => expect(handler.countTokens).toHaveBeenCalledTimes(1)) // let the generator reach the pending count
 			external.abort()
 			resolveCountTokens(1)
 
@@ -278,7 +270,7 @@ describe("LmStudioHandler abort wiring", () => {
 			const external = new AbortController()
 			const stream = handler.createMessage("system", [], { taskId: "t1", abortSignal: external.signal })
 			const pending = stream.next()
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending count
+			await vitest.waitFor(() => expect(handler.countTokens).toHaveBeenCalledTimes(1)) // let the generator reach the pending count
 			external.abort()
 
 			let caught: unknown
@@ -309,7 +301,7 @@ describe("LmStudioHandler abort wiring", () => {
 			const first = await stream.next()
 			expect(first.value?.type).toBe("text")
 			const pending = stream.next() // runs past the stream into the pending output count
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await vitest.waitFor(() => expect(handler.countTokens).toHaveBeenCalledTimes(2))
 			external.abort()
 
 			let caught: unknown
@@ -666,7 +658,7 @@ describe("LmStudioHandler abort wiring", () => {
 			const external = new AbortController()
 			const stream = handler.createMessage("system", [], { taskId: "t1", abortSignal: external.signal })
 			const pending = stream.next()
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let the generator reach the pending count
+			await vitest.waitFor(() => expect(handler.countTokens).toHaveBeenCalledTimes(1)) // let the generator reach the pending count
 			resolveInputCount(1)
 			await Promise.resolve() // let the race settle and detach its listener
 			external.abort()

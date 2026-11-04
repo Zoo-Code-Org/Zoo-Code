@@ -116,15 +116,8 @@ describe("LmStudioHandler abort signal wiring", () => {
 		return err
 	}
 
-	const waitForCreateCall = async (create: { mock: { calls: unknown[][] } }, timeoutMs = 5000): Promise<void> => {
-		const start = Date.now()
-		while (create.mock.calls.length === 0) {
-			if (Date.now() - start > timeoutMs) {
-				throw new Error("timed out waiting for the SDK create call")
-			}
-			await new Promise((resolve) => setTimeout(resolve, 5))
-		}
-	}
+	const waitForCreateCall = (create: { mock: { calls: unknown[][] } }): Promise<void> =>
+		vitest.waitFor(() => expect(create.mock.calls.length).toBeGreaterThan(0))
 
 	const waitForSignalAbort = (signal: AbortSignal | undefined): Promise<void> => {
 		return new Promise((resolve, reject) => {

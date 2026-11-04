@@ -16,6 +16,7 @@ import {
 	isTimeoutAbort,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
+import { flushMacrotasks } from "../../../../test-utils/timers"
 
 describe("rejectOnAbort", () => {
 	it("resolves with the pending value when it settles before the signal aborts", async () => {
@@ -72,7 +73,7 @@ describe("rejectOnAbort", () => {
 			})
 
 			// Node reports an unhandled rejection only after the microtask queue drains.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			await flushMacrotasks()
 			expect(unhandled).toHaveLength(0)
 		} finally {
 			// Remove the process-level listener on every exit path: a failed assertion
@@ -198,7 +199,7 @@ describe("detachOnAbort", () => {
 			await expect(withSettleGuard(detachOnAbort(pending, controller.signal))).rejects.toBeDefined()
 
 			// Node reports an unhandled rejection only after the microtask queue drains.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			await flushMacrotasks()
 			expect(unhandled).toHaveLength(0)
 		} finally {
 			process.off("unhandledRejection", onUnhandledRejection)
@@ -314,7 +315,7 @@ describe("resolveModelWithAbort", () => {
 		})
 		const race = withSettleGuard(resolveModelWithAbort(async () => pending, controller.signal, "TestProvider"))
 
-		setTimeout(() => controller.abort(), 10)
+		void flushMacrotasks().then(() => controller.abort())
 
 		await expect(race).rejects.toMatchObject({
 			name: "AbortError",
@@ -432,6 +433,7 @@ describe("abort-signal utilities", () => {
 			expect(result).toBeInstanceOf(AbortSignal)
 			expect(result?.aborted).toBe(false)
 
+			// eslint-disable-next-line no-restricted-globals -- a real native timer is the thing under test; fake timers do not drive AbortSignal.timeout
 			await new Promise((resolve) => setTimeout(resolve, 20))
 			expect(result?.aborted).toBe(false)
 		})
@@ -616,8 +618,9 @@ describe("settleOnAbort", () => {
 		// with the sentinel instead of rejecting).
 		const controller = new AbortController()
 		controller.abort()
+		let releaseSentinel!: (value: number) => void
 		const pending = new Promise<number>((resolve) => {
-			setTimeout(() => resolve(1), 20)
+			releaseSentinel = resolve
 		})
 
 		let caught: unknown
@@ -626,7 +629,8 @@ describe("settleOnAbort", () => {
 		} catch (error) {
 			caught = error
 		}
-		await new Promise((resolve) => setTimeout(resolve, 30)) // let the sentinel arrive
+		releaseSentinel(1)
+		await flushMacrotasks() // let the sentinel arrive
 
 		expect(caught).toBeInstanceOf(Error)
 		expect((caught as Error).name).toBe("AbortError")
@@ -635,9 +639,7 @@ describe("settleOnAbort", () => {
 
 	it("resolves with the pending value when it settles before the signal aborts", async () => {
 		const controller = new AbortController()
-		const pending = new Promise<number>((resolve) => {
-			setTimeout(() => resolve(7), 10)
-		})
+		const pending = Promise.resolve(7)
 
 		expect(await settleOnAbort(pending, controller.signal, "Test")).toBe(7)
 	})
@@ -662,7 +664,7 @@ describe("settleOnAbort", () => {
 			} catch (error) {
 				caught = error
 			}
-			await new Promise((resolve) => setTimeout(resolve, 10)) // let any unhandledRejection fire
+			await flushMacrotasks() // let any unhandledRejection fire
 
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("AbortError")

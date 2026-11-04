@@ -66,6 +66,7 @@ import { providerIdentifiers } from "@roo-code/types"
 
 import { LmStudioHandler } from "../lm-studio"
 import type { ApiHandlerOptions } from "../../../shared/api"
+import { withSettleGuard } from "../../../test-utils/settle-guard"
 
 const { mockGetModels, mockGetModelsFromCache } = vi.hoisted(() => ({
 	mockGetModels: vi.fn(),
@@ -274,23 +275,14 @@ describe("LmStudioHandler", () => {
 			const pending = collectStream(stream).catch((error: unknown) => error)
 
 			// Let the generator reach the token count, then abort while it is pending.
-			const start = Date.now()
-			while (countSpy.mock.calls.length === 0) {
-				if (Date.now() - start > 5000) {
-					throw new Error("timed out waiting for the token count")
-				}
-				await new Promise((resolve) => setTimeout(resolve, 5))
-			}
+			await vitest.waitFor(() => expect(countSpy).toHaveBeenCalled())
 			controller.abort()
 
 			try {
 				// The count gate is still closed, so cancellation itself has to settle the
 				// pending count. Releasing the gate first would let counting finish normally
 				// and the later pre-request abort check would make this pass anyway.
-				const raced = await Promise.race([
-					pending,
-					new Promise((resolve) => setTimeout(() => resolve(undefined), 300)),
-				])
+				const raced = await withSettleGuard(pending, 300)
 				expect(raced).toBeInstanceOf(Error)
 				expect((raced as Error).name).toBe("AbortError")
 				expect((raced as Error).message).toBe("The LM Studio request was aborted")
