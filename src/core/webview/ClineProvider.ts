@@ -144,7 +144,7 @@ import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
-import type { ClineMessage, ProviderSettingsWithId, TodoItem } from "@roo-code/types"
+import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
 	readApiMessages,
@@ -434,11 +434,7 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
-	// Shared across instances: profile mutations rewrite the shared ContextProxy stores, so a
-	// per-instance queue lets another view commit between this view's shared write and its
-	// snapshot compensation, and the compensation would restore a stale copy over the newer
-	// write. One queue serializes every view's profile mutations against each other.
-	private static providerProfileMutationQueue = Promise.resolve()
+	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
@@ -956,57 +952,6 @@ export class ClineProvider
 
 				try {
 					await this.contextProxy.setValue("viewStates", pruned)
-				} catch (error) {
-					// updateGlobalState applies the new map to the in-memory cache
-					// before the durable write: restore the cache to the value durable
-					// storage actually holds so closed-view pins cannot serve re-pointed
-					// names that never reached disk, then let the caller compensate.
-					try {
-						await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
-					} catch {
-						// The cache is updated before the durable attempt: it matches the
-						// durable value regardless of whether this restore write landed.
-					}
-					throw error
-				}
-			}
-		})
-
-		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
-		await write
-	}
-
-	/**
-	 * Re-points persisted view pins that reference a removed profile so views do not
-	 * rehydrate a missing profile name after a reload. Runs through the serialized
-	 * write queue like every other viewStates mutation.
-	 */
-	private async repointPersistedViewStates(
-		removedProfileName: string,
-		replacementProfileName: string,
-	): Promise<void> {
-		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-			const states = this.getPersistedViewStates({ fresh: true })
-			let changed = false
-
-			for (const [viewId, entry] of Object.entries(states)) {
-				if (entry?.currentApiConfigName !== removedProfileName) {
-					continue
-				}
-
-				changed = true
-				const { currentApiConfigName: _removed, ...rest } = entry
-
-				if (rest.mode) {
-					states[viewId] = { ...rest, currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
-				} else {
-					states[viewId] = { currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
-				}
-			}
-
-			if (changed) {
-				try {
-					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
 				} catch (error) {
 					// updateGlobalState applies the new map to the in-memory cache
 					// before the durable write: restore the cache to the value durable
@@ -1731,19 +1676,6 @@ export class ClineProvider
 
 		this.clearWebviewResources()
 		this.settleViewResolvedGate()
-
-		// Clean up cloud service event listener
-		if (CloudService.hasInstance()) {
-			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
-		}
-
-		while (this.disposables.length) {
-			const x = this.disposables.pop()
-
-			if (x) {
-				x.dispose()
-			}
-		}
 
 		// Each teardown step gets its own guard: a rejecting step must not strand the steps after
 		// it. The registry unregistration already happened at the top of dispose(), so a step
@@ -2873,10 +2805,6 @@ export class ClineProvider
 		const previousTaskMode = task?.taskMode
 		const previousHistoryMode = task ? this.getTaskHistoryItem(task.taskId)?.mode : undefined
 
-		// Set once the task-history write has landed and cleared once the durable mode
-		// write settles, so the durable-write failure path can undo the task-side write.
-		let undoHistoryWrite: (() => Promise<void>) | null = null
-
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
 
@@ -2888,27 +2816,10 @@ export class ClineProvider
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
 				}
 
-				// TaskModeSwitched and the in-memory mode are applied only after the durable
-				// mode write below succeeds, so a failed switch cannot leave the task on the
-				// new mode while the provider state is still on the old one. Until then this
-				// is the compensation for the history write that just landed.
-				undoHistoryWrite = async () => {
-					if (!taskHistoryItem) {
-						// No history item existed before the switch, so no history write landed:
-						// there is nothing to undo.
-						return
-					}
-					const previousMode = taskHistoryItem.mode
-					// Restore only the field this switch changed: re-read the item so fields
-					// the running task persisted during the pending window (tokens, cost,
-					// status, apiConfigName) survive the rollback.
-					const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
-					if (!latest) {
-						// The item was removed while the write was in flight; nothing to restore.
-						return
-					}
-					await this.updateTaskHistory({ ...latest, mode: previousMode })
-				}
+				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
+
+				// Only update the task's mode after successful persistence.
+				;(task as any)._taskMode = newMode
 			} catch (error) {
 				// If persistence fails, log the error but don't update the in-memory state.
 				this.log(
@@ -2927,14 +2838,7 @@ export class ClineProvider
 		// restored mode would otherwise shadow the fresh switch for consumers.
 		// If the durable write fails, roll the shared write back so getValues()
 		// cannot mix a fresh shared mode with the stale pre-switch buffer.
-		// Two independent values are at stake: the shared ContextProxy mode and this
-		// view's own pin (viewLocalState.mode). setValue writes BOTH, so each must be
-		// restored from its own pre-switch value - replaying the shared value through
-		// setValue would overwrite a pin that held a different mode (a view pinned to
-		// architect while the shared mode was code would end the rollback pinned to
-		// code). previousViewMode is undefined when the view has no pin.
-		const previousSharedMode = this.getValue("mode")
-		const previousViewMode = this.viewLocalState.mode
+		const previousMode = this.getValue("mode")
 		try {
 			await this.setValue("mode", newMode)
 		} catch (error) {
@@ -2962,10 +2866,7 @@ export class ClineProvider
 				}
 			}
 			try {
-				// Shared value only: the failed write never reached the view-local
-				// mutation step, so the pin still holds its own value and must not be
-				// touched here.
-				await this.contextProxy.setValue("mode", previousSharedMode)
+				await this.contextProxy.setValue("mode", previousMode)
 			} catch (rollbackError) {
 				this.log(
 					`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
@@ -2973,121 +2874,10 @@ export class ClineProvider
 					}`,
 				)
 			}
-			// The task-history write landed before the durable mode write, so undo it as
-			// well: leaving the history on the new mode while the shared/per-view mode is
-			// restored is exactly the inconsistency this switch must not produce.
-			if (undoHistoryWrite) {
-				try {
-					await undoHistoryWrite()
-				} catch (rollbackError) {
-					this.log(
-						`[handleModeSwitch] Failed to roll back task-history mode after persistence failure: ${
-							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-						}`,
-					)
-				}
-			}
 			this.log(
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
 			)
 			throw error
-		}
-
-		// The durable write can settle AFTER the mutation timeout has already aborted this
-		// run and handed the caller a timeout rejection. Nothing below may then run:
-		// emitting TaskModeSwitched/ModeChanged or loading the mode profile would publish a
-		// switch the caller was told had been cancelled, and the next queued mutation could
-		// start against a half-applied mode. Undo everything that landed and keep the
-		// cancellation result; each restore is awaited on its own so one failing write
-		// cannot skip the next.
-		if (signal?.aborted) {
-			try {
-				await this.contextProxy.setValue("mode", previousSharedMode)
-			} catch (rollbackError) {
-				this.log(
-					`[handleModeSwitch] Failed to roll back shared mode after cancellation: ${
-						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-					}`,
-				)
-			}
-			try {
-				await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
-			} catch (rollbackError) {
-				this.log(
-					`[handleModeSwitch] Failed to roll back the view mode pin after cancellation: ${
-						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-					}`,
-				)
-			}
-			if (undoHistoryWrite) {
-				try {
-					await undoHistoryWrite()
-				} catch (rollbackError) {
-					this.log(
-						`[handleModeSwitch] Failed to roll back task-history mode after cancellation: ${
-							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-						}`,
-					)
-				}
-			}
-			return
-		}
-
-		// Both durable writes succeeded: this is the point of no return for the task
-		// side. Emitting and updating _taskMode here (rather than before the durable
-		// write) keeps listeners and in-memory task state from observing a switch that
-		// the persisted provider state contradicts.
-		if (task) {
-			try {
-				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
-				;(task as any)._taskMode = newMode
-			} catch (error) {
-				// A listener that threw (or the in-memory write failing) must not leave the
-				// durable mode on the new value while the task is still on the old one: undo
-				// the task-history write and the durable mode write, then surface the failure.
-				if (undoHistoryWrite) {
-					try {
-						await undoHistoryWrite()
-					} catch (rollbackError) {
-						this.log(
-							`[handleModeSwitch] Failed to roll back task-history mode after the emit failed: ${
-								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-							}`,
-						)
-					}
-				}
-				// Each restore is awaited on its own: a failed shared-mode write must not skip the
-				// pin restore (or the reverse), because one store left on the new mode while the
-				// other is back on the old one is exactly the split state this rollback exists to
-				// prevent. A rollback that itself failed is reported, not just logged.
-				const rollbackFailures: string[] = []
-				const describeModeRollbackFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
-				try {
-					// Restore the shared value through the proxy only.
-					await this.contextProxy.setValue("mode", previousSharedMode)
-				} catch (rollbackError) {
-					rollbackFailures.push(`shared mode: ${describeModeRollbackFailure(rollbackError)}`)
-				}
-				try {
-					// Then the pin from its own pre-switch value. When the view had no pin, the forward
-					// setValue created one; clearing it (mode: undefined) is what returns this view to
-					// its pre-switch state instead of leaving the shared mode pinned.
-					await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
-				} catch (rollbackError) {
-					rollbackFailures.push(`view mode pin: ${describeModeRollbackFailure(rollbackError)}`)
-				}
-				if (rollbackFailures.length > 0) {
-					// Unrepaired partial state must not be reported as a clean rollback: the caller
-					// needs to know the durable mode may still name the mode this switch abandoned.
-					this.log(
-						`[handleModeSwitch] Mode rollback left persisted state inconsistent (${rollbackFailures.join(", ")}).`,
-					)
-					throw new Error(
-						`Mode switch left persisted mode state inconsistent: ${rollbackFailures.join(", ")}. Original failure: ${error instanceof Error ? error.message : String(error)}`,
-					)
-				}
-				throw error
-			}
 		}
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
@@ -3717,10 +3507,6 @@ export class ClineProvider
 				// (and this one when it is the pinned view) or their getState() keeps
 				// serving the settings captured before the save under the same name.
 				if (this.pinnedProfileName === name) {
-					// Marked before the await: a rejection from the sibling refresh later must
-					// still restore this overlay, or it keeps serving settings the rolled-back
-					// save never committed.
-					landed.viewOverlay = true
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 				}
 				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
@@ -3767,24 +3553,6 @@ export class ClineProvider
 			}
 			await this._restoreProfileActivationState(preWriteSnapshot)
 			throw error
-		}
-	}
-
-	/**
-	 * Post state after a deletion has already committed. A posting failure must be
-	 * logged, never routed through the deletion's compensation path: the deletion is
-	 * durable by then, and the compensation would restore a record whose deletion
-	 * already landed.
-	 */
-	private async postStateToWebviewAfterCommittedDeletion(): Promise<void> {
-		try {
-			await this.postStateToWebview()
-		} catch (error) {
-			this.log(
-				`deleteProviderProfile: deletion committed, but posting state failed: ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			)
 		}
 	}
 
@@ -3848,6 +3616,12 @@ export class ClineProvider
 			)
 		}
 
+		// Captured outside the write group: the post-commit activation completion below the catch
+		// runs after the deletion stands and needs both flags, which the campaign declares inside
+		// the try block scope.
+		let deletedWasGlobal = false
+		let viewWasPinnedToDeleted = false
+
 		try {
 			const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
@@ -3869,13 +3643,13 @@ export class ClineProvider
 			// writes below - needs a lock spanning ProviderSettingsManager instances, which is
 			// tracked as its own unit rather than widened into this method.
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
-			const deletedWasGlobal = profileToDelete.name === selectionAfterDelete
+			deletedWasGlobal = profileToDelete.name === selectionAfterDelete
 
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under
 			// the surviving profile's name.
-			const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+			viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
 
 			// Whether anything is actually going to be re-pointed at the survivor: this view's
 			// own pin, the shared selection, a live sibling's pin, or a closed view's
@@ -3956,7 +3730,9 @@ export class ClineProvider
 				if (survivingSettings) {
 					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
 				}
-				await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+				// Strict: a task left naming the deleted profile must fail the deletion so the write
+				// group above is rolled back instead of reporting a successful deletion.
+				await this.persistStickyProviderProfileToCurrentTask(profileToActivate, { strictPersistence: true })
 			}
 			// Re-pin other live views still buffered on the deleted profile: their
 			// buffer and durable viewStates entry would otherwise keep serving the
@@ -4098,6 +3874,11 @@ export class ClineProvider
 					const { mode } = await this.getState()
 					await this.providerSettingsManager.setModeConfig(mode, survivingId)
 				}
+
+				// The deleted profile was the one a live conversation may be running: mirror
+				// activateProviderProfileUnlocked's completion so the running handler serves the survivor's
+				// settings instead of the deleted profile's stale configuration.
+				this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
 				if (activatedSettings.apiProvider) {
 					this.emit(RooCodeEventName.ProviderProfileChanged, {
 						name: profileToActivate,
@@ -4116,7 +3897,6 @@ export class ClineProvider
 				)
 			}
 
-			await this.postStateToWebviewAfterCommittedDeletion()
 			if (activationFailed) {
 				throw new ProfileDeletionActivationError(profileToActivate, activationError)
 			}
@@ -4124,9 +3904,19 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Point the current task's sticky provider profile at `apiConfigName`.
+	 *
+	 * `strictPersistence` is what the deletion paths use: there the caller has other durable
+	 * writes in flight and a silently-swallowed task-history failure would let the deletion
+	 * report success while the task and its history entry still name the deleted profile. In
+	 * strict mode the in-memory name and the history entry are put back and the failure is
+	 * re-thrown so the caller's compensation runs. Activation keeps the tolerant contract -
+	 * there a failed history refresh must not fail an otherwise-successful profile switch.
+	 */
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
+		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string; strictPersistence?: boolean } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
@@ -4134,12 +3924,17 @@ export class ClineProvider
 			return
 		}
 
+		// Read before any write so the strict rollback below can put the persisted entry back.
+		const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
+
+		// Captured for the strict rollback below: the in-memory name and the persisted entry
+		// have to move back together with it.
+		const previousTaskApiConfigName = task.taskApiConfigName
+
 		try {
 			// Update in-memory state immediately so sticky behavior works even before the task has
 			// been persisted into taskHistory (it will be captured on the next save).
 			task.setTaskApiConfigName(apiConfigName)
-
-			const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
 
 			if (taskHistoryItem) {
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
@@ -4151,6 +3946,25 @@ export class ClineProvider
 					error instanceof Error ? error.message : String(error)
 				}`,
 			)
+
+			if (options.strictPersistence) {
+				// The deletion paths keep other durable writes in flight: a swallowed task-history
+				// failure would let the deletion report success while the conversation and its history
+				// entry still name the profile that is about to be gone. Put both back and let the
+				// caller compensate.
+				task.setTaskApiConfigName(previousTaskApiConfigName)
+				if (taskHistoryItem) {
+					try {
+						await this.updateTaskHistory(taskHistoryItem)
+					} catch (restoreError: unknown) {
+						this.log(
+							`[persistStickyProviderProfileToCurrentTask] Could not restore the task history entry for
+								task ${task.taskId}: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						)
+					}
+				}
+				throw error
+			}
 		}
 	}
 
@@ -4553,7 +4367,12 @@ export class ClineProvider
 					if (replacementSettings) {
 						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
 					}
-					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+					// Strict: the allSettled below turns a rejected task-history write into a rejected sibling,
+					// which rolls every affected view back and rejects the deletion, instead of leaving that
+					// sibling's conversation on the deleted profile while its view was already re-pointed.
+					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName, {
+						strictPersistence: true,
+					})
 				}
 				await snapshot.instance.postStateToWebview()
 			}),
@@ -5925,6 +5744,15 @@ export class ClineProvider
 
 		try {
 			await this.contextProxy.setValues(restore)
+
+			// The shared store is back on the pre-mutation values while the per-view record never landed;
+			// say so: the caller only sees the original per-view failure, and a silent rollback would make the
+			// divergence between the two stores untraceable.
+			this.log(
+				`[ClineProvider] The per-view write failed; the shared value(s) were restored: ${Object.keys(
+					restore,
+				).join(", ")}`,
+			)
 		} catch (rollbackError) {
 			this.log(
 				`[ClineProvider] Shared-state rollback after failed per-view write failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
@@ -6148,7 +5976,7 @@ export class ClineProvider
 		// Fence in-flight profile and mode mutations before the reset clears the stores: a mutation
 		// that started before the reset can otherwise persist after the whole-map clear, and the clear
 		// would then be undone by a write the user never saw.
-		await ClineProvider.providerProfileMutationQueue.catch(() => {})
+		await this.providerProfileMutationQueue.catch(() => {})
 
 		// Log out from cloud if authenticated
 		if (CloudService.hasInstance()) {

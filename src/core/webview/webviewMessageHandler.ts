@@ -776,9 +776,9 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "webviewHeartbeat":
-		// Confirm renderer liveness and advance the watchdog recovery health window.
-		provider.updateWebviewHeartbeat()
-		break
+			// Confirm renderer liveness and advance the watchdog recovery health window.
+			provider.updateWebviewHeartbeat()
+			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -966,9 +966,7 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					// Route through provider.setValue so view-local buffer/pin sync stays
-					// consistent with the other mutation paths.
-					await provider.setValue(key as keyof RooCodeSettings, newValue)
+					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
 
 				await provider.postStateToWebview()

@@ -78,7 +78,7 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-import type { ModelRecord, RooCodeSettings } from "@roo-code/types"
+import type { ModelRecord } from "@roo-code/types"
 import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
@@ -133,16 +133,6 @@ const mockClineProvider = {
 		setValue: vi.fn(),
 		getValue: vi.fn(),
 	},
-	// Delegates to contextProxy.setValue so existing assertions keep holding while
-	// the updateSettings flow is exercised through the provider-level mutation path.
-	setValue: vi
-		.fn()
-		.mockImplementation((key: string, value: unknown) =>
-			mockClineProvider.contextProxy.setValue(
-				key as keyof RooCodeSettings,
-				value as RooCodeSettings[keyof RooCodeSettings],
-			),
-		),
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
@@ -2209,8 +2199,8 @@ describe("webviewMessageHandler - host-owned keys in an updateSettings payload",
 		})
 
 		// The ordinary setting still takes its normal route through provider.setValue, which
-		// is also what keeps the acting view's buffer and pin in sync.
-		expect(mockClineProvider.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
+		// The ordinary setting still takes its normal route through ContextProxy.setValue;
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
 		// The profile- and provider-owned keys reach neither sink: not the shared store, and
 		// not this view's local buffer (which getState() prefers over the shared values).
 		for (const key of ["apiConfiguration", "listApiConfigMeta", "viewStates", "currentApiConfigName"]) {
@@ -2241,7 +2231,7 @@ describe("webviewMessageHandler - host-owned keys in an updateSettings payload",
 			updatedSettings: craftedPayload,
 		})
 
-		expect(mockClineProvider.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
 
 		for (const key of ["apiProvider", "openAiApiKey", "openAiBaseUrl", "openAiModelId"]) {
 			expect(mockClineProvider.setValue).not.toHaveBeenCalledWith(key, expect.anything())
@@ -2264,7 +2254,7 @@ describe("webviewMessageHandler - host-owned keys in an updateSettings payload",
 			updatedSettings: { rateLimitSeconds: 30 },
 		})
 
-		expect(mockClineProvider.setValue).toHaveBeenCalledWith("rateLimitSeconds", 30)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("rateLimitSeconds", 30)
 		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
 			expect.stringContaining("Ignoring provider-profile setting 'rateLimitSeconds'"),
 		)
@@ -2418,20 +2408,6 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
-	})
-
-	it("routes the write through provider.setValue so view-local state stays in sync", async () => {
-		await webviewMessageHandler(mockClineProvider, {
-			type: "updateSettings",
-			updatedSettings: { destructiveCommandGuardEnabled: false },
-		})
-
-		// The provider-level call is the write path under test. The mock forwards to
-		// contextProxy.setValue, so an assertion on the proxy alone would also pass
-		// if the handler bypassed the provider and skipped the view-local sync.
-		expect(mockClineProvider.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
-		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
-		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })
 
