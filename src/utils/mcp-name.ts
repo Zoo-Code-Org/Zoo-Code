@@ -160,9 +160,13 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 	const prefix = `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}`
 	// Cap the server part so the second separator and at least one tool character survive;
 	// otherwise the shortened name no longer parses as mcp--server--tool and the call is dropped.
-	// A trailing hyphen is removed so it cannot merge with the separator.
+	// Trailing hyphens and underscores are removed (keeping at least one character) so the cut
+	// cannot merge with the separator, and the hyphen and underscore spellings of a name are cut
+	// to the same length.
 	const maxServerLength = budget - prefix.length - MCP_TOOL_SEPARATOR.length - 1
-	const server = sanitizeMcpName(serverName).slice(0, maxServerLength).replace(/-+$/, "")
+	const server = sanitizeMcpName(serverName)
+		.slice(0, maxServerLength)
+		.replace(/(?<=.)[-_]+$/, "")
 	const head = `${prefix}${server}${MCP_TOOL_SEPARATOR}`
 	const tool = sanitizeMcpName(toolName).slice(0, budget - head.length)
 

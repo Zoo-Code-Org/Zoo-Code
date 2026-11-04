@@ -35,6 +35,23 @@ describe("NativeToolCallParser.parseDynamicMcpTool name for API history", () => 
 		})
 	})
 
+	it("resolves an underscore-mangled uncut name whose server is cut next to a hyphen", () => {
+		// The server cut lands right after the hyphen of "-backend"; in the model's underscore
+		// spelling that hyphen is an underscore, which must be trimmed the same way.
+		const server = `${"a".repeat(46)}-backend`
+		const mangled = `mcp--${server}--${TOOL}`.replace(/-/g, "_")
+
+		const result = NativeToolCallParser.parseDynamicMcpTool({ id: "toolu_6", name: mangled, arguments: "{}" })
+
+		expect(result).not.toBeNull()
+		expect(result!.name.length).toBeLessThanOrEqual(64)
+		expect(toolNamesMatch(result!.name, buildMcpToolName(server, TOOL))).toBe(true)
+		expect(resolveMcpToolByName([{ name: server, tools: [{ name: TOOL }] }], result!.name)).toEqual({
+			serverName: server,
+			toolName: TOOL,
+		})
+	})
+
 	it("keeps the declared name the model returned", () => {
 		const declared = buildMcpToolName(SERVER, TOOL)
 

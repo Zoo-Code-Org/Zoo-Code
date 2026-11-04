@@ -62,6 +62,19 @@ describe("long MCP tool names", () => {
 			expect(name).not.toContain("---")
 			expect(parseMcpToolName(name)?.serverName).toBe("a".repeat(46))
 		})
+
+		it("cuts the hyphen and underscore spellings of a server name to the same length", () => {
+			const server = `${"a".repeat(46)}-backend`
+
+			expect(buildMcpToolName(server.replace(/-/g, "_"), TOOL)).toBe(buildMcpToolName(server, TOOL))
+		})
+
+		it("keeps one character of a server name made only of underscores", () => {
+			const name = buildMcpToolName("_".repeat(60), TOOL)
+
+			expect(name.length).toBeLessThanOrEqual(64)
+			expect(parseMcpToolName(name)?.serverName).toBe("_")
+		})
 	})
 
 	it("is deterministic and keeps tools that share a 55-character prefix distinct", () => {
