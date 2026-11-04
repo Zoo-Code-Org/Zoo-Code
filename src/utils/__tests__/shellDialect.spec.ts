@@ -33,6 +33,14 @@ describe("describeShellDialect", () => {
 		expect(describeShellDialect("C:\\Windows\\System32\\cmd.exe")).toContain("`;` is not a separator")
 	})
 
+	it("tells cmd.exe users that %ERRORLEVEL% expands before a chained line runs", () => {
+		const description = describeShellDialect("C:\\Windows\\System32\\cmd.exe")
+
+		expect(description).toContain("`%ERRORLEVEL%` expands before a chained line runs")
+		expect(description).toContain("use `&&` or `||` for same-line success checks")
+		expect(description).toContain("enable delayed expansion and use `!ERRORLEVEL!`")
+	})
+
 	it.each(["/bin/bash", "/bin/zsh", "C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Windows\\System32\\wsl.exe"])(
 		"adds nothing for POSIX shell %s",
 		(shell) => {
