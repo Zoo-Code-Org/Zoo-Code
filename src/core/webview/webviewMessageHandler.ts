@@ -4,6 +4,7 @@ import * as os from "os"
 import * as fs from "fs/promises"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import pWaitFor from "p-wait-for"
+import deepEqual from "fast-deep-equal"
 import * as vscode from "vscode"
 
 import {
@@ -2496,11 +2497,21 @@ export const webviewMessageHandler = async (
 					// and save are not ordered against the other's: both can see newName as absent, and a
 					// compensation here would then delete the record the other rename stored. The id is the
 					// record's identity, and every rename carries the id it loaded from oldName.
+					//
+					// Identity alone is not enough: saveConfig keeps a profile's id, so a save of newName
+					// that lands after this rename's write - another view editing the same profile - stores
+					// different settings under the same id, and an id-only check would let compensation
+					// delete that newer save. Compensation therefore also requires that the stored settings
+					// are still the ones this rename wrote. Before the read-back succeeds there is no such
+					// copy to compare against, and this rename had only its own write to newName, so the id
+					// check stays the rule there.
+					let writtenByThisRename: typeof previousRecord | undefined
 					const removeOwnRenameRecord = async (): Promise<void> => {
-						let storedId: string | undefined
+						let stored: typeof previousRecord | undefined
 						try {
-							const stored = await provider.providerSettingsManager.getProfile({ name: newName })
-							storedId = stored.id
+							const { name: _storedName, ...storedRecord } =
+								await provider.providerSettingsManager.getProfile({ name: newName })
+							stored = storedRecord
 						} catch (readError) {
 							if (readError instanceof ProviderSettingsNotFoundError) {
 								// The record is gone: there is nothing of this rename left to undo, and a
@@ -2510,15 +2521,20 @@ export const webviewMessageHandler = async (
 							// Any other read failure leaves the previous behaviour: this rename did store
 							// newName, so its compensation still removes it.
 						}
-						if (storedId !== undefined && storedId !== id) {
+						if (stored !== undefined && stored.id !== id) {
 							provider.log(
-								`Rename compensation skipped for '${newName}': the stored record (id ${storedId}) is not the one this rename wrote (id ${id})`,
+								`Rename compensation skipped for '${newName}': the stored record (id ${stored.id}) is not the one this rename wrote (id ${id}).`,
+							)
+							return
+						}
+						if (stored !== undefined && writtenByThisRename && !deepEqual(stored, writtenByThisRename)) {
+							provider.log(
+								`Rename compensation skipped for '${newName}': the stored record still carries this rename's id (${id}) but no longer holds the settings this rename wrote.`,
 							)
 							return
 						}
 						await provider.providerSettingsManager.deleteConfig(newName)
 					}
-
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
 
@@ -2534,6 +2550,7 @@ export const webviewMessageHandler = async (
 						const { name: _renamedName, ...renamedRecord } =
 							await provider.providerSettingsManager.getProfile({ name: newName })
 						normalizedRenamed = renamedRecord
+						writtenByThisRename = renamedRecord
 					} catch (error) {
 						try {
 							await removeOwnRenameRecord()

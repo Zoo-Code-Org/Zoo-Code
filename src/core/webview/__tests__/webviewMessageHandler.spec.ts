@@ -3014,6 +3014,100 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		)
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
+
+	it("leaves a newer save under the new name alone when the rename compensates", async () => {
+		// saveConfig keeps a profile's id, so a save that another view makes under newName after this
+		// rename wrote it carries the same id and different settings. Compensation that only compared
+		// ids would delete that newer save.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "old-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.openai,
+					apiModelId: "someone-elses-model",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "new-model" },
+		})
+
+		// The deletion that triggered the compensation is still attempted, and the rollback re-point
+		// still runs, but the record another view saved under newName survives the compensation.
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("no longer holds the settings this rename wrote"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("still removes the new profile when the stored settings are the ones the rename wrote", async () => {
+		// The equality check must not become a blanket refusal: on the ordinary compensation path the
+		// stored record is exactly what this rename wrote, so it is still removed.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "old-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "new-model" },
+		})
+
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
+			expect.stringContaining("no longer holds the settings this rename wrote"),
+		)
+	})
 })
 
 describe("webviewMessageHandler - kimiCodeSignIn", () => {
