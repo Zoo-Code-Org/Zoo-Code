@@ -3535,12 +3535,25 @@ export class ClineProvider
 			// with this view's stale cached copy.
 			await this.contextProxy.setValue("listApiConfigMeta", entries)
 
+			// Two views in this extension host share the ContextProxy while their provider queues
+			// and their settings-manager locks stay per instance, so a sibling view can move the
+			// shared selection between this method's entry snapshot and the moment the deletion
+			// became durable above. Decide what the shared store owes the selection as it stands
+			// now that the record is gone, not as it was at entry. If it names the profile this
+			// deletion just removed, the selection has to move to a survivor; the survivor itself stays
+			// the one chosen above, because picking a different one here would mean deciding the
+			// user's next selection for them. The remaining race - an activation that lands after
+			// this read and before the
+			// writes below - needs a lock spanning ProviderSettingsManager instances, which is
+			// tracked as its own unit rather than widened into this method.
+			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
+			const deletedWasGlobal = profileToDelete.name === selectionAfterDelete
+
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under
 			// the surviving profile's name.
 			const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
-			const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
 			// Whether anything is actually going to be re-pointed at the survivor: this view's
 			// own pin, the shared selection, a live sibling's pin, or a closed view's

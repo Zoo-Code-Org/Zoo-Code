@@ -1231,5 +1231,99 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(values.currentApiConfigName).toBe("default")
 			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "ghost-profile"])
 		})
+
+		it("re-points the selection when a sibling view activates the deleted profile mid-deletion", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "default",
+			})
+
+			// A second view activates the profile this deletion is about to remove while the deletion is
+			// in flight. Both views share the extension host's ContextProxy, so from the moment the
+			// record is gone the shared selection genuinely names the deleted profile - the deletion has
+			// to notice that instead of trusting what it read at entry.
+			const manager = provider.providerSettingsManager
+			const deleteStoredConfig = manager.deleteConfig.bind(manager)
+			manager.deleteConfig = async (name: string) => {
+				await provider.contextProxy.setValue("currentApiConfigName", "subtask-child-profile")
+				return deleteStoredConfig(name)
+			}
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			// The shared provider keys still carried the deleted profile's settings when the selection
+			// moved onto it, so they must be replaced with the profile the selection now names.
+			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4.1")
+		})
+
+		it("follows a selection a sibling view moved onto another survivor mid-deletion", async () => {
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const otherId = await provider.providerSettingsManager.saveConfig("other-survivor", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "other-survivor", id: otherId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// This deletion selects the first survivor at entry, because that is what the shared
+			// selection names then. A sibling view moves the selection onto a different survivor while
+			// the record delete is in flight; that choice is the user's, and the deletion must follow it
+			// instead of pushing the selection back onto its own pick.
+			const manager = provider.providerSettingsManager
+			const deleteStoredConfig = manager.deleteConfig.bind(manager)
+			manager.deleteConfig = async (name: string) => {
+				await provider.contextProxy.setValue("currentApiConfigName", "other-survivor")
+				return deleteStoredConfig(name)
+			}
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("other-survivor")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "other-survivor"])
+		})
 	})
 })
