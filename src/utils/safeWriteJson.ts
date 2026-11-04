@@ -102,7 +102,7 @@ function _sameDirectory(approved: string, actual: string): boolean {
 }
 
 /**
- * Canonicalize the directory a write is confined to. The publish target is fully
+ * Canonicalize a directory a write is confined to or approved to stage into. The publish
  * resolved through symlinks, so the scope has to be resolved the same way or a
  * scope path that itself runs through a symlink (macOS /var -> /private/var is the
  * common case) would compare lexically against a resolved target and reject every
@@ -299,10 +299,30 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
 		// put the staged file outside the directory this write was approved for. safeWriteText would
 		// then reject the publish, but the stray file would already exist.
+		// The staging location was chosen from the parent directory resolved under the lock. Re-verify
+		// that directory against itself before writing anything into it: a resolved pathname is not an
+		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
+		// put the staged file outside the directory this write was approved for. safeWriteText would
+		// then reject the publish, but the stray file would already exist. Both sides of this comparison
+		// are canonicalized with the same directory walk the confinement check above uses, because for a
+		// target that does not exist yet resolvePublishTarget returns the path it was given: comparing
+		// that lexical spelling against fs.realpath of the same directory rejects an ordinary write
+		// whenever the two spellings differ. On a Windows runner the temp root arrives spelled with its
+		// 8.3 short name (C:\Users\RUNNER~1\AppData\Local\Temp) and realpath reports the long name for
+		// that very same directory, so every write into a directory that did not exist yet rejected
+		// here. The two walks run against the same frozen approval one after the other, so a parent that
+		// really was replaced by a link still lands on a different canonical directory and still
+		// rejects; the stat between them keeps rejecting a deleted approval, which the walk alone cannot
+		// tell apart from a replaced one. Where a filesystem reports no usable file identity at all the
+		// comparison degrades to today's spelling comparison, which is why the identity being compared
+		// here is the canonical directory rather than the text of a path.
 		const approvedStagingDirectory = path.dirname(actualTempNewFilePath)
+		let approvedCanonical: string
 		let currentStagingDirectory: string
 		try {
-			currentStagingDirectory = await fs.realpath(approvedStagingDirectory)
+			approvedCanonical = await _resolveScopeRoot(approvedStagingDirectory)
+			await fs.stat(approvedCanonical)
+			currentStagingDirectory = await _resolveScopeRoot(approvedCanonical)
 		} catch (driftError: unknown) {
 			const code =
 				driftError && typeof driftError === "object" && "code" in driftError
@@ -314,14 +334,13 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 				code === "ENOENT" ? "no existing directory" : String(driftError),
 			)
 		}
-		if (!_sameDirectory(approvedStagingDirectory, currentStagingDirectory)) {
+		if (!_sameDirectory(approvedCanonical, currentStagingDirectory)) {
 			throw new StagingDirectoryDriftError(
 				resolvedTargetPath ?? absoluteFilePath,
-				approvedStagingDirectory,
+				approvedCanonical,
 				currentStagingDirectory,
 			)
 		}
-
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
 		// Step 2: Delegate backup + commit to safeWriteText with the pre-written
