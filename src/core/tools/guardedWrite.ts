@@ -49,6 +49,23 @@ export class GuardRejectedError extends Error {
 	}
 }
 
+/**
+ * The compare-and-swap rejection whose only cause is that the version token moved.
+ *
+ * Every other rejection in this module is a statement about the caller's authorization or about
+ * the target's identity: the file was never read, it was deleted, the link moved, the target is
+ * outside the workspace. This one says the bytes handed to the guard were authorized and a
+ * different token is now on disk, which is the only shape a caller may read as "the publish I
+ * wanted has already happened". Adoption is gated on it so a matching read cannot stand in for a
+ * rejection that says nothing about this write's content.
+ */
+export class GuardStaleVersionError extends GuardRejectedError {
+	constructor(message: string, path: string) {
+		super(message, path)
+		this.name = "GuardStaleVersionError"
+	}
+}
+
 // -- Per-path tail-promise chain --------------------------------------------
 
 /**
@@ -424,7 +441,7 @@ export async function replaceIfVersion(
 			return tokenAfterPublish(publishTarget)
 		}
 
-		throw new GuardRejectedError(
+		throw new GuardStaleVersionError(
 			"Stale version -- the file changed since you read it (expected " +
 				expectedVersion +
 				", current " +
@@ -527,7 +544,32 @@ export async function guardedWrite(
 		// reject an in-workspace write. Both fall back to the lexical form when the
 		// filesystem cannot resolve them.
 		const canonicalWorkspaceRoot = await fs.realpath(task.cwd).catch(() => path.resolve(task.cwd))
-		const canonicalAlias = await fs.realpath(absolutePath).catch(() => absolutePath)
+		// realpath only resolves a name when every component of it exists, so the ordinary case of a
+		// write that creates its own file lands in the fallback: the final component is absent. The
+		// lexical spelling is not a canonical alias - a workspace reached through a link directory or
+		// a Windows 8.3 short name canonicalizes to a root the alias's own spelling cannot match - and
+		// the clause below only binds the retained target when the alias is inside the canonical root.
+		// Falling back to the lexical form therefore skipped containment for exactly the writes that
+		// create a file inside an aliased workspace. Walk up to the deepest ancestor that does resolve
+		// and re-join the components that are still missing, which is the shape resolvePublishTarget
+		// now uses for the publish target, so the alias and the target are canonicalized alike.
+		const canonicalAlias = await fs.realpath(absolutePath).catch(async () => {
+			let cursor = path.dirname(absolutePath)
+			const missing: string[] = []
+			for (;;) {
+				const resolvedAncestor = await fs.realpath(cursor).catch(() => undefined)
+				if (resolvedAncestor !== undefined) {
+					return path.join(resolvedAncestor, ...missing.reverse(), path.basename(absolutePath))
+				}
+				missing.push(path.basename(cursor))
+				const parent = path.dirname(cursor)
+				// Nothing above resolves either: the lexical path is the only canonical form left.
+				if (parent === cursor) {
+					return path.resolve(absolutePath)
+				}
+				cursor = parent
+			}
+		})
 		const authorizeTarget = (retainedTarget: string): void => {
 			// Containment: validateAccess enforces .rooignore only (its own tests allow
 			// absolute and ../ paths), so a workspace symlink retargeted after the tool's

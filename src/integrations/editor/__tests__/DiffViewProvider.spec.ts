@@ -19,6 +19,7 @@ import { PostCommitDurabilityError, safeWriteText } from "../../../services/file
 import { withFileLock } from "../../../utils/fileLock"
 import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
+import { GuardRejectedError, GuardStaleVersionError } from "../../../core/tools/guardedWrite"
 import type { Task } from "../../../core/task/Task"
 
 // Mock delay
@@ -2597,32 +2598,105 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
-		// The two authorization refusals have to be decided before the baseline branches, or
-		// adoption depends on which baseline the session happened to have. Pinned directly on
-		// the predicate because no scenario above reaches these combinations: the suite never
-		// pairs a create placeholder with a never-read or partial-read preview, which is exactly
-		// the gap the review row is about.
-		it("refuses to adopt a published match when a create placeholder previewed a never-read target", () => {
+		// The refusals are decided against the reason the guard rejected, and before the baseline
+		// branches, so adoption does not depend on which baseline the session happened to have. Pinned
+		// directly on the predicate because no scenario above reaches these combinations: the suite
+		// never pairs a create placeholder with a never-read or partial-read preview.
+		const stale = new GuardStaleVersionError(
+			"Stale version -- the file changed since you read it (expected v1, current v2).",
+			"/test.ts",
+		)
+		const unread = new GuardRejectedError(
+			"File already exists at /test.ts and was not read before this write -- read the file first, then retry.",
+			"/test.ts",
+		)
+
+		it("refuses to adopt a published match when a create placeholder previewed a never-read existing file", () => {
+			diffViewProvider["placeholderVersion"] = undefined
+			diffViewProvider["preOpenObservation"] = null
+
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", stale)).toBe(false)
+		})
+
+		it("adopts a published match for the placeholder open() created, whose only rejection is the moved token", () => {
 			diffViewProvider["placeholderVersion"] = "placeholder-token"
 			diffViewProvider["preOpenObservation"] = null
 
-			expect(diffViewProvider["canAdoptPublishedContent"]("update")).toBe(false)
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", stale)).toBe(true)
+		})
+
+		it("refuses to adopt for an owned placeholder when the rejection is not the moved token", () => {
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			diffViewProvider["preOpenObservation"] = null
+
+			// A peer created the file between open() and the save: the placeholder is still this
+			// session's, but the bytes on disk are not this write's, so a matching read proves nothing.
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", unread)).toBe(false)
 		})
 
 		it("refuses to adopt a published match when a create placeholder previewed a partial read", () => {
 			diffViewProvider["placeholderVersion"] = "placeholder-token"
 			diffViewProvider["preOpenObservation"] = { version: "placeholder-token", complete: false }
 
-			expect(diffViewProvider["canAdoptPublishedContent"]("update")).toBe(false)
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", stale)).toBe(false)
 			// A targeted edit is authorized by a partial read, so it is not this refusal.
-			expect(diffViewProvider["canAdoptPublishedContent"]("edit")).toBe(true)
+			expect(diffViewProvider["canAdoptPublishedContent"]("edit", stale)).toBe(true)
 		})
 
 		it("still adopts for a create placeholder when no preview snapshot exists to check", () => {
 			diffViewProvider["placeholderVersion"] = "placeholder-token"
 			diffViewProvider["preOpenObservation"] = undefined
 
-			expect(diffViewProvider["canAdoptPublishedContent"]("update")).toBe(true)
+			expect(diffViewProvider["canAdoptPublishedContent"]("update", stale)).toBe(true)
+		})
+
+		it("adopts the bytes Auto Save published for a new file open() created", async () => {
+			// The create shape of the autosave race, end to end through saveChanges(): open() made the
+			// file, verified the empty placeholder as this session's baseline and left preOpenObservation
+			// null because there was no prior content to read. Auto Save wrote the accepted bytes, so the
+			// compare-and-swap finds a moved token and the guard rejects. The file already holds exactly
+			// what this save was going to write, and the rejected-save cleanup could not remove it - it is
+			// no longer the empty placeholder open() wrote - so reporting a failure would leave a new file
+			// holding the accepted content with the task told the write had failed.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "create"
+			// open()'s record of the file it created: the placeholder token in the registry, the
+			// ownership identity, and a null prior observation because nothing was there to read.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "placeholder-token", true)
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			diffViewProvider["placeholderIdentity"] = { dev: 1n, ino: 1n }
+			diffViewProvider["preOpenObservation"] = null
+			diffViewProvider["openToken"] = "placeholder-token"
+			// Auto Save moved the token: the disk now reports these stats and holds the accepted bytes.
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			// A rejected save reports the guard's diagnostic; an adopted publish reports the normal
+			// post-save outcome for the content that is already on disk.
+			await expect(diffViewProvider.saveChanges(false)).resolves.toMatchObject({
+				newProblemsMessage: "",
+				finalContent: "new content",
+			})
+
+			// Adopted rather than cleaned up: the file stayed where it is, and the session's observation
+			// now vouches for the version that is actually on disk instead of the placeholder that is gone.
+			expect(fs.unlink).not.toHaveBeenCalled()
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.complete).toBe(true)
 		})
 
 		it("adopts content autosave already published instead of reporting a stale rejection", async () => {

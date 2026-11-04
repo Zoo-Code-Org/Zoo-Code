@@ -1191,6 +1191,38 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
+		it("guardedWrite still applies containment when the workspace resolves through a link and the target is absent", async () => {
+			// The row's bypass: realpath cannot resolve a name whose final component is missing, which
+			// is every write that creates its file. Handing the containment check the lexical alias in
+			// that case made an aliased workspace look outside its own canonical root, so the retained
+			// target was never compared against it and the approved bytes left the workspace.
+			const reg = new ObservationRegistry()
+			const workspaceRoot = path.resolve(WORKSPACE)
+			const canonicalRoot = path.resolve("/private/workspace")
+			const alias = path.resolve(workspaceRoot, "new-file.txt")
+			reg.observe(alias, "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(path.resolve("/outside/workspace/secret.txt"))
+			vi.mocked(fs.realpath).mockImplementation(async (value) => {
+				// Key on the resolved spelling: the guard hands down whichever form it computed, and the
+				// alias and the root have to map regardless of separators.
+				const key = path.resolve(String(value))
+				if (key === alias) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+				if (key === workspaceRoot) {
+					return canonicalRoot
+				}
+				return key
+			})
+
+			await expect(guardedWrite(task, "new-file.txt", "hello", "update")).rejects.toThrow(/outside the workspace/)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
 		it.each([path.resolve("/test/workspace-evil/secret.txt"), path.resolve("./workspace", "../escape.txt")])(
 			"guardedWrite rejects a retained target outside the workspace: %s",
 			async (target) => {

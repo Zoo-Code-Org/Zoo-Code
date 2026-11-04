@@ -25,6 +25,7 @@ import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import {
 	guardedWrite,
 	GuardRejectedError,
+	GuardStaleVersionError,
 	replaceIfVersion,
 	type GuardedWriteKind,
 } from "../../core/tools/guardedWrite"
@@ -717,7 +718,7 @@ export class DiffViewProvider {
 	 * even though the intended publish is satisfied. That reading is only sound when
 	 * the save was authorized against the exact version open() stat-matched.
 	 */
-	private canAdoptPublishedContent(writeKind: GuardedWriteKind): boolean {
+	private canAdoptPublishedContent(writeKind: GuardedWriteKind, rejection: GuardRejectedError): boolean {
 		// The two authorization refusals run first, before any early-return that would
 		// adopt the match: a never-read or partial-read preview is not a moved-token
 		// rejection for ANY session, including one whose baseline is a create placeholder
@@ -728,7 +729,17 @@ export class DiffViewProvider {
 		// would record an observation for content the model never read and authorize a
 		// later full-file replacement.
 		if (this.preOpenObservation === null) {
-			return false
+			// Two sessions land on a null observation and only one of them is authorized. An existing
+			// file the model never read is the refusal: the rejection is about authorization, not a
+			// moved token, for every write kind, and adopting the match would record an observation for
+			// content the model never read and authorize a later full-file replacement. A file open()
+			// itself created is the other case - there was nothing to read, and open() verified the
+			// empty placeholder and recorded it as this session's baseline - so the session owns the
+			// content it is publishing and an autosave of the accepted bytes stays adoptable. Gated on
+			// the rejection the placeholder can actually explain: an "already exists and was not read"
+			// rejection means somebody else's file is at the target, and a matching read of it is what a
+			// clobber looks like from here.
+			return this.placeholderVersion !== undefined && rejection instanceof GuardStaleVersionError
 		}
 		// A full-file publish rejected for a partial read is not a moved-token rejection:
 		// the completeness gate refused before any compare-and-swap ran, so the matching
@@ -861,7 +872,7 @@ export class DiffViewProvider {
 					// only the version token moved. A rejection caused by an external writer, or
 					// by a save that was never authorized at all, must stay a rejection - the
 					// matching bytes are what the clobber looks like from here.
-					this.canAdoptPublishedContent(writeKind) &&
+					this.canAdoptPublishedContent(writeKind, error) &&
 					// Only the autosave shape: a clean buffer means its content is what autosave
 					// already put on disk. A dirty buffer means the disk content came from
 					// someone else, so the discard cleanup below is still the right outcome.

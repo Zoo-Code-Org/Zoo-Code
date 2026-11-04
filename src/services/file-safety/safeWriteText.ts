@@ -1070,7 +1070,14 @@ export async function safeWriteText(
 		// write still owns it (the rename did not complete).
 		if (
 			!stagingCommitted &&
-			stagingNameIsStillOurs(await fs.lstat(tempPath).catch(() => null), validatedStagingIdentity)
+			stagingNameIsStillOurs(
+				// The identity above is captured from a bigint lstat, so the comparison has to be made
+				// against a bigint lstat too: fs.lstat reports plain numbers when no { bigint: true } is
+				// asked for, and a number is never === to the bigint holding the same value, which made
+				// this check disown a staging file this write still owned and leave it beside the target.
+				await fs.lstat(tempPath, { bigint: true }).catch(() => null),
+				validatedStagingIdentity,
+			)
 		) {
 			try {
 				await fs.unlink(tempPath).catch(() => {})

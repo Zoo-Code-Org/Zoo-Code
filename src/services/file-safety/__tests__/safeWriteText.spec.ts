@@ -293,6 +293,42 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
 			expect(fs.rmdir).not.toHaveBeenCalled()
 		})
+
+		it("removes the caller's staging file when a bigint-validated write fails before the rename", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const callerTemp = "/tmp/test-dir/bigint-staged.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStatsWithIdentity(5n, 5n))
+			// The staging identity is validated from a bigint lstat and the cleanup compares it field
+			// for field. fs.lstat reports plain numbers unless { bigint: true } is asked for, so a
+			// numeric read of this same file is the state that used to make the comparison say "not
+			// ours" and leave the file behind. Two identities so the staging name is not the target.
+			// fs.lstat reports plain numbers unless { bigint: true } is asked for, so the same file has
+			// two spellings of its identity here - that difference is exactly what the cleanup
+			// comparison used to trip over. Two different identities so the staging name is not the target.
+			vi.mocked(fs.lstat).mockImplementation(async (p, opts) => {
+				// Match on the name rather than the full path: this platform rewrites the separators
+				// safeWriteText passes down, and the identity has to follow the file, not the spelling.
+				const ours = String(p).includes("bigint-staged")
+				if (opts?.bigint === true) {
+					return ours ? _fileStatsWithIdentity(5n, 5n) : _fileStatsWithIdentity(9n, 8n)
+				}
+				const numeric = _fileStats(false)
+				numeric.ino = ours ? 5 : 9
+				numeric.dev = 8
+				return numeric
+			})
+			vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+			await expect(
+				safeWriteText(targetPath, "hello", { platform: "linux", tempPath: callerTemp }),
+			).rejects.toThrow("EACCES")
+
+			// The rename never landed, so this write still owns the name it staged - by identity, which
+			// is only provable if the cleanup asks for the same numeric base the capture used.
+			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
+		})
 	})
 
 	it("win32: a rejecting async onWarning does not abort the write or leak an unhandled rejection", async () => {
