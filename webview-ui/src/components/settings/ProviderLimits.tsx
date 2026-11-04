@@ -30,6 +30,11 @@ export const ProviderLimits = () => {
 	const [quotas, setQuotas] = useState<ProviderQuota[] | undefined>()
 	const [loading, setLoading] = useState(true)
 	const [failed, setFailed] = useState(false)
+	// Whether the request in flight is a forced refresh (the user pressed Refresh). Only that one disables the button
+	// and is protected from a focus request: a focus request is not forced, and the focus that comes with the first
+	// click into an unfocused webview must not swallow that click.
+	const [forcing, setForcing] = useState(false)
+	const forcingRef = useRef(false)
 
 	// Only the newest request counts: an answer for an older one (a slow first load that a refresh
 	// overtook, or one that outlived this component) is ignored.
@@ -51,6 +56,8 @@ export const ProviderLimits = () => {
 			const requestId = nextQuotaRequestId()
 			latestRequestId.current = requestId
 			setLoading(true)
+			forcingRef.current = force
+			setForcing(force)
 			vscode.postMessage({ type: VsCodeLmModelsMessageType.requestProviderQuotas, bool: force, requestId })
 		},
 		[cancelLatest],
@@ -64,10 +71,15 @@ export const ProviderLimits = () => {
 			setQuotas(event.data.providerQuotas ?? [])
 			setFailed(event.data.providerQuotasFailed === true)
 			setLoading(false)
+			forcingRef.current = false
+			setForcing(false)
 		}
 		window.addEventListener("message", onMessage)
-		// A profile saved in another webview does not reach this one, so look again when it regains focus.
-		const onFocus = () => request(false)
+		// A profile saved in another webview does not reach this one, so look again when it regains focus. A forced
+		// refresh that is in flight is left alone: replacing it would answer a Refresh with a cached result.
+		const onFocus = () => {
+			if (!forcingRef.current) request(false)
+		}
 		window.addEventListener("focus", onFocus)
 		request(false)
 		return () => {
@@ -94,7 +106,7 @@ export const ProviderLimits = () => {
 					type="button"
 					className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground bg-transparent cursor-pointer disabled:cursor-default"
 					onClick={() => request(true)}
-					disabled={loading}
+					disabled={forcing}
 					aria-label={t("settings:usage.limits.refresh")}
 					data-testid="provider-limits-refresh">
 					{fetchedAt ? (

@@ -76,14 +76,19 @@ describe("exportUsageCsv", () => {
 		expect(writeFile).not.toHaveBeenCalled()
 	})
 
-	it("writes nothing for text beyond the size limit, and accepts text at it", async () => {
-		showSaveDialog.mockResolvedValue({ fsPath: "/tmp/big.csv" } as vscode.Uri)
+	it("writes nothing for text beyond the size limit, and writes all of the text at it", async () => {
+		const saveUri = { fsPath: "/tmp/big.csv" } as vscode.Uri
+		showSaveDialog.mockResolvedValue(saveUri)
 
 		expect(await exportUsageCsv("a".repeat(20_000_001), "all")).toBeUndefined()
 		expect(showSaveDialog).not.toHaveBeenCalled()
+		expect(writeFile).not.toHaveBeenCalled()
 
-		expect(await exportUsageCsv("a".repeat(20_000_000), "all")).toBeDefined()
+		expect(await exportUsageCsv("a".repeat(20_000_000), "all")).toBe(saveUri)
 		expect(writeFile).toHaveBeenCalledTimes(1)
+		const [target, bytes] = writeFile.mock.calls[0]
+		expect(target).toBe(saveUri)
+		expect(bytes).toHaveLength(20_000_000) // all of it, not a truncated copy
 	})
 
 	it("tells the user about a failure that is not an Error, as text", async () => {

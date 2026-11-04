@@ -39,6 +39,19 @@ vi.mock("@src/components/ui", () => ({
 const NOW = Date.now()
 const DAY = 24 * 60 * 60 * 1000
 
+/** The text under each bar of a chart. */
+const labelsUnder = (chart: HTMLElement) =>
+	Array.from(chart.nextElementSibling?.children ?? []).map((label) => label.textContent)
+
+/** The last `count` local days, oldest first, formatted the way the chart is expected to label them. */
+const lastDays = (count: number, format: Intl.DateTimeFormat) =>
+	Array.from({ length: count }, (_, i) => {
+		const day = new Date()
+		day.setHours(0, 0, 0, 0)
+		day.setDate(day.getDate() - (count - 1 - i))
+		return format.format(day)
+	})
+
 let n = 0
 const task = (overrides: Partial<HistoryItem> = {}): HistoryItem => ({
 	id: `t${++n}`,
@@ -99,16 +112,17 @@ describe("UsageSettings – branches", () => {
 		expect(screen.getByTestId("usage-stats").textContent).not.toContain("settings:usage.stats.cacheHit")
 	})
 
-	it("labels chart bars by weekday for a week, and by date for a longer range", () => {
+	it("labels the bars of a week by weekday, and draws no labels under a 30-day chart", () => {
 		state.taskHistory = [withUsage()]
 		render(<UsageSettings />)
-		const weekLabels = Array.from(screen.getByTestId("usage-daily-chart").parentElement!.querySelectorAll("span"))
-			.map((s) => s.textContent)
-			.filter(Boolean)
+
+		const chart = screen.getByTestId("usage-daily-chart")
+		expect(labelsUnder(chart)).toEqual(lastDays(7, new Intl.DateTimeFormat(undefined, { weekday: "narrow" })))
+
 		fireEvent.click(screen.getByTestId("usage-range-30d"))
 		const monthChart = screen.getByTestId("usage-daily-chart")
-		expect(monthChart.children.length).toBeGreaterThan(14)
-		expect(weekLabels.length).toBeGreaterThan(0)
+		expect(monthChart.children).toHaveLength(30)
+		expect(monthChart.nextElementSibling).toBeNull() // too many bars to label
 	})
 
 	it("shows an unpriced top task by tokens and a priced one by cost when metrics are mixed", () => {
@@ -172,10 +186,10 @@ describe("UsageSettings – branches", () => {
 		const chart = screen.getByTestId("usage-daily-chart")
 		expect(chart.children.length).toBeGreaterThan(7)
 		expect(chart.children.length).toBeLessThanOrEqual(14)
-		// Date labels (e.g. "Oct 27") sit under the bars, one per day, each with a day number.
-		const labelRow = chart.nextElementSibling as HTMLElement
-		expect(labelRow.children).toHaveLength(chart.children.length)
-		expect(labelRow.textContent).toMatch(/\d/)
+		// One day number per bar, for the days that were charted: not weekday letters.
+		expect(labelsUnder(chart)).toEqual(
+			lastDays(chart.children.length, new Intl.DateTimeFormat(undefined, { day: "numeric" })),
+		)
 	})
 
 	it("treats tasks with no recorded tokens or cost as zero rather than failing", () => {

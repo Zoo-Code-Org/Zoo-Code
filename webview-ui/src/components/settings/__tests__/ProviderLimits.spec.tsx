@@ -330,12 +330,64 @@ describe("ProviderLimits", () => {
 			expect(screen.queryByTestId(`provider-limit-${providerIdentifiers.deepseek}`)).toBeNull()
 		})
 
-		it("does not offer a refresh while a request is pending, so a newer one never races an older one", () => {
+		it("offers no second refresh while a forced refresh is pending, so a newer one never races an older one", () => {
 			render(<ProviderLimits />)
+			fireEvent.click(screen.getByTestId("provider-limits-refresh"))
 			expect(screen.getByTestId("provider-limits-refresh").hasAttribute("disabled")).toBe(true)
 			post.mockClear()
 			fireEvent.click(screen.getByTestId("provider-limits-refresh"))
 			expect(post).not.toHaveBeenCalled()
+		})
+
+		it("lets Refresh be pressed while only the automatic request is pending, and forces a new request", () => {
+			render(<ProviderLimits />)
+			const first = lastRequestId()
+			expect(screen.getByTestId("provider-limits-refresh").hasAttribute("disabled")).toBe(false)
+			post.mockClear()
+
+			fireEvent.click(screen.getByTestId("provider-limits-refresh"))
+
+			expect(post).toHaveBeenCalledWith({ type: "cancelProviderQuotas", requestId: first })
+			expect(post).toHaveBeenCalledWith({
+				type: "requestProviderQuotas",
+				bool: true,
+				requestId: expect.not.stringMatching(first),
+			})
+		})
+
+		it("still forces a request when the click on Refresh comes with the focus of the webview", () => {
+			render(<ProviderLimits />)
+			respond([ok(providerIdentifiers.deepseek)])
+			post.mockClear()
+
+			// The first click into an unfocused webview: it gains focus, and only then is the button pressed.
+			act(() => {
+				window.dispatchEvent(new Event("focus"))
+			})
+			fireEvent.click(screen.getByTestId("provider-limits-refresh"))
+
+			const requests = post.mock.calls.map((c) => c[0]).filter((m) => m.type === "requestProviderQuotas")
+			expect(requests.map((r) => r.bool)).toEqual([false, true])
+		})
+
+		it("does not replace a forced refresh in flight when the webview regains focus", () => {
+			render(<ProviderLimits />)
+			respond([ok(providerIdentifiers.deepseek)])
+			fireEvent.click(screen.getByTestId("provider-limits-refresh"))
+			const forced = lastRequestId()
+			post.mockClear()
+
+			act(() => {
+				window.dispatchEvent(new Event("focus"))
+			})
+
+			expect(post).not.toHaveBeenCalled()
+			// Once it is answered, focus asks again as before.
+			respond([ok(providerIdentifiers.deepseek)], forced)
+			act(() => {
+				window.dispatchEvent(new Event("focus"))
+			})
+			expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "requestProviderQuotas", bool: false }))
 		})
 
 		it("cancels the in-flight request on unmount and ignores a late answer", () => {
