@@ -1,7 +1,9 @@
 // npx vitest src/components/ui/hooks/__tests__/useSelectedModel.spec.ts
 
 import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
+
+import { createTestQueryClient } from "@/utils/test-utils"
 import { renderHook } from "@testing-library/react"
 import type { Mock } from "vitest"
 
@@ -59,6 +61,9 @@ import { useLmStudioModels } from "../useLmStudioModels"
 import { useOllamaModels } from "../useOllamaModels"
 import { useGitHubCopilotModels } from "../useGitHubCopilotModels"
 
+import { useVsCodeLmModels } from "../useVsCodeLmModels"
+
+vi.mock("../useVsCodeLmModels")
 vi.mock("../useRouterModels")
 vi.mock("../useOpenRouterModelProviders")
 vi.mock("../useLmStudioModels")
@@ -98,13 +103,7 @@ const createLocalModelsResult = (
 ): ReturnType<typeof useLmStudioModels> => createQueryResult(data, options) as ReturnType<typeof useLmStudioModels>
 
 const createWrapper = () => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				retry: false,
-			},
-		},
-	})
+	const queryClient = createTestQueryClient()
 	return ({ children }: { children: React.ReactNode }) =>
 		React.createElement(QueryClientProvider, { client: queryClient }, children)
 }
@@ -116,6 +115,7 @@ describe("useSelectedModel", () => {
 		mockUseLmStudioModels.mockReturnValue(createLocalModelsResult({}))
 		mockUseOllamaModels.mockReturnValue(createLocalModelsResult({}))
 		mockUseGitHubCopilotModels.mockReturnValue({ data: undefined } as ReturnType<typeof useGitHubCopilotModels>)
+		vi.mocked(useVsCodeLmModels).mockReturnValue({ data: undefined } as ReturnType<typeof useVsCodeLmModels>)
 	})
 
 	const dynamicProviderCases = [
@@ -613,7 +613,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.isLoading).toBe(true)
 		})
@@ -632,7 +632,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.isLoading).toBe(true)
 		})
@@ -651,7 +651,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.isError).toBe(true)
 		})
@@ -672,7 +672,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(), { wrapper })
+			const { result } = renderHook(() => useSelectedModel({}), { wrapper })
 
 			expect(result.current.provider).toBe(providerIdentifiers.openrouter)
 			expect(result.current.id).toBe(openRouterDefaultModelId)
@@ -1671,6 +1671,101 @@ describe("useSelectedModel", () => {
 			} as any)
 		})
 
+		it.each([true, false, undefined])(
+			"uses the generic host's image capability (%s), not the catalog",
+			(supportsImages) => {
+				vi.mocked(useVsCodeLmModels).mockReturnValue({
+					data: [
+						{
+							vendor: "other",
+							family: vscodeLlmDefaultModelId,
+							modelInfo: { contextWindow: 100, supportsImages },
+						},
+					],
+				} as ReturnType<typeof useVsCodeLmModels>)
+				const { result } = renderHook(() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.vscodeLm,
+						vsCodeLmModelSelector: { vendor: "other", family: vscodeLlmDefaultModelId },
+					}),
+				)
+				expect(result.current.info?.supportsImages).toBe(supportsImages)
+				expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
+				expect(useVsCodeLmModels).toHaveBeenLastCalledWith(true)
+			},
+		)
+
+		it("does not request generic VS Code LM models for other providers", () => {
+			renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative }))
+			expect(useVsCodeLmModels).toHaveBeenLastCalledWith(false)
+		})
+
+		it.each([
+			{ vendor: "other", family: "unknown" },
+			{ vendor: "wanted", family: "unknown", id: "missing" },
+			{ vendor: "wanted", family: "unknown", version: "missing" },
+		])("does not borrow image support from a different selector: %j", (selector) => {
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: [
+					{
+						vendor: "wanted",
+						family: "unknown",
+						id: "present",
+						version: "1",
+						modelInfo: { contextWindow: 100, supportsImages: true },
+					},
+				],
+			} as ReturnType<typeof useVsCodeLmModels>)
+			const { result } = renderHook(() =>
+				useSelectedModel({
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: selector,
+				}),
+			)
+			expect(result.current.info?.supportsImages).toBeUndefined()
+		})
+
+		it.each([false, true])("keeps ambiguous generic selectors unknown (reverse order: %s)", (reverse) => {
+			const models = [true, false].map((supportsImages) => ({
+				vendor: "other",
+				family: "shared-family",
+				id: supportsImages ? "vision" : "text",
+				version: "1",
+				modelInfo: { contextWindow: 100, supportsImages },
+			}))
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: reverse ? models.reverse() : models,
+			} as ReturnType<typeof useVsCodeLmModels>)
+
+			const { result, rerender } = renderHook(
+				({ selector }: { selector: ProviderSettings["vsCodeLmModelSelector"] }) =>
+					useSelectedModel({ apiProvider: providerIdentifiers.vscodeLm, vsCodeLmModelSelector: selector }),
+				{ initialProps: { selector: undefined as ProviderSettings["vsCodeLmModelSelector"] } },
+			)
+			expect(result.current.info?.supportsImages).toBeUndefined()
+			rerender({ selector: { vendor: "other", family: "shared-family" } })
+			expect(result.current.info?.supportsImages).toBeUndefined()
+
+			for (const model of models) {
+				const { id, vendor, family, version } = model
+				rerender({ selector: { id, vendor, family, version } })
+				expect(result.current.info?.supportsImages).toBe(model.modelInfo.supportsImages)
+			}
+		})
+
+		it("enables an unlisted family when the host reports image support", () => {
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: [{ vendor: "other", family: "unknown", modelInfo: { contextWindow: 100, supportsImages: true } }],
+			} as ReturnType<typeof useVsCodeLmModels>)
+			const { result } = renderHook(() =>
+				useSelectedModel({
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { vendor: "other", family: "unknown" },
+				}),
+			)
+			expect(result.current.info?.supportsImages).toBe(true)
+		})
+
 		it("resolves a listed family's contextWindow to its maxInputTokens", () => {
 			const family = vscodeLlmDefaultModelId
 			const apiConfiguration: ProviderSettings = {
@@ -1685,28 +1780,62 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe(`copilot/${family}`)
 			// The bar and the condense gate share one source of truth: contextWindow === maxInputTokens.
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
-			expect(result.current.info?.supportsImages).toBe(false)
+			expect(result.current.info?.supportsImages).toBeUndefined()
 		})
 
-		it.each(["claude-opus-4.8", "claude-opus-5", "gemini-3.6-flash"] as const)(
-			"pins %s to the 197897 input ceiling, not its advertised window",
-			(family) => {
-				const apiConfiguration: ProviderSettings = {
-					apiProvider: providerIdentifiers.vscodeLm,
-					vsCodeLmModelSelector: { vendor: "copilot", family },
-				}
+		it.each([
+			["claude-opus-4.8", 197897],
+			["claude-opus-5.5", 677108],
+			["claude-opus-5", 680456],
+			["gpt-6-astra", 266789],
+			["claude-sonnet-5.5", 680552],
+			["claude-haiku-5.5", 99784],
+			["grok-4.7", 199751],
+			["gemini-4-argon", 953064],
+			["vscModelF", 921736],
+			["oswe-vscode-modelD", 127783],
+			["gpt-6.1-sol", 269903],
+			["gpt-5.6-sol-fast", 269903],
+			["gpt-6.1-terra", 269123],
+			["gpt-6-luna", 269122],
+			["gpt-6-sol", 269122],
+			["claude-fable-5.1", 660686],
+			["claude-fable-5", 658785],
+			["claude-fable-5.5", 660686],
+			["grok-4.5", 199783],
+			["grok-4.6", 199784],
+			["gemini-3.7-flash", 935783],
+			["gemini-3.8-flash", 955113],
+			["gemini-3.6-flash", 935785],
+		] as const)("pins %s to the %s assigned input budget, not its advertised window", (family, expected) => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.vscodeLm,
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
 
-				const wrapper = createWrapper()
-				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-				expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
-				expect(result.current.id).toBe(`copilot/${family}`)
-				expect(result.current.info?.contextWindow).toBe(197897)
-				expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
-				expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
-				expect(result.current.info?.supportsImages).toBe(false)
-			},
-		)
+			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
+			expect(result.current.id).toBe(`copilot/${family}`)
+			expect(result.current.info?.contextWindow).toBe(expected)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
+			expect(result.current.info?.supportsImages).toBeUndefined()
+		})
+
+		it.each(["copilot", "some-other-vendor"])("uses the same measured budget for vendor %s", (vendor) => {
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.vscodeLm,
+						vsCodeLmModelSelector: { vendor, family: "gpt-6-astra" },
+					}),
+				{ wrapper: createWrapper() },
+			)
+			expect(result.current.info?.contextWindow).toBe(266789)
+			expect(result.current.id).toBe(`${vendor}/gpt-6-astra`)
+		})
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
@@ -1720,7 +1849,7 @@ describe("useSelectedModel", () => {
 			// A family miss must not use the 128000 sane-defaults window; use the default model's instead.
 			expect(result.current.info?.contextWindow).not.toBe(128000)
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
-			expect(result.current.info?.supportsImages).toBe(false)
+			expect(result.current.info?.supportsImages).toBeUndefined()
 		})
 	})
 

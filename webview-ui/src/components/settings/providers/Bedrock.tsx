@@ -38,7 +38,7 @@ export const Bedrock = ({
 	organizationAllowList,
 }: BedrockProps) => {
 	const { t } = useAppTranslation()
-	const [awsEndpointSelected, setAwsEndpointSelected] = useState(!!apiConfiguration?.awsBedrockEndpointEnabled)
+	const [awsEndpointSelected, setAwsEndpointSelected] = useState(!!apiConfiguration.awsBedrockEndpointEnabled)
 	const allowCatalog =
 		!organizationAllowList ||
 		organizationAllowList.allowAll ||
@@ -61,12 +61,12 @@ export const Bedrock = ({
 
 	// For a custom ARN, model capabilities come from the model the ARN points to.
 	const capabilityModelId =
-		apiConfiguration?.apiModelId === "custom-arn"
+		apiConfiguration.apiModelId === "custom-arn"
 			? resolveBedrockCustomArnBaseModelId(
 					apiConfiguration.awsCustomArn,
 					apiConfiguration.awsCustomArnBaseModelId,
 				)
-			: apiConfiguration?.apiModelId
+			: apiConfiguration.apiModelId
 
 	// Check if the selected model supports 1M context (supported Claude 4 models)
 	const supports1MContextBeta =
@@ -74,8 +74,7 @@ export const Bedrock = ({
 
 	// Check if the selected model supports Global Inference profile routing
 	const supportsGlobalInference =
-		!!apiConfiguration?.apiModelId &&
-		BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(apiConfiguration.apiModelId as any)
+		!!apiConfiguration.apiModelId && BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(apiConfiguration.apiModelId as any)
 
 	// Check if the selected model supports service tiers
 	const supportsServiceTiers =
@@ -83,8 +82,8 @@ export const Bedrock = ({
 
 	// Update the endpoint enabled state when the configuration changes
 	useEffect(() => {
-		setAwsEndpointSelected(!!apiConfiguration?.awsBedrockEndpointEnabled)
-	}, [apiConfiguration?.awsBedrockEndpointEnabled])
+		setAwsEndpointSelected(!!apiConfiguration.awsBedrockEndpointEnabled)
+	}, [apiConfiguration.awsBedrockEndpointEnabled])
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -103,9 +102,9 @@ export const Bedrock = ({
 				<label className="block font-medium mb-1">Authentication Method</label>
 				<Select
 					value={
-						apiConfiguration?.awsUseApiKey
+						apiConfiguration.awsUseApiKey
 							? "apikey"
-							: apiConfiguration?.awsUseProfile
+							: apiConfiguration.awsUseProfile
 								? "profile"
 								: "credentials"
 					}
@@ -134,18 +133,18 @@ export const Bedrock = ({
 			<div className="text-sm text-vscode-descriptionForeground -mt-3">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{apiConfiguration?.awsUseApiKey ? (
+			{apiConfiguration.awsUseApiKey ? (
 				<VSCodeTextField
-					value={apiConfiguration?.awsApiKey || ""}
+					value={apiConfiguration.awsApiKey || ""}
 					type="password"
 					onInput={handleInputChange("awsApiKey")}
 					placeholder={t("settings:placeholders.apiKey")}
 					className="w-full">
 					<label className="block font-medium mb-1">{t("settings:providers.awsApiKey")}</label>
 				</VSCodeTextField>
-			) : apiConfiguration?.awsUseProfile ? (
+			) : apiConfiguration.awsUseProfile ? (
 				<VSCodeTextField
-					value={apiConfiguration?.awsProfile || ""}
+					value={apiConfiguration.awsProfile || ""}
 					onInput={handleInputChange("awsProfile")}
 					placeholder={t("settings:placeholders.profileName")}
 					className="w-full">
@@ -154,7 +153,7 @@ export const Bedrock = ({
 			) : (
 				<>
 					<VSCodeTextField
-						value={apiConfiguration?.awsAccessKey || ""}
+						value={apiConfiguration.awsAccessKey || ""}
 						type="password"
 						onInput={handleInputChange("awsAccessKey")}
 						placeholder={t("settings:placeholders.accessKey")}
@@ -162,7 +161,7 @@ export const Bedrock = ({
 						<label className="block font-medium mb-1">{t("settings:providers.awsAccessKey")}</label>
 					</VSCodeTextField>
 					<VSCodeTextField
-						value={apiConfiguration?.awsSecretKey || ""}
+						value={apiConfiguration.awsSecretKey || ""}
 						type="password"
 						onInput={handleInputChange("awsSecretKey")}
 						placeholder={t("settings:placeholders.secretKey")}
@@ -170,7 +169,7 @@ export const Bedrock = ({
 						<label className="block font-medium mb-1">{t("settings:providers.awsSecretKey")}</label>
 					</VSCodeTextField>
 					<VSCodeTextField
-						value={apiConfiguration?.awsSessionToken || ""}
+						value={apiConfiguration.awsSessionToken || ""}
 						type="password"
 						onInput={handleInputChange("awsSessionToken")}
 						placeholder={t("settings:placeholders.sessionToken")}
@@ -182,7 +181,7 @@ export const Bedrock = ({
 			<div>
 				<label className="block font-medium mb-1">{t("settings:providers.awsRegion")}</label>
 				<Select
-					value={apiConfiguration?.awsRegion || ""}
+					value={apiConfiguration.awsRegion || ""}
 					onValueChange={(value) => setApiConfigurationField("awsRegion", value)}>
 					<SelectTrigger className="w-full">
 						<SelectValue placeholder={t("settings:common.select")} />
@@ -200,7 +199,7 @@ export const Bedrock = ({
 				<div>
 					<label className="block font-medium mb-1">{t("settings:providers.awsServiceTier")}</label>
 					<Select
-						value={apiConfiguration?.awsBedrockServiceTier || "STANDARD"}
+						value={apiConfiguration.awsBedrockServiceTier || "STANDARD"}
 						onValueChange={(value) =>
 							setApiConfigurationField("awsBedrockServiceTier", value as BedrockServiceTier)
 						}>
@@ -221,7 +220,7 @@ export const Bedrock = ({
 			{supportsGlobalInference && (
 				<div className="flex flex-col gap-1">
 					<Checkbox
-						checked={apiConfiguration?.awsUseGlobalInference || false}
+						checked={apiConfiguration.awsUseGlobalInference || false}
 						onChange={(checked: boolean) => {
 							// Global Inference takes priority over cross-region when both are enabled
 							setApiConfigurationField("awsUseGlobalInference", checked)
@@ -235,7 +234,7 @@ export const Bedrock = ({
 			)}
 			<div className="flex flex-col gap-1">
 				<Checkbox
-					checked={apiConfiguration?.awsUseCrossRegionInference || false}
+					checked={apiConfiguration.awsUseCrossRegionInference || false}
 					onChange={(checked: boolean) => {
 						setApiConfigurationField("awsUseCrossRegionInference", checked)
 					}}>
@@ -271,10 +270,11 @@ export const Bedrock = ({
 					}}
 				/>
 			)}
+
 			{selectedModelInfo?.supportsPromptCache && (
 				<>
 					<Checkbox
-						checked={apiConfiguration?.awsUsePromptCache ?? true}
+						checked={apiConfiguration.awsUsePromptCache ?? true}
 						onChange={handleInputChange("awsUsePromptCache", noTransform)}>
 						<div className="flex items-center gap-1">
 							<span>{t("settings:providers.enablePromptCaching")}</span>
@@ -294,7 +294,7 @@ export const Bedrock = ({
 			{supports1MContextBeta && (
 				<div>
 					<Checkbox
-						checked={apiConfiguration?.awsBedrock1MContext ?? false}
+						checked={apiConfiguration.awsBedrock1MContext ?? false}
 						onChange={(checked: boolean) => {
 							setApiConfigurationField("awsBedrock1MContext", checked)
 						}}>
@@ -316,7 +316,7 @@ export const Bedrock = ({
 			{awsEndpointSelected && (
 				<>
 					<VSCodeTextField
-						value={apiConfiguration?.awsBedrockEndpoint || ""}
+						value={apiConfiguration.awsBedrockEndpoint || ""}
 						style={{ width: "100%", marginTop: 3, marginBottom: 5 }}
 						type="url"
 						onInput={handleInputChange("awsBedrockEndpoint")}
