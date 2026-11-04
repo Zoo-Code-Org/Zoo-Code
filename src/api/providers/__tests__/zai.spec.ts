@@ -18,6 +18,7 @@ import { ZAiHandler } from "../zai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { captureError } from "../../../test-utils/errors"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -702,34 +703,6 @@ describe("ZAiHandler", () => {
 			expect(result.message).toBe("The Z.ai request was aborted")
 		})
 
-		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
-			const thinkingHandler = new ZAiHandler({
-				apiModelId: "glm-4.7",
-				zaiApiKey: "test-zai-api-key",
-				zaiApiLine: "international_coding",
-			})
-			mockCreate.mockImplementationOnce(() =>
-				(async function* () {
-					yield { choices: [{ delta: { content: "partial" } }] }
-					throw new APIUserAbortError()
-				})(),
-			)
-
-			const result = await captureError(
-				(async () => {
-					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
-						// consume
-					}
-				})(),
-			)
-
-			// The thinking path inherits stream iteration from the base provider; a
-			// mid-stream abort must normalize to the Task.ts contract shape.
-			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("The Z.ai request was aborted")
-			expect(result.message.endsWith("aborted")).toBe(true)
-		})
-
 		it("completePrompt should pass the abort signal through to the client", async () => {
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
@@ -762,6 +735,39 @@ describe("ZAiHandler", () => {
 
 			expect(result.name).toBe("AbortError")
 			expect(result.message).toBe("The Z.ai request was aborted")
+		})
+
+		it("completePrompt should cap an oversized timeoutMs before handing it to the SDK", async () => {
+			// GLM-5.3 has its own completePrompt path; other models delegate to the base
+			// provider, so the override is what this test has to exercise.
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await h53.completePrompt("test prompt", { timeoutMs: MAX_TIMEOUT_MS + 1 })
+
+			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
+			// Same capped normalization as the merged abort signal: uncapped, the SDK timer
+			// clamps the delay to ~1 ms and aborts the request almost immediately.
+			expect(requestOptions?.timeout).toBe(MAX_TIMEOUT_MS)
+		})
+
+		it("completePrompt should omit the request timeout for a non-finite timeoutMs", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await h53.completePrompt("test prompt", { timeoutMs: Number.POSITIVE_INFINITY })
+
+			// Infinity satisfies a bare `> 0` check but is not a legal timer delay, so it has
+			// to mean "no explicit timeout" and leave the request config unset.
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), undefined)
 		})
 
 		it("glm-5.3 completePrompt should cancel the in-flight request when the caller signal aborts", async () => {

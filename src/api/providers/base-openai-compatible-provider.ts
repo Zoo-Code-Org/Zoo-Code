@@ -16,6 +16,7 @@ import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { createAbortError, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -286,8 +287,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		// timeoutMs <= 0 as "no explicit timeout". The per-request timeout is
 		// forwarded as well: without it the SDK falls back to the client-level
 		// default, which can still expire before a larger per-request timeoutMs.
-		const requestTimeout =
-			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
+		const requestTimeout = getRequestTimeoutMs(options?.timeoutMs)
 		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
 			.setOption("signal", requestSignal)

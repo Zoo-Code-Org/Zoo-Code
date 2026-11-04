@@ -16,6 +16,7 @@ import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { captureError } from "../../../test-utils/errors"
 
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import axios from "axios"
 
 vitest.mock("../utils/timeout-config", () => ({
@@ -1207,6 +1208,23 @@ describe("OpenAiHandler", () => {
 		it("should not pass a request signal for zero timeoutMs in completePrompt", async () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {})
+		})
+
+		it("should cap an oversized completePrompt timeoutMs before handing it to the SDK", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: MAX_TIMEOUT_MS + 1 })
+			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
+			// The merged abort signal already caps the delay; the SDK timeout option is the
+			// same value, because an uncapped one is clamped to ~1 ms by the timer itself.
+			expect(requestOptions?.timeout).toBe(MAX_TIMEOUT_MS)
+		})
+
+		it("should omit the request timeout for a non-finite completePrompt timeoutMs", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: Number.POSITIVE_INFINITY })
+			// Infinity passes a bare `> 0` check but is not a legal timer delay, so it must
+			// mean "no explicit timeout" rather than reaching the SDK.
 			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {})
 		})
 

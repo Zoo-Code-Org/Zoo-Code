@@ -1,3 +1,4 @@
+import { MAX_TIMEOUT_MS } from "../abort-signal"
 import { createTimeoutError, getRequestTimeoutMs } from "../request-timeout"
 
 describe("getRequestTimeoutMs", () => {
@@ -34,6 +35,16 @@ describe("getRequestTimeoutMs", () => {
 		// Non-number values can only reach this helper through untyped callers
 		// (e.g. user settings); the double cast exercises the typeof guard.
 		expect(getRequestTimeoutMs("5000" as unknown as number)).toBeUndefined()
+	})
+
+	it("caps timeouts past the maximum timer delay instead of letting Node clamp them", () => {
+		// A delay above 2^31-1 ms is not a legal timer value: Node clamps it to ~1 ms, so an
+		// oversized setting would abort the request almost immediately rather than wait. The
+		// cap belongs here because this value also goes to the SDK's own timeout option.
+		expect(getRequestTimeoutMs(MAX_TIMEOUT_MS)).toBe(MAX_TIMEOUT_MS)
+		expect(getRequestTimeoutMs(MAX_TIMEOUT_MS + 1)).toBe(MAX_TIMEOUT_MS)
+		expect(getRequestTimeoutMs(2 ** 32)).toBe(MAX_TIMEOUT_MS)
+		expect(getRequestTimeoutMs(Number.MAX_SAFE_INTEGER)).toBe(MAX_TIMEOUT_MS)
 	})
 })
 

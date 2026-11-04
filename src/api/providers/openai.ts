@@ -31,6 +31,7 @@ import { handleOpenAIRequestError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { createAbortError, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 /** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
 type OpenAiRequestConfig = {
@@ -463,8 +464,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		isAzureAiInference: boolean,
 		options?: CompletePromptOptions,
 	): OpenAI.RequestOptions {
-		const requestTimeout =
-			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
+		const requestTimeout = getRequestTimeoutMs(options?.timeoutMs)
 		return (
 			new RequestConfigBuilder<OpenAiRequestConfig>()
 				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)

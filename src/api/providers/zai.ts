@@ -19,6 +19,7 @@ import { NOT_PROVIDED } from "./constants"
 import { handleOpenAIRequestError } from "./utils/error-handler"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
 // Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
@@ -180,10 +181,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
 			.setOption("signal", requestSignal)
-			.setOption(
-				"timeout",
-				typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined,
-			)
+			.setOption("timeout", getRequestTimeoutMs(options?.timeoutMs))
 			.build()
 
 		try {

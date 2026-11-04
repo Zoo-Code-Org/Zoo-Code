@@ -9,6 +9,7 @@ import { BaseOpenAiCompatibleProvider } from "../base-openai-compatible-provider
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { captureError } from "../../../test-utils/errors"
+import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -705,6 +706,28 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			// aborting the caller's controller proves caller cancellation survives.
 			controller.abort()
 			expect(requestOptions?.signal.aborted).toBe(true)
+		})
+
+		it("should cap an oversized completePrompt timeoutMs before handing it to the SDK", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: MAX_TIMEOUT_MS + 1 })
+
+			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
+			// The SDK passes this straight to a Node timer, which clamps anything past 2^31-1 ms
+			// to ~1 ms: uncapped, the request would abort at once instead of waiting.
+			expect(requestOptions?.timeout).toBe(MAX_TIMEOUT_MS)
+			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+		})
+
+		it("should omit the request timeout for a non-finite completePrompt timeoutMs", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: Number.POSITIVE_INFINITY })
+
+			// Infinity satisfies a bare `> 0` check but is not a legal timer delay; it means
+			// "no explicit timeout", so no request options are sent at all.
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "test-model" }), undefined)
 		})
 
 		it("should abort the request when a timeout-only completePrompt timeoutMs elapses", async () => {
