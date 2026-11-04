@@ -28,6 +28,20 @@ const fetchers = vi.hoisted(() => ({
 	getZooGatewayModels: vi.fn(),
 }))
 
+// The pre-warm hook reaches the fetcher either directly (fetchModel) or through
+// getModels(). Delegating to the handler's own fetchModels keeps the fetcher
+// call counts in this file meaningful and avoids touching the real disk cache.
+const modelCache = vi.hoisted(() => ({
+	getModels: vi.fn(),
+	getModelsFromCache: vi.fn(),
+}))
+
+vi.mock("../fetchers/modelCache", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../fetchers/modelCache")>()),
+	getModels: modelCache.getModels,
+	getModelsFromCache: modelCache.getModelsFromCache,
+}))
+
 vi.mock("../fetchers/deepseek", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/deepseek")>()),
 	getDeepSeekModels: fetchers.getDeepSeekModels,
@@ -110,6 +124,7 @@ import { RequestyHandler } from "../requesty"
 import { UnboundHandler } from "../unbound"
 import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
 import { ZooGatewayHandler } from "../zoo-gateway"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 const BASE_URL = "https://catalog.example.com/v1"
 const API_KEY = "catalog-key"
@@ -126,6 +141,8 @@ interface AdapterCase {
 	expectedArgs: unknown[]
 	/** Whether the adapter forwards an AbortSignal to its fetcher. */
 	forwardsSignal: boolean
+	/** Whether the handler implements the ensureModelFetched pre-warm hook. */
+	prewarms: boolean
 }
 
 const cases: AdapterCase[] = [
@@ -136,6 +153,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: false, authScoped: false },
 		expectedArgs: [BASE_URL, API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "IO Intelligence",
@@ -144,6 +162,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: true, authScoped: false },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "Kenari",
@@ -152,6 +171,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: false, authScoped: false },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "Kimi Code",
@@ -160,6 +180,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: true, authScoped: true },
 		expectedArgs: [API_KEY],
 		forwardsSignal: false,
+		prewarms: false,
 	},
 	{
 		name: "LiteLLM",
@@ -168,6 +189,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: true, authScoped: false },
 		expectedArgs: [API_KEY, BASE_URL],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "LM Studio",
@@ -176,6 +198,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: false, authScoped: false },
 		expectedArgs: [BASE_URL],
 		forwardsSignal: true,
+		prewarms: true,
 	},
 	{
 		name: "Moonshot",
@@ -184,6 +207,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: true, authScoped: false },
 		expectedArgs: [BASE_URL, API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "NanoGPT",
@@ -192,6 +216,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: true, authScoped: false },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "Ollama",
@@ -200,6 +225,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: false, authScoped: false },
 		expectedArgs: [BASE_URL, API_KEY],
 		forwardsSignal: true,
+		prewarms: true,
 	},
 	{
 		name: "OpenCode Go",
@@ -208,6 +234,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: false, authScoped: false },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "OpenRouter",
@@ -216,6 +243,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: false, authScoped: false },
 		expectedArgs: [undefined],
 		forwardsSignal: true,
+		prewarms: true,
 	},
 	{
 		name: "Poe",
@@ -224,6 +252,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: true, authScoped: false },
 		expectedArgs: [API_KEY, BASE_URL],
 		forwardsSignal: true,
+		prewarms: true,
 	},
 	{
 		name: "Requesty",
@@ -232,6 +261,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: true, authScoped: false },
 		expectedArgs: [BASE_URL, API_KEY],
 		forwardsSignal: true,
+		prewarms: true,
 	},
 	{
 		name: "Unbound",
@@ -240,6 +270,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: false, authScoped: false },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,
+		prewarms: true,
 	},
 	{
 		name: "Vercel AI Gateway",
@@ -248,6 +279,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: false, keyScoped: false, authScoped: false },
 		expectedArgs: [undefined],
 		forwardsSignal: true,
+		prewarms: false,
 	},
 	{
 		name: "Zoo Gateway",
@@ -256,6 +288,7 @@ const cases: AdapterCase[] = [
 		scope: { urlScoped: true, keyScoped: true, authScoped: true },
 		expectedArgs: [{ zooSessionToken: API_KEY, zooGatewayBaseUrl: BASE_URL }],
 		forwardsSignal: false,
+		prewarms: false,
 	},
 ]
 
@@ -267,9 +300,16 @@ describe("model catalog adapters", () => {
 			fetcher.mockReset()
 			fetcher.mockResolvedValue(CATALOG)
 		}
+
+		modelCache.getModels.mockReset()
+		modelCache.getModels.mockImplementation((opts: GetModelsOptions, handler: ApiHandler) =>
+			handler.fetchModels!(opts),
+		)
+		modelCache.getModelsFromCache.mockReset()
+		modelCache.getModelsFromCache.mockReturnValue(undefined)
 	})
 
-	describe.each(cases)("$name", ({ create, fetcher, scope, expectedArgs, forwardsSignal }) => {
+	describe.each(cases)("$name", ({ create, fetcher, scope, expectedArgs, forwardsSignal, prewarms }) => {
 		it("declares its model cache scope", () => {
 			expect(create().getModelCacheScope()).toEqual(scope)
 		})
@@ -301,6 +341,94 @@ describe("model catalog adapters", () => {
 
 			await expect(create().fetchModels?.(options)).rejects.toThrow("catalog unavailable")
 		})
+
+		if (prewarms) {
+			it("implements the ensureModelFetched pre-warm hook", () => {
+				expect(create().ensureModelFetched).toBeTypeOf("function")
+			})
+		}
+	})
+
+	describe.each(cases.filter(({ prewarms }) => prewarms))("$name pre-warm", ({ create, fetcher }) => {
+		it("memoizes a successful load", async () => {
+			const handler = create()
+
+			await handler.ensureModelFetched!()
+			await handler.ensureModelFetched!()
+
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(1)
+		})
+
+		it("retries a failed load on the next call", async () => {
+			const handler = create()
+			fetchers[fetcher].mockRejectedValueOnce(new Error("catalog unavailable"))
+
+			await expect(handler.ensureModelFetched!()).rejects.toThrow("catalog unavailable")
+			await expect(handler.ensureModelFetched!()).resolves.toBeUndefined()
+
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(2)
+		})
+
+		it("retries when the provider returns an empty catalog", async () => {
+			const handler = create()
+			// getModels() deliberately does not cache an empty response, so the
+			// pre-warm must not memoize it either -- otherwise the handler would be
+			// pinned to the fallback model info for the rest of its lifetime.
+			fetchers[fetcher].mockResolvedValueOnce({})
+
+			await handler.ensureModelFetched!()
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(1)
+
+			await handler.ensureModelFetched!()
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(2)
+
+			// The second response was non-empty, so it is memoized.
+			await handler.ensureModelFetched!()
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(2)
+		})
+
+		it("single-flights concurrent calls", async () => {
+			const handler = create()
+
+			await Promise.all([handler.ensureModelFetched!(), handler.ensureModelFetched!()])
+
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(1)
+		})
+
+		it("rejects a pre-aborted caller without fetching", async () => {
+			const handler = create()
+			const controller = new AbortController()
+			controller.abort(new Error("caller gave up"))
+
+			await expect(handler.ensureModelFetched!(controller.signal)).rejects.toThrow("caller gave up")
+			expect(fetchers[fetcher]).not.toHaveBeenCalled()
+		})
+
+		it("detaches only the aborted waiter while the shared fetch still settles", async () => {
+			const handler = create()
+			let settle: (models: ModelRecord) => void = () => {}
+			fetchers[fetcher].mockImplementation(
+				() =>
+					new Promise<ModelRecord>((resolve) => {
+						settle = resolve
+					}),
+			)
+
+			const controller = new AbortController()
+			const wait = handler.ensureModelFetched!(controller.signal)
+			controller.abort(new Error("caller gave up"))
+
+			await expect(wait).rejects.toThrow("caller gave up")
+
+			settle(CATALOG)
+			// Let the shared load's promise chain settle (load -> .then -> .finally).
+			await flushMacrotasks()
+
+			// The load completed despite the detached waiter, so the next call
+			// is a memoized no-op rather than a second fetch.
+			await expect(handler.ensureModelFetched!()).resolves.toBeUndefined()
+			expect(fetchers[fetcher]).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	it("defaults to an unscoped cache and no catalog fetcher for static providers", () => {
@@ -308,5 +436,6 @@ describe("model catalog adapters", () => {
 
 		expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
 		expect(handler.fetchModels).toBeUndefined()
+		expect(handler.ensureModelFetched).toBeUndefined()
 	})
 })

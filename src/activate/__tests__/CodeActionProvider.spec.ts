@@ -41,6 +41,9 @@ vi.mock("vscode", () => ({
 		Information: 2,
 		Hint: 3,
 	},
+	CodeActionTriggerKind: {
+		Invoke: 0,
+	},
 	workspace: {
 		getConfiguration: vi.fn().mockReturnValue({
 			get: vi.fn().mockReturnValue(true),
@@ -59,23 +62,24 @@ vi.mock("../../integrations/editor/EditorUtils", () => ({
 
 describe("CodeActionProvider", () => {
 	let provider: CodeActionProvider
-	let mockDocument: any
-	let mockRange: any
-	let mockContext: any
+	let mockDocument: vscode.TextDocument
+	let mockRange: vscode.Range
+	let mockContext: vscode.CodeActionContext
 
 	beforeEach(() => {
 		provider = new CodeActionProvider()
 
+		// Document double provides getText, lineAt, lineCount, and uri.fsPath.
 		mockDocument = {
 			getText: vi.fn(),
 			lineAt: vi.fn(),
 			lineCount: 10,
 			uri: { fsPath: "/test/file.ts" },
-		}
+		} as unknown as vscode.TextDocument
 
 		mockRange = new vscode.Range(0, 0, 0, 10)
 
-		mockContext = { diagnostics: [] }
+		mockContext = { diagnostics: [], triggerKind: vscode.CodeActionTriggerKind.Invoke, only: undefined }
 		;(EditorUtils.getEffectiveRange as Mock).mockReturnValue({
 			range: mockRange,
 			text: "test code",
@@ -89,30 +93,31 @@ describe("CodeActionProvider", () => {
 
 	describe("provideCodeActions", () => {
 		it("should provide explain, improve, fix logic, and add to context actions by default", () => {
-			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
+			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext) as vscode.CodeAction[]
 
 			expect(actions).toHaveLength(3)
-			expect((actions as any)[0].title).toBe("Add to Zoo Code")
-			expect((actions as any)[1].title).toBe("Explain with Zoo Code")
-			expect((actions as any)[2].title).toBe("Improve with Zoo Code")
+			expect(actions[0].title).toBe("Add to Zoo Code")
+			expect(actions[1].title).toBe("Explain with Zoo Code")
+			expect(actions[2].title).toBe("Improve with Zoo Code")
 		})
 
 		it("should provide fix action instead of fix logic when diagnostics exist", () => {
-			mockContext.diagnostics = [
-				{ message: "test error", severity: vscode.DiagnosticSeverity.Error, range: mockRange },
-			]
+			mockContext = {
+				...mockContext,
+				diagnostics: [{ message: "test error", severity: vscode.DiagnosticSeverity.Error, range: mockRange }],
+			}
 
-			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
+			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext) as vscode.CodeAction[]
 
 			expect(actions).toHaveLength(2)
-			expect((actions as any).some((a: any) => a.title === "Fix with Zoo Code")).toBe(true)
-			expect((actions as any).some((a: any) => a.title === "Add to Zoo Code")).toBe(true)
+			expect(actions.some((a) => a.title === "Fix with Zoo Code")).toBe(true)
+			expect(actions.some((a) => a.title === "Add to Zoo Code")).toBe(true)
 		})
 
 		it("should return empty array when no effective range", () => {
 			;(EditorUtils.getEffectiveRange as Mock).mockReturnValue(null)
 
-			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
+			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext) as vscode.CodeAction[]
 
 			expect(actions).toEqual([])
 		})
@@ -125,7 +130,7 @@ describe("CodeActionProvider", () => {
 			})
 			;(vscode.workspace.getConfiguration as Mock).mockReturnValue(mockGetConfiguration())
 
-			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
+			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext) as vscode.CodeAction[]
 
 			expect(actions).toEqual([])
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith("zoo-code")
@@ -145,7 +150,7 @@ describe("CodeActionProvider", () => {
 				throw new Error("Test error")
 			})
 
-			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
+			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext) as vscode.CodeAction[]
 
 			expect(actions).toEqual([])
 			expect(consoleErrorSpy).toHaveBeenCalledWith("Error providing code actions:", expect.any(Error))
