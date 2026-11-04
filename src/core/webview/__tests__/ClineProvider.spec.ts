@@ -3314,8 +3314,9 @@ describe("ClineProvider", () => {
 		expect(mockPostMessage).toHaveBeenCalledWith(message)
 	})
 
-	test("postMessageToWebview does not throw when webview is disposed", async () => {
+	test("postMessageToWebview logs the dropped message type when the webview post rejects", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
+		;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
 
 		// Simulate postMessage throwing after webview disposal
 		mockPostMessage.mockRejectedValueOnce(new Error("Webview is disposed"))
@@ -3324,6 +3325,34 @@ describe("ClineProvider", () => {
 
 		// Should not throw
 		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+
+		// The rejection is handled by a detached catch, so awaiting the post alone cannot prove
+		// anything about the log: flush the handler and assert on what it wrote, message type and
+		// Error.message both included.
+		await vi.waitFor(() =>
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("dropped message type=action: Webview is disposed"),
+			),
+		)
+	})
+
+	test("postMessageToWebview logs a non-Error webview rejection", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+
+		// VS Code settles postMessage from the renderer, so a rejection reason is not guaranteed to
+		// be an Error; the log has to carry the value itself instead of "[object Object]".
+		mockPostMessage.mockRejectedValueOnce("disposed without an error object")
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+
+		await vi.waitFor(() =>
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("dropped message type=action: disposed without an error object"),
+			),
+		)
 	})
 
 	test("postMessageToWebview does not await the webview ack", async () => {
