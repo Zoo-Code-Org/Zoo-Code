@@ -341,13 +341,19 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// is in flight — openInNewTab and popoutButtonClicked both dispatch
 	// through here — awaits it instead of creating a second panel: exactly
 	// one panel is created and every caller receives the same provider.
-	const inFlight = pendingTabPanelCreation
-	if (inFlight) {
+	//
+	// Joining repeats while the slot stays filled: when a shared creation settles to
+	// a disposed provider, the first caller that falls back stores its own replacement
+	// before awaiting it, so a later caller must join that replacement rather than
+	// open another tab of its own. Without the re-join, three overlapping calls open
+	// two replacement tabs. An empty slot means this call owns the next creation.
+	while (pendingTabPanelCreation) {
+		const inFlight = pendingTabPanelCreation
 		const pendingProvider = await inFlight
 		// The panel can be closed while the creation is still settling (the settle delay
 		// and the editor-group lock run after resolveWebviewView): the shared promise then
 		// resolves to a disposed provider, and returning it opens no usable tab. Drop the
-		// settled creation and fall through to create a fresh panel.
+		// settled creation and join whatever replacement the slot holds next.
 		if (!pendingProvider.isDisposed) {
 			return pendingProvider
 		}

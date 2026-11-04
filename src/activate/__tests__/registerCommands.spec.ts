@@ -1496,4 +1496,57 @@ describe("openClineInNewTab initialization failure", () => {
 		resolveSpy.mockRestore()
 		isDisposedSpy.mockRestore()
 	})
+	// One disposed creation with two waiting callers: the first waiter stores its replacement
+	// before awaiting it, so the third call must join that replacement. Two replacement tabs
+	// for three overlapping calls is the bug this pins.
+	it("gives every fallback caller the same replacement when the shared creation settles disposed", async () => {
+		let releaseInitialization: () => void = () => {}
+		const initializationGate = new Promise<void>((resolve) => {
+			releaseInitialization = resolve
+		})
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockImplementation(async () => {
+			await initializationGate
+		})
+		// Only the creation that was in flight when the panel closed is unusable. The
+		// replacement a waiter starts is live, and it is the one every later waiter gets.
+		const isDisposedSpy = vi.spyOn(ClineProvider.prototype, "isDisposed", "get").mockImplementation(function (
+			this: ClineProvider,
+		) {
+			return this === vi.mocked(ClineProvider).mock.instances[0]
+		})
+		// Every tab here is a fresh surface: nothing is reusable through the tracked ref.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		const started = [
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		]
+		releaseInitialization()
+		const results = await Promise.all(started)
+		const ctor = vi.mocked(ClineProvider)
+		// The caller that owned the disposed creation still receives it; the two waiters
+		// share the single replacement creation.
+		expect(results[0]).toBe(ctor.mock.instances[0])
+		const replacement = ctor.mock.instances[1]
+		expect(replacement).toBeDefined()
+		expect(results[1]).toBe(replacement)
+		expect(results[2]).toBe(replacement)
+		// One original tab plus one replacement. A second replacement tab here means a
+		// waiter opened its own panel instead of joining the one already in flight.
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+		resolveSpy.mockRestore()
+		isDisposedSpy.mockRestore()
+	})
 })
