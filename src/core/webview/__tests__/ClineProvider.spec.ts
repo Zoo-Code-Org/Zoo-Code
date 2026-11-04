@@ -4835,6 +4835,142 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("tombstones an id whose entry a write cleared and releases it at dispose", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tombstone-clear-write")
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+
+			// Both persisted fields go undefined in one write, which drops the entry.
+			await provider["savePersistedViewState"]({ mode: undefined, currentApiConfigName: undefined })
+
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-clear-write")).toBe(true)
+			expect(provider["addedClearedViewStateIds"].has("stable-tombstone-clear-write")).toBe(true)
+
+			await provider.dispose()
+
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-clear-write")).toBe(false)
+			expect(provider["addedClearedViewStateIds"].size).toBe(0)
+		})
+
+		it("lifts the tombstone and this provider's claim when a write lands the entry again", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tombstone-relift")
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+			await provider["clearPersistedViewState"]()
+			expect(provider["addedClearedViewStateIds"].has("stable-tombstone-relift")).toBe(true)
+
+			await provider["savePersistedViewState"]({ mode: "code", updatedAt: 2 })
+
+			// An entry that is in storage again was not cleared, so neither the shared tombstone nor
+			// this provider's claim on it may survive: a stale claim would let dispose drop a
+			// tombstone another view had already lifted.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({
+				"stable-tombstone-relift": { mode: "code", updatedAt: 2 },
+			})
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-relift")).toBe(false)
+			expect(provider["addedClearedViewStateIds"].has("stable-tombstone-relift")).toBe(false)
+
+			await provider.dispose()
+		})
+
+		it("puts the tombstone back when the write that would have landed the entry fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tombstone-lift-fail")
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+			await provider["clearPersistedViewState"]()
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-lift-fail")).toBe(true)
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				return Promise.resolve()
+			})
+
+			// This write would have landed the entry and lifted the tombstone with it.
+			await expect(provider["savePersistedViewState"]({ mode: "code", updatedAt: 2 })).rejects.toThrow(
+				"storage unavailable",
+			)
+			mockContext.globalState.update = originalUpdate
+
+			// Storage never changed, so the lift is undone together with the write: an id that is
+			// still cleared on disk has to stay tombstoned.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-lift-fail")).toBe(true)
+			expect(provider["addedClearedViewStateIds"].has("stable-tombstone-lift-fail")).toBe(true)
+
+			await provider.dispose()
+		})
+
+		it("drains an ownerless tombstone only once no live eviction list guards it", async () => {
+			const owner = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const firstGuard = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const secondGuard = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await owner["setViewStateId"]("stable-tombstone-drain")
+			await owner["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+			await owner["clearPersistedViewState"]()
+
+			// Two views are mid-activation with this id in their eviction lists when the provider
+			// that cleared the entry goes away.
+			firstGuard["prunedViewIdsDuringActivation"].push("stable-tombstone-drain")
+			secondGuard["prunedViewIdsDuringActivation"].push("stable-tombstone-drain")
+			await owner.dispose()
+
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-drain")).toBe(true)
+
+			// The first group lets go of its list, but the second still names the id, so that
+			// rollback still needs the tombstone.
+			firstGuard["_snapshotProfileActivationState"]()
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-drain")).toBe(true)
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-drain")).toBe(true)
+
+			// Once the last list naming it is let go, the next group drops it.
+			secondGuard["_snapshotProfileActivationState"]()
+			expect(ClineProvider["clearedViewStateIds"].has("stable-tombstone-drain")).toBe(false)
+			expect(ClineProvider["clearedViewStateIdsWithoutOwner"].has("stable-tombstone-drain")).toBe(false)
+
+			await firstGuard.dispose()
+			await secondGuard.dispose()
+		})
+
 		it("should roll back the shared write when setValue per-view persistence fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -6899,6 +7035,16 @@ describe("ClineProvider", () => {
 			expect(lastSibling["viewLocalState"].apiConfiguration).toEqual(lastOverlay)
 			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({ apiKey: "origin" })
 
+			// The last sibling's post rejects for good, so putting its own overlay back fails too:
+			// the compensation logs which view it could not restore instead of swallowing that as
+			// well.
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("Unable to restore the overlay of view"),
+			)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("after the refresh of profile 'profile-sibling-refresh' failed: webview gone"),
+			)
+
 			await provider.dispose()
 			await firstSibling.dispose()
 			await lastSibling.dispose()
@@ -6939,9 +7085,16 @@ describe("ClineProvider", () => {
 				})
 			}
 
+			// The sibling moves its own overlay once, right after the refresh wrote the saved
+			// settings, so that change is newer than this operation. Exactly once: the compensation
+			// posts this view too, and re-applying the change there would hide a compensation that
+			// ignored the newer write.
+			let moved = false
 			vi.spyOn(firstSibling, "postStateToWebview").mockImplementation(async () => {
-				// The sibling moves its own overlay right after the refresh wrote the saved
-				// settings, so that change is newer than this operation.
+				if (moved) {
+					return
+				}
+				moved = true
 				await firstSibling["_updateViewLocalStateFromMutation"]({ apiConfiguration: newerSiblingSettings })
 			})
 			vi.spyOn(lastSibling, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
@@ -7021,6 +7174,129 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 			await firstSibling.dispose()
+			await lastSibling.dispose()
+		})
+
+		it("leaves a sibling task outside the compensation guards alone when a later sibling refresh fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const otherProfileSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const evictedSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const lastSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const profileName = "profile-sibling-task-guards"
+			const savedSettings: ProviderSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "saved" }
+			const overlays: ProviderSettings[] = [
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "other-profile" },
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "evicted" },
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "last" },
+			]
+
+			for (const [index, instance] of [provider, otherProfileSibling, evictedSibling, lastSibling].entries()) {
+				await instance.saveViewState("currentApiConfigName", profileName)
+				await instance["_updateViewLocalStateFromMutation"]({
+					apiConfiguration: index === 0 ? undefined : overlays[index - 1],
+				})
+			}
+
+			// A task pinned to another profile: neither the refresh nor its compensation has any
+			// business rebuilding it.
+			const otherProfileTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "other-profile-task",
+					taskApiConfigName: "another-profile",
+					apiConfiguration: { apiProvider: providerIdentifiers.openai, apiKey: "other" } as ProviderSettings,
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			vi.spyOn(otherProfileSibling, "getCurrentTask").mockReturnValue(otherProfileTask)
+
+			// A task that is replaced by a newer one between the refresh and the compensation: the
+			// handler recorded for it belongs to a task this view no longer runs.
+			const evictedTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "evicted-task",
+					taskApiConfigName: profileName,
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "task",
+					} as ProviderSettings,
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const replacementTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "replacement-task",
+					taskApiConfigName: "yet-another-profile",
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openai,
+						apiKey: "replacement",
+					} as ProviderSettings,
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			let currentTask: Task | undefined = evictedTask
+			vi.spyOn(evictedSibling, "getCurrentTask").mockImplementation(() => currentTask)
+			vi.spyOn(evictedSibling, "postStateToWebview").mockImplementation(async () => {
+				currentTask = replacementTask
+			})
+
+			vi.spyOn(otherProfileSibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(lastSibling, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
+
+			await expect(
+				provider["refreshViewLocalStateForUpdatedProfile"](profileName, savedSettings),
+			).rejects.toThrow("webview gone")
+
+			// The refresh rebuilds only tasks that run under the profile being saved, and the
+			// compensation only puts back a handler it had actually replaced. A view whose task belongs
+			// to another profile has no recorded handler, so compensation must leave it alone - and a
+			// compensation that called the rebuild anyway would crash on the missing settings and show
+			// up as a restore failure for this view.
+			expect(otherProfileTask.updateApiConfiguration).not.toHaveBeenCalled()
+			const restoreFailures = vi
+				.mocked(mockOutputChannel.appendLine)
+				.mock.calls.map(([line]: [string]) => String(line))
+				.filter((line: string) => line.includes("Unable to restore the overlay of view"))
+			expect(
+				restoreFailures.some((line: string) => line.includes(`of view ${otherProfileSibling["viewId"]} after`)),
+			).toBe(false)
+
+			// This task was rebuilt with the saved settings while it still belonged to the view, and
+			// the compensation must not rebuild it back: the view now runs a different task, and that
+			// task's own handler belongs to its own profile.
+			expect(evictedTask.updateApiConfiguration).toHaveBeenCalledTimes(1)
+			expect(evictedTask.updateApiConfiguration).toHaveBeenNthCalledWith(1, savedSettings)
+			expect(replacementTask.updateApiConfiguration).not.toHaveBeenCalled()
+
+			await provider.dispose()
+			await otherProfileSibling.dispose()
+			await evictedSibling.dispose()
 			await lastSibling.dispose()
 		})
 
