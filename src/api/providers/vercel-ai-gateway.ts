@@ -8,17 +8,25 @@ import {
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
 	providerIdentifiers,
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getVercelAiGatewayModels } from "./fetchers/vercel-ai-gateway"
 
 // Extend OpenAI's CompletionUsage to include Vercel AI Gateway specific fields
 interface VercelAiGatewayUsage extends OpenAI.CompletionUsage {
@@ -53,6 +61,15 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getVercelAiGatewayModels(undefined, ...fetchOpts)
+	}
+
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -66,7 +83,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		]
 
 		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
+			addCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, info))
 		}
 
 		const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)
@@ -138,7 +155,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {

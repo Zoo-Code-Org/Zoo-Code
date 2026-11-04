@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { parseMarkdownChecklist, setPendingTodoList, updateTodoListTool } from "../UpdateTodoListTool"
 import { TodoItem } from "@roo-code/types"
 import type { Task } from "../../task/Task"

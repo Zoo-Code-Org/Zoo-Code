@@ -27,7 +27,7 @@ export class MarketplaceManager {
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
-		private readonly customModesManager?: CustomModesManager,
+		customModesManager?: CustomModesManager,
 	) {
 		this.configLoader = new ConfigLoader(context.extensionUri.fsPath)
 		this.installer = new SimpleInstaller(context, customModesManager)
@@ -228,7 +228,7 @@ export class MarketplaceManager {
 						}
 					}
 				}
-			} catch (error) {
+			} catch {
 				// File doesn't exist or can't be read, skip
 			}
 
@@ -244,7 +244,7 @@ export class MarketplaceManager {
 						}
 					}
 				}
-			} catch (error) {
+			} catch {
 				// File doesn't exist or can't be read, skip
 			}
 		} catch (error) {
@@ -273,7 +273,7 @@ export class MarketplaceManager {
 						}
 					}
 				}
-			} catch (error) {
+			} catch {
 				// File doesn't exist or can't be read, skip
 			}
 
@@ -289,7 +289,7 @@ export class MarketplaceManager {
 						}
 					}
 				}
-			} catch (error) {
+			} catch {
 				// File doesn't exist or can't be read, skip
 			}
 		} catch (error) {

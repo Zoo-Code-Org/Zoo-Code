@@ -1,10 +1,15 @@
 // npx vitest run __tests__/provider-delegation.spec.ts
 
+import * as fs from "fs/promises"
+import * as os from "os"
+import * as path from "path"
+
 import { describe, it, expect, vi } from "vitest"
 import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskScheduler } from "../core/task/TaskScheduler"
+import { LifecycleTransitionError } from "../core/task-persistence"
 
 const parentHistoryItem: HistoryItem = {
 	id: "parent-1",
@@ -35,16 +40,15 @@ function makeStoreStub(
  * `parent`. Without flushPendingToolResultsToHistory the method hits its
  * non-fatal flush-error branch and never reaches the happy delegation path.
  */
-const makeParentTask = () =>
-	({
-		taskId: "parent-1",
-		apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
-		getTaskMode: vi.fn().mockResolvedValue("code"),
-		getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
-		emit: vi.fn(),
-		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
-		retrySaveApiConversationHistory: vi.fn(),
-	}) as any
+const makeParentTask = () => ({
+	taskId: "parent-1",
+	apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
+	getTaskMode: vi.fn().mockResolvedValue("code"),
+	getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
+	emit: vi.fn(),
+	flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+	retrySaveApiConversationHistory: vi.fn(),
+})
 
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("rejects a stale restored action before delegation side effects", async () => {
@@ -145,7 +149,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		const parentTask = makeParentTask()
 		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
-		const getCurrentTask = vi.fn(() => parentTask)
+		const getCurrentTask = vi.fn((): { taskId: string } => parentTask)
 		const createTask = vi.fn(async () => {
 			getCurrentTask.mockReturnValue(child)
 			return child
@@ -213,7 +217,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		const child = await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		const child = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -411,7 +415,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -445,7 +449,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -486,7 +490,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -533,7 +537,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Continue",
 			initialTodos: [],
@@ -598,7 +602,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		} as unknown as ClineProvider
 
 		await expect(
-			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 				parentTaskId: "parent-1",
 				message: "Continue",
 				initialTodos: [],
@@ -609,7 +613,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		// The authoritative preflight rejects before either provider mutates its stack.
 		expect(child.run).not.toHaveBeenCalled()
 		expect(createTask).not.toHaveBeenCalled()
-		expect((provider as any).deleteTaskWithId).not.toHaveBeenCalled()
+		expect(provider.deleteTaskWithId).not.toHaveBeenCalled()
 	})
 
 	it("rejects a delegated parent whose awaited-child identity is missing", async () => {
@@ -739,7 +743,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		} as unknown as ClineProvider
 
 		await expect(
-			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 				parentTaskId: "parent-1",
 				message: "Do something",
 				initialTodos: [],
@@ -752,5 +756,494 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(removeClineFromStack).toHaveBeenNthCalledWith(2)
 		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistoryItem)
+	})
+
+	it("settles an interrupted parent's pending action when delegation is rejected", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		let current: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const taskHistoryStore = {
+			invalidate: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn(() => current),
+			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+				current = updater(current)
+				return [current]
+			}),
+			clearPendingActionIfMatching: vi.fn(async (_taskId: string, actionId: string) => {
+				if (current.pendingAction?.kind === "create_subtask" && current.pendingAction.actionId === actionId) {
+					current = { ...current, pendingAction: undefined }
+				}
+				return current
+			}),
+		}
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			recentTasksCache: [parentHistoryItem],
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockImplementation(async () => ({ historyItem: current })),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: pendingAction.message,
+				initialTodos: pendingAction.todos,
+				mode: pendingAction.mode,
+				pendingActionId: pendingAction.actionId,
+			}),
+		).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+		expect(current.pendingAction).toBeUndefined()
+		expect(current.status).toBe("interrupted")
+		expect((provider as unknown as { recentTasksCache?: HistoryItem[] }).recentTasksCache).toBeUndefined()
+		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(provider.createTaskWithHistoryItem).toHaveBeenCalledWith(
+			expect.objectContaining({
+				status: "interrupted",
+				pendingAction: undefined,
+			}),
+		)
+	})
+
+	it("rolls back a typed lifecycle rejection without a pending action ID", async () => {
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		let transitionError: LifecycleTransitionError | undefined
+		const atomicReadAndUpdate = vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+			try {
+				updater(interruptedParent)
+			} catch (error) {
+				if (error instanceof LifecycleTransitionError) transitionError = error
+				throw error
+			}
+			return []
+		})
+		const clearPendingActionIfMatching = vi.fn()
+		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: interruptedParent }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId,
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate,
+				clearPendingActionIfMatching,
+			},
+		} as unknown as ClineProvider
+
+		let rejection: unknown
+		try {
+			await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+			})
+		} catch (error) {
+			rejection = error
+		}
+
+		expect(rejection).toBe(transitionError)
+		expect(transitionError).toBeInstanceOf(LifecycleTransitionError)
+		expect(clearPendingActionIfMatching).not.toHaveBeenCalled()
+		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(interruptedParent)
+	})
+
+	it("does not settle a pending action after an unrelated persistence failure", async () => {
+		const persistenceError = new Error("parent persistence failed")
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const atomicReadAndUpdate = vi.fn().mockRejectedValue(persistenceError)
+		const clearPendingActionIfMatching = vi.fn().mockResolvedValue(interruptedParent)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: interruptedParent }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate,
+				clearPendingActionIfMatching,
+			},
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: pendingAction.message,
+				initialTodos: pendingAction.todos,
+				mode: pendingAction.mode,
+				pendingActionId: pendingAction.actionId,
+			}),
+		).rejects.toThrow(persistenceError)
+
+		expect(atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		expect(clearPendingActionIfMatching).not.toHaveBeenCalled()
+		expect(interruptedParent.pendingAction).toBe(pendingAction)
+		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(interruptedParent)
+	})
+
+	it("does not restore a rejected pending action when its settlement write fails", async () => {
+		const settlementError = new Error("pending-action settlement failed")
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const atomicReadAndUpdate = vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+			updater(interruptedParent)
+			return []
+		})
+		const clearPendingActionIfMatching = vi.fn().mockRejectedValue(settlementError)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: interruptedParent }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate,
+				clearPendingActionIfMatching,
+			},
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: pendingAction.message,
+				initialTodos: pendingAction.todos,
+				mode: pendingAction.mode,
+				pendingActionId: pendingAction.actionId,
+			}),
+		).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+		expect(atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		expect(clearPendingActionIfMatching).toHaveBeenCalledTimes(1)
+		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+	})
+
+	it("does not restore a completed parent when settlement preserves the rejected action", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const completedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "completed",
+			pendingAction,
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const clearPendingActionIfMatching = vi.fn().mockResolvedValue(completedParent)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: completedParent }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+					updater(interruptedParent)
+					return []
+				}),
+				clearPendingActionIfMatching,
+			},
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: pendingAction.message,
+				initialTodos: pendingAction.todos,
+				mode: pendingAction.mode,
+				pendingActionId: pendingAction.actionId,
+			}),
+		).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+		expect(clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", pendingAction.actionId)
+		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+	})
+
+	it("restores the authoritative parent record when settlement preserves a replacement action", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const replacementAction = { ...pendingAction, actionId: "replacement-action" }
+		const cachedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const replacedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction: replacementAction,
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const clearPendingActionIfMatching = vi.fn(async (_taskId: string, _actionId: string) => replacedParent)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: replacedParent }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => cachedParent),
+				atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+					updater(cachedParent)
+					return []
+				}),
+				clearPendingActionIfMatching,
+			},
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: pendingAction.message,
+				initialTodos: pendingAction.todos,
+				mode: pendingAction.mode,
+				pendingActionId: pendingAction.actionId,
+			}),
+		).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+		expect(clearPendingActionIfMatching).toHaveBeenCalledTimes(1)
+		expect(replacedParent.pendingAction).toEqual(replacementAction)
+		expect(provider.deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(replacedParent)
+	})
+
+	it("keeps directory cleanup and parent restoration when the child history lock failure is swallowed", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "create-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Do something",
+			todos: [],
+		}
+		const interruptedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "interrupted",
+			pendingAction,
+		}
+		const settledParent: HistoryItem = { ...interruptedParent, pendingAction: undefined }
+		const childItem: HistoryItem = { ...parentHistoryItem, id: "child-1", task: "Child" }
+
+		const globalStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "delegation-rollback-cleanup-"))
+		const childDir = path.join(globalStorageDir, "tasks", "child-1")
+		await fs.mkdir(childDir, { recursive: true })
+		await fs.writeFile(path.join(childDir, "ui_messages.json"), "[]")
+
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+		const getTaskWithId = vi.fn(async (taskId: string) => {
+			if (taskId === "parent-1") {
+				return { historyItem: settledParent }
+			}
+			return { taskDirPath: childDir, historyItem: childItem }
+		})
+		const clearPendingActionIfMatching = vi.fn(async () => settledParent)
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			recentTasksCache: [parentHistoryItem],
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			getTaskWithId,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			// The real deletion path: the store swallows a per-file history
+			// lock failure, so deleteMany resolves and cleanup continues.
+			deleteTaskWithId: ClineProvider.prototype.deleteTaskWithId,
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+			isViewLaunched: false,
+			contextProxy: { globalStorageUri: { fsPath: globalStorageDir } },
+			cwd: globalStorageDir,
+			taskHistoryStore: {
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				get: vi.fn(() => interruptedParent),
+				atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+					updater(interruptedParent)
+					return []
+				}),
+				clearPendingActionIfMatching,
+				deleteMany: vi.fn().mockResolvedValue(undefined),
+			},
+		} as unknown as ClineProvider
+
+		try {
+			await expect(
+				ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+					parentTaskId: "parent-1",
+					message: pendingAction.message,
+					initialTodos: pendingAction.todos,
+					mode: pendingAction.mode,
+					pendingActionId: pendingAction.actionId,
+				}),
+			).rejects.toThrow("Invalid task status transition: interrupted → delegated")
+
+			// The child task directory was removed even though the child's
+			// history lock failed and was swallowed, and the settled parent
+			// was restored before the original rejection surfaced.
+			await expect(fs.access(childDir)).rejects.toMatchObject({ code: "ENOENT" })
+			expect(clearPendingActionIfMatching).toHaveBeenCalledWith("parent-1", "create-action")
+			expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
+				expect.objectContaining({ status: "interrupted", pendingAction: undefined }),
+			)
+		} finally {
+			await fs.rm(globalStorageDir, { recursive: true, force: true }).catch(() => {})
+		}
 	})
 })

@@ -6,21 +6,23 @@ import {
 	deepSeekDefaultModelId,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
-	type ModelInfo,
+	type ModelRecord,
 	DeepSeekModelId,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { convertToR1Format } from "../transform/r1-format"
+import { normalizeChatUsage } from "../transform/chat-usage-normalization"
 
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-import type { ApiHandlerCreateMessageMetadata } from "../index"
+import type { ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import { getDeepSeekModels } from "./fetchers/deepseek"
 
 // Custom interface for DeepSeek params to support thinking mode
 type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
@@ -98,6 +100,15 @@ export class DeepSeekHandler extends OpenAiHandler {
 			openAiStreamingEnabled: true,
 			includeMaxTokens: true,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getDeepSeekModels(options.baseUrl, options.apiKey, ...fetchOpts)
 	}
 
 	override getModel() {
@@ -217,13 +228,20 @@ export class DeepSeekHandler extends OpenAiHandler {
 	}
 
 	// Override to handle DeepSeek's usage metrics, including caching.
+	// DeepSeek reports cache counters in two shapes that describe the same
+	// quantities: top-level `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+	// and nested `prompt_tokens_details.cached_tokens`. The normalizer resolves
+	// one value per field and never sums the shapes.
+	// https://api-docs.deepseek.com/api/create-chat-completion
 	protected override processUsageMetrics(usage: any, _modelInfo?: any): ApiStreamUsageChunk {
+		const normalized = normalizeChatUsage(usage)
+
 		return {
 			type: "usage",
-			inputTokens: usage?.prompt_tokens || 0,
-			outputTokens: usage?.completion_tokens || 0,
-			cacheWriteTokens: usage?.prompt_tokens_details?.cache_miss_tokens,
-			cacheReadTokens: usage?.prompt_tokens_details?.cached_tokens,
+			inputTokens: normalized?.inputTokens ?? 0,
+			outputTokens: normalized?.outputTokens ?? 0,
+			cacheWriteTokens: normalized?.cacheWriteTokens,
+			cacheReadTokens: normalized?.cacheReadTokens,
 		}
 	}
 }

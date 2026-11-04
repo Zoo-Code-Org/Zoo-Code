@@ -912,7 +912,7 @@ describe("getModelParams", () => {
 				reasoningEffort: "medium",
 			}
 
-			const result = getModelParams({
+			getModelParams({
 				...anthropicParams,
 				settings: {},
 				model,

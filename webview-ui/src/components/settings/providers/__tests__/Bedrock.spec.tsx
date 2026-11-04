@@ -551,4 +551,56 @@ describe("Bedrock Component", () => {
 			})
 		})
 	})
+
+	describe("1M context and service tier options", () => {
+		const oneMillionCheckbox = "checkbox-settings:providers.awsbedrock1mcontextbetalabel"
+		const serviceTierLabel = "settings:providers.awsServiceTier"
+		const appProfileArn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
+		const renderBedrock = (settings: Partial<ProviderSettings>) =>
+			render(<Bedrock apiConfiguration={settings} setApiConfigurationField={mockSetApiConfigurationField} />)
+		const renderCustomArn = (awsCustomArnBaseModelId?: string) =>
+			renderBedrock({ apiModelId: "custom-arn", awsCustomArn: appProfileArn, awsCustomArnBaseModelId })
+
+		it("offers the 1M context option, not service tiers, for a regular Opus 4.8 model", () => {
+			renderBedrock({ apiModelId: "anthropic.claude-opus-4-8" })
+
+			expect(screen.getByTestId(oneMillionCheckbox)).toBeInTheDocument()
+			expect(screen.queryByText(serviceTierLabel)).not.toBeInTheDocument()
+		})
+
+		it("offers service tiers, not the 1M context option, for a regular Nova model", () => {
+			renderBedrock({ apiModelId: "amazon.nova-lite-v1:0" })
+
+			expect(screen.getByText(serviceTierLabel)).toBeInTheDocument()
+			expect(screen.queryByTestId(oneMillionCheckbox)).not.toBeInTheDocument()
+		})
+
+		it("ignores a leftover custom ARN base model when a regular model is selected", () => {
+			renderBedrock({ apiModelId: "amazon.nova-lite-v1:0", awsCustomArnBaseModelId: "anthropic.claude-opus-4-8" })
+
+			expect(screen.getByText(serviceTierLabel)).toBeInTheDocument()
+			expect(screen.queryByTestId(oneMillionCheckbox)).not.toBeInTheDocument()
+		})
+
+		it("offers the 1M context option when the custom ARN's base model supports it", () => {
+			renderCustomArn("anthropic.claude-opus-4-8")
+
+			expect(screen.getByTestId(oneMillionCheckbox)).toBeInTheDocument()
+			expect(screen.queryByText(serviceTierLabel)).not.toBeInTheDocument()
+		})
+
+		it("offers service tiers when the custom ARN's base model supports them", () => {
+			renderCustomArn("amazon.nova-lite-v1:0")
+
+			expect(screen.getByText(serviceTierLabel)).toBeInTheDocument()
+			expect(screen.queryByTestId(oneMillionCheckbox)).not.toBeInTheDocument()
+		})
+
+		it("hides both options when the custom ARN's base model is unknown", () => {
+			renderCustomArn()
+
+			expect(screen.queryByTestId(oneMillionCheckbox)).not.toBeInTheDocument()
+			expect(screen.queryByText(serviceTierLabel)).not.toBeInTheDocument()
+		})
+	})
 })

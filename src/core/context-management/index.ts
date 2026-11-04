@@ -129,8 +129,6 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 		return msg
 	})
 
-	// Find the actual boundary - the index right after the last truncated message
-	const lastTruncatedVisibleIndex = visibleIndices[messagesToRemove] // Last visible message being truncated
 	// If all visible messages except the first are truncated, insert marker at the end
 	const firstKeptVisibleIndex = visibleIndices[messagesToRemove + 1] ?? taggedMessages.length
 

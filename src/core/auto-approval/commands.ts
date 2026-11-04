@@ -114,94 +114,6 @@ export function findLongestPrefixMatch(command: string, prefixes: string[]): str
 }
 
 /**
- * Check if a single command should be auto-approved.
- * Returns true only for commands that explicitly match the allowlist
- * and either don't match the denylist or have a longer allowlist match.
- *
- * Special handling for wildcards: "*" in allowlist allows any command,
- * but denylist can still block specific commands.
- */
-export function isAutoApprovedSingleCommand(
-	command: string,
-	allowedCommands: string[],
-	deniedCommands?: string[],
-): boolean {
-	if (!command) {
-		return true
-	}
-
-	// If no allowlist configured, nothing can be auto-approved
-	if (!allowedCommands?.length) {
-		return false
-	}
-
-	// Check if wildcard is present in allowlist
-	const hasWildcard = allowedCommands.some((cmd) => cmd.toLowerCase() === "*")
-
-	// If no denylist provided (undefined), use simple allowlist logic
-	if (deniedCommands === undefined) {
-		const trimmedCommand = command.trim().toLowerCase()
-
-		return allowedCommands.some((prefix) => {
-			const lowerPrefix = prefix.toLowerCase()
-			// Handle wildcard "*" - it matches any command
-			return lowerPrefix === "*" || trimmedCommand.startsWith(lowerPrefix)
-		})
-	}
-
-	// Find longest matching prefix in both lists
-	const longestDeniedMatch = findLongestPrefixMatch(command, deniedCommands)
-	const longestAllowedMatch = findLongestPrefixMatch(command, allowedCommands)
-
-	// Special case: if wildcard is present and no denylist match, auto-approve
-	if (hasWildcard && !longestDeniedMatch) {
-		return true
-	}
-
-	// Must have an allowlist match to be auto-approved
-	if (!longestAllowedMatch) {
-		return false
-	}
-
-	// If no denylist match, auto-approve
-	if (!longestDeniedMatch) {
-		return true
-	}
-
-	// Both have matches - allowlist must be longer to auto-approve
-	return longestAllowedMatch.length > longestDeniedMatch.length
-}
-
-/**
- * Check if a single command should be auto-denied.
- * Returns true only for commands that explicitly match the denylist
- * and either don't match the allowlist or have a longer denylist match.
- */
-export function isAutoDeniedSingleCommand(
-	command: string,
-	allowedCommands: string[],
-	deniedCommands?: string[],
-): boolean {
-	if (!command) return false
-
-	// If no denylist configured, nothing can be auto-denied
-	if (!deniedCommands?.length) return false
-
-	// Find longest matching prefix in both lists
-	const longestDeniedMatch = findLongestPrefixMatch(command, deniedCommands)
-	const longestAllowedMatch = findLongestPrefixMatch(command, allowedCommands || [])
-
-	// Must have a denylist match to be auto-denied
-	if (!longestDeniedMatch) return false
-
-	// If no allowlist match, auto-deny
-	if (!longestAllowedMatch) return true
-
-	// Both have matches - denylist must be longer or equal to auto-deny
-	return longestDeniedMatch.length >= longestAllowedMatch.length
-}
-
-/**
  * Command approval decision types
  */
 export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malformed_command"
@@ -259,8 +171,46 @@ export function getCommandDecision(
 	allowedCommands: string[],
 	deniedCommands?: string[],
 ): CommandDecision {
+	return getCommandDecisionDetailed(command, allowedCommands, deniedCommands).decision
+}
+
+/**
+ * Result of {@link getCommandDecisionDetailed}: {@link getCommandDecision}'s
+ * plain decision plus the offending sub-command and the matched pattern that
+ * produced it, so automatic denials can tell the model exactly what went
+ * wrong.
+ */
+export interface CommandDecisionDetail {
+	decision: CommandDecision
+	/**
+	 * For `auto_deny`: the first sub-command matched by the denylist.
+	 * For `ask_user`: the first sub-command lacking an allowlist match.
+	 * For `malformed_command`: the raw (unsplit) command string.
+	 */
+	offendingCommand?: string
+	/** The matched denied prefix, for `auto_deny` decisions. */
+	matchedPattern?: string
+	/** Human-readable shell syntax error, for `malformed_command` decisions. */
+	parseError?: string
+}
+
+/**
+ * Same decision logic as {@link getCommandDecision}, additionally naming the
+ * offending sub-command (and matched denied prefix) that produced the
+ * decision, so the auto-deny feedback can point the model at the specific
+ * part of a chained command that caused the rejection.
+ *
+ * The chain-level aggregation mirrors `getCommandDecision` exactly:
+ * "any denial blocks all", dangerous substitutions force `ask_user`, and a
+ * parse error yields `malformed_command`.
+ */
+export function getCommandDecisionDetailed(
+	command: string,
+	allowedCommands: string[],
+	deniedCommands?: string[],
+): CommandDecisionDetail {
 	if (!command?.trim()) {
-		return "auto_approve"
+		return { decision: "auto_approve" }
 	}
 
 	// Parse into sub-commands (split by &&, ||, ;, |). parseCommand also
@@ -274,34 +224,44 @@ export function getCommandDecision(
 	// distinct decision lets callers surface a useful message to the agent
 	// rather than silently presenting the command for user approval.
 	if (parseError !== null) {
-		return "malformed_command"
+		return { decision: "malformed_command", offendingCommand: command, parseError: parseError.message }
 	}
 
-	// Check each sub-command and collect decisions
-	const decisions: CommandDecision[] = subCommands.map((cmd) => {
-		// Remove simple PowerShell-like redirections (e.g. 2>&1) before checking
-		const cmdWithoutRedirection = cmd.replace(/\d*>&\d*/, "").trim()
+	// Remove simple PowerShell-like redirections (e.g. 2>&1) before checking
+	const sanitizedCommands = subCommands.map((cmd) => cmd.replace(/\d*>&\d*/, "").trim())
 
-		return getSingleCommandDecision(cmdWithoutRedirection, allowedCommands, deniedCommands)
-	})
+	const decisions: CommandDecision[] = sanitizedCommands.map((cmd) =>
+		getSingleCommandDecision(cmd, allowedCommands, deniedCommands),
+	)
 
-	// If any sub-command is denied, deny the whole command
-	if (decisions.includes("auto_deny")) {
-		return "auto_deny"
+	// If any sub-command is denied, deny the whole command; name the first
+	// denied sub-command and the denied prefix it matched.
+	const denyIndex = decisions.indexOf("auto_deny")
+	if (denyIndex !== -1) {
+		const offendingCommand = sanitizedCommands[denyIndex]
+		const lowerMatch = findLongestPrefixMatch(offendingCommand, deniedCommands || [])
+		// Prefer the original-cased pattern the user typed, falling back to the
+		// case-insensitive match itself.
+		const matchedPattern =
+			(deniedCommands || []).find((pattern) => pattern.toLowerCase() === lowerMatch) ?? lowerMatch ?? undefined
+
+		return { decision: "auto_deny", offendingCommand, matchedPattern }
 	}
 
 	// Require explicit user approval for dangerous patterns
 	if (containsDangerousSubstitution(command)) {
-		return "ask_user"
+		return { decision: "ask_user" }
 	}
 
 	// If all sub-commands are approved, approve the whole command
 	if (decisions.every((decision) => decision === "auto_approve")) {
-		return "auto_approve"
+		return { decision: "auto_approve" }
 	}
 
-	// Otherwise, ask user
-	return "ask_user"
+	// Otherwise, ask user; name the first sub-command with no allowlist match.
+	const askIndex = decisions.indexOf("ask_user")
+
+	return { decision: "ask_user", offendingCommand: askIndex !== -1 ? sanitizedCommands[askIndex] : undefined }
 }
 
 /**

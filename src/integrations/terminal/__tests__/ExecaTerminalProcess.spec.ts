@@ -4,8 +4,8 @@ const mockPid = 12345
 
 vitest.mock("execa", () => {
 	const mockKill = vitest.fn()
-	const execa = vitest.fn(function (options: any) {
-		return (_template: TemplateStringsArray, ...args: any[]) => ({
+	const execa = vitest.fn(function (_options: any) {
+		return (_template: TemplateStringsArray, ..._args: any[]) => ({
 			pid: mockPid,
 			iterable: (_opts: any) =>
 				(async function* () {

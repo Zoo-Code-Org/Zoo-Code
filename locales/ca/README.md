@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.84.0
+## Novetats a la v3.94.0
 
-- ✨ **Nous models SOTA afegits:** Utilitza GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 amb els proveïdors compatibles.
-- 🧭 **Tasques i subtasques més fiables:** Mantén aïllats els modes delegats, conserva els enllaços de les subtasques després d'aturades repetides i protegeix la configuració de l'orquestrador quan les ordres amb barra canvien de mode.
-- 🛠️ **Comportament més fiable del terminal, els proveïdors i la cerca de codi:** Millora el terminal a Windows i en entorns que no són en anglès, reforça les respostes i la cancel·lació dels proveïdors i fes que la cerca de codi utilitzi l'espai de treball correcte de manera més consistent.
+- ✨ **Compatibilitat més àmplia amb models i proveïdors:** Utilitza Claude Haiku 5.5 mitjançant Anthropic, envia imatges a models VS Code LM compatibles, ajusta la temperatura per als models OpenCode Go Responses i cancel·la sol·licituds de forma neta a més proveïdors.
+- 🔐 **MCP OAuth més flexible:** Configura opcions estàtiques de client OAuth, usa rutes de callback personalitzades, descobreix detalls d'autenticació de `WWW-Authenticate` i veu els errors de callback abans de tornar-ho a provar.
+- 🧭 **Xats i sessions llargues més fluides:** Reanomena tasques a l'historial, arrossega fitxers al xat sense mantenir premut Shift, redueix la memòria que es conserva durant les sessions llargues i mantén estables els enllaços de subtasques i els webviews substituïts.
 
 ## Què pot fer Zoo Code per TU?
 

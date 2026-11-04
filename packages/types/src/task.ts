@@ -87,6 +87,7 @@ export interface CreateTaskOptions {
 	taskId?: string
 	enableCheckpoints?: boolean
 	consecutiveMistakeLimit?: number
+	toolRepetitionSoftLimit?: number
 	experiments?: Record<string, boolean>
 	initialTodos?: TodoItem[]
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
@@ -101,7 +102,6 @@ export enum TaskStatus {
 	Interactive = "interactive",
 	Resumable = "resumable",
 	Idle = "idle",
-	None = "none",
 }
 
 export const taskMetadataSchema = z.object({
@@ -147,6 +147,9 @@ export type TaskEvents = {
 	[RooCodeEventName.TaskPaused]: [taskId: string]
 	[RooCodeEventName.TaskUnpaused]: [taskId: string]
 	[RooCodeEventName.TaskSpawned]: [taskId: string]
+	[RooCodeEventName.TaskDelegated]: [childTaskId: string]
+	[RooCodeEventName.TaskDelegationCompleted]: [childTaskId: string, summary: string]
+	[RooCodeEventName.TaskDelegationResumed]: [childTaskId: string]
 
 	// Task Execution
 	[RooCodeEventName.Message]: [{ action: "created" | "updated"; message: ClineMessage }]

@@ -1,8 +1,9 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
-import * as lockfile from "proper-lockfile"
 import { JsonStreamStringify } from "json-stream-stringify"
+
+import { acquireFileLock } from "./fileLock"
 
 /**
  * Options for safeWriteJson function
@@ -37,12 +38,12 @@ export interface SafeWriteJsonOptions {
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
  * @param {string} filePath - The absolute path to the target file.
- * @param {any} data - The data to serialize to JSON and write.
+ * @param {unknown} data - The data to serialize to JSON and write.
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
 
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
@@ -56,37 +57,19 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
-	} catch (dirError: any) {
+	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
 
-	// Acquire the lock before any file operations
-	try {
-		releaseLock = await lockfile.lock(absoluteFilePath, {
-			stale: LOCK_STALE_MS,
-			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
-			realpath: false, // the file may not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
-			onCompromised: (err) => {
-				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
-				throw err
-			},
-		})
-	} catch (lockError) {
-		// If lock acquisition fails, we throw immediately.
-		// The releaseLock remains a no-op, so the finally block in the main file operations
-		// try-catch-finally won't try to release an unacquired lock if this path is taken.
-		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
-		// Propagate the lock acquisition error
-		throw lockError
-	}
+	// Acquire the lock before any file operations. `acquireFileLock` owns the
+	// shared advisory lock protocol, so callers that lock the same path with
+	// it (for example task-history deletion) serialize with this write.
+	// If lock acquisition fails, it throws immediately. The releaseLock
+	// remains a no-op, so the finally block in the main file operations
+	// try-catch-finally won't try to release an unacquired lock if this
+	// path is taken.
+	releaseLock = await acquireFileLock(absoluteFilePath)
 
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
@@ -128,9 +111,13 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
 			)
 			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: any) {
-			// Explicitly type accessError
-			if (accessError.code !== "ENOENT") {
+		} catch (accessError: unknown) {
+			if (
+				typeof accessError !== "object" ||
+				accessError === null ||
+				!("code" in accessError) ||
+				accessError.code !== "ENOENT"
+			) {
 				// An error other than "file not found" occurred during access check.
 				throw accessError
 			}
@@ -226,7 +213,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
 
@@ -246,7 +233,5 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		stringifyStream.pipe(fileWriteStream)
 	})
 }
-
-export const LOCK_STALE_MS = 31_000
 
 export { safeWriteJson }

@@ -1,8 +1,15 @@
 // npx vitest src/components/settings/providers/__tests__/Moonshot.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent, waitFor, act } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+	render,
+	screen,
+	fireEvent,
+	waitFor,
+	act,
+	createTestQueryClient,
+	renderWithExtensionState,
+} from "@/utils/test-utils"
 import { allRouterModelsProvider, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { Moonshot } from "../Moonshot"
@@ -73,7 +80,8 @@ vi.mock("@src/utils/vscode", () => {
 })
 
 // Mock useExtensionState
-vi.mock("@src/context/ExtensionStateContext", () => ({
+vi.mock("@src/context/ExtensionStateContext", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@src/context/ExtensionStateContext")>()),
 	useExtensionState: vi.fn(),
 }))
 
@@ -225,16 +233,15 @@ describe("Moonshot Component", () => {
 	})
 
 	it("invalidates only the Moonshot and shared router-model caches after a successful refresh", async () => {
-		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+		const queryClient = createTestQueryClient()
 		const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries")
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<Moonshot
-					apiConfiguration={createDefaultApiConfiguration({ moonshotApiKey: "test-key" })}
-					setApiConfigurationField={mockSetApiConfigurationField}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<Moonshot
+				apiConfiguration={createDefaultApiConfiguration({ moonshotApiKey: "test-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
 		)
 
 		const refreshButton = screen

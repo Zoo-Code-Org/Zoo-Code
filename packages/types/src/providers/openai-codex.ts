@@ -1,4 +1,11 @@
-import type { ModelInfo } from "../model.js"
+import { openAiCodexServiceTierSchema, type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 /**
  * OpenAI Codex Provider
@@ -24,6 +31,25 @@ export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
  * Costs are 0 as they are covered by the subscription.
  */
 export const openAiCodexModels = {
+	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
+	"gpt-6.1-sol": {
+		maxTokens: 128000,
+		// Use Codex's supported maximum rather than its 272K default compaction budget.
+		contextWindow: 872000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "low",
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description:
+			"GPT-6.1 Sol: Near-Astra performance for complex coding and professional work via ChatGPT subscription",
+	},
 	"gpt-6-astra": {
 		maxTokens: 128000,
 		contextWindow: 872000,
@@ -331,3 +357,17 @@ export const openAiCodexModels = {
 		description: "GPT-5.2: Latest GPT model via ChatGPT subscription",
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const OPEN_AI_CODEX_SERVICE_TIER_KEY = "openAiCodexServiceTier"
+
+export const openAiCodexProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.openaiCodex,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => openAiCodexDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		// Codex "Fast" mode maps to the Responses API priority service tier.
+		[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTierSchema.optional(),
+	},
+})

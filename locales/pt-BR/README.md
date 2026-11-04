@@ -47,11 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.84.0
+## Novidades na v3.94.0
 
-- ✨ **Novos modelos SOTA adicionados:** Use GPT-6 Sol, GPT-6 Luna e Claude Opus 5.5 nos providers compatíveis.
-- 🧭 **Tarefas e subtarefas mais confiáveis:** Mantenha os modos delegados isolados, preserve os links das subtarefas após interrupções repetidas e proteja as configurações do orquestrador quando comandos com barra alternarem o modo.
-- 🛠️ **Comportamento mais confiável do terminal, dos providers e da busca de código:** Melhore o terminal no Windows e em ambientes que não usam inglês, fortaleça as respostas e o cancelamento dos providers e faça a busca de código usar o workspace correto com mais consistência.
+- ✨ **Suporte mais amplo a modelos e provedores:** Use Claude Haiku 5.5 pela Anthropic, envie imagens para modelos VS Code LM compatíveis, ajuste a temperatura para modelos OpenCode Go Responses e cancele solicitações de forma limpa em mais provedores.
+- 🔐 **MCP OAuth mais flexível:** Configure definições estáticas de cliente OAuth, use caminhos de callback personalizados, descubra detalhes de autenticação no `WWW-Authenticate` e veja falhas de callback antes de tentar de novo.
+- 🧭 **Chats mais fluidos e sessões longas:** Renomeie tarefas no histórico, arraste arquivos para o chat sem segurar Shift, reduza a memória retida durante sessões longas e mantenha estáveis os links de subtarefas e as webviews substituídas.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

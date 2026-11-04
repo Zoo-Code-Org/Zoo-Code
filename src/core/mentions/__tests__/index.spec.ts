@@ -1,7 +1,5 @@
 // npx vitest core/mentions/__tests__/index.spec.ts
 
-import * as vscode from "vscode"
-
 import { parseMentions } from "../index"
 
 // Mock vscode

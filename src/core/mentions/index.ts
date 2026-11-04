@@ -127,7 +127,7 @@ export async function parseMentions(
 
 				const skillContent = await resolveSkillContentForMode(skillsManager, commandName, currentMode)
 				return { commandName, command: undefined, skillContent }
-			} catch (error) {
+			} catch {
 				// If there's an error checking command existence, treat it as non-existent
 				return { commandName, command: undefined, skillContent: null }
 			}
@@ -355,7 +355,7 @@ async function getFileOrFolderContentWithMetadata(
 								const result = await extractTextFromFileWithMetadata(absoluteFilePath)
 								fileReadResults.push(formatFileReadResult(filePath.toPosix(), result))
 							}
-						} catch (error) {
+						} catch {
 							// Skip files that can't be read
 						}
 					}

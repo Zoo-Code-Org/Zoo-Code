@@ -7,6 +7,14 @@ export class CodeIndexManagerRegistry {
 	private static codeIndexWorkspaceScopes = new Map<string, CodeIndexWorkspaceScope>()
 
 	public static getOrCreate(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexManager | undefined {
+		return this.getOrCreateScope(context, workspacePath)?.codeIndexManager
+	}
+
+	/** Returns the complete, initialized service scope for the resolved workspace. */
+	public static getOrCreateScope(
+		context: vscode.ExtensionContext,
+		workspacePath?: string,
+	): CodeIndexWorkspaceScope | undefined {
 		const folder = this.resolveWorkspaceFolder(workspacePath)
 		const resolvedPath = workspacePath || folder?.uri.fsPath
 		if (!resolvedPath) {
@@ -15,7 +23,7 @@ export class CodeIndexManagerRegistry {
 
 		const existing = this.codeIndexWorkspaceScopes.get(resolvedPath)
 		if (existing) {
-			return existing.codeIndexManager
+			return existing
 		}
 
 		// Preserve real workspace URIs, including remote schemes and authorities.
@@ -23,7 +31,7 @@ export class CodeIndexManagerRegistry {
 		const codeIndexWorkspaceScope = new CodeIndexWorkspaceScope(resolvedPath, folderUri, context)
 		codeIndexWorkspaceScope.init()
 		this.codeIndexWorkspaceScopes.set(resolvedPath, codeIndexWorkspaceScope)
-		return codeIndexWorkspaceScope.codeIndexManager
+		return codeIndexWorkspaceScope
 	}
 
 	public static getAllInstances(): CodeIndexManager[] {

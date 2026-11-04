@@ -11,80 +11,72 @@
 </sub>
 </div>
 
-# Codice di Condotta del Patto del Contributore
+<a id="contributor-covenant-code-of-conduct"></a>
 
-## Il Nostro Impegno
+# Codice di condotta Contributor Covenant
 
-Nell'interesse di promuovere un ambiente aperto e accogliente, noi, in qualità di
-contributori e manutentori, ci impegniamo a rendere la partecipazione al nostro progetto e
-alla nostra comunità un'esperienza libera da molestie per tutti, indipendentemente da età, corporatura,
-disabilità, etnia, caratteristiche sessuali, identità ed espressione di genere,
-livello di esperienza, istruzione, stato socio-economico, nazionalità, aspetto
-personale, razza, religione o identità e orientamento sessuale.
+<a id="our-pledge"></a>
 
-## I Nostri Standard
+## Il nostro impegno
 
-Esempi di comportamento che contribuiscono a creare un ambiente positivo
-includono:
+Siamo collaboratori e manutentori. Vogliamo un ambiente aperto e accogliente. Ci impegniamo a rendere la partecipazione al progetto e alla comunità libera da molestie per tutti. Questo vale indipendentemente da età, corporatura, disabilità, etnia, caratteristiche sessuali, identità ed espressione di genere, esperienza, istruzione, condizione socioeconomica, nazionalità, aspetto, razza, religione o identità e orientamento sessuale.
 
-- Usare un linguaggio accogliente e inclusivo
-- Essere rispettosi dei diversi punti di vista ed esperienze
-- Accettare con grazia le critiche costruttive
-- Concentrarsi su ciò che è meglio per la comunità
-- Mostrare empatia verso gli altri membri della comunità
+<a id="our-standards"></a>
 
-Esempi di comportamento inaccettabile da parte dei partecipanti includono:
+## I nostri standard
 
-- L'uso di linguaggio o immagini sessualizzate e attenzioni o
-  avances sessuali indesiderate
-- Trolling, commenti offensivi/dispregiativi e attacchi personali o politici
-- Molestie pubbliche o private
-- Pubblicare informazioni private altrui, come un indirizzo fisico o elettronico,
-  senza esplicito permesso
-- Altri comportamenti che potrebbero ragionevolmente essere considerati inappropriati in un
-  contesto professionale
+Questi comportamenti aiutano a creare un ambiente positivo:
 
-## Le Nostre Responsabilità
+- Usa un linguaggio accogliente e inclusivo.
+- Rispetta punti di vista ed esperienze diverse.
+- Accetta le critiche costruttive con apertura.
+- Concentrati su ciò che è meglio per la comunità.
+- Mostra empatia verso gli altri membri della comunità.
 
-I manutentori del progetto sono responsabili di chiarire gli standard di comportamento
-accettabile e ci si aspetta che prendano azioni correttive appropriate ed eque in
-risposta a qualsiasi caso di comportamento inaccettabile.
+Questi comportamenti dei partecipanti non sono accettabili:
 
-I manutentori del progetto hanno il diritto e la responsabilità di rimuovere, modificare o
-rifiutare commenti, commit, codice, modifiche wiki, issue e altri contributi
-che non sono allineati a questo Codice di Condotta, o di bandire temporaneamente o
-permanentemente qualsiasi contributore per altri comportamenti che ritengono inappropriati,
-minacciosi, offensivi o dannosi.
+- Uso di linguaggio o immagini a sfondo sessuale.
+- Attenzioni o avances sessuali indesiderate.
+- Trolling, commenti offensivi o denigratori e attacchi personali o politici.
+- Molestie pubbliche o private.
+- Pubblicazione di informazioni private altrui senza un permesso esplicito. Per esempio, un indirizzo fisico o elettronico.
+- Altri comportamenti che si possono ragionevolmente considerare inappropriati in un contesto professionale.
 
-## Ambito
+<a id="our-responsibilities"></a>
 
-Questo Codice di Condotta si applica sia negli spazi del progetto che negli spazi pubblici
-quando un individuo rappresenta il progetto o la sua comunità. Esempi di
-rappresentazione di un progetto o comunità includono l'utilizzo di un indirizzo e-mail ufficiale del progetto,
-la pubblicazione tramite un account ufficiale sui social media o l'agire come rappresentante designato
-ad un evento online o offline. La rappresentazione di un progetto può essere
-ulteriormente definita e chiarita dai manutentori del progetto.
+## Le nostre responsabilità
 
-## Applicazione
+I manutentori del progetto devono chiarire gli standard di comportamento accettabile. Devono adottare misure correttive appropriate ed eque quando un partecipante si comporta in modo inaccettabile.
 
-Casi di comportamento abusivo, molesto o altrimenti inaccettabile possono essere
-segnalati contattando il team del progetto all'indirizzo support@zoocode.dev. Tutti i reclami
-saranno esaminati e indagati e risulteranno in una risposta che
-è ritenuta necessaria e appropriata alle circostanze. Il team del progetto è
-obbligato a mantenere la riservatezza nei confronti di chi segnala un incidente.
-Ulteriori dettagli su politiche di applicazione specifiche possono essere pubblicati separatamente.
+I manutentori hanno il diritto e la responsabilità di intervenire sui contributi che non seguono questo codice di condotta. Possono rimuovere, modificare o rifiutare commenti, commit, codice, modifiche alla wiki, issue e altri contributi. Possono anche escludere temporaneamente o definitivamente un collaboratore per altri comportamenti che considerano inappropriati, minacciosi, offensivi o dannosi.
 
-I manutentori del progetto che non seguono o non fanno rispettare il Codice di Condotta in buona
-fede possono affrontare ripercussioni temporanee o permanenti determinate da altri
-membri della leadership del progetto.
+<a id="scope"></a>
+
+## Ambito di applicazione
+
+Questo codice di condotta si applica negli spazi del progetto. Si applica anche negli spazi pubblici quando una persona rappresenta il progetto o la sua comunità. Ecco alcuni esempi:
+
+- Usare un indirizzo e-mail ufficiale del progetto.
+- Pubblicare con un account ufficiale sui social media.
+- Agire come rappresentante designato a un evento online o in presenza.
+
+I manutentori possono definire e chiarire cosa significa rappresentare il progetto.
+
+<a id="enforcement"></a>
+
+## Applicazione delle regole
+
+Per segnalare comportamenti offensivi, molestie o altri comportamenti inaccettabili, contatta il team del progetto all'indirizzo support@zoocode.dev. Il team esamina e indaga su tutte le segnalazioni. Risponde nel modo che ritiene necessario e appropriato alle circostanze. Deve mantenere riservata l'identità di chi segnala un incidente. Può pubblicare separatamente ulteriori dettagli sulle specifiche regole di applicazione.
+
+I manutentori devono seguire e applicare il codice di condotta in buona fede. In caso contrario, possono subire conseguenze temporanee o permanenti. Gli altri membri della direzione del progetto decidono le conseguenze.
+
+<a id="attribution"></a>
 
 ## Attribuzione
 
-Questo Codice di Condotta è adattato dalla [versione di Cline][cline_coc] del [Patto del Contributore][homepage], versione 1.4,
-disponibile su https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Per risposte alle domande comuni su questo codice di condotta, vedi
-https://www.contributor-covenant.org/faq
+For answers to common questions about this code of conduct, see https://www.contributor-covenant.org/faq

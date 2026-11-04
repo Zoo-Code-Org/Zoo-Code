@@ -11,13 +11,11 @@ vi.mock("../index", () => ({
 
 describe("processUserContentMentions", () => {
 	let mockFileContextTracker: FileContextTracker
-	let mockRooIgnoreController: any
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 
 		mockFileContextTracker = {} as FileContextTracker
-		mockRooIgnoreController = {}
 
 		// Default mock implementation - returns ParseMentionsResult object
 		vi.mocked(parseMentions).mockImplementation(async (text) => ({

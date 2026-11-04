@@ -8,9 +8,18 @@ interface BatchableMessage {
  * Messages that can be safely skipped over when batching tool asks.
  * These are low-information or invisible messages that don't affect semantics.
  */
-export const isIgnorableBetweenTargets = (msg: BatchableMessage): boolean => {
+export const isIgnorableBetweenTargets = (msg: BatchableMessage, batchContext?: BatchableMessage): boolean => {
 	if (msg.type !== "say") return false
-	return msg.say === "api_req_started" || (msg.say === "text" && !msg.text?.trim()) || msg.say === "reasoning"
+	return (
+		msg.say === "api_req_started" ||
+		(msg.say === "text" &&
+			(!msg.text?.trim() ||
+				(batchContext?.type === "say" &&
+					batchContext.say === "text" &&
+					!!batchContext.text?.trim() &&
+					msg.text === batchContext.text))) ||
+		msg.say === "reasoning"
+	)
 }
 
 /**

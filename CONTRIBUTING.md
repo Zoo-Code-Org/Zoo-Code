@@ -13,7 +13,7 @@
 
 # Contributing to Zoo Code
 
-Zoo Code is a community-driven project, and we deeply value every contribution. To streamline collaboration, we operate on an [Issue-First](#issue-first-approach) basis, meaning all [Pull Requests (PRs)](#submitting-a-pull-request) must first be linked to a GitHub Issue. Please review this guide carefully.
+Zoo Code is a community project. We value every contribution. We work on an [Issue-First](#issue-first-approach) basis. This means each [Pull Request (PR)](#submitting-a-pull-request) must link to a GitHub Issue. Read this guide with care.
 
 ## Table of Contents
 
@@ -22,37 +22,38 @@ Zoo Code is a community-driven project, and we deeply value every contribution. 
 - [Development & Submission Process](#development--submission-process)
     - [Pull Request Expectations](#pull-request-expectations)
     - [AI-Assisted Contributions](#ai-assisted-contributions)
+    - [Writing Style](#writing-style)
 - [Legal](#legal)
 
 ## Before You Contribute
 
 ### 1. Code of Conduct
 
-All contributors must adhere to our [Code of Conduct](./CODE_OF_CONDUCT.md).
+All contributors must follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ### 2. Project Roadmap
 
-Our roadmap guides the project's direction. Align your contributions with these key goals:
+Our roadmap shows the direction of the project. Align your contributions with these goals:
 
 ### Reliability First
 
-- Ensure diff editing and command execution are consistently reliable.
-- Reduce friction points that deter regular usage.
-- Guarantee smooth operation across all locales and platforms.
-- Expand robust support for a wide variety of AI providers and models.
+- Make diff editing and command execution reliable every time.
+- Remove the problems that stop people from using Zoo Code every day.
+- Make Zoo Code work on all locales and platforms.
+- Support more AI providers and models.
 
 ### Enhanced User Experience
 
-- Streamline the UI/UX for clarity and intuitiveness.
-- Continuously improve the workflow to meet the high expectations developers have for daily-use tools.
+- Make the UI and UX clear and easy to use.
+- Improve the workflow. Developers expect a high standard from the tools they use every day.
 
 ### Leading on Agent Performance
 
-- Establish comprehensive evaluation benchmarks (evals) to measure real-world productivity.
-- Make it easy for everyone to easily run and interpret these evals.
-- Ship improvements that demonstrate clear increases in eval scores.
+- Build evaluation benchmarks (evals) that measure real-world productivity.
+- Make the evals easy to run and easy to read.
+- Ship improvements that clearly increase the eval scores.
 
-Mention alignment with these areas in your PRs.
+In your PRs, say which of these areas the change supports.
 
 ### 3. Join the Zoo Code Community
 
@@ -63,34 +64,36 @@ Mention alignment with these areas in your PRs.
 
 ### Types of Contributions
 
-- **Bug Fixes:** Addressing code issues.
-- **New Features:** Adding functionality.
-- **Documentation:** Improving guides and clarity.
+- **Bug Fixes:** Fix code problems.
+- **New Features:** Add functions.
+- **Documentation:** Improve the guides and make them clearer.
 
 ### Issue-First Approach
 
-All contributions start with a GitHub Issue using our skinny templates.
+Each contribution starts with a GitHub Issue. Use our short templates.
 
 - **Check existing issues**: Search [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
 - **Create an issue** using:
     - **Enhancements:** "Enhancement Request" template (plain language focused on user benefit).
-    - **Bugs:** "Bug Report" template (minimal repro + expected vs actual + version).
-- **Want to work on it?** Comment "Claiming" on the issue and reach out to the core team on [Discord](https://discord.gg/VxfP4Vx3gX) to get assigned. Assignment will be confirmed in the thread.
-- **PRs must link to the issue.** Unlinked PRs may be closed.
+    - **Bugs:** "Bug Report" template (minimal repro, expected and actual result, version).
+- **Write the issue** in the [Writing Style](#writing-style) below.
+- **Want to work on it?** Comment "Claiming" on the issue. Then contact the core team on [Discord](https://discord.gg/VxfP4Vx3gX) to get assigned. The core team confirms the assignment in the thread.
+- **PRs must link to the issue.** We may close PRs that have no link.
 
 ### Deciding What to Work On
 
-- Check the [GitHub Issues page](https://github.com/Zoo-Code-Org/Zoo-Code/issues) for issues.
-- For docs, visit [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
+- Look at the [GitHub Issues page](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+- For docs, go to [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
 ### Reporting Bugs
 
-- Check for existing reports first.
+- First, check for existing reports.
 - Create a new bug using the ["Bug Report" template](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) with:
     - Clear, numbered reproduction steps
-    - Expected vs actual result
-    - Zoo Code version (required); API provider/model if relevant
-- **Security issues**: Report privately via [security advisories](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+    - Expected result and actual result
+    - Zoo Code version (required)
+    - API provider and model, if they matter
+- **Security issues**: Report them in private with [security advisories](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Development & Submission Process
 
@@ -113,68 +116,99 @@ pnpm install
 ### Writing Code Guidelines
 
 - One focused PR per feature or fix.
-- Follow ESLint and TypeScript best practices.
-- Write clear, descriptive commits referencing issues (e.g., `Fixes #123`).
-- Provide thorough testing (`npm test`).
-- Rebase onto the latest `main` branch before submission.
+- Follow the ESLint and TypeScript best practices.
+- Write clear, descriptive commits that reference issues (for example, `Fixes #123`). Follow the [Writing Style](#writing-style).
+- Test your change fully (`npm test`).
+- Run both dead-code checks: `pnpm knip` and `pnpm knip:production`. See [Dead-code checks before review](docs/development-quality-checks.md) for findings, exceptions, and verification.
+- Rebase onto the latest `main` branch before you submit.
 
 ### Submitting a Pull Request
 
-- Begin as a **Draft PR** if seeking early feedback.
-- Clearly describe your changes following the Pull Request Template.
-- Link the issue in the PR description/title (e.g., "Fixes #123").
-- Provide screenshots/videos for UI changes.
-- Indicate if documentation updates are necessary.
+- Start as a **Draft PR** if you want early feedback.
+- Describe your changes with the Pull Request Template. Follow the [Writing Style](#writing-style).
+- Link the issue in the PR description or title (for example, "Fixes #123").
+- Add screenshots or videos for UI changes.
+- Say if the change needs documentation updates.
 
 ### Pull Request Policy
 
-- Must reference an assigned GitHub Issue. To get assigned: comment "Claiming" on the issue and reach out to the core team on [Discord](https://discord.gg/VxfP4Vx3gX). Assignment will be confirmed in the thread.
-- Unlinked PRs may be closed.
-- PRs should pass CI tests, align with the roadmap, and have clear documentation.
+- The PR must reference an assigned GitHub Issue. To get assigned, comment "Claiming" on the issue. Then contact the core team on [Discord](https://discord.gg/VxfP4Vx3gX). The core team confirms the assignment in the thread.
+- We may close PRs that have no link.
+- A PR must pass the CI tests, follow the roadmap, and have clear documentation.
 
 ### Review Process
 
-Ready-for-review PRs must pass required CI checks, address actionable review feedback, and receive fresh maintainer or CODEOWNER approval after automated review completes for the latest commit. Automated review may add a guidance comment and managed state labels; contributors should follow the indicated next step rather than editing those labels directly. New commits reset review state for the updated code.
+A PR that is ready for review must meet these conditions:
 
-Automated review supports maintainers but does not replace human approval. Outside contributors cannot direct CodeRabbit through comments; eligible reviews restart automatically after required CI passes, and maintainers handle any exceptional restart. Warnings are advisory unless repository policy says otherwise, and native GitHub required-check, CODEOWNER, and review protections remain authoritative for merging.
+- It passes the required CI checks.
+- It addresses the review feedback that needs action.
+- It gets a fresh maintainer or CODEOWNER approval. This happens after the automated review finishes for the latest commit.
 
-- **Daily Triage:** Quick checks by maintainers.
-- **Weekly In-depth Review:** Comprehensive assessment.
-- **Iterate promptly** based on feedback.
+The automated review may add a guidance comment and managed state labels. Follow the next step in the comment. Do not edit the labels yourself. New commits reset the review state for the changed code.
+
+The `community-approved` label shows a fresh community approval on the latest commit. The PR then waits for maintainer review. The label is an advisory priority signal for maintainers. It does not replace maintainer review or a required check. The review workflow manages the label.
+
+Automated review helps maintainers. It does not replace human approval. Outside contributors cannot direct CodeRabbit with comments. An eligible review restarts by itself after the required CI passes. Maintainers handle any exceptional restart. Warnings are advisory, unless repository policy says they are not. The native GitHub required checks, CODEOWNER rules, and review protections decide if a PR can merge.
+
+- **Daily Triage:** Maintainers do quick checks.
+- **Weekly In-depth Review:** Maintainers do a full assessment.
+- **Iterate quickly** when you get feedback.
 
 ### Pull Request Expectations
 
-Pull requests should be reviewable, tested, and maintainable. Before opening a PR, please make sure that:
+A PR must be easy to review, tested, and easy to maintain. Before you open a PR, make sure of these points:
 
-- The change is scoped to a specific issue, bug, or improvement.
+- The change covers one specific issue, bug, or improvement.
 - You can explain what the change does and why it is correct.
-- You have tested the change locally where practical.
-- You are willing to respond to review feedback and make reasonable follow-up changes.
-- The PR does not require maintainers to substantially rewrite, redesign, or take ownership of the implementation before it can be merged.
+- You tested the change on your computer where possible.
+- You will answer review feedback and make reasonable follow-up changes.
+- Maintainers do not need to rewrite or redesign the change, or take ownership of it, before it can merge.
 
-Maintainers may close PRs that are incomplete, too broad, inactive, not aligned with the project direction, or that create disproportionate review or maintenance burden. Closing a PR is not a judgment on the contributor; it is a maintainer decision that the change cannot be accepted in its present form.
+Maintainers may close a PR for these reasons:
 
-PRs are also closed automatically by bot:
+- It is incomplete.
+- It is too broad.
+- It is inactive.
+- It does not follow the direction of the project.
+- It creates too much review or maintenance work.
 
-- **60-day inactivity:** A PR with no activity for 60 days is marked stale and closed after a further 7 days if there is still no activity. Any new comment, commit, or review resets the timer.
-- **14-day author inactivity:** After a reviewer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. Once the changes are ready, re-request review from the reviewer.
+Closing a PR is not a judgment on the contributor. It means the maintainers cannot accept the change in its present form.
 
-To opt a PR out of automatic closure, apply the `do-not-close`, `pinned`, or `work-in-progress` label.
+A bot also closes PRs automatically:
+
+- **60-day inactivity:** The bot marks a PR as stale after 60 days with no activity. If there is still no activity after 7 more days, the bot closes the PR. A new comment, commit, or review resets the timer.
+- **14-day author inactivity:** When a reviewer requests changes, the bot adds the `awaiting-author` label. Activity from the author resets the inactivity timer. When the changes are ready, ask the reviewer for a new review.
+
+To stop automatic closure of a PR, add the `do-not-close`, `pinned`, or `work-in-progress` label.
 
 ### AI-Assisted Contributions
 
-Use of AI tools is allowed, but contributors remain fully responsible for their submissions.
+You can use AI tools. You are still fully responsible for your submission.
 
 If you use AI tools to help create a PR, you must:
 
-- Review and understand every meaningful change.
-- Be able to explain the implementation and tradeoffs in your own words.
-- Test the change yourself. If testing is impractical for your environment, explain why in the PR description and describe how reviewers can verify the change instead.
-- Verify that generated code is correct, necessary, and compatible with the project license.
-- Consider disclosing AI assistance in the PR description when it materially shaped the code, tests, or design — this helps reviewers give better feedback.
+- Review and understand each important change.
+- Explain the implementation and the trade-offs in your own words.
+- Test the change yourself. If you cannot test in your environment, explain why in the PR description. Also describe how reviewers can verify the change.
+- Make sure the generated code is correct, necessary, and compatible with the project license.
+- Think about telling reviewers about the AI help in the PR description. Do this when the AI help changed the code, tests, or design in a major way. This helps reviewers give better feedback.
 
-Please do not submit AI-generated changes that you do not understand or cannot maintain through review. Maintainers may close PRs that appear substantially AI-assisted but lack human verification, clear rationale, or review follow-through.
+Do not submit AI-generated changes that you do not understand. Do not submit changes that you cannot maintain through review. Maintainers may close a PR that seems to have much AI help. They may do this if it has no human verification, no clear reason, or no follow-up in review.
+
+### Writing Style
+
+Write issue titles, issue text, PR titles, PR descriptions, and commit messages in Simplified Technical English ([ASD-STE100](https://www.asd-ste100.org/)). The issue and PR templates give the same reminder.
+
+- Use short sentences. Use 20 words or fewer for an instruction.
+- Use plain words. Write "use", not "utilize". Write "start", not "commence".
+- Use the active voice. Write "the parser reads the file", not "the file is read by the parser".
+- Write one idea in each sentence.
+- Do not use contractions, semicolons, or em-dashes.
+- Keep the title short and specific.
+- Do not change exact logs, error messages, identifiers, commands, or reproduction evidence. Paste them as they are.
+
+These rules are writing guidance. Reviewers do not check formal ASD-STE100 compliance. Code, identifiers, and command syntax are not part of this rule.
 
 ## Legal
 
-By contributing, you agree your contributions will be licensed under the Apache 2.0 License, consistent with Zoo Code's licensing.
+When you contribute, you agree that your contributions use the Apache 2.0 License. This is the license of Zoo Code.

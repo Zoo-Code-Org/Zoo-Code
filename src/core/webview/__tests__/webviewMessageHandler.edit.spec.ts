@@ -1,4 +1,3 @@
-import type { Mock } from "vitest"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 // Mock dependencies first

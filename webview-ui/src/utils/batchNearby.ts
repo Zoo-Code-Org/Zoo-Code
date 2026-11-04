@@ -12,7 +12,7 @@ export interface BatchNearbyOptions<T> {
 	/** Returns true if this item is the target type to batch (e.g., readFile ask) */
 	isTarget: (item: T) => boolean
 	/** Returns true if this item can be skipped over when looking for more targets */
-	isIgnorableBetweenTargets: (item: T) => boolean
+	isIgnorableBetweenTargets: (item: T, batchContext?: T) => boolean
 	/** Returns true if this item is a semantic boundary that stops merging */
 	isBoundary: (item: T) => boolean
 	/** Synthesize a batch of items into a single item */
@@ -43,15 +43,24 @@ export function batchNearby<T>(items: T[], options: BatchNearbyOptions<T>): T[] 
 			const batch: T[] = [items[i]]
 			let j = i + 1
 			const pendingIgnorable: T[] = []
+			let batchContext: T | undefined
+
+			for (let contextIndex = i - 1; contextIndex >= 0; contextIndex--) {
+				if (!isIgnorableBetweenTargets(items[contextIndex])) {
+					batchContext = items[contextIndex]
+					break
+				}
+			}
 
 			while (j < items.length) {
-				if (isBoundary(items[j])) {
+				if (isBoundary(items[j]) && !isIgnorableBetweenTargets(items[j], batchContext)) {
 					break // boundary stops the batch
-				}
-				if (isTarget(items[j])) {
+				} else if (isTarget(items[j])) {
 					batch.push(items[j])
+					// Ignorable items seen so far sit between two targets, so the batch consumes them
+					pendingIgnorable.length = 0
 					j++
-				} else if (isIgnorableBetweenTargets(items[j])) {
+				} else if (isIgnorableBetweenTargets(items[j], batchContext)) {
 					pendingIgnorable.push(items[j]) // track but don't commit yet
 					j++
 				} else {
@@ -60,14 +69,16 @@ export function batchNearby<T>(items: T[], options: BatchNearbyOptions<T>): T[] 
 			}
 
 			if (batch.length > 1) {
-				// Bridge succeeded — pending ignorable items are metadata consumed by the batch
+				// Bridge succeeded — ignorable items between targets were consumed by the batch.
+				// Those left in pendingIgnorable come after the last target and belong to the
+				// next turn (its api_req_started / reasoning rows), so they must stay visible.
 				result.push(synthesize(batch))
 			} else {
 				// Bridge failed — restore pending ignorable items to preserve in-order semantics
 				result.push(batch[0])
-				if (pendingIgnorable.length > 0) {
-					result.push(...pendingIgnorable)
-				}
+			}
+			if (pendingIgnorable.length > 0) {
+				result.push(...pendingIgnorable)
 			}
 
 			i = j // items[j] was not consumed — re-examine it on next iteration

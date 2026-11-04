@@ -4,7 +4,6 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import { clearAllMocks, restoreGlobals } from "../../../test-utils/reset"
 import { OutputInterceptor } from "../OutputInterceptor"
-import { TerminalOutputPreviewSize } from "@roo-code/types"
 
 // Mock filesystem operations
 vi.mock("fs", () => ({

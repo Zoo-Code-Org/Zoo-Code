@@ -19,10 +19,7 @@ export class CacheManager implements ICacheManager {
 	 * @param context VS Code extension context
 	 * @param workspacePath Path to the workspace
 	 */
-	constructor(
-		private context: vscode.ExtensionContext,
-		private workspacePath: string,
-	) {
+	constructor(context: vscode.ExtensionContext, workspacePath: string) {
 		this.cachePath = vscode.Uri.joinPath(
 			context.globalStorageUri,
 			`roo-index-cache-${createHash("sha256").update(workspacePath).digest("hex")}.json`,

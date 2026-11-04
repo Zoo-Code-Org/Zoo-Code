@@ -1,7 +1,12 @@
-import { ApiHandlerOptions } from "../../shared/api"
 import { ContextProxy } from "../../core/config/ContextProxy"
+import type { CodebaseIndexConfig } from "@roo-code/types"
 import { EmbedderProvider } from "./interfaces/manager"
-import { CodeIndexConfig, PreviousConfigSnapshot } from "./interfaces/config"
+import {
+	CodeIndexConfig,
+	CodeIndexConfigSnapshot,
+	PreviousConfigSnapshot,
+	freezeCodeIndexConfigSnapshot,
+} from "./interfaces/config"
 import { DEFAULT_SEARCH_MIN_SCORE, DEFAULT_MAX_SEARCH_RESULTS } from "./constants"
 import { getDefaultModelId, getModelDimension, getModelScoreThreshold } from "../../shared/embeddingModels"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -12,32 +17,18 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
  */
 export class CodeIndexConfigManager {
 	private _isConfigurationLoaded = false
+	private config: CodeIndexConfigSnapshot
+	private readonly contextProxy: ContextProxy
+
+	constructor(contextProxy: ContextProxy) {
+		this.contextProxy = contextProxy
+		// Initialize with current configuration to avoid false restart triggers
+		this.config = this._readConfiguration()
+	}
 
 	/** Whether at least one full asynchronous configuration load has succeeded. */
 	public get isConfigurationLoaded(): boolean {
 		return this._isConfigurationLoaded
-	}
-
-	private codebaseIndexEnabled: boolean = false
-	private embedderProvider: EmbedderProvider = providerIdentifiers.openai
-	private modelId?: string
-	private modelDimension?: number
-	private openAiOptions?: ApiHandlerOptions
-	private ollamaOptions?: ApiHandlerOptions
-	private openAiCompatibleOptions?: { baseUrl: string; apiKey: string }
-	private geminiOptions?: { apiKey: string }
-	private mistralOptions?: { apiKey: string }
-	private vercelAiGatewayOptions?: { apiKey: string }
-	private bedrockOptions?: { region: string; profile?: string }
-	private openRouterOptions?: { apiKey: string; specificProvider?: string }
-	private qdrantUrl?: string = "http://localhost:6333"
-	private qdrantApiKey?: string
-	private searchMinScore?: number
-	private searchMaxResults?: number
-
-	constructor(private readonly contextProxy: ContextProxy) {
-		// Initialize with current configuration to avoid false restart triggers
-		this._loadAndSetConfiguration()
 	}
 
 	/**
@@ -48,12 +39,13 @@ export class CodeIndexConfigManager {
 	}
 
 	/**
-	 * Private method that handles loading configuration from storage and updating instance variables.
-	 * This eliminates code duplication between initializeWithCurrentConfig() and loadConfiguration().
+	 * Builds a complete immutable snapshot without changing the current configuration.
 	 */
-	private _loadAndSetConfiguration(): void {
+	private _readConfiguration(): CodeIndexConfigSnapshot {
 		// Load configuration from storage
-		const codebaseIndexConfig = this.contextProxy?.getGlobalState("codebaseIndexConfig") ?? {
+		const codebaseIndexConfig: Readonly<CodebaseIndexConfig> = this.contextProxy?.getGlobalState(
+			"codebaseIndexConfig",
+		) ?? {
 			codebaseIndexEnabled: false,
 			codebaseIndexQdrantUrl: "http://localhost:6333",
 			codebaseIndexEmbedderProvider: providerIdentifiers.openai,
@@ -65,99 +57,133 @@ export class CodeIndexConfigManager {
 			codebaseIndexBedrockProfile: "",
 		}
 
-		const {
-			codebaseIndexEnabled,
-			codebaseIndexQdrantUrl,
-			codebaseIndexEmbedderProvider,
-			codebaseIndexEmbedderBaseUrl,
-			codebaseIndexEmbedderModelId,
-			codebaseIndexSearchMinScore,
-			codebaseIndexSearchMaxResults,
-		} = codebaseIndexConfig
-
-		const openAiKey = this.contextProxy?.getSecret("codeIndexOpenAiKey") ?? ""
 		const qdrantApiKey = this.contextProxy?.getSecret("codeIndexQdrantApiKey") ?? ""
-		// Fix: Read OpenAI Compatible settings from the correct location within codebaseIndexConfig
-		const openAiCompatibleBaseUrl = codebaseIndexConfig.codebaseIndexOpenAiCompatibleBaseUrl ?? ""
-		const openAiCompatibleApiKey = this.contextProxy?.getSecret("codebaseIndexOpenAiCompatibleApiKey") ?? ""
-		const geminiApiKey = this.contextProxy?.getSecret("codebaseIndexGeminiApiKey") ?? ""
-		const mistralApiKey = this.contextProxy?.getSecret("codebaseIndexMistralApiKey") ?? ""
-		const vercelAiGatewayApiKey = this.contextProxy?.getSecret("codebaseIndexVercelAiGatewayApiKey") ?? ""
-		const bedrockRegion = codebaseIndexConfig.codebaseIndexBedrockRegion ?? "us-east-1"
-		const bedrockProfile = codebaseIndexConfig.codebaseIndexBedrockProfile ?? ""
-		const openRouterApiKey = this.contextProxy?.getSecret("codebaseIndexOpenRouterApiKey") ?? ""
-		const openRouterSpecificProvider = codebaseIndexConfig.codebaseIndexOpenRouterSpecificProvider ?? ""
 
-		// Update instance variables with configuration
-		this.codebaseIndexEnabled = codebaseIndexEnabled ?? false
-		this.qdrantUrl = codebaseIndexQdrantUrl
-		this.qdrantApiKey = qdrantApiKey ?? ""
-		this.searchMinScore = codebaseIndexSearchMinScore
-		this.searchMaxResults = codebaseIndexSearchMaxResults
-
-		// Validate and set model dimension
-		const rawDimension = codebaseIndexConfig.codebaseIndexEmbedderModelDimension
-		if (rawDimension !== undefined && rawDimension !== null) {
-			const dimension = Number(rawDimension)
-			if (!isNaN(dimension) && dimension > 0) {
-				this.modelDimension = dimension
-			} else {
-				console.warn(
-					`Invalid codebaseIndexEmbedderModelDimension value: ${rawDimension}. Must be a positive number.`,
-				)
-				this.modelDimension = undefined
-			}
-		} else {
-			this.modelDimension = undefined
-		}
-
-		this.openAiOptions = { openAiNativeApiKey: openAiKey }
+		// Build locally so a failed read cannot partially update the published snapshot.
+		const modelDimension = this._parseModelDimension(codebaseIndexConfig.codebaseIndexEmbedderModelDimension)
 
 		// Set embedder provider with support for openai-compatible
-		if (codebaseIndexEmbedderProvider === providerIdentifiers.ollama) {
-			this.embedderProvider = providerIdentifiers.ollama
-		} else if (codebaseIndexEmbedderProvider === "openai-compatible") {
-			this.embedderProvider = "openai-compatible"
-		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.gemini) {
-			this.embedderProvider = providerIdentifiers.gemini
-		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.mistral) {
-			this.embedderProvider = providerIdentifiers.mistral
-		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.vercelAiGateway) {
-			this.embedderProvider = providerIdentifiers.vercelAiGateway
-		} else if ((codebaseIndexEmbedderProvider as string) === providerIdentifiers.bedrock) {
-			this.embedderProvider = providerIdentifiers.bedrock
-		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.openrouter) {
-			this.embedderProvider = providerIdentifiers.openrouter
-		} else if (codebaseIndexEmbedderProvider === "semble") {
-			this.embedderProvider = "semble"
-		} else {
-			this.embedderProvider = providerIdentifiers.openai
+		const embedderProvider = this._resolveEmbedderProvider(codebaseIndexConfig.codebaseIndexEmbedderProvider)
+
+		const modelId = codebaseIndexConfig.codebaseIndexEmbedderModelId || undefined
+
+		return freezeCodeIndexConfigSnapshot({
+			codebaseIndexEnabled: codebaseIndexConfig.codebaseIndexEnabled ?? false,
+			qdrantUrl: codebaseIndexConfig.codebaseIndexQdrantUrl,
+			qdrantApiKey,
+			searchMinScore: codebaseIndexConfig.codebaseIndexSearchMinScore,
+			searchMaxResults: codebaseIndexConfig.codebaseIndexSearchMaxResults,
+			embedderProvider,
+			modelId,
+			modelDimension,
+			openAiOptions: this._readOpenAiOptions(),
+			ollamaOptions: this._readOllamaOptions(),
+			openAiCompatibleOptions: this._readOpenAiCompatibleOptions(),
+			geminiOptions: this._readGeminiOptions(),
+			mistralOptions: this._readMistralOptions(),
+			vercelAiGatewayOptions: this._readVercelAiGatewayOptions(),
+			bedrockOptions: this._readBedrockOptions(),
+			openRouterOptions: this._readOpenRouterOptions(),
+		})
+	}
+
+	private _readOpenAiOptions(): CodeIndexConfig["openAiOptions"] {
+		return { openAiNativeApiKey: this.contextProxy?.getSecret("codeIndexOpenAiKey") ?? "" }
+	}
+
+	private _readOllamaOptions(): CodeIndexConfig["ollamaOptions"] {
+		const config = this.contextProxy?.getGlobalState("codebaseIndexConfig")
+		return { ollamaBaseUrl: config == null ? "" : config.codebaseIndexEmbedderBaseUrl }
+	}
+
+	private _readGeminiOptions(): CodeIndexConfig["geminiOptions"] {
+		const apiKey = this.contextProxy?.getSecret("codebaseIndexGeminiApiKey") ?? ""
+		if (!apiKey) {
+			return undefined
 		}
 
-		this.modelId = codebaseIndexEmbedderModelId || undefined
+		return { apiKey }
+	}
 
-		this.ollamaOptions = {
-			ollamaBaseUrl: codebaseIndexEmbedderBaseUrl,
+	private _readMistralOptions(): CodeIndexConfig["mistralOptions"] {
+		const apiKey = this.contextProxy?.getSecret("codebaseIndexMistralApiKey") ?? ""
+		if (!apiKey) {
+			return undefined
 		}
 
-		this.openAiCompatibleOptions =
-			openAiCompatibleBaseUrl && openAiCompatibleApiKey
-				? {
-						baseUrl: openAiCompatibleBaseUrl,
-						apiKey: openAiCompatibleApiKey,
-					}
-				: undefined
+		return { apiKey }
+	}
 
-		this.geminiOptions = geminiApiKey ? { apiKey: geminiApiKey } : undefined
-		this.mistralOptions = mistralApiKey ? { apiKey: mistralApiKey } : undefined
-		this.vercelAiGatewayOptions = vercelAiGatewayApiKey ? { apiKey: vercelAiGatewayApiKey } : undefined
-		this.openRouterOptions = openRouterApiKey
-			? { apiKey: openRouterApiKey, specificProvider: openRouterSpecificProvider || undefined }
-			: undefined
-		// Set bedrockOptions if region is provided (profile is optional)
-		this.bedrockOptions = bedrockRegion
-			? { region: bedrockRegion, profile: bedrockProfile || undefined }
-			: undefined
+	private _readVercelAiGatewayOptions(): CodeIndexConfig["vercelAiGatewayOptions"] {
+		const apiKey = this.contextProxy?.getSecret("codebaseIndexVercelAiGatewayApiKey") ?? ""
+		if (!apiKey) {
+			return undefined
+		}
+
+		return { apiKey }
+	}
+
+	private _readBedrockOptions(): CodeIndexConfig["bedrockOptions"] {
+		const config = this.contextProxy?.getGlobalState("codebaseIndexConfig")
+		const region = config?.codebaseIndexBedrockRegion ?? "us-east-1"
+		if (!region) {
+			return undefined
+		}
+
+		return { region, profile: config?.codebaseIndexBedrockProfile || undefined }
+	}
+
+	private _readOpenRouterOptions(): CodeIndexConfig["openRouterOptions"] {
+		const apiKey = this.contextProxy?.getSecret("codebaseIndexOpenRouterApiKey") ?? ""
+		if (!apiKey) {
+			return undefined
+		}
+
+		const specificProvider =
+			this.contextProxy?.getGlobalState("codebaseIndexConfig")?.codebaseIndexOpenRouterSpecificProvider
+		return { apiKey, specificProvider: specificProvider || undefined }
+	}
+
+	private _readOpenAiCompatibleOptions(): CodeIndexConfig["openAiCompatibleOptions"] {
+		const baseUrl =
+			this.contextProxy?.getGlobalState("codebaseIndexConfig")?.codebaseIndexOpenAiCompatibleBaseUrl ?? ""
+		const apiKey = this.contextProxy?.getSecret("codebaseIndexOpenAiCompatibleApiKey") ?? ""
+
+		if (!baseUrl || !apiKey) {
+			return undefined
+		}
+
+		return { baseUrl, apiKey }
+	}
+
+	private _resolveEmbedderProvider(provider: unknown): EmbedderProvider {
+		switch (provider) {
+			case providerIdentifiers.ollama:
+			case "openai-compatible":
+			case providerIdentifiers.gemini:
+			case providerIdentifiers.mistral:
+			case providerIdentifiers.vercelAiGateway:
+			case providerIdentifiers.bedrock:
+			case providerIdentifiers.openrouter:
+			case "semble":
+				return provider
+			default:
+				return providerIdentifiers.openai
+		}
+	}
+
+	private _parseModelDimension(rawDimension: unknown): number | undefined {
+		if (rawDimension === undefined || rawDimension === null) {
+			return undefined
+		}
+
+		const dimension = Number(rawDimension)
+		if (dimension > 0) {
+			return dimension
+		}
+
+		console.warn(`Invalid codebaseIndexEmbedderModelDimension value: ${rawDimension}. Must be a positive number.`)
+		return undefined
 	}
 
 	/**
@@ -165,132 +191,87 @@ export class CodeIndexConfigManager {
 	 */
 	public async loadConfiguration(): Promise<{
 		configSnapshot: PreviousConfigSnapshot
-		currentConfig: {
-			isConfigured: boolean
-			embedderProvider: EmbedderProvider
-			modelId?: string
-			modelDimension?: number
-			openAiOptions?: ApiHandlerOptions
-			ollamaOptions?: ApiHandlerOptions
-			openAiCompatibleOptions?: { baseUrl: string; apiKey: string }
-			geminiOptions?: { apiKey: string }
-			mistralOptions?: { apiKey: string }
-			vercelAiGatewayOptions?: { apiKey: string }
-			bedrockOptions?: { region: string; profile?: string }
-			openRouterOptions?: { apiKey: string }
-			qdrantUrl?: string
-			qdrantApiKey?: string
-			searchMinScore?: number
-		}
+		currentConfig: CodeIndexConfig
 		requiresRestart: boolean
 	}> {
 		// Capture the ACTUAL previous state before loading new configuration
-		const previousConfigSnapshot: PreviousConfigSnapshot = {
-			enabled: this.codebaseIndexEnabled,
-			configured: this.isConfigured(),
-			embedderProvider: this.embedderProvider,
-			modelId: this.modelId,
-			modelDimension: this.modelDimension,
-			openAiKey: this.openAiOptions?.openAiNativeApiKey ?? "",
-			ollamaBaseUrl: this.ollamaOptions?.ollamaBaseUrl ?? "",
-			openAiCompatibleBaseUrl: this.openAiCompatibleOptions?.baseUrl ?? "",
-			openAiCompatibleApiKey: this.openAiCompatibleOptions?.apiKey ?? "",
-			geminiApiKey: this.geminiOptions?.apiKey ?? "",
-			mistralApiKey: this.mistralOptions?.apiKey ?? "",
-			vercelAiGatewayApiKey: this.vercelAiGatewayOptions?.apiKey ?? "",
-			bedrockRegion: this.bedrockOptions?.region ?? "",
-			bedrockProfile: this.bedrockOptions?.profile ?? "",
-			openRouterApiKey: this.openRouterOptions?.apiKey ?? "",
-			openRouterSpecificProvider: this.openRouterOptions?.specificProvider ?? "",
-			qdrantUrl: this.qdrantUrl ?? "",
-			qdrantApiKey: this.qdrantApiKey ?? "",
-		}
+		const previousConfigSnapshot = this._getRestartComparisonSnapshot()
 
 		// Refresh secrets from VSCode storage to ensure we have the latest values
 		await this.contextProxy.refreshSecrets()
 
-		// Load new configuration from storage and update instance variables
-		this._loadAndSetConfiguration()
+		// Publish only after the complete snapshot has been built.
+		this.config = this._readConfiguration()
 
 		const requiresRestart = this.doesConfigChangeRequireRestart(previousConfigSnapshot)
 
 		const result = {
 			configSnapshot: previousConfigSnapshot,
-			currentConfig: {
-				isConfigured: this.isConfigured(),
-				embedderProvider: this.embedderProvider,
-				modelId: this.modelId,
-				modelDimension: this.modelDimension,
-				openAiOptions: this.openAiOptions,
-				ollamaOptions: this.ollamaOptions,
-				openAiCompatibleOptions: this.openAiCompatibleOptions,
-				geminiOptions: this.geminiOptions,
-				mistralOptions: this.mistralOptions,
-				vercelAiGatewayOptions: this.vercelAiGatewayOptions,
-				bedrockOptions: this.bedrockOptions,
-				openRouterOptions: this.openRouterOptions,
-				qdrantUrl: this.qdrantUrl,
-				qdrantApiKey: this.qdrantApiKey,
-				searchMinScore: this.currentSearchMinScore,
-			},
+			currentConfig: this.getConfig(),
 			requiresRestart,
 		}
 		this._isConfigurationLoaded = true
 		return result
 	}
 
+	private _getRestartComparisonSnapshot(): PreviousConfigSnapshot {
+		return {
+			enabled: this.config.codebaseIndexEnabled,
+			configured: this.isConfigured(),
+			embedderProvider: this.config.embedderProvider,
+			modelId: this.config.modelId,
+			modelDimension: this.config.modelDimension,
+			openAiKey: this.config.openAiOptions?.openAiNativeApiKey ?? "",
+			ollamaBaseUrl: this.config.ollamaOptions?.ollamaBaseUrl ?? "",
+			openAiCompatibleBaseUrl: this.config.openAiCompatibleOptions?.baseUrl ?? "",
+			openAiCompatibleApiKey: this.config.openAiCompatibleOptions?.apiKey ?? "",
+			geminiApiKey: this.config.geminiOptions?.apiKey ?? "",
+			mistralApiKey: this.config.mistralOptions?.apiKey ?? "",
+			vercelAiGatewayApiKey: this.config.vercelAiGatewayOptions?.apiKey ?? "",
+			bedrockRegion: this.config.bedrockOptions?.region ?? "",
+			bedrockProfile: this.config.bedrockOptions?.profile ?? "",
+			openRouterApiKey: this.config.openRouterOptions?.apiKey ?? "",
+			openRouterSpecificProvider: this.config.openRouterOptions?.specificProvider ?? "",
+			qdrantUrl: this.config.qdrantUrl ?? "",
+			qdrantApiKey: this.config.qdrantApiKey ?? "",
+		}
+	}
+
 	/**
 	 * Checks if the service is properly configured based on the embedder type.
 	 */
 	public isConfigured(): boolean {
-		if (this.embedderProvider === "semble") {
-			// Semble requires no API keys or Qdrant — it's always configured
+		if (this.config.embedderProvider === "semble") {
+			// Semble requires no API keys or Qdrant.
 			return true
 		}
 
-		if (this.embedderProvider === providerIdentifiers.openai) {
-			const openAiKey = this.openAiOptions?.openAiNativeApiKey
-			const qdrantUrl = this.qdrantUrl
-			return !!(openAiKey && qdrantUrl)
-		} else if (this.embedderProvider === providerIdentifiers.ollama) {
-			// Ollama model ID has a default, so only base URL is strictly required for config
-			const ollamaBaseUrl = this.ollamaOptions?.ollamaBaseUrl
-			const qdrantUrl = this.qdrantUrl
-			return !!(ollamaBaseUrl && qdrantUrl)
-		} else if (this.embedderProvider === "openai-compatible") {
-			const baseUrl = this.openAiCompatibleOptions?.baseUrl
-			const apiKey = this.openAiCompatibleOptions?.apiKey
-			const qdrantUrl = this.qdrantUrl
-			const isConfigured = !!(baseUrl && apiKey && qdrantUrl)
-			return isConfigured
-		} else if (this.embedderProvider === providerIdentifiers.gemini) {
-			const apiKey = this.geminiOptions?.apiKey
-			const qdrantUrl = this.qdrantUrl
-			const isConfigured = !!(apiKey && qdrantUrl)
-			return isConfigured
-		} else if (this.embedderProvider === providerIdentifiers.mistral) {
-			const apiKey = this.mistralOptions?.apiKey
-			const qdrantUrl = this.qdrantUrl
-			const isConfigured = !!(apiKey && qdrantUrl)
-			return isConfigured
-		} else if (this.embedderProvider === providerIdentifiers.vercelAiGateway) {
-			const apiKey = this.vercelAiGatewayOptions?.apiKey
-			const qdrantUrl = this.qdrantUrl
-			const isConfigured = !!(apiKey && qdrantUrl)
-			return isConfigured
-		} else if (this.embedderProvider === providerIdentifiers.bedrock) {
-			// Only region is required for Bedrock (profile is optional)
-			const region = this.bedrockOptions?.region
-			const qdrantUrl = this.qdrantUrl
-			const isConfigured = !!(region && qdrantUrl)
-			return isConfigured
-		} else if (this.embedderProvider === providerIdentifiers.openrouter) {
-			const apiKey = this.openRouterOptions?.apiKey
-			const qdrantUrl = this.qdrantUrl
-			const isConfigured = !!(apiKey && qdrantUrl)
-			return isConfigured
+		if (!this.config.qdrantUrl) {
+			return false
 		}
-		return false // Should not happen if embedderProvider is always set correctly
+
+		switch (this.config.embedderProvider) {
+			case providerIdentifiers.openai:
+				return !!this.config.openAiOptions?.openAiNativeApiKey
+			case providerIdentifiers.ollama:
+				// The model ID has a default, so only the base URL is required.
+				return !!this.config.ollamaOptions?.ollamaBaseUrl
+			case "openai-compatible":
+				return !!(this.config.openAiCompatibleOptions?.baseUrl && this.config.openAiCompatibleOptions?.apiKey)
+			case providerIdentifiers.gemini:
+				return !!this.config.geminiOptions?.apiKey
+			case providerIdentifiers.mistral:
+				return !!this.config.mistralOptions?.apiKey
+			case providerIdentifiers.vercelAiGateway:
+				return !!this.config.vercelAiGatewayOptions?.apiKey
+			case providerIdentifiers.bedrock:
+				// The profile is optional.
+				return !!this.config.bedrockOptions?.region
+			case providerIdentifiers.openrouter:
+				return !!this.config.openRouterOptions?.apiKey
+			default:
+				return false
+		}
 	}
 
 	/**
@@ -310,132 +291,60 @@ export class CodeIndexConfigManager {
 	 * - Non-functional configuration tweaks
 	 */
 	doesConfigChangeRequireRestart(prev: PreviousConfigSnapshot): boolean {
-		const nowConfigured = this.isConfigured()
+		const current = this._getRestartComparisonSnapshot()
+		const wasEnabled = prev?.enabled ?? false
+		const wasReady = wasEnabled && (prev?.configured ?? false)
+		const isReady = current.enabled && current.configured
 
-		// Handle null/undefined values safely
-		const prevEnabled = prev?.enabled ?? false
-		const prevConfigured = prev?.configured ?? false
-		const prevProvider = prev?.embedderProvider ?? providerIdentifiers.openai
-		const prevOpenAiKey = prev?.openAiKey ?? ""
-		const prevOllamaBaseUrl = prev?.ollamaBaseUrl ?? ""
-		const prevOpenAiCompatibleBaseUrl = prev?.openAiCompatibleBaseUrl ?? ""
-		const prevOpenAiCompatibleApiKey = prev?.openAiCompatibleApiKey ?? ""
-		const prevModelDimension = prev?.modelDimension
-		const prevGeminiApiKey = prev?.geminiApiKey ?? ""
-		const prevMistralApiKey = prev?.mistralApiKey ?? ""
-		const prevVercelAiGatewayApiKey = prev?.vercelAiGatewayApiKey ?? ""
-		const prevBedrockRegion = prev?.bedrockRegion ?? ""
-		const prevBedrockProfile = prev?.bedrockProfile ?? ""
-		const prevOpenRouterApiKey = prev?.openRouterApiKey ?? ""
-		const prevOpenRouterSpecificProvider = prev?.openRouterSpecificProvider ?? ""
-		const prevQdrantUrl = prev?.qdrantUrl ?? ""
-		const prevQdrantApiKey = prev?.qdrantApiKey ?? ""
-
-		// 1. Transition from disabled/unconfigured to enabled/configured
-		if ((!prevEnabled || !prevConfigured) && this.codebaseIndexEnabled && nowConfigured) {
+		if (!wasReady && isReady) {
 			return true
 		}
 
-		// 2. Transition from enabled to disabled
-		if (prevEnabled && !this.codebaseIndexEnabled) {
+		if (wasEnabled && !current.enabled) {
 			return true
 		}
 
-		// 3. If wasn't ready before and isn't ready now, no restart needed
-		if ((!prevEnabled || !prevConfigured) && (!this.codebaseIndexEnabled || !nowConfigured)) {
+		if (!current.enabled || (!wasReady && !isReady)) {
 			return false
 		}
 
-		// 4. CRITICAL CHANGES - Always restart for these
-		// Only check for critical changes if feature is enabled
-		if (!this.codebaseIndexEnabled) {
-			return false
-		}
-
-		// Provider change
-		if (prevProvider !== this.embedderProvider) {
+		const previousProvider = prev?.embedderProvider ?? providerIdentifiers.openai
+		if (previousProvider !== current.embedderProvider || prev?.modelDimension !== current.modelDimension) {
 			return true
 		}
 
-		// Authentication changes (API keys)
-		const currentOpenAiKey = this.openAiOptions?.openAiNativeApiKey ?? ""
-		const currentOllamaBaseUrl = this.ollamaOptions?.ollamaBaseUrl ?? ""
-		const currentOpenAiCompatibleBaseUrl = this.openAiCompatibleOptions?.baseUrl ?? ""
-		const currentOpenAiCompatibleApiKey = this.openAiCompatibleOptions?.apiKey ?? ""
-		const currentModelDimension = this.modelDimension
-		const currentGeminiApiKey = this.geminiOptions?.apiKey ?? ""
-		const currentMistralApiKey = this.mistralOptions?.apiKey ?? ""
-		const currentVercelAiGatewayApiKey = this.vercelAiGatewayOptions?.apiKey ?? ""
-		const currentBedrockRegion = this.bedrockOptions?.region ?? ""
-		const currentBedrockProfile = this.bedrockOptions?.profile ?? ""
-		const currentOpenRouterApiKey = this.openRouterOptions?.apiKey ?? ""
-		const currentOpenRouterSpecificProvider = this.openRouterOptions?.specificProvider ?? ""
-		const currentQdrantUrl = this.qdrantUrl ?? ""
-		const currentQdrantApiKey = this.qdrantApiKey ?? ""
+		return (
+			this._hasConnectionSettingsChanged(prev, current) ||
+			this._hasVectorDimensionChanged(previousProvider, prev?.modelId)
+		)
+	}
 
-		if (prevOpenAiKey !== currentOpenAiKey) {
-			return true
-		}
+	private _hasConnectionSettingsChanged(prev: PreviousConfigSnapshot, current: PreviousConfigSnapshot): boolean {
+		const keys = [
+			"openAiKey",
+			"ollamaBaseUrl",
+			"openAiCompatibleBaseUrl",
+			"openAiCompatibleApiKey",
+			"geminiApiKey",
+			"mistralApiKey",
+			"vercelAiGatewayApiKey",
+			"bedrockRegion",
+			"bedrockProfile",
+			"openRouterApiKey",
+			"openRouterSpecificProvider",
+			"qdrantUrl",
+			"qdrantApiKey",
+		] as const satisfies readonly (keyof PreviousConfigSnapshot)[]
 
-		if (prevOllamaBaseUrl !== currentOllamaBaseUrl) {
-			return true
-		}
-
-		if (
-			prevOpenAiCompatibleBaseUrl !== currentOpenAiCompatibleBaseUrl ||
-			prevOpenAiCompatibleApiKey !== currentOpenAiCompatibleApiKey
-		) {
-			return true
-		}
-
-		if (prevGeminiApiKey !== currentGeminiApiKey) {
-			return true
-		}
-
-		if (prevMistralApiKey !== currentMistralApiKey) {
-			return true
-		}
-
-		if (prevVercelAiGatewayApiKey !== currentVercelAiGatewayApiKey) {
-			return true
-		}
-
-		if (prevBedrockRegion !== currentBedrockRegion || prevBedrockProfile !== currentBedrockProfile) {
-			return true
-		}
-
-		if (prevOpenRouterApiKey !== currentOpenRouterApiKey) {
-			return true
-		}
-
-		// OpenRouter specific provider change
-		if (prevOpenRouterSpecificProvider !== currentOpenRouterSpecificProvider) {
-			return true
-		}
-
-		// Check for model dimension changes (generic for all providers)
-		if (prevModelDimension !== currentModelDimension) {
-			return true
-		}
-
-		if (prevQdrantUrl !== currentQdrantUrl || prevQdrantApiKey !== currentQdrantApiKey) {
-			return true
-		}
-
-		// Vector dimension changes (still important for compatibility)
-		if (this._hasVectorDimensionChanged(prevProvider, prev?.modelId)) {
-			return true
-		}
-
-		return false
+		return keys.some((key) => (prev?.[key] ?? "") !== (current[key] ?? ""))
 	}
 
 	/**
 	 * Checks if model changes result in vector dimension changes that require restart.
 	 */
 	private _hasVectorDimensionChanged(prevProvider: EmbedderProvider, prevModelId?: string): boolean {
-		const currentProvider = this.embedderProvider
-		const currentModelId = this.modelId ?? getDefaultModelId(currentProvider)
+		const currentProvider = this.config.embedderProvider
+		const currentModelId = this.config.modelId ?? getDefaultModelId(currentProvider)
 		const resolvedPrevModelId = prevModelId ?? getDefaultModelId(prevProvider)
 
 		// If model IDs are the same and provider is the same, no dimension change
@@ -460,31 +369,31 @@ export class CodeIndexConfigManager {
 	 * Gets the current configuration state.
 	 */
 	public getConfig(): CodeIndexConfig {
-		return {
+		return Object.freeze({
 			isConfigured: this.isConfigured(),
-			embedderProvider: this.embedderProvider,
-			modelId: this.modelId,
-			modelDimension: this.modelDimension,
-			openAiOptions: this.openAiOptions,
-			ollamaOptions: this.ollamaOptions,
-			openAiCompatibleOptions: this.openAiCompatibleOptions,
-			geminiOptions: this.geminiOptions,
-			mistralOptions: this.mistralOptions,
-			vercelAiGatewayOptions: this.vercelAiGatewayOptions,
-			bedrockOptions: this.bedrockOptions,
-			openRouterOptions: this.openRouterOptions,
-			qdrantUrl: this.qdrantUrl,
-			qdrantApiKey: this.qdrantApiKey,
+			embedderProvider: this.config.embedderProvider,
+			modelId: this.config.modelId,
+			modelDimension: this.config.modelDimension,
+			openAiOptions: this.config.openAiOptions,
+			ollamaOptions: this.config.ollamaOptions,
+			openAiCompatibleOptions: this.config.openAiCompatibleOptions,
+			geminiOptions: this.config.geminiOptions,
+			mistralOptions: this.config.mistralOptions,
+			vercelAiGatewayOptions: this.config.vercelAiGatewayOptions,
+			bedrockOptions: this.config.bedrockOptions,
+			openRouterOptions: this.config.openRouterOptions,
+			qdrantUrl: this.config.qdrantUrl,
+			qdrantApiKey: this.config.qdrantApiKey,
 			searchMinScore: this.currentSearchMinScore,
 			searchMaxResults: this.currentSearchMaxResults,
-		}
+		})
 	}
 
 	/**
 	 * Gets whether the code indexing feature is enabled
 	 */
 	public get isFeatureEnabled(): boolean {
-		return this.codebaseIndexEnabled
+		return this.config.codebaseIndexEnabled
 	}
 
 	/**
@@ -495,10 +404,10 @@ export class CodeIndexConfigManager {
 	}
 
 	/**
-	 * Gets the current embedder type (openai or ollama)
+	 * Gets the current embedder provider
 	 */
 	public get currentEmbedderProvider(): EmbedderProvider {
-		return this.embedderProvider
+		return this.config.embedderProvider
 	}
 
 	/**
@@ -506,8 +415,8 @@ export class CodeIndexConfigManager {
 	 */
 	public get qdrantConfig(): { url?: string; apiKey?: string } {
 		return {
-			url: this.qdrantUrl,
-			apiKey: this.qdrantApiKey,
+			url: this.config.qdrantUrl,
+			apiKey: this.config.qdrantApiKey,
 		}
 	}
 
@@ -515,7 +424,7 @@ export class CodeIndexConfigManager {
 	 * Gets the current model ID being used for embeddings.
 	 */
 	public get currentModelId(): string | undefined {
-		return this.modelId
+		return this.config.modelId
 	}
 
 	/**
@@ -524,12 +433,12 @@ export class CodeIndexConfigManager {
 	 */
 	public get currentModelDimension(): number | undefined {
 		// First try to get the model-specific dimension
-		const modelId = this.modelId ?? getDefaultModelId(this.embedderProvider)
-		const modelDimension = getModelDimension(this.embedderProvider, modelId)
+		const modelId = this.config.modelId ?? getDefaultModelId(this.config.embedderProvider)
+		const modelDimension = getModelDimension(this.config.embedderProvider, modelId)
 
 		// Only use custom dimension if model doesn't have a built-in dimension
-		if (!modelDimension && this.modelDimension && this.modelDimension > 0) {
-			return this.modelDimension
+		if (!modelDimension && this.config.modelDimension && this.config.modelDimension > 0) {
+			return this.config.modelDimension
 		}
 
 		return modelDimension
@@ -541,13 +450,13 @@ export class CodeIndexConfigManager {
 	 */
 	public get currentSearchMinScore(): number {
 		// First check if user has configured a custom score threshold
-		if (this.searchMinScore !== undefined) {
-			return this.searchMinScore
+		if (this.config.searchMinScore !== undefined) {
+			return this.config.searchMinScore
 		}
 
 		// Fall back to model-specific threshold
-		const currentModelId = this.modelId ?? getDefaultModelId(this.embedderProvider)
-		const modelSpecificThreshold = getModelScoreThreshold(this.embedderProvider, currentModelId)
+		const currentModelId = this.config.modelId ?? getDefaultModelId(this.config.embedderProvider)
+		const modelSpecificThreshold = getModelScoreThreshold(this.config.embedderProvider, currentModelId)
 		return modelSpecificThreshold ?? DEFAULT_SEARCH_MIN_SCORE
 	}
 
@@ -556,6 +465,6 @@ export class CodeIndexConfigManager {
 	 * Returns user setting if configured, otherwise returns default.
 	 */
 	public get currentSearchMaxResults(): number {
-		return this.searchMaxResults ?? DEFAULT_MAX_SEARCH_RESULTS
+		return this.config.searchMaxResults ?? DEFAULT_MAX_SEARCH_RESULTS
 	}
 }

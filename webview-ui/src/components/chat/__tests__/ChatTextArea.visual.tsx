@@ -14,14 +14,7 @@ for (const theme of visualThemes) {
 		await expect(editor).toBeVisible()
 		await expect(story).toHaveScreenshot(`chat-composer-resting-${theme.name}.png`)
 
-		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-		for (
-			let index = 0;
-			index < 10 && !(await editor.evaluate((element) => element === document.activeElement));
-			index++
-		) {
-			await page.keyboard.press("Tab")
-		}
+		await editor.focus()
 		await expect(editor).toBeFocused()
 		await expect(story).toHaveScreenshot(`chat-composer-focus-${theme.name}.png`)
 		await expectBoundedLayout(page, story, {

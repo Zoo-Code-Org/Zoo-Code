@@ -24,10 +24,12 @@ export function getDcgArchiveInfo(platform = process.platform, arch = process.ar
 	return DCG_ARCHIVES[`${platform}-${arch}`]
 }
 
+/** @internal Exported for focused implementation tests. */
 export function isDcgSupportedPlatform(platform = process.platform, arch = process.arch): boolean {
 	return getDcgArchiveInfo(platform, arch) !== undefined
 }
 
+/** @internal Exported for focused implementation tests. */
 export function getDcgBinaryPath(
 	storageDir: string,
 	platform = process.platform,
@@ -37,10 +39,12 @@ export function getDcgBinaryPath(
 	return info ? path.join(storageDir, "destructive-command-guard", info.binary) : undefined
 }
 
+/** @internal Exported for focused implementation tests. */
 export function isTrustedDownloadUrl(url: string): boolean {
 	return isTrustedHttpsUrl(url, DCG_TRUSTED_DOWNLOAD_DOMAINS)
 }
 
+/** @internal Exported for focused implementation tests. */
 export function resolveTrustedRedirect(url: string, location: string | undefined, redirectsRemaining: number): string {
 	return resolveManagedBinaryRedirect(url, location, redirectsRemaining, {
 		name: "DCG",

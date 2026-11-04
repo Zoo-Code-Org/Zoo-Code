@@ -5,7 +5,6 @@ import type { PendingTaskAction, TodoItem } from "@roo-code/types"
 import { Task } from "../task/Task"
 import { getModeBySlug } from "../../shared/modes"
 import { formatResponse } from "../prompts/responses"
-import { t } from "../../i18n"
 import { parseMarkdownChecklist } from "./UpdateTodoListTool"
 import { Package } from "../../shared/package"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -73,7 +72,7 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 			if (todos) {
 				try {
 					todoItems = parseMarkdownChecklist(todos)
-				} catch (error) {
+				} catch {
 					task.consecutiveMistakeCount++
 					task.recordToolError("new_task")
 					task.didToolFailInCurrentTurn = true

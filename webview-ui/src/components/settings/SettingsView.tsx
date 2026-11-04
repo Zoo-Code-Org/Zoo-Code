@@ -164,6 +164,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		language,
 		alwaysAllowExecute,
 		destructiveCommandGuardEnabled,
+		alwaysDenyUnapprovedCommands,
 		alwaysAllowMcp,
 		alwaysAllowModeSwitch,
 		alwaysAllowSubtasks,
@@ -187,6 +188,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalOutputPreviewSize,
 		terminalShellIntegrationTimeout,
 		terminalShellIntegrationDisabled, // Added from upstream
+		collapseCommandOutputByDefault,
 		terminalCommandDelay,
 		terminalPowershellCounter,
 		terminalZshClearEolMark,
@@ -221,7 +223,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedNewFiles,
 	} = cachedState
 
-	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
+	const apiConfiguration = cachedState.apiConfiguration
 
 	useEffect(() => {
 		// Update when currentApiConfigName or mode changes.
@@ -261,11 +263,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setApiConfigurationField = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K], isUserAction: boolean = true) => {
 			setCachedState((prevState) => {
-				if (prevState.apiConfiguration?.[field] === value) {
+				if (prevState.apiConfiguration[field] === value) {
 					return prevState
 				}
 
-				const previousValue = prevState.apiConfiguration?.[field]
+				const previousValue = prevState.apiConfiguration[field]
 
 				// Helper to check if two values are semantically equal
 				const areValuesEqual = (a: any, b: any): boolean => {
@@ -393,6 +395,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					allowedWriteFiles: allowedWriteFiles ?? [],
 					alwaysAllowExecute: alwaysAllowExecute ?? undefined,
 					destructiveCommandGuardEnabled: destructiveCommandGuardEnabled ?? false,
+					alwaysDenyUnapprovedCommands: alwaysDenyUnapprovedCommands ?? false,
 					alwaysAllowMcp,
 					alwaysAllowModeSwitch,
 					allowedCommands: allowedCommands ?? [],
@@ -414,6 +417,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					diffFuzzyThreshold,
 					terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? 30_000,
 					terminalShellIntegrationDisabled,
+					collapseCommandOutputByDefault,
 					terminalCommandDelay,
 					terminalPowershellCounter,
 					terminalZshClearEolMark,
@@ -823,6 +827,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								alwaysAllowSubtasks={alwaysAllowSubtasks}
 								alwaysAllowExecute={alwaysAllowExecute}
 								destructiveCommandGuardEnabled={destructiveCommandGuardEnabled}
+								alwaysDenyUnapprovedCommands={alwaysDenyUnapprovedCommands}
 								alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
 								followupAutoApproveTimeoutMs={followupAutoApproveTimeoutMs}
 								allowedCommands={allowedCommands}
@@ -894,6 +899,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalOutputPreviewSize={terminalOutputPreviewSize}
 								terminalShellIntegrationTimeout={terminalShellIntegrationTimeout}
 								terminalShellIntegrationDisabled={terminalShellIntegrationDisabled}
+								collapseCommandOutputByDefault={collapseCommandOutputByDefault}
 								terminalCommandDelay={terminalCommandDelay}
 								terminalPowershellCounter={terminalPowershellCounter}
 								terminalZshClearEolMark={terminalZshClearEolMark}

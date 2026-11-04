@@ -8,9 +8,10 @@ import {
 	ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
 	providerIdentifiers,
+	type ModelRecord,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { clearZooCodeToken, getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../services/zoo-code-auth"
 import { Package } from "../../shared/package"
 import { t } from "../../i18n"
@@ -18,10 +19,17 @@ import { t } from "../../i18n"
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
+import { getZooGatewayModels } from "./fetchers/zoo-gateway"
 
 function getApiErrorStatus(error: unknown): number | undefined {
 	if (typeof error === "object" && error !== null && "status" in error) {
@@ -170,6 +178,14 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: true }
+	}
+
+	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
+		return getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+	}
+
 	private ensureAuthenticated(): void {
 		if (!resolveZooGatewaySessionToken(this.options.zooSessionToken)) {
 			throw new Error(ZOO_GATEWAY_AUTH_ERROR)
@@ -193,7 +209,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		// Apply prompt caching for models that support it
 		// Zoo Gateway serves the same models as Vercel AI Gateway, so caching support is identical
 		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
+			addCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, info))
 		}
 
 		// Build request headers with enrichment metadata
@@ -278,7 +294,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		this.ensureAuthenticated()
 
 		const { id: modelId, info } = await this.fetchModel()

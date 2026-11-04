@@ -138,7 +138,7 @@ describe("Kimi Code model discovery", () => {
 	})
 
 	it("rejects fractional max_tokens from server response", () => {
-		const mapped = mapKimiCodeModel({
+		mapKimiCodeModel({
 			id: "kimi-for-coding",
 			max_tokens: 131072.5,
 		})

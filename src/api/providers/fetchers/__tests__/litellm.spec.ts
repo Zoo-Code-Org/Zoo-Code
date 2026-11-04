@@ -708,7 +708,7 @@ describe("getLiteLLMModels", () => {
 
 		mockedAxios.get.mockResolvedValue(mockResponse)
 
-		const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+		await getLiteLLMModels("test-api-key", "http://localhost:4000")
 	})
 
 	it("prefers max_output_tokens over max_tokens when both are present", async () => {

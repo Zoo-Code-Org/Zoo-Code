@@ -11,80 +11,72 @@
 </sub>
 </div>
 
-# Code de Conduite des Contributeurs
+<a id="contributor-covenant-code-of-conduct"></a>
 
-## Notre Engagement
+# Code de conduite de Contributor Covenant
 
-Dans l'intérêt de favoriser un environnement ouvert et accueillant, nous nous
-engageons, en tant que contributeurs et responsables, à faire de la participation
-à notre projet et à notre communauté une expérience sans harcèlement pour tous,
-indépendamment de l'âge, de la taille corporelle, du handicap, de l'origine ethnique,
-des caractéristiques sexuelles, de l'identité et de l'expression de genre,
-du niveau d'expérience, de l'éducation, du statut socio-économique, de la nationalité,
-de l'apparence personnelle, de la race, de la religion, ou de l'orientation sexuelle.
+<a id="our-pledge"></a>
 
-## Nos Standards
+## Notre engagement
 
-Exemples de comportements qui contribuent à créer un environnement positif :
+Nous sommes contributeurs et mainteneurs. Nous voulons un environnement ouvert et accueillant. Nous nous engageons à permettre à tous de participer à notre projet et à notre communauté sans harcèlement. Cela s'applique quels que soient l'âge, la corpulence, le handicap, l'origine ethnique, les caractéristiques sexuelles, l'identité et l'expression de genre, le niveau d'expérience, l'éducation, la situation socio-économique, la nationalité, l'apparence personnelle, la race, la religion ou l'identité et l'orientation sexuelles.
 
-- Utiliser un langage accueillant et inclusif
-- Respecter les différents points de vue et expériences
-- Accepter gracieusement les critiques constructives
-- Se concentrer sur ce qui est le mieux pour la communauté
-- Faire preuve d'empathie envers les autres membres de la communauté
+<a id="our-standards"></a>
 
-Exemples de comportements inacceptables de la part des participants :
+## Nos règles
 
-- L'utilisation de langage ou d'images à caractère sexuel et l'attention ou les avances
-  sexuelles importunes
-- Le trolling, les commentaires insultants/désobligeants, et les attaques personnelles ou politiques
-- Le harcèlement public ou privé
-- La publication d'informations privées d'autrui, telles que des informations physiques ou
-  électroniques, sans autorisation explicite
-- Tout autre comportement qui pourrait raisonnablement être considéré comme inapproprié
-  dans un cadre professionnel
+Ces comportements aident à créer un environnement positif :
 
-## Nos Responsabilités
+- Utilise un langage accueillant et inclusif.
+- Respecte les différents points de vue et expériences.
+- Accepte les critiques constructives avec bienveillance.
+- Concentre-toi sur ce qui est le mieux pour la communauté.
+- Fais preuve d'empathie envers les autres membres de la communauté.
 
-Les mainteneurs de projet sont responsables de clarifier les standards de comportement
-acceptable et sont censés prendre des mesures correctives appropriées et équitables en
-réponse à tout cas de comportement inacceptable.
+Ces comportements des participants ne sont pas acceptables :
 
-Les mainteneurs de projet ont le droit et la responsabilité de supprimer, modifier ou
-rejeter les commentaires, commits, code, modifications du wiki, questions et autres contributions
-qui ne sont pas alignés sur ce Code de Conduite, ou de bannir temporairement ou
-définitivement tout contributeur pour d'autres comportements qu'ils jugent inappropriés,
-menaçants, offensants ou nuisibles.
+- Utiliser un langage ou des images sexualisés.
+- Porter une attention sexuelle ou faire des avances sexuelles non désirées.
+- Faire du trolling, des commentaires insultants ou dénigrants et des attaques personnelles ou politiques.
+- Harceler en public ou en privé.
+- Publier les informations privées d'autres personnes sans leur autorisation explicite. Par exemple, une adresse physique ou électronique.
+- Tout autre comportement qu'on peut raisonnablement considérer comme inapproprié dans un cadre professionnel.
 
-## Portée
+<a id="our-responsibilities"></a>
 
-Ce Code de Conduite s'applique à la fois dans les espaces du projet et dans les espaces
-publics lorsqu'un individu représente le projet ou sa communauté. Les exemples de
-représentation d'un projet ou d'une communauté incluent l'utilisation d'une adresse e-mail
-officielle du projet, la publication via un compte officiel sur les réseaux sociaux,
-ou le fait d'agir en tant que représentant désigné lors d'un événement en ligne ou hors ligne.
-La représentation d'un projet peut être définie et clarifiée davantage par les mainteneurs du projet.
+## Nos responsabilités
+
+Les mainteneurs du projet doivent expliquer les règles de comportement acceptable. Ils doivent prendre des mesures correctives adaptées et équitables quand un participant a un comportement inacceptable.
+
+Les mainteneurs du projet ont le droit et la responsabilité d'agir sur les contributions qui ne suivent pas ce code de conduite. Ils peuvent supprimer, modifier ou refuser des commentaires, commits, du code, des modifications du wiki, des issues et d'autres contributions. Ils peuvent aussi exclure un contributeur temporairement ou définitivement pour d'autres comportements qu'ils jugent inappropriés, menaçants, offensants ou nuisibles.
+
+<a id="scope"></a>
+
+## Champ d'application
+
+Ce code de conduite s'applique dans les espaces du projet. Il s'applique aussi dans les espaces publics quand une personne représente le projet ou sa communauté. Voici des exemples de représentation d'un projet ou d'une communauté :
+
+- Utiliser une adresse e-mail officielle du projet.
+- Publier avec un compte officiel sur les réseaux sociaux.
+- Agir comme représentant désigné lors d'un événement en ligne ou en présentiel.
+
+Les mainteneurs du projet peuvent définir et expliquer ce que signifie représenter le projet.
+
+<a id="enforcement"></a>
 
 ## Application
 
-Les cas de comportement abusif, harcelant ou autrement inacceptable peuvent être
-signalés en contactant l'équipe du projet à support@zoocode.dev. Toutes les plaintes
-seront examinées et étudiées et donneront lieu à une réponse qui
-est jugée nécessaire et appropriée aux circonstances. L'équipe du projet est
-obligée de maintenir la confidentialité concernant la personne qui signale un incident.
-Des détails supplémentaires sur des politiques d'application spécifiques peuvent être publiés séparément.
+Pour signaler un comportement abusif, du harcèlement ou tout autre comportement inacceptable, contacte l'équipe du projet à support@zoocode.dev. L'équipe examine et enquête sur toutes les plaintes. Elle répond de la manière qu'elle juge nécessaire et adaptée aux circonstances. L'équipe doit garder confidentielle l'identité de la personne qui signale un incident. Elle peut publier séparément plus de détails sur des règles d'application précises.
 
-Les mainteneurs de projet qui ne suivent ou n'appliquent pas le Code de Conduite de bonne
-foi peuvent faire face à des répercussions temporaires ou permanentes déterminées par d'autres
-membres de la direction du projet.
+Les mainteneurs du projet doivent suivre et faire respecter le code de conduite de bonne foi. Sinon, ils peuvent subir des conséquences temporaires ou permanentes. D'autres membres de la direction du projet décident de ces conséquences.
+
+<a id="attribution"></a>
 
 ## Attribution
 
-Ce Code de Conduite est adapté de la [version de Cline][cline_coc] du [Contributor Covenant][homepage], version 1.4,
-disponible à https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Pour obtenir des réponses aux questions courantes sur ce code de conduite, voir
-https://www.contributor-covenant.org/faq
+Pour les réponses aux questions courantes sur ce code de conduite, consulte https://www.contributor-covenant.org/faq

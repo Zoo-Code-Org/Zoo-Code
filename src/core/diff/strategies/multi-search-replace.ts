@@ -2,11 +2,13 @@ import { distance } from "fastest-levenshtein"
 
 import { ToolProgressStatus, DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
 
-import { addLineNumbers, everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
+import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, DiffStrategy, DiffResult } from "../../../shared/tools"
 import { normalizeString } from "../../../utils/text-normalization"
 
 const BUFFER_LINES = 40 // Number of extra context lines to show before and after matches
+// Real malformed markers are short; longer lines skip the hint regex entirely.
+const MAX_MARKER_HINT_LINE_LENGTH = 64
 
 function getSimilarity(original: string, search: string): number {
 	// Empty searches are no longer supported
@@ -396,7 +398,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 
 		const matches = [
 			...repairedDiff.matchAll(
-				/(?:^|\n)(?<!\\)<<<<<<< SEARCH>?\s*\n((?:\:start_line:\s*(\d+)\s*\n))?((?:\:end_line:\s*(\d+)\s*\n))?((?<!\\)-------\s*\n)?([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)=======\s*\n)([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)>>>>>>> REPLACE)(?=\n|$)/g,
+				/(?:^|\n)(?<!\\)<<<<<<< SEARCH>?\s*\n((?::start_line:\s*(\d+)\s*\n))?((?::end_line:\s*(\d+)\s*\n))?((?<!\\)-------\s*\n)?([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)=======\s*\n)([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)>>>>>>> REPLACE)(?=\n|$)/g,
 			),
 		]
 
@@ -468,8 +470,6 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				continue
 			}
 
-			const endLine = replacement.startLine + searchLines.length - 1
-
 			// Initialize search variables
 			let matchIndex = -1
 			let bestMatchScore = 0
@@ -538,46 +538,47 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					searchLines = aggressiveSearchLines
 					replaceLines = replaceContent ? replaceContent.split(/\r?\n/) : []
 				} else {
-					// No match found with either method
-					const originalContentSection =
-						startLine && endLine
-							? `\n\nOriginal Content:\n${addLineNumbers(
-									resultLines
-										.slice(
-											Math.max(0, startLine - 1 - this.bufferLines),
-											Math.min(resultLines.length, endLine + this.bufferLines),
-										)
-										.join("\n"),
-									Math.max(1, startLine - this.bufferLines),
-								)}`
-							: `\n\nOriginal Content:\n${addLineNumbers(
-									resultLines
-										.slice(
-											Math.max(0, (matchIndex >= 0 ? matchIndex : 0) - this.bufferLines),
-											Math.min(
-												resultLines.length,
-												(matchIndex >= 0 ? matchIndex : 0) +
-													searchLines.length +
-													this.bufferLines,
-											),
-										)
-										.join("\n"),
-									Math.max(1, (matchIndex >= 0 ? matchIndex : 0) - this.bufferLines + 1),
-								)}`
-
-					const bestMatchSection = bestMatchContent
-						? `\n\nBest Match Found:\n${addLineNumbers(bestMatchContent, matchIndex + 1)}`
-						: `\n\nBest Match Found:\n(no match)`
-
+					// File and search text are never echoed: they may hold secrets. Report only numbers and constants.
 					const lineRange = startLine ? ` at line: ${startLine}` : ""
+					const bestMatchLocation =
+						bestMatchContent && matchIndex >= 0
+							? `lines ${matchIndex + 1}-${matchIndex + bestMatchContent.split("\n").length}`
+							: "none"
 
 					const levenDist = bestMatchContent
 						? distance(normalizeString(searchChunk), normalizeString(bestMatchContent))
 						: -1
 
+					// Only diagnose markers after matching fails: marker-like text can be valid file content.
+					const hintLines = searchChunk.split("\n")
+					const firstSearchLine = hintLines[0]?.trim() ?? ""
+					const separatorSwallowed = hintLines[1]?.trim() === "-------"
+					// Length guard: adjacent `\s*` groups backtrack quadratically on long whitespace runs.
+					const looksLikeMalformedMarker =
+						firstSearchLine.length <= MAX_MARKER_HINT_LINE_LENGTH &&
+						/^(?::\s*\d{1,9}:?|:?\s*start[_-]?line\s*:?\s*\d{1,9}:?)$/i.test(firstSearchLine)
+					const malformedMarkerHint = looksLikeMalformedMarker
+						? `\n- LIKELY CAUSE: the first line of your search content looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
+						: ""
+
 					diffResults.push({
 						success: false,
-						error: `No sufficiently similar match found${lineRange} (${Math.floor(bestMatchScore * 100)}% similar, needs ${Math.floor(this.fuzzyThreshold * 100)}%)\n\nDebug Info:\n- Similarity Score: ${Math.floor(bestMatchScore * 100)}%\n- Required Threshold: ${Math.floor(this.fuzzyThreshold * 100)}%\n- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n- Levenshtein Distance: ${levenDist >= 0 ? `${levenDist} characters` : "N/A"}\n- Search Length: ${searchChunk.length} characters\n- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n- Tried both standard and aggressive line number stripping\n- Tip: Use the read_file tool to get the latest content of the file before attempting to use the apply_diff tool again, as the file content may have changed\n\nSearch Content:\n${searchChunk}${bestMatchSection}${originalContentSection}`,
+						error:
+							`No sufficiently similar match found${lineRange} ` +
+							`(${Math.floor(bestMatchScore * 100)}% similar, needs ${Math.floor(this.fuzzyThreshold * 100)}%)\n\n` +
+							`Debug Info:\n` +
+							`- Similarity Score: ${Math.floor(bestMatchScore * 100)}%\n` +
+							`- Required Threshold: ${Math.floor(this.fuzzyThreshold * 100)}%\n` +
+							`- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n` +
+							`- Levenshtein Distance: ${levenDist >= 0 ? `${levenDist} characters` : "N/A"}\n` +
+							`- Search Length: ${searchChunk.length} characters\n` +
+							`- Best Match Location: ${bestMatchLocation}\n` +
+							`- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n` +
+							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}\n` +
+							`- Tip: Use the read_file tool to get the latest content of the file before attempting ` +
+							`to use the apply_diff tool again, as the file content may have changed\n` +
+							`- Tip: The SEARCH block must contain complete, whole lines — partial-line (substring) matching is not supported. ` +
+							`If the target line is very long, copy the entire line into the SEARCH block`,
 					})
 					continue
 				}
@@ -641,6 +642,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 			success: true,
 			content: finalContent,
 			failParts: diffResults,
+			blockCount: matches.length,
 		}
 	}
 

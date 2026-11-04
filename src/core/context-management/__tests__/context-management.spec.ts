@@ -653,14 +653,6 @@ describe("Context Management", () => {
 				{ ...messages[messages.length - 1], content: "" },
 			]
 
-			// When truncating, always uses 0.5 fraction
-			// With 4 messages after the first, 0.5 fraction means remove 2 messages
-			const expectedMessages = [
-				messagesWithSmallContent[0],
-				messagesWithSmallContent[3],
-				messagesWithSmallContent[4],
-			]
-
 			const result = await manageContext({
 				messages: messagesWithSmallContent,
 				totalTokens,
@@ -701,14 +693,6 @@ describe("Context Management", () => {
 			const messagesWithSmallContent = [
 				...messages.slice(0, -1),
 				{ ...messages[messages.length - 1], content: "" },
-			]
-
-			// When truncating, always uses 0.5 fraction
-			// With 4 messages after the first, 0.5 fraction means remove 2 messages
-			const expectedMessages = [
-				messagesWithSmallContent[0],
-				messagesWithSmallContent[3],
-				messagesWithSmallContent[4],
 			]
 
 			const result = await manageContext({
@@ -1025,7 +1009,7 @@ describe("Context Management", () => {
 				{ ...messages[messages.length - 1], content: "" },
 			]
 
-			const result = await manageContext({
+			await manageContext({
 				messages: messagesWithSmallContent,
 				totalTokens,
 				contextWindow: modelInfo.contextWindow,

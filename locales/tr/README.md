@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.84.0'daki Yenilikler
+## v3.94.0'daki Yenilikler
 
-- ✨ **Yeni SOTA modelleri eklendi:** Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.
-- 🧭 **Daha güvenilir görevler ve alt görevler:** Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.
-- 🛠️ **Daha güvenilir terminal, sağlayıcı ve kod arama davranışı:** Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla.
+- ✨ **Daha geniş model ve sağlayıcı desteği:** Claude Haiku 5.5'i Anthropic üzerinden kullan, uyumlu VS Code LM modellerine görsel gönder, OpenCode Go Responses modelleri için temperature değerini ayarla ve istekleri daha fazla sağlayıcıda temiz şekilde iptal et.
+- 🔐 **Daha esnek MCP OAuth:** Statik OAuth istemci ayarlarını yapılandır, özel geri çağırma yolları kullan, kimlik doğrulama ayrıntılarını `WWW-Authenticate` üzerinden keşfet ve yeniden denemeden önce geri çağırma hatalarını gör.
+- 🧭 **Daha akıcı sohbetler ve uzun oturumlar:** Geçmişteki görevleri yeniden adlandır, dosyaları Shift tuşuna basmadan sohbete sürükle, uzun oturumlarda tutulan belleği azalt ve alt görev bağlantılarını ve değiştirilen webview'ları stabil tut.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

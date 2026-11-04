@@ -102,6 +102,8 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
  *   opener line's newline through the line that is exactly the terminator word
  *   (after stripping leading tabs for `<<-`). If no terminator line is found the
  *   heredoc is unterminated.
+ *
+ * @internal
  */
 export function findUnterminatedQuote(command: string): UnterminatedQuote | null {
 	return scanTopLevelQuotes(command).unterminatedQuote
@@ -651,9 +653,9 @@ function parseCommandLine(command: string): string[] {
 	let tokens: ShellToken[]
 	try {
 		tokens = parse(processedCommand) as ShellToken[]
-	} catch (error: any) {
+	} catch (error) {
 		// If shell-quote fails to parse, fall back to simple splitting
-		console.warn("shell-quote parse error:", error.message, "for command:", processedCommand)
+		console.warn("shell-quote parse error:", (error as Error).message, "for command:", processedCommand)
 
 		// Simple fallback: split by common operators
 		const fallbackCommands = processedCommand

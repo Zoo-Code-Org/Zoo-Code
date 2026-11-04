@@ -64,7 +64,6 @@ export async function testParseSourceCodeDefinitions(
 	// Clear any previous mocks and set up fs mock
 	vi.clearAllMocks()
 	vi.mock("fs/promises")
-	const mockedFs = (await vi.importActual("fs/promises")) as typeof import("fs/promises")
 	;(fs.readFile as any).mockResolvedValue(content)
 
 	// Get the mock function
@@ -72,7 +71,7 @@ export async function testParseSourceCodeDefinitions(
 	const mockedLoadRequiredLanguageParsers = loadRequiredLanguageParsers as any
 
 	// Initialize TreeSitter and create a real parser
-	const { Parser, Language } = await initializeTreeSitter()
+	const { Parser } = await initializeTreeSitter()
 	const parser = new Parser()
 
 	// Load language and configure parser
@@ -102,7 +101,7 @@ export async function testParseSourceCodeDefinitions(
 
 // Helper function to inspect tree structure
 export async function inspectTreeStructure(content: string, language: string = "typescript"): Promise<string> {
-	const { Parser, Language } = await initializeTreeSitter()
+	const { Parser } = await initializeTreeSitter()
 	const parser = new Parser()
 	const lang = await loadTestGrammar(`tree-sitter-${language}.wasm`)
 	parser.setLanguage(lang)
