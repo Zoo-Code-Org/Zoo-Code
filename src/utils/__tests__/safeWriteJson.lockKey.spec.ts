@@ -471,3 +471,89 @@ it("takes one lock for a regular file whose parent directory resolves through a 
 	// one a writer that names the canonical path takes - one identity, two locks again.
 	expect(keys[0]).toBe(canonicalFile)
 })
+
+// safeWriteJson resolves its target, checks confinement and stages beside the resolved path,
+// and only then holds that target's lock. Resolving the path a second time inside safeWriteText
+// resolves it AFTER that authorization: a link a peer plants in the gap moves these bytes to a
+// file this call never locked. This host cannot create real symlinks, so the planting is modelled
+// the way the rest of this file models a link - through realpath - while the commit rename stays a
+// real rename of a real file.
+// safeWriteJson resolves its target, confinement-checks it, acquires its lock and re-verifies the
+// locked identity; only then does it hand the path to safeWriteText. Resolving the same path a second
+// time inside safeWriteText resolves it AFTER that authorization, so a link a peer plants in that gap
+// moves the bytes to a file this call never locked. This host cannot create real symlinks, so the
+// planting is modelled the way the rest of this file models a link - through realpath.
+describe("safeWriteJson publish target under a planted link", () => {
+	it("publishes to the target it verified under the lock instead of resolving it a second time", async () => {
+		const dir = await makeDir("planted-")
+		const outsideDir = await makeDir("outside-")
+		const target = path.join(dir, "history_item.json")
+		const outside = path.join(outsideDir, "outside.json")
+		await fs.writeFile(target, '{"id":"old"}\n', "utf8")
+		await fs.writeFile(outside, '{"id":"peer"}\n', "utf8")
+
+		let locked = false
+		let postLockResolutions = 0
+		mockedRealpath.mockImplementation(async (p) => {
+			const key = String(p)
+			if (locked && key === target) {
+				postLockResolutions += 1
+				// safeWriteJson re-resolves the target under the lock, verifies the identity it just locked and
+				// re-asserts confinement; those three get the honest answer. From then on the name answers as the link
+				// a peer plants in the gap before safeWriteText would have resolved it a fourth time.
+				if (postLockResolutions > 3) return outside
+			}
+			return key
+		})
+		mockedLstat.mockImplementation(async (p) => symlinkStat(String(p)))
+		mockedAcquireFileLock.mockImplementation(async () => {
+			locked = true
+			return async () => {}
+		})
+
+		await safeWriteJson(target, { id: "planted" }, { confineTo: dir })
+
+		// Only safeWriteJson's own three post-lock resolutions ran; safeWriteText was handed the verified
+		// path and did not resolve it a fourth time. A write that follows the planted alias lands outside.
+		expect(postLockResolutions).toBe(3)
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ id: "planted" })
+		expect(JSON.parse(await fs.readFile(outside, "utf8"))).toEqual({ id: "peer" })
+	})
+})
+
+// An unscoped publish-over-link write takes two locks: one on the referent, one on the link path.
+// They are acquired in sorted order, and the protected block's finally has not started yet when an
+// acquisition fails, so anything already acquired must be released here or it outlives this call
+// until the stale timeout.
+describe("safeWriteJson lock acquisition failure on the second key", () => {
+	it("releases the first lock, propagates the rejection, and never holds the second", async () => {
+		const dir = await makeDir("lockfail-")
+		const referent = path.join(dir, "history_item.json")
+		currentLink = path.join(dir, "link.json")
+		await fs.writeFile(referent, '{"id":"old"}\n', "utf8")
+		await fs.writeFile(currentLink, '{"id":"link"}\n', "utf8")
+
+		const acquired: string[] = []
+		const released: string[] = []
+		mockedRealpath.mockImplementation(async (p) => (String(p) === currentLink ? referent : String(p)))
+		mockedLstat.mockImplementation(async (p) => symlinkStat(String(p)))
+		mockedAcquireFileLock.mockImplementation(async (key) => {
+			const name = String(key)
+			acquired.push(name)
+			if (acquired.length > 1) throw new Error("lock contention on the second key")
+			return async () => {
+				released.push(name)
+			}
+		})
+
+		await expect(safeWriteJson(currentLink, { id: "task-9" })).rejects.toThrow("lock contention on the second key")
+
+		// Both keys were attempted in sorted order, only the first was ever held, and the rejection
+		// that aborted the acquisition is the error the caller sees.
+		expect(acquired).toHaveLength(2)
+		expect(acquired[0]).not.toEqual(acquired[1])
+		expect(released).toEqual([acquired[0]])
+		expect(await fs.readFile(referent, "utf8")).toContain('"old"')
+		expect(await fs.readFile(currentLink, "utf8")).toContain('"link"')
+	})
+})

@@ -469,6 +469,11 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			// A write with no declared scope replaces the link rather than writing through it, so the
 			// publish must not re-resolve the path it is handed below.
 			publishOverLink,
+			// The same rule holds for every other shape this function writes. resolvedTargetPath was
+			// resolved, confinement-checked and staged beside above, and its lock is held; a second
+			// resolution inside safeWriteText would resolve it AFTER that authorization, so a link a peer
+			// plants in the gap would move these bytes to a file this call never locked.
+			retainedTarget: true,
 		}
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)
