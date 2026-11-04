@@ -23,8 +23,12 @@ describe("NativeToolCallParser.parseDynamicMcpTool name for API history", () => 
 
 		expect(result).not.toBeNull()
 		expect(result!.name.length).toBeLessThanOrEqual(64)
-		// The recorded name is the declared one, up to the hyphen/underscore spelling.
-		expect(toolNamesMatch(result!.name, buildMcpToolName(SERVER, TOOL))).toBe(true)
+		// The parser has no registry to restore the hyphens: it records the declared name (same hash)
+		// in the model's underscore spelling, with the mcp-- prefix and separator restored.
+		const declared = buildMcpToolName(SERVER, TOOL)
+		const [, , declaredServer, declaredTool] = declared.match(/^(mcp--)(.+?)--(.+)$/)!
+		expect(result!.name).toBe(`mcp--${declaredServer.replace(/-/g, "_")}--${declaredTool.replace(/-/g, "_")}`)
+		expect(toolNamesMatch(result!.name, declared)).toBe(true)
 		expect(resolveMcpToolByName([{ name: SERVER, tools: [{ name: TOOL }] }], result!.name)).toEqual({
 			serverName: SERVER,
 			toolName: TOOL,
