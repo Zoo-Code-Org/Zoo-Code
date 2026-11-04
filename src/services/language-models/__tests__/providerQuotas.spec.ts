@@ -1334,6 +1334,100 @@ describe("loadProfiles", () => {
 		await expect(loadProfiles(source)).rejects.toThrow("None of the saved profiles could be read")
 	})
 
+	describe("when the request is abandoned", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		/** Counts the abort listeners that are added and not removed. */
+		const trackListeners = (signal: AbortSignal) => {
+			let live = 0
+			const add = signal.addEventListener.bind(signal)
+			const remove = signal.removeEventListener.bind(signal)
+			signal.addEventListener = ((...args: Parameters<typeof add>) => (live++, add(...args))) as typeof add
+			signal.removeEventListener = ((...args: Parameters<typeof remove>) => (
+				live--,
+				remove(...args)
+			)) as typeof remove
+			return () => live
+		}
+
+		it("rejects at once while the list is pending, and leaves no timer or listener behind", async () => {
+			const controller = new AbortController()
+			const live = trackListeners(controller.signal)
+			const source = { listConfig: vi.fn(() => new Promise<never>(() => {})), getProfile: vi.fn() }
+
+			const loading = loadProfilesWithActive(source, controller.signal)
+			const rejected = expect(loading).rejects.toMatchObject({ name: "AbortError" })
+			controller.abort()
+			await rejected
+
+			expect(vi.getTimerCount()).toBe(0)
+			expect(live()).toBe(0)
+			expect(source.getProfile).not.toHaveBeenCalled()
+		})
+
+		it("rejects at once while the profiles are being read, and leaves no timer or listener behind", async () => {
+			const controller = new AbortController()
+			const live = trackListeners(controller.signal)
+			const source = {
+				listConfig: vi.fn(async () => [{ id: "a" }, { id: "b" }]),
+				getProfile: vi.fn(() => new Promise<never>(() => {})), // never settles
+			}
+
+			const loading = loadProfilesWithActive(source, controller.signal)
+			const rejected = expect(loading).rejects.toMatchObject({ name: "AbortError" })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(source.getProfile).toHaveBeenCalledTimes(2)
+			controller.abort()
+			await rejected
+
+			expect(vi.getTimerCount()).toBe(0)
+			expect(live()).toBe(0)
+		})
+
+		it("does not read a profile when the signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+			const source = { listConfig: vi.fn(async () => [{ id: "a" }]), getProfile: vi.fn() }
+
+			await expect(loadProfilesWithActive(source, controller.signal)).rejects.toMatchObject({
+				name: "AbortError",
+			})
+
+			expect(source.getProfile).not.toHaveBeenCalled()
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("releases its timers and listener when everything settles normally", async () => {
+			const controller = new AbortController()
+			const live = trackListeners(controller.signal)
+			const source = {
+				listConfig: vi.fn(async () => [{ id: "a" }]),
+				getProfile: vi.fn(async () => ({ apiProvider: "x" }) as never),
+			}
+
+			await loadProfilesWithActive(source, controller.signal)
+
+			expect(vi.getTimerCount()).toBe(0)
+			expect(live()).toBe(0)
+		})
+
+		it("still times out a read that never settles, and the others produce a response", async () => {
+			const source = {
+				listConfig: vi.fn(async () => [{ id: "slow" }, { id: "ok" }]),
+				getProfile: vi.fn(({ id }: { id: string }) =>
+					id === "slow" ? new Promise<never>(() => {}) : Promise.resolve({ apiProvider: "x" } as never),
+				),
+			}
+
+			const loading = loadProfilesWithActive(source)
+			await vi.advanceTimersByTimeAsync(10_000)
+
+			expect((await loading).profiles).toEqual([{ apiProvider: "x" }])
+			expect(vi.getTimerCount()).toBe(0)
+		})
+	})
+
 	it("returns an empty list when there are no saved profiles", async () => {
 		const source = { listConfig: vi.fn(async () => []), getProfile: vi.fn() }
 		expect(await loadProfiles(source)).toEqual([])

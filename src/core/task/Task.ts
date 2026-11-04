@@ -1786,6 +1786,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * to replace the stored messages outright.
 	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
+		// One save at a time per task, from the message write to the task-history write: callers that do not wait for it
+		// (the fire-and-forget ones) would otherwise let an older save's metadata land after a newer save's and replace
+		// it, an explicit clear of the usage breakdown included. A save that fails does not hold up the next one.
+		const run = this.saveClineMessagesQueue.then(
+			() => this.persistClineMessages(merge),
+			() => this.persistClineMessages(merge),
+		)
+		this.saveClineMessagesQueue = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		return run
+	}
+
+	private saveClineMessagesQueue: Promise<void> = Promise.resolve()
+
+	private async persistClineMessages(merge: boolean): Promise<boolean> {
 		// What was actually persisted: with `merge`, newer messages another host wrote are folded in. The metadata
 		// (including the usage breakdown) is computed from it, so a stale local snapshot cannot clear usage that
 		// the stored messages still contain.

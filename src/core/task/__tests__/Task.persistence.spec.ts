@@ -1104,6 +1104,107 @@ describe("Task persistence", () => {
 		})
 	})
 
+	// ── one save at a time ────────────────────────────────────────────────
+
+	describe("saveClineMessages ordering", () => {
+		afterEach(() => {
+			mockSaveTaskMessages.mockReset()
+			mockSaveTaskMessages.mockResolvedValue(undefined)
+		})
+
+		const metadataFor = (usage: boolean) => ({
+			historyItem: { id: "t", number: 1, ts: 1, task: "x", tokensIn: 0, tokensOut: 0, totalCost: 0, usage },
+			tokenUsage: { totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, contextTokens: 0 },
+		})
+
+		it("does not start a save before the previous save has written its task-history entry", async () => {
+			const events: string[] = []
+			const firstMetadata = createDeferred<ReturnType<typeof metadataFor>>()
+			const firstHistoryWrite = createDeferred<undefined>()
+			mockSaveTaskMessages.mockImplementation(async () => {
+				events.push("messages")
+				return []
+			})
+			mockTaskMetadata
+				.mockImplementationOnce(() => firstMetadata.promise)
+				.mockImplementationOnce(async () => metadataFor(true))
+			const updateTaskHistory = vi
+				.fn()
+				.mockImplementationOnce(async () => {
+					await firstHistoryWrite.promise
+					events.push("history 1")
+				})
+				.mockImplementationOnce(async () => {
+					events.push("history 2")
+				})
+			const provider = { ...mockProvider, updateTaskHistory }
+			const task = new Task({
+				provider: provider as any,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => (task as Record<string, any>).saveClineMessages() as Promise<boolean>
+
+			const older = save() // not awaited, like the fire-and-forget callers
+			const newer = save()
+			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1))
+
+			// The older save is between its two writes; the newer one has not written anything yet.
+			expect(events).toEqual(["messages"])
+
+			firstMetadata.resolve(metadataFor(false))
+			await vi.waitFor(() => expect(updateTaskHistory).toHaveBeenCalledTimes(1))
+			expect(events).toEqual(["messages"])
+			firstHistoryWrite.resolve(undefined)
+			await Promise.all([older, newer])
+
+			// The newer save's entry is the last one written, whatever the timing of the older one.
+			expect(events).toEqual(["messages", "history 1", "messages", "history 2"])
+			expect(updateTaskHistory.mock.calls.map(([item]) => item.usage)).toEqual([false, true])
+		})
+
+		it("runs the next save even when the one before it failed", async () => {
+			mockSaveTaskMessages.mockRejectedValueOnce(new Error("write error")).mockResolvedValueOnce([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => (task as Record<string, any>).saveClineMessages() as Promise<boolean>
+
+			const first = save()
+			const second = save()
+
+			expect(await first).toBe(false)
+			expect(await second).toBe(true)
+		})
+
+		it("keeps saves in the order they were asked for", async () => {
+			const order: number[] = []
+			let n = 0
+			mockSaveTaskMessages.mockImplementation(async () => {
+				const mine = ++n
+				// The first save is the slowest: without the queue it would finish last.
+				await new Promise((resolve) => setTimeout(resolve, mine === 1 ? 30 : 0))
+				order.push(mine)
+				return []
+			})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => (task as Record<string, any>).saveClineMessages() as Promise<boolean>
+
+			await Promise.all([save(), save(), save()])
+
+			expect(order).toEqual([1, 2, 3])
+		})
+	})
+
 	// ── abortTask history hydration guard ─────────────────────────────────
 
 	describe("abortTask", () => {
