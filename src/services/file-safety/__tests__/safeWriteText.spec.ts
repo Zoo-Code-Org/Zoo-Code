@@ -11,6 +11,7 @@ import {
 	DaclRestoreError,
 	PostCommitDurabilityError,
 	resolveLockKey,
+	resolvePublishTarget,
 	safeWriteText,
 	StagingPathError,
 	stagingNameIsStillOurs,
@@ -2296,6 +2297,42 @@ describe("windows ACL failure leaves no unauthorized content", () => {
 		})
 
 		await expect(safeWriteText(targetPath, "new data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
+	})
+})
+
+// A target that is not there yet must still be canonicalized: realpath cannot tell a plain missing
+// file apart from a name under a link directory, and the containment check has to be made against the
+// location the publish will actually land on, not against the spelling the caller happened to use.
+describe("resolvePublishTarget with an absent final component", () => {
+	const missing = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
+	it("canonicalizes the deepest existing ancestor instead of returning the alias", async () => {
+		const aliasDir = "/workspace/short"
+		const realDir = "/mnt/real-workspace"
+		const target = `${aliasDir}/sub/settings.json`
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			const key = String(p)
+			if (key === target || key === `${aliasDir}/sub`) return Promise.reject(missing())
+			if (key === aliasDir) return realDir
+			return key
+		})
+		vi.mocked(fs.lstat).mockImplementation(async (p) => {
+			const key = String(p)
+			if (key === target || key === `${aliasDir}/sub`) return Promise.reject(missing())
+			return _fileStats(false)
+		})
+
+		await expect(resolvePublishTarget(target)).resolves.toBe(path.join(realDir, "sub", "settings.json"))
+	})
+
+	it("keeps a plain missing file at its own path when no ancestor is an alias", async () => {
+		const target = "/tmp/test-dir/new.json"
+		vi.mocked(fs.realpath).mockImplementation(() => Promise.reject(missing()))
+		vi.mocked(fs.lstat).mockImplementation(() => Promise.reject(missing()))
+
+		// The fallback is path.join of the parent and the basename, so the expectation is spelled the way
+		// this platform joins paths; the point is that nothing outside the given directory appeared.
+		await expect(resolvePublishTarget(target)).resolves.toBe(path.join(path.dirname(target), path.basename(target)))
 	})
 })
 

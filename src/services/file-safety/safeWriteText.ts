@@ -371,7 +371,14 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 			throw lstatError
 		})
 		if (linkStat?.isSymbolicLink()) throw error
-		return absoluteFilePath
+		// Both realpath and lstat report the final component as absent. Returning the spelling this
+		// call was handed leaves an alias ancestor unresolved: a workspace path routed through a link
+		// directory, or through a Windows 8.3 short name, would be published - and checked against the
+		// confinement root - under a name that is not the file's canonical location, so the containment
+		// verdict would depend on how the caller happened to spell the path. Canonicalize the deepest
+		// ancestor that does exist and re-join the components that are still missing, which is what the
+		// lock keys already do so the target and its key cannot disagree.
+		return canonicalDirKey(absoluteFilePath)
 	})
 }
 /**
