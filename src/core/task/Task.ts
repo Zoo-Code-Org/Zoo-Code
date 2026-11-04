@@ -5637,13 +5637,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public async *attemptApiRequest(
 		retryAttempt: number = 0,
 		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo } = {},
+		// Truncation retries already made for this request. Counted apart from `retryAttempt`,
+		// which callers also advance for mid-stream and empty-response retries.
+		contextWindowRetries: number = 0,
 	): ApiStream {
 		// Hold replaced handlers from request setup until the stream is fully
 		// consumed (including the background usage drain) or closed early.
 		// Retries recurse through this method and nest their own unit of work.
 		const endApiWork = this.beginApiWork()
 		try {
-			yield* this.attemptApiRequestWithActiveApi(retryAttempt, options)
+			yield* this.attemptApiRequestWithActiveApi(retryAttempt, options, contextWindowRetries)
 		} finally {
 			endApiWork()
 		}
@@ -5652,6 +5655,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async *attemptApiRequestWithActiveApi(
 		retryAttempt: number,
 		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo },
+		contextWindowRetries: number,
 	): ApiStream {
 		const state = await this.providerRef.deref()?.getState()
 
@@ -6043,15 +6047,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			// If it's a context window error and we haven't exceeded max retries for this error type
-			if (isContextWindowExceededError && retryAttempt < MAX_CONTEXT_WINDOW_RETRIES) {
+			if (isContextWindowExceededError && contextWindowRetries < MAX_CONTEXT_WINDOW_RETRIES) {
 				console.warn(
 					`[Task#${this.taskId}] Context window exceeded for model ${this.api.getModel().id}. ` +
-						`Retry attempt ${retryAttempt + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +
+						`Retry attempt ${contextWindowRetries + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +
 						`Attempting automatic truncation...`,
 				)
 				await this.handleContextWindowExceededError(requestModelInfo)
 				// Retry the request after handling the context window error
-				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
+				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions, contextWindowRetries + 1)
 				return
 			}
 
@@ -6071,7 +6075,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// Delegate generator output from the recursive call with
 				// incremented retry count.
-				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
+				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions, contextWindowRetries)
 
 				return
 			} else {
