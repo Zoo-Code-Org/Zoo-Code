@@ -134,6 +134,7 @@ describe("WriteToFileTool partial-delta cancellation", () => {
 		once: MockedFunction<(...args: unknown[]) => unknown>
 		off: MockedFunction<(...args: unknown[]) => unknown>
 		ask: MockedFunction<(type: string, text: string, partial?: boolean) => Promise<unknown>>
+		finalizePartialToolAsk: MockedFunction<(text?: string) => Promise<void>>
 		providerRef: { deref: () => { getState: () => Promise<Record<string, unknown>> } }
 		diffViewProvider: {
 			editType: "modify" | "create" | undefined
@@ -152,6 +153,8 @@ describe("WriteToFileTool partial-delta cancellation", () => {
 		once: vi.fn(),
 		off: vi.fn(),
 		ask: vi.fn().mockResolvedValue(undefined),
+		finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
+
 		providerRef: { deref: () => ({ getState: async () => ({ experiments: {} }) }) },
 		diffViewProvider: {
 			editType: "create",
@@ -175,6 +178,30 @@ describe("WriteToFileTool partial-delta cancellation", () => {
 		state.lastSeenPartialPath = "src/demo.ts"
 		return state
 	}
+	// A refused rollback plus an empty streamed document reaches handlePartial with an ask
+	// already on screen and no preview to open, which used to leave that ask partial forever.
+	it("finalizes the empty-content partial ask when a rollback was refused", async () => {
+		const task = buildStreamTask("refused-empty-content", "inst-c6")
+		seedStablePath(task as unknown as Task)
+		const failureKey = writeToFileTool["getPartialStreamFailureKey"](task as unknown as Task)
+		writeToFileTool["taskRollbackFailures"].set(
+			failureKey,
+			new Error("EPERM: cannot restore the streamed document"),
+		)
+		const emptyContentBlock = {
+			...partialBlock,
+			params: { path: "src/demo.ts", content: "" },
+		}
+
+		await writeToFileTool.handlePartial(task as unknown as Task, emptyContentBlock)
+
+		expect(task.ask).toHaveBeenCalledWith("tool", expect.stringContaining('"content":""'), true)
+		expect(task.finalizePartialToolAsk).toHaveBeenCalledWith(expect.stringContaining('"content":""'))
+		expect(task.diffViewProvider.open).not.toHaveBeenCalled()
+		expect(task.diffViewProvider.update).not.toHaveBeenCalled()
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		writeToFileTool["taskRollbackFailures"].delete(failureKey)
+	})
 
 	it("does not register per-task state for a task that already stopped", async () => {
 		const task = buildStreamTask("cancel-before-register", "inst-c1")

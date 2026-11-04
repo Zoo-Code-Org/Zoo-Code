@@ -634,17 +634,20 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			return
 		}
 
+		// A refused rollback left the streamed document dirty: opening a preview here would save
+		// that unapproved buffer before approval, so this delta stops and execute() owns the refusal
+		// report. The check sits outside the content guard on purpose: a delta that streamed an
+		// empty document still has its ask on screen, and that one has to be finalized too.
+		if (this.taskRollbackFailures.has(this.getPartialStreamFailureKey(task))) {
+			// The ask above is already on screen and this return is the last thing the delta does:
+			// finalize it, or the spinner and Save/Reject buttons stay live for a preview that will
+			// never be opened. execute() owns the refusal report.
+			await this.finalizePartialToolAskAfterFailure(task, partialMessage)
+			this.resetTaskPartialState(task)
+			return
+		}
+
 		if (newContent) {
-			// A refused rollback left the streamed document dirty: opening it here would save
-			// that unapproved buffer before approval. Skip the preview; execute() owns the refusal.
-			if (this.taskRollbackFailures.has(this.getPartialStreamFailureKey(task))) {
-				// The ask above is already on screen and this return is the last thing the delta
-				// does: finalize it, or the spinner and Save/Reject buttons stay live for a preview
-				// that will never be opened. execute() owns the refusal report.
-				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
-				this.resetTaskPartialState(task)
-				return
-			}
 			try {
 				if (!task.diffViewProvider.isEditing) {
 					await task.diffViewProvider.open(relPath!)
