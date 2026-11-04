@@ -7020,8 +7020,12 @@ describe("ClineProvider", () => {
 			}
 
 			// The second sibling's post is what fails, so the first sibling has already taken the
-			// saved settings by the time the caller is told the refresh failed.
-			vi.spyOn(firstSibling, "postStateToWebview").mockResolvedValue(undefined)
+			// saved settings by the time the caller is told the refresh failed. The first sibling's
+			// post succeeds for that apply and rejects afterwards, so both restores fail and the
+			// order the compensation works through them in becomes observable.
+			vi.spyOn(firstSibling, "postStateToWebview")
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValue(new Error("first restore gone"))
 			vi.spyOn(lastSibling, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
 
 			await expect(
@@ -7037,13 +7041,23 @@ describe("ClineProvider", () => {
 
 			// The last sibling's post rejects for good, so putting its own overlay back fails too:
 			// the compensation logs which view it could not restore instead of swallowing that as
-			// well.
-			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining("Unable to restore the overlay of view"),
+			// well, and it works through the siblings in the reverse of the order it applied them.
+			const restoreFailures = vi
+				.mocked(mockOutputChannel.appendLine)
+				.mock.calls.map(([line]: [string]) => String(line))
+				.filter((line: string) => line.includes("Unable to restore the overlay of view"))
+			expect(
+				restoreFailures.some((line: string) =>
+					line.includes("after the refresh of profile 'profile-sibling-refresh' failed: webview gone"),
+				),
+			).toBe(true)
+			expect(restoreFailures.some((line: string) => line.includes("failed: first restore gone"))).toBe(true)
+			const lastRestored = restoreFailures.findIndex((line: string) => line.includes("failed: webview gone"))
+			const firstRestored = restoreFailures.findIndex((line: string) =>
+				line.includes("failed: first restore gone"),
 			)
-			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining("after the refresh of profile 'profile-sibling-refresh' failed: webview gone"),
-			)
+			expect(lastRestored).toBeGreaterThanOrEqual(0)
+			expect(firstRestored).toBeGreaterThan(lastRestored)
 
 			await provider.dispose()
 			await firstSibling.dispose()
