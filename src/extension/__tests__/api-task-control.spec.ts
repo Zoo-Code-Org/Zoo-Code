@@ -205,13 +205,24 @@ describe("API task controls", () => {
 
 		it("fails task creation when the view state is not ready within the readiness bound", async () => {
 			// A readiness promise that never settles: the bound must reject task creation
-			// instead of letting createTask run against stale shared defaults.
+			// instead of letting createTask run against stale shared defaults. Fake timers keep
+			// the assertion from paying the whole 3000 ms bound on the wall clock.
+			vi.useFakeTimers()
 			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
 
-			await expect(api.startNewTask({ configuration, text: "new task" })).rejects.toThrow(
-				"Timed out waiting for the view state to become ready",
-			)
-			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			const started = api.startNewTask({ configuration, text: "new task" })
+			// Attach the rejection handler before advancing: with fake timers the bound fires
+			// during the advance, and a handler attached afterwards would see the rejection
+			// briefly unhandled.
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			await vi.advanceTimersByTimeAsync(3000)
+
+			try {
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
