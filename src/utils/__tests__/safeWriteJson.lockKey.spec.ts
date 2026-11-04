@@ -99,7 +99,8 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
 		// After the lock: the strict publish resolution, the key/publish-target agreement check
 		// (resolve of the publish target plus canonicalization of its directory), the re-resolution of
-		// the staging directory before anything is written into it, then safeWriteText's two
+		// the staging directory twice - the approval and the re-verification before anything is staged -
+		// then safeWriteText's two
 		// staging-path lstat checks. None of them changes which lock the caller queued behind.
 		expect(order).toEqual([
 			"resolve-failed",
@@ -107,6 +108,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"resolve",
 			"resolve",
 			"lock",
+			"resolve",
 			"resolve",
 			"resolve",
 			"resolve",
