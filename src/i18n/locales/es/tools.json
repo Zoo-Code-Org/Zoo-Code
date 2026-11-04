@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (líneas {{start}}-{{end}})",
-		"definitionsOnly": " (solo definiciones)",
-		"maxLines": " (máximo {{max}} líneas)",
 		"imageTooLarge": "El archivo de imagen es demasiado grande ({{size}} MB). El tamaño máximo permitido es {{max}} MB.",
 		"imageWithSize": "Archivo de imagen ({{size}} KB)"
 	},
@@ -11,9 +8,6 @@
 	"unknownToolError": "Zoo intentó usar una herramienta desconocida: \"{{toolName}}\". Reintentando...",
 	"missingToolParameter": "Zoo intentó usar {{toolName}} sin valor para el parámetro requerido '{{paramName}}'. Reintentando...",
 	"missingToolParameterWithPath": "Zoo intentó usar {{toolName}} para '{{relPath}}' sin valor para el parámetro requerido '{{paramName}}'. Reintentando...",
-	"codebaseSearch": {
-		"approval": "Buscando '{{query}}' en la base de código..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard bloqueó este comando.",
@@ -23,11 +17,6 @@
 			"assumedPosixNote": "Nota: DCG analiza los comandos como sintaxis de shell POSIX, pero este comando se ejecuta en {{shell}}, por lo que un bloqueo puede significar que DCG no pudo leer el comando y no que sea destructivo."
 		}
 	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "No se pudo crear una nueva tarea debido a restricciones de política."
-		}
-	},
 	"generateImage": {
 		"openRouterApiKeyRequired": "Se requiere la clave API de OpenRouter para la generación de imágenes con modelos de OpenRouter. Por favor, configúrala en la configuración experimental de Generación de Imágenes.",
 		"failedWithStatus": "Error al generar imagen: {{status}} {{statusText}}",
@@ -35,9 +24,6 @@
 		"noImageGenerated": "No se generó ninguna imagen en la respuesta",
 		"invalidImageData": "Datos de imagen no válidos en la respuesta",
 		"invalidImageFormat": "Formato de imagen no válido recibido",
-		"unknownError": "Ocurrió un error desconocido",
-		"roo": {
-			"authRequired": "Se requiere autenticación de Zoo Code Cloud para la generación de imágenes. Por favor, inicia sesión en Zoo Code Cloud."
-		}
+		"unknownError": "Ocurrió un error desconocido"
 	}
 }

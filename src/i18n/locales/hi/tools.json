@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (पंक्तियाँ {{start}}-{{end}})",
-		"definitionsOnly": " (केवल परिभाषाएँ)",
-		"maxLines": " (अधिकतम {{max}} पंक्तियाँ)",
 		"imageTooLarge": "छवि फ़ाइल बहुत बड़ी है ({{size}} MB)। अधिकतम अनुमतित आकार {{max}} MB है।",
 		"imageWithSize": "छवि फ़ाइल ({{size}} KB)"
 	},
@@ -11,9 +8,6 @@
 	"unknownToolError": "Zoo ने एक अज्ञात उपकरण का उपयोग करने का प्रयास किया: \"{{toolName}}\"। पुनः प्रयास कर रहा है...",
 	"missingToolParameter": "Zoo ने आवश्यक पैरामीटर '{{paramName}}' के मान के बिना {{toolName}} का उपयोग करने का प्रयास किया। पुनः प्रयास कर रहा है...",
 	"missingToolParameterWithPath": "Zoo ने '{{relPath}}' के लिए आवश्यक पैरामीटर '{{paramName}}' के मान के बिना {{toolName}} का उपयोग करने का प्रयास किया। पुनः प्रयास कर रहा है...",
-	"codebaseSearch": {
-		"approval": "कोडबेस में '{{query}}' खोज रहा है..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard ने इस कमांड को ब्लॉक कर दिया।",
@@ -23,11 +17,6 @@
 			"assumedPosixNote": "नोट: DCG कमांड को POSIX शेल सिंटैक्स के रूप में विश्लेषित करता है, लेकिन यह कमांड {{shell}} में चलती है, इसलिए ब्लॉक का मतलब यह हो सकता है कि DCG कमांड को पढ़ नहीं सका, न कि वह विनाशकारी है।"
 		}
 	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "नीति प्रतिबंधों के कारण नया कार्य बनाने में विफल।"
-		}
-	},
 	"generateImage": {
 		"openRouterApiKeyRequired": "OpenRouter मॉडल के साथ छवि निर्माण के लिए OpenRouter API कुंजी आवश्यक है। कृपया इसे छवि निर्माण प्रयोगात्मक सेटिंग में कॉन्फ़िगर करें।",
 		"failedWithStatus": "छवि निर्माण विफल: {{status}} {{statusText}}",
@@ -35,9 +24,6 @@
 		"noImageGenerated": "प्रतिक्रिया में कोई छवि उत्पन्न नहीं हुई",
 		"invalidImageData": "प्रतिक्रिया में अमान्य छवि डेटा",
 		"invalidImageFormat": "अमान्य छवि प्रारूप प्राप्त हुआ",
-		"unknownError": "एक अज्ञात त्रुटि हुई",
-		"roo": {
-			"authRequired": "छवि निर्माण के लिए Zoo Code Cloud प्रमाणीकरण आवश्यक है। कृपया Zoo Code Cloud में साइन इन करें।"
-		}
+		"unknownError": "एक अज्ञात त्रुटि हुई"
 	}
 }

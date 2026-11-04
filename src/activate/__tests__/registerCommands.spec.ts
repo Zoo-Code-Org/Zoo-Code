@@ -5,7 +5,7 @@ import { WebviewFocusTracker } from "../../core/webview/WebviewFocusTracker"
 import { ContextProxy } from "../../core/config/ContextProxy"
 import { makeExtensionContext } from "../../test-utils/vscode"
 
-import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import { getPanel, getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -96,6 +96,10 @@ vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 }))
 
+vi.mock("../../services/diagnostics", () => ({
+	createDiagnosticsReport: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe("getVisibleProviderOrLog", () => {
 	let mockOutputChannel: vscode.OutputChannel
 
@@ -136,8 +140,18 @@ describe("getVisibleProviderOrLog", () => {
 describe("registerCommands handlers", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockContext: vscode.ExtensionContext
-	let mockVisibleProvider: { postMessageToWebview: Mock }
-	let mockProvider: { postMessageToWebview: Mock; webviewFocusTracker: WebviewFocusTracker }
+	let mockVisibleProvider: {
+		postMessageToWebview: Mock
+		retryWebviewRecovery: Mock<() => Promise<void>>
+		evictCurrentTask?: Mock
+		refreshWorkspace?: Mock
+	}
+	let mockProvider: {
+		postMessageToWebview: Mock
+		webviewFocusTracker: WebviewFocusTracker
+		retryWebviewRecovery: Mock<() => Promise<void>>
+	}
+	let mockVisibleProviderInstance: ClineProvider
 	let handlers: Record<string, (...args: unknown[]) => unknown>
 
 	beforeEach(() => {
@@ -158,10 +172,14 @@ describe("registerCommands handlers", () => {
 		mockContext = makeExtensionContext()
 
 		mockVisibleProvider = {
+			retryWebviewRecovery: vi.fn().mockResolvedValue(undefined),
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 		}
 
+		// The visible-provider double supplies message posting and explicit recovery retry.
+		mockVisibleProviderInstance = mockVisibleProvider as unknown as ClineProvider
 		mockProvider = {
+			retryWebviewRecovery: vi.fn().mockResolvedValue(undefined),
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			webviewFocusTracker: new WebviewFocusTracker(),
 		}
@@ -178,6 +196,13 @@ describe("registerCommands handlers", () => {
 			outputChannel: mockOutputChannel,
 			provider: mockProvider as unknown as ClineProvider,
 		})
+	})
+
+	it.each([false, true])("retries the appropriate provider when a visible provider exists: %s", async (visible) => {
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(visible ? mockVisibleProviderInstance : undefined)
+		await handlers["zoo-code.retryWebviewRecovery"]()
+		expect(mockVisibleProvider.retryWebviewRecovery).toHaveBeenCalledTimes(visible ? 1 : 0)
+		expect(mockProvider.retryWebviewRecovery).toHaveBeenCalledTimes(visible ? 0 : 1)
 	})
 
 	afterEach(() => {
@@ -241,6 +266,21 @@ describe("registerCommands handlers", () => {
 			expect(tabProvider.resolveWebviewView).toHaveBeenCalledExactlyOnceWith(panel)
 		},
 	)
+
+	it("creates diagnostics from all provider instances without requiring a visible provider", async () => {
+		const { createDiagnosticsReport } = await import("../../services/diagnostics")
+		const providers = [{}, {}]
+		;(ClineProvider.getAllInstances as Mock).mockReturnValue(providers)
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.createDiagnosticsReport"]()
+
+		expect(createDiagnosticsReport).toHaveBeenCalledWith({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			providers,
+		})
+	})
 
 	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions", () => {
 		handlers["zoo-code.settingsButtonClicked"]()
@@ -410,8 +450,8 @@ describe("registerCommands handlers", () => {
 	it("plusButtonClicked calls evictCurrentTask on the visible provider", async () => {
 		const evictCurrentTask = vi.fn().mockResolvedValue(undefined)
 		const refreshWorkspace = vi.fn().mockResolvedValue(undefined)
-		;(mockVisibleProvider as any).evictCurrentTask = evictCurrentTask
-		;(mockVisibleProvider as any).refreshWorkspace = refreshWorkspace
+		mockVisibleProvider.evictCurrentTask = evictCurrentTask
+		mockVisibleProvider.refreshWorkspace = refreshWorkspace
 
 		await handlers["zoo-code.plusButtonClicked"]()
 
@@ -460,6 +500,25 @@ describe("openClineInNewTab", () => {
 		setPanel(undefined, "sidebar")
 		setPanel(undefined, "tab")
 	})
+
+	it.each([false, true])(
+		"clears a closed tab reference only if it is still current (replacement: %s)",
+		async (replaced) => {
+			await openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			const panel = vi.mocked(vscode.window.createWebviewPanel).mock.results[0].value
+			const onDispose = vi.mocked(panel.onDidDispose).mock.calls[0][0]
+			const replacement = { ...panel }
+			if (replaced) setPanel(replacement, "tab")
+
+			onDispose()
+
+			expect(getPanel()).toBe(replaced ? replacement : undefined)
+		},
+	)
 
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		const webviewFocusTracker = new WebviewFocusTracker()

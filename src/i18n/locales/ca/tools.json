@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (línies {{start}}-{{end}})",
-		"definitionsOnly": " (només definicions)",
-		"maxLines": " (màxim {{max}} línies)",
 		"imageTooLarge": "El fitxer d'imatge és massa gran ({{size}} MB). La mida màxima permesa és {{max}} MB.",
 		"imageWithSize": "Fitxer d'imatge ({{size}} KB)"
 	},
@@ -11,9 +8,6 @@
 	"unknownToolError": "Zoo ha intentat utilitzar una eina desconeguda: \"{{toolName}}\". Reintentant...",
 	"missingToolParameter": "Zoo ha intentat utilitzar {{toolName}} sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
 	"missingToolParameterWithPath": "Zoo ha intentat utilitzar {{toolName}} per a '{{relPath}}' sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
-	"codebaseSearch": {
-		"approval": "Cercant '{{query}}' a la base de codi..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard ha bloquejat aquesta ordre.",
@@ -23,11 +17,6 @@
 			"assumedPosixNote": "Nota: DCG analitza les ordres com a sintaxi d'intèrpret POSIX, però aquesta ordre s'executa a {{shell}}, de manera que un bloqueig pot voler dir que DCG no ha pogut llegir l'ordre i no que sigui destructiva."
 		}
 	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "No s'ha pogut crear una nova tasca a causa de restriccions de política."
-		}
-	},
 	"generateImage": {
 		"openRouterApiKeyRequired": "Es requereix la clau API d'OpenRouter per a la generació d'imatges amb models d'OpenRouter. Configura-la a la configuració experimental de Generació d'Imatges.",
 		"failedWithStatus": "Error en generar imatge: {{status}} {{statusText}}",
@@ -35,9 +24,6 @@
 		"noImageGenerated": "No s'ha generat cap imatge en la resposta",
 		"invalidImageData": "Dades d'imatge no vàlides en la resposta",
 		"invalidImageFormat": "Format d'imatge no vàlid rebut",
-		"unknownError": "S'ha produït un error desconegut",
-		"roo": {
-			"authRequired": "Es requereix autenticació de Zoo Code Cloud per a la generació d'imatges. Inicia sessió a Zoo Code Cloud."
-		}
+		"unknownError": "S'ha produït un error desconegut"
 	}
 }

@@ -272,6 +272,8 @@ export const clineMessageSchema = z.object({
 	 * Present when `say: "sliding_window_truncation"`.
 	 */
 	contextTruncation: contextTruncationSchema.optional(),
+	// Older delegation messages lack this stamp and require positional link resolution.
+	childTaskId: z.string().optional(),
 	isProtected: z.boolean().optional(),
 	apiProtocol: z.union([z.literal("openai"), z.literal("anthropic")]).optional(),
 	isAnswered: z.boolean().optional(),

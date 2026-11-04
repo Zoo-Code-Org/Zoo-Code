@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (lines {{start}}-{{end}})",
-		"definitionsOnly": " (definitions only)",
-		"maxLines": " (max {{max}} lines)",
 		"imageTooLarge": "Image file is too large ({{size}} MB). The maximum allowed size is {{max}} MB.",
 		"imageWithSize": "Image file ({{size}} KB)"
 	},
@@ -11,9 +8,6 @@
 	"unknownToolError": "Zoo tried to use an unknown tool: \"{{toolName}}\". Retrying...",
 	"missingToolParameter": "Zoo tried to use {{toolName}} without value for required parameter '{{paramName}}'. Retrying...",
 	"missingToolParameterWithPath": "Zoo tried to use {{toolName}} for '{{relPath}}' without value for required parameter '{{paramName}}'. Retrying...",
-	"codebaseSearch": {
-		"approval": "Searching for '{{query}}' in codebase..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard blocked this command.",
@@ -23,11 +17,6 @@
 			"assumedPosixNote": "Note: DCG analyzes commands as POSIX shell syntax, but this command runs in {{shell}}, so a block may mean DCG could not read the command rather than that it is destructive."
 		}
 	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "Failed to create new task due to policy restrictions."
-		}
-	},
 	"generateImage": {
 		"openRouterApiKeyRequired": "OpenRouter API key is required for image generation with OpenRouter models. Please configure it in the Image Generation experimental settings.",
 		"failedWithStatus": "Failed to generate image: {{status}} {{statusText}}",
@@ -35,9 +24,6 @@
 		"noImageGenerated": "No image was generated in the response",
 		"invalidImageData": "Invalid image data in response",
 		"invalidImageFormat": "Invalid image format received",
-		"unknownError": "Unknown error occurred",
-		"roo": {
-			"authRequired": "Zoo Code Cloud authentication is required for image generation. Please sign in to Zoo Code Cloud."
-		}
+		"unknownError": "Unknown error occurred"
 	}
 }
