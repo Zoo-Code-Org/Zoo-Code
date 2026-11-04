@@ -471,10 +471,15 @@ describe("ContextProxy", () => {
 
 		it("does not replace a secret written while refreshSecrets was reading it", async () => {
 			await proxy.initialize()
+			mockSecrets.get.mockClear() // initialize() read the secrets too: wait for the read of the refresh
 			let finishRead: (value: string) => void = () => {}
-			mockSecrets.get.mockImplementationOnce(() => new Promise((resolve) => (finishRead = resolve)))
+			// Only the read of this key is held back; the other keys resolve as usual.
+			mockSecrets.get.mockImplementation((key: string) =>
+				key === "openAiApiKey" ? new Promise((resolve) => (finishRead = resolve)) : Promise.resolve(undefined),
+			)
 
 			const refreshing = proxy.refreshSecrets()
+			await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledWith("openAiApiKey"))
 			await proxy.storeSecret("openAiApiKey", "written-key") // starts and succeeds during the read
 			finishRead("older-key")
 			await refreshing

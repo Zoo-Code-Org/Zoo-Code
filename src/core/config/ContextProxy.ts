@@ -397,6 +397,8 @@ export class ContextProxy {
 	 */
 	private readonly stateWriteOwner = new Map<string, object>()
 	private readonly secretWriteOwner = new Map<string, object>()
+	/** How many writes of each secret were started. Unlike the owners, it is not cleared when a write is over. */
+	private readonly secretWriteCount = new Map<string, number>()
 
 	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
 		if (isPassThroughStateKey(key)) {
@@ -444,6 +446,7 @@ export class ContextProxy {
 		// Update cache.
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
+		this.secretWriteCount.set(key, (this.secretWriteCount.get(key) ?? 0) + 1)
 		this.secretCache[key] = value
 
 		// Write directly to context. If the write rejects, the cache is read back from the secret storage while this
@@ -480,13 +483,13 @@ export class ContextProxy {
 
 	/**
 	 * Loads one secret into the cache. A write of the key that started while the secret was being read has its own
-	 * outcome, so the (older) value that was read is dropped. Otherwise the load takes over the key from a write that is
+	 * outcome, even if it is already over, so the (older) value that was read is dropped. Otherwise the load takes over the key from a write that is
 	 * still pending, so that a failure of that write cannot replace what was just loaded.
 	 */
 	private async refreshSecret(key: SecretStateKey) {
-		const owner = this.secretWriteOwner.get(key)
+		const writes = this.secretWriteCount.get(key)
 		const value = await this.originalContext.secrets.get(key)
-		if (this.secretWriteOwner.get(key) !== owner) return
+		if (this.secretWriteCount.get(key) !== writes) return
 		this.secretWriteOwner.delete(key)
 		this.secretCache[key] = value
 	}
