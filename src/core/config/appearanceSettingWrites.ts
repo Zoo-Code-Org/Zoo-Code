@@ -25,6 +25,11 @@ export interface SettingWrite {
 	/** Its store has been issued, so `previous` has been read. */
 	started?: boolean
 	wrote: unknown
+	/**
+	 * Values of writes before this one that were rolled back while this one was pending, and may have stored them (a
+	 * store that landed late). This write's rollback puts `previous` back when the stored value is any of them.
+	 */
+	alsoWrote?: unknown[]
 	/** The write before this one that has not finished yet, and the one after it. */
 	prev?: SettingWrite
 	next?: SettingWrite
@@ -77,7 +82,20 @@ const staleKeys = new Set<AppearanceSettingKey>()
  * refused: it waits its turn behind that store, without a timeout, and runs when the store has settled, before any
  * write that comes after it.
  */
+/**
+ * Writes that are waiting (not started) for each owner, a provider's ContextProxy, so that disposing the provider can
+ * drop them. A store that has started cannot be cancelled and runs on.
+ */
+const waitingByOwner = new WeakMap<object, Set<() => void>>()
+
+/** Drops the writes of a disposed provider that have not started: they are never issued, and their callers are told. */
+export const disposeSettingWrites = (owner: object) => {
+	for (const cancel of [...(waitingByOwner.get(owner) ?? [])]) cancel()
+	waitingByOwner.delete(owner)
+}
+
 const queuedSettingWrite = (
+	owner: object,
 	key: AppearanceSettingKey,
 	write: () => Promise<unknown>,
 	behindStale = false,
@@ -100,7 +118,17 @@ const queuedSettingWrite = (
 		resolveTail()
 	}
 
+	const waiting = waitingByOwner.get(owner) ?? new Set<() => void>()
+	waitingByOwner.set(owner, waiting)
+
 	return new Promise<void>((resolve, reject) => {
+		const cancel = () => {
+			if (started || gaveUp) return
+			gaveUp = true
+			clearTimeout(timer)
+			reject(new Error(`The write of ${key} was dropped: its provider was disposed`))
+		}
+		waiting.add(cancel)
 		const timer = behindStale
 			? undefined
 			: setTimeout(() => {
@@ -111,6 +139,7 @@ const queuedSettingWrite = (
 
 		void prior.then(() => {
 			// Its caller has given up before it started: it is dropped, and the next write may go ahead.
+			waiting.delete(cancel)
 			if (gaveUp) return release()
 			started = true
 			void Promise.resolve()
@@ -141,7 +170,7 @@ export const settingWriteBookkeepingSize = () => ({
  * writes before it have reached storage, unless a rolled-back write handed its own value over.
  */
 export const performSettingWrite = (contextProxy: ContextProxy, write: SettingWrite): Promise<void> =>
-	queuedSettingWrite(write.key, () => {
+	queuedSettingWrite(contextProxy, write.key, () => {
 		if (!write.inherited) write.previous = contextProxy.getValue(write.key as keyof RooCodeSettings)
 		write.started = true
 		return contextProxy.setValue(write.key as keyof RooCodeSettings, write.wrote as never)
@@ -180,15 +209,22 @@ export const finishSettingWrites = (writes: SettingWrite[]) => {
 }
 
 /** Puts a failed write back, unless another write has superseded it (see `lastWriteOfSetting`). */
-export const undoSettingWrite = async (contextProxy: ContextProxy, write: SettingWrite) => {
+export const undoSettingWrite = async (
+	contextProxy: ContextProxy,
+	write: SettingWrite,
+	onDeferredSettled?: () => void,
+) => {
 	const { key } = write
 	write.done = true
 
 	if (lastWriteOfSetting.get(key) !== write) {
-		// A newer write exists. Make it restore the value from before this one if it fails as well.
-		if (write.next && !write.next.done) {
-			write.next.previous = write.previous
-			write.next.inherited = true
+		// A newer write exists. Make it restore the value from before this one if it fails as well, including when this
+		// write's store lands late (it never completed for its caller, but it may have stored its value).
+		const { next } = write
+		if (next && !next.done) {
+			next.previous = write.previous
+			next.inherited = true
+			next.alsoWrote = [...(write.alsoWrote ?? []), write.wrote, ...(next.alsoWrote ?? [])]
 		}
 		unlinkSettingWrite(write)
 		return
@@ -201,7 +237,8 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
 	unlinkSettingWrite(write)
 
 	const restore = async () => {
-		if (contextProxy.getValue(key as keyof RooCodeSettings) === write.wrote) {
+		const stored = contextProxy.getValue(key as keyof RooCodeSettings)
+		if (stored === write.wrote || write.alsoWrote?.includes(stored)) {
 			await contextProxy.setValue(key as keyof RooCodeSettings, write.previous as never)
 		}
 	}
@@ -211,13 +248,16 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
 		// caller was told it failed. The rollback is attached to that store: it is queued now, behind it, so it runs
 		// when the store has settled and before any write that comes after, which are refused until then. Nobody
 		// waits for it (the store may never settle), and a newer write cannot have been stored in between.
-		void queuedSettingWrite(key, restore, true).catch((error: unknown) =>
-			console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),
-		)
+		// `onDeferredSettled` runs when it is over, so the caller can show what is really stored.
+		void queuedSettingWrite(contextProxy, key, restore, true)
+			.catch((error: unknown) =>
+				console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),
+			)
+			.finally(() => onDeferredSettled?.())
 		return
 	}
 
-	await queuedSettingWrite(key, restore)
+	await queuedSettingWrite(contextProxy, key, restore)
 }
 
 /**
@@ -228,8 +268,13 @@ export const undoSettingWrite = async (contextProxy: ContextProxy, write: Settin
  * and an earlier save that is still pending keeps its own rollback. An invalid appearance value rejects the write
  * before any value is stored.
  */
-export async function setValuesThroughWriteChain(contextProxy: ContextProxy, settings: RooCodeSettings) {
-	const keys = APPEARANCE_SETTING_KEYS.filter((key) => key in settings)
+export async function setValuesThroughWriteChain(
+	contextProxy: ContextProxy,
+	settings: RooCodeSettings,
+	onDeferredSettled?: () => void,
+) {
+	// Own properties only: an inherited value is not something the caller wrote.
+	const keys = APPEARANCE_SETTING_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(settings, key))
 	if (keys.length === 0) return contextProxy.setValues(settings)
 
 	// Every appearance value is checked before anything is written (these values come from the API and from a
@@ -261,7 +306,7 @@ export async function setValuesThroughWriteChain(contextProxy: ContextProxy, set
 		}
 		failure ??= result
 		try {
-			await undoSettingWrite(contextProxy, write)
+			await undoSettingWrite(contextProxy, write, onDeferredSettled)
 		} catch (restoreError) {
 			console.error(`Failed to restore setting "${write.key}" after a failed write:`, restoreError)
 		}

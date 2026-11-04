@@ -1933,6 +1933,73 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 		expect(vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder[0]).toBeGreaterThan(lastWrite)
 	})
 
+	it("shows what is stored once a write that timed out has landed and its rollback has run", async () => {
+		vi.useFakeTimers()
+		try {
+			let landLate: () => void = () => {}
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				async (key: string, value: unknown) => {
+					if (key === "terminalFontSize" && value === 14) {
+						await new Promise<void>((resolve) => (landLate = resolve)) // the store hangs, then lands
+					}
+					return real(key as never, value as never)
+				},
+			)
+
+			const saving = save({ terminalFontSize: 14 })
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saving
+
+			// The save reported the failure, and the webview was refreshed once: the store has not landed yet.
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "settingsSaveResult", success: false }),
+			)
+			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+			expect(stored.terminalFontSize).toBe(12)
+
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+
+			// The late store was rolled back, and the webview is refreshed again with what is stored.
+			expect(stored.terminalFontSize).toBe(12)
+			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("logs when the refresh after a rollback that had to wait for a store fails", async () => {
+		vi.useFakeTimers()
+		try {
+			let landLate: () => void = () => {}
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				async (key: string, value: unknown) => {
+					if (key === "terminalFontSize" && value === 14) {
+						await new Promise<void>((resolve) => (landLate = resolve))
+					}
+					return real(key as never, value as never)
+				},
+			)
+			vi.mocked(mockClineProvider.postStateToWebview)
+				.mockResolvedValueOnce(undefined as never)
+				.mockRejectedValueOnce(new Error("webview gone"))
+
+			const saving = save({ terminalFontSize: 14 })
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saving
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	it("puts back the value whose own write failed after it had changed the stored value", async () => {
 		// As a store whose cache is updated before its write to disk fails.
 		failWriteOf("terminalFontSize", 14, (key, value) => {

@@ -1,8 +1,11 @@
+import type { RooCodeSettings } from "@roo-code/types"
+
 import {
 	APPEARANCE_SETTING_KEYS,
 	beginSettingWrite,
 	finishSettingWrites,
 	isAppearanceSetting,
+	disposeSettingWrites,
 	performSettingWrite,
 	setValuesThroughWriteChain,
 	settingWriteBookkeepingSize,
@@ -86,6 +89,7 @@ describe("appearanceSettingWrites", () => {
 
 			expect(write.previous).toBe(150)
 			expect(stored.get("interfaceFontScale")).toBe(120)
+			finishSettingWrites([write]) // leave nothing linked for the next test
 		})
 
 		it("keeps the value handed over by a write that was rolled back before this one started", async () => {
@@ -317,6 +321,171 @@ describe("appearanceSettingWrites", () => {
 			await undoSettingWrite(proxy, first)
 		})
 
+		it("puts the first value back when two saves both fail, the second never having started, and the first lands late", async () => {
+			const { proxy, landLate } = deferredProxy()
+			const first = beginSettingWrite("interfaceFontScale", 100, 120) // the store that hangs
+			const second = beginSettingWrite("interfaceFontScale", 100, 150) // queued behind it, dropped at its timeout
+			const firstDone = expect(performSettingWrite(proxy, first)).rejects.toThrow("did not finish")
+			const secondDone = expect(performSettingWrite(proxy, second)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await firstDone
+			await secondDone
+
+			// The saves report their failures in the order they gave up: the first one first.
+			await undoSettingWrite(proxy, first)
+			await undoSettingWrite(proxy, second)
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+
+			// The first save's value landed after both had failed, and the rollback of the second (which took over the
+			// first's) put back what was stored before either.
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+		})
+
+		it("tells the caller when the rollback of a timed-out write is over, after the store has settled", async () => {
+			const { proxy, landLate } = deferredProxy()
+			const save = beginSettingWrite("interfaceFontScale", 100, 120)
+			const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saveFailed
+			const settled = vi.fn()
+
+			await undoSettingWrite(proxy, save, settled)
+			expect(settled).not.toHaveBeenCalled() // the store is still outstanding
+
+			landLate()
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(settled).toHaveBeenCalledTimes(1)
+			expect(stored.get("interfaceFontScale")).toBe(100)
+		})
+
+		it("tells the caller too when the late store failed and nothing had to be put back", async () => {
+			const failLate: Array<() => void> = []
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: vi.fn(
+					() => new Promise<void>((_resolve, reject) => failLate.push(() => reject(new Error("no")))),
+				),
+			} as unknown as ContextProxy
+			const save = beginSettingWrite("interfaceFontScale", 100, 120)
+			const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow("did not finish")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await saveFailed
+			const settled = vi.fn()
+			await undoSettingWrite(proxy, save, settled)
+
+			failLate.forEach((fail) => fail())
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(settled).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not call back for a rollback that did not have to wait for a store", async () => {
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: async (key: string, value: unknown) => void stored.set(key, value),
+			} as unknown as ContextProxy
+			const write = beginSettingWrite("interfaceFontScale", 100, 120)
+			await performSettingWrite(proxy, write)
+			const settled = vi.fn()
+
+			await undoSettingWrite(proxy, write, settled)
+
+			expect(settled).not.toHaveBeenCalled()
+			expect(stored.get("interfaceFontScale")).toBe(100)
+		})
+
+		describe("when the provider is disposed", () => {
+			it("drops a write that is waiting behind a store, so it is never issued, and tells its caller", async () => {
+				const { proxy, landLate } = deferredProxy()
+				const first = beginSettingWrite("interfaceFontScale", 100, 120) // hangs
+				const second = beginSettingWrite("interfaceFontScale", 100, 150) // waiting behind it
+				const firstDone = expect(performSettingWrite(proxy, first)).rejects.toThrow("did not finish")
+				const secondDone = expect(performSettingWrite(proxy, second)).rejects.toThrow("provider was disposed")
+				await vi.advanceTimersByTimeAsync(1_000)
+
+				disposeSettingWrites(proxy)
+				await secondDone
+				await vi.advanceTimersByTimeAsync(14_000)
+				await firstDone
+				landLate()
+				await vi.advanceTimersByTimeAsync(0)
+
+				// Only the first store was ever issued, and it was not cancelled: it landed.
+				expect(proxy.setValue).toHaveBeenCalledTimes(1)
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+				expect(vi.getTimerCount()).toBe(0)
+				await undoSettingWrite(proxy, second)
+				await undoSettingWrite(proxy, first)
+			})
+
+			it("drops a rollback that is waiting behind a store", async () => {
+				const { proxy, landLate } = deferredProxy()
+				const save = beginSettingWrite("interfaceFontScale", 100, 120)
+				const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow("did not finish")
+				await vi.advanceTimersByTimeAsync(15_000)
+				await saveFailed
+				const settled = vi.fn()
+				await undoSettingWrite(proxy, save, settled)
+
+				disposeSettingWrites(proxy)
+				landLate()
+				await vi.advanceTimersByTimeAsync(0)
+
+				// The rollback was dropped with the provider: the store that landed stays, and the caller is told.
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(settled).toHaveBeenCalledTimes(1)
+			})
+
+			it("leaves the writes of another provider alone", async () => {
+				const { proxy, landLate } = deferredProxy()
+				const other = {
+					getValue: (key: string) => stored.get(key),
+					setValue: vi.fn(),
+				} as unknown as ContextProxy
+				const hung = beginSettingWrite("interfaceFontScale", 100, 120)
+				const hungDone = performSettingWrite(proxy, hung) // its store is outstanding
+				const waiting = beginSettingWrite("interfaceFontScale", 100, 150)
+				const waitingDone = performSettingWrite(proxy, waiting) // owned by `proxy`, waits behind `hung`
+				await vi.advanceTimersByTimeAsync(0)
+
+				disposeSettingWrites(other) // a different provider goes away
+				landLate()
+				await hungDone
+				await waitingDone
+
+				expect(stored.get("interfaceFontScale")).toBe(150) // the waiting write was not dropped
+				finishSettingWrites([hung, waiting])
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("does not drop a second time a write whose caller already gave up", async () => {
+				const { proxy, landLate } = deferredProxy()
+				const first = beginSettingWrite("interfaceFontScale", 100, 120) // hangs
+				const second = beginSettingWrite("interfaceFontScale", 100, 150) // waits, then times out
+				const firstDone = expect(performSettingWrite(proxy, first)).rejects.toThrow("did not finish")
+				const secondDone = expect(performSettingWrite(proxy, second)).rejects.toThrow("did not finish")
+				await vi.advanceTimersByTimeAsync(15_000)
+				await firstDone
+				await secondDone
+
+				expect(() => disposeSettingWrites(proxy)).not.toThrow() // the second one still sits in the queue
+
+				landLate()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(proxy.setValue).toHaveBeenCalledTimes(1)
+				await undoSettingWrite(proxy, second)
+				await undoSettingWrite(proxy, first)
+			})
+
+			it("does nothing for a provider with no writes", () => {
+				expect(() => disposeSettingWrites({})).not.toThrow()
+			})
+		})
+
 		it("keeps the other keys going while one key's store is outstanding", async () => {
 			const { proxy, landLate } = deferredProxy()
 			const hung = beginSettingWrite("interfaceFontScale", 100, 120)
@@ -445,6 +614,16 @@ describe("appearanceSettingWrites", () => {
 			await setValuesThroughWriteChain(proxy, { [key]: value } as never)
 
 			expect(stored.get(key)).toBe(value)
+		})
+
+		it("does not take an inherited value for something the caller wrote", async () => {
+			const inherited = Object.create({ interfaceFontScale: 150 }) as RooCodeSettings
+			inherited.mode = "code"
+
+			await setValuesThroughWriteChain(proxy, inherited)
+
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
 		})
 
 		it("does not let a failing save that wrote the same value undo it", async () => {

@@ -937,7 +937,16 @@ export const webviewMessageHandler = async (
 
 				for (const write of written.reverse()) {
 					try {
-						await undoSettingWrite(provider.contextProxy, write)
+						await undoSettingWrite(provider.contextProxy, write, () => {
+							// A store that timed out has settled and its rollback has run: show what is really stored.
+							provider
+								.postStateToWebview()
+								.catch((error: unknown) =>
+									provider.log(
+										`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+									),
+								)
+						})
 					} catch (rollbackError) {
 						provider.log(
 							`[updateSettings] Could not restore ${write.key}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,

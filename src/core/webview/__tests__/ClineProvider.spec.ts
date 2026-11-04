@@ -3435,6 +3435,30 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test("setValues shows what is stored when a timed-out write has been rolled back", async () => {
+		const chain = await import("../../config/appearanceSettingWrites")
+		const spy = vi.spyOn(chain, "setValuesThroughWriteChain").mockResolvedValue(undefined)
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+		await provider.setValues({ terminalFontSize: 14 })
+		const onDeferredSettled = spy.mock.calls[0][2]
+		expect(post).not.toHaveBeenCalled()
+		onDeferredSettled?.()
+
+		expect(post).toHaveBeenCalledTimes(1)
+		spy.mockRestore()
+	})
+
+	test("disposing the provider drops its appearance writes that have not started", async () => {
+		const chain = await import("../../config/appearanceSettingWrites")
+		const spy = vi.spyOn(chain, "disposeSettingWrites")
+
+		await provider.dispose()
+
+		expect(spy).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
+		spy.mockRestore()
+	})
+
 	test("setValues, which a new task's configuration goes through, writes an appearance value through the write chain", async () => {
 		const setValue = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
 		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)

@@ -86,3 +86,39 @@ for (const theme of visualThemes) {
 		await expect(story).toHaveScreenshot(`appearance-consumers-${theme.name}-unset.png`)
 	})
 }
+
+// The configured chat font size is a fourth input of the chat text size, next to the interface scale: the text is
+// the chat size times the scale. It is set on <html> the way the app's own state provider sets it.
+test("a configured chat font size and the interface scale combine in the chat text, and each can be removed", async ({
+	mount,
+	page,
+}) => {
+	const component = mountedStory(await mount("appearance-consumers"))
+	await applyVisualTheme(page, visualThemes[0])
+	const story = component.getByTestId("appearance-consumers-story")
+	const markdownText = story.getByTestId("consumer-markdown").locator("p").first()
+	await expect(markdownText).toBeVisible()
+
+	const base = await px(markdownText, "font-size")
+	const setChatSize = (value: string | null) =>
+		page.evaluate((size) => {
+			if (size === null) document.documentElement.style.removeProperty("--zoo-chat-font-size")
+			else document.documentElement.style.setProperty("--zoo-chat-font-size", size)
+		}, value)
+
+	// The chat size alone replaces the editor's text size.
+	await setChatSize("16px")
+	await expect.poll(() => px(markdownText, "font-size")).toBe(16)
+
+	// With the interface scale (150%) on top: 16px * 1.5.
+	await story.getByTestId("apply-appearance").click()
+	await expect.poll(() => px(markdownText, "font-size")).toBe(24)
+
+	// Clearing the chat size leaves the scale on the default size...
+	await setChatSize(null)
+	await expect.poll(() => px(markdownText, "font-size")).toBeCloseTo(base * 1.5, 1)
+
+	// ...and removing the scale as well brings back the unset look.
+	await story.getByTestId("remove-appearance").click()
+	await expect.poll(() => px(markdownText, "font-size")).toBeCloseTo(base, 1)
+})

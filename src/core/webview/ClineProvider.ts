@@ -132,7 +132,11 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
-import { isAppearanceSetting, setValuesThroughWriteChain } from "../config/appearanceSettingWrites"
+import {
+	disposeSettingWrites,
+	isAppearanceSetting,
+	setValuesThroughWriteChain,
+} from "../config/appearanceSettingWrites"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -958,6 +962,8 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		// Appearance writes that have not started are dropped; one whose store has started cannot be cancelled.
+		disposeSettingWrites(this.contextProxy)
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")
@@ -3739,7 +3745,11 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await setValuesThroughWriteChain(this.contextProxy, values)
+		await setValuesThroughWriteChain(
+			this.contextProxy,
+			values,
+			() => void this.postStateToWebview().catch(() => undefined),
+		)
 	}
 
 	// dev

@@ -113,6 +113,28 @@ describe("API - configuration", () => {
 		},
 	)
 
+	it("shows what is stored when a timed-out write has been rolled back", async () => {
+		const chain = await import("../../core/config/appearanceSettingWrites")
+		const spy = vi.spyOn(chain, "setValuesThroughWriteChain").mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			contextProxy: {},
+			providerSettingsManager: { saveConfig: vi.fn().mockResolvedValue("id"), setModeConfig: vi.fn() },
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await api.setConfiguration({ terminalFontSize: 14 })
+		expect(postStateToWebview).toHaveBeenCalledTimes(1) // the one after the write
+		spy.mock.calls[0][2]?.() // the rollback of a timed-out write is over
+
+		expect(postStateToWebview).toHaveBeenCalledTimes(2)
+		spy.mockRestore()
+	})
+
 	it("puts an appearance value back when its write fails, and rejects", async () => {
 		const stored = new Map<string, unknown>([["terminalFontSize", 12]])
 		const provider = {
