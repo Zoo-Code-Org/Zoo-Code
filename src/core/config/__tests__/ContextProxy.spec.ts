@@ -316,7 +316,7 @@ describe("ContextProxy", () => {
 			expect((error as Error).message).toBe(
 				"Could not store dateFormat (stored: timeFormat, showRelativeTimes): storage unavailable",
 			)
-			// The stores that worked were not undone, and the failed key's cache shows what storage holds.
+			// The stores that worked were not undone, and the failed key's cache shows what the Memento holds.
 			expect(storage.get("timeFormat")).toBe("24h")
 			expect(proxy.getGlobalState("timeFormat")).toBe("24h")
 			expect(proxy.getGlobalState("showRelativeTimes")).toBe(false)
@@ -396,6 +396,48 @@ describe("ContextProxy", () => {
 			logged.mockRestore()
 		})
 
+		it("still rejects with the write error, and drops the unsaved secret, when the read-back never settles", async () => {
+			vi.useFakeTimers()
+			try {
+				const failure = new Error("keychain locked")
+				mockSecrets.store.mockRejectedValue(failure)
+				await proxy.initialize()
+				mockSecrets.get.mockImplementation(() => new Promise(() => {})) // never settles
+				const logged = vi.spyOn(logger, "error").mockImplementation(() => {})
+
+				const storing = expect(proxy.storeSecret("openAiApiKey", "new-key")).rejects.toBe(failure)
+				await vi.advanceTimersByTimeAsync(4_999)
+				expect(proxy.getSecret("openAiApiKey")).toBe("new-key") // still waiting for the read-back
+				await vi.advanceTimersByTimeAsync(1)
+				await storing
+
+				expect(proxy.getSecret("openAiApiKey")).toBeUndefined()
+				expect(logged).toHaveBeenCalledWith(
+					"Error reading back secret openAiApiKey: Reading back openAiApiKey did not finish in 5 seconds",
+				)
+				expect(vi.getTimerCount()).toBe(0)
+				logged.mockRestore()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("releases the read-back deadline when the read settles in time", async () => {
+			vi.useFakeTimers()
+			try {
+				mockSecrets.store.mockRejectedValue(new Error("keychain locked"))
+				await proxy.initialize()
+				mockSecrets.get.mockResolvedValue("stored-key")
+
+				await expect(proxy.storeSecret("openAiApiKey", "new-key")).rejects.toThrow("keychain locked")
+
+				expect(proxy.getSecret("openAiApiKey")).toBe("stored-key")
+				expect(vi.getTimerCount()).toBe(0)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("keeps a newer value written while a failed secret is being read back", async () => {
 			mockSecrets.store.mockRejectedValueOnce(new Error("keychain locked")).mockResolvedValue(undefined)
 			await proxy.initialize()
@@ -430,16 +472,28 @@ describe("ContextProxy", () => {
 			logged.mockRestore()
 		})
 
-		it("reads a global setting back when a single setValue fails, not only setValues", async () => {
-			const storage = new Map<string, unknown>([["dateFormat", "auto"]])
-			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
-			mockGlobalState.update.mockRejectedValue(new Error("storage unavailable"))
-			await proxy.initialize()
+		// A Memento can keep the attempted value in memory after a rejected update, or drop it: the cache shows
+		// whichever it holds.
+		it.each([
+			["keeps the attempted value in memory", true, "ymd"],
+			["does not keep the attempted value", false, "auto"],
+		])(
+			"reads a global setting back from a Memento that %s, when a single setValue fails",
+			async (_name, keeps, expected) => {
+				const memento = new Map<string, unknown>([["dateFormat", "auto"]])
+				mockGlobalState.get.mockImplementation((key: string) => memento.get(key))
+				mockGlobalState.update.mockImplementation(async (key: string, value: unknown) => {
+					if (keeps) memento.set(key, value)
+					throw new Error("storage unavailable")
+				})
+				await proxy.initialize()
 
-			await expect(proxy.setValue("dateFormat", "ymd")).rejects.toThrow("storage unavailable")
+				await expect(proxy.setValue("dateFormat", "ymd")).rejects.toThrow("storage unavailable")
 
-			expect(proxy.getGlobalState("dateFormat")).toBe("auto") // not the value that was never stored
-		})
+				expect(proxy.getGlobalState("dateFormat")).toBe(expected)
+				expect(proxy.getGlobalState("dateFormat")).toBe(memento.get("dateFormat"))
+			},
+		)
 
 		it("does not let an older failed write replace the value of a newer write of the same key that is still being stored", async () => {
 			const storage = new Map<string, unknown>([["dateFormat", "auto"]])

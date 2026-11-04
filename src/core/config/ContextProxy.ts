@@ -46,6 +46,21 @@ export class SettingsWriteError extends Error {
 	}
 }
 
+/** How long the read-back of a failed secret may take: the write error must reach the caller even if it never settles. */
+const SECRET_READBACK_TIMEOUT_MS = 5_000
+
+const withinReadBackDeadline = <T>(read: PromiseLike<T>, key: string): Promise<T> =>
+	new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(
+			() =>
+				reject(new Error(`Reading back ${key} did not finish in ${SECRET_READBACK_TIMEOUT_MS / 1000} seconds`)),
+			SECRET_READBACK_TIMEOUT_MS,
+		)
+		Promise.resolve(read)
+			.then(resolve, reject)
+			.finally(() => clearTimeout(timer))
+	})
+
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
@@ -389,7 +404,9 @@ export class ContextProxy {
 		}
 
 		// The cache is updated first, so a read right after the call sees the value. If the store rejects, the cache is
-		// read back from storage, so it never runs ahead of what was stored.
+		// read back from the Memento (`globalState.get`) so that it shows what the Memento holds. This is best effort: a
+		// Memento can keep the attempted value in memory after a rejected update, in which case the cache and the
+		// Memento agree and only the durable copy, which cannot be read, may differ until the key is written again.
 		const owner = {}
 		this.stateWriteOwner.set(key, owner)
 		this.stateCache[key] = value
@@ -430,7 +447,7 @@ export class ContextProxy {
 		return Promise.resolve(stored).catch(async (error: unknown) => {
 			if (this.secretWriteOwner.get(key) === owner) {
 				try {
-					const readBack = await this.originalContext.secrets.get(key)
+					const readBack = await withinReadBackDeadline(this.originalContext.secrets.get(key), key)
 					if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = readBack
 				} catch (readError) {
 					logger.error(
@@ -611,7 +628,7 @@ export class ContextProxy {
 	 * stores that completed are not undone. If any store rejects, every store is still awaited (the call stays pending
 	 * until the last one has settled) and then rejects with a `SettingsWriteError` that says which keys were stored and
 	 * which were not. A failed store has already read its key back into the cache (see `updateGlobalState` and
-	 * `storeSecret`), so the cache never runs ahead of what was stored. Callers that need more than this, such as a
+	 * `storeSecret`; best effort for global state, whose Memento may keep the attempted value). Callers that need more than this, such as a
 	 * rollback, must provide it themselves.
 	 */
 	public async setValues(values: RooCodeSettings) {
