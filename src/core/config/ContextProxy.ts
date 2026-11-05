@@ -407,6 +407,9 @@ export class ContextProxy {
 	 * pairing a reset cannot tell a settled-but-orphaned write from a live one.
 	 */
 	private readonly pendingSecretWrites = new Map<string, Set<{ settle: Promise<void> }>>()
+	// A reset is in progress: the caches are meaningless mid-reset, and a secret write begun
+	// inside it would commit after the delete pass and survive the erase.
+	private resetting = false
 	/** How many writes of each secret were started. Unlike the owners, it is not cleared when a write is over. */
 	private readonly secretWriteCount = new Map<string, number>()
 
@@ -453,6 +456,13 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
+		if (this.resetting) {
+			// Refused rather than deferred: a deferred secret write would re-store exactly the
+			// value the user asked to erase, and a silently dropped one would lose the save.
+			return Promise.reject(
+				new SettingsWriteError([], [key], new Error("secret writes are refused while state is being reset")),
+			)
+		}
 		// Update cache.
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
@@ -738,6 +748,7 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
+		this.resetting = true
 		// A secret write that is in flight at this moment has already committed nothing, but it will
 		// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
 		// after them. Wait for the pending writes first, then end the claims, then delete, so the
@@ -761,6 +772,7 @@ export class ContextProxy {
 		])
 
 		await this.initialize()
+		this.resetting = false
 	}
 
 	private static _instance: ContextProxy | null = null
