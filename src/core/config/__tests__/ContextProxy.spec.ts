@@ -191,6 +191,47 @@ describe("ContextProxy", () => {
 			expect(await mockSecrets.get("apiKey")).toBeUndefined()
 			expect(proxy.getSecret("apiKey")).toBeUndefined()
 		})
+		// Two phases, because the guarantee has two halves. A secret write issued while the reset is
+		// running must be refused rather than deferred - a deferred write would re-store exactly the
+		// value the user asked to erase - and after a reset that failed the store has to accept writes
+		// again. The second half is the one that bites: the delete pass is a single Promise.all, so one
+		// keychain delete rejecting rejects resetAllState itself, and unless the flag that guards
+		// storeSecret is cleared in a finally the store stays shut for the life of the instance while
+		// resetState() aborts on the same error.
+		it("refuses a secret write during a reset and accepts it again after a failed reset", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			let rejectDelete: (error: Error) => void = () => {}
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						rejectDelete = reject
+					})
+				}
+				durable.delete(key)
+				return Promise.resolve()
+			})
+
+			// Holding apiKey's delete open keeps the guard raised across the mid-reset assertion below.
+			const resetting = proxy.resetAllState()
+
+			await expect(proxy.storeSecret("apiKey", "written-mid-reset")).rejects.toThrow(
+				"secret writes are refused while state is being reset",
+			)
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+
+			rejectDelete(new Error("keychain locked"))
+			await expect(resetting).rejects.toThrow("keychain locked")
+
+			// The store is usable again, measured as a save that resolves and reads back through both the
+			// cache and storage, not as an absence of errors.
+			await expect(proxy.storeSecret("apiKey", "written-after-failed-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
+			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
+		})
 
 		it("adopts a secret write issued after a reset that waited for a pending write", async () => {
 			const durable = new Map<string, string | undefined>()
