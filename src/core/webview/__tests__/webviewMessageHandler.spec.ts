@@ -1914,17 +1914,25 @@ describe("webviewMessageHandler - deleteApiConfiguration", () => {
 		// names the profile. Before the fallback the lookup came back empty, the handler
 		// showed the delete error and returned, so the entry stayed listed forever.
 		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([])
-		mockClineProvider.contextProxy.getValue = vi
-			.fn()
-			.mockImplementation((key: string) => (key === "listApiConfigMeta" ? [staleEntry] : undefined))
-		vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+		// The double is module-level and this file does not isolate these reassignments:
+		// vi.clearAllMocks() resets call history, not an implementation assigned here, so the
+		// replacement has to be undone or every later suite reads the stale entry.
+		const originalGetValue = mockClineProvider.contextProxy.getValue
+		try {
+			mockClineProvider.contextProxy.getValue = vi
+				.fn()
+				.mockImplementation((key: string) => (key === "listApiConfigMeta" ? [staleEntry] : undefined))
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
 
-		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "ghost-profile" })
+			await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "ghost-profile" })
 
-		// deleteProviderProfile is the path that treats the missing record as an idempotent
-		// success and prunes the stale entry, which is what the user needs here.
-		expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith(staleEntry)
-		expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(t("common:errors.delete_api_config"))
+			// deleteProviderProfile is the path that treats the missing record as an idempotent
+			// success and prunes the stale entry, which is what the user needs here.
+			expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith(staleEntry)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(t("common:errors.delete_api_config"))
+		} finally {
+			mockClineProvider.contextProxy.getValue = originalGetValue
+		}
 	})
 
 	it("reports the failure when the routed deletion rejects", async () => {
