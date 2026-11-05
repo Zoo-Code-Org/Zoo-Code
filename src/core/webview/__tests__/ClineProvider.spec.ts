@@ -6503,6 +6503,59 @@ describe("ClineProvider", () => {
 				await provider.dispose()
 			}
 		})
+		it("keeps resetting after a sibling webview refuses the refreshed state", async () => {
+			// Review thread 4476213612: the sibling refresh post was the one step in resetState that could
+			// abort the reset. Its neighbour in the same loop already logs and continues when the durable
+			// clear rejects (and the next mutation retries that clear), so a webview that has already gone
+			// away must not leave the profile, custom-mode and task-stack resets unrun for every other view.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				sibling["viewLocalState"].mode = "architect"
+				sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "sibling-secret",
+				}
+				const siblingPostSpy = vi
+					.spyOn(sibling, "postStateToWebview")
+					.mockRejectedValue(new Error("webview is gone"))
+				const providerPostSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const removeSpy = vi.spyOn(provider, "removeClineFromStack").mockResolvedValue(undefined)
+				const configsSpy = vi
+					.spyOn(provider.providerSettingsManager, "resetAllConfigs")
+					.mockResolvedValue(undefined)
+				const modesSpy = vi.spyOn(provider.customModesManager, "resetCustomModes").mockResolvedValue(undefined)
+				vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+				await expect(provider.resetState()).resolves.toBeUndefined()
+
+				// The refresh was attempted, the sibling overlay still went, and everything after the
+				// failed post still ran.
+				expect(siblingPostSpy).toHaveBeenCalled()
+				expect(sibling["viewLocalState"]).toEqual({})
+				expect(sibling.pinnedProfileName).toBeUndefined()
+				expect(configsSpy).toHaveBeenCalled()
+				expect(modesSpy).toHaveBeenCalled()
+				expect(removeSpy).toHaveBeenCalled()
+				expect(providerPostSpy).toHaveBeenCalled()
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
 		it("clears only the live views whose per-view mode names the deleted slug", async () => {
 			const provider = new ClineProvider(
 				mockContext,

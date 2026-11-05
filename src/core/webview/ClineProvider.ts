@@ -6131,7 +6131,18 @@ export class ClineProvider
 					}`,
 				)
 			}
-			await instance.postStateToWebview()
+			// The sibling refresh post is state delivery, not part of the reset contract: a webview that
+			// has already gone away must not abort the steps below, which still have to reach every other
+			// live view. The durable clear above is already logged and retried by the next mutation.
+			try {
+				await instance.postStateToWebview()
+			} catch (error) {
+				instance.log(
+					`[resetState] Failed to refresh a sibling webview after the reset: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
 		}
 
 		await this.providerSettingsManager.resetAllConfigs()
