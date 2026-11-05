@@ -39,6 +39,11 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { t } from "../../../i18n"
 import { ClineProvider } from "../ClineProvider"
+
+// The re-adopted cases below swap ClineProvider's readonly members for test doubles. A readonly
+// property can only be re-bound through a structural view, so the shape is declared once here
+// instead of repeating a double assertion at every stub site (AGENTS.md: no new any casts).
+type MemberSwapTarget = { customModesManager: unknown; providerSettingsManager: unknown }
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
@@ -608,7 +613,7 @@ describe("ClineProvider", () => {
 		updateGlobalStateSpy = vi.spyOn(provider.contextProxy, "setValue")
 
 		// @ts-ignore - Accessing private property for testing.
-		provider.customModesManager = mockCustomModesManager
+		;(provider as MemberSwapTarget).customModesManager = mockCustomModesManager
 
 		// Mock getMcpHub method for generateSystemPrompt
 		provider.getMcpHub = vi.fn().mockReturnValue({
@@ -5612,6 +5617,289 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("createTaskWithHistoryItem mode validation", () => {
+		test("validates and falls back to default mode when restored mode no longer exists", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Mock custom modes that don't include the saved mode
+			const mockCustomModesManager = {
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "existing-mode",
+						name: "Existing Mode",
+						roleDefinition: "Test role",
+						groups: ["read"] as const,
+					},
+				]),
+				dispose: vi.fn(),
+			}
+			;(provider as MemberSwapTarget).customModesManager = mockCustomModesManager
+
+			// Mock getModeBySlug to return undefined for non-existent mode
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug)
+				.mockReturnValueOnce(undefined) // First call returns undefined (mode doesn't exist)
+				.mockReturnValue({
+					slug: "code",
+					name: "Code Mode",
+					roleDefinition: "You are a code assistant",
+					groups: ["read", "edit"],
+				}) // Subsequent calls return default mode
+
+			// Mock provider settings manager
+			;(provider as MemberSwapTarget).providerSettingsManager = {
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([]),
+			}
+
+			// Spy on log method to verify warning was logged
+			const logSpy = vi.spyOn(provider, "log")
+
+			// Create history item with non-existent mode
+			const historyItem = {
+				id: "test-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "non-existent-mode", // This mode doesn't exist
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Initialize with history item
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			// Verify mode validation occurred
+			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
+			expect(getModeBySlug).toHaveBeenCalledWith("non-existent-mode", expect.any(Array))
+
+			// Verify fallback to default mode
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("viewStates", expect.anything())
+			// This branch persists the restored mode through the view's own pin rather than the shared
+			// global write main asserted on, because a global write would leak the restored mode into
+			// other views in parallel mode. Same claim, moved observable: the resolved mode is what
+			// this view now holds, and historyItem still carries it below.
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(logSpy).toHaveBeenCalledWith(
+				"Mode 'non-existent-mode' from history no longer exists. Falling back to default mode 'code'.",
+			)
+
+			// Verify history item was updated with default mode
+			expect(historyItem.mode).toBe("code")
+		})
+
+		test("preserves mode when it exists in custom modes", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Mock custom modes that include the saved mode
+			const mockCustomModesManager = {
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "custom-mode",
+						name: "Custom Mode",
+						roleDefinition: "Custom role",
+						groups: ["read", "edit"] as const,
+					},
+				]),
+				dispose: vi.fn(),
+			}
+			;(provider as MemberSwapTarget).customModesManager = mockCustomModesManager
+
+			// Mock getModeBySlug to return the custom mode
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug).mockReturnValue({
+				slug: "custom-mode",
+				name: "Custom Mode",
+				roleDefinition: "Custom role",
+				groups: ["read", "edit"],
+			})
+
+			// Mock provider settings manager
+			;(provider as MemberSwapTarget).providerSettingsManager = {
+				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "config-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			}
+
+			// Spy on log method to verify no warning was logged
+			const logSpy = vi.spyOn(provider, "log")
+
+			// Create history item with existing custom mode
+			const historyItem = {
+				id: "test-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "custom-mode",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Initialize with history item
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			// Verify mode validation occurred
+			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
+			expect(getModeBySlug).toHaveBeenCalledWith("custom-mode", expect.any(Array))
+
+			// Verify mode was preserved
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("viewStates", expect.anything())
+			// This branch persists the restored mode through the view's own pin rather than the shared
+			// global write main asserted on, because a global write would leak the restored mode into
+			// other views in parallel mode. Same claim, moved observable: the resolved mode is what
+			// this view now holds, and historyItem still carries it below.
+			expect(provider["viewLocalState"].mode).toBe("custom-mode")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
+
+			// Verify history item mode was not changed
+			expect(historyItem.mode).toBe("custom-mode")
+		})
+
+		test("preserves mode when it exists in built-in modes", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Mock no custom modes
+			const mockCustomModesManager = {
+				getCustomModes: vi.fn().mockResolvedValue([]),
+				dispose: vi.fn(),
+			}
+			;(provider as MemberSwapTarget).customModesManager = mockCustomModesManager
+
+			// Mock getModeBySlug to return built-in architect mode
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug).mockReturnValue({
+				slug: "architect",
+				name: "Architect Mode",
+				roleDefinition: "You are an architect",
+				groups: ["read", "edit"],
+			})
+
+			// Mock provider settings manager
+			;(provider as MemberSwapTarget).providerSettingsManager = {
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([]),
+			}
+
+			// Create history item with built-in mode
+			const historyItem = {
+				id: "test-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "architect",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Initialize with history item
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			// Verify mode was preserved
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("viewStates", expect.anything())
+			// This branch persists the restored mode through the view's own pin rather than the shared
+			// global write main asserted on, because a global write would leak the restored mode into
+			// other views in parallel mode. Same claim, moved observable: the resolved mode is what
+			// this view now holds, and historyItem still carries it below.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			// Verify history item mode was not changed
+			expect(historyItem.mode).toBe("architect")
+		})
+
+		test("handles history items without mode property", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Mock provider settings manager
+			;(provider as MemberSwapTarget).providerSettingsManager = {
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([]),
+			}
+
+			// Create history item without mode
+			const historyItem = {
+				id: "test-id",
+				ts: Date.now(),
+				task: "Test task",
+				// No mode property
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Initialize with history item
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			// Verify no mode validation occurred (mode update not called)
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", expect.any(String))
+		})
+
+		test("continues with task restoration even if mode config loading fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Mock custom modes
+			const mockCustomModesManager = {
+				getCustomModes: vi.fn().mockResolvedValue([]),
+				dispose: vi.fn(),
+			}
+			;(provider as MemberSwapTarget).customModesManager = mockCustomModesManager
+
+			// Mock getModeBySlug to return built-in mode
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug).mockReturnValue({
+				slug: "code",
+				name: "Code Mode",
+				roleDefinition: "You are a code assistant",
+				groups: ["read", "edit"],
+			})
+
+			// Mock provider settings manager to throw error
+			;(provider as MemberSwapTarget).providerSettingsManager = {
+				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				activateProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
+			}
+
+			// Spy on log method
+			const logSpy = vi.spyOn(provider, "log")
+
+			// Create history item
+			const historyItem = {
+				id: "test-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Initialize with history item - should not throw
+			await expect(provider.createTaskWithHistoryItem(historyItem)).resolves.not.toThrow()
+
+			// Verify error was logged but task restoration continued
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to restore API configuration for mode 'code'"),
+			)
+		})
+	})
+
 	describe("deleteProviderProfile", () => {
 		it("moves the settings manager's current profile to the survivor when the active profile is deleted", async () => {
 			const contextProxy = new ContextProxy(mockContext)
@@ -6748,7 +7036,10 @@ describe("ClineProvider", () => {
 			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			;(provider as MemberSwapTarget).customModesManager = {
+				getCustomModes: vi.fn().mockResolvedValue([]),
+				dispose: vi.fn(),
+			}
 			// The file-level modes mock resolves every slug to a mode; drop the pinned slug.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
@@ -6780,7 +7071,10 @@ describe("ClineProvider", () => {
 			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			;(provider as MemberSwapTarget).customModesManager = {
+				getCustomModes: vi.fn().mockResolvedValue([]),
+				dispose: vi.fn(),
+			}
 			await provider.saveViewState("mode", "code")
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -7239,7 +7533,10 @@ describe("ClineProvider", () => {
 		)
 		const logSpy = vi.spyOn(provider, "log")
 		// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-		provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+		;(provider as MemberSwapTarget).customModesManager = {
+			getCustomModes: vi.fn().mockResolvedValue([]),
+			dispose: vi.fn(),
+		}
 		// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
 		const modesModule = vi.mocked(await import("../../../shared/modes"))
 		const originalMode = modesModule.getModeBySlug("code")
@@ -7315,7 +7612,10 @@ describe("ClineProvider", () => {
 		)
 		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 		// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
-		provider.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
+		;(provider as MemberSwapTarget).customModesManager = {
+			resetCustomModes: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn(),
+		}
 		// The modal answer is a string label; the last-typed vscode overload expects a
 		// MessageItem. A double assertion is the last-resort cast here (AGENTS.md): the
 		// production path compares the answer against the string label directly, so the
@@ -10083,6 +10383,64 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// State must still be refreshed even when profile persistence fails.
 				expect(provider.postStateToWebview).toHaveBeenCalled()
 			})
+			it("updates every zoo-gateway profile and activates only the active one", async () => {
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
+				} as never)
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					apiProvider: providerIdentifiers.zooGateway,
+				} as never)
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					currentApiConfigName: "Zoo Gateway",
+				} as never)
+				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
+				const saveConfig = vi.fn().mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([
+						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
+					]),
+					getProfile: vi
+						.fn()
+						.mockResolvedValueOnce({
+							apiProvider: providerIdentifiers.zooGateway,
+							zooSessionToken: "old-token",
+							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
+						})
+						.mockResolvedValueOnce({
+							apiProvider: providerIdentifiers.zooGateway,
+							zooSessionToken: "old-token",
+						}),
+					saveConfig,
+				}
+
+				await provider.handleZooCodeCallback("new-token")
+
+				expect(upsertSpy).toHaveBeenCalledWith(
+					"Zoo Gateway",
+					expect.objectContaining({
+						zooSessionToken: "new-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+					true,
+				)
+				// Both zoo-gateway profiles are refreshed - that is what every profile means - and this branch
+				// does it through upsertProviderProfile rather than a direct saveConfig so that a view pinned
+				// to a profile re-resolves it instead of serving the pre-callback config. The activation flag
+				// follows whether Zoo Gateway is already the active provider: this callback keeps Zoo Gateway
+				// active and refreshes the other profiles without activating them, so activates only the
+				// active one holds through the API we ship.
+				expect(upsertSpy).toHaveBeenCalledWith(
+					"Backup Zoo",
+					expect.objectContaining({
+						zooSessionToken: "new-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+					false,
+				)
+				expect(saveConfig).not.toHaveBeenCalled()
+			})
 		})
 
 		describe("ensureZooGatewayProfileSeeded", () => {
@@ -10096,6 +10454,67 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				await (provider as any).ensureZooGatewayProfileSeeded()
 
 				expect(handleSpy).not.toHaveBeenCalled()
+			})
+			it("skips seeding when every zoo-gateway profile already has the current token and base URL", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "current-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await provider["ensureZooGatewayProfileSeeded"]()
+
+				expect(handleSpy).not.toHaveBeenCalled()
+				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
+			})
+
+			it("re-seeds when any zoo-gateway profile has a stale or missing token", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "stale-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await provider["ensureZooGatewayProfileSeeded"]()
+
+				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
+			})
+
+			it("re-seeds when any zoo-gateway profile has a stale base URL", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "current-token",
+						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await provider["ensureZooGatewayProfileSeeded"]()
+
+				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
 		})
 	})
