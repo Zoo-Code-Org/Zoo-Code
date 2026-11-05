@@ -2964,8 +2964,12 @@ export class ClineProvider
 	}
 
 	async postStateToWebview() {
+		// A disposed provider has no webview to show a state to: it is not built, and no sequence number is spent.
+		if (this._disposed) return
 		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview()
+		// It may have been disposed while the state was being built (the settings and the history are read first).
+		if (this._disposed) return
 		state.clineMessagesSeq = clineMessagesSeq
 		await this.postMessageToWebview({ type: "state", state })
 	}

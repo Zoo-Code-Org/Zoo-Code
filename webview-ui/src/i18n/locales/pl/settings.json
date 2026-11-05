@@ -1089,7 +1089,7 @@
 			},
 			"spacingScale": {
 				"label": "Gęstość odstępów",
-				"description": "Odstęp między wiadomościami czatu. Niższa wartość oznacza zwartszy układ."
+				"description": "Odstęp między wiadomościami czatu. Niższa wartość oznacza bardziej zwarty układ."
 			},
 			"preview": "Podgląd",
 			"sample": {

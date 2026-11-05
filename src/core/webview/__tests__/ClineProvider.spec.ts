@@ -3763,6 +3763,46 @@ describe("ClineProvider", () => {
 		expect(mockPostMessage).not.toHaveBeenCalled()
 	})
 
+	test("a disposed provider builds and posts no state, and spends no sequence number", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.dispose()
+		const build = vi.spyOn(provider, "getStateToPostToWebview")
+		const post = vi.spyOn(provider, "postMessageToWebview")
+		const seq = provider["clineMessagesSeq"]
+
+		await provider.postStateToWebview()
+
+		expect(build).not.toHaveBeenCalled()
+		expect(post).not.toHaveBeenCalled()
+		expect(provider["clineMessagesSeq"]).toBe(seq)
+	})
+
+	test("a provider that is disposed while its state is being built posts nothing", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const post = vi.spyOn(provider, "postMessageToWebview")
+		const real = provider.getStateToPostToWebview.bind(provider)
+		vi.spyOn(provider, "getStateToPostToWebview").mockImplementation(async (options) => {
+			const state = await real(options)
+			await provider.dispose() // the view is closed during the build
+			return state
+		})
+		post.mockClear()
+
+		await provider.postStateToWebview()
+
+		expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+	})
+
+	test("a live provider still builds and posts its state", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const post = vi.spyOn(provider, "postMessageToWebview")
+		post.mockClear()
+
+		await provider.postStateToWebview()
+
+		expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+	})
+
 	test("isDisposed tells whether dispose has run", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		expect(provider.isDisposed).toBe(false)

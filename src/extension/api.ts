@@ -641,10 +641,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		const values = withoutInvalidDisplaySettings(allValues, (key) =>
 			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
 		)
-		await setValuesThroughWriteChain(this.sidebarProvider.contextProxy, values, {
-			owner: this.sidebarProvider,
-			onDeferredSettled: () => void this.sidebarProvider.postStateToWebview().catch(() => undefined),
-		})
+		try {
+			await setValuesThroughWriteChain(this.sidebarProvider.contextProxy, values, {
+				owner: this.sidebarProvider,
+				onDeferredSettled: () => void this.sidebarProvider.postStateToWebview().catch(() => undefined),
+			})
+		} catch (error) {
+			// The write is not a transaction: some of the settings may be stored, and the ones that failed were read back
+			// into the cache. The webview is shown what is stored, and the error is not hidden by it.
+			try {
+				await this.sidebarProvider.postStateToWebview()
+			} catch {
+				// Not worth hiding the error of the write for.
+			}
+			throw error
+		}
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
 			await Promise.all(

@@ -161,6 +161,58 @@ describe("API - configuration", () => {
 		expect(stored.get("terminalFontSize")).toBe(12)
 	})
 
+	describe("when a setting cannot be stored", () => {
+		const setup = (postStateToWebview = vi.fn().mockResolvedValue(undefined)) => {
+			const stored = new Map<string, unknown>([["terminalFontSize", 12]])
+			const failure = new Error("storage unavailable")
+			const provider = {
+				context: {},
+				on: vi.fn(),
+				log: vi.fn(),
+				contextProxy: {
+					getValue: (key: string) => stored.get(key),
+					setValue: async (key: string, value: unknown) => void stored.set(key, value),
+					setValues: vi.fn().mockRejectedValue(failure), // the other settings fail
+				},
+				providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+				postStateToWebview,
+			} as unknown as ClineProvider
+			const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+			return {
+				api: new API(outputChannel, provider, makeClineProviderFactory()),
+				provider,
+				failure,
+				postStateToWebview,
+			}
+		}
+
+		it("shows the webview what is stored, and rejects with the original error", async () => {
+			const { api, provider, failure, postStateToWebview } = setup()
+
+			await expect(api.setConfiguration({ terminalFontSize: 14, soundEnabled: true })).rejects.toBe(failure)
+
+			expect(postStateToWebview).toHaveBeenCalledTimes(1)
+			expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled() // nothing after the settings
+		})
+
+		it("does not let a failed refresh hide the original error", async () => {
+			const { api, failure, postStateToWebview } = setup(vi.fn().mockRejectedValue(new Error("webview gone")))
+
+			await expect(api.setConfiguration({ soundEnabled: true })).rejects.toBe(failure)
+
+			expect(postStateToWebview).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not refresh anything when all the settings are stored, other than the one refresh after the profiles", async () => {
+			const { api, provider, postStateToWebview } = setup()
+			vi.mocked(provider.contextProxy.setValues).mockResolvedValue(undefined)
+
+			await api.setConfiguration({ soundEnabled: true })
+
+			expect(postStateToWebview).toHaveBeenCalledTimes(1) // the existing refresh at the end
+		})
+	})
+
 	describe("the display settings", () => {
 		const setup = () => {
 			const setValues = vi.fn().mockResolvedValue(undefined)
@@ -203,7 +255,8 @@ describe("API - configuration", () => {
 			)
 
 			expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
-			expect(provider.postStateToWebview).not.toHaveBeenCalled()
+			// The webview is shown what is stored, though: some of the settings may have been.
+			expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
 		})
 
 		it.each([

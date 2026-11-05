@@ -718,11 +718,19 @@ export const ChatRowContent = ({
 									padding: "10px 12px",
 								}}>
 								<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-									<span style={{ fontWeight: "500", fontSize: "var(--vscode-font-size)" }}>
+									<span
+										style={{
+											fontWeight: "500",
+											fontSize: "calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))",
+										}}>
 										{skillInfo.skill}
 									</span>
 									{skillInfo.source && (
-										<VSCodeBadge style={{ fontSize: "calc(var(--vscode-font-size) - 2px)" }}>
+										<VSCodeBadge
+											style={{
+												fontSize:
+													"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1) - 2px)",
+											}}>
 											{skillInfo.source}
 										</VSCodeBadge>
 									)}
@@ -974,11 +982,19 @@ export const ChatRowContent = ({
 									padding: "10px 12px",
 								}}>
 								<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-									<span style={{ fontWeight: "500", fontSize: "var(--vscode-font-size)" }}>
+									<span
+										style={{
+											fontWeight: "500",
+											fontSize: "calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))",
+										}}>
 										/{slashCommandInfo.command}
 									</span>
 									{slashCommandInfo.source && (
-										<VSCodeBadge style={{ fontSize: "calc(var(--vscode-font-size) - 2px)" }}>
+										<VSCodeBadge
+											style={{
+												fontSize:
+													"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1) - 2px)",
+											}}>
 											{slashCommandInfo.source}
 										</VSCodeBadge>
 									)}
@@ -1513,7 +1529,8 @@ export const ChatRowContent = ({
 													<span
 														style={{
 															fontWeight: "500",
-															fontSize: "var(--vscode-font-size)",
+															fontSize:
+																"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))",
 														}}>
 														/{slashCommandInfo.command}
 													</span>
@@ -1521,7 +1538,8 @@ export const ChatRowContent = ({
 														<span
 															style={{
 																color: "var(--vscode-descriptionForeground)",
-																fontSize: "var(--vscode-font-size)",
+																fontSize:
+																	"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))",
 															}}>
 															{slashCommandInfo.args}
 														</span>
@@ -1531,7 +1549,8 @@ export const ChatRowContent = ({
 													<div
 														style={{
 															color: "var(--vscode-descriptionForeground)",
-															fontSize: "calc(var(--vscode-font-size) - 1px)",
+															fontSize:
+																"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1) - 1px)",
 														}}>
 														{slashCommandInfo.description}
 													</div>
@@ -1539,7 +1558,10 @@ export const ChatRowContent = ({
 												{slashCommandInfo.source && (
 													<div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
 														<VSCodeBadge
-															style={{ fontSize: "calc(var(--vscode-font-size) - 2px)" }}>
+															style={{
+																fontSize:
+																	"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1) - 2px)",
+															}}>
 															{slashCommandInfo.source}
 														</VSCodeBadge>
 													</div>

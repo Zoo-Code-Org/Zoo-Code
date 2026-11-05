@@ -242,9 +242,13 @@ describe("UISettings", () => {
 			})
 		})
 
-		it("records telemetry for changes", () => {
+		it("records telemetry for changes, once for one click", () => {
+			vi.mocked(telemetryClient.capture).mockClear() // the earlier tests recorded calls too
 			const { getByTestId } = render(<UISettings {...defaultProps} />)
+
 			fireEvent.click(getByTestId("appearance-editorFontSize-increment"))
+
+			expect(telemetryClient.capture).toHaveBeenCalledTimes(1)
 			expect(telemetryClient.capture).toHaveBeenCalledWith("ui_settings_appearance_changed", {
 				key: "editorFontSize",
 				value: 14,
