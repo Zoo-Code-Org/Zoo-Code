@@ -76,6 +76,7 @@ import {
 	modelIdKeys,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
+	isSecretStateKey,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -132,7 +133,7 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
-import { ContextProxy } from "../config/ContextProxy"
+import { ContextProxy, isPassThroughStateKey } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
@@ -6571,9 +6572,16 @@ export class ClineProvider
 
 		for (const key of Object.keys(attempted) as (keyof RooCodeSettings)[]) {
 			const generation = generations[key]
+			// ContextProxy does not count every key: secrets go through storeSecret and pass-through
+			// keys straight to the Memento, and neither advances the per-key write generation, so the
+			// expectation this setter recorded for them (generation 1 against a stored 0) can never
+			// match and would exempt those keys from the rollback of their own failed attempt.
+			const uncountedHere = isSecretStateKey(key) || isPassThroughStateKey(key)
 			if (
 				this.contextProxy.getValue(key) === attempted[key] &&
-				(generation === undefined || this.contextProxy.getStateWriteGeneration(key as never) === generation)
+				(generation === undefined ||
+					uncountedHere ||
+					this.contextProxy.getStateWriteGeneration(key as never) === generation)
 			) {
 				;(rollback as Record<string, unknown>)[key] = previous[key]
 			}

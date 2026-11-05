@@ -7782,6 +7782,152 @@ describe("ClineProvider", () => {
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
 	})
+	it("should roll back a secret key that ContextProxy does not track with a write generation", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("nanoGptApiKey", "old-secret")
+		await provider.contextProxy.setValue("mode", "architect")
+		const secretStore = vi.spyOn(mockContext.secrets, "store")
+		const originalUpdate = mockContext.globalState.update
+		mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			if (key === "viewStates") {
+				return Promise.reject(new Error("storage unavailable"))
+			}
+			return Promise.resolve()
+		})
+
+		await expect(provider.setValues({ nanoGptApiKey: "new-secret", mode: "code" })).rejects.toThrow(
+			"storage unavailable",
+		)
+
+		// ContextProxy routes secret keys through storeSecret, which never advances the per-key
+		// write generation the rollback guard compares against. A key it does not count is captured
+		// with generation 1 and still reads 0 afterwards, so the guard excludes it and the secret
+		// alone stays at the value the failed attempt wrote while every other key is restored.
+		// The attempt did move the secret: ContextProxy.storeSecret is fire-and-forget, so
+		// only the presence of the attempted value and the restored end state are deterministic.
+		expect(secretStore.mock.calls.map(([key, value]) => [key, value])).toContainEqual([
+			"nanoGptApiKey",
+			"new-secret",
+		])
+		expect(provider.getValue("mode")).toBe("architect")
+		expect(provider.contextProxy.getSecret("nanoGptApiKey")).toBe("old-secret")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+
+	it("should keep the generation guard for a counted key whose concurrent write carried the same value", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("mode", "architect")
+		await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+		const originalUpdate = mockContext.globalState.update
+		let rejectViews: (error: Error) => void = () => {}
+		let viewWrites = 0
+		mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			if (key === "viewStates") {
+				// The attempt's own per-view write is parked below; the concurrent write's must land.
+				viewWrites++
+				if (viewWrites === 1) {
+					return new Promise<void>((_, reject) => (rejectViews = reject))
+				}
+				return Promise.resolve()
+			}
+			return Promise.resolve()
+		})
+
+		const attempt = provider.setValues({ mode: "code", currentApiConfigName: "other-config" })
+		await vi.waitFor(() => expect(provider.getValue("mode")).toBe("code"))
+		// A concurrent provider re-writes the very value this attempt wrote: the stored value
+		// cannot tell the two writes apart, only the per-key generation can.
+		await provider.contextProxy.setValue("mode", "code")
+		rejectViews(new Error("storage unavailable"))
+		await expect(attempt).rejects.toThrow("storage unavailable")
+
+		// Restoring the captured "architect" here would undo a newer write that this rollback
+		// did not make, for every view that reads shared state.
+		expect(provider.getValue("mode")).toBe("code")
+		expect(provider.getValue("currentApiConfigName")).toBe("current-config")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+
+	it("should roll back a pass-through key that ContextProxy hands straight to the Memento", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const firstHistory = [
+			{
+				id: "task-1",
+				number: 1,
+				ts: 1700000000000,
+				task: "first",
+				tokensIn: 1,
+				tokensOut: 1,
+				totalCost: 0,
+			},
+		]
+		const secondHistory = [
+			{
+				id: "task-2",
+				number: 2,
+				ts: 1700000000001,
+				task: "second",
+				tokensIn: 2,
+				tokensOut: 2,
+				totalCost: 0,
+			},
+		]
+		await provider.contextProxy.setValue("taskHistory", firstHistory as never)
+		await provider.contextProxy.setValue("mode", "architect")
+		const originalUpdate = mockContext.globalState.update
+		// The double must still move the Memento: a pass-through key is read back from there,
+		// so replacing the store outright would hide the very write under test.
+		const globalStore = vi.fn().mockImplementation((key: string, value: unknown) => {
+			if (key === "viewStates") {
+				return Promise.reject(new Error("storage unavailable"))
+			}
+			return originalUpdate(key, value as never)
+		})
+		mockContext.globalState.update = globalStore
+
+		await expect(provider.setValues({ taskHistory: secondHistory as never, mode: "code" })).rejects.toThrow(
+			"storage unavailable",
+		)
+
+		// taskHistory is a pass-through key: ContextProxy writes it straight to the Memento and
+		// never advances its write generation, so a guard that demands one leaves the durable
+		// history at the value the failed attempt wrote.
+		// taskHistory is a pass-through key: ContextProxy writes it straight to the Memento and
+		// never advances its write generation, so a guard that still demands one for it leaves
+		// the durable history at the value the failed attempt wrote while every other key is
+		// restored. The write sequence is the observable that separates a restored key from
+		// one the rollback never touched.
+		expect(globalStore.mock.calls.filter(([key]) => key === "taskHistory").map(([, value]) => value)).toEqual([
+			secondHistory,
+			firstHistory,
+		])
+		expect(provider.getValue("mode")).toBe("architect")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
 
 	it("should serve this view's restored mode through getState()", async () => {
 		const provider = new ClineProvider(
