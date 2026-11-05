@@ -789,24 +789,22 @@ export class ClineProvider
 	 * to this view and no later session can load it, yet it would occupy a slot in the shared map
 	 * and outrank loadable entries when the map is pruned. Such a change waits in pendingViewState
 	 * and is written by the registration flush under the stable id, which is the only name another
-	 * session could load it under. A provider that goes away while a change is still held flushes it
-	 * under its own id (`forceUnregisteredWrite`) so the change reaches storage instead of
-	 * disappearing with the instance; nothing loads such an entry, as loadViewState refuses to
-	 * attribute a temporary-id entry to a view.
+	 * session could load it under. A provider that goes away while a change is still held drops it:
+	 * writing it under the session-local id would put an entry in the shared map that loadViewState
+	 * refuses to read back, for the price of a slot that outranks loadable entries when the map is
+	 * pruned.
 	 */
-	private async savePersistedViewState(
-		values: Partial<PersistedViewState>,
-		options: { forceUnregisteredWrite?: boolean } = {},
-	): Promise<void> {
+	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
 
-		// Pre-registration change: hold it for the flush instead of persisting it under the
-		// session-local id, unless the caller is this provider's own dispose and there will be no
-		// later flush. Spreading keeps a key the change explicitly cleared present with an undefined
-		// value, which is what the write below turns back into a deletion.
-		if (viewStateId === this.viewId && !options.forceUnregisteredWrite) {
+		// Pre-registration change: hold it for the registration flush instead of persisting it under
+		// the session-local id. Temporary ids restart from 0 on every host start, so an entry under
+		// one is a slot in the shared map that no view can ever load, and it outranks loadable entries
+		// when the map is pruned. Spreading keeps a key the change explicitly cleared present with an
+		// undefined value, which is what the write below turns back into a deletion.
+		if (viewStateId === this.viewId) {
 			this.pendingViewState = { ...this.pendingViewState, ...values }
 			return
 		}
@@ -1665,27 +1663,12 @@ export class ClineProvider
 		this.customModesManager?.dispose()
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
-		// A change made before the webview registered a stable id waits in memory, and the only
-		// thing that ever writes it is that registration. A provider that goes away before it lands
-		// flushes the change itself, so the selection reaches storage rather than evaporating with
-		// the instance. It lands under the id this instance holds - its session-local one - which
-		// loadViewState refuses to attribute to any view, so this is a durability guarantee and not
-		// something a later view can mis-read. Done while this provider is still in activeInstances
-		// so the write is attributed to a live view.
-		const unregisteredViewState = this.pendingViewState
-		if (unregisteredViewState) {
-			this.pendingViewState = undefined
-			try {
-				await this.savePersistedViewState(unregisteredViewState, { forceUnregisteredWrite: true })
-				this.log(`[dispose] Flushed the unregistered view state of view ${this.viewId}`)
-			} catch (error) {
-				this.log(
-					`[dispose] Unable to flush the unregistered view state of view ${this.viewId}: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				)
-			}
-		}
+		// A change made before the webview registered a stable id waits in memory, and the only thing
+		// that ever writes it is that registration. A provider that goes away before it lands drops the
+		// change rather than writing it under its session-local id: loadViewState refuses to attribute
+		// a temporary-id entry to any view, so such a write is a record nobody can read back, and its
+		// cost is a slot in the shared map that outranks loadable entries when the map is pruned.
+		this.pendingViewState = undefined
 		ClineProvider.activeInstances.delete(this)
 		// Tombstones this provider wrote are no longer its responsibility. Done after leaving
 		// activeInstances so this provider's own eviction list cannot keep its tombstone guarded.
@@ -3416,12 +3399,14 @@ export class ClineProvider
 			)
 		}
 
-		let activationMode: Mode | undefined
-		let priorModeConfigId: string | undefined
+		// The mode mapping is compensated from a record of the mapping write that was actually issued,
+		// not from the mode captured below. The capture runs before the sibling snapshot and the
+		// prior-mapping read, so gating the rollback on it alone would replay a restore for a write
+		// that never started and clear a mapping this call never overwrote.
+		let modeMappingWrite: { mode: Mode; priorModeConfigId: string | undefined } | undefined
 		try {
 			if (activate) {
 				const { mode } = await this.getState()
-				activationMode = mode
 
 				// These promises do the following:
 				// 1. Adds or updates the list of provider profiles.
@@ -3438,12 +3423,16 @@ export class ClineProvider
 				// pin their profile's settings into their overlays first.
 				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name, { requireResolvablePins: true })
 
+				let priorModeConfigId: string | undefined
 				try {
 					priorModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
 				} catch {
 					// Best-effort snapshot: when the prior mapping cannot be read the
 					// compensation restores the mapping as absent.
 				}
+				// Issue the mapping write and record the pairing it used at the same moment: the
+				// compensation below restores exactly this mapping, and only if this line ran.
+				modeMappingWrite = { mode, priorModeConfigId }
 				// `allSettled` so the compensation below never races a write still in flight.
 				const activationResults = await Promise.allSettled([
 					this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
@@ -3516,12 +3505,17 @@ export class ClineProvider
 			// The original failure is re-thrown for the caller.
 			await this._restoreProviderManagerRecord(name, managerSnapshot, normalizedSettings)
 			await this._restoreProviderManagerSelection(managerSnapshot)
-			if (activationMode !== undefined) {
+			if (modeMappingWrite) {
 				try {
-					await this.providerSettingsManager.setModeConfig(activationMode, priorModeConfigId as string)
+					await this.providerSettingsManager.setModeConfig(
+						modeMappingWrite.mode,
+						modeMappingWrite.priorModeConfigId as string,
+					)
 				} catch (restoreError) {
 					this.log(
-						`[ClineProvider] profile-activation rollback failed for the mode mapping: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						`[ClineProvider] profile-activation rollback failed for the mode mapping of ${modeMappingWrite.mode}: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
 					)
 				}
 			}

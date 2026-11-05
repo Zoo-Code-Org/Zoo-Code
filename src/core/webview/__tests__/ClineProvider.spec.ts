@@ -4835,7 +4835,7 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		it("keeps tearing down when the pre-registration change cannot be flushed", async () => {
+		it("drops a held pre-registration change at teardown instead of storing it under the session-local id", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -4845,37 +4845,6 @@ describe("ClineProvider", () => {
 			)
 			await provider.saveViewState("mode", "plan")
 			const viewId = provider["viewId"]
-
-			const originalUpdate = mockContext.globalState.update
-			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates") {
-					// A non-Error rejection: teardown has to report what it got, not assume a shape.
-					return Promise.reject("storage unavailable")
-				}
-				return Promise.resolve()
-			})
-
-			// Teardown must not turn into a rejection because one durable write failed.
-			await provider.dispose()
-			mockContext.globalState.update = originalUpdate
-
-			expect(provider["pendingViewState"]).toBeUndefined()
-			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
-			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining(`[dispose] Unable to flush the unregistered view state of view ${viewId}`),
-			)
-			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("storage unavailable"))
-		})
-
-		it("writes a held pre-registration change to storage when the provider is disposed", async () => {
-			const provider = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-				new WebviewFocusTracker(),
-			)
-			await provider.saveViewState("mode", "plan")
 
 			// Nothing is on disk while the change waits for a registration that has not happened.
 			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
@@ -4883,17 +4852,14 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 
-			// Disposal is the last chance to keep the change: it reaches storage under the only id
-			// this view ever had, and it stays a durability record rather than something a later view
-			// can load as its own.
-			const states = provider["getPersistedViewStates"]({ fresh: true })
-			const viewId = provider["viewId"]
-			expect(Object.keys(states)).toEqual([viewId])
-			expect(states[viewId]).toMatchObject({ mode: "plan" })
-			expect(typeof states[viewId]?.updatedAt).toBe("number")
+			// The only name this view ever had was session-local, and loadViewState refuses to read an
+			// entry under one back. Writing it would put a record nobody can load into the shared map,
+			// where its fresh updatedAt outranks loadable entries when the map is pruned, so teardown
+			// drops the change and claims nothing.
+			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
 			expect(provider["pendingViewState"]).toBeUndefined()
-			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining(`[dispose] Flushed the unregistered view state of view ${viewId}`),
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalledWith(
+				expect.stringContaining("unregistered view state of view " + viewId),
 			)
 		})
 
@@ -6649,6 +6615,135 @@ describe("ClineProvider", () => {
 			})
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "old-profile" })
 			await provider.dispose()
+		})
+
+		it("does not restore a mode mapping the activation never issued", async () => {
+			// The sibling snapshot runs before the mapping write is issued, so a failure there means this
+			// call never touched the mode mapping. Replaying the restore anyway would clear the current
+			// mode's mapping on an upsert that never reached it.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "old-rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			// Typed alias for the private activation step: the failure under test is that the sibling
+			// snapshot rejects before any mapping write starts.
+			const activationStep = provider as unknown as {
+				snapshotSiblingOverlaysBeforeSharedSettingsWrite: (name: string, options: unknown) => Promise<void>
+			}
+			vi.spyOn(activationStep, "snapshotSiblingOverlaysBeforeSharedSettingsWrite").mockRejectedValue(
+				new Error("sibling pin unresolvable"),
+			)
+			const setModeConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.openai }, true),
+			).resolves.toBeUndefined()
+
+			expect(setModeConfigSpy).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+		})
+
+		it("restores the mapping of the mode the activation captured when the live mode changes mid-window", async () => {
+			// The prior-mapping read sits between the capture and the mapping write, so it is the point a
+			// concurrent mode change lands in this flow. The rollback must name the mode the write
+			// targeted, not whatever mode is live when the catch runs.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("mode", "code")
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "old-rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
+				// The mid-window change, through the same path a user message takes.
+				await provider.setValue("mode", "architect")
+				return "old-mode-id"
+			})
+			const setModeConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockRejectedValueOnce(new Error("mode write failed"))
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.openai }, true),
+			).resolves.toBeUndefined()
+
+			// The change landed - otherwise the assertion below is vacuous.
+			expect(provider.contextProxy.getValue("mode")).toBe("architect")
+			// The rollback names the captured mode, not the live one.
+			expect(setModeConfigSpy).toHaveBeenCalledWith("code", "old-mode-id")
+			expect(setModeConfigSpy).not.toHaveBeenCalledWith("architect", expect.anything())
+		})
+
+		it("restores the captured mapping when the shared mode is cleared mid-window", async () => {
+			// The other direction of the same window: the shared store stops naming a mode between the
+			// capture and the write, and the restore must still target the captured one.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValue("mode", "code")
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "old-rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
+				await provider.contextProxy.setValue("mode", undefined)
+				return "old-mode-id"
+			})
+			const setModeConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockRejectedValueOnce(new Error("mode write failed"))
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.openai }, true),
+			).resolves.toBeUndefined()
+
+			expect(provider.contextProxy.getValue("mode")).toBeUndefined()
+			expect(setModeConfigSpy).toHaveBeenCalledWith("code", "old-mode-id")
 		})
 		it("rolls back the direct activation writes when one concurrent write fails", async () => {
 			const provider = new ClineProvider(
