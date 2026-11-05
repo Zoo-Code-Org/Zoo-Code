@@ -419,7 +419,6 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 					? undefined
 					: () => {
 							cline.recordToolUsage("use_mcp_tool")
-							TelemetryService.instance.captureToolUsage(cline.taskId, "use_mcp_tool")
 						},
 			})
 			break
@@ -802,10 +801,11 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 
 				// Validation passed: record exactly one attempt at this single
 				// central point. Individual tool handlers must not also record
-				// usage, or the attempt would be double-counted.
+				// usage, or the attempt would be double-counted. Usage reaches
+				// telemetry as a per-task toolsUsed breakdown on Task Completed
+				// (flushTelemetryInstallment), never as one event per tool call.
 				const recordName = toTelemetryToolName(block.name, isCustomTool, stateExperiments)
 				cline.recordToolUsage(recordName)
-				TelemetryService.instance.captureToolUsage(cline.taskId, recordName)
 
 				// Track legacy format usage for read_file tool (for migration monitoring).
 				// Model ids on telemetry events are non-policy labels: a live
