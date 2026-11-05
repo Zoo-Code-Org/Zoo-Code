@@ -251,6 +251,16 @@ const NUL = "\x00"
 const MAX_PAYLOAD_SCAN_DEPTH = 64
 
 /**
+ * Sentinel for "a region opens here but never closes", distinct from "no
+ * region opens here". A closer scan that retries the next byte on either
+ * reading re-walks the whole tail once per byte; masking the tail at this
+ * reading keeps the scan linear. An unclosed region is bash's own syntax
+ * error: the shell reads every later byte inside it, so the tail holds no
+ * further region opener for the scan to find.
+ */
+const INERT_UNCLOSED = -1
+
+/**
  * Bytes the shell ends a word at (default $IFS blanks plus metacharacters).
  * JS \s is wider than $IFS (VT, FF, NBSP, U+3000, …), and bash does not
  * word-split on the extras.
@@ -608,6 +618,9 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// after the pair continues the word.
 			let escapedEnd = -1
 			let quote: "'" | '"' | null = null
+			// Whether the open `quote` region was opened by `$'`, whose body
+			// escapes the next byte even when the quote byte is `'`.
+			let escapedQuote = false
 			// Mirrors the scan loop's expansion state: the closers this walk
 			// must balance before a top-level region ends, and the index just
 			// past the most recent top-level region closer. The shell ends the
@@ -646,14 +659,27 @@ function scanShellSyntax(text: string): ScanOutcome {
 			}
 			while (i < to) {
 				const char = text[i]
-				if (char === "\\" && quote !== "'") {
-					// Inside single quotes a backslash is literal, so only an
-					// unquoted or double-quoted backslash pairs with the next
-					// character.
+				if (char === "\\" && (quote !== "'" || escapedQuote)) {
+					// Inside plain single quotes a backslash is literal, so only
+					// an unquoted, double-quoted, or ANSI-C-quoted backslash
+					// pairs with the next character.
 					if (maskedStart === -1) {
 						remainderHost += text.slice(i, i + 2)
 					}
 					escapedEnd = i + 2
+					i += 2
+					continue
+				}
+				if (char === "$" && quote === null && text[i + 1] === "'") {
+					// Track the ANSI-C region so its escaped `\'` cannot end the
+					// region early: an early close re-reads region bytes as live
+					// syntax, and the reversed pairing reads the word's live tail
+					// as quoted, hiding it from the chained-opener test below.
+					quote = "'"
+					escapedQuote = true
+					if (maskedStart === -1) {
+						remainderHost += "$'"
+					}
 					i += 2
 					continue
 				}
@@ -662,6 +688,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 						quote = char
 					} else if (quote === char) {
 						quote = null
+						escapedQuote = false
 					}
 					if (maskedStart === -1) {
 						remainderHost += char
@@ -959,6 +986,10 @@ function scanShellSyntax(text: string): ScanOutcome {
 		const commentOnset = (): number => {
 			let j = endIndex
 			let quote: "'" | '"' | null = null
+			// Whether the open `quote` region was opened by `$'` or `$"`. Inside
+			// such a region a backslash escapes the next byte, unlike inside a
+			// plain single-quoted region where it is literal.
+			let escapedQuote = false
 			// Index just past the most recent `\c` escape pair, or -1. The
 			// escaped character is word content to the shell, so a `#` directly
 			// after the pair continues the word and cannot start a comment.
@@ -977,7 +1008,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 			let closerEnd = -1
 			while (j < remainderEnd) {
 				const char = text[j]
-				if (char === "\\" && quote !== "'") {
+				if (char === "\\" && (quote !== "'" || escapedQuote)) {
 					escapedEnd = j + 2
 					j += 2
 					continue
@@ -1021,6 +1052,18 @@ function scanShellSyntax(text: string): ScanOutcome {
 						j++
 						continue
 					}
+					if (char === "$" && (text[j + 1] === "'" || text[j + 1] === '"')) {
+						// ANSI-C and locale quoting open an escaped region that
+						// runs to the first unescaped copy of the quote byte,
+						// like `openQuote`'s `ansi-c` and `locale` kinds. Pairing
+						// raw quote bytes instead lets an escaped `\'` end the
+						// region early and re-reads the word's live tail.
+						const quoteByte: "'" | '"' = text[j + 1] === "'" ? "'" : '"'
+						quote = quoteByte
+						escapedQuote = true
+						j += 2
+						continue
+					}
 					if (char === "$" && (text[j + 1] === "(" || text[j + 1] === "{" || text[j + 1] === "[")) {
 						// A `$((` region starts with one inner group pending,
 						// so it closes past its second `)`.
@@ -1060,6 +1103,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 					}
 				} else if (char === quote) {
 					quote = null
+					escapedQuote = false
 				}
 				j++
 			}
@@ -1068,23 +1112,33 @@ function scanShellSyntax(text: string): ScanOutcome {
 		const liveRemainderEnd = commentOnset()
 		// The quote state of the remainder `[from, to)`, with the same semantics
 		// the remainder walk applies: outside single quotes a backslash pairs
-		// with the next character, and only a matching quote character closes an
-		// open region.
+		// with the next character, a region opened by `$'` or `$"` is escaped so
+		// its backslash pairs even under the `'` quote byte, and only a matching
+		// quote character closes an open region.
 		const quoteStateAt = (from: number, to: number): "'" | '"' | null => {
 			let quote: "'" | '"' | null = null
+			let escapedQuote = false
 			let j = from
 			while (j < to) {
 				const char = text[j]
-				if (char === "\\" && quote !== "'") {
+				if (char === "\\" && (quote !== "'" || escapedQuote)) {
 					j += 2
 					continue
 				}
 				if (quote === null) {
+					if (char === "$" && (text[j + 1] === "'" || text[j + 1] === '"')) {
+						const quoteByte: "'" | '"' = text[j + 1] === "'" ? "'" : '"'
+						quote = quoteByte
+						escapedQuote = true
+						j += 2
+						continue
+					}
 					if (char === "'" || char === '"') {
 						quote = char
 					}
 				} else if (char === quote) {
 					quote = null
+					escapedQuote = false
 				}
 				j++
 			}
@@ -1380,6 +1434,29 @@ function scanShellSyntax(text: string): ScanOutcome {
 					i++
 					continue
 				}
+				if (char === "$" && !dqOpen && text[i + 1] === "'") {
+					// An ANSI-C word is opaque to its first unescaped `'`, like
+					// `openQuote`'s `ansi-c` kind: its `\'` escapes, so pairing
+					// raw quote bytes would end the word early and re-read the
+					// bytes bash keeps inside it, or (reversed) swallow the live
+					// bytes after it. An unterminated region is bash's own
+					// syntax error: the shell reads one word to end of input
+					// and expands nothing there, so the rest of the region
+					// carries no payload.
+					let k = i + 2
+					while (k < end) {
+						if (text[k] === "\\") {
+							k += 2
+							continue
+						}
+						if (text[k] === "'") {
+							break
+						}
+						k++
+					}
+					i = k < end ? k + 1 : end
+					continue
+				}
 				if (char === "'" && !dqOpen) {
 					const close = text.indexOf("'", i + 1)
 					if (close !== -1 && close < end) {
@@ -1507,14 +1584,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 	}
 
 	/**
-	 * Index after the region of shell syntax that opens at `i`, or null when
-	 * no region opens there or an opened region never closes. The regions
-	 * counted here are inert to a delimiter scan: the shell reads each interior
-	 * with its own matching rules, so none can contain the enclosing scan's
-	 * closer. Quotes follow `openQuote`'s escaping; a backtick region ends at
-	 * the next backtick and does not nest; a `${…}` body balances nested
-	 * `${…}` regions and treats bare parens as literal word text; a `$(…)`
-	 * body balances nested `${…}` regions and bare grouping parens.
+	 * Index after the region of shell syntax that opens at `i`, `INERT_UNCLOSED`
+	 * when a region opens there but never closes, or null when no region opens
+	 * there. The regions counted here are inert to a delimiter scan: the shell
+	 * reads each interior with its own matching rules, so none can contain the
+	 * enclosing scan's closer. Quotes follow `openQuote`'s escaping; a backtick
+	 * region ends at the next backtick and does not nest; a `${…}` body
+	 * balances nested `${…}` regions and treats bare parens as literal word
+	 * text; a `$(…)` body balances nested `${…}` regions and bare grouping
+	 * parens.
 	 *
 	 * `substitutionIsText` stops `$(` from opening a region. bash's legacy
 	 * `$[…]` arithmetic reader ends the expression at an unquoted `]` even
@@ -1523,10 +1601,12 @@ function scanShellSyntax(text: string): ScanOutcome {
 	 * closer is a shell error; skipping it lets the interior walk report the
 	 * still-open `$(`.
 	 *
-	 * Returns null when no region opens at `i`, and also when an opened region
-	 * never closes. The caller keeps its own byte counting then, and the
-	 * interior walk still reports the unclosed region, so it can never make
-	 * the enclosing expression look closed.
+	 * A region still open at end of input is bash's own unclosed-delimiter
+	 * error: the shell reads every later byte inside that region, so the tail
+	 * holds no further region opener for an enclosing closer scan to find.
+	 * Reporting the case separately from "no region" lets that scan mask the
+	 * tail instead of re-running this walk from the next byte; conflating the
+	 * two readings rescans the whole tail once per byte.
 	 */
 	const skipInertRegion = (i: number, substitutionIsText = false): number | null => {
 		const quote = openQuote(i)
@@ -1599,7 +1679,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 			}
 			j++
 		}
-		return frames.length === 0 ? j : null
+		return frames.length === 0 ? j : INERT_UNCLOSED
 	}
 
 	/**
@@ -1621,8 +1701,20 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// inert here, exactly as in the `$((` loop below.
 			let depth = 1 // the opening bracket
 			let j = i + 2
+			// Set once the scan passes a region that never closes. The shell
+			// reads every later byte inside that region, so no later byte can
+			// open one: plain counting finishes the scan instead of re-walking
+			// the tail at each byte. An expression closed through a masked tail
+			// still holds the unclosed opener in its interior, so the interior
+			// walk fails it closed.
+			let maskedTail = false
 			while (j < text.length) {
-				const jumped = skipInertRegion(j, true)
+				const jumped = maskedTail ? null : skipInertRegion(j, true)
+				if (jumped === INERT_UNCLOSED) {
+					maskedTail = true
+					j++
+					continue
+				}
 				if (jumped !== null) {
 					j = jumped
 					continue
@@ -1642,8 +1734,17 @@ function scanShellSyntax(text: string): ScanOutcome {
 		// $(( … )) balances plain parens. An unbalanced scan runs to end of input.
 		let depth = 2 // the two opening parens
 		let j = i + 3
+		// The `$[…]` loop's masked-tail rule applies here too: past an
+		// unclosed region the shell opens nothing else, so plain counting
+		// keeps the scan linear without changing what the depth sees.
+		let maskedTail = false
 		while (j < text.length && depth > 0) {
-			const jumped = skipInertRegion(j)
+			const jumped = maskedTail ? null : skipInertRegion(j)
+			if (jumped === INERT_UNCLOSED) {
+				maskedTail = true
+				j++
+				continue
+			}
 			if (jumped !== null) {
 				j = jumped
 				continue

@@ -714,6 +714,47 @@ describe("parseCommand", () => {
 			expect(structuralError("echo $[1+2")?.quoteType).toBe("arithmetic")
 		})
 
+		it("fails closed when a region inside an arithmetic expression never closes", () => {
+			// An opener inside `$((…))`/`$[…]` that never closes is bash's own
+			// unclosed-delimiter error: the shell reads every later byte inside
+			// it and runs nothing, so the expression fails closed whatever the
+			// masked tail looks like to a depth count. The closer scan masks
+			// the tail from that reading on instead of re-walking it per byte;
+			// these rows pin the fail-closed set and the accept rows pin that
+			// a scan which masks too much (dropping a real closer's effect on
+			// the interior walk) cannot pass.
+			expect(structuralError("echo $(( $(evil)")?.quoteType).toBe("arithmetic")
+			expect(structuralError("echo $(( `x")?.quoteType).toBe("arithmetic")
+			expect(structuralError("echo $[1 ${")?.quoteType).toBe("arithmetic")
+			expect(structuralError("echo $(( $(f 'x) ))")?.quoteType).toBe("command-substitution")
+			const closed = parseCommand("echo $(( 1 + $(printf 2) ))")
+			expect(closed.parseError).toBeNull()
+			expect(closed.commands).toEqual(["echo $(( 1 + $(printf 2) ))", "printf 2"])
+			const quoted = parseCommand("echo $(( $(printf ')') + 1 ))")
+			expect(quoted.parseError).toBeNull()
+			expect(quoted.commands).toEqual(["echo $(( $(printf ')') + 1 ))", "printf ')'"])
+		})
+
+		it("keeps the arithmetic closer scan linear past an unclosed region", () => {
+			// One unclosed region inside `$((` makes every later byte a
+			// non-opener for the shell: the closer scan masks that tail and
+			// plain-counts instead of re-walking it per byte. The fail-closed
+			// set is pinned by the block above; this pin bounds the cost — the
+			// per-byte re-walk shape measures ~410 ms at this size vs ~1 ms
+			// linear, so the ceiling cannot fire on the shipped scan and does
+			// fire the moment the unclosed-region sentinel stops ending the
+			// region walk.
+			const input = "echo $(( " + "${".repeat(8000)
+			expect(parseCommand(input).parseError?.quoteType).toBe("arithmetic")
+			let best = Number.POSITIVE_INFINITY
+			for (let run = 0; run < 3; run++) {
+				const t0 = process.hrtime.bigint()
+				parseCommand(input)
+				best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6)
+			}
+			expect(best).toBeLessThan(100)
+		})
+
 		it("does not extract from a quoted-delimiter heredoc body (the shell suppresses expansion there)", () => {
 			const input = "cat <<'EOF'\n$(whoami)\nEOF"
 			const { commands, parseError } = parseCommand(input)
@@ -1062,20 +1103,35 @@ describe("parseCommand", () => {
 			// The collector cap rides the scan's existing generated-input bound.
 			// 64 chained openers (plus the outer one) parse; the 65th chained
 			// opener fails the construct closed before any body search runs, so
-			// the accept half pins the boundary from both sides.
+			// the accept half pins the boundary from both sides. The equality
+			// pins hold the resolved host text exactly: dropping a chained
+			// token or leaking a placeholder changes the string, not just the
+			// segment count.
 			const chain = (count: number): string => {
 				const delims = Array.from({ length: count }, (_, k) => `d${k}`)
 				return "cat " + delims.map((d) => `<<${d}`).join(" ") + "\n" + delims.map((d) => `${d}\n`).join("")
 			}
+			const delims = Array.from({ length: 65 }, (_, k) => `d${k}`)
 			const at = parseCommand(chain(65))
 			expect(at.parseError).toBeNull()
-			expect(at.commands.length).toBe(1)
+			expect(at.commands).toEqual([
+				"cat <<d0\n" +
+					delims.join("\n") +
+					delims
+						.slice(1)
+						.map((d) => ` << ${d}`)
+						.join(""),
+			])
 			const over = parseCommand(chain(66))
 			expect(over.parseError?.quoteType).toBe("heredoc")
+			// A fail-closed construct returns the raw input verbatim as its one
+			// host word: no masking, no placeholder, no dropped bytes.
+			expect(over.commands).toEqual([chain(66)])
 			// Stack safety: a generated chain far beyond the cap fails closed
 			// at the collector, never through recursion.
 			const huge = parseCommand(chain(8000))
 			expect(huge.parseError?.quoteType).toBe("heredoc")
+			expect(huge.commands).toEqual([chain(8000)])
 		})
 
 		it("starts a frame comment after every word-ending metacharacter", () => {
@@ -1206,6 +1262,87 @@ describe("parseCommand", () => {
 			const dq = parseCommand(`cat <<E "x' $(zap x)' y"\nbody\nE`)
 			expect(dq.parseError).toBeNull()
 			expect(dq.commands).toEqual(["cat <<E\nbody\nE x' $(zap x)' y", "zap x"])
+		})
+
+		it("extracts the substitution after an ANSI-C word whose escaped quote ends the word", () => {
+			// bash ends an ANSI-C word at its first unescaped `'`: in `$'\''`
+			// the `\'` is the word's content and the word closes at the third
+			// quote, so `$(zap x)` after it is live syntax that bash expands
+			// before running `cat`. A mask that pairs raw quote bytes consumes
+			// the escaped quote, treats the following space and substitution as
+			// quoted host text, and lets the executed payload ride the host
+			// unchecked.
+			const { commands, parseError } = parseCommand("cat <<E $'\\'' $(zap x) ''\nbody\nE\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\nbody\nE ' $ ( zap x ) ", "zap x"])
+		})
+
+		it("keeps an ANSI-C word's body inert and its chain collection faithful", () => {
+			// The ANSI-C region is opaque to its unescaped closer: a
+			// substitution inside its body expands to nothing (bash performs
+			// no expansion inside `$'…'`) and must not surface as a segment,
+			// while live syntax after the word still reaches its own.
+			const inert = parseCommand("cat <<E $'a $(inert) b' $(zap x)\nbody\nE\n")
+			expect(inert.parseError).toBeNull()
+			expect(inert.commands).toEqual(["cat <<E\nbody\nE a $(inert) b $ ( zap x )", "zap x"])
+			// An ANSI-C word whose closer is escaped never closes: bash reads
+			// one unterminated word, runs nothing, and executes no
+			// substitution — so none may surface as a segment either.
+			const unterminated = parseCommand("cat <<E $'a\\' $(zap x)\nbody\nE\n")
+			expect(unterminated.parseError).toBeNull()
+			expect(unterminated.commands).not.toContain("zap x")
+			// The chained-opener collector reads the same remainder bytes: an
+			// ANSI-C word must not shift its quote parity into a hidden `<<`
+			// chain opener. Here the chain resolves and the second body's
+			// substitution reaches its own segment; in the comment variant the
+			// chain body runs past end of input and the construct fails closed
+			// (bash reads the chained bodies sequentially from the input
+			// stream and expands what it reads), where a parity-flipped word
+			// would silently drop the opener and hand the body lines back as
+			// live text.
+			const chain = parseCommand("cat <<A $'\\'' <<B\nA\n$(evil)\nB\n")
+			expect(chain.parseError).toBeNull()
+			expect(chain.commands).toEqual(["cat <<A\nA\n$(evil)\nB ' << B", "evil"])
+			const chainComment = parseCommand("cat <<A $'\\'' <<B\nA\n# $(evil) B\n")
+			expect(chainComment.parseError?.quoteType).toBe("heredoc")
+			expect(chainComment.commands).toEqual(["cat <<A $'\\'' <<B\nA\n# $(evil) B\n"])
+		})
+
+		it("keeps a word-start # inside an open ANSI-C region from cutting the live remainder", () => {
+			// bash starts a comment at a word-start `#` only outside quotes:
+			// here the `#` sits inside the open `$'…'` region, so it is region
+			// content and the region closes at the final quote — bash expands
+			// the substitution after the word. An onset scan that pairs raw
+			// quote bytes closes the region at the escaped `\'`, reads that
+			// `#` as a comment start, and drops the executed payload into the
+			// host text.
+			const { commands, parseError } = parseCommand("cat <<E $'a \\' # b' $(echo M30 >&2)\nbody\nE\n")
+			expect(parseError).toBeNull()
+			expect(commands).toContain("echo M30 >&2")
+			expect(commands).toEqual(["cat <<E\nbody\nE a ' # b $ ( echo M30 >& 2 )", "echo M30 >&2"])
+		})
+
+		it("fails closed when an ANSI-C word precedes a line-continuation backslash on a quoted-delimiter opener", () => {
+			// bash joins a trailing-backslash continuation before
+			// tokenizing, so the substitution is live on the opener line
+			// while the remainder cut cannot account for the joined bytes
+			// — the construct must fail closed. The guard reads the quote
+			// state just before the backslash run: ANSI-C-aware pairing
+			// closes `$'\''` at its third quote and reports no open quote,
+			// while raw-byte pairing closes at the escaped quote and
+			// reopens at the trailing one, silencing the guard exactly
+			// where bash runs the joined payload.
+			const join = "cat <<'E' $'\\'' \\\n$(echo M20 >&2)\nE\n"
+			const joined = parseCommand(join)
+			expect(joined.parseError?.quoteType).toBe("heredoc")
+			expect(joined.commands).toEqual([join])
+			// The joinless shape still passes the same guard: the quoted
+			// delimiter suppresses body expansion, not opener-line
+			// remainder expansion, so the substitution reaches its own
+			// segment.
+			const clean = parseCommand("cat <<'E' $'\\'' $(echo M22 >&2)\nbody\nE\n")
+			expect(clean.parseError).toBeNull()
+			expect(clean.commands).toContain("echo M22 >&2")
 		})
 
 		it("keeps an escaped double quote from closing a double-quoted opener region", () => {
