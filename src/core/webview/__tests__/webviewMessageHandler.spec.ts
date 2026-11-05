@@ -2351,6 +2351,12 @@ describe("webviewMessageHandler - profile deletion routes through the provider m
 		// English. The bundle wording deliberately differs from the error class message, which stays
 		// in the log line: an assertion that expected the class message verbatim would also pass for
 		// a handler that never asked i18n.
+		// The mock returns the key for this warning, so the text assertion alone cannot tell a
+		// handler that passed the survivor name from one that omitted or changed the interpolation
+		// value. Pin the payload the handler handed to i18n as well.
+		expect(t).toHaveBeenCalledWith("common:warnings.profile_deleted_activation_failed", {
+			name: "keeper-profile",
+		})
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
 			t("common:warnings.profile_deleted_activation_failed", { name: "keeper-profile" }),
 		)

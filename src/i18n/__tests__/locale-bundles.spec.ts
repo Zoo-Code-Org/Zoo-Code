@@ -61,7 +61,13 @@ describe("common locale bundles", () => {
 			expect(bundles[locale].errors[key]).toEqual(expect.any(String))
 		}
 		for (const key of addedWarningKeys) {
-			expect(bundles[locale].warnings[key]).toEqual(expect.any(String))
+			const warning: unknown = bundles[locale].warnings[key]
+			// expect.any(String) accepts an empty string, and a message with no interpolation slot is a
+			// different message: the handler builds its expected text through t(...) too, so nothing else
+			// in this unit would notice a bundle that dropped the placeholder.
+			expect(typeof warning).toBe("string")
+			expect(String(warning).trim().length).toBeGreaterThan(0)
+			expect(warning).toEqual(expect.stringContaining("{{name}}"))
 		}
 	})
 })
