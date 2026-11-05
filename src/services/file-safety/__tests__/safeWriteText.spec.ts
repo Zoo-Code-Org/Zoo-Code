@@ -4,7 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { safeWriteText } from "../safeWriteText"
+import { flushPendingBackupRemovals, safeWriteText } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
@@ -253,6 +253,26 @@ describe("safeWriteText", () => {
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
+		it("retains a backup whose cleanup failed and clears it on the next flush", async () => {
+			const targetPath = "/tmp/test-dir/retry-target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Every unlink attempt fails during the write, so the path has to be kept rather than
+			// abandoned - that is the difference between a retry and an orphan.
+			vi.mocked(fs.unlink).mockRejectedValue(new Error("EBUSY"))
+
+			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
+
+			const backupPaths = vi
+				.mocked(fs.unlink)
+				.mock.calls.map(([candidate]) => String(candidate))
+				.filter((candidate) => candidate.includes("safeWriteText.bak_"))
+			expect(backupPaths.length).toBeGreaterThan(1) // retried before giving up
+
+			// A later cleanup, once the filesystem lets go, must clear the retained path.
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			await expect(flushPendingBackupRemovals()).resolves.toBe(1)
+		})
 		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

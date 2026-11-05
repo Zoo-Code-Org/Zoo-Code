@@ -6,6 +6,38 @@ import { execFile } from "child_process"
 /**
  * Options for safeWriteText atomic text publish primitive.
  */
+// Backups whose removal failed. The path is kept, not abandoned: the next write retries it, so a
+// transient EBUSY or a scanner holding the file does not leave the backup in the workspace for good.
+const PENDING_BACKUP_REMOVALS = new Set<string>()
+
+async function _removeBackupWithRetry(backupPath: string, attempts = 3): Promise<boolean> {
+	for (let attempt = 0; attempt < attempts; attempt++) {
+		try {
+			await fs.unlink(backupPath)
+			PENDING_BACKUP_REMOVALS.delete(backupPath)
+			return true
+		} catch {
+			if (attempt < attempts - 1) {
+				await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)))
+			}
+		}
+	}
+
+	PENDING_BACKUP_REMOVALS.add(backupPath)
+	return false
+}
+
+/** Retry the backup removals an earlier write could not finish. Best-effort; returns how many cleared. */
+export async function flushPendingBackupRemovals(): Promise<number> {
+	let cleared = 0
+	for (const backupPath of [...PENDING_BACKUP_REMOVALS]) {
+		if (await _removeBackupWithRetry(backupPath)) {
+			cleared += 1
+		}
+	}
+	return cleared
+}
+
 export interface SafeWriteTextOptions {
 	/**
 	 * When true, preserve the old-file semantics: copy the target to a backup and
@@ -348,11 +380,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 			// -- Step 6 (backup:true): delete backup on success -----------
 			if (releaseBackupOnSuccess && backupPath) {
-				try {
-					await fs.unlink(backupPath)
-				} catch {
-					// non-fatal — orphaned backup is acceptable
-				}
+				// A cleanup failure must not abandon the path: retry, and if it still fails keep it for the
+				// next write to clear instead of leaving an orphan nobody owns.
+				await _removeBackupWithRetry(backupPath)
 			}
 
 			// The staging sub-directory only exists to hold this write's temp file. Once the
