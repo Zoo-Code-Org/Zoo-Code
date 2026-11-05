@@ -1260,9 +1260,15 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// this exact error, so the store has to be read directly.
 			// Identity, not mere presence: a regression that deleted the record and then
 			// re-created it from the payload would also resolve to an object.
+			// The record is read back by value, not merely for existence: a regression that deletes
+			// and re-saves the profile, or that leaves it under the same name with different settings,
+			// must fail here rather than pass a presence check.
 			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toMatchObject({
 				id: defaultId,
 				name: "default",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
 			})
 			expect((await provider.providerSettingsManager.listConfig()).map(({ name }) => name)).toEqual(["default"])
 
