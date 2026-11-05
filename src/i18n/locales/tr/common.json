@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "Seçili terminal içeriği yok",
 		"auto_import_failed": "ZooCode ayarları otomatik olarak içe aktarılamadı: {{error}}",
+		"profile_deleted_activation_failed": "Profil silindi, ancak '{{name}}' yedek profili etkinleştirilemedi.",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}} kaynağından içe aktarılacak Roo Code görev geçmişi bulunamadı.",
 			"alreadyImported_one": "{{count}} Roo Code görev geçmişinin tamamı zaten Zoo Code'a aktarılmış.",

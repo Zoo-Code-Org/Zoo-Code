@@ -2346,9 +2346,13 @@ describe("webviewMessageHandler - profile deletion routes through the provider m
 
 		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "doomed-profile" })
 
-		// The deletion landed: the user must not be told the delete failed.
+		// The deletion landed: the user must not be told the delete failed. The text comes from
+		// the locale bundle, as every other notification in this handler does, so it is not pinned to
+		// English. The bundle wording deliberately differs from the error class message, which stays
+		// in the log line: an assertion that expected the class message verbatim would also pass for
+		// a handler that never asked i18n.
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-			"The profile was deleted, but activating replacement profile 'keeper-profile' failed.",
+			t("common:warnings.profile_deleted_activation_failed", { name: "keeper-profile" }),
 		)
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith("common:errors.delete_api_config")
 	})
@@ -3176,16 +3180,20 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			expect.objectContaining({ id: "profile-id" }),
 		)
 		expect(mockClineProvider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
-		// The rename legitimately deletes old-profile before the activation runs, so the ordering is
-		// the assertion that matters: restoring the record before that delete would let the delete
-		// undo the restore and leave the selection naming a missing profile again.
-		const deleteOldCall = vi
-			.mocked(mockClineProvider.providerSettingsManager.deleteConfig)
-			.mock.calls.findIndex(([name]) => name === "old-profile")
-		const restoreOldCall = vi
-			.mocked(mockClineProvider.providerSettingsManager.saveConfig)
-			.mock.calls.findIndex(([name]) => name === "old-profile")
-		expect(restoreOldCall).toBeGreaterThan(deleteOldCall)
+		// The two indices are positions in two different arrays, so comparing them says nothing:
+		// deleteConfig is called with old-profile first and saveConfig with old-profile second in
+		// every run of this flow, whatever the real order is. The two mocks share one invocation
+		// clock, and that is the only thing on this double that can show the restore landing after
+		// the delete rather than before it.
+		const deleteCalls = vi.mocked(mockClineProvider.providerSettingsManager.deleteConfig).mock
+		const saveCalls = vi.mocked(mockClineProvider.providerSettingsManager.saveConfig).mock
+		const deleteOldIndex = deleteCalls.calls.findIndex(([name]) => name === "old-profile")
+		const restoreOldIndex = saveCalls.calls.findIndex(([name]) => name === "old-profile")
+		expect(deleteOldIndex).toBeGreaterThanOrEqual(0)
+		expect(restoreOldIndex).toBeGreaterThanOrEqual(0)
+		expect(saveCalls.invocationCallOrder[restoreOldIndex]).toBeGreaterThan(
+			deleteCalls.invocationCallOrder[deleteOldIndex],
+		)
 		// The fallback must not move the shared selection on its own, and it must not resurrect a
 		// delete of the name it just restored.
 		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("currentApiConfigName", expect.anything())

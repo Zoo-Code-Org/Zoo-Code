@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "Geen terminalinhoud geselecteerd",
 		"auto_import_failed": "Automatisch importeren van ZooCode-instellingen mislukt: {{error}}",
+		"profile_deleted_activation_failed": "Het profiel is verwijderd, maar het activeren van het vervangende profiel '{{name}}' is mislukt.",
 		"rooHistoryImport": {
 			"nothingFound": "Geen Roo Code-taakgeschiedenis gevonden om te importeren van {{domain}}.",
 			"alreadyImported_one": "De {{count}} Roo Code-taakgeschiedenis is al geïmporteerd in Zoo Code.",

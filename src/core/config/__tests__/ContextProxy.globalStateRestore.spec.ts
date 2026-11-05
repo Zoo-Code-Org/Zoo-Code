@@ -22,9 +22,13 @@ vi.mock("vscode", () => ({
 describe("ContextProxy globalState cache restore", () => {
 	const KEY = "currentApiConfigName"
 
-	const setup = (persisted: string, failOnValues: readonly string[] = []) => {
+	const setup = (persisted: string, failOnValues: readonly string[] = [], deferredUpdates = false) => {
 		const store = new Map<string, unknown>([[KEY, persisted]])
 		let storageWorks = true
+
+		// Deferred mode for the two overlapping-write cases below: each update parks in this list instead
+		// of rejecting at once, so the test - not the fixture - decides whose rejection handler runs first.
+		const pending: { value: unknown; resolve: () => void; reject: (error: Error) => void }[] = []
 
 		// Plain functions rather than vi.fn for the memento doubles: vitest's Mock wrapper
 		// instantiates a generic signature at its call-site type, which drops the genericity
@@ -40,6 +44,11 @@ describe("ContextProxy globalState cache restore", () => {
 			},
 			setKeysForSync(_keys: readonly string[]): void {},
 			async update(key: string, value: unknown): Promise<void> {
+				if (deferredUpdates) {
+					return new Promise<void>((resolve, reject) => {
+						pending.push({ value, resolve, reject })
+					})
+				}
 				if (failOnValues.includes(value as string)) {
 					throw new Error("storage unavailable")
 				}
@@ -74,7 +83,12 @@ describe("ContextProxy globalState cache restore", () => {
 			logUri: makeUri("/test/logs"),
 			extension: { packageJSON: { version: "1.0.0" } },
 		} as unknown as vscode.ExtensionContext
-		return { proxy: new ContextProxy(context), store, setStorageWorks: (works: boolean) => (storageWorks = works) }
+		return {
+			proxy: new ContextProxy(context),
+			store,
+			setStorageWorks: (works: boolean) => (storageWorks = works),
+			pending,
+		}
 	}
 	it("only restores for keys the cache actually owns", () => {
 		// Guards the tests below: if this key were passed straight through to storage, the cache
@@ -83,31 +97,41 @@ describe("ContextProxy globalState cache restore", () => {
 		expect(isPassThroughStateKey(KEY)).toBe(false)
 	})
 
-	it.each(["A settles first", "B settles first"])(
+	it.each(["A rejects first", "B rejects first"])(
 		"keeps the cache on the persisted value when two overlapping writes both reject (%s)",
 		async (_order: string) => {
-			const { proxy, store, setStorageWorks } = setup("X")
+			const { proxy, store, pending } = setup("X", [], true)
 			await proxy.initialize()
-			setStorageWorks(false)
 
 			const writeA = Promise.resolve(proxy.updateGlobalState(KEY, "a"))
 			const writeB = Promise.resolve(proxy.updateGlobalState(KEY, "b"))
 
-			const settle = async (first: Promise<unknown>, second: Promise<unknown>) => {
-				await expect(first).rejects.toThrow("storage unavailable")
-				await expect(second).rejects.toThrow("storage unavailable")
-			}
+			// Both writes park in the memento, so nothing has rejected yet and the case really does
+			// choose whose rejection handler runs first. Rejecting at once, as this fixture used to,
+			// made the handlers run in creation order whatever the case awaited first, so the two
+			// cases were the same scenario and a B-before-A break could not show up.
+			expect(pending.map((p) => p.value)).toEqual(["a", "b"])
+			const [a, b] = pending
 
-			if (_order === "A settles first") {
-				await settle(writeA, writeB)
+			if (_order === "A rejects first") {
+				a.reject(new Error("storage unavailable"))
+				await expect(writeA).rejects.toThrow("storage unavailable")
+				b.reject(new Error("storage unavailable"))
+				await expect(writeB).rejects.toThrow("storage unavailable")
 			} else {
-				await settle(writeB, writeA)
+				b.reject(new Error("storage unavailable"))
+				await expect(writeB).rejects.toThrow("storage unavailable")
+				a.reject(new Error("storage unavailable"))
+				await expect(writeA).rejects.toThrow("storage unavailable")
 			}
 
-			// Write B owns the current generation, so B is the only write allowed to restore. If
-			// it restored the cache content it found - write A's value - the cache would advertise
-			// 'a' while storage still holds 'X', which is the stale-cache state this guard exists
-			// to prevent.
+			// Write B owns the key: it started last, so B is the only write allowed to correct the
+			// cache, and it reads the value back from the store. Under A rejects first the older write
+			// A has already failed and its handler has already run, so it must leave the cache alone
+			// even though it ran before the owner. Restoring each write's own pre-write cache value
+			// instead - the generation-map design this guard replaced - splits the two cases: measured on
+			// that design, A rejects first is the case that ends with the cache advertising 'a', a value
+			// the store never accepted, while B rejects first happens to land back on 'X'.
 			expect(proxy.getGlobalState(KEY)).toBe("X")
 			expect(store.get(KEY)).toBe("X")
 		},

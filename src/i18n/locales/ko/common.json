@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "선택된 터미널 내용이 없습니다",
 		"auto_import_failed": "ZooCode 설정 자동 가져오기 실패: {{error}}",
+		"profile_deleted_activation_failed": "프로파일이 삭제되었지만 대체 프로필 '{{name}}'을(를) 활성화하지 못했습니다.",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}에서 가져올 Roo Code 작업 기록을 찾을 수 없습니다.",
 			"alreadyImported_one": "{{count}}개의 Roo Code 작업 기록이 이미 Zoo Code로 가져와졌습니다.",

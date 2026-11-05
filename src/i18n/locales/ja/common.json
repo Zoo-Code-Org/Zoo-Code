@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",
 		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}",
+		"profile_deleted_activation_failed": "プロファイルは削除されましたが、代替プロファイル「{{name}}」の有効化に失敗しました。",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}からインポートするRoo Codeのタスク履歴が見つかりませんでした。",
 			"alreadyImported_one": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。",

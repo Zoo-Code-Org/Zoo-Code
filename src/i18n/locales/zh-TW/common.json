@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "沒有選擇終端機內容",
 		"auto_import_failed": "自動匯入 ZooCode 設定失敗：{{error}}",
+		"profile_deleted_activation_failed": "設定檔已刪除，但啟用取代的設定檔 '{{name}}' 失敗。",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可從 {{domain}} 匯入的 Roo Code 工作歷史記錄。",
 			"alreadyImported_one": "全部 {{count}} 筆 Roo Code 工作歷史記錄已匯入 Zoo Code。",

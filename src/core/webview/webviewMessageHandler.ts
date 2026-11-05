@@ -2849,7 +2849,11 @@ export const webviewMessageHandler = async (
 									: String(error.activationError)
 							}`,
 						)
-						vscode.window.showWarningMessage(error.message)
+						vscode.window.showWarningMessage(
+							t("common:warnings.profile_deleted_activation_failed", {
+								name: error.replacementProfileName,
+							}),
+						)
 						break
 					}
 
