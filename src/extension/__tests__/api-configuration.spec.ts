@@ -93,6 +93,60 @@ describe("API - configuration", () => {
 		expect(setModeConfig).toHaveBeenCalledWith("architect", "architect-config")
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
+	it("aborts before the profile save when the prior mode mapping read fails", async () => {
+		const store = makeProfileStoreDouble({
+			default: { id: "prior-id", settings: { apiProvider: providerIdentifiers.openrouter } },
+		})
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		// The prior mapping of each mode the payload touches is read before anything is written, so
+		// the read joins the fail-closed reads the critical section below already runs.
+		const getModeConfigId = vi.fn().mockRejectedValue(new Error("mode mapping read failed"))
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+			},
+			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				...store,
+				setModeConfig,
+				getModeConfigId,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "default",
+				apiProvider: providerIdentifiers.openrouter,
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode mapping read failed")
+
+		// Nothing may have been mutated: the record this call found must still be the record it found,
+		// with its own id, and no shared write may have run. A rejection after the save would leave a
+		// created-or-overwritten record that the compensation never sees, because the compensation
+		// only runs for failures of the writes that follow the capture.
+		expect(store.saveConfig).not.toHaveBeenCalled()
+		expect(setValues).not.toHaveBeenCalled()
+		expect(setModeConfig).not.toHaveBeenCalled()
+		expect(postStateToWebview).not.toHaveBeenCalled()
+		expect(store.entries.get("default")).toEqual({
+			id: "prior-id",
+			settings: { apiProvider: providerIdentifiers.openrouter },
+		})
+	})
 
 	it("does not persist mode mappings when none are supplied", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
