@@ -752,9 +752,7 @@ export class ClineProvider
 			? this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
 			: this.contextProxy.getValue("viewStates")
 
-		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) {
-			return Object.create(null)
-		}
+		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) return Object.create(null)
 
 		// Copy onto a null prototype. A view id that names an Object.prototype key
 		// ("constructor", "toString", "valueOf", ...) must not resolve through the
@@ -953,9 +951,7 @@ export class ClineProvider
 			const current = states[viewStateId]
 			// A concurrent registration may have bound this key while this write was queued:
 			// never overwrite an existing claim, and let the caller refuse the stale adoption.
-			if (current && typeof current.claimToken === "string" && current.claimToken) {
-				return
-			}
+			if (current && typeof current.claimToken === "string" && current.claimToken) return
 			states[viewStateId] = { claimToken, updatedAt: Date.now() }
 			await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(states))
 			rebound = true
@@ -1043,9 +1039,7 @@ export class ClineProvider
 	 * present on the next launch; an entry that fails again is re-queued for the next launch.
 	 */
 	public async deliverPendingViewStateClaims(): Promise<void> {
-		if (this._disposed || !this.view || !this.isViewLaunched || this.pendingViewStateClaims.size === 0) {
-			return
-		}
+		if (this._disposed || !this.view || !this.isViewLaunched || this.pendingViewStateClaims.size === 0) return
 
 		const pending = [...this.pendingViewStateClaims.entries()]
 		this.pendingViewStateClaims.clear()
@@ -1635,9 +1629,7 @@ export class ClineProvider
 		for (const entry of this.scheduledViewStateWrites) {
 			const index = ClineProvider.pendingViewStateWrites.indexOf(entry)
 
-			if (index !== -1) {
-				ClineProvider.pendingViewStateWrites.splice(index, 1)
-			}
+			if (index !== -1) ClineProvider.pendingViewStateWrites.splice(index, 1)
 
 			entry.provider = null
 		}
