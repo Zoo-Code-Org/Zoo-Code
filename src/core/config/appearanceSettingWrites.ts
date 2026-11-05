@@ -76,8 +76,13 @@ const settingWriteQueues = new Map<AppearanceSettingKey, Promise<void>>()
  */
 const SETTING_WRITE_TIMEOUT_MS = 15_000
 
-/** Keys with a write whose caller gave up but whose store has not settled. */
-const staleKeys = new Set<AppearanceSettingKey>()
+/**
+ * Keys that are taken: a write whose caller gave up but whose store has not settled, and a rollback that is waiting
+ * behind such a store, each hold the key until they are over (a count, because both can be there at once). A write of
+ * the key is refused until none is left.
+ */
+const staleKeys = new Map<AppearanceSettingKey, number>()
+const isStale = (key: AppearanceSettingKey) => (staleKeys.get(key) ?? 0) > 0
 
 /**
  * Who issued a write: the provider that handles the request (the sidebar and an editor tab share one ContextProxy but
@@ -87,6 +92,9 @@ type Owner = object
 
 /** Writes that have not started, per owner, so that disposing the owner can drop them. */
 const waitingByOwner = new WeakMap<Owner, Set<() => void>>()
+
+/** How many writes are in `waitingByOwner`: a count, because a WeakMap cannot be looked into (see the test hook). */
+let waitingWrites = 0
 
 /** Owners that have been disposed: they issue no more writes. */
 const disposedOwners = new WeakSet<Owner>()
@@ -108,21 +116,33 @@ export const disposeSettingWrites = (owner: Owner) => {
 	callbacksByOwner.delete(owner)
 }
 
-/**
- * `behindStale`: the write is a rollback that was asked for while the key's store is still outstanding. It is not
- * refused: it waits its turn behind that store, without a timeout, and runs when the store has settled, before any
- * write that comes after it. It is not dropped when its owner is disposed either.
- */
+type WriteKind =
+	/** A write: refused when its provider is disposed or the key is taken, dropped when it waits too long. */
+	| "write"
+	/**
+	 * A rollback that was asked for while the key's store is still outstanding. It is not refused: it waits its turn
+	 * behind that store, without a timeout, and runs when the store has settled, before any write that comes after it.
+	 * It is not dropped when its owner is disposed either, and it keeps the key taken until it is over: a write of the
+	 * key is refused until then, not queued behind a rollback that may stall.
+	 */
+	| "deferredRollback"
+	/**
+	 * A rollback of a write that failed, behind whatever is outstanding for the key: kept like a deferred one (no
+	 * timeout, not refused, not dropped), but it does not take the key, so a write that comes meanwhile queues behind it.
+	 */
+	| "keptRollback"
+
 const queuedSettingWrite = (
 	owner: Owner,
 	key: AppearanceSettingKey,
 	write: () => Promise<unknown>,
-	behindStale = false,
+	kind: WriteKind = "write",
 ): Promise<void> => {
+	const behindStale = kind !== "write"
 	if (!behindStale && disposedOwners.has(owner)) {
 		return Promise.reject(new Error(`The write of ${key} was refused: its provider was disposed`))
 	}
-	if (staleKeys.has(key) && !behindStale) {
+	if (isStale(key) && !behindStale) {
 		return Promise.reject(new Error(`An earlier write of ${key} has not finished yet`))
 	}
 
@@ -136,36 +156,64 @@ const queuedSettingWrite = (
 	const tail = new Promise<void>((resolve) => (resolveTail = resolve))
 	settingWriteQueues.set(key, tail)
 	// The key is free for the next write once this one's store has settled (or it was dropped before it started).
+	let takesKey = false
+	const takeKey = () => {
+		if (takesKey) return
+		takesKey = true
+		staleKeys.set(key, (staleKeys.get(key) ?? 0) + 1)
+	}
 	const release = () => {
-		staleKeys.delete(key)
+		if (takesKey) {
+			takesKey = false
+			const left = (staleKeys.get(key) ?? 1) - 1
+			if (left > 0) staleKeys.set(key, left)
+			else staleKeys.delete(key)
+		}
 		if (settingWriteQueues.get(key) === tail) settingWriteQueues.delete(key)
 		resolveTail()
 	}
+	if (kind === "deferredRollback") takeKey()
 
 	const waiting = waitingByOwner.get(owner) ?? new Set<() => void>()
 	if (!behindStale) waitingByOwner.set(owner, waiting)
 
 	return new Promise<void>((resolve, reject) => {
-		const cancel = () => {
-			if (started || gaveUp) return
+		// A write that gave up before it started is gone from the bookkeeping at once, not when the writes before it are
+		// over (they may never be): what it captured is let go, and the queue of the key leads to the write before it.
+		const giveUpBeforeStarting = () => {
 			gaveUp = true
 			work = undefined
+			leaveWaiting()
+			if (settingWriteQueues.get(key) === tail) settingWriteQueues.set(key, prior)
+		}
+		const cancel = () => {
+			if (started || gaveUp) return
+			giveUpBeforeStarting()
 			clearTimeout(timer)
 			reject(new Error(`The write of ${key} was dropped: its provider was disposed`))
 		}
-		if (!behindStale) waiting.add(cancel)
+		const leaveWaiting = () => {
+			if (waiting.delete(cancel)) waitingWrites--
+		}
+		if (!behindStale) {
+			waiting.add(cancel)
+			waitingWrites++
+		}
 		const timer = behindStale
 			? undefined
 			: setTimeout(() => {
-					gaveUp = true
-					if (started) staleKeys.add(key)
-					else work = undefined
+					if (started) {
+						gaveUp = true
+						takeKey()
+					} else {
+						giveUpBeforeStarting()
+					}
 					reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
 				}, SETTING_WRITE_TIMEOUT_MS)
 
 		void prior.then(() => {
 			// Its caller has given up before it started: it is dropped, and the next write may go ahead.
-			waiting.delete(cancel)
+			leaveWaiting()
 			if (gaveUp || !work) return release()
 			started = true
 			void Promise.resolve()
@@ -185,6 +233,9 @@ const queuedSettingWrite = (
 		})
 	})
 }
+
+/** @internal test hook: how many writes are waiting for their turn to start, in the bookkeeping of their providers. */
+export const settingWritesWaitingToStart = () => waitingWrites
 
 /** @internal test hook: how much is kept about writes. It is nothing once the saves are over. */
 export const settingWriteBookkeepingSize = () => ({
@@ -293,7 +344,7 @@ export const undoSettingWrite = async (
 		}
 	}
 
-	if (staleKeys.has(key)) {
+	if (isStale(key)) {
 		// The store of this write (or of an earlier one of the key) is still outstanding and may yet land, after the
 		// caller was told it failed. The rollback is attached to that store: it is queued now, behind it, so it runs
 		// when the store has settled and before any write that comes after, which are refused until then. Nobody
@@ -310,7 +361,7 @@ export const undoSettingWrite = async (
 			holders.add(holder)
 			callbacksByOwner.set(owner, holders)
 		}
-		void queuedSettingWrite(owner, key, restore, true)
+		void queuedSettingWrite(owner, key, restore, "deferredRollback")
 			.catch((error: unknown) =>
 				console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),
 			)
@@ -327,7 +378,7 @@ export const undoSettingWrite = async (
 	// rollback waits, and has no timeout of its own, so a slow rollback ahead of it cannot cost it its turn. The caller
 	// stops waiting after the usual time, and the rollback runs when its turn comes. The provider is still detached:
 	// nothing is called back into it.
-	const rollback = queuedSettingWrite(owner, key, restore, true)
+	const rollback = queuedSettingWrite(owner, key, restore, "keptRollback")
 	let timer: ReturnType<typeof setTimeout> | undefined
 	const gaveUp = new Promise<never>((_resolve, reject) => {
 		timer = setTimeout(() => {

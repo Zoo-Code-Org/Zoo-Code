@@ -9,6 +9,7 @@ import {
 	performSettingWrite,
 	setValuesThroughWriteChain,
 	settingWriteBookkeepingSize,
+	settingWritesWaitingToStart,
 	undoSettingWrite,
 } from "../appearanceSettingWrites"
 import type { ContextProxy } from "../ContextProxy"
@@ -298,6 +299,88 @@ describe("appearanceSettingWrites", () => {
 			expect(stored.get("interfaceFontScale")).toBe(100)
 			expect(proxy.setValue).toHaveBeenCalledTimes(1) // nothing was stored, so nothing was put back
 			expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+		})
+
+		describe("a store that stalls, and the rollback that waits behind it", () => {
+			/** Stores of the given values hang until they are released (in the order they started). */
+			const stallingProxy = (stalling: Set<number>) => {
+				const releases: Array<() => void> = []
+				const proxy = {
+					getValue: (key: string) => stored.get(key),
+					setValue: vi.fn(async (key: string, value: unknown) => {
+						if (typeof value === "number" && stalling.has(value)) {
+							await new Promise<void>((resolve) => releases.push(resolve))
+						}
+						stored.set(key, value)
+					}),
+				} as unknown as ContextProxy
+				return { proxy, release: () => releases.splice(0).forEach((release) => release()) }
+			}
+
+			it("keeps the key taken until the deferred rollback is over, so repeated attempts are refused and nothing piles up", async () => {
+				const stalling = new Set([120]) // the store of the save
+				const { proxy, release } = stallingProxy(stalling)
+				const save = beginSettingWrite("interfaceFontScale", 100, 120)
+				const saveFailed = expect(performSettingWrite(proxy, save)).rejects.toThrow(
+					"did not finish in 15 seconds",
+				)
+				await vi.advanceTimersByTimeAsync(15_000)
+				await saveFailed
+				await undoSettingWrite(proxy, save) // queued behind the store, and nobody waits for it
+
+				stalling.clear()
+				stalling.add(100) // the store lands, and then the rollback that was waiting behind it stalls too
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				const before = settingWriteBookkeepingSize()
+
+				// The store has settled, but the rollback has not: the key is still taken, so every attempt is refused at once.
+				for (const value of [130, 140, 150, 160]) {
+					const retry = beginSettingWrite("interfaceFontScale", 120, value)
+					await expect(performSettingWrite(proxy, retry)).rejects.toThrow("has not finished yet")
+					await undoSettingWrite(proxy, retry) // never issued: nothing to put back
+				}
+				expect(settingWriteBookkeepingSize()).toEqual(before) // nothing was queued, nothing was kept
+				expect(proxy.setValue).toHaveBeenCalledTimes(2) // the store of the save, and the rollback
+
+				// The rollback settles: the key is free again.
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				const later = beginSettingWrite("interfaceFontScale", 100, 170)
+				await performSettingWrite(proxy, later)
+				expect(stored.get("interfaceFontScale")).toBe(170)
+				finishSettingWrites([later])
+				await vi.advanceTimersByTimeAsync(0)
+			})
+
+			it("does not wait for the writes before it to leave the bookkeeping of a write that gave up before it started", async () => {
+				const sidebar = {}
+				const { proxy, release } = stallingProxy(new Set([120]))
+				const hung = beginSettingWrite("interfaceFontScale", 100, 120) // its store never settles
+				const hungFailed = expect(performSettingWrite(proxy, hung, sidebar)).rejects.toThrow("did not finish")
+				const queued = beginSettingWrite("interfaceFontScale", 100, 150) // waits behind it
+				const queuedFailed = expect(performSettingWrite(proxy, queued, sidebar)).rejects.toThrow(
+					"did not finish",
+				)
+				expect(settingWritesWaitingToStart()).toBe(2)
+
+				await vi.advanceTimersByTimeAsync(15_000)
+				await hungFailed
+				await queuedFailed
+
+				// The store that hung is still outstanding, and the write behind it has given up and is gone from the
+				// bookkeeping of its provider: it does not stay there until the store settles.
+				expect(settingWritesWaitingToStart()).toBe(0)
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+				await undoSettingWrite(proxy, queued, { owner: sidebar })
+				await undoSettingWrite(proxy, hung, { owner: sidebar })
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				expect(settingWritesWaitingToStart()).toBe(0)
+			})
 		})
 
 		describe("a rollback that waits behind the slow rollback of a newer save", () => {

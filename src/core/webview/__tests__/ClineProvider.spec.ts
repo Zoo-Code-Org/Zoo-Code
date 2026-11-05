@@ -4028,6 +4028,38 @@ describe("ClineProvider", () => {
 			await expect(provider.buildStateUnlessDisposed()).rejects.toThrow("settings unreadable")
 		})
 
+		it.each([
+			["is not known yet", undefined, false],
+			["is known", true, true],
+		])(
+			"posts the state of the prompt update with a mode selector that %s as it is",
+			async (_name, opened, expected) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				// The type says the mode selector flag is always set; the handler does not rely on it, and this is the case it covers.
+				const builtState = {
+					...(await provider.getStateToPostToWebview()),
+					hasOpenedModeSelector: opened,
+				} as ExtensionState
+				track(vi.spyOn(provider, "buildStateUnlessDisposed")).mockResolvedValue(builtState)
+				const post = track(vi.spyOn(provider, "postMessageToWebview"))
+				post.mockClear()
+
+				await webviewMessageHandler(provider, {
+					type: "updatePrompt",
+					promptMode: "code",
+					customPrompt: { roleDefinition: "a new role" },
+				})
+
+				expect(post).toHaveBeenCalledWith({
+					type: "state",
+					state: expect.objectContaining({
+						hasOpenedModeSelector: expected,
+						customModePrompts: expect.objectContaining({ code: { roleDefinition: "a new role" } }),
+					}),
+				})
+			},
+		)
+
 		it("stores the prompt of a mode, and posts no state, when the provider is disposed while the state is built", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const realGetState = provider.getState.bind(provider)
