@@ -340,9 +340,39 @@ export async function setValuesThroughWriteChain(
 	settings: RooCodeSettings,
 	options: SettingWriteOptions = {},
 ) {
+	const { failure } = await writeValuesThroughWriteChain(contextProxy, settings, options)
+	if (failure) throw failure.reason
+}
+
+/** What a write through the chain did: the first failure, and which settings were stored and which were not. */
+export interface WriteValuesReport {
+	failure?: { reason: unknown }
+	/** The appearance settings that were stored: they are final. */
+	stored: string[]
+	/** The settings that were not stored: the appearance settings that failed (and were put back), and the others as a group. */
+	notStored: string[]
+}
+
+/**
+ * `setValuesThroughWriteChain`, for a caller that tells its user what was stored: it reports the failure instead of
+ * throwing it, together with the settings that were stored and those that were not. An invalid appearance value still
+ * throws, as nothing was started then.
+ */
+export async function writeValuesThroughWriteChain(
+	contextProxy: ContextProxy,
+	settings: RooCodeSettings,
+	options: SettingWriteOptions = {},
+): Promise<WriteValuesReport> {
 	// Own properties only: an inherited value is not something the caller wrote.
 	const keys = APPEARANCE_SETTING_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(settings, key))
-	if (keys.length === 0) return contextProxy.setValues(settings)
+	if (keys.length === 0) {
+		try {
+			await contextProxy.setValues(settings)
+			return { stored: [], notStored: [] }
+		} catch (reason) {
+			return { failure: { reason }, stored: [], notStored: ["the other settings"] }
+		}
+	}
 
 	// Every appearance value is checked before anything is written (these values come from the API and from a
 	// webview's new-task configuration, which are not bound by the settings controls): an invalid one rejects the
@@ -365,13 +395,17 @@ export async function setValuesThroughWriteChain(
 	])
 
 	let failure = othersResult.status === "rejected" ? othersResult : undefined
+	const stored: string[] = []
+	const notStored: string[] = othersResult.status === "rejected" ? ["the other settings"] : []
 	for (const [index, write] of writes.entries()) {
 		const result = writeResults[index]
 		if (result.status === "fulfilled") {
 			finishSettingWrites([write])
+			stored.push(write.key)
 			continue
 		}
 		failure ??= result
+		notStored.push(write.key)
 		try {
 			await undoSettingWrite(contextProxy, write, options)
 		} catch (restoreError) {
@@ -379,5 +413,5 @@ export async function setValuesThroughWriteChain(
 		}
 	}
 
-	if (failure) throw failure.reason
+	return { failure: failure && { reason: failure.reason }, stored, notStored }
 }

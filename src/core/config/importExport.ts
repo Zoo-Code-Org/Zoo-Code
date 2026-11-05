@@ -19,7 +19,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
 import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
-import { setValuesThroughWriteChain } from "./appearanceSettingWrites"
+import { writeValuesThroughWriteChain, type WriteValuesReport } from "./appearanceSettingWrites"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { t } from "../../i18n"
@@ -78,6 +78,20 @@ function sanitizeProviderConfig(configName: string, apiConfig: unknown): { confi
 	}
 
 	return { config: apiConfig }
+}
+
+/**
+ * The error of an import whose settings were not all stored. A write that failed on its own, with nothing else stored,
+ * is reported as it was. When it was only partly done, or several failed, the user is told which settings were stored
+ * and which were not: the ones that were stored are final, so what is stored is not what the file asked for.
+ */
+function describeFailedWrite({ failure, stored, notStored }: WriteValuesReport): unknown {
+	if (notStored.length <= 1 && stored.length === 0) return failure?.reason
+	const reason = failure?.reason instanceof Error ? failure.reason.message : String(failure?.reason)
+	const storedText = stored.length > 0 ? stored.join(", ") : "none of the appearance settings"
+	return new Error(`${reason} (not stored: ${notStored.join(", ")}; stored: ${storedText})`, {
+		cause: failure?.reason,
+	})
 }
 
 const globalSettingsShape = globalSettingsSchema.shape as Record<keyof GlobalSettings, z.ZodTypeAny>
@@ -236,7 +250,11 @@ export async function importSettingsFromPath(
 		// They will be imported automatically with the config - no special handling needed
 
 		await providerSettingsManager.import(providerProfiles)
-		await setValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings, { onDeferredSettled, owner })
+		const written = await writeValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings, {
+			onDeferredSettled,
+			owner,
+		})
+		if (written.failure) throw describeFailedWrite(written)
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
@@ -437,6 +455,9 @@ export const importSettingsWithFeedback = async (
 			await vscode.window.showInformationMessage(t("common:info.settings_imported"))
 		}
 	} else if (result.error) {
+		// An import that failed part of the way may have stored some of its settings: the webview is shown what is
+		// stored, not what it had before. A refresh that fails does not hide the answer.
+		await provider.postStateToWebview().catch(() => undefined)
 		await vscode.window.showErrorMessage(t("common:errors.settings_import_failed", { error: result.error }))
 	}
 }

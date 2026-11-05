@@ -23,6 +23,8 @@ import {
 	beginSettingWrite,
 	disposeSettingWrites,
 	performSettingWrite,
+	setValuesThroughWriteChain,
+	writeValuesThroughWriteChain,
 	settingWriteBookkeepingSize,
 	undoSettingWrite,
 } from "../appearanceSettingWrites"
@@ -479,9 +481,137 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
 
-				expect(result).toEqual({ success: false, error: "other settings failed" })
+				expect(result).toEqual({
+					success: false,
+					error: "other settings failed (not stored: the other settings; stored: interfaceFontScale)",
+				})
 				expect(stored.get("interfaceFontScale")).toBe(120)
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("names every setting that was not stored when several fail, and says that nothing else was stored", async () => {
+				mockContextProxy.setValue.mockImplementation((async () => {
+					throw new Error("storage unavailable")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+				expect(result).toEqual({
+					success: false,
+					error: "storage unavailable (not stored: interfaceFontScale, terminalFontSize; stored: none of the appearance settings)",
+				})
+				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("names the other settings as not stored too when they fail together with an appearance value", async () => {
+				mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
+				mockContextProxy.setValue.mockImplementation((async (_key: string, value: unknown) => {
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					error: "other settings failed (not stored: the other settings, interfaceFontScale; stored: none of the appearance settings)",
+				})
+			})
+
+			describe("an import that failed part of the way, through importSettingsWithFeedback", () => {
+				const importFailing = async (postStateToWebview: () => Promise<void>) => {
+					;(fs.access as Mock).mockResolvedValue(undefined)
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "test",
+								apiConfigs: {
+									test: {
+										apiProvider: providerIdentifiers.openai,
+										apiKey: "test-key",
+										id: "test-id",
+									},
+								},
+							},
+							globalSettings: { interfaceFontScale: 120, mode: "code" },
+						}),
+					)
+					mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
+					const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: { postStateToWebview },
+						},
+						"/mock/path/settings.json",
+					)
+					return showErrorMessage
+				}
+
+				it("shows the webview what is stored, and tells the user the import failed", async () => {
+					const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+
+					const showErrorMessage = await importFailing(postStateToWebview)
+
+					expect(postStateToWebview).toHaveBeenCalledOnce()
+					expect(showErrorMessage).toHaveBeenCalledOnce()
+					showErrorMessage.mockRestore()
+				})
+
+				it("still tells the user when that refresh fails", async () => {
+					const postStateToWebview = () => Promise.reject(new Error("webview is gone")) // a plain function: a mock would record it
+					const showErrorMessage = await importFailing(postStateToWebview)
+
+					expect(showErrorMessage).toHaveBeenCalledOnce()
+					showErrorMessage.mockRestore()
+				})
+			})
+
+			describe("the report of a write through the chain", () => {
+				const proxy = () => mockContextProxy as unknown as ContextProxy
+
+				it("rejects with the original error, whatever else was stored, for the callers that do not report", async () => {
+					const failure = new Error("other settings failed")
+					mockContextProxy.setValues.mockRejectedValue(failure)
+
+					await expect(
+						setValuesThroughWriteChain(proxy(), { interfaceFontScale: 120, mode: "code" }),
+					).rejects.toBe(failure)
+					expect(stored.get("interfaceFontScale")).toBe(120)
+				})
+
+				it("names what was stored and what was not, with the first failure", async () => {
+					const failure = new Error("other settings failed")
+					mockContextProxy.setValues.mockRejectedValue(failure)
+
+					const report = await writeValuesThroughWriteChain(proxy(), {
+						interfaceFontScale: 120,
+						mode: "code",
+					})
+
+					expect(report).toEqual({
+						failure: { reason: failure },
+						stored: ["interfaceFontScale"],
+						notStored: ["the other settings"],
+					})
+				})
+
+				it("reports nothing when everything was stored, and a failure of settings without an appearance value", async () => {
+					expect(await writeValuesThroughWriteChain(proxy(), { interfaceFontScale: 120 })).toEqual({
+						stored: ["interfaceFontScale"],
+						notStored: [],
+						failure: undefined,
+					})
+
+					const failure = new Error("other settings failed")
+					mockContextProxy.setValues.mockRejectedValue(failure)
+					expect(await writeValuesThroughWriteChain(proxy(), { mode: "code" })).toEqual({
+						failure: { reason: failure },
+						stored: [],
+						notStored: ["the other settings"],
+					})
+				})
 			})
 
 			it("stores every appearance value of an import that has several", async () => {
@@ -502,7 +632,10 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14 })
 
-				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(result).toEqual({
+					success: false,
+					error: "failed after storing (not stored: interfaceFontScale; stored: terminalFontSize)",
+				})
 				expect(stored.get("interfaceFontScale")).toBe(100)
 				expect(stored.get("terminalFontSize")).toBe(14)
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
