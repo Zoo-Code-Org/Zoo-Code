@@ -600,8 +600,9 @@ async function fetchCopilot(force: boolean, signal?: AbortSignal): Promise<Provi
 
 /** The slice of `ProviderSettingsManager` this service needs (keeps it testable without the manager). */
 export interface ProfileSource {
-	listConfig(): Promise<{ id: string; name?: string }[]>
-	getProfile(params: { id: string }): Promise<ProviderSettings>
+	/** With `signal`, a read that is aborted before it starts reads nothing: it cannot be stopped once it has. */
+	listConfig(options?: { signal?: AbortSignal }): Promise<{ id: string; name?: string }[]>
+	getProfile(params: { id: string }, options?: { signal?: AbortSignal }): Promise<ProviderSettings>
 }
 
 /** How long one profile read may take. A read that never settles is skipped, so the others still produce a response. */
@@ -654,7 +655,7 @@ function withDeadline<T>(start: () => PromiseLike<T>, ms: number, message: strin
 /** Reads one profile; one that fails, takes too long, or is abandoned (`signal` aborts) reads as missing. */
 function readProfile(source: ProfileSource, id: string, signal?: AbortSignal): Promise<ProviderSettings | undefined> {
 	return withDeadline(
-		() => source.getProfile({ id }),
+		() => source.getProfile({ id }, { signal }),
 		PROFILE_READ_TIMEOUT_MS,
 		"Reading a profile timed out",
 		signal,
@@ -677,7 +678,7 @@ export async function loadProfilesWithActive(
 	// request that was already cancelled, and the profile reads are not started once the list wait has been abandoned.
 	const listed = await until(
 		withDeadline(
-			() => source.listConfig(),
+			() => source.listConfig({ signal }),
 			PROFILE_READ_TIMEOUT_MS,
 			"Reading the saved profiles timed out",
 			signal,

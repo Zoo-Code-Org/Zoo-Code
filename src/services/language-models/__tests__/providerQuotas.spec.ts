@@ -1372,7 +1372,21 @@ describe("loadProfiles", () => {
 			{ apiProvider: "x", openRouterApiKey: "key-a" },
 			{ apiProvider: "x", openRouterApiKey: "key-b" },
 		])
-		expect(source.getProfile).toHaveBeenCalledWith({ id: "a" })
+		expect(source.getProfile).toHaveBeenCalledWith({ id: "a" }, { signal: undefined })
+	})
+
+	it("hands the request's abort signal to the source, for the list and for every profile", async () => {
+		const controller = new AbortController()
+		const source = {
+			listConfig: vi.fn(async () => [{ id: "a" }, { id: "b" }]),
+			getProfile: vi.fn(async () => ({ apiProvider: "x" }) as never),
+		}
+
+		await loadProfilesWithActive(source, controller.signal)
+
+		expect(source.listConfig).toHaveBeenCalledExactlyOnceWith({ signal: controller.signal })
+		expect(source.getProfile).toHaveBeenCalledTimes(2)
+		for (const call of source.getProfile.mock.calls) expect(call[1]).toEqual({ signal: controller.signal })
 	})
 
 	it("skips a profile that fails to load instead of failing the whole refresh", async () => {

@@ -393,10 +393,15 @@ export class ProviderSettingsManager {
 
 	/**
 	 * List all available configs with metadata.
+	 *
+	 * With `signal`, a call that is aborted by the time its turn comes (it waited behind other operations) reads
+	 * nothing from storage. A read that has started cannot be stopped: it holds the lock until it settles, because
+	 * a second `load` (which may migrate and write) must not run beside it.
 	 */
-	public async listConfig(): Promise<ProviderSettingsEntry[]> {
+	public async listConfig(options?: { signal?: AbortSignal }): Promise<ProviderSettingsEntry[]> {
 		try {
 			return await this.lock(async () => {
+				options?.signal?.throwIfAborted()
 				const providerProfiles = await this.load()
 
 				return Object.entries(providerProfiles.apiConfigs).map(([name, apiConfig]) => ({
@@ -443,11 +448,14 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	/** With `signal`, a call that is aborted by the time its turn comes reads nothing from storage (see `listConfig`). */
 	public async getProfile(
 		params: { name: string } | { id: string },
+		options?: { signal?: AbortSignal },
 	): Promise<ProviderSettingsWithId & { name: string }> {
 		try {
 			return await this.lock(async () => {
+				options?.signal?.throwIfAborted()
 				const providerProfiles = await this.load()
 				let name: string
 				let providerSettings: ProviderSettingsWithId

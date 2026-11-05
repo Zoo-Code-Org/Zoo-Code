@@ -578,6 +578,77 @@ describe("ProviderSettingsManager", () => {
 		})
 	})
 
+	describe("reads that are aborted before their turn", () => {
+		const stored: ProviderProfiles = {
+			currentApiConfigName: "default",
+			apiConfigs: { default: { id: "default-id" }, other: { id: "other-id" } },
+			modeApiConfigs: {},
+			migrations: { rateLimitSecondsMigrated: true },
+		}
+		const aborted = () => {
+			const controller = new AbortController()
+			controller.abort()
+			return controller.signal
+		}
+
+		it("lists nothing, and reads nothing from storage, when the signal is already aborted", async () => {
+			mockSecrets.get.mockClear()
+			mockSecrets.get.mockResolvedValue(JSON.stringify(stored))
+
+			await expect(providerSettingsManager.listConfig({ signal: aborted() })).rejects.toThrow(
+				"Failed to list configs",
+			)
+
+			expect(mockSecrets.get).not.toHaveBeenCalled()
+		})
+
+		it("reads no profile from storage when the signal is already aborted", async () => {
+			mockSecrets.get.mockClear()
+			mockSecrets.get.mockResolvedValue(JSON.stringify(stored))
+
+			await expect(providerSettingsManager.getProfile({ id: "other-id" }, { signal: aborted() })).rejects.toThrow(
+				"Failed to get profile",
+			)
+
+			expect(mockSecrets.get).not.toHaveBeenCalled()
+		})
+
+		it("reads nothing for a call that is aborted while it waits behind another one, and the others are not held up", async () => {
+			mockSecrets.get.mockClear()
+			let finishFirst: (value: string) => void = () => {}
+			mockSecrets.get
+				.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+				.mockResolvedValue(JSON.stringify(stored))
+			const load = vi.spyOn(providerSettingsManager as unknown as { load(): Promise<unknown> }, "load")
+			const controller = new AbortController()
+
+			const first = providerSettingsManager.listConfig() // holds the lock: its read has started
+			await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+			const waiting = providerSettingsManager.getProfile({ id: "other-id" }, { signal: controller.signal })
+			const waitingFailed = expect(waiting).rejects.toThrow("Failed to get profile")
+			const after = providerSettingsManager.listConfig() // queued behind both, and not aborted
+			controller.abort()
+			finishFirst(JSON.stringify(stored))
+
+			await first
+			await waitingFailed
+			await expect(after).resolves.toHaveLength(2)
+			// Only the first call and the one that was not aborted loaded the profiles: the aborted one never did.
+			expect(load).toHaveBeenCalledTimes(2)
+			load.mockRestore()
+		})
+
+		it("reads as before when the signal is not aborted", async () => {
+			mockSecrets.get.mockResolvedValue(JSON.stringify(stored))
+			const controller = new AbortController()
+
+			await expect(providerSettingsManager.listConfig({ signal: controller.signal })).resolves.toHaveLength(2)
+			await expect(
+				providerSettingsManager.getProfile({ id: "other-id" }, { signal: controller.signal }),
+			).resolves.toMatchObject({ name: "other" })
+		})
+	})
+
 	describe("ListConfig", () => {
 		it("should list all available configs", async () => {
 			const existingConfig: ProviderProfiles = {
