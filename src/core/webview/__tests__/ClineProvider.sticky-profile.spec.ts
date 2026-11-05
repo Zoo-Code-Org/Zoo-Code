@@ -1240,7 +1240,16 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// The refusal must leave the stored record alone. The message, the selection, and the
 			// list all stay the same when a regression deletes the record first and then throws
 			// this exact error, so the store has to be read directly.
-			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toBeDefined()
+			// The record is read back by value, not merely for existence: a regression that deletes
+			// and re-saves the profile, or that leaves it under the same name with different settings,
+			// must fail here rather than pass a presence check.
+			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toMatchObject({
+				id: defaultId,
+				name: "default",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
 			expect((await provider.providerSettingsManager.listConfig()).map(({ name }) => name)).toEqual(["default"])
 
 			// Nothing was repointed or pruned.
