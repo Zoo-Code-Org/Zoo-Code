@@ -821,6 +821,11 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		caughtBy: differsFor("turnStarted"),
 		useTable: true,
 	},
+	"turn-event-rejected": {
+		step: (state, event) => (event.tag === "toolUsed" ? { rejected: state } : nextRunState(state, event)),
+		caughtBy: /toolUsed was rejected/,
+		useTable: false,
+	},
 	"stream-start-resets-turn": {
 		step: (state, event) => {
 			const result = nextRunState(state, event)
