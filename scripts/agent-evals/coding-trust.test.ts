@@ -10,6 +10,8 @@ import {
 	assertCredentialEnvAllowed,
 	assertEvaluatedTreeClean,
 	buildSideEnvironment,
+	buildContainerCliEnvironment,
+	CONTAINER_ENDPOINT_ALLOWLIST,
 	buildWorktreeEnvironment,
 	DirtyEvaluatedTreeError,
 	loadTrustPolicy,
@@ -451,3 +453,28 @@ for (const kind of ["symlink", "filter"] as const) {
 		}
 	})
 }
+
+describe("container endpoint environment", () => {
+	const endpoints = Object.fromEntries(CONTAINER_ENDPOINT_ALLOWLIST.map((name) => [name, `value-${name}`]))
+	it("preserves endpoints through the side and CLI while stripping provider and unrelated secrets", () => {
+		const side = buildSideEnvironment(
+			{
+				...endpoints,
+				HOME: "/home/operator",
+				PATH: "/usr/bin",
+				SOLHEIM_API_KEY: "provider-secret",
+				OTHER_SECRET: "unrelated-secret",
+			},
+			"SOLHEIM_API_KEY",
+			"baseline",
+		)
+		assert.equal(side["SOLHEIM_API_KEY"], "provider-secret")
+		const expected = { ...endpoints, HOME: "/home/operator", PATH: "/usr/bin" }
+		assert.deepEqual(buildContainerCliEnvironment(side), expected)
+		for (const [name, value] of Object.entries(endpoints)) assert.equal(side[name], value)
+		assert.equal(side["OTHER_SECRET"], undefined)
+	})
+	it("does not invent missing endpoint settings or a home", () => {
+		assert.deepEqual(buildContainerCliEnvironment({ PATH: "/usr/bin" }), { PATH: "/usr/bin" })
+	})
+})

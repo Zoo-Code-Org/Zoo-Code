@@ -7,6 +7,8 @@ import path from "node:path"
 import { describe, it } from "node:test"
 import {
 	buildContainerArgs,
+	defaultDetect,
+	probePath,
 	createContainerGradingRuntime,
 	EXEC_OUTPUT_MAX_BYTES,
 	exec,
@@ -469,4 +471,53 @@ it("refuses to run when inspection remains unavailable after a successful pull",
 	assert.deepEqual(cli.calls, [`pull ${GRADER_IMAGE}`])
 	assert.deepEqual(cli.runArgs, [])
 	assert.deepEqual(await runtime.imageDigest!(), { available: false, reason: "digestUnavailable" })
+})
+
+describe("container engine detection", () => {
+	for (const available of ["docker", "podman", undefined] as const) {
+		it(`selects ${available ?? "no runtime"} using engine availability`, async () => {
+			const checked: string[] = []
+			assert.equal(
+				await defaultDetect(async (candidate) => {
+					checked.push(candidate)
+					return candidate === available
+				}),
+				available,
+			)
+			assert.deepEqual(checked, available === "docker" ? ["docker"] : ["docker", "podman"])
+		})
+	}
+	it("probes info with the same endpoint environment as CLI execution", async () => {
+		const temp = await fs.mkdtemp(path.join(os.tmpdir(), "container-engine-probe-"))
+		try {
+			const file = path.join(temp, "engine")
+			await fs.writeFile(
+				file,
+				`#!/bin/sh
+[ "$1" = "info" ] && [ "$DOCKER_HOST" = "unix:///custom.sock" ] && [ "$HOME" = "/home/operator" ] && [ -z "$SOLHEIM_API_KEY" ] && [ -z "$OTHER_SECRET" ]
+`,
+				{ mode: 0o700 },
+			)
+			const moduleUrl = new URL("./container-runtime.ts", import.meta.url).href
+			const script = `
+				const { probePath, exec } = await import(${JSON.stringify(moduleUrl)});
+				if (!await probePath(${JSON.stringify(file)})) throw new Error("engine probe failed");
+				if ((await exec(${JSON.stringify(file)}, ["info"], 5000)).code !== 0) throw new Error("CLI environment failed");
+			`
+			await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+				env: {
+					...process.env,
+					HOME: "/home/operator",
+					DOCKER_HOST: "unix:///custom.sock",
+					SOLHEIM_API_KEY: "secret",
+					OTHER_SECRET: "secret",
+				},
+				timeout: 15_000,
+			})
+			await fs.writeFile(file, '#!/bin/sh\n[ "$1" = "--version" ]\n', { mode: 0o700 })
+			assert.equal(await probePath(file), false)
+		} finally {
+			await fs.rm(temp, { recursive: true, force: true })
+		}
+	})
 })
