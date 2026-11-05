@@ -19,6 +19,13 @@ export class VSCodeAPIWrapper {
 	// for getState() until a write succeeds again.
 	private storageWriteFailed: boolean = false
 
+	// The extension host caps a persisted view id at 64 characters: ClineProvider declares
+	// MAX_VIEW_STATE_ID_LENGTH = 64 and refuses a longer value with the "Ignoring an oversized
+	// viewStateId" log instead of storing it, so a longer value cannot become this view's id.
+	// The host keeps its own copy private and the webview cannot import it, so the number is
+	// restated here; vscode.spec.ts pins both the limit and the reuse of the largest legal id.
+	public static readonly MAX_VIEW_STATE_ID_LENGTH = 64
+
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
 		// context (i.e. VS Code development window or web browser)
@@ -52,16 +59,22 @@ export class VSCodeAPIWrapper {
 				: {}
 		const existingViewStateId = stateObject.viewStateId
 
-		// Mirror the ClineProvider.setViewStateId validation so the webview never
-		// registers an id the extension would reject: trim, replace unsafe
-		// characters, and drop whitespace-only values plus every Object.prototype
-		// member name. "__proto__" alone is not enough: ids like "constructor" or
-		// "toString" survive the host's normalization and would be refused there
-		// forever, stranding this view's pre-launch entry under the temporary id.
+		// Match the extension host's setViewStateId so this view never registers an id the
+		// extension would refuse: same trim and same unsafe-character replacement, drop
+		// whitespace-only values, and refuse an id over MAX_VIEW_STATE_ID_LENGTH, which the
+		// host logs and refuses without storing (ClineProvider.ts:945-947). The host rejects
+		// only "__proto__" by name (ClineProvider.ts:938) while this side refuses every
+		// Object.prototype member - deliberately stricter, not a mirror: those names are
+		// useless keys here because writing them into the state object goes through the
+		// prototype setter and the later spread drops them. The length cap is the mirror.
 		const normalizedViewStateId =
 			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
 
-		if (normalizedViewStateId && !Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)) {
+		if (
+			normalizedViewStateId &&
+			normalizedViewStateId.length <= VSCodeAPIWrapper.MAX_VIEW_STATE_ID_LENGTH &&
+			!Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
+		) {
 			return normalizedViewStateId
 		}
 

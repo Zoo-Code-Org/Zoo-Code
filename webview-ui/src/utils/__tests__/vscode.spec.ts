@@ -66,8 +66,10 @@ describe("VSCodeAPIWrapper", () => {
 		})
 		const wrapper = new VSCodeAPIWrapper()
 
-		// The host's setViewStateId rejects every Object.prototype member name; accepting
-		// "constructor" here would make every launch message rejected and strand the
+		// The host refuses only "__proto__" by name (ClineProvider.ts:938), so "constructor" survives
+		// its normalization. This side refuses every Object.prototype member anyway - stricter than
+		// the host on purpose - because such an id is a useless key: writing it into the state object
+		// goes through the prototype setter and the later spread drops it, stranding this view's
 		// pre-launch entry under the temporary id forever.
 		expect(wrapper.getViewStateId()).toBe("generated-view")
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "generated-view" })
@@ -285,6 +287,40 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "proto-refused-view" })
 	})
 
+	it("generates and persists a fresh id when the stored id is longer than the host limit", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "generated-after-oversize") },
+		})
+		const oversized = "a".repeat(VSCodeAPIWrapper.MAX_VIEW_STATE_ID_LENGTH + 1)
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: oversized }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// The host logs "Ignoring an oversized viewStateId" and returns without storing the id
+		// (ClineProvider.ts:945-947), so reusing an oversized value here would strand this view on
+		// its pre-launch id at every launch - the exact state this reuse path exists to avoid.
+		expect(wrapper.getViewStateId()).toBe("generated-after-oversize")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "generated-after-oversize" })
+	})
+
+	it("reuses a stored id that sits exactly on the host limit", () => {
+		const atLimit = "b".repeat(VSCodeAPIWrapper.MAX_VIEW_STATE_ID_LENGTH)
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: atLimit }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// The host rejects values strictly longer than 64, so 64 must still be reused rather than
+		// minted away: a cap that also drops the largest legal id would discard real per-view state.
+		expect(wrapper.getViewStateId()).toBe(atLimit)
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: atLimit })
+	})
 	it("keeps one generated id when a write fails while stale persisted state stays readable", () => {
 		const randomUUID = vi.fn().mockReturnValueOnce("gen-one").mockReturnValueOnce("gen-two")
 		Object.defineProperty(globalThis, "crypto", {
