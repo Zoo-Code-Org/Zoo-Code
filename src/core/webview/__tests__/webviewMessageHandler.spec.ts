@@ -2306,6 +2306,27 @@ it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loo
 	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 })
 
+// viewStates is host-owned: one map holding every view persisted mode and pin. The
+// renderer payload is not trusted with it, for the same reason the import path and both
+// API writes refuse it.
+it("keeps the host-owned viewStates map out of the updateSettings write", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: {
+			viewStates: { "view-1": { currentApiConfigName: "ghost-profile" } },
+			alwaysDenyUnapprovedCommands: true,
+		},
+	})
+
+	expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+	// A portable key in the same payload still persists through the provider path.
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+})
+
 // Mode validation lives in provider.setValue (ClineProvider#setValue, and its spec
 // covers the rejected slug): an invalid slug is logged and dropped there before any
 // write. What this loop owns is the routing - the slug has to reach provider.setValue
