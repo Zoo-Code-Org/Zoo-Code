@@ -1630,6 +1630,44 @@ describe("loadProfiles", () => {
 		expect((await loadProfilesWithActive(source)).activeProfileId).toBeUndefined()
 	})
 
+	describe("the profiles that the organisation allow list refuses", () => {
+		const source = {
+			listConfig: vi.fn(async () => [
+				{ id: "a", name: "work" },
+				{ id: "b", name: "personal" },
+				{ id: "c", name: "spare" },
+			]),
+			getProfile: vi.fn(
+				async ({ id }: { id: string }) => ({ apiProvider: id === "b" ? "refused" : "x", apiKey: id }) as never,
+			),
+		}
+		const allowedExceptRefused = (profile: { apiProvider?: string }) => profile.apiProvider !== "refused"
+
+		it("are left out, and every profile is allowed when no predicate is given", async () => {
+			const filtered = await loadProfilesWithActive(source, undefined, undefined, allowedExceptRefused)
+			const unfiltered = await loadProfilesWithActive(source)
+
+			expect(filtered.profiles.map((p) => p.apiKey)).toEqual(["a", "c"])
+			expect(unfiltered.profiles.map((p) => p.apiKey)).toEqual(["a", "b", "c"])
+		})
+
+		it("are not reported as the active profile, while an allowed active profile still is", async () => {
+			const refusedActive = await loadProfilesWithActive(source, undefined, "personal", allowedExceptRefused)
+			const allowedActive = await loadProfilesWithActive(source, undefined, "spare", allowedExceptRefused)
+
+			expect(refusedActive.activeProfileId).toBeUndefined()
+			expect(refusedActive.profiles.map((p) => p.apiKey)).toEqual(["a", "c"])
+			expect(allowedActive.activeProfileId).toBe("c")
+			expect(allowedActive.profiles.map((p) => p.apiKey)).toEqual(["c", "a"]) // the active one comes first
+		})
+
+		it("do not turn into a failure: the profiles were read, the list is just empty", async () => {
+			const result = await loadProfilesWithActive(source, undefined, "work", () => false)
+
+			expect(result).toEqual({ profiles: [], activeProfileId: undefined })
+		})
+	})
+
 	describe("a profile read that never settles", () => {
 		afterEach(() => vi.useRealTimers())
 

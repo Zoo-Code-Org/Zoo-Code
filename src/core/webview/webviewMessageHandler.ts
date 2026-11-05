@@ -63,6 +63,7 @@ import {
 } from "./rulesMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
+import { ProfileValidator } from "../../shared/ProfileValidator"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
@@ -1659,10 +1660,14 @@ export const webviewMessageHandler = async (
 			try {
 				const { getProviderQuotas, loadProfilesWithActive } =
 					await import("../../services/language-models/providerQuotas")
+				// The organisation allow list applies here as it does to a request: a profile it refuses is not read for its
+				// credentials, and no quota is fetched with them.
+				const { organizationAllowList } = await provider.getState()
 				const { profiles, activeProfileId } = await loadProfilesWithActive(
 					provider.providerSettingsManager,
 					controller.signal,
 					provider.contextProxy.getValue("currentApiConfigName"),
+					(profile) => ProfileValidator.isProfileAllowed(profile, organizationAllowList),
 				)
 				providerQuotas = await getProviderQuotas(profiles, {
 					force: message.bool === true,

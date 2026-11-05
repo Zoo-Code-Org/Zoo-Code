@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, type OrganizationAllowList } from "@roo-code/types"
 
 const quotas = vi.hoisted(() => ({
 	getProviderQuotas: vi.fn(),
@@ -19,10 +19,13 @@ import type { ClineProvider } from "../ClineProvider"
 
 const SECRET = "sk-super-secret"
 
+const ALLOW_ALL: OrganizationAllowList = { allowAll: true, providers: {} }
+
 const makeProvider = (overrides: Record<string, unknown> = {}) =>
 	({
 		postMessageToWebview: vi.fn(),
 		log: vi.fn(),
+		getState: vi.fn(async () => ({ organizationAllowList: ALLOW_ALL })),
 		contextProxy: { getValue: vi.fn((key: string) => (key === "currentApiConfigName" ? "default" : undefined)) },
 		providerSettingsManager: {
 			listConfig: vi.fn(async () => [{ id: "a" }, { id: "b" }]),
@@ -90,6 +93,85 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 			expect.any(Array),
 			expect.objectContaining({ activeProfileId: "b" }),
 		)
+	})
+
+	describe("the organisation allow list", () => {
+		const onlyOpenRouter: OrganizationAllowList = {
+			allowAll: false,
+			providers: { [providerIdentifiers.openrouter]: { allowAll: true } },
+		}
+		const profileBy = (providerForId: Record<string, string>) => ({
+			listConfig: vi.fn(async () => [
+				{ id: "a", name: "work" },
+				{ id: "b", name: "personal" },
+			]),
+			getProfile: vi.fn(async ({ id }: { id: string }) => ({
+				apiProvider: providerForId[id],
+				apiKey: `key-${id}`,
+				id,
+			})),
+		})
+		const request = async (
+			organizationAllowList: OrganizationAllowList,
+			active: string,
+			providers: Record<string, string>,
+		) => {
+			const provider = makeProvider({
+				getState: vi.fn(async () => ({ organizationAllowList })),
+				contextProxy: { getValue: vi.fn(() => active) },
+				providerSettingsManager: profileBy(providers),
+			})
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+			return provider
+		}
+		const providers = { a: providerIdentifiers.openrouter, b: providerIdentifiers.anthropic }
+		const queried = () => quotas.getProviderQuotas.mock.calls[0][0].map((p: { id: string }) => p.id) as string[]
+
+		it("keeps a profile it refuses out of the quota request, with its credentials", async () => {
+			await request(onlyOpenRouter, "work", providers)
+
+			expect(queried()).toEqual(["a"])
+			expect(JSON.stringify(quotas.getProviderQuotas.mock.calls)).not.toContain("key-b")
+		})
+
+		it("does not name a refused profile as the active one, and still names an allowed one", async () => {
+			await request(onlyOpenRouter, "personal", providers) // the active profile is the refused one
+			expect(quotas.getProviderQuotas.mock.calls[0][1].activeProfileId).toBeUndefined()
+
+			quotas.getProviderQuotas.mockClear()
+			await request(onlyOpenRouter, "work", providers)
+			expect(quotas.getProviderQuotas.mock.calls[0][1].activeProfileId).toBe("a")
+		})
+
+		it("queries nothing for a profile of a provider the list does not name, and posts no failure for it", async () => {
+			const provider = await request(onlyOpenRouter, "personal", { a: providers.b, b: providers.b })
+
+			expect(queried()).toEqual([])
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "providerQuotas", providerQuotasFailed: false }),
+			)
+		})
+
+		it("queries every profile when the list allows all", async () => {
+			await request(ALLOW_ALL, "personal", providers)
+
+			expect(queried()).toEqual(["b", "a"])
+			expect(quotas.getProviderQuotas.mock.calls[0][1].activeProfileId).toBe("b")
+		})
+
+		it("reports a failure, and queries nothing, when the allow list cannot be read", async () => {
+			const provider = makeProvider({
+				getState: vi.fn(async () => {
+					throw new Error("state unavailable")
+				}),
+			})
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+
+			expect(quotas.getProviderQuotas).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ providerQuotas: [], providerQuotasFailed: true }),
+			)
+		})
 	})
 
 	it("reports a failure, not an empty list, when no saved profile can be read", async () => {

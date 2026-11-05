@@ -668,12 +668,14 @@ function readProfile(source: ProfileSource, id: string, signal?: AbortSignal): P
  * rather than failing the whole refresh, but if none of the saved profiles can be read that is a failure, not "no
  * connected providers". The active profile (`activeName`) comes first, and its id is returned so that its own
  * credentials are the ones queried for its provider. Keys never leave the extension host: only formatted quota rows
- * are posted to the webview.
+ * are posted to the webview. A profile that `isAllowed` refuses (the organisation allow list) is left out, and is not
+ * reported as the active one: no credential of it is queried.
  */
 export async function loadProfilesWithActive(
 	source: ProfileSource,
 	signal?: AbortSignal,
 	activeName?: string,
+	isAllowed: (profile: ProviderSettings) => boolean = () => true,
 ): Promise<{ profiles: ProviderSettings[]; activeProfileId?: string }> {
 	// Stops waiting as soon as `signal` aborts. The reads themselves cannot be cancelled, but none is started for a
 	// request that was already cancelled, and the profile reads are not started once the list wait has been abandoned.
@@ -701,8 +703,15 @@ export async function loadProfilesWithActive(
 	const loaded = profiles.filter((p): p is ProviderSettings => !!p)
 	if (entries.length > 0 && loaded.length === 0) throw new Error("None of the saved profiles could be read")
 
+	const allowed = entries.flatMap((entry, index) => {
+		const profile = profiles[index]
+		return profile && isAllowed(profile) ? [{ entry, profile }] : []
+	})
 	const activeEntry = activeName ? listed.find((entry) => entry.name === activeName) : undefined
-	return { profiles: loaded, activeProfileId: activeEntry?.id }
+	return {
+		profiles: allowed.map(({ profile }) => profile),
+		activeProfileId: allowed.find(({ entry }) => entry.id === activeEntry?.id)?.entry.id,
+	}
 }
 
 // Successful results only, per provider and URL set. A missing key, a sign-out or a
