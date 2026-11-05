@@ -79,6 +79,9 @@ export class ContextProxy {
 
 	private secretCache: SecretState
 	private _isInitialized = false
+	// Raised for the whole duration of a reset and cleared in a finally, so a reset that fails
+	// mid-way cannot leave the store refusing every later secret write; see resetAllState.
+	private resetting = false
 
 	constructor(context: vscode.ExtensionContext) {
 		this.originalContext = context
@@ -452,6 +455,13 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
+		// Refused rather than deferred: a deferred secret write would re-store exactly the value the
+		// user asked to erase, and a silently dropped one would lose the save.
+		if (this.resetting) {
+			return Promise.reject(
+				new SettingsWriteError([], [key], new Error("secret writes are refused while state is being reset")),
+			)
+		}
 		// Update cache.
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
@@ -725,22 +735,27 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
-		// Clear in-memory caches
-		this.stateCache = {}
-		this.secretCache = {}
-		// A write that started before this reset must not restore its pre-reset value when it
-		// rejects afterwards, so advance every generation the pending writes still hold.
-		for (const key of this.stateWriteGenerations.keys()) {
-			this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+		this.resetting = true
+		try {
+			// Clear in-memory caches
+			this.stateCache = {}
+			this.secretCache = {}
+			// A write that started before this reset must not restore its pre-reset value when it
+			// rejects afterwards, so advance every generation the pending writes still hold.
+			for (const key of this.stateWriteGenerations.keys()) {
+				this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+			}
+
+			await Promise.all([
+				...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+				...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+			])
+
+			await this.initialize()
+		} finally {
+			this.resetting = false
 		}
-
-		await Promise.all([
-			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-		])
-
-		await this.initialize()
 	}
 
 	private static _instance: ContextProxy | null = null

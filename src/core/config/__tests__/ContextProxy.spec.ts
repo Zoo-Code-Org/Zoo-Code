@@ -160,6 +160,75 @@ describe("ContextProxy", () => {
 			// that storage no longer holds.
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
 		})
+		// This branch carried no write guard at all before these two cases: resetAllState cleared the
+		// caches and deleted storage with nothing telling storeSecret that a reset was running, so a
+		// save issued mid-reset could land after the deletes and resurrect a value the user had just
+		// erased. The refusal is the new observable here rather than an existing one, so it gets its
+		// own case instead of being a phase of the leak case.
+		it("refuses a secret write issued while a reset is still inside its delete pass", async () => {
+			const erases: { reject: (error: Error) => void }[] = []
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						erases.push({ reject })
+					})
+				}
+				return Promise.resolve()
+			})
+
+			const resetting = proxy.resetAllState()
+			// The reset yields before it reaches its delete pass, so let it get there before asking the
+			// store to write.
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(erases.length).toBe(1)
+
+			const refused = await proxy.storeSecret("apiKey", "saved-mid-reset").then(
+				() => undefined,
+				(error: unknown) => error,
+			)
+			expect(refused).toBeInstanceOf(SettingsWriteError)
+			expect(String((refused as Error).message)).toContain("secret writes are refused while state is being reset")
+			// Refused rather than deferred: a deferred write would re-store the value this reset is
+			// in the middle of erasing.
+			// Refused rather than deferred, and not silently written either: the cache the reset already
+			// cleared stays empty and no store call was made for the key.
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockSecrets.store.mock.calls.filter((call: readonly unknown[]) => call[0] === "apiKey").length).toBe(
+				0,
+			)
+
+			erases.forEach((erase) => {
+				erase.reject(new Error("keychain locked"))
+			})
+			await expect(resetting).rejects.toThrow("keychain locked")
+		})
+		it("accepts a secret write again after a reset whose delete pass rejected", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				if (key === "apiKey") {
+					throw new Error("keychain locked")
+				}
+				durable.delete(key)
+			})
+
+			await expect(proxy.resetAllState()).rejects.toThrow("keychain locked")
+
+			// The half that bites: the delete pass is a single Promise.all, so one keychain rejection
+			// rejects resetAllState itself. Unless the guard is lowered on that path too, every later
+			// save is refused for the life of the instance while resetState() has already aborted on the
+			// same error, so the user cannot get a key back without restarting the extension host.
+			// Measured as a save that resolves and reads back through storage and cache, not as an
+			// absence of errors.
+			await expect(proxy.storeSecret("apiKey", "written-after-failed-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
+			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
+		})
 
 		it("should restore the last persisted value when two overlapping writes both reject", async () => {
 			await proxy.updateGlobalState("apiProvider", "anthropic")
