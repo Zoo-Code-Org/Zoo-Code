@@ -218,6 +218,14 @@ function scheduleTask(
 // Keys a model-selector patch may touch: model IDs plus settings reset on model change.
 const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
 
+/** Thrown inside a state build when the provider was disposed meanwhile: there is nobody left to show the state to. */
+class StateBuildAbandonedError extends Error {
+	constructor() {
+		super("The provider was disposed while its state was being built")
+		this.name = "StateBuildAbandonedError"
+	}
+}
+
 const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
 
 // These keys can only be cleared. Setting `awsCustomArn` would let a patch invoke a Bedrock
@@ -2967,7 +2975,13 @@ export class ClineProvider
 		// A disposed provider has no webview to show a state to: it is not built, and no sequence number is spent.
 		if (this._disposed) return
 		const clineMessagesSeq = ++this.clineMessagesSeq
-		const state = await this.getStateToPostToWebview()
+		let state: ExtensionState
+		try {
+			state = await this.getStateToPostToWebview()
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return
+			throw error
+		}
 		// It may have been disposed while the state was being built (the settings and the history are read first).
 		if (this._disposed) return
 		state.clineMessagesSeq = clineMessagesSeq
@@ -2983,8 +2997,16 @@ export class ClineProvider
 	 *   `taskHistoryUpdated` / `taskHistoryItemUpdated`.
 	 */
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
+		if (this._disposed) return
 		const clineMessagesSeq = ++this.clineMessagesSeq
-		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		let state: ExtensionState
+		try {
+			state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return
+			throw error
+		}
+		if (this._disposed) return
 		state.clineMessagesSeq = clineMessagesSeq
 		const { taskHistory: _omit, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
@@ -3024,7 +3046,15 @@ export class ClineProvider
 	 *   (cloud auth, org settings, profiles, etc.) without interfering with task message streaming.
 	 */
 	async postStateToWebviewWithoutClineMessages(): Promise<void> {
-		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		if (this._disposed) return
+		let state: ExtensionState
+		try {
+			state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return
+			throw error
+		}
+		if (this._disposed) return
 		const { clineMessages: _omitMessages, taskHistory: _omitHistory, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
 	}
@@ -3130,9 +3160,32 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Builds the state to post, or nothing when the provider was disposed while it was being built: a disposed
+	 * provider has no webview to show it to, so the half-built state is dropped, not posted.
+	 */
+	async buildStateUnlessDisposed(options?: GetStateOptions): Promise<ExtensionState | undefined> {
+		try {
+			return await this.getStateToPostToWebview(options)
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return undefined
+			throw error
+		}
+	}
+
+	private throwIfDisposed() {
+		if (this._disposed) throw new StateBuildAbandonedError()
+	}
+
+	/**
+	 * Throws `StateBuildAbandonedError` when the provider is disposed before or while the state is built; it is checked
+	 * before a sequence number is spent and after every step that waits. The posting methods catch it.
+	 */
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
+		this.throwIfDisposed()
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
+		this.throwIfDisposed()
 
 		// Taken in the same synchronous step as getState() starts, which reads the settings before its first await.
 		// So a higher number always means a newer snapshot, however long the rest of the push takes.
@@ -3237,6 +3290,7 @@ export class ClineProvider
 			autoCloseZooOpenedFilesAfterUserEdited,
 			autoCloseZooOpenedNewFiles,
 		} = await this.getState({ includeTaskHistory: false })
+		this.throwIfDisposed()
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
 
@@ -3259,6 +3313,7 @@ export class ClineProvider
 		} catch {
 			// Ignore this error.
 		}
+		this.throwIfDisposed()
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
@@ -3306,6 +3361,35 @@ export class ClineProvider
 		} catch {
 			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
 		}
+		this.throwIfDisposed()
+
+		const openAiCodexIsAuthenticated = await (async () => {
+			try {
+				const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
+				return await openAiCodexOAuthManager.isAuthenticated()
+			} catch {
+				return false
+			}
+		})()
+		this.throwIfDisposed()
+		const kimiCodeIsAuthenticated = await (async () => {
+			try {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				return await kimiCodeOAuthManager.isAuthenticated()
+			} catch {
+				return false
+			}
+		})()
+		this.throwIfDisposed()
+		const kimiCodeOAuthState = await (async () => {
+			try {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				return kimiCodeOAuthManager.getState()
+			} catch {
+				return undefined
+			}
+		})()
+		this.throwIfDisposed()
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -3446,30 +3530,9 @@ export class ClineProvider
 			autoCloseZooOpenedFilesAfterUserEdited:
 				autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 			autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			openAiCodexIsAuthenticated: await (async () => {
-				try {
-					const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
-					return await openAiCodexOAuthManager.isAuthenticated()
-				} catch {
-					return false
-				}
-			})(),
-			kimiCodeIsAuthenticated: await (async () => {
-				try {
-					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-					return await kimiCodeOAuthManager.isAuthenticated()
-				} catch {
-					return false
-				}
-			})(),
-			kimiCodeOAuthState: await (async () => {
-				try {
-					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-					return kimiCodeOAuthManager.getState()
-				} catch {
-					return undefined
-				}
-			})(),
+			openAiCodexIsAuthenticated,
+			kimiCodeIsAuthenticated,
+			kimiCodeOAuthState,
 			...zooCodeState,
 			platform: process.platform,
 			arch: process.arch,

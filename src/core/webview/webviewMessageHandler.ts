@@ -2289,13 +2289,16 @@ export const webviewMessageHandler = async (
 				const existingPrompts = getGlobalState("customModePrompts") ?? {}
 				const updatedPrompts = { ...existingPrompts, [message.promptMode]: message.customPrompt }
 				await updateGlobalState("customModePrompts", updatedPrompts)
-				const currentState = await provider.getStateToPostToWebview()
-				const stateWithPrompts = {
-					...currentState,
-					customModePrompts: updatedPrompts,
-					hasOpenedModeSelector: currentState.hasOpenedModeSelector ?? false,
+				// Nothing is built for a provider that was disposed meanwhile: there is no webview to show it to.
+				const currentState = await provider.buildStateUnlessDisposed()
+				if (currentState) {
+					const stateWithPrompts = {
+						...currentState,
+						customModePrompts: updatedPrompts,
+						hasOpenedModeSelector: currentState.hasOpenedModeSelector ?? false,
+					}
+					await provider.postMessageToWebview({ type: "state", state: stateWithPrompts })
 				}
-				await provider.postMessageToWebview({ type: "state", state: stateWithPrompts })
 
 				if (TelemetryService.hasInstance()) {
 					// Determine which setting was changed by comparing objects

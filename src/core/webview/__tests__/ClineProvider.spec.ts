@@ -41,6 +41,9 @@ import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
 import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
+import { CloudService } from "@roo-code/cloud"
+import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
+import { kimiCodeOAuthManager } from "../../../integrations/kimi-code/oauth"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
@@ -321,6 +324,9 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 vi.mock("../../../services/zoo-code-auth", () => ({
 	getZooCodeBaseUrl: vi.fn(() => "https://www.zoocode.dev"),
 	getCachedZooCodeToken: vi.fn(),
+	// Without an implementation they throw when read, as the missing members of the mock did: the state is the default.
+	getCachedZooCodeUserInfo: vi.fn(),
+	isZooCodeAuthenticated: vi.fn(),
 	handleAuthCallback: vi.fn(),
 	setZooCodeUserInfo: vi.fn(),
 	disconnectZooCode: vi.fn(),
@@ -3791,6 +3797,194 @@ describe("ClineProvider", () => {
 		await provider.postStateToWebview()
 
 		expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+	})
+
+	describe("a provider that is disposed at a wait of its state build stops building", () => {
+		type Step = { mockClear: () => unknown } & ((...args: never[]) => unknown)
+
+		// Each case disposes the provider at one wait of the build, and gives the step that comes next, which must not run.
+		type Case = {
+			name: string
+			setup: (current: ClineProvider, undo: Array<() => void>) => Promise<Step>
+		}
+
+		// What a test replaced is put back after it, whether it is a spy or a member the mocked modules do not have.
+		const undo: Array<() => void> = []
+		afterEach(() => {
+			for (const restore of undo.splice(0).reverse()) restore()
+		})
+
+		const track = <Spy extends { mockRestore: () => void }>(replaced: Spy) => {
+			undo.push(() => replaced.mockRestore())
+			return replaced
+		}
+
+		const cloudWith = (organizations: () => Promise<unknown[]>) => {
+			const getOrganizationMemberships = vi.fn(organizations)
+			// The rest of the instance stays what it is (the provider unhooks itself from it when it is disposed).
+			// A partial double of the service: the build reads only the two members that are replaced.
+			const instance = {
+				...CloudService.instance,
+				isCloudAgent: false,
+				getOrganizationMemberships,
+			} as unknown as typeof CloudService.instance
+			track(vi.spyOn(CloudService, "instance", "get").mockReturnValue(instance))
+			return getOrganizationMemberships
+		}
+
+		// The mocked modules have no such members: they are put there for the test, and taken away after it.
+		const withMembers = <Target extends object>(target: Target, members: Record<string, unknown>) => {
+			const record = target as Record<string, unknown>
+			const before = Object.fromEntries(Object.keys(members).map((key) => [key, record[key]]))
+			Object.assign(record, members)
+			undo.push(() => {
+				for (const key of Object.keys(members)) {
+					if (before[key] === undefined) delete record[key]
+					else record[key] = before[key]
+				}
+			})
+		}
+
+		const cases: Case[] = [
+			{
+				name: "the task history is initialised",
+				setup: async (current) => {
+					Object.defineProperty(current.taskHistoryStore, "initialized", {
+						configurable: true,
+						// Read by the build once it has started: the provider is disposed while it waits for it.
+						get: async () => {
+							await current.dispose()
+						},
+					})
+					return track(vi.spyOn(current, "getState"))
+				},
+			},
+			{
+				name: "the settings are read",
+				setup: async (current) => {
+					const realGetState = current.getState.bind(current)
+					track(vi.spyOn(current, "getState")).mockImplementation(async (options) => {
+						const state = await realGetState(options)
+						await current.dispose()
+						return state
+					})
+					return cloudWith(async () => [])
+				},
+			},
+			{
+				name: "the organisations of the user are read",
+				setup: async (current) => {
+					cloudWith(async () => {
+						await current.dispose()
+						return []
+					})
+					// A private method: no typed alternative lets a spy name it.
+					const privateMembers = current as unknown as { mergeAllowedCommands: () => string[] }
+					return track(vi.spyOn(privateMembers, "mergeAllowedCommands"))
+				},
+			},
+			{
+				name: "the Zoo Code sign-in is read",
+				setup: async (current) => {
+					const codexSignIn = vi.fn(async () => false)
+					const zooCodeAuth = await import("../../../services/zoo-code-auth")
+					track(vi.mocked(zooCodeAuth.getCachedZooCodeUserInfo).mockReturnValue({} as never))
+					track(
+						vi.mocked(zooCodeAuth.isZooCodeAuthenticated).mockImplementation(async () => {
+							await current.dispose()
+							return true
+						}),
+					)
+					withMembers(openAiCodexOAuthManager, { isAuthenticated: codexSignIn })
+					return codexSignIn
+				},
+			},
+			{
+				name: "the OpenAI Codex sign-in is read",
+				setup: async (current) => {
+					withMembers(openAiCodexOAuthManager, {
+						isAuthenticated: async () => {
+							await current.dispose()
+							return true
+						},
+					})
+					return track(vi.spyOn(kimiCodeOAuthManager, "isAuthenticated"))
+				},
+			},
+			{
+				name: "the Kimi Code sign-in is read",
+				setup: async (current) => {
+					track(vi.spyOn(kimiCodeOAuthManager, "isAuthenticated")).mockImplementation(async () => {
+						await current.dispose()
+						return true
+					})
+					return track(vi.spyOn(kimiCodeOAuthManager, "getState"))
+				},
+			},
+			{
+				name: "the Kimi Code state is read",
+				setup: async (current) => {
+					track(vi.spyOn(kimiCodeOAuthManager, "getState")).mockImplementation(() => {
+						void current.dispose() // disposed synchronously: the build is over but for its last check
+						return { status: "idle" }
+					})
+					return track(vi.spyOn(current, "postMessageToWebview"))
+				},
+			},
+		]
+
+		const posters: Array<[string, (current: ClineProvider) => Promise<void>]> = [
+			["postStateToWebview", (current) => current.postStateToWebview()],
+			["postStateToWebviewWithoutTaskHistory", (current) => current.postStateToWebviewWithoutTaskHistory()],
+			["postStateToWebviewWithoutClineMessages", (current) => current.postStateToWebviewWithoutClineMessages()],
+		]
+
+		it.each(cases.map((c) => [c.name, c] as const))("when %s, the build is abandoned", async (_name, c) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const nextStep = await c.setup(provider, undo)
+			nextStep.mockClear()
+
+			await expect(provider.getStateToPostToWebview()).rejects.toThrow("disposed")
+
+			expect(provider.isDisposed).toBe(true)
+			expect(nextStep).not.toHaveBeenCalled()
+		})
+
+		it.each(posters)("%s posts no state when the provider is disposed while it is built", async (_name, poster) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const post = vi.spyOn(provider, "postMessageToWebview")
+			const realGetState = provider.getState.bind(provider)
+			track(vi.spyOn(provider, "getState")).mockImplementation(async (options) => {
+				const state = await realGetState(options)
+				await provider.dispose()
+				return state
+			})
+			post.mockClear()
+
+			await poster(provider)
+
+			expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
+		it("does not read the task history, or spend a sequence number, when it is disposed before the build starts", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const seq = provider["appearanceSeq"]
+			const read = vi.fn()
+			Object.defineProperty(provider.taskHistoryStore, "initialized", { configurable: true, get: read })
+			await provider.dispose()
+
+			await expect(provider.getStateToPostToWebview()).rejects.toThrow("disposed")
+
+			expect(read).not.toHaveBeenCalled()
+			expect(provider["appearanceSeq"]).toBe(seq)
+		})
+
+		it("builds nothing for the prompt update of a provider that was disposed meanwhile", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.dispose()
+
+			await expect(provider.buildStateUnlessDisposed()).resolves.toBeUndefined()
+		})
 	})
 
 	test("a live provider still builds and posts its state", async () => {
