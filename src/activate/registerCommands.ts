@@ -53,8 +53,9 @@ export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined
  *
  * The two refs are independent: each surface keeps its own ref for its whole
  * lifetime, so resolving the sidebar view never wipes a live tab panel (and
- * vice versa). Callers pass `undefined` only when the surface itself is
- * disposed (see the `onDidDispose` wiring in `openClineInNewTab`).
+ * vice versa). A caller passes `undefined` for the surface itself; the
+ * `onDidDispose` wiring in `openClineInNewTab` instead hands the tab ref to a
+ * surviving panel when one is still live.
  */
 export function setPanel(
 	newPanel: vscode.WebviewPanel | vscode.WebviewView | undefined,
@@ -76,6 +77,53 @@ export function setPanel(
  */
 function getTabProvider(): ClineProvider | undefined {
 	return tabPanel ? ClineProvider.getInstanceForView(tabPanel) : undefined
+}
+
+/**
+ * The tab panel the tracker should point at once the tracked one is gone.
+ *
+ * Several tab panels can be open at once and the visibility handler above says so
+ * outright: it re-points the tracker at whichever panel the user activates. Closing the
+ * tracked panel therefore has to choose a successor deliberately. Clearing the ref while
+ * another panel is still open leaves focusInput reading an empty ref - it takes the tab
+ * branch only while `tabPanel` is set - and getPanel falling back to the sidebar, so the
+ * next ordinary "Open in editor" builds a third panel beside the one the user can still
+ * see.
+ *
+ * The pool is the live tab-mode provider instances rather than a list of panels: closing a
+ * panel disposes its provider, and disposal unregisters the instance synchronously at its
+ * start (ClineProvider.ts:1653-1659), so a panel that is gone - or one whose provider never
+ * resolved, which is what a failed creation leaves behind - cannot be picked. Pointing the
+ * ref at a panel nobody owns is worse than the defect here: focusInput would take the tab
+ * branch, find no instance and post nothing while a usable sidebar sits right there. A panel
+ * in a collapsed group is still a tab the user can click back to, so it counts too.
+ *
+ * Preference: the active panel - the one being looked at, the same reasoning the visibility
+ * handler uses - then a visible one, then any live panel. `undefined` means no tab surface
+ * is left, which is the only state where clearing the ref is right and the sidebar resumes
+ * as the surface.
+ */
+function pickTabPanelSurvivor(): vscode.WebviewPanel | undefined {
+	let visiblePanel: vscode.WebviewPanel | undefined
+	let anyPanel: vscode.WebviewPanel | undefined
+	for (const instance of ClineProvider.getAllInstances()) {
+		// Bracket access: `view` is private (ClineProvider.ts:383), and getInstanceForView
+		// resolves instances against the same field (1754-1756).
+		const view = instance["view"]
+		if (!view || !("onDidChangeViewState" in view)) {
+			continue
+		}
+		if (view.active) {
+			return view
+		}
+		if (view.visible && !visiblePanel) {
+			visiblePanel = view
+		}
+		if (!anyPanel) {
+			anyPanel = view
+		}
+	}
+	return visiblePanel ?? anyPanel
 }
 
 export type RegisterCommandOptions = {
@@ -510,9 +558,16 @@ const createTabPanelUnlocked = async ({
 		// Handle panel closing events.
 		newPanel.onDidDispose(
 			() => {
-				if (tabPanel === newPanel) {
-					// A recovery may already have installed a replacement panel.
-					setPanel(undefined, "tab")
+				// This panel's own provider disposes first: its view-dispose handler is
+				// registered inside resolveWebviewView (ClineProvider.ts:1907-1931), before this
+				// one, so by the time this callback runs it has already cleared the tab ref and
+				// unregistered the instance. The successor therefore has to be chosen whenever no
+				// live panel is tracked or the tracked one is this panel - deciding from
+				// `tabPanel === newPanel` alone would leave a still-open panel unreachable exactly
+				// in the ordering the shipped wiring produces. A recovery that installed a
+				// replacement panel in the meantime keeps its own tracking.
+				if (!tabPanel || tabPanel === newPanel) {
+					setPanel(pickTabPanelSurvivor(), "tab")
 				}
 			},
 			null,

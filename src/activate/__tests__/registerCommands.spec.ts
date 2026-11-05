@@ -496,6 +496,235 @@ describe("registerCommands handlers", () => {
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 	})
 
+	// Two tab panels can be open at once and the tracker follows whichever one the user
+	// activates: the onDidChangeViewState wiring in openClineInNewTab
+	// (registerCommands.ts:492-508) says so outright and re-points on activation. Disposal
+	// has to make the same choice deliberately, because focusInput reads the tracker
+	// (255-273) and getPanel falls back to the sidebar (47-49): a cleared tracker with a
+	// live panel left behind sends the next ordinary "Open in editor" to a third panel
+	// instead of the one that is still on screen.
+	//
+	// The pool the survivor is chosen from is the instance registry, because closing a
+	// panel disposes its provider and ClineProvider.dispose unregisters the instance
+	// synchronously at its start (ClineProvider.ts:1653-1659). These tests model liveness
+	// the same way: a view is live while a map entry for it exists, and disposing a tab
+	// removes that entry.
+	const makeTabPanel = (title: string, viewState: { active: boolean; visible: boolean }): vscode.WebviewPanel => ({
+		viewType: "zoo-code.TabPanelProvider",
+		title,
+		webview: {
+			options: {},
+			html: "",
+			cspSource: "test-webview",
+			postMessage: vi.fn().mockResolvedValue(true),
+			onDidReceiveMessage: vi.fn(),
+			asWebviewUri: vi.fn((uri) => uri),
+		},
+		options: {},
+		viewColumn: vscode.ViewColumn.Two,
+		...viewState,
+		onDidChangeViewState: vi.fn(),
+		onDidDispose: vi.fn(),
+		reveal: vi.fn(),
+		dispose: vi.fn(),
+	})
+
+	let providersByView: Map<vscode.WebviewView | vscode.WebviewPanel, ClineProvider>
+	const liveInstances = (): ClineProvider[] => [...providersByView.values()]
+
+	// View -> live instance, which is the lookup getInstanceForView performs
+	// (ClineProvider.ts:1754-1756), so the tab provider is resolved by panel identity.
+	const startInstanceRegistry = () => {
+		providersByView = new Map()
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation(
+			(view: vscode.WebviewView | vscode.WebviewPanel) => providersByView.get(view),
+		)
+		;(ClineProvider.getAllInstances as Mock).mockImplementation(liveInstances)
+	}
+
+	/**
+	 * Open one tab panel through the shipped creation path and register the provider the
+	 * automocked ClineProvider constructor produced for it. forceNew is how two live tab
+	 * panels happen today: startNewTask({ newTab: true }) asks for its own provider without
+	 * closing the panel that is already open.
+	 */
+	const openTabPanel = async (panel: vscode.WebviewPanel, forceNew = false): Promise<ClineProvider> => {
+		vi.mocked(vscode.window.createWebviewPanel).mockReturnValueOnce(panel)
+		const provider = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: mockProvider.webviewFocusTracker,
+			forceNew,
+		})
+		// The automocked constructor does not run resolveWebviewView, so the view assignment
+		// the real resolve makes (ClineProvider.ts:1896) has to be made here: the survivor rule
+		// reads each instance's view, exactly as getInstanceForView does.
+		provider["view"] = panel
+		providersByView.set(panel, provider)
+		return provider
+	}
+
+	const viewStateCallback = (panel: vscode.WebviewPanel) =>
+		(panel.onDidChangeViewState as Mock).mock.calls[0][0] as (event: { webviewPanel: vscode.WebviewPanel }) => void
+
+	const disposeCallback = (panel: vscode.WebviewPanel) => (panel.onDidDispose as Mock).mock.calls[0][0] as () => void
+
+	/**
+	 * Opens two live tab panels, re-points the tracker at the first one the way the
+	 * visibility handler does, and closes that tracked panel with its provider already
+	 * unregistered - the ordering the shipped wiring produces, because ClineProvider's own
+	 * view-dispose handler is registered inside resolveWebviewView (ClineProvider.ts:
+	 * 1907-1931), before the one in openClineInNewTab, so it runs first and clears the tab
+	 * ref. Each case states only the survivor's view state, which is what decides which
+	 * tier of the survivor rule it measures.
+	 */
+	const closeTrackedTabPanel = async (survivorPanel: vscode.WebviewPanel) => {
+		const trackedPanel = makeTabPanel("closing-tab", { active: true, visible: true })
+		await openTabPanel(trackedPanel)
+		const survivorProvider = await openTabPanel(survivorPanel, true)
+		viewStateCallback(trackedPanel)({ webviewPanel: trackedPanel })
+		expect(getPanel()).toBe(trackedPanel)
+		setPanel(undefined, "tab")
+		providersByView.delete(trackedPanel)
+		return { trackedPanel, survivorPanel, survivorProvider }
+	}
+
+	it("keeps the live tab panel that is active tracked when the tracked panel closes", async () => {
+		startInstanceRegistry()
+		const survivorPanel = makeTabPanel("survivor-tab", { active: true, visible: true })
+		const { trackedPanel, survivorProvider } = await closeTrackedTabPanel(survivorPanel)
+
+		disposeCallback(trackedPanel)()
+
+		// A sidebar is tracked as well, so "kept the survivor tracked" has to be proved
+		// against the fallback: getPanel and focusInput must both name the tab.
+		setPanel({} as vscode.WebviewView, "sidebar")
+		expect(getPanel()).toBe(survivorPanel)
+
+		await handlers["zoo-code.focusInput"]()
+
+		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("tracks a visible but inactive survivor over the sidebar fallback", async () => {
+		startInstanceRegistry()
+		// The user closed the tab from a different group, so nothing reports itself active.
+		const survivorPanel = makeTabPanel("survivor-tab", { active: false, visible: true })
+		const { trackedPanel, survivorProvider } = await closeTrackedTabPanel(survivorPanel)
+
+		disposeCallback(trackedPanel)()
+
+		setPanel({} as vscode.WebviewView, "sidebar")
+		expect(getPanel()).toBe(survivorPanel)
+		await handlers["zoo-code.focusInput"]()
+		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("tracks a survivor in a hidden group instead of dropping the tab surface", async () => {
+		startInstanceRegistry()
+		// A tab moved into a collapsed group is neither active nor visible, and it is still a
+		// tab the user can click back to. Dropping the tracker here is the defect: the next
+		// ordinary "Open in editor" builds a second panel beside it.
+		const survivorPanel = makeTabPanel("survivor-tab", { active: false, visible: false })
+		const { trackedPanel, survivorProvider } = await closeTrackedTabPanel(survivorPanel)
+
+		disposeCallback(trackedPanel)()
+
+		setPanel({} as vscode.WebviewView, "sidebar")
+		expect(getPanel()).toBe(survivorPanel)
+		await handlers["zoo-code.focusInput"]()
+		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("opens into the surviving tab panel instead of creating a third one", async () => {
+		startInstanceRegistry()
+		const survivorPanel = makeTabPanel("survivor-tab", { active: true, visible: true })
+		const { trackedPanel, survivorProvider } = await closeTrackedTabPanel(survivorPanel)
+		const creationsBefore = vi.mocked(vscode.window.createWebviewPanel).mock.calls.length
+
+		disposeCallback(trackedPanel)()
+
+		const opened = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: mockProvider.webviewFocusTracker,
+		})
+
+		// The reuse path is what keeps one panel per surface: it only fires while the tracker
+		// names the live panel, so a cleared tracker must show up as a new creation.
+		expect(vi.mocked(vscode.window.createWebviewPanel).mock.calls).toHaveLength(creationsBefore)
+		expect(opened).toBe(survivorProvider)
+		expect(survivorPanel.reveal).toHaveBeenCalled()
+		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "didBecomeVisible",
+		})
+	})
+
+	it("selects the survivor when disposal arrives while the tracker still names the panel", async () => {
+		startInstanceRegistry()
+		const survivorPanel = makeTabPanel("survivor-tab", { active: true, visible: true })
+		const trackedPanel = makeTabPanel("closing-tab", { active: true, visible: true })
+		await openTabPanel(trackedPanel)
+		await openTabPanel(survivorPanel, true)
+		viewStateCallback(trackedPanel)({ webviewPanel: trackedPanel })
+		// The other half of the state the stale-reference comment at registerCommands.ts:
+		// 426-430 describes: the provider is gone while the tracker still points at the panel,
+		// which is what a creation that failed after setPanel leaves behind. The branch that
+		// owns this case must select the survivor rather than clear, and must not select the
+		// panel being disposed - its registry entry is already gone.
+		providersByView.delete(trackedPanel)
+
+		disposeCallback(trackedPanel)()
+
+		expect(getPanel()).toBe(survivorPanel)
+	})
+
+	it("leaves the tab ref clear when the disposed panel was the last live tab", async () => {
+		startInstanceRegistry()
+		const lastPanel = makeTabPanel("last-tab", { active: true, visible: true })
+		await openTabPanel(lastPanel)
+		// Deliberately no onDidChangeViewState: that is the property that separates a panel
+		// from a view, and ClineProvider itself uses it as the tab/sidebar discriminator
+		// (ClineProvider.ts:1898). The describe's ClineProvider-typed double stands in for the
+		// sidebar instance - only its view matters to the survivor rule.
+		const sidebarView = {} as vscode.WebviewView
+		const sidebarProvider = mockVisibleProviderInstance
+		// The sidebar instance is live too, and its view is a WebviewView, not a panel: the
+		// survivor rule must not put a sidebar view into the tab ref, because the tab branch of
+		// focusInput would then post through the panel-shaped path at the wrong surface.
+		sidebarProvider["view"] = sidebarView
+		providersByView.set(sidebarView, sidebarProvider)
+		// Provider-first ordering again: the ref is cleared and the instance unregistered
+		// before registerCommands sees the disposal.
+		setPanel(undefined, "tab")
+		providersByView.delete(lastPanel)
+
+		disposeCallback(lastPanel)()
+
+		// Nothing is left in the tab surface, so the ref stays empty and the sidebar resumes.
+		// This state already holds today; it is pinned so the survivor rule cannot break it by
+		// pointing the tab ref at the panel that was just disposed.
+		setPanel(sidebarView, "sidebar")
+		expect(getPanel()).toBe(sidebarView)
+
+		await handlers["zoo-code.focusInput"]()
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+		expect(lastPanel.reveal).not.toHaveBeenCalled()
+	})
 	// Coverage for the .catch arm on the sidebar title-bar post sites
 	// (settingsButtonClicked posts twice, plus historyButtonClicked and
 	// marketplaceButtonClicked) and acceptInput (the visible-provider path).
