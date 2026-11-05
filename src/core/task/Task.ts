@@ -54,9 +54,9 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
-	MAX_MCP_TOOLS_THRESHOLD,
-	countEnabledMcpTools,
 	providerIdentifiers,
+	attachedMcpToolNamesSchema,
+	resolveMcpDynamicLoadSettings,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -101,6 +101,9 @@ import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
+import { ToolRouter } from "../../services/tools/ToolRouter"
+import { buildMcpToolName, isMcpTool, normalizeMcpToolName } from "../../utils/mcp-name"
+import type { ToolDoc } from "../../services/tools/types"
 
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
@@ -292,6 +295,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
+	readonly attachedMcpToolNames = new Set<string>()
+	private mcpToolsInitialized = false
+	private mcpToolsInitialization?: Promise<void>
 
 	todoList?: TodoItem[]
 
@@ -747,6 +753,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			images: historyItem ? [] : images,
 		}
 		this._isHistoryTask = !!historyItem && !task && !images
+		const savedMcpToolNames = attachedMcpToolNamesSchema.parse(historyItem?.attachedMcpToolNames)
+		if (savedMcpToolNames !== undefined) {
+			for (const name of savedMcpToolNames) this.attachedMcpToolNames.add(name)
+			this.mcpToolsInitialized = true
+		}
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1783,8 +1794,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
 	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
 	 * to replace the stored messages outright.
+	 * MCP initialization uses strict mode to detect metadata failures, retain the
+	 * in-memory selection, and let later normal saves retry persistence.
 	 */
-	private async saveClineMessages(merge = true): Promise<boolean> {
+	private async saveClineMessages(merge = true, requireMetadataPersistence = false): Promise<boolean> {
 		try {
 			await saveTaskMessages({
 				messages: structuredClone(this.clineMessages),
@@ -1813,6 +1826,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
 				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
 				initialStatus: this.initialStatus,
+				attachedMcpToolNames: this.mcpToolsInitialized ? [...this.attachedMcpToolNames] : undefined,
 			})
 
 			// Emit token/tool usage updates using debounced function
@@ -1823,12 +1837,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
 			const provider = this.providerRef.deref()
+			if (requireMetadataPersistence && !provider)
+				throw new Error("Provider lost while saving MCP tool selection")
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
 		} catch (error) {
 			// The message array was persisted above; a metadata or task-history failure must
 			// not mask that write (see the method docs). The next saveClineMessages() call
 			// recomputes and re-emits the metadata update.
+			if (requireMetadataPersistence) throw error
 			console.error("Failed to save task metadata:", error)
 		}
 
@@ -2665,6 +2682,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
+				task: this,
+				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
 				provider,
 				cwd: this.cwd,
 				mode,
@@ -2959,37 +2979,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Start / Resume / Abort / Dispose
 
 	/**
-	 * Get enabled MCP tools count for this task.
-	 * Returns the count along with the number of servers contributing.
-	 *
-	 * @returns Object with enabledToolCount and enabledServerCount
-	 */
-	private async getEnabledMcpToolsCount(): Promise<{ enabledToolCount: number; enabledServerCount: number }> {
-		try {
-			const provider = this.providerRef.deref()
-			if (!provider) {
-				return { enabledToolCount: 0, enabledServerCount: 0 }
-			}
-
-			const { mcpEnabled } = (await provider.getState()) ?? {}
-			if (!(mcpEnabled ?? true)) {
-				return { enabledToolCount: 0, enabledServerCount: 0 }
-			}
-
-			const mcpHub = await McpServerManager.getInstance(provider.context, provider)
-			if (!mcpHub) {
-				return { enabledToolCount: 0, enabledServerCount: 0 }
-			}
-
-			const servers = mcpHub.getServers()
-			return countEnabledMcpTools(servers)
-		} catch (error) {
-			console.error("[Task#getEnabledMcpToolsCount] Error counting MCP tools:", error)
-			return { enabledToolCount: 0, enabledServerCount: 0 }
-		}
-	}
-
-	/**
 	 * Manually start a **new** task when it was created with `startTask: false`.
 	 *
 	 * This fires task startup as a background async operation after the provider
@@ -3039,6 +3028,57 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this._runPromise
 	}
 
+	/** Select once, preserve historical calls, and attempt to persist before use. */
+	public async initializeAttachedMcpTools(scopedTools: ToolDoc[], initialK: number): Promise<void> {
+		if (this.mcpToolsInitialization) return this.mcpToolsInitialization
+
+		this.mcpToolsInitialization = (async () => {
+			const historicalNames = new Set<string>()
+			for (const message of this.apiConversationHistory) {
+				if (message.role !== "assistant" || !Array.isArray(message.content)) continue
+				for (const block of message.content) {
+					if (block.type === "tool_use" && typeof block.name === "string" && isMcpTool(block.name)) {
+						historicalNames.add(normalizeMcpToolName(block.name))
+					}
+				}
+			}
+
+			if (this.mcpToolsInitialized) {
+				const missing = [...historicalNames].filter((name) => !this.attachedMcpToolNames.has(name))
+				if (missing.length === 0) return
+				for (const name of missing) this.attachedMcpToolNames.add(name)
+			} else {
+				const taskText = this.metadata.task?.trim() ?? ""
+				const { initialK: limit } = resolveMcpDynamicLoadSettings(undefined, initialK)
+				// Images-only tasks have no searchable text. Use a bounded, stable
+				// selection instead of permanently attaching no tools.
+				const names = taskText
+					? await ToolRouter.getInstance().attachInitial(taskText, scopedTools, limit)
+					: [...new Set(scopedTools.map((tool) => buildMcpToolName(tool.serverName, tool.toolName)))].slice(
+							0,
+							limit,
+						)
+				if (!taskText && names.length === 0 && historicalNames.size === 0) return
+				this.attachedMcpToolNames.clear()
+				// History compatibility may require more than initialK definitions.
+				for (const name of [...historicalNames, ...names]) this.attachedMcpToolNames.add(name)
+				this.mcpToolsInitialized = true
+			}
+			try {
+				if (!(await this.saveClineMessages(true, true))) throw new Error("Failed to save MCP tool selection")
+			} catch (error) {
+				// Storage failure must not enter the API stream's retry loop. Keep
+				// routing stable; every subsequent normal history save includes it.
+				console.error("[Task] Failed to persist MCP tool selection; keeping in-memory selection:", error)
+			}
+		})()
+		try {
+			await this.mcpToolsInitialization
+		} finally {
+			this.mcpToolsInitialization = undefined
+		}
+	}
+
 	private async startTask(task?: string, images?: string[]): Promise<void> {
 		try {
 			// `conversationHistory` (for API) and `clineMessages` (for webview)
@@ -3057,31 +3097,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			await this.say("text", task, images)
 
-			// Check for too many MCP tools and warn the user
-			const { enabledToolCount, enabledServerCount } = await this.getEnabledMcpToolsCount()
-			if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
-				await this.say(
-					"too_many_tools_warning",
-					JSON.stringify({
-						toolCount: enabledToolCount,
-						serverCount: enabledServerCount,
-						threshold: MAX_MCP_TOOLS_THRESHOLD,
-					}),
-					undefined,
-					undefined,
-					undefined,
-					undefined,
-					{ isNonInteractive: true },
-				)
-			}
-
 			// Surface once per new task which `disabledTools` entries carry no
 			// disabling weight (protocol tools are exempt from user disabling).
 			// Detection reads the raw list, so the notice also fires when a
 			// model-profile `excludedTools` entry suppresses the tool through a
 			// separate route. `startTask` runs exactly once per new task, which
 			// is what bounds this to a single notice. The block is guarded like
-			// `getEnabledMcpToolsCount` above: this is a telemetry-class notice,
+			// other startup notices: this is a telemetry-class notice,
 			// so a rejection from the state read or the say must never keep the
 			// task loop from starting.
 			try {
@@ -5472,6 +5494,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
+				task: this,
+				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
 				provider,
 				cwd: this.cwd,
 				mode,
@@ -5749,6 +5774,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const provider = this.providerRef.deref()
 				if (provider) {
 					const toolsResult = await buildNativeToolsArrayWithRestrictions({
+						task: this,
+						mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+						mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
 						provider,
 						cwd: this.cwd,
 						mode,
@@ -5923,6 +5951,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
+				task: this,
+				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
 				provider,
 				cwd: this.cwd,
 				mode,

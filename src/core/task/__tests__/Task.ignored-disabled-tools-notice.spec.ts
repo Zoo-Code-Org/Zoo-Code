@@ -105,7 +105,6 @@ vi.mock("delay", () => ({
 type StartTaskAccess = {
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
-	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	getSavedClineMessages: () => Promise<ClineMessage[]>
 	getSavedApiConversationHistory: () => Promise<ApiMessage[]>
 	initiateTaskLoop: (userContent: unknown[]) => Promise<void>
@@ -169,10 +168,6 @@ async function startTaskWithDisabledTools(disabledTools: string[] | undefined, p
 		info: modelInfo,
 	})
 	const taskAccess = getStartTaskAccess(task)
-	vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
-		enabledToolCount: 0,
-		enabledServerCount: 0,
-	})
 	vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
 
 	await taskAccess.startTask("example task")
@@ -202,10 +197,6 @@ async function startTaskWithFailingStateRead() {
 
 	const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
 	const taskAccess = getStartTaskAccess(task)
-	vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
-		enabledToolCount: 0,
-		enabledServerCount: 0,
-	})
 	const initiateLoopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
 
 	await taskAccess.startTask("example task")

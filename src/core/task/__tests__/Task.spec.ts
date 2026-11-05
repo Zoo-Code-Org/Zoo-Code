@@ -41,11 +41,11 @@ import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
+import * as buildTools from "../build-tools"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
 	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
-	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
@@ -4926,6 +4926,184 @@ describe("Cline", () => {
 					expect(allowedFunctionNames.every((name) => toolNames.includes(name))).toBe(true)
 				})
 
+				it.each([
+					{
+						provider: providerIdentifiers.anthropic,
+						threshold: 50,
+						initialK: 7,
+						expected: 7,
+						saveFailure: false,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.gemini,
+						threshold: 50,
+						initialK: 7,
+						expected: 7,
+						saveFailure: false,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.anthropic,
+						threshold: 100,
+						initialK: 7,
+						expected: 100,
+						saveFailure: false,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.anthropic,
+						threshold: 50,
+						initialK: 7,
+						expected: 7,
+						saveFailure: true,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.gemini,
+						threshold: 50,
+						initialK: 7,
+						expected: 8,
+						saveFailure: false,
+						historyCall: true,
+					},
+				])(
+					"sends $expected of 100 MCP tools in the initial $provider API request",
+					async ({ provider, threshold, initialK, expected, saveFailure, historyCall }) => {
+						const apiConfiguration: ProviderSettings = { ...mockApiConfig, apiProvider: provider }
+						const task = new Task({
+							provider: mockProvider,
+							apiConfiguration,
+							task: "search tickets",
+							startTask: false,
+						})
+						const access = getTaskTestAccess(task)
+						vi.spyOn(access, "getSystemPrompt").mockResolvedValue("mock system prompt")
+						// Message and history persistence have focused round-trip coverage.
+						const save = vi.spyOn(access, "saveClineMessages").mockResolvedValue(true)
+						if (saveFailure) save.mockRejectedValue(new Error("persistent storage failure"))
+						vi.spyOn(task.api, "getModel").mockReturnValue({
+							id: "test-model",
+							info: { contextWindow: 200000, maxTokens: 4096, supportsPromptCache: false },
+						})
+						const state = await mockProvider.getState()
+						vi.spyOn(mockProvider, "getState").mockResolvedValue({
+							...state,
+							apiConfiguration,
+							requestDelaySeconds: 0,
+							"mcp.dynamicLoad.threshold": threshold,
+							"mcp.dynamicLoad.initialK": initialK,
+						})
+						// Native tool generation only reads the hub's public server list.
+						const hub = {
+							getServers: () => [
+								{
+									name: "catalog",
+									config: "{}",
+									status: "connected" as const,
+									tools: Array.from({ length: 100 }, (_, index) => ({
+										name: `tool_${index}`,
+										description: "search tickets",
+									})),
+								},
+							],
+						} as McpHub
+						vi.spyOn(mockProvider, "getMcpHub").mockReturnValue(hub)
+						const createMessage = vi
+							.spyOn(task.api, "createMessage")
+							.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+						task.apiConversationHistory = [
+							{ role: "user", content: [{ type: "text", text: "search tickets" }], ts: Date.now() },
+						]
+						if (historyCall) {
+							task.apiConversationHistory.push(
+								{
+									role: "assistant",
+									content: [
+										{ type: "tool_use", id: "previous", name: "mcp--catalog--tool_99", input: {} },
+									],
+								},
+								{
+									role: "user",
+									content: [{ type: "tool_result", tool_use_id: "previous", content: "done" }],
+								},
+							)
+						}
+						await task.attemptApiRequest(0).next()
+						expect(createMessage).toHaveBeenCalledTimes(1)
+						const metadata = requireDefined(createMessage.mock.calls[0])[2]
+						const names = requireDefined(metadata?.tools).flatMap((tool) =>
+							"function" in tool ? [tool.function.name] : [],
+						)
+						expect(names.filter((name) => name.startsWith("mcp--"))).toHaveLength(expected)
+						expect(names).toContain("read_file")
+						expect(names).not.toContain("mcp_load")
+						if (provider === providerIdentifiers.gemini)
+							expect(
+								metadata?.allowedFunctionNames?.filter((name) => name.startsWith("mcp--")),
+							).toHaveLength(expected)
+					},
+				)
+
+				it.each(["manual", "recovery", "automatic"] as const)(
+					"passes task routing settings to the %s condensation build",
+					async (path) => {
+						const task = new Task({
+							provider: mockProvider,
+							apiConfiguration: mockApiConfig,
+							task: "search tickets",
+							startTask: false,
+						})
+						const state = await mockProvider.getState()
+						vi.spyOn(mockProvider, "getState").mockResolvedValue({
+							...state,
+							requestDelaySeconds: 0,
+							autoCondenseContext: true,
+							"mcp.dynamicLoad.threshold": 2,
+							"mcp.dynamicLoad.initialK": 1,
+						})
+						const access = getTaskTestAccess(task)
+						vi.spyOn(access, "getSystemPrompt").mockResolvedValue("mock prompt")
+						vi.spyOn(access, "saveClineMessages").mockResolvedValue(true)
+						vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+						const model: ModelInfo = { contextWindow: 50000, maxTokens: 1024, supportsPromptCache: false }
+						vi.spyOn(task.api, "getModel").mockReturnValue({ id: "routing-test", info: model })
+						vi.spyOn(task.api, "countTokens").mockResolvedValue(1000)
+						vi.spyOn(task, "getTokenUsage").mockReturnValue({
+							totalCost: 0,
+							totalTokensIn: 0,
+							totalTokensOut: 0,
+							contextTokens: 100000,
+						})
+						vi.spyOn(task.api, "createMessage").mockReturnValue(
+							asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+						)
+						task.apiConversationHistory = [
+							{ role: "user", content: [{ type: "text", text: "search tickets" }], ts: Date.now() },
+						]
+						const build = vi
+							.spyOn(buildTools, "buildNativeToolsArrayWithRestrictions")
+							.mockResolvedValue({ tools: [] })
+						try {
+							if (path === "manual") await task.condenseContext()
+							else if (path === "recovery") await access.handleContextWindowExceededError(model)
+							else await task.attemptApiRequest(0).next()
+							expect(build).toHaveBeenCalledTimes(path === "automatic" ? 2 : 1)
+							for (const [options] of build.mock.calls) {
+								expect(options).toEqual(
+									expect.objectContaining({
+										task,
+										mcpDynamicLoadThreshold: 2,
+										mcpDynamicLoadInitialK: 1,
+									}),
+								)
+							}
+						} finally {
+							build.mockRestore()
+						}
+					},
+				)
+
 				it("should invoke abort on currentRequestAbortController during first-chunk wait", async () => {
 					const task = new Task({
 						provider: mockProvider,
@@ -6888,10 +7066,6 @@ describe("Cline", () => {
 					await pendingPostState
 				})
 			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
-			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
-				enabledToolCount: 0,
-				enabledServerCount: 0,
-			})
 			const initiateTaskLoopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
 
 			const startPromise = taskAccess.startTask("new task")
