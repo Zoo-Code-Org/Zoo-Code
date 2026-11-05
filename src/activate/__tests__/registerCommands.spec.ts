@@ -900,6 +900,47 @@ describe("registerCommands handlers", () => {
 			action: "focusInput",
 		})
 	})
+
+	// The shared double above never sets isViewLaunched, so every case that goes through it
+	// takes the not-launched branch. This is the other side of the guard at
+	// registerCommands.ts:194: a view that is already resolved must neither focus the pane nor
+	// wait on the resolution gate, while still posting both actions.
+	it("plusButtonClicked skips the focus command and the wait when the sidebar view is already launched", async () => {
+		const sidebarProvider = Object.assign({} as ClineProvider, {
+			isViewLaunched: true,
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			whenViewResolved: vi.fn().mockResolvedValue(undefined),
+		})
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, cb: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = cb
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({ context: mockContext, outputChannel: mockOutputChannel, provider: sidebarProvider })
+
+		// Counted rather than absolute: earlier cases in this file also invoke commands, so the
+		// claim under test is that this handler adds no focus call of its own.
+		const executeCommandMock = vscode.commands.executeCommand as Mock
+		const isFocus = (command: unknown) => typeof command === "string" && command.includes("SidebarProvider.focus")
+		const focusCallsBefore = executeCommandMock.mock.calls.filter(isFocus).length
+
+		await commandHandlers["zoo-code.plusButtonClicked"]()
+
+		expect(executeCommandMock.mock.calls.filter(isFocus).length).toBe(focusCallsBefore)
+		expect(sidebarProvider.whenViewResolved).not.toHaveBeenCalled()
+		expect(sidebarProvider.postMessageToWebview).toHaveBeenNthCalledWith(1, {
+			type: "action",
+			action: "chatButtonClicked",
+		})
+		expect(sidebarProvider.postMessageToWebview).toHaveBeenNthCalledWith(2, {
+			type: "action",
+			action: "focusInput",
+		})
+	})
 	it("plusButtonClicked calls evictCurrentTask on the registered sidebar provider", async () => {
 		await handlers["zoo-code.plusButtonClicked"]()
 

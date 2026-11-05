@@ -24,8 +24,8 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
-	providerSettingsSchema,
-	globalSettingsSchema,
+	GLOBAL_SETTINGS_KEYS,
+	PROVIDER_SETTINGS_KEYS,
 	retiredProviderIdentifiers,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
@@ -126,9 +126,9 @@ const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "v
 // task unvalidated. Every settings payload the webview actually sends was checked (packages/types
 // vs webview-ui) and carries global keys only, so a profile-only key here is never a real setting.
 // Keys that are genuinely global too (rateLimitSeconds) stay on the ordinary route.
-const GLOBAL_SETTINGS_KEYS = new Set(Object.keys(globalSettingsSchema.shape))
-const PROVIDER_PROFILE_SETTINGS = new Set(
-	Object.keys(providerSettingsSchema.shape).filter((key) => !GLOBAL_SETTINGS_KEYS.has(key)),
+const GLOBAL_SETTINGS_KEY_SET = new Set<string>(GLOBAL_SETTINGS_KEYS)
+const PROVIDER_PROFILE_SETTINGS = new Set<string>(
+	PROVIDER_SETTINGS_KEYS.filter((key) => !GLOBAL_SETTINGS_KEY_SET.has(key)),
 )
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
