@@ -341,8 +341,35 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// is in flight — openInNewTab and popoutButtonClicked both dispatch
 	// through here — awaits it instead of creating a second panel: exactly
 	// one panel is created and every caller receives the same provider.
-	if (pendingTabPanelCreation) {
-		return pendingTabPanelCreation
+	// The join is re-entered rather than trusted once. A creation can resolve
+	// to a disposed provider - the panel closed mid-flight - and several callers
+	// may be parked on that same settled promise. The first of them to wake
+	// starts the replacement and stores it in the slot; the others must re-read
+	// the slot and join that replacement instead of falling through, or each
+	// wake-up creates its own panel and the serialization is lost exactly where
+	// it matters. Re-entry terminates: each pass either returns a live provider
+	// or consumes a settled creation and moves to a strictly newer one, so it
+	// cannot outlive the number of callers.
+	for (;;) {
+		const pendingCreation = pendingTabPanelCreation
+		if (!pendingCreation) {
+			break
+		}
+
+		// The panel can close while the creation is still awaiting its post-creation delay or the
+		// editor-group lock, and a closing panel disposes its provider: a caller that arrives then
+		// would receive that disposed provider from the shared promise and open no editor tab at
+		// all. Reuse the in-flight creation only when the provider it resolves to is still live -
+		// bracket access: _disposed is the only liveness signal ClineProvider exposes.
+		const resolvedProvider = await pendingCreation
+
+		if (!resolvedProvider["_disposed"]) {
+			return resolvedProvider
+		}
+
+		if (pendingTabPanelCreation === pendingCreation) {
+			pendingTabPanelCreation = undefined
+		}
 	}
 
 	const creation = createTabPanelUnlocked(options)
@@ -357,8 +384,12 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 		// clobber a replacement already stored in the slot. That clobber is
 		// unreachable in single-threaded settlement order: while the slot
 		// holds this in-flight creation, every other caller receives that
-		// same promise (guard above), so no replacement can be stored before
-		// this finally block runs — the equality check pins the invariant.
+		// clobber a replacement already stored in the slot. A joining caller
+		// that woke on the disposed creation can reach the slot first - it
+		// re-enters the loop, sees the slot empty, and stores its own
+		// creation before this finally block runs - so the equality check is
+		// what keeps this settlement from dropping that replacement and
+		// letting a fourth call open a third panel.
 		if (pendingTabPanelCreation === creation) {
 			pendingTabPanelCreation = undefined
 		}
@@ -500,27 +531,22 @@ export const createClineTabPanel = async ({
 	try {
 		await tabProvider.resolveWebviewView(newPanel)
 	} catch (error) {
-		// Initialization failed: drop the half-registered panel from the live
-		// registry and dispose the provider so the failed surface leaves no
-		// listeners or state behind. Disposing the provider disposes the panel
-		// (resolveWebviewView assigns this.view before its first await), whose
-		// disposal listener (installed above) then re-points the tracked ref at
-		// the best remaining live panel - or clears it when none remains.
-		// Clearing the ref here first would make that handler skip the
-		// re-pointing and leave getTabProvider() undefined while another tab
-		// panel is still open. A user close that landed during initialization
-		// already ran that handler.
+		// Initialization failed: dispose the panel so the handler installed above
+		// removes it from the live registry and re-points or clears the tracked ref,
+		// and dispose the provider too - resolveWebviewView registers its own panel
+		// handler only after its awaited getHtmlContent/getState calls, so a rejection
+		// before that point would otherwise strand the provider in
+		// ClineProvider.activeInstances. The registry delete is repeated here so a
+		// double whose dispose does not fire the handler still leaves no stale entry,
+		// and a failing provider dispose is logged rather than allowed to mask the
+		// initialization error the caller must observe.
+		newPanel.dispose()
 		liveTabPanels.delete(newPanel)
-		try {
-			await tabProvider.dispose()
-		} catch (cleanupError) {
-			// A cleanup rejection (e.g. an MCP client whose disposal throws) must
-			// not replace the initialization error the caller is about to see;
-			// dispose()'s finally path has already deregistered the provider.
-			tabProvider.log(
-				`Tab provider cleanup after failed init also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+		await tabProvider
+			.dispose()
+			.catch((disposeError) =>
+				outputChannel.appendLine(`[openClineInNewTab] provider dispose failed: ${disposeError}`),
 			)
-		}
 		throw error
 	}
 

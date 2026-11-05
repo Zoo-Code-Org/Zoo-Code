@@ -90,6 +90,50 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("initialize", () => {
+		it("serializes critical sections across managers bound to the same secrets key", async () => {
+			const first = new ProviderSettingsManager(mockContext)
+			const second = new ProviderSettingsManager(mockContext)
+			const events: string[] = []
+			let releaseFirst: () => void = () => {}
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+
+			const firstRun = first.runExclusiveAcrossInstances(async () => {
+				events.push("first:enter")
+				await firstGate
+				events.push("first:exit")
+			})
+			// Let the first critical section start before the second one is queued.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			const secondRun = second.runExclusiveAcrossInstances(async () => {
+				events.push("second:enter")
+			})
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// The sidebar and each editor tab own a manager over the same
+			// context.secrets: without a lock shared by those instances the second
+			// critical section starts while the first is still inside it.
+			expect(events).toEqual(["first:enter"])
+
+			releaseFirst()
+			await Promise.all([firstRun, secondRun])
+			expect(events).toEqual(["first:enter", "first:exit", "second:enter"])
+		})
+
+		it("keeps the shared critical section usable after a rejection", async () => {
+			const first = new ProviderSettingsManager(mockContext)
+			const second = new ProviderSettingsManager(mockContext)
+
+			await expect(
+				first.runExclusiveAcrossInstances(async () => {
+					throw new Error("boom")
+				}),
+			).rejects.toThrow("boom")
+
+			await expect(second.runExclusiveAcrossInstances(async () => "ok")).resolves.toBe("ok")
+		})
+
 		it("should not write to storage when secrets.get returns null", async () => {
 			// Mock readConfig to return null
 			mockSecrets.get.mockResolvedValueOnce(null)
@@ -1392,6 +1436,77 @@ describe("ProviderSettingsManager", () => {
 		})
 	})
 
+	// The delete compensation in ClineProvider compares what it wrote against what the store
+	// reports after a partial mutation, so the gate read must be complete (selection plus every
+	// mapping), stable across awaits (a copy, not the live map), and side-effect free.
+	describe("GetSelectionAndModeConfigs", () => {
+		it("returns the stored selection together with every mode mapping", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "selected-profile",
+					apiConfigs: { selected: { id: "selected-id" }, other: { id: "other-id" } },
+					modeApiConfigs: { architect: "other-id", code: "selected-id" },
+					migrations: { rateLimitSecondsMigrated: false },
+				}),
+			)
+
+			const gate = await providerSettingsManager.getSelectionAndModeConfigs()
+
+			expect(gate).toEqual({
+				currentApiConfigName: "selected-profile",
+				modeApiConfigs: { architect: "other-id", code: "selected-id" },
+			})
+		})
+
+		it("returns a copy of the mode map so a later write cannot rewrite the snapshot", async () => {
+			// Round-trip the store so the read after the write can actually differ: a constant
+			// secrets double would hide an aliased snapshot behind stale data.
+			let stored = JSON.stringify({
+				currentApiConfigName: "selected-profile",
+				apiConfigs: { selected: { id: "selected-id" }, other: { id: "other-id" } },
+				modeApiConfigs: { code: "selected-id" },
+				migrations: { rateLimitSecondsMigrated: false },
+			})
+			// store() receives the already-serialised profiles, so the double round-trips the string
+			// as-is: re-encoding it here would hand load() a double-encoded payload.
+			mockSecrets.get.mockImplementation(async () => stored)
+			mockSecrets.store.mockImplementation(async (_key: string, value: string) => {
+				stored = value
+			})
+
+			const snapshot = await providerSettingsManager.getSelectionAndModeConfigs()
+			await providerSettingsManager.setModeConfig("code", "other-id")
+
+			// A snapshot handed back as the live map object would follow the later write, and the
+			// compensation could no longer tell what the gate held before the mutation.
+			expect(snapshot.modeApiConfigs).toEqual({ code: "selected-id" })
+			expect(await providerSettingsManager.getModeConfigId("code")).toBe("other-id")
+		})
+
+		it("reads the gate without storing, so the read adds no write path", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "selected-profile",
+					apiConfigs: { selected: { id: "selected-id" } },
+					modeApiConfigs: { code: "selected-id" },
+					migrations: { rateLimitSecondsMigrated: false },
+				}),
+			)
+			const storeCallsBefore = mockSecrets.store.mock.calls.length
+
+			await providerSettingsManager.getSelectionAndModeConfigs()
+
+			expect(mockSecrets.store.mock.calls.length).toBe(storeCallsBefore)
+		})
+
+		it("should throw error if reading the gate fails", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			await expect(providerSettingsManager.getSelectionAndModeConfigs()).rejects.toThrow(
+				"Failed to read the profile selection and mode configs",
+			)
+		})
+	})
 	describe("syncCloudProfiles", () => {
 		it("should add new cloud profiles without secret keys", async () => {
 			const existingConfig: ProviderProfiles = {

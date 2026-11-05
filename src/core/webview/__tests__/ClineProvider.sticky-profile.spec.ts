@@ -324,7 +324,15 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 		})
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
+		// Dispose the provider this test created: a leaked instance stays in the static
+		// registry with the profile pin it activated, and a later test's fresh settings store
+		// cannot resolve that pin - which now (correctly) aborts that test's shared write.
+		// Teardown errors are swallowed because dispose() deregisters in its finally even when
+		// a double in this file is incomplete (the CloudService mock has no off()), and a
+		// teardown failure must not fail assertions that already ran.
+		await provider?.dispose().catch(() => undefined)
+
 		if (originalRooCliRuntimeEnv === undefined) {
 			delete process.env.ROO_CLI_RUNTIME
 		} else {
