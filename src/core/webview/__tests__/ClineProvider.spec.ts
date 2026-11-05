@@ -39,6 +39,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 import { t } from "../../../i18n"
 
 import { ClineProvider } from "../ClineProvider"
+import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { MdmService } from "../../../services/mdm/MdmService"
 import { Terminal } from "../../../integrations/terminal/Terminal"
@@ -3698,6 +3699,62 @@ describe("ClineProvider", () => {
 
 			// ...and disposal releases it.
 			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		})
+		// Measured before the fix: one dispose() ran each of these releases twice - the teardown
+		// body performed the broker release, the listener removal and the MCP unregistration after
+		// the caller's finally had already done them. The second dispose() was already a no-op, so
+		// the existing guard test could not see the doubling; only a count across the pair can.
+		it("releases the broker, the listeners and the MCP registration exactly once across a double dispose", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await new Promise((resolve) => setImmediate(resolve))
+
+			const broker = vi.spyOn(provider["diagnosticsRequestBroker"], "dispose")
+			const listeners = vi.spyOn(provider, "removeAllListeners")
+			const unregister = vi.spyOn(McpServerManager, "unregisterProvider")
+
+			await provider.dispose()
+			await provider.dispose()
+
+			expect(broker).toHaveBeenCalledTimes(1)
+			expect(listeners).toHaveBeenCalledTimes(1)
+			expect(unregister).toHaveBeenCalledTimes(1)
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+
+			broker.mockRestore()
+			listeners.mockRestore()
+			unregister.mockRestore()
+		})
+
+		// The dispose-time hydrate was a merge artifact that neither parent carried: it started a
+		// state load against a provider that is already closing, with no live view to deliver to.
+		it("does not start a view-state load while disposing", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// loadViewState is private and private keys sit outside keyof, so the spy needs one
+			// assertion onto the method shape it actually has (AGENTS.md: last resort, commented).
+			const load = vi.spyOn(
+				ClineProvider.prototype as unknown as { loadViewState: () => Promise<boolean> },
+				"loadViewState",
+			)
+
+			await provider.dispose()
+
+			expect(load).not.toHaveBeenCalled()
+
+			load.mockRestore()
 		})
 
 		it("releases the provider and reports the failure when a cleanup step rejects", async () => {
