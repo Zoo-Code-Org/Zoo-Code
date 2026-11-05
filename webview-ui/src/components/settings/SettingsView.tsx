@@ -45,6 +45,7 @@ import {
 
 import { vscode } from "@src/utils/vscode"
 import { APPEARANCE_SETTINGS, type AppearanceKey } from "@src/utils/appearance"
+import { useLatestRef } from "@src/hooks/useLatestRef"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ExtensionStateContextType, useExtensionState } from "@src/context/ExtensionStateContext"
@@ -196,12 +197,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
-	const latestCachedState = useRef(cachedState)
-	const latestChangeCount = useRef(changeCount)
-	useEffect(() => {
-		latestCachedState.current = cachedState
-		latestChangeCount.current = changeCount
-	}, [cachedState, changeCount])
+	// What the save results are compared with: the latest commit, not the one before it (see `useLatestRef`).
+	const latestCachedState = useLatestRef(cachedState)
+	const latestChangeCount = useLatestRef(changeCount)
 
 	const {
 		alwaysAllowReadOnly,
