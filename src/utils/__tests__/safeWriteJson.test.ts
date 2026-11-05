@@ -639,14 +639,30 @@ describe("safeWriteJson", () => {
 				expect.any(Error),
 			)
 		} finally {
-			// Cleanup must run even when an assertion fails: a leaked mock
-			// registration or console spy changes later tests, and vi.unmock
-			// alone does not reset a module that already imported the mock.
+			// Cleanup must run even when an assertion fails: a leaked mock registration or a
+			// leftover console spy changes later tests. The undo has to be the runtime form:
+			// Vitest hoists vi.unmock above this file's imports, so an unmock written here is
+			// registered before the vi.doMock above runs and never removes this test's wrapper.
 			realpathSpy.mockRestore()
-			vi.unmock("proper-lockfile")
+			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
 			consoleErrorSpy.mockRestore()
 		}
+	})
+
+	// The undo in the case above has to be visible from the other side of the file: a later
+	// test that imports proper-lockfile fresh must resolve the real module, not the wrapper
+	// that case installed for its own import graph. This is the case that reddens when the
+	// undo is written as vi.unmock -- Vitest hoists that call above the imports, so it is
+	// registered before the vi.doMock above runs, the wrapper is never removed, and it is
+	// what a later import resolves.
+	test("resolves the real proper-lockfile after the capture above is undone", async () => {
+		vi.resetModules()
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const imported = await import("proper-lockfile")
+
+		expect(imported.lock).toBe(realLockfile.lock)
+		expect(vi.isMockFunction(imported.lock)).toBe(false)
 	})
 
 	test("rejects a confined write whose target is outside the confined directory", async () => {

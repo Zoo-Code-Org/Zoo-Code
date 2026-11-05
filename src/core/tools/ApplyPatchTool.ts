@@ -6,6 +6,7 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
+import type { FileObservation } from "../task/observationRegistry"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -58,6 +59,25 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const { patch } = params
 		const { handleError, pushToolResult } = callbacks
 
+		// Every observation this call creates is tracked here by path -> the exact entry the
+		// registry stored. A hunk read is the tool read, not a model read: an exit that does
+		// not publish must withdraw what this call recorded, otherwise a later edit,
+		// search_replace, edit_file or apply_diff finds the leftover partial entry, the
+		// compare-and-swap matches, and the file publishes without the model ever reading it.
+		// Withdrawal is keyed to the stored entry, so an entry a publish re-earned or one a
+		// concurrent read replaced is never discarded here. Declared outside the try because
+		// the finally exit needs it. ApplyDiffTool enforces the same contract for its single
+		// read with forgetPartialObservationIfCurrent; apply_patch reads several files per
+		// call, so this side keeps one entry per path.
+		const toolObservations = new Map<string, FileObservation>()
+		const forgetToolObservationsIfCurrent = (): void => {
+			for (const [observedPath, entry] of toolObservations) {
+				if (task.observationRegistry.get(observedPath) === entry) {
+					task.observationRegistry.forget(observedPath)
+				}
+			}
+			toolObservations.clear()
+		}
 		try {
 			// Validate required parameters
 			if (!patch) {
@@ -114,6 +134,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						const complete =
 							prior === undefined ? false : prior.complete === true && prior.version === preReadToken
 						task.observationRegistry.observe(absolutePath, preReadToken, complete)
+						// Keep the stored entry so a non-publishing exit can withdraw exactly this
+						// observation later.
+						const storedObservation = task.observationRegistry.get(absolutePath)
+						if (storedObservation) {
+							toolObservations.set(absolutePath, storedObservation)
+						}
 					}
 				}
 				return content
@@ -148,13 +174,36 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						toolObservations,
+					)
 				} else if (change.type === "delete") {
 					// Delete file
-					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleDeleteFile(
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						toolObservations,
+					)
 				} else if (change.type === "update") {
 					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						toolObservations,
+					)
 				}
 			}
 
@@ -162,6 +211,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
+		} finally {
+			// Every exit that did not publish passes through here: processAllHunks throwing (the
+			// files read before the failure stay observed), a refused approval, a rooignore or
+			// outside-workspace refusal, and the outer catch. Paths that published were removed
+			// from the tracker at the publish site, so this withdraws only what no publish earned.
+			forgetToolObservationsIfCurrent()
 		}
 	}
 
@@ -172,6 +227,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		toolObservations: Map<string, FileObservation>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -277,6 +333,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+		// This call published the path, so the observation it carries is earned: the sweep in
+		// the finally block leaves it alone.
+		toolObservations.delete(absolutePath)
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
@@ -291,6 +350,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		toolObservations: Map<string, FileObservation>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -337,6 +397,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			return
 		}
 
+		// The delete consumed the observation: the version the hunk read recorded is no longer
+		// reachable at this path, so there is nothing here for the sweep to withdraw.
+		toolObservations.delete(absolutePath)
+
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
 		task.processQueuedMessages()
@@ -349,6 +413,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		toolObservations: Map<string, FileObservation>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -519,6 +584,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// had of the source, so carry the source's completeness instead of the
 						// destination's stale one.
 						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
+						// Tracked like a hunk read: if the move does not publish, this partial entry must
+						// not survive as authority for a destination the model never read.
+						const storedDestObservation = task.observationRegistry.get(moveAbsolutePath)
+						if (storedDestObservation) {
+							toolObservations.set(moveAbsolutePath, storedDestObservation)
+						}
 					}
 				}
 				await task.diffViewProvider.saveDirectly(
@@ -549,6 +620,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
+			// Both paths published: the destination through the save above and the source by being
+			// moved out of the way. Neither observation is left for the sweep to withdraw.
+			toolObservations.delete(moveAbsolutePath)
+			toolObservations.delete(absolutePath)
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
@@ -582,6 +657,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+			// The publish owns this path now, so the sweep in the finally block leaves its
+			// observation alone.
+			toolObservations.delete(absolutePath)
 		}
 
 		task.didEditFile = true

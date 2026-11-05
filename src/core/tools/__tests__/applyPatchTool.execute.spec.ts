@@ -189,6 +189,27 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 -original file content
 +modified file content
 *** End Patch`
+	const mismatchedSecondPatch = `*** Begin Patch
+*** Update File: src/first.ts
+@@
+-original file content
++modified first content
+*** Update File: src/second.ts
+@@
+-context the mocked file does not contain
++modified second content
+*** End Patch`
+
+	const twoUpdatePatch = `*** Begin Patch
+*** Update File: src/first.ts
+@@
+-original file content
++modified first content
+*** Update File: src/second.ts
+@@
+-original file content
++modified second content
+*** End Patch`
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -376,6 +397,85 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
 				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
 		)
+	})
+	it("update: withdraws the hunk-read observation when the user denies the publish", async () => {
+		// apply_patch read the file to compute the hunk, so the tool owns that observation.
+		// The user said no, nothing published, and a leftover partial entry would let a later
+		// edit, search_replace, edit_file or apply_diff publish against a version the model
+		// never read. This is the exit that made apply_patch the remaining tool-read path.
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		const reg = mockTask.observationRegistry
+		mockAskApproval.mockResolvedValue(false)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
+		expect(reg.has(key)).toBe(false)
+	})
+
+	it("update: withdraws the hunk-read observation when the publish throws", async () => {
+		// The outer-catch exit: the hunk read happened, the save blew up before publishing,
+		// and the observation must not survive as authority for a later write.
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		const reg = mockTask.observationRegistry
+		mockSaveDirectly.mockRejectedValue(new Error("extension host went away"))
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalled()
+		expect(reg.has(key)).toBe(false)
+	})
+
+	it("withdraws observations for files read before a hunk failure", async () => {
+		// processAllHunks throws on the second file context mismatch, so the first file was
+		// read, observed and then never published. Its leftover entry is the state a later
+		// targeted edit would wrongly accept.
+		const firstKey = path.resolve(mockTask.cwd, "src/first.ts")
+		const secondKey = path.resolve(mockTask.cwd, "src/second.ts")
+		const reg = mockTask.observationRegistry
+
+		await tool.execute({ patch: mismatchedSecondPatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Failed to process patch"))
+		expect(reg.has(firstKey)).toBe(false)
+		expect(reg.has(secondKey)).toBe(false)
+	})
+
+	it("keeps the observation of a path that published while withdrawing a denied one", async () => {
+		// Two updates in one patch: the first approves and publishes, the second is denied.
+		// Withdrawal is scoped by path and by the exact stored entry, so the published file
+		// keeps the observation its publish ran on (partial, as the hunk read recorded it)
+		// while the denied path is left with nothing.
+		const publishedKey = path.resolve(mockTask.cwd, "src/first.ts")
+		const deniedKey = path.resolve(mockTask.cwd, "src/second.ts")
+		const reg = mockTask.observationRegistry
+		mockAskApproval.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+
+		await tool.execute({ patch: twoUpdatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(reg.has(publishedKey)).toBe(true)
+		expect(reg.get(publishedKey)?.complete).toBe(false)
+		expect(reg.has(deniedKey)).toBe(false)
 	})
 
 	it("update: observes the hunk read so the guarded publish is not unobserved", async () => {

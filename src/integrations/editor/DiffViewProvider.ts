@@ -762,7 +762,12 @@ export class DiffViewProvider {
 				await this.revertDocument(updatedDocument)
 			}
 
-			await this.closeAllDiffViews()
+			// A save belongs to one task, so its post-publish cleanup closes only this provider's
+			// diff tab. closeAllDiffViews() would also close a concurrent task's clean diff view
+			// while that task still holds its activation listener and deferred scroll timer against
+			// a tab that is gone - the same reason the failure teardown above and reset() scope the
+			// close to this provider's own file.
+			await this.closeOwnDiffView(absolutePath)
 
 			// Read auto-close preferences from state; fall back to defaults that
 			// preserve the existing behavior when unset (saveTask was resolved above
@@ -959,7 +964,9 @@ export class DiffViewProvider {
 						await updatedDocument.save()
 					}
 
-					await this.closeAllDiffViews()
+					// A rejection belongs to one task, so this teardown closes only this provider's
+					// diff tab rather than every clean diff view in the workbench.
+					await this.closeOwnDiffView(absolutePath)
 					// The file was newly created for this edit; close its transiently
 					// opened tab before deleting it from disk.
 					await this.closeFileTab(absolutePath)
@@ -986,7 +993,9 @@ export class DiffViewProvider {
 					await vscode.workspace.applyEdit(edit)
 					await updatedDocument.save()
 
-					await this.closeAllDiffViews()
+					// Same scoping as the create branch above: the revert is this task's, so only this
+					// provider's diff tab goes.
+					await this.closeOwnDiffView(absolutePath)
 
 					// Read auto-close preferences from state; fall back to defaults that
 					// preserve the existing behavior when unset.
@@ -1032,6 +1041,13 @@ export class DiffViewProvider {
 		}
 	}
 
+	/**
+	 * Close every clean Zoo diff tab in the workbench. After the per-task teardowns were
+	 * scoped, only the fallback in reset() still calls this, for the case where the provider
+	 * no longer knows which file it was editing; every teardown that has a path in scope
+	 * closes just its own view, so one task's rejected or saved edit cannot disturb another
+	 * task's open diff view.
+	 */
 	private async closeAllDiffViews(): Promise<void> {
 		const closeOps = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)

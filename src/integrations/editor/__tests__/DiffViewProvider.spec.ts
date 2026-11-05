@@ -780,6 +780,47 @@ describe("DiffViewProvider", () => {
 			expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.pinEditor")
 		})
 	})
+	// Installs one of this provider's Zoo diff tabs in the mocked workbench and spies the
+	// real tab-close call, optionally holding that close open on a gate. Tests use it to
+	// wait for, and count, a teardown pass by the effect that matters - the tab actually
+	// going away - rather than by the name of the private helper that closes it.
+	const installDiffTabSpy = (absolutePath: string, hold?: Promise<void>) => {
+		const tab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: absolutePath },
+			},
+			label: absolutePath + ": changes (Editable)",
+			isDirty: false,
+		}
+		Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+		// A second, foreign diff view sits in the same workbench so a teardown that sweeps every
+		// clean diff view is visible to the caller rather than invisible.
+		const otherTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: absolutePath.replace(/([^/]+)$/, "other-task.ts") },
+			},
+			label: "other-task.ts: changes (Editable)",
+			isDirty: false,
+		}
+		Object.setPrototypeOf(otherTab.input, vscode.TabInputTextDiff.prototype)
+		Object.defineProperty(vscode.window.tabGroups, "all", {
+			get: () => [{ tabs: [tab, otherTab] }],
+			configurable: true,
+		})
+		const closedTabs: unknown[] = []
+		vi.mocked(vscode.window.tabGroups.close).mockImplementation(async (closed) => {
+			closedTabs.push(closed)
+			if (hold) {
+				await hold
+			}
+			return true
+		})
+		return { tab, otherTab, closedTabs }
+	}
 
 	describe("closeAllDiffViews method", () => {
 		it("should close diff views including those identified by label", async () => {
@@ -1033,6 +1074,105 @@ describe("DiffViewProvider", () => {
 		await diffViewProvider.reset()
 
 		expect(closedTabs).toEqual([ownTab])
+	})
+
+	// The flow-level version of the tab-scoping check above: a rejected edit is one task's
+	// business, so its teardown must not reach into another task's diff view. Asserted
+	// through revertChanges() and the tabs themselves rather than through the private
+	// helper the teardown now calls, so it stays true whichever helper is used.
+	it("revertChanges() leaves another task's diff view open", async () => {
+		const ownTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: `${mockCwd}/test.ts` },
+			},
+			label: `test.ts: changes (Editable)`,
+			isDirty: false,
+		}
+		const otherTaskTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: `${mockCwd}/other-task.ts` },
+			},
+			label: `other-task.ts: changes (Editable)`,
+			isDirty: false,
+		}
+		for (const tab of [ownTab, otherTaskTab]) {
+			Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+		}
+		Object.defineProperty(vscode.window.tabGroups, "all", {
+			get: () => [{ tabs: [ownTab, otherTaskTab] }],
+			configurable: true,
+		})
+		const closedTabs: unknown[] = []
+		vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+			closedTabs.push(tab)
+			return Promise.resolve(true)
+		})
+		vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+		diffViewProvider["relPath"] = "test.ts"
+		diffViewProvider["editType"] = "modify"
+		diffViewProvider["originalContent"] = "original"
+		diffViewProvider["activeDiffEditor"] = {
+			document: {
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+				getText: vi.fn().mockReturnValue("content"),
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+			},
+		} as unknown as vscode.TextEditor
+		// The tail steps are not what this assertion is about: stub them so the spy counts
+		// only the revert pass's own tab work.
+		diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+		diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+		diffViewProvider["reset"] = vi.fn().mockResolvedValue(undefined)
+
+		await diffViewProvider.revertChanges()
+
+		expect(closedTabs).toEqual([ownTab])
+	})
+
+	// The one closeAllDiffViews() call site that survives is reset()'s fallback for when
+	// the provider no longer knows which file it was editing. That site is chosen, not
+	// overlooked: with no path to scope to, sweeping every clean diff view is all that is
+	// left, and this test is what says so out loud.
+	it("reset() without a relPath still closes every clean diff view", async () => {
+		const ownTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: `${mockCwd}/test.ts` },
+			},
+			isDirty: false,
+		}
+		const otherTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: `${mockCwd}/other-task.ts` },
+			},
+			isDirty: false,
+		}
+		for (const tab of [ownTab, otherTab]) {
+			Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+		}
+		Object.defineProperty(vscode.window.tabGroups, "all", {
+			get: () => [{ tabs: [ownTab, otherTab] }],
+			configurable: true,
+		})
+		const closedTabs: unknown[] = []
+		vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+			closedTabs.push(tab)
+			return Promise.resolve(true)
+		})
+		diffViewProvider["relPath"] = undefined
+
+		await diffViewProvider["reset"]()
+
+		expect(closedTabs).toEqual([ownTab, otherTab])
 	})
 
 	describe("saveDirectly method", () => {
@@ -2541,6 +2681,15 @@ describe("DiffViewProvider", () => {
 				revealRange: vi.fn(),
 			} as unknown as vscode.TextEditor
 			diffViewProvider["activeDiffEditor"] = cleanEditor
+			// Run the real close helpers and watch the tab itself, so the claim below does
+			// not depend on which private helper the post-save cleanup happens to call. The
+			// plain-file close and the preview restore are not this test's subject, so they
+			// stay stubbed.
+			Reflect.deleteProperty(diffViewProvider, "closeAllDiffViews")
+			Reflect.deleteProperty(diffViewProvider, "closeOwnDiffView")
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const { tab: diffTab, closedTabs } = installDiffTabSpy(`${mockCwd}/test.ts`)
 			diffViewProvider.editType = "modify"
 			// A partial observation must stay partial: adopting content that is already on
 			// disk cannot upgrade it into authority for a full-file replacement.
@@ -2560,7 +2709,10 @@ describe("DiffViewProvider", () => {
 			// unlinked; the normal post-save close flow still ran.
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			// Proven on the tab itself: the diff tab this save had is gone. Asserting on the
+			// close call rather than on the private helper keeps the claim true whichever
+			// helper the post-save cleanup uses.
+			expect(closedTabs).toEqual([diffTab])
 		})
 
 		it("does not adopt an autosaved match for an edit that was never authorized", async () => {
@@ -3254,7 +3406,7 @@ describe("DiffViewProvider", () => {
 
 		it("saveChanges() closes the file tab when the file was not open and untouched", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
-			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			;(diffViewProvider as any).closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
 			;(diffViewProvider as any).closeFileTab = closeFileTab
 			;(diffViewProvider as any).relPath = "mock-target-file.ts"
 			;(diffViewProvider as any).documentWasOpen = false
@@ -3277,8 +3429,7 @@ describe("DiffViewProvider", () => {
 			// tabs are restored and the provider reset twice.
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
 			applyEdit.mockResolvedValue(true)
-			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
-			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			const { closedTabs } = installDiffTabSpy(mockTargetPath)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["relPath"] = "mock-target-file.ts"
 			diffViewProvider["editType"] = "modify"
@@ -3317,7 +3468,9 @@ describe("DiffViewProvider", () => {
 			await Promise.all([first, second])
 
 			expect(applyEdit).toHaveBeenCalledTimes(1)
-			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			// One pass over the tabs across both callers: counted on the tab actually
+			// closing, not on the helper the pass happens to call.
+			expect(closedTabs).toHaveLength(1)
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 			expect(reset).toHaveBeenCalledTimes(1)
 		})
@@ -3328,7 +3481,7 @@ describe("DiffViewProvider", () => {
 			// tabs is duplicate cleanup, so the second caller waits for the first.
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
 			applyEdit.mockResolvedValue(true)
-			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			const { closedTabs } = installDiffTabSpy(mockTargetPath)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["relPath"] = "mock-target-file.ts"
 			diffViewProvider["editType"] = "modify"
@@ -3347,6 +3500,8 @@ describe("DiffViewProvider", () => {
 			const second = diffViewProvider.revertChanges()
 			await Promise.all([first, second])
 
+			// Only this provider's tab is touched, whichever caller ran the pass.
+			expect(new Set(closedTabs).size).toBe(1)
 			expect(applyEdit).toHaveBeenCalledTimes(1)
 		})
 		// The save's post-publish cleanup touches the same buffers and tabs a cancellation's
@@ -3356,9 +3511,8 @@ describe("DiffViewProvider", () => {
 			// A cancellation can reach revertChanges() while the publish is awaiting. That teardown
 			// already closed the diff views and applied the auto-close preferences; a second pass
 			// would close the same tabs and re-run the same document revert.
-			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
-			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			const { closedTabs } = installDiffTabSpy(mockTargetPath)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
@@ -3399,7 +3553,8 @@ describe("DiffViewProvider", () => {
 			// Exactly one teardown ran - the cancellation's - and the save added no cleanup of its
 			// own on top of it.
 			expect(applyEdit).toHaveBeenCalledTimes(1)
-			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			// Only this provider's tab is touched, by either caller.
+			expect(new Set(closedTabs).size).toBe(1)
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 		})
 
@@ -3410,12 +3565,7 @@ describe("DiffViewProvider", () => {
 			const gate = new Promise<void>((resolve) => {
 				release = resolve
 			})
-			let cleanupEntered = false
-			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
-				cleanupEntered = true
-				await gate
-			})
-			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			const { closedTabs } = installDiffTabSpy(mockTargetPath, gate)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
@@ -3434,7 +3584,7 @@ describe("DiffViewProvider", () => {
 			})
 
 			const save = diffViewProvider.saveChanges(false)
-			while (!cleanupEntered) {
+			while (closedTabs.length === 0) {
 				await new Promise((resolve) => setImmediate(resolve))
 			}
 
@@ -3448,7 +3598,8 @@ describe("DiffViewProvider", () => {
 			await Promise.all([save, revert])
 
 			// One pass over the tabs, and the cancellation did not repeat the document revert.
-			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			// Only this provider's tab is touched, by either caller.
+			expect(new Set(closedTabs).size).toBe(1)
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
@@ -3460,12 +3611,7 @@ describe("DiffViewProvider", () => {
 			const gate = new Promise<void>((resolve) => {
 				release = resolve
 			})
-			let cleanupEntered = false
-			const gatedCleanup = vi.fn().mockImplementation(async () => {
-				cleanupEntered = true
-				await gate
-			})
-			diffViewProvider["closeAllDiffViews"] = gatedCleanup
+			const { closedTabs } = installDiffTabSpy(mockTargetPath, gate)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
 			const reset = vi.fn().mockResolvedValue(undefined)
@@ -3487,7 +3633,7 @@ describe("DiffViewProvider", () => {
 			})
 
 			const save = diffViewProvider.saveChanges(false)
-			while (!cleanupEntered) {
+			while (closedTabs.length === 0) {
 				await new Promise((resolve) => setImmediate(resolve))
 			}
 
@@ -3515,14 +3661,8 @@ describe("DiffViewProvider", () => {
 			const gate = new Promise<void>((resolve) => {
 				release = resolve
 			})
-			let cleanupEntered = false
-			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
-				cleanupEntered = true
-				await gate
-			})
+			const { closedTabs } = installDiffTabSpy(mockTargetPath, gate)
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
-			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
-			diffViewProvider["closeOwnDiffView"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
@@ -3545,7 +3685,7 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["deferredScrollTimer"] = setTimeout(() => {}, 10_000)
 
 			const save = diffViewProvider.saveChanges(false)
-			while (!cleanupEntered) {
+			while (closedTabs.length === 0) {
 				await new Promise((resolve) => setImmediate(resolve))
 			}
 
@@ -3565,7 +3705,10 @@ describe("DiffViewProvider", () => {
 			// One pass over the tabs and buffers: the waiting cancellation repeated neither the
 			// document revert nor the preview-tab restoration.
 			expect(applyEdit).not.toHaveBeenCalled()
-			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			// Both the save pass and the cancellation's session finalization close this
+			// provider's own tab; what must not happen is either of them touching another
+			// task's view.
+			expect(new Set(closedTabs).size).toBe(1)
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 
 			// A session a cancellation is closing reports no completed save, so no caller can present
@@ -3851,18 +3994,11 @@ describe("DiffViewProvider", () => {
 			const gate = new Promise<void>((resolve) => {
 				release = resolve
 			})
-			let cleanupEntered = false
-			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
-				cleanupEntered = true
-				await gate
-			})
+			const { closedTabs } = installDiffTabSpy(mockTargetPath, gate)
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
-			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
-			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
-			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
-			// reset() closes this provider's diff tab; stub it so closeOwnDiffView counts only the
-			// save's own cleanup pass.
+			// reset() also closes this provider's diff tab; stub it so the close spy counts
+			// only the pass under test.
 			diffViewProvider["reset"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
@@ -3882,7 +4018,7 @@ describe("DiffViewProvider", () => {
 
 			// The revert starts its pass first and is held inside it.
 			const revert = diffViewProvider.revertChanges()
-			while (!cleanupEntered) {
+			while (closedTabs.length === 0) {
 				await new Promise((resolve) => setImmediate(resolve))
 			}
 
@@ -3901,7 +4037,9 @@ describe("DiffViewProvider", () => {
 
 			// The save's cleanup never ran, so it restored nothing; the owning revert pass did the
 			// restoring exactly once.
-			expect(closeOwnDiffView).not.toHaveBeenCalled()
+			// The rejected save ran no cleanup of its own: the only tab close in the whole
+			// exchange is the owning revert pass's own view going away.
+			expect(closedTabs).toHaveLength(1)
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 		})
 
