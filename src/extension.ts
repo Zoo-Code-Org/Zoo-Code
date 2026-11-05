@@ -29,6 +29,7 @@ import { formatLanguage } from "./shared/language"
 import { ContextProxy } from "./core/config/ContextProxy"
 import { ClineProvider } from "./core/webview/ClineProvider"
 import { registerCopilotModelBroadcast } from "./services/language-models/copilotModelBroadcast"
+import { ClineProviderFactory } from "./core/webview/ClineProviderFactory"
 import { WebviewFocusTracker } from "./core/webview/WebviewFocusTracker"
 import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
 import { Terminal } from "./integrations/terminal/Terminal"
@@ -395,7 +396,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	})
 
-	return new API(outputChannel, provider, socketPath, enableLogging)
+	const providerFactory = new ClineProviderFactory(context, outputChannel, webviewFocusTracker)
+	return new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
 }
 
 // This method is called when your extension is deactivated.

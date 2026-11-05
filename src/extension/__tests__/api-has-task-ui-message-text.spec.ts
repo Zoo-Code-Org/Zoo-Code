@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { readTaskMessages, TaskMessagesReadError } from "../../core/task-persistence/taskMessages"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
@@ -34,7 +35,7 @@ describe("API#hasTaskUiMessageText", () => {
 			on: vi.fn(),
 		} as unknown as ClineProvider
 
-		api = new API(mockOutputChannel, mockProvider)
+		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory())
 	})
 
 	it("returns true when a persisted ui message contains the text", async () => {

@@ -679,6 +679,700 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(updateTaskHistorySpy).toHaveBeenLastCalledWith(historyItem)
 		})
 
+		it("rolls back every mode-switch write when the mode-linked profile activation fails", async () => {
+			// Same typed double as the abort rollback test: the private members stay
+			// out of the Object.assign intersection type.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The task, pin, and shared writes all land; the mode-linked profile
+			// activation then rejects. The caller (submitUserMessage) logs the failure
+			// and delivers the message, so no write may stand: the message must run the
+			// pre-switch mode against the unchanged profile, not a half-applied switch
+			// that pairs the new task mode with the old profile's settings.
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// Seed both pre-switch mode stores explicitly: the pin buffer and the
+			// shared ContextProxy value, so the restore assertions have a value that
+			// differs from the switched "architect".
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
+				new Error("activation read failed"),
+			)
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"activation read failed",
+			)
+
+			// No partial application: the task keeps its previous mode, the history
+			// entry is restored, and the view's durable pin and the shared mode are
+			// rolled back too.
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(updateTaskHistorySpy).toHaveBeenLastCalledWith(historyItem)
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider.getValue("mode")).toBe("code")
+		})
+
+		it("keeps the committed mode switch when the post-activation state refresh fails", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The mode-linked profile resolves and its activation lands (writing the
+			// shared profile like the real activation does); only the trailing state
+			// post rejects. By then the switch has fully committed - ModeChanged was
+			// emitted and the activation persisted the new profile - so a UI refresh
+			// failure must not roll the mode back: that would pair the old mode with
+			// the new profile, the very mismatch the reconcile exists to prevent.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "architect-profile",
+				id: "architect-profile-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			provider["activateProviderProfileUnlocked"] = vi.fn().mockImplementation(async () => {
+				await provider.contextProxy.setValue("currentApiConfigName", "architect-profile")
+			})
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post failed"))
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask)
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("architect-profile")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+		})
+
+		it("keeps the switched mode when the mode-linked activation fails after writing", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The mode-linked activation lands its shared writes and only then rejects
+			// (e.g. its own state post or setModeConfig step failing). A mode-only rollback
+			// would pair the old mode with the profile the activation already switched to,
+			// the mismatch the reconcile exists to prevent: the switch must stand and the
+			// error must still surface.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "architect-profile",
+				id: "architect-profile-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			provider["activateProviderProfileUnlocked"] = vi.fn().mockImplementation(async (_args, options) => {
+				// The real activation flips the committed-switch guard when it writes
+				// the activated profile; mirror that here.
+				options?.onSharedWriteStart?.()
+				await provider.contextProxy.setValue("currentApiConfigName", "architect-profile")
+				throw new Error("activation step failed")
+			})
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"activation step failed",
+			)
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("architect-profile")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+		})
+
+		it("keeps the switched mode when the mutation signal aborted before the failure", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The pin and shared writes land; then the mutation timeout aborts this
+			// switch and a later step rejects. The queue has already advanced past the
+			// timed-out switch, so a newer mutation may own the mode stores: the late
+			// rollback must not replay the pre-switch values over them.
+			const controller = new AbortController()
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
+				controller.abort()
+				throw new Error("late activation read failure")
+			})
+			await provider.addClineToStack(mockTask)
+
+			await expect(
+				provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal),
+			).rejects.toThrow("late activation read failure")
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+		})
+
+		it("does not report ModeChanged for a mode switch that gets reconciled", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+			const emitSpy = vi.spyOn(provider, "emit")
+
+			// The task, pin, and shared writes land and the activation read then rejects:
+			// the reconcile rolls every store back, so listeners must not be left tracking
+			// the rolled-back mode: ModeChanged must not have fired for it, and the task's
+			// TaskModeSwitched must be re-emitted with the restored mode.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
+				new Error("activation read failed"),
+			)
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"activation read failed",
+			)
+
+			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "architect")
+			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", "test-task-id", "architect")
+			expect(mockTask.emit).toHaveBeenLastCalledWith("taskModeSwitched", "test-task-id", "code")
+		})
+
+		it("keeps the committed switch when the lock-path state refresh fails", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// With the workspace profile lock on the switch commits without a mode-linked
+			// activation; the trailing post now runs outside the reconciled region, so its
+			// failure must leave the committed switch standing instead of rolling the mode
+			// stores back.
+			vi.spyOn(provider["context"].workspaceState, "get").mockImplementation((key: unknown, def?: unknown) =>
+				key === "lockApiConfigAcrossModes" ? true : def,
+			)
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post failed"))
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask)
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+		})
+
+		it("records the mode default from the view's pinned profile, not the shared slot", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The view pins profile-x while a sibling view's activation moved the shared
+			// slot to profile-y. Recording the mode default from the shared slot would make
+			// profile-y the default for the new mode in every view, though this view was
+			// running profile-x.
+			await provider.setValue("currentApiConfigName", "profile-x")
+			await provider.contextProxy.setValue("currentApiConfigName", "profile-y")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.openrouter },
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.anthropic },
+			])
+			const setModeConfig = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask)
+
+			expect(setModeConfig).toHaveBeenCalledWith("architect", "x-id")
+		})
+
+		it("reconciles the switch when the mode-linked profile lookup fails", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The REAL activation is exercised: its profile lookup throws before the
+			// activated profile is written, so the committed-switch guard must still be
+			// off (the callback fires only after activateProfile resolves) and the
+			// reconcile must restore every mode write.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "architect-profile",
+				id: "architect-profile-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockRejectedValue(
+				new Error("profile not found"),
+			)
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"profile not found",
+			)
+
+			expect(provider.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+		})
+
+		it("keeps the switch when the activation fails after the profile write", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The real activation resolves its profile lookup - flipping the
+			// committed-switch guard at that point - and only a later shared write
+			// fails: the activated profile is already in place, so the switch must
+			// be kept rather than reconciled.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "architect-profile",
+				id: "architect-profile-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				id: "architect-profile-id",
+				name: "architect-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
+				new Error("set-mode-config failed"),
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"set-mode-config failed",
+			)
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("architect-profile")
+			// The kept switch must leave the task state and history on the
+			// committed mode too: rolling the task-side writes back here would
+			// diverge the task from the mode stores.
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(updateTaskHistorySpy).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "architect" }))
+		})
+
+		it("reports ModeChanged for a switch the catch keeps after activation wrote", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The activation writes the activated profile and only then rejects: the catch
+			// keeps the switch, and listeners plus the webview must still learn the
+			// committed mode before the error surfaces.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
+				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "architect-profile",
+				id: "architect-profile-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			const emitSpy = vi.spyOn(provider, "emit")
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			provider["activateProviderProfileUnlocked"] = vi.fn().mockImplementation(async (_args, options) => {
+				options?.onSharedWriteStart?.()
+				await provider.contextProxy.setValue("currentApiConfigName", "architect-profile")
+				throw new Error("activation step failed")
+			})
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"activation step failed",
+			)
+
+			expect(emitSpy).toHaveBeenCalledWith("modeChanged", "architect")
+			expect(postSpy).toHaveBeenCalled()
+			expect(provider.getValue("mode")).toBe("architect")
+		})
+
+		it("reports the committed mode when the signal aborts after the mode writes", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The pin and shared mode writes land, then the mutation signal aborts during
+			// the activation reads. The activation is skipped, but the committed mode
+			// must still reach listeners and the webview through the emit/post tail.
+			const emitSpy = vi.spyOn(provider, "emit")
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const controller = new AbortController()
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
+				controller.abort()
+				return undefined
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(emitSpy).toHaveBeenCalledWith("modeChanged", "architect")
+			expect(postSpy).toHaveBeenCalled()
+		})
+
+		it("stays silent when a newer mutation supersedes the aborted switch", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The abort lands after this switch's mode writes, and a newer mutation
+			// immediately moves the mode stores to its own mode: this switch's commit
+			// is superseded, so announcing it would clobber the newer owner - the
+			// emit/post tail must stay silent.
+			const emitSpy = vi.spyOn(provider, "emit")
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const controller = new AbortController()
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
+				controller.abort()
+				await provider.setValue("mode", "ask")
+				return undefined
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			expect(provider.getValue("mode")).toBe("ask")
+			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "architect")
+			expect(postSpy).not.toHaveBeenCalled()
+		})
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
 			const mockTask = Object.assign(
 				{} as Task,
@@ -1723,21 +2417,13 @@ describe("ClineProvider - Sticky Mode", () => {
 				[tempId]: { mode: "architect", currentApiConfigName: "stale-profile" },
 			})
 
-			// The constructor fires loadViewState without awaiting it. Capture the in-flight
-			// promise so the assertions below run against a settled buffer instead of racing
-			// a fixed delay that only passes by luck on a fast machine.
-			// Private member: no typed API exposes the load promise, hence the double assertion.
-			const proto = ClineProvider.prototype as unknown as { loadViewState: () => Promise<void> }
-			const originalLoad = proto.loadViewState
-			let loadDone: Promise<void> = Promise.resolve()
-			proto.loadViewState = function (this: unknown) {
-				loadDone = originalLoad.call(this)
-				return loadDone
-			}
 			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
 			try {
 				expect(fresh.viewId).toBe(tempId)
-				await loadDone
+
+				// Await the load itself instead of a fixed timer: the negative
+				// assertion must run after the load has definitely finished.
+				await fresh["loadViewState"]()
 
 				// The unowned temporary-id entry must not be adopted...
 				expect(fresh["viewLocalState"]).toStrictEqual({})
@@ -1747,9 +2433,6 @@ describe("ClineProvider - Sticky Mode", () => {
 				expect(state.mode).toBe("code")
 				expect(state.currentApiConfigName).not.toBe("stale-profile")
 			} finally {
-				proto.loadViewState = originalLoad
-				// The constructor registers the instance in ClineProvider.activeInstances;
-				// leaving it there would leak it into every later test in this worker.
 				await fresh.dispose()
 			}
 		})
@@ -1783,22 +2466,23 @@ describe("ClineProvider - Sticky Mode", () => {
 			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
 			const proxy = new ContextProxy(mockContext)
 			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
-			expect(fresh.viewId).toBe(tempId)
-
+			// Captured before the try below so its finally block can put the mock back.
 			const originalUpdate = mockContext.globalState.update
-			mockContext.globalState.update = vi.fn().mockImplementation((key: string, _value: unknown) => {
-				if (key === "viewStates") {
-					return Promise.reject(new Error("storage unavailable"))
-				}
-				return Promise.resolve()
-			})
-
 			try {
+				expect(fresh.viewId).toBe(tempId)
+
+				mockContext.globalState.update = vi.fn().mockImplementation((key: string, _value: unknown) => {
+					if (key === "viewStates") {
+						return Promise.reject(new Error("storage unavailable"))
+					}
+					return Promise.resolve()
+				})
+
 				await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
 				expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
 			} finally {
-				// Restore even when an assertion fails: a rejecting stub left in place makes
-				// every later test in this worker fail for an unrelated reason.
+				// Restored first: dispose below writes globalState, and the rejecting
+				// mock would make that teardown reject and swallow the assertion failure.
 				mockContext.globalState.update = originalUpdate
 				await fresh.dispose()
 			}

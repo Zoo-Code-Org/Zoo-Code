@@ -7,6 +7,14 @@ import { RooCodeEventName, type ModeConfig, type RooCodeSettings } from "@roo-co
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
+// The merged API constructor requires a ClineProviderFactory; these specs drive
+// tab creation through the mocked createClineTabPanel, so the factory must never
+// be called. Cast structurally: the class type carries private members.
+const makeUnusedTabFactory = () =>
+	({
+		createInNewTab: vi.fn().mockRejectedValue(new Error("Unexpected editor-tab creation in this test")),
+	}) as unknown as ConstructorParameters<typeof API>[2]
+
 const { createClineTabPanelMock } = vi.hoisted(() => ({
 	createClineTabPanelMock: vi.fn(),
 }))
@@ -70,6 +78,7 @@ type ProviderDouble = EventEmitter & {
 	isDisposed: boolean
 	viewStateReadiness: Promise<void>
 	taskHistoryStore: Map<string, unknown>
+	webviewFocusTracker: typeof focusTrackerDouble
 }
 
 type TaskDouble = EventEmitter & {
@@ -79,6 +88,10 @@ type TaskDouble = EventEmitter & {
 	denyAsk: Mock<() => void>
 	handleWebviewAskResponse: Mock<(response: "messageResponse", text?: string, images?: string[]) => void>
 }
+
+// Sentinel double: the API must forward the source provider's focus tracker to
+// newly created tab providers, so the tests assert this exact object arrives.
+const focusTrackerDouble = { kind: "focus-tracker-double" }
 
 const configuration: RooCodeSettings = {}
 
@@ -104,6 +117,7 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.isDisposed = false
 	provider.viewStateReadiness = Promise.resolve()
 	provider.taskHistoryStore = new Map()
+	provider.webviewFocusTracker = focusTrackerDouble
 	return provider
 }
 
@@ -125,7 +139,7 @@ describe("API task controls", () => {
 		vi.clearAllMocks()
 		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		sidebarProvider = createProvider("sidebar-task")
-		api = new API(outputChannel, asClineProvider(sidebarProvider))
+		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 	})
 
 	describe("startNewTask", () => {
@@ -141,6 +155,7 @@ describe("API task controls", () => {
 			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
+				webviewFocusTracker: focusTrackerDouble,
 			})
 			expect(newTabProvider.evictCurrentTask).toHaveBeenCalledOnce()
 			expect(newTabProvider.createTask).toHaveBeenCalledWith(
@@ -168,6 +183,7 @@ describe("API task controls", () => {
 			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
+				webviewFocusTracker: focusTrackerDouble,
 			})
 			expect(newTabProvider.createTask).toHaveBeenCalledWith(
 				"keep editors",
@@ -176,6 +192,17 @@ describe("API task controls", () => {
 				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
 				configuration,
 			)
+		})
+
+		it("fails task creation when the view state is not ready within the readiness bound", async () => {
+			// A readiness promise that never settles: the bound must reject task creation
+			// instead of letting createTask run against stale shared defaults.
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			await expect(api.startNewTask({ configuration, text: "new task" })).rejects.toThrow(
+				"Timed out waiting for the view state to become ready",
+			)
+			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
 		})
 
 		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
@@ -238,8 +265,6 @@ describe("API task controls", () => {
 
 			try {
 				await settled
-				// The bound rejected before createTask could run against stale defaults.
-				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
 			} finally {
 				vi.useRealTimers()
 			}
@@ -407,7 +432,7 @@ describe("API task controls", () => {
 
 		it("responds without switching modes and logs when the requested mode is invalid", async () => {
 			const task = createTask("task-invalid-mode")
-			api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory(), undefined, true)
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
 			await expect(
@@ -443,7 +468,7 @@ describe("API task controls", () => {
 	})
 })
 
-describe("API task controls - registry identity, listener wiring, and mode-switch failure handling", () => {
+describe("API task controls - per-view review fixes", () => {
 	let outputChannel: vscode.OutputChannel
 	let sidebarProvider: ProviderDouble
 	let api: API
@@ -452,7 +477,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 		vi.clearAllMocks()
 		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		sidebarProvider = createProvider("sidebar-task")
-		api = new API(outputChannel, asClineProvider(sidebarProvider))
+		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 	})
 
 	it("keeps the new registration when a replaced task instance tears down", async () => {
@@ -473,7 +498,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 
 	it("still delivers the follow-up answer when the mode switch fails", async () => {
 		const task = createTask("task-failing-switch")
-		api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
+		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory(), undefined, true)
 		sidebarProvider.handleModeSwitch.mockRejectedValueOnce(new Error("persist failed"))
 		sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
@@ -521,7 +546,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 
 		it("rejects the task ask and global-state surface in production mode", async () => {
 			sidebarProvider.context = withProductionContext()
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 
 			// Pin the method name in each message: the guard builds the error from the
 			// method argument, and a partial match would leave the argument untested.
@@ -542,7 +567,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 
 			expect(api.getGlobalState("mode")).toBe("code")
 			expect(get).toHaveBeenCalledWith("mode")
@@ -558,7 +583,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 
 			// The generic only constrains typed callers; a crafted runtime key must
 			// be refused by the schema check before it reaches globalState storage.
@@ -581,7 +606,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 
 			// mimoApiKey and openAiHeaders are schema keys but carry credentials; the
 			// test-only API must refuse them before storage access, both directions.
@@ -605,7 +630,7 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
 
 			// Task history carries user PII and stays unreachable even though it is a
 			// plain GlobalState key.

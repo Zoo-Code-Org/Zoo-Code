@@ -6,6 +6,7 @@ import { RooCodeEventName, type TaskEvents, type TaskProviderEvents } from "@roo
 
 import type { Task } from "../../core/task/Task"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 import { API } from "../api"
 
 vi.mock("vscode")
@@ -24,7 +25,7 @@ function setup() {
 		dispose: vi.fn(),
 	}
 	// The provider double supplies the typed event subscription API used by the constructor.
-	const api = new API(output, provider as unknown as ClineProvider)
+	const api = new API(output, provider as unknown as ClineProvider, makeClineProviderFactory())
 	return { api, provider }
 }
 
