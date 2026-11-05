@@ -95,6 +95,25 @@ export const settingsTabTrigger =
 	"whitespace-nowrap overflow-hidden min-w-0 h-12 px-4 py-3 box-border flex items-center border-l-2 border-transparent text-vscode-foreground opacity-70 hover:bg-vscode-list-hoverBackground data-[compact=true]:w-12 data-[compact=true]:p-4"
 export const settingsTabTriggerActive = "opacity-100 border-vscode-focusBorder bg-vscode-list-activeSelectionBackground"
 
+// Command-list snapshot of a settings state object. Entries are compared by value because every
+// state post delivers freshly deserialized arrays; reference identity carries no meaning here.
+interface CommandListSnapshot {
+	allowedCommands?: string[]
+	deniedCommands?: string[]
+	workspaceCommandListsEnabled?: boolean
+}
+
+const commandListSnapshot = (state: CommandListSnapshot): string =>
+	JSON.stringify([
+		state.allowedCommands ?? [],
+		state.deniedCommands ?? [],
+		state.workspaceCommandListsEnabled ?? false,
+	])
+
+const commandListsEquivalent = (left?: string[], right?: string[]) =>
+	left === right ||
+	(!!left && !!right && left.length === right.length && left.every((entry, index) => entry === right[index]))
+
 export interface SettingsViewRef {
 	checkUnsaveChanges: (then: () => void) => void
 }
@@ -152,6 +171,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
+
+	// Command-list values the dialog last displayed, so a later state post can be recognized as
+	// an external change rather than a restatement of what is already shown.
+	const lastDisplayedCommandSnapshot = useRef(commandListSnapshot(extensionState))
+	// An in-flight user edit of either list claims ownership of the lists until Save, discard, or
+	// a full reseed; external list updates must not silently overwrite it.
+	const commandListsTouched = useRef(false)
 
 	const {
 		alwaysAllowReadOnly,
@@ -235,6 +261,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
+		lastDisplayedCommandSnapshot.current = commandListSnapshot(extensionState)
+		commandListsTouched.current = false
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -246,13 +274,77 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledSettingsImportedAt.current = settingsImportedAt
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+		lastDisplayedCommandSnapshot.current = commandListSnapshot(extensionState)
+		commandListsTouched.current = false
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
+
+	// The command lists can change in the extension host while this dialog is open (for example,
+	// a settings-file edit landing mid-session). Fold exactly those fields into the edit buffer on
+	// every state post that changes them, so a later Save cannot rewrite the configuration layer
+	// from a list that never showed the new entry. List fields are held back while the user has an
+	// in-flight list edit (in-flight edits win); every other buffered field is left untouched and
+	// the dirty flag is never cleared here, keeping the buffer's Save-gated semantics.
+	useEffect(() => {
+		const snapshot = commandListSnapshot(extensionState)
+		if (snapshot === lastDisplayedCommandSnapshot.current) {
+			return
+		}
+
+		setCachedState((prevState) => {
+			const merged: CommandListSnapshot = {}
+			let changedFields = 0
+
+			if (!commandListsTouched.current) {
+				if (!commandListsEquivalent(prevState.allowedCommands, extensionState.allowedCommands)) {
+					merged.allowedCommands = extensionState.allowedCommands
+					changedFields++
+				}
+				if (!commandListsEquivalent(prevState.deniedCommands, extensionState.deniedCommands)) {
+					merged.deniedCommands = extensionState.deniedCommands
+					changedFields++
+				}
+			}
+			if (prevState.workspaceCommandListsEnabled !== extensionState.workspaceCommandListsEnabled) {
+				merged.workspaceCommandListsEnabled = extensionState.workspaceCommandListsEnabled
+				changedFields++
+			}
+
+			// The stamp records the lists this merge leaves on screen, never the posted
+			// state outright: an entry held back by an in-flight edit was never displayed,
+			// and a baseline claiming it had been lets the save erase it as a user
+			// deletion without warning. While the lists are held back the buffered lists
+			// are themselves unposted, so the stamp keeps its prior lists instead - a
+			// deletion inside the buffered edit must stay in the baseline for the save to
+			// apply it rather than resurrect the deleted entry as an external addition.
+			const [stampAllowed, stampDenied] = commandListsTouched.current
+				? (JSON.parse(lastDisplayedCommandSnapshot.current) as [string[], string[], boolean])
+				: [
+						merged.allowedCommands ?? prevState.allowedCommands,
+						merged.deniedCommands ?? prevState.deniedCommands,
+					]
+			lastDisplayedCommandSnapshot.current = commandListSnapshot({
+				allowedCommands: stampAllowed,
+				deniedCommands: stampDenied,
+				workspaceCommandListsEnabled:
+					merged.workspaceCommandListsEnabled ?? prevState.workspaceCommandListsEnabled,
+			})
+
+			if (changedFields === 0) {
+				return prevState
+			}
+			return { ...prevState, ...merged }
+		})
+	}, [extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
 			if (prevState[field] === value) {
 				return prevState
+			}
+
+			if (field === "allowedCommands" || field === "deniedCommands") {
+				commandListsTouched.current = true
 			}
 
 			setChangeDetected(true)
@@ -382,8 +474,17 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
+			const [lastDisplayedAllowed, lastDisplayedDenied] = JSON.parse(lastDisplayedCommandSnapshot.current) as [
+				string[],
+				string[],
+				boolean,
+			]
 			vscode.postMessage({
 				type: "updateSettings",
+				commandListBaseline: {
+					allowedCommands: lastDisplayedAllowed,
+					deniedCommands: lastDisplayedDenied,
+				},
 				updatedSettings: {
 					language,
 					alwaysAllowReadOnly: alwaysAllowReadOnly ?? undefined,
@@ -465,6 +566,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
+			// Saving commits the buffered lists, so they no longer hold off external updates.
+			commandListsTouched.current = false
+			lastDisplayedCommandSnapshot.current = commandListSnapshot({
+				allowedCommands,
+				deniedCommands,
+				workspaceCommandListsEnabled: cachedState.workspaceCommandListsEnabled,
+			})
 			setChangeDetected(false)
 		}
 	}
@@ -488,6 +596,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (confirm) {
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
+				lastDisplayedCommandSnapshot.current = commandListSnapshot(extensionState)
+				commandListsTouched.current = false // Buffered edits are gone, so live lists are not held off
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}

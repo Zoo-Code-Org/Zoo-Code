@@ -691,6 +691,32 @@ describe("SettingsView - Allowed Commands", () => {
 		)
 	})
 
+	it("sends the lists displayed at open as the save baseline, unmoved by an in-flight list edit", () => {
+		// The save path classifies divergence between "user deleted this" and "the
+		// settings file gained this" from the baseline, so the payload must carry what
+		// the dialog displayed BEFORE this save - not the edited list it is submitting,
+		// and not the committed value the post-save bookkeeping writes back.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			state: { allowedCommands: ["git"], alwaysAllowExecute: true },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		// An in-flight addition lands in the edit buffer only.
+		const input = within(content).getByTestId("command-input")
+		fireEvent.change(input, { target: { value: "npm test" } })
+		fireEvent.click(within(content).getByTestId("add-command-button"))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: { allowedCommands: ["git"], deniedCommands: [] },
+				updatedSettings: expect.objectContaining({ allowedCommands: ["git", "npm test"] }),
+			}),
+		)
+	})
+
 	it("removes command from the list", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()

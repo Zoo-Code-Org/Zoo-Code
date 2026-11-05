@@ -3445,13 +3445,22 @@ export class ClineProvider
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
-			// Enforce and display the effective lists that
-			// resolveEffectiveCommandLists composes from the global-state and
-			// workspace-scope configuration layers; getStateToPostToWebview shows
-			// exactly these values, so display cannot drift from enforcement.
+			// The effective lists composed from the global-state and
+			// workspace-scope configuration layers, scoped to the window's
+			// first folder; getStateToPostToWebview shows exactly these values,
+			// so the dialog cannot drift from what this state posts. In a
+			// multi-root window a task in another folder is judged by that
+			// folder's lists instead — enforcement re-composes the pair from
+			// the raw global layers below, so the displayed pair describes the
+			// window, not the task.
 			allowedCommands: effectiveCommandLists.allowed,
 			deniedCommands: effectiveCommandLists.denied,
 			workspaceCommandListsEnabled: gateEnabled,
+			// The global layers before workspace composition, so command
+			// enforcement can re-compose the pair against each task's own
+			// folder; the window-scoped pair above stays what display shows.
+			globalAllowedCommands: allowScopes.global,
+			globalDeniedCommands: denyScopes.global,
 			soundEnabled: stateValues.soundEnabled ?? false,
 			ttsEnabled: stateValues.ttsEnabled ?? false,
 			ttsSpeed: stateValues.ttsSpeed ?? 1.0,

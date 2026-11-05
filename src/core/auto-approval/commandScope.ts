@@ -24,17 +24,52 @@ export interface CommandListInspection {
 }
 
 /**
- * The configuration object for every command-list read and write, scoped to
- * the first workspace folder. Sharing one scoped access path keeps the two
- * sides symmetric: `inspect()` can report `workspaceFolderValue`, and
- * `ConfigurationTarget.WorkspaceFolder` updates are legal (the API contract
- * throws for that target when the configuration is not scoped to a
- * resource). In a multi-root workspace only the first folder's values are in
- * scope; with no folder open the configuration is unscoped and reports no
- * folder value.
+ * The configuration object for every command-list read and write. Scoped to
+ * `folderResource` when the caller resolved one — per-task enforcement reads
+ * the folder that task runs in — and to the first workspace folder otherwise,
+ * the default the display, save, and seeding callers keep. Sharing one scoped
+ * access path keeps the two sides symmetric: `inspect()` can report
+ * `workspaceFolderValue`, and `ConfigurationTarget.WorkspaceFolder` updates
+ * are legal (the API contract throws for that target when the configuration
+ * is not scoped to a resource). With no folder open — or when a supplied
+ * resource resolved to nothing, see {@link commandListFolderForResource} —
+ * the configuration is unscoped or defaults to the first folder and reports
+ * only what that lookup can see.
  */
-export function commandListConfiguration(): vscode.WorkspaceConfiguration {
-	return vscode.workspace.getConfiguration(Package.name, vscode.workspace.workspaceFolders?.[0]?.uri)
+export function commandListConfiguration(folderResource?: vscode.Uri): vscode.WorkspaceConfiguration {
+	return vscode.workspace.getConfiguration(
+		Package.name,
+		folderResource ?? vscode.workspace.workspaceFolders?.[0]?.uri,
+	)
+}
+
+/**
+ * Resolves the workspace folder a task's `cwd` lives in, so command-list
+ * enforcement scopes its configuration reads to the folder the task belongs
+ * to instead of the window's first folder. A child task inherits the working
+ * directory of the task it came from, so it resolves to the same folder
+ * without separate plumbing.
+ *
+ * @param cwd - The task's working directory. A blank cwd, or one that names
+ * no workspace root (a removed or relocated folder), yields `undefined`,
+ * which leaves every read on its first-folder default — the behavior such a
+ * cwd had before per-task scoping existed, never a guess at a different one.
+ * @returns The containing folder's URI, or `undefined` when cwd resolves to
+ * no root.
+ */
+export function commandListFolderForResource(cwd?: string): vscode.Uri | undefined {
+	if (!cwd) {
+		return undefined
+	}
+
+	// Guarded like the configuration reads this feeds: a lookup that cannot
+	// run stands in for a cwd naming no root, so enforcement degrades to the
+	// first-folder default instead of failing the approval decision.
+	try {
+		return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(cwd))?.uri
+	} catch {
+		return undefined
+	}
 }
 
 /**
@@ -54,12 +89,15 @@ export function commandListConfiguration(): vscode.WorkspaceConfiguration {
  * configuration state. Without it the lookup runs guarded (lenient): this is
  * the enforcement/display path, where an unavailable workspace layer must
  * degrade to empty rather than fail.
+ * @param folderResource - Workspace folder the configuration is scoped to;
+ * `undefined` keeps the first-folder default.
  * @returns The per-layer lists and their deduplicated set union.
  */
 export function readCommandListScopes(
 	configKey: CommandListConfigKey,
 	globalList: string[] | undefined,
 	inspectionOverride?: CommandListInspection,
+	folderResource?: vscode.Uri,
 ): CommandListScopes {
 	const global = sanitizeCommandList(globalList)
 
@@ -71,7 +109,7 @@ export function readCommandListScopes(
 		// of their own, so the catch covers exactly the failure it exists to
 		// absorb.
 		try {
-			inspected = commandListConfiguration().inspect<string[]>(configKey)
+			inspected = commandListConfiguration(folderResource).inspect<string[]>(configKey)
 		} catch {
 			inspected = undefined
 		}

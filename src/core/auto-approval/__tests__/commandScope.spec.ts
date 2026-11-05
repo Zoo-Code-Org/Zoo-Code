@@ -13,12 +13,17 @@ import {
 	splitCommandListScopes,
 	workspaceCommandListsEnabled,
 } from "../commandScope"
+import { checkAutoApproval } from "../index"
+import { baseState, type State } from "./fixtures"
 
 // Scriptable stand-in for `vscode.workspace.workspaceFolders`: the module
 // mock's getter reads through this object, so a test can change the open
-// folders without re-mocking the module.
+// folders without re-mocking the module. `foldersByPath` backs
+// `getWorkspaceFolder`: keys are folder paths, values the folder objects, so
+// a test controls which cwds resolve to a root.
 const workspaceState = vi.hoisted(() => ({
 	workspaceFolders: undefined as { uri: unknown }[] | undefined,
+	foldersByPath: new Map<string, unknown>(),
 }))
 
 vi.mock("vscode", () => ({
@@ -27,11 +32,25 @@ vi.mock("vscode", () => ({
 		Workspace: 2,
 		WorkspaceFolder: 3,
 	},
+	Uri: {
+		// Structural local stand-in: the resolver only carries the path
+		// through to `getWorkspaceFolder`.
+		file: (fsPath: string) => ({ scheme: "file", authority: "", path: fsPath, fsPath, query: "", fragment: "" }),
+	},
 	workspace: {
 		get workspaceFolders() {
 			return workspaceState.workspaceFolders
 		},
 		getConfiguration: vi.fn(),
+		getWorkspaceFolder: vi.fn((resource?: { fsPath?: string }) => {
+			const fsPath = resource?.fsPath ?? ""
+			for (const [folderPath, uri] of workspaceState.foldersByPath) {
+				if (fsPath === folderPath || fsPath.startsWith(`${folderPath}/`)) {
+					return { uri }
+				}
+			}
+			return undefined
+		}),
 	},
 }))
 
@@ -345,6 +364,20 @@ it("workspaceCommandListsEnabled: enables the workspace layers only when the gat
 	expect(config.get).toHaveBeenCalledWith("workspaceCommandListsEnabled")
 })
 
+it("workspaceCommandListsEnabled: is off when the gate is unset", () => {
+	vi.clearAllMocks()
+	// Unset is the state of every installation that has never opted in, so it
+	// must read as disabled: treating unset as enabled would widen
+	// auto-approval by default. The equality against the declared default also
+	// keeps this expectation attached to the constant that documents the
+	// shipped default, not to an independently hard-coded boolean.
+	const config = mockGateConfiguration(undefined)
+
+	expect(workspaceCommandListsEnabled()).toBe(false)
+	expect(workspaceCommandListsEnabled()).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+	expect(config.get).toHaveBeenCalledWith("workspaceCommandListsEnabled")
+})
+
 it("workspaceCommandListsEnabled: keeps the workspace layers disabled when the gate lookup throws", () => {
 	vi.clearAllMocks()
 	// Fail-closed: a broken configuration read must never widen what the
@@ -440,4 +473,131 @@ it("resolveEffectiveCommandLists: shadows workspace entries case-insensitively, 
 	expect(effective.denied).toEqual(["DOCKER"])
 	expect(effective.hiddenWorkspaceAllow).toEqual(["git status"])
 	expect(effective.hiddenWorkspaceDeny).toEqual([])
+})
+
+// Command-branch enforcement composes its allow/deny pair from the raw
+// global layers at the folder the task's cwd resolves to, so a task in
+// another root is judged by that root's lists rather than the window's
+// first folder. The window-scoped pair on the state stays what the dialog
+// displays.
+
+function openMultiRootWindow() {
+	const folderA = makeUri("/mock/folder-a")
+	const folderB = makeUri("/mock/folder-b")
+	workspaceState.workspaceFolders = [{ uri: folderA }, { uri: folderB }]
+	workspaceState.foldersByPath.set(folderA.fsPath, folderA)
+	workspaceState.foldersByPath.set(folderB.fsPath, folderB)
+	return { folderA, folderB }
+}
+
+// Scripts each folder's configuration independently so the test can tell
+// which folder's settings the enforcement path actually read.
+function mockFolderConfigurations(scripts: Record<string, { gate?: boolean; deny?: string[] }>) {
+	vi.mocked(vscode.workspace.getConfiguration).mockImplementation(
+		(_section?: string, scope?: vscode.ConfigurationScope | null) => {
+			const entry = scripts[scope && "fsPath" in scope ? scope.fsPath : ""]
+			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: entry?.gate ?? false })
+			vi.mocked(config.inspect).mockImplementation((key: string) =>
+				key === "deniedCommands" && entry?.deny ? { key, workspaceFolderValue: entry.deny } : undefined,
+			)
+			return config
+		},
+	)
+}
+
+// Raw global layers empty: every enforcement decision then comes from the
+// folder layer, so a decision can only be right for one folder. The baked
+// pair on the state is set to values no folder composes, so a check that
+// consumed it instead of re-composing decides differently.
+const taskFolderState = (bakedAllowed: string[]): State => ({
+	...baseState,
+	alwaysAllowExecute: true,
+	allowedCommands: bakedAllowed,
+	deniedCommands: [],
+	globalAllowedCommands: [],
+	globalDeniedCommands: [],
+})
+
+it("checkAutoApproval command: enforces the deny entries of the folder the task's cwd resolves to", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	// Folder A denies "echo", folder B denies "rm"; the task runs in B.
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["echo"] },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	// The baked pair would approve exactly what folder B's layer denies.
+	const result = await checkAutoApproval({
+		state: taskFolderState(["rm"]),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "rm file",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "rm file", pattern: "rm" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderB)
+})
+
+it("checkAutoApproval command: does not apply another root's deny entries to a task outside it", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["echo"] },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	// "echo" is denied only in the first folder; judging this B-rooted task
+	// there would auto-deny it. Nothing allows it either, so the correct
+	// multi-root decision is the plain user prompt.
+	const result = await checkAutoApproval({
+		state: taskFolderState(["echo"]),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "ask" })
+})
+
+it("checkAutoApproval command: falls back to the first folder when the cwd resolves to no workspace root", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["echo"] },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	// A removed or relocated folder names no root; enforcement stays on the
+	// first-folder configuration it used before per-task scoping existed.
+	const result = await checkAutoApproval({
+		state: taskFolderState(["echo"]),
+		cwd: "/mock/removed-folder",
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
+	expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, folderB)
+})
+
+it("checkAutoApproval command: in a single-folder window reads exactly the same configuration as before", async () => {
+	vi.clearAllMocks()
+	const { folderA } = openMultiRootWindow()
+	workspaceState.workspaceFolders = [{ uri: folderA }]
+	workspaceState.foldersByPath.delete(makeUri("/mock/folder-b").fsPath)
+	// The one open folder is both the task folder and the first folder, so
+	// the resolved scope and the no-arg default are the same resource.
+	mockFolderConfigurations({ [folderA.fsPath]: { gate: true, deny: ["echo"] } })
+
+	const result = await checkAutoApproval({
+		state: taskFolderState(["echo"]),
+		cwd: folderA.fsPath,
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
 })

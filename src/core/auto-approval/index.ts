@@ -15,6 +15,12 @@ import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { isWriteToolAction, isReadOnlyToolAction } from "./tools"
 import { isMcpToolAlwaysAllowed } from "./mcp"
 import { containsDangerousSubstitution, getCommandDecisionDetailed } from "./commands"
+import {
+	commandListFolderForResource,
+	readCommandListScopes,
+	resolveEffectiveCommandLists,
+	workspaceCommandListsEnabled,
+} from "./commandScope"
 import { isFileMatchedByPatterns } from "./filePatterns"
 import { type AutoDenyDetail } from "./autoDenyReason"
 
@@ -40,6 +46,8 @@ export type AutoApprovalStateOptions =
 	| "mcpServers" // For `alwaysAllowMcp`.
 	| "allowedCommands" // For `alwaysAllowExecute`.
 	| "deniedCommands"
+	| "globalAllowedCommands" // Raw global layer feeding the per-folder command-list composition.
+	| "globalDeniedCommands"
 	| "destructiveCommandGuardEnabled"
 	| "alwaysDenyUnapprovedCommands" // For `alwaysAllowExecute` (blanket auto-deny).
 
@@ -304,10 +312,32 @@ export async function checkAutoApproval({
 				return { decision: "approve" }
 			}
 
+			// The pair on `state` was composed against the window's first
+			// folder; a task rooted in another folder must be judged by that
+			// folder's lists, so enforcement re-composes from the raw global
+			// layers at the folder the task's `cwd` resolves to (a cwd that
+			// names no workspace root keeps the first-folder configuration).
+			// Without the raw layers the pre-composed pair is all the state
+			// carries, and that pair is what enforcement consumes.
+			const taskFolder = commandListFolderForResource(cwd)
+			const effectiveLists =
+				state.globalAllowedCommands !== undefined && state.globalDeniedCommands !== undefined
+					? resolveEffectiveCommandLists(
+							readCommandListScopes(
+								"allowedCommands",
+								state.globalAllowedCommands,
+								undefined,
+								taskFolder,
+							),
+							readCommandListScopes("deniedCommands", state.globalDeniedCommands, undefined, taskFolder),
+							workspaceCommandListsEnabled(),
+						)
+					: { allowed: state.allowedCommands || [], denied: state.deniedCommands || [] }
+
 			const { decision, offendingCommand, matchedPattern, parseError } = getCommandDecisionDetailed(
 				text,
-				state.allowedCommands || [],
-				state.deniedCommands || [],
+				effectiveLists.allowed,
+				effectiveLists.denied,
 			)
 
 			if (decision === "auto_approve") {

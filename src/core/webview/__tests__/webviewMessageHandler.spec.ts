@@ -77,7 +77,7 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-import type { ModelRecord } from "@roo-code/types"
+import type { ModelRecord, WebviewMessage } from "@roo-code/types"
 import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
@@ -776,9 +776,16 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 
 import { t } from "../../../i18n"
 
+// Mutable so a test can script a multi-root workspace; every other test sees the
+// single folder the command-list configuration resolves against by default.
+const mockWorkspaceFolders = vi.hoisted(() => ({
+	folders: [{ uri: { fsPath: "/mock/workspace" } }] as { uri: { fsPath: string } }[],
+}))
+
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
 	const showErrorMessage = vi.fn()
+	const showWarningMessage = vi.fn()
 	const openTextDocument = vi.fn().mockResolvedValue({})
 	const showTextDocument = vi.fn().mockResolvedValue(undefined)
 
@@ -791,10 +798,13 @@ vi.mock("vscode", () => {
 		window: {
 			showInformationMessage,
 			showErrorMessage,
+			showWarningMessage,
 			showTextDocument,
 		},
 		workspace: {
-			workspaceFolders: [{ uri: { fsPath: "/mock/workspace" } }],
+			get workspaceFolders() {
+				return mockWorkspaceFolders.folders
+			},
 			openTextDocument,
 			getConfiguration: vi.fn(() => ({ get: vi.fn() })),
 		},
@@ -2104,6 +2114,7 @@ describe("webviewMessageHandler - allowlists together", () => {
 describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockWorkspaceFolders.folders = [{ uri: { fsPath: "/mock/workspace" } }]
 	})
 
 	// The file-level vscode mock opens one workspace folder, so the command
@@ -2520,6 +2531,298 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		// The state post still runs, so the dialog re-reads the effective value
 		// instead of keeping the refused one.
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	// A payload can carry both command-list keys; the second-processed key's
+	// hidden-entry check must judge shadowing against the state as it was when
+	// the save started, not as the same loop's earlier key left it. The double
+	// below mirrors ContextProxy: setValue publishes the in-memory copy before
+	// resolving, so a fresh read after the first key's awaited write would
+	// observe it and let the never-displayed entry be deleted.
+	function mockCommandListStateStore(initial: Partial<Record<"allowedCommands" | "deniedCommands", string[]>>) {
+		const store: Partial<Record<"allowedCommands" | "deniedCommands", string[]>> = { ...initial }
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" || key === "deniedCommands" ? store[key] : undefined,
+		)
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key: string, value: unknown) => {
+			if (key === "allowedCommands" || key === "deniedCommands") {
+				store[key] = value as string[] | undefined
+			}
+		})
+		return store
+	}
+
+	it("preserves a workspace deny entry shadowed by a global allow the same save removes", async () => {
+		mockCommandListStateStore({ allowedCommands: ["git"] })
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// "allowedCommands" is processed first and drops the shadowing
+			// global "git"; "git push" was hidden from the dialog, so an empty
+			// deny list must not delete it.
+			updatedSettings: { allowedCommands: [], deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("preserves a workspace allow entry shadowed by a global deny the same save removes", async () => {
+		mockCommandListStateStore({ deniedCommands: ["git"] })
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "allowedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The mirror order: the deny key is processed first, so this pins
+			// that preservation does not depend on which key arrives first.
+			updatedSettings: { deniedCommands: [], allowedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("reports a rejected extension-state write without aborting the save", async () => {
+		// The configuration writes succeeded, so silently dropping the state
+		// write would leave the settings files and the stored list disagreeing
+		// with nothing shown to the user. The rejection is queued (once) so it
+		// consumes exactly this key's write and the sibling key still persists.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("state store unavailable"))
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"], alwaysDenyUnapprovedCommands: true },
+		})
+
+		// The configuration leg did persist...
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// ...so the message names the leg that failed...
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: state store unavailable. The configuration was updated, but the extension's stored copy of the list was not, so the two disagree until a later save succeeds.",
+		)
+		// ...the save continued to the next key...
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+		// ...and the dialog was re-synced instead of keeping an unsaved value.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("still propagates a rejected state write for non-command-list keys", async () => {
+		// The partial-failure report is scoped to the command-list keys, whose
+		// configuration legs succeeded first; other keys have no half-completed
+		// save to explain, so their failures keep propagating as before. The
+		// rejection is queued (once) so it stays scoped to this test.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("state store unavailable"))
+
+		await expect(
+			webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { alwaysDenyUnapprovedCommands: true },
+			}),
+		).rejects.toThrow("state store unavailable")
+
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("keeps a settings-file entry the dialog never displayed and warns that it was preserved", async () => {
+		// An entry the settings file gained while the dialog was open has the same
+		// shape as a user deletion (in the file, absent from the submitted list);
+		// the baseline tells them apart, so the new entry is kept in the layer the
+		// snapshot found it in and the user is told instead of losing it silently.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+			commandListBaseline: { deniedCommands: ["aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws", "rm -rf"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("rm -rf"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("1 entry was"))
+	})
+
+	it("applies a user deletion of a displayed entry without warning", async () => {
+		// The counterpart classification: an entry the baseline shows the dialog
+		// displayed and the submitted list omits is a deliberate deletion and must
+		// be dropped from every layer that held it, with nothing disclosed.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+			commandListBaseline: { deniedCommands: ["aws", "rm -rf"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["rm -rf"], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("keeps a file-added entry while applying a displayed deletion in one save, warning once", async () => {
+		// Both divergence classes in one payload: "git" was displayed and the user
+		// deleted it (deletion applies), "curl" arrived after the dialog opened
+		// (preserved). The warning counts only the preserved entry, once per save.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["git", "curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: ["git"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("git"))
+	})
+
+	it("saves command lists unchanged when the message carries no baseline", async () => {
+		// Backward-compatibility witness: senders that omit the baseline keep the
+		// exact pre-existing behavior - the omitted entry is dropped as a deletion
+		// and no warning is produced.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("routes a preserved entry to the layer the save-start snapshot found it in", async () => {
+		// A preserved entry must land where it lives, not be flattened into the
+		// global layer: "rm -rf" is in the workspace snapshot, "npm" in the
+		// extension's stored global layer, and neither was ever displayed.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["npm"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: [] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["rm -rf"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["npm"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["npm"])
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("2 entries were"))
+	})
+
+	it("treats a malformed command-list baseline exactly like a missing one", async () => {
+		// The save message crosses a JSON boundary, so a baseline whose key holds a
+		// non-array is reachable at runtime even though the declared type forbids it.
+		// The classification guard treats it as no baseline at all: the submitted list
+		// is written unclassified and no entry the dialog never displayed is claimed
+		// as user-deleted, matching the no-baseline witness exactly.
+		const wireMessage: WebviewMessage = JSON.parse(
+			JSON.stringify({
+				type: "updateSettings",
+				updatedSettings: { deniedCommands: ["aws"] },
+				commandListBaseline: { deniedCommands: "aws" },
+			}),
+		)
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["aws", "rm -rf"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, wireMessage)
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("composes and writes only the first workspace folder's layer in a multi-root save", async () => {
+		// The dialog composes against the first folder, so a save must never read or
+		// write the second folder's per-folder layer: folder B's entries survive a
+		// folder A save untouched.
+		const secondFolderUri = { fsPath: "/mock/second-folder" }
+		mockWorkspaceFolders.folders = [{ uri: mockWorkspaceFolderUri }, { uri: secondFolderUri }]
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["npm"], workspaceFolderValue: ["docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, mockWorkspaceFolderUri)
+		expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, secondFolderUri)
+		// The folder-target write the save does make goes to the first folder's layer.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.WorkspaceFolder)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+	})
+
+	it("aggregates preserved entries from both command-list keys into a single save warning", async () => {
+		// A payload carrying both list keys classifies per key, so two file entries the
+		// dialog never displayed - one per key - must survive in their own layers and be
+		// disclosed together in exactly one warning for the save.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			(key) =>
+				key === "allowedCommands"
+					? { workspaceValue: ["git", "curl"] }
+					: { workspaceValue: ["rm -rf", "docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"], deniedCommands: ["rm -rf"] },
+			commandListBaseline: { allowedCommands: ["git"], deniedCommands: ["rm -rf"] },
+		})
+
+		// "curl" stays in the workspace allow layer, "docker" in the workspace deny layer.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git", "curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["rm -rf", "docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// One aggregated warning naming both preserved entries and counting them together.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("2 entries were"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("docker"))
 	})
 })
 

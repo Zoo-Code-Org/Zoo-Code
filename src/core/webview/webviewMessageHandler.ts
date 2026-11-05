@@ -770,6 +770,17 @@ export const webviewMessageHandler = async (
 					}
 				}
 
+				// Shadowing is cross-directional, and a payload can carry both
+				// command-list keys, so the second-processed key's hidden-entry
+				// check would otherwise read the layer the first key's iteration
+				// just wrote. Both global layers are captured before any write so
+				// a hidden entry's preservation cannot depend on payload key order.
+				const commandListGlobalsAtSaveStart = {
+					allowedCommands: getGlobalState("allowedCommands"),
+					deniedCommands: getGlobalState("deniedCommands"),
+				}
+				const externallyAddedCommandEntries: string[] = []
+
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
 					let newValue = value
 
@@ -823,20 +834,34 @@ export const webviewMessageHandler = async (
 						}
 
 						const currentScopes = readCommandListScopes(key, getGlobalState(key), inspection)
+						// An entry the settings file gained while the dialog was open has
+						// the same shape as an entry the user deleted: present in the file,
+						// absent from the submitted list. Only the dialog's last-displayed
+						// baseline separates the two, so file entries outside that baseline
+						// are re-admitted before the split (deletions of baseline entries
+						// still apply). A sender that shows no lists sends no baseline, and
+						// its submitted list is written unclassified.
+						const baseline = message.commandListBaseline?.[key]
+						const externallyAdded = Array.isArray(baseline)
+							? [...new Set([...currentScopes.workspace, ...currentScopes.global])].filter(
+									(entry) => !baseline.includes(entry) && !incoming.includes(entry),
+								)
+							: []
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
-							incoming,
+							[...incoming, ...externallyAdded],
 							currentScopes.workspace,
 							currentScopes.global,
 						)
 
-						// Shadowing is cross-directional, so the hidden-entry
-						// set needs the opposite key's global layer as input.
-						// That opposite-key read is a fresh guarded read: it
-						// only feeds the additive preservation below and never
-						// this key's split, target, or rollback, which stay on
-						// the single snapshot.
+						// Shadowing is cross-directional, so the hidden-entry set
+						// needs the opposite key's global layer as input. It comes
+						// from the save-start snapshot, not a fresh read: an
+						// earlier iteration of this loop may already have written
+						// that key. The layer only feeds the additive preservation
+						// below and never this key's split, target, or rollback,
+						// which stay on the per-key configuration snapshot.
 						const otherKey = key === "allowedCommands" ? "deniedCommands" : "allowedCommands"
-						const otherScopes = readCommandListScopes(otherKey, getGlobalState(otherKey))
+						const otherScopes = readCommandListScopes(otherKey, commandListGlobalsAtSaveStart[otherKey])
 						const { hiddenWorkspaceAllow, hiddenWorkspaceDeny } = resolveEffectiveCommandLists(
 							key === "allowedCommands" ? currentScopes : otherScopes,
 							key === "deniedCommands" ? currentScopes : otherScopes,
@@ -910,6 +935,10 @@ export const webviewMessageHandler = async (
 						// would double-home workspace entries and re-leak them on the
 						// next save.
 						newValue = globalWrite
+						// Accumulated only after both configuration writes succeeded: the
+						// disclosure must not claim preservation for a key whose save was
+						// abandoned by a failed write.
+						externallyAddedCommandEntries.push(...externallyAdded)
 					} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
 						const patterns = value ?? []
 
@@ -994,7 +1023,32 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					if (key === "allowedCommands" || key === "deniedCommands") {
+						// The configuration writes above already succeeded, so a
+						// rejected state write leaves the configuration and the
+						// extension's stored list disagreeing until a later save
+						// overwrites it. Letting the rejection escape would also
+						// skip the state post that re-syncs the dialog, so the key
+						// reports which leg failed and the save continues.
+						try {
+							await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+						} catch (error) {
+							const failure = error instanceof Error ? error.message : String(error)
+							vscode.window.showErrorMessage(
+								`Failed to save ${key}: ${failure}. The configuration was updated, but the extension's stored copy of the list was not, so the two disagree until a later save succeeds.`,
+							)
+							continue
+						}
+					} else {
+						await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					}
+				}
+
+				if (externallyAddedCommandEntries.length > 0) {
+					const count = externallyAddedCommandEntries.length
+					vscode.window.showWarningMessage(
+						`Your settings file changed while the settings dialog was open. ${count} ${count === 1 ? "entry was" : "entries were"} added there during this session and kept by this save: ${externallyAddedCommandEntries.join(", ")}. Reopen the settings dialog to see the current command lists.`,
+					)
 				}
 
 				await provider.postStateToWebview()
