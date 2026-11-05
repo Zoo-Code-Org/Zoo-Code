@@ -329,6 +329,98 @@ describe("importExport", () => {
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
 
+			describe("when a write of the import times out and is rolled back after the import was answered", () => {
+				beforeEach(() => vi.useFakeTimers())
+				afterEach(() => vi.useRealTimers())
+
+				const importWithFeedback = async (postStateToWebview: () => Promise<void>, viaDialog = false) => {
+					;(fs.access as Mock).mockResolvedValue(undefined)
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "test",
+								apiConfigs: {
+									test: {
+										apiProvider: providerIdentifiers.openai,
+										apiKey: "test-key",
+										id: "test-id",
+									},
+								},
+							},
+							globalSettings: { interfaceFontScale: 120 },
+						}),
+					)
+					// The store of the value starts, and lands only when it is released: after the import timed out.
+					const release = createDeferred<void>()
+					mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+						if (value === 120) {
+							await release.promise
+						}
+						stored.set(key, value)
+					}) as unknown as typeof mockContextProxy.setValue)
+					const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+
+					;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+					const done = importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider: { postStateToWebview },
+						},
+						viaDialog ? undefined : "/mock/path/settings.json",
+					)
+					await vi.advanceTimersByTimeAsync(15_000)
+					await done
+					return { release, showErrorMessage }
+				}
+
+				it.each([
+					["a file path", false],
+					["the file dialog", true],
+				])(
+					"shows the webview what is stored once the rollback has run, for an import from %s",
+					async (_name, viaDialog) => {
+						const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+						const { release, showErrorMessage } = await importWithFeedback(postStateToWebview, viaDialog)
+						const refreshesWhenAnswered = postStateToWebview.mock.calls.length
+
+						release.resolve() // the late store lands, and its rollback runs behind it
+						await vi.advanceTimersByTimeAsync(0)
+
+						expect(showErrorMessage).toHaveBeenCalled() // the import was answered as failed
+						expect(stored.get("interfaceFontScale")).toBe(100)
+						expect(postStateToWebview.mock.calls.length).toBe(refreshesWhenAnswered + 1)
+						showErrorMessage.mockRestore()
+					},
+				)
+
+				it("keeps the answer of the import when that refresh fails", async () => {
+					const unhandled: unknown[] = []
+					const onUnhandled = (reason: unknown) => unhandled.push(reason)
+					process.on("unhandledRejection", onUnhandled)
+					let failRefresh = false
+					const attempts: boolean[] = []
+					// A plain function: a mock that rejects would be reported by the mock itself.
+					const postStateToWebview = () => {
+						attempts.push(failRefresh)
+						return failRefresh ? Promise.reject(new Error("webview is gone")) : Promise.resolve()
+					}
+					const { release, showErrorMessage } = await importWithFeedback(postStateToWebview)
+
+					failRefresh = true
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+					await vi.advanceTimersByTimeAsync(0)
+					process.off("unhandledRejection", onUnhandled)
+
+					expect(attempts).toContain(true) // the refresh was tried, and failed
+					expect(unhandled).toEqual([])
+					expect(stored.get("interfaceFontScale")).toBe(100)
+					showErrorMessage.mockRestore()
+				})
+			})
+
 			it("keeps an imported value when a save that wrote the same value fails afterwards", async () => {
 				const save = beginSettingWrite("interfaceFontScale", 100, 120)
 				await performSettingWrite(mockContextProxy as unknown as ContextProxy, save)

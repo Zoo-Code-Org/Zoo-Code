@@ -28,6 +28,11 @@ export type ImportOptions = {
 	providerSettingsManager: ProviderSettingsManager
 	contextProxy: ContextProxy
 	customModesManager: CustomModesManager
+	/**
+	 * Called when a setting write that timed out has settled and its rollback has run, so the caller can show what is
+	 * really stored (the import has been answered by then).
+	 */
+	onDeferredSettled?: () => void
 }
 
 type ExportOptions = {
@@ -136,7 +141,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
  */
 export async function importSettingsFromPath(
 	filePath: string,
-	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled }: ImportOptions,
 ) {
 	// Use a lenient schema that accepts any apiConfigs, then validate each individually
 	const lenientProviderProfilesSchema = providerProfilesSchema.extend({
@@ -229,7 +234,7 @@ export async function importSettingsFromPath(
 		// They will be imported automatically with the config - no special handling needed
 
 		await providerSettingsManager.import(providerProfiles)
-		await setValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings)
+		await setValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings, { onDeferredSettled })
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
@@ -270,7 +275,12 @@ export async function importSettingsFromPath(
  * @param options - Import options containing managers and proxy
  * @returns Promise resolving to import result
  */
-export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
+export const importSettings = async ({
+	providerSettingsManager,
+	contextProxy,
+	customModesManager,
+	onDeferredSettled,
+}: ImportOptions) => {
 	// Use the last export path as a sensible default, falling back to Downloads
 	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
@@ -291,6 +301,7 @@ export const importSettings = async ({ providerSettingsManager, contextProxy, cu
 		providerSettingsManager,
 		contextProxy,
 		customModesManager,
+		onDeferredSettled,
 	})
 }
 
@@ -303,13 +314,14 @@ export const importSettings = async ({ providerSettingsManager, contextProxy, cu
  * @returns Promise resolving to import result
  */
 export const importSettingsFromFile = async (
-	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled }: ImportOptions,
 	fileUri: vscode.Uri,
 ) => {
 	return importSettingsFromPath(fileUri.fsPath, {
 		providerSettingsManager,
 		contextProxy,
 		customModesManager,
+		onDeferredSettled,
 	})
 }
 
@@ -366,6 +378,10 @@ export const importSettingsWithFeedback = async (
 ) => {
 	let result
 
+	// A write of the import that timed out may still land and be rolled back after the import has been answered: the
+	// webview is shown what is stored then. A refresh that fails does not matter to anybody.
+	const onDeferredSettled = () => void provider.postStateToWebview().catch(() => undefined)
+
 	if (filePath) {
 		// Validate file path and check if file exists
 		try {
@@ -375,6 +391,7 @@ export const importSettingsWithFeedback = async (
 				providerSettingsManager,
 				contextProxy,
 				customModesManager,
+				onDeferredSettled,
 			})
 		} catch (error) {
 			result = {
@@ -383,7 +400,7 @@ export const importSettingsWithFeedback = async (
 			}
 		}
 	} else {
-		result = await importSettings({ providerSettingsManager, contextProxy, customModesManager })
+		result = await importSettings({ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled })
 	}
 
 	if (result.success) {
