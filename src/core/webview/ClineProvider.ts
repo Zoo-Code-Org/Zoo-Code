@@ -317,6 +317,22 @@ function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, t
 }
 
 /**
+ * Whether the shared provider-settings store still carries this profile's stored record.
+ * The store normalizes every provider's keys on write, so a key the record does not
+ * mention and a key whose stored value is `undefined` are the same value here.
+ */
+function sharedStoreCarriesProfileRecord(store: ProviderSettings, record: Record<string, unknown>): boolean {
+	const storeValues = new Map<string, unknown>(Object.entries(store))
+	const recordValues = new Map<string, unknown>(Object.entries(record))
+	for (const key of new Set([...storeValues.keys(), ...recordValues.keys()])) {
+		if (storeValues.get(key) !== recordValues.get(key)) {
+			return false
+		}
+	}
+	return true
+}
+
+/**
  * Raised when a profile activation or upsert failed after durable writes landed and at least one
  * compensating write failed too. The persisted profile stores may now disagree, which is not the
  * ordinary "the save failed and nothing changed" outcome the caller's `undefined` would suggest.
@@ -3739,6 +3755,44 @@ export class ClineProvider
 					// settings. A view pinned to another profile keeps its own overlay.
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
 				}
+			}
+
+			// A selection-only move by a sibling view is the one interleaving the guards above cannot
+			// see. Every view in the host shares this ContextProxy, so a sibling that writes the shared
+			// selection alone lands in the store this deletion re-reads above; if it lands after that
+			// read, the selection now names a survivor while nothing re-points - no live pin, no
+			// persisted pin, and not this view's own pin names the deleted profile - so every guard
+			// above stays closed and the shared store goes on carrying the deleted profile's settings
+			// under the survivor's name. Views without an overlay of their own serve that store, so
+			// they would report the survivor's name with the deleted profile's credentials. Compare
+			// against the deleted record instead of assuming it: an interleaved write that did carry
+			// settings has already repaired the pairing, and writing over it again would clobber a
+			// newer value. Whether a shipped message reaches this interleaving today is unmeasured;
+			// the invariant - after a deletion the shared store carries the payload of the profile the
+			// selection names - is pinned either way.
+			const sharedSelectionSurvivorName =
+				!deletedWasGlobal &&
+				!viewWasPinnedToDeleted &&
+				typeof selectionAfterDelete === "string" &&
+				entries.some((entry) => entry.name === selectionAfterDelete)
+					? selectionAfterDelete
+					: undefined
+			if (
+				sharedSelectionSurvivorName &&
+				previousRecord &&
+				sharedStoreCarriesProfileRecord(this.contextProxy.getProviderSettings(), {
+					...previousRecord,
+					name: undefined,
+					id: undefined,
+				})
+			) {
+				const { name: _selectedName, ...selectedRecord } = await this.providerSettingsManager.getProfile({
+					name: sharedSelectionSurvivorName,
+				})
+				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(sharedSelectionSurvivorName, {
+					includeSelf: true,
+				})
+				await this.contextProxy.setProviderSettings(selectedRecord as ProviderSettings)
 			}
 
 			// The acting view's own conversation may be running the deleted profile's

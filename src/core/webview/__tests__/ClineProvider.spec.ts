@@ -5843,6 +5843,91 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("replaces the shared settings with the survivor's payload when a sibling moves the selection mid-deletion", async () => {
+			// Both views share one ContextProxy, as every view in the extension host does:
+			// `ContextProxy.getInstance` hands the same instance to the sidebar and to a tab
+			// provider, so the sibling write below lands in the store this deletion reads back;
+			// only the view-local state differs between the two providers.
+			const sharedProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			try {
+				const doomedProfile: ProviderSettingsEntry = {
+					name: "doomed-profile",
+					id: "doomed-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				const doomedSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "doomed-key" }
+				const keeperSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					deleteConfig: vi.fn().mockImplementation(() =>
+						// The interleaving: while the deletion sits inside its first durable write, a
+						// sibling view moves the shared selection onto the survivor, and that move
+						// carries the name only - no settings write of the survivor's payload follows
+						// it. The deletion has already read the entry selection, so nothing it decides
+						// from here on sees the move. Which shipped message reaches this interleaving
+						// today is unmeasured; the invariant is pinned either way.
+						sibling.contextProxy.setValue("currentApiConfigName", "keeper-profile").then(() => undefined),
+					),
+					getProfile: vi
+						.fn()
+						.mockImplementation(({ name }: { name: string }) =>
+							Promise.resolve(
+								name === "doomed-profile"
+									? { name: "doomed-profile", id: "doomed-id", ...doomedSettings }
+									: { name: "keeper-profile", id: "keeper-id", ...keeperSettings },
+							),
+						),
+					activateProfile: vi
+						.fn()
+						.mockImplementation(({ name }: { name: string }) =>
+							Promise.resolve({ name, id: "keeper-id", ...keeperSettings }),
+						),
+					setModeConfig: vi.fn().mockResolvedValue(undefined),
+					getModeConfigId: vi.fn().mockResolvedValue(undefined),
+					listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				}
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+				// This view already shows the survivor while the shared selection names the profile
+				// about to be deleted, so once the sibling's move lands neither this view's pin, the
+				// selection, nor any live or persisted pin names the deleted profile.
+				await provider.setValue("currentApiConfigName", "keeper-profile")
+				await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+				await provider.contextProxy.setProviderSettings(doomedSettings)
+
+				await provider.deleteProviderProfile(doomedProfile)
+
+				expect(provider.getValue("currentApiConfigName")).toBe("keeper-profile")
+				// The shared settings store is what every view without an overlay of its own serves,
+				// so it has to carry the payload of the profile the selection names, not the one
+				// that was just deleted.
+				expect(provider.contextProxy.getProviderSettings()).toEqual(keeperSettings)
+			} finally {
+				await provider.dispose()
+				await sibling.dispose()
+			}
+		})
+
 		it("throws a distinct error when the replacement activation fails after the deletion commits", async () => {
 			const provider = new ClineProvider(
 				mockContext,
