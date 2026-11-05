@@ -1907,6 +1907,34 @@ describe("webviewMessageHandler - deleteApiConfiguration", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
+	it("deletes a profile the manager no longer stores but the cached list still shows", async () => {
+		const staleEntry = { name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter }
+		// The manager record is already gone (cloud sync, or a delete through another
+		// ProviderSettingsManager instance) while the cached list the dropdown reads still
+		// names the profile. Before the fallback the lookup came back empty, the handler
+		// showed the delete error and returned, so the entry stayed listed forever.
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([])
+		// The double is module-level and this file does not isolate these reassignments:
+		// vi.clearAllMocks() resets call history, not an implementation assigned here, so the
+		// replacement has to be undone or every later suite reads the stale entry.
+		const originalGetValue = mockClineProvider.contextProxy.getValue
+		try {
+			mockClineProvider.contextProxy.getValue = vi
+				.fn()
+				.mockImplementation((key: string) => (key === "listApiConfigMeta" ? [staleEntry] : undefined))
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+			await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "ghost-profile" })
+
+			// deleteProviderProfile is the path that treats the missing record as an idempotent
+			// success and prunes the stale entry, which is what the user needs here.
+			expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith(staleEntry)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(t("common:errors.delete_api_config"))
+		} finally {
+			mockClineProvider.contextProxy.getValue = originalGetValue
+		}
+	})
+
 	it("reports the failure when the routed deletion rejects", async () => {
 		const profileToDelete = { name: "only-profile", id: "only-id", apiProvider: providerIdentifiers.zooGateway }
 		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([profileToDelete])
@@ -3203,6 +3231,51 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// The fallback must not move the shared selection on its own, and it must not resurrect a
 		// delete of the name it just restored.
 		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("currentApiConfigName", expect.anything())
+	})
+
+	it("warns the user when a rename's activation rollback cannot restore the pre-rename state", async () => {
+		// Review row DOSK-bwM6z6Vop: the two rename compensations that give up show the user the
+		// rename_api_config warning; this one - the activation failure whose own rollback also fails -
+		// only logged, so the inconsistent state was visible to nobody but the log file. The existing
+		// key is reused across the locale bundles; no new string is invented for it.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		// The forward re-point moves the views old-profile -> new-profile; the rollback calls it the
+		// other way round. Rejecting only the reverse direction is what makes the rollback itself fail.
+		const repoint = vi.fn(async (from: string) => {
+			if (from === "new-profile") {
+				throw new Error("rollback failed")
+			}
+		})
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockRejectedValue(new Error("activation failed"))
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		expect(repoint).toHaveBeenCalledWith(
+			"new-profile",
+			"old-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Rename activation failed and the pre-rename state could not be restored"),
+		)
+		// The log is not something the user can act on: the rename committed, its activation failed and
+		// the rollback failed too, so both names can stay stored and the user has to be told - the same
+		// way the sibling compensation catch tells them.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
+		// The localized string, not the raw rollback error the log carries.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("rollback failed"))
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
 	})
 	it("leaves another rename's record alone when its own compensation runs", async () => {
 		provider.providerSettingsManager = {

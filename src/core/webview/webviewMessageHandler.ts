@@ -24,8 +24,8 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
-	providerSettingsSchema,
-	globalSettingsSchema,
+	GLOBAL_SETTINGS_KEYS,
+	PROVIDER_SETTINGS_KEYS,
 	retiredProviderIdentifiers,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
@@ -126,9 +126,9 @@ const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "v
 // task unvalidated. Every settings payload the webview actually sends was checked (packages/types
 // vs webview-ui) and carries global keys only, so a profile-only key here is never a real setting.
 // Keys that are genuinely global too (rateLimitSeconds) stay on the ordinary route.
-const GLOBAL_SETTINGS_KEYS = new Set(Object.keys(globalSettingsSchema.shape))
-const PROVIDER_PROFILE_SETTINGS = new Set(
-	Object.keys(providerSettingsSchema.shape).filter((key) => !GLOBAL_SETTINGS_KEYS.has(key)),
+const GLOBAL_SETTINGS_KEY_SET = new Set<string>(GLOBAL_SETTINGS_KEYS)
+const PROVIDER_PROFILE_SETTINGS = new Set<string>(
+	PROVIDER_SETTINGS_KEYS.filter((key) => !GLOBAL_SETTINGS_KEY_SET.has(key)),
 )
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
@@ -2758,6 +2758,10 @@ export const webviewMessageHandler = async (
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 							await removeOwnRenameRecord()
 						} catch (rollbackError) {
+							// Neither the rename nor its rollback landed, so both names can stay stored: the same
+							// inconsistent state the catch above warns about. The user needs to know that, not
+							// only the log, and the existing rename_api_config string is the honest one to show.
+							vscode.window.showWarningMessage(t("common:errors.rename_api_config"))
 							provider.log(
 								`Rename activation failed and the pre-rename state could not be restored: ${JSON.stringify(rollbackError, Object.getOwnPropertyNames(rollbackError), 2)}`,
 							)
@@ -2811,11 +2815,16 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
+				const managerProfiles = await provider.providerSettingsManager.listConfig()
+				// The dropdown the user deleted from is fed by the cached listApiConfigMeta entry,
+				// not by the manager: after a cloud sync or a delete through another
+				// ProviderSettingsManager instance the record can already be gone while the stale
+				// entry is still listed. Refusing there would show an error for an entry the user
+				// can still select, and deleteProviderProfile - which treats a missing record as an
+				// idempotent success and prunes the stale entry - would never run. Fall back to the
+				// cached entry so the deletion the user just confirmed reaches that path.
 				const profileToDelete =
-					(await provider.providerSettingsManager.listConfig()).find((profile) => profile.name === oldName) ??
-					// The stored record can already be gone while the entry still shows in the selector:
-					// deleteProviderProfile treats that delete as an idempotent prune, so falling back to
-					// the UI-facing list clears the stale entry instead of stranding it in the selector.
+					managerProfiles.find((profile) => profile.name === oldName) ??
 					(getGlobalState("listApiConfigMeta") ?? []).find((profile) => profile.name === oldName)
 
 				if (!profileToDelete) {

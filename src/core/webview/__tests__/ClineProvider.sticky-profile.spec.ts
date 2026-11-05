@@ -1423,11 +1423,18 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				return deleteStoredConfig(name)
 			}
 
-			await provider.deleteProviderProfile({
-				name: "subtask-child-profile",
-				id: childId,
-				apiProvider: providerIdentifiers.openrouter,
-			})
+			// The sibling is a live entry in ClineProvider's static instance registry, and dispose
+			// is what removes it (ClineProvider.ts:1653-1659), so give it back rather than leave a
+			// later test to find it through getAllInstances.
+			try {
+				await provider.deleteProviderProfile({
+					name: "subtask-child-profile",
+					id: childId,
+					apiProvider: providerIdentifiers.openrouter,
+				})
+			} finally {
+				await sibling.dispose()
+			}
 
 			expect(sibling.contextProxy.getValues().currentApiConfigName).toBe("other-survivor")
 			expect(sibling.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4o")
