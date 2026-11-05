@@ -1023,8 +1023,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const pendingHub = new Promise<McpHub>((resolve) => {
 				resolveHub = resolve
 			})
-			// Spied locally: this file's vi.mock specifiers for the MCP modules are off by one
-			// directory, so the real manager is what ClineProvider imports here.
+			// Spied locally so this test can hold the hub pending. The file-level vi.mock of
+			// McpServerManager (line 472) is the module ClineProvider imports, so the spy lands
+			// on the same module the provider resolves against.
 			const getInstanceSpy = vi.spyOn(McpServerManager, "getInstance").mockReturnValue(pendingHub)
 
 			try {

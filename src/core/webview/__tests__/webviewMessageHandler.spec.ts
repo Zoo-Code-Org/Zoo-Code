@@ -2227,7 +2227,6 @@ describe("webviewMessageHandler - host-owned keys in an updateSettings payload",
 			updatedSettings: craftedPayload,
 		})
 
-		// The ordinary setting still takes its normal route through provider.setValue, which
 		// The ordinary setting still takes its normal route through ContextProxy.setValue;
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
 		// The profile- and provider-owned keys reach neither sink: not the shared store, and
@@ -3272,10 +3271,14 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// The log is not something the user can act on: the rename committed, its activation failed and
 		// the rollback failed too, so both names can stay stored and the user has to be told - the same
 		// way the sibling compensation catch tells them.
-		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		// The exact localized key the handler shows for an unrecoverable rename, not any
+		// string that happens to mention renaming.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith("common:errors.rename_api_config")
 		// The localized string, not the raw rollback error the log carries.
 		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("rollback failed"))
-		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.rename_api_config")
 	})
 	it("leaves another rename's record alone when its own compensation runs", async () => {
 		provider.providerSettingsManager = {

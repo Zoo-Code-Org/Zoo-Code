@@ -332,6 +332,17 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 		}
 	})
 
+	// An instance built inside a test is outside the module-scope teardown, and
+	// resolveWebviewView starts a webview watchdog interval (ClineProvider.ts:6394), so an
+	// undisposed sibling keeps its interval and its instance-registry entry alive for
+	// every later test in the file. Tests that create one push it here.
+	const extraInstances: ClineProvider[] = []
+	afterEach(async () => {
+		for (const instance of extraInstances.splice(0).reverse()) {
+			await instance.dispose()
+		}
+	})
+
 	describe("activateProviderProfile", () => {
 		beforeEach(async () => {
 			await provider.resolveWebviewView(mockWebviewView)
@@ -1240,7 +1251,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// The refusal must leave the stored record alone. The message, the selection, and the
 			// list all stay the same when a regression deletes the record first and then throws
 			// this exact error, so the store has to be read directly.
-			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toBeDefined()
+			// Identity, not mere presence: a regression that deleted the record and then
+			// re-created it from the payload would also resolve to an object.
+			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toMatchObject({
+				id: defaultId,
+				name: "default",
+			})
 			expect((await provider.providerSettingsManager.listConfig()).map(({ name }) => name)).toEqual(["default"])
 
 			// Nothing was repointed or pruned.
@@ -1402,6 +1418,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				provider.contextProxy,
 				new WebviewFocusTracker(),
 			)
+			extraInstances.push(sibling)
 			await new Promise((resolve) => setTimeout(resolve, 10))
 			sibling.getMcpHub = vi.fn().mockReturnValue({
 				listTools: vi.fn().mockResolvedValue([]),

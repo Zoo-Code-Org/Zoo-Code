@@ -167,7 +167,7 @@ describe("ContextProxy", () => {
 			// reset actually stored rather than a value the mock kept on its own.
 			const store = new Map<string, unknown>()
 			let holdNextWrite = false
-			let heldWrite: { reject?: (error: Error) => void } | null = null
+			let heldWrite: { reject?: (error: Error) => void } = {}
 			mockGlobalState.get = vi.fn((key: string) => store.get(key))
 			mockGlobalState.update = vi.fn((key: string, value: unknown) => {
 				if (holdNextWrite) {
@@ -193,7 +193,7 @@ describe("ContextProxy", () => {
 			expect(mockGlobalState.update).toHaveBeenCalledWith("apiProvider", undefined)
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
 
-			heldWrite!.reject!(new Error("write failed after reset"))
+			heldWrite.reject!(new Error("write failed after reset"))
 			await expect(pendingWrite).rejects.toThrow("write failed after reset")
 
 			// The rejection handler is still the owner of the key, so it writes back what the Memento now

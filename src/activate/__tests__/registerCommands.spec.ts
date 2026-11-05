@@ -712,17 +712,25 @@ describe("registerCommands handlers", () => {
 	const disposeCallback = (panel: vscode.WebviewPanel) => (panel.onDidDispose as Mock).mock.calls[0][0] as () => void
 
 	/**
-	 * Opens two live tab panels, re-points the tracker at the first one the way the
-	 * visibility handler does, and closes that tracked panel with its provider already
+	 * Opens live tab panels - the survivor plus any extras - and re-points the tracker at the
+	 * first one the way the visibility handler does, then closes that tracked panel with its
 	 * unregistered - the ordering the shipped wiring produces, because ClineProvider's own
 	 * view-dispose handler is registered inside resolveWebviewView (ClineProvider.ts:
 	 * 1907-1931), before the one in openClineInNewTab, so it runs first and clears the tab
 	 * ref. Each case states only the survivor's view state, which is what decides which
 	 * tier of the survivor rule it measures.
 	 */
-	const closeTrackedTabPanel = async (survivorPanel: vscode.WebviewPanel) => {
+	const closeTrackedTabPanel = async (
+		survivorPanel: vscode.WebviewPanel,
+		extraSurvivors: vscode.WebviewPanel[] = [],
+	) => {
 		const trackedPanel = makeTabPanel("closing-tab", { active: true, visible: true })
 		await openTabPanel(trackedPanel)
+		// Registered first, so the survivor rule has to rank the candidates rather than take
+		// the live instance it happens to meet first.
+		for (const extra of extraSurvivors) {
+			await openTabPanel(extra, true)
+		}
 		const survivorProvider = await openTabPanel(survivorPanel, true)
 		viewStateCallback(trackedPanel)({ webviewPanel: trackedPanel })
 		expect(getPanel()).toBe(trackedPanel)
@@ -782,6 +790,57 @@ describe("registerCommands handlers", () => {
 
 		setPanel({} as vscode.WebviewView, "sidebar")
 		expect(getPanel()).toBe(survivorPanel)
+		await handlers["zoo-code.focusInput"]()
+		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	// The three cases above each leave a single live tab, so any tier of the survivor rule
+	// returns it and none of them can tell the tiers apart. These two register several live
+	// tabs at once, which is the only way to show the preference order is enforced.
+	it("prefers the active survivor when several tabs are still live", async () => {
+		startInstanceRegistry()
+		const hiddenPanel = makeTabPanel("hidden-tab", { active: false, visible: false })
+		const visiblePanel = makeTabPanel("visible-tab", { active: false, visible: true })
+		const activePanel = makeTabPanel("active-tab", { active: true, visible: true })
+		const { trackedPanel, survivorPanel, survivorProvider } = await closeTrackedTabPanel(activePanel, [
+			hiddenPanel,
+			visiblePanel,
+		])
+		expect(survivorPanel).toBe(activePanel)
+
+		disposeCallback(trackedPanel)()
+
+		// Tier one: the panel the user is looking at wins over the two other live tabs,
+		// whichever order they were opened in.
+		setPanel({} as vscode.WebviewView, "sidebar")
+		expect(getPanel()).toBe(activePanel)
+		await handlers["zoo-code.focusInput"]()
+		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "action",
+			action: "focusInput",
+		})
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("prefers the visible survivor over a hidden one when nothing is active", async () => {
+		startInstanceRegistry()
+		const hiddenPanel = makeTabPanel("hidden-tab", { active: false, visible: false })
+		const visiblePanel = makeTabPanel("visible-tab", { active: false, visible: true })
+		const { trackedPanel, survivorPanel, survivorProvider } = await closeTrackedTabPanel(visiblePanel, [
+			hiddenPanel,
+		])
+		expect(survivorPanel).toBe(visiblePanel)
+
+		disposeCallback(trackedPanel)()
+
+		// Tier two: with no active panel anywhere the visible tab wins even though the hidden
+		// tab was registered first.
+		setPanel({} as vscode.WebviewView, "sidebar")
+		expect(getPanel()).toBe(visiblePanel)
 		await handlers["zoo-code.focusInput"]()
 		expect(survivorProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",

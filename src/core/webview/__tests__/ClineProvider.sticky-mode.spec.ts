@@ -723,6 +723,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const historyWrites: HistoryItem[] = []
 			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item) => {
+				historyItem.mode = item.mode
 				historyWrites.push(item)
 				return Promise.resolve([])
 			})
@@ -757,7 +758,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// The history row is rewritten only by a switch that completes, so the write the
 			// failed switch attempted carries the new mode while the stored row still names the
 			// mode the task was on before it.
-			expect(historyWrites.at(-1)?.mode).toBe("ask")
+			// The double now applies every write it records, so this reads the state the
+			// compensation left behind rather than the payload of the last call: dropping the
+			// history leg of the rollback fails here instead of passing silently.
+			expect(historyItem.mode).toBe(mockTask.taskMode)
 			expect(historyItem.mode).toBe("architect")
 		})
 
