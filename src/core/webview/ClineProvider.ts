@@ -2823,12 +2823,18 @@ export class ClineProvider
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				// Route through setValue so the buffer tracks the activated profile.
+				// Shared write: adds/updates the profile list entry and the current-profile name.
 				this.setValue("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
-				// setProviderSettings bypasses the buffer path: refresh this view's overlay.
-				this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings }),
+				// setProviderSettings bypasses the buffer path; the mutation below refreshes this view.
+				// One mutation carries both the name and the settings: pinnedProfileName reads the buffer,
+				// so a buffer that keeps the previous name while holding the new settings pins a profile
+				// this view no longer runs under.
+				this._saveViewLocalStateFromMutation({
+					currentApiConfigName: name,
+					apiConfiguration: providerSettings,
+				}),
 			])
 			const failedActivation = activationResults.find(
 				(result): result is PromiseRejectedResult => result.status === "rejected",
@@ -2837,6 +2843,8 @@ export class ClineProvider
 			if (failedActivation) throw failedActivation.reason
 
 			if (signal.aborted) return id
+
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2856,6 +2864,10 @@ export class ClineProvider
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 				}
 			}
+			// A non-activating save changes the profile's settings too: refresh every sibling
+			// that buffered a copy (pinned siblings included), or their getState() keeps the pre-save
+			// values. This head had no sibling refresh at all before this change.
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
 		}
 
 		if (signal.aborted) return id
@@ -2863,6 +2875,33 @@ export class ClineProvider
 		await this.postStateToWebview()
 		return id
 	}
+	/**
+	 * Refresh the buffered overlay of every live sibling pinned to a saved profile and rebuild
+	 * any task that follows it. The handler rebuild is independent of the pin: a task restored
+	 * from history can follow profile A while its view pins profile B.
+	 */
+	private async refreshSiblingsAfterProfileSave(name: string, providerSettings: ProviderSettings): Promise<void> {
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance === this || instance._disposed || instance.pinnedProfileName !== name) {
+				continue
+			}
+			// Direct private access: compile-time safe across sibling instances.
+			await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+		}
+
+		const {
+			name: _recordName,
+			id: _recordId,
+			...taskSettings
+		} = providerSettings as ProviderSettings & { name?: string; id?: string }
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance._disposed || instance.getCurrentTask()?.taskApiConfigName !== name) {
+				continue
+			}
+			instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
+		}
+	}
+
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName

@@ -6263,6 +6263,109 @@ describe("ClineProvider", () => {
 			})
 			await provider.dispose()
 		})
+		// The activation path writes the profile settings straight into this view's buffer, so the
+		// buffered profile name has to move with them: pinnedProfileName reads the buffer, and a later
+		// non-activating save of the same profile is gated on that name.
+		it("keeps the buffered profile name in step with the profile it activates", async () => {
+			const saver = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await saver["saveViewState"]("currentApiConfigName", "profile-a")
+			expect(saver["pinnedProfileName"]).toBe("profile-a")
+			// @ts-ignore - The double only backs the profile-store calls of the save path.
+			saver.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("profile-b-id"),
+				listConfig: vi.fn().mockResolvedValue([{ name: "profile-b", id: "profile-b-id" }]),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "activated-key" }
+
+			await saver.upsertProviderProfile("profile-b", providerSettings, true)
+
+			// One mutation: the name and the settings land in the buffer together, or the view pins a
+			// profile whose settings it is no longer holding.
+			expect(saver["viewLocalState"]).toMatchObject({
+				currentApiConfigName: "profile-b",
+				apiConfiguration: providerSettings,
+			})
+			expect(saver["pinnedProfileName"]).toBe("profile-b")
+			await saver.dispose()
+		})
+
+		it("should refresh the buffered overlay of another view pinned to the saved profile on a non-activating save", async () => {
+			const saver = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const pinned = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// saveViewState is the buffer write on this head: setValue is a ContextProxy pass-through,
+			// so going through setValue here would leave pinnedProfileName undefined.
+			await pinned["saveViewState"]("currentApiConfigName", "shared-profile")
+			// @ts-ignore - The double only backs the profile-store calls of the save path.
+			saver.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("shared-id"),
+				listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
+
+			await saver.upsertProviderProfile("shared-profile", providerSettings, false)
+
+			// The pinned view buffered a copy of the profile's settings; a non-activating save must
+			// refresh it, or its getState() keeps serving the pre-save configuration.
+			expect(pinned["viewLocalState"].apiConfiguration).toEqual(providerSettings)
+			await saver.dispose()
+			await pinned.dispose()
+		})
+
+		it("should refresh the buffered overlay of another view pinned to the activated profile", async () => {
+			const saver = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const pinned = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// saveViewState is the buffer write on this head: setValue is a ContextProxy pass-through,
+			// so going through setValue here would leave pinnedProfileName undefined.
+			await pinned["saveViewState"]("currentApiConfigName", "shared-profile")
+			// @ts-ignore - The double only backs the profile-store calls of the save path.
+			saver.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("shared-id"),
+				listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
+
+			await saver.upsertProviderProfile("shared-profile", providerSettings, true)
+
+			// The pinned view buffered a copy of the profile's settings; an activating save refreshes
+			// it through the sibling loop, so this row covers the activate=true branch that the case
+			// above no longer reaches.
+			expect(pinned["viewLocalState"].apiConfiguration).toEqual(providerSettings)
+			await saver.dispose()
+			await pinned.dispose()
+		})
 	})
 
 	describe("saveViewState", () => {

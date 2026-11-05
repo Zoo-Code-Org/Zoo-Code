@@ -149,6 +149,10 @@ describe("ContextProxy", () => {
 			)
 			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
 			await proxy.resetAllState()
+			// The Memento answers the read-back with the pre-reset value: only ending write ownership
+			// during the reset keeps the cache cleared. With the mocked store this is the difference
+			// between the guarantee holding and the rejected write repopulating the cache.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "anthropic" : undefined))
 			rejectPending(new Error("disk full"))
 			await expect(pending).rejects.toThrow("disk full")
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()

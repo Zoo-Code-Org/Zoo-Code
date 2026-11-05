@@ -76,7 +76,6 @@ export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
-	private stateWriteGenerations = new Map<GlobalStateKey, number>()
 	private secretCache: SecretState
 	private _isInitialized = false
 
@@ -417,8 +416,6 @@ export class ContextProxy {
 		// writes that are in flight. An update that throws at once is turned into a rejection, so it is handled the same.
 		const owner = {}
 		this.stateWriteOwner.set(key, owner)
-		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
-		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
 		const release = () => {
 			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
@@ -725,10 +722,11 @@ export class ContextProxy {
 		// Clear in-memory caches
 		this.stateCache = {}
 		this.secretCache = {}
-		// Advance every tracked generation so a pending write cannot restore pre-reset state.
-		for (const key of this.stateWriteGenerations.keys()) {
-			this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
-		}
+		// A reset also ends write ownership: a write that is still in flight reads the Memento back
+		// into the cache it just lost, so clearing the caches is not enough to keep pre-reset state
+		// out. Ownership is what the rejection handlers gate on.
+		this.stateWriteOwner.clear()
+		this.secretWriteOwner.clear()
 
 		await Promise.all([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
