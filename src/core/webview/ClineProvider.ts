@@ -987,6 +987,19 @@ export class ClineProvider
 	 * Removes the given view's entry from the registered viewStates map.
 	 * Runs through the serialized write queue to avoid racing concurrent view-state writes.
 	 */
+	/**
+	 * Enqueues one serialized view-state write for this view's current generation. The three callers
+	 * below pass a fresh-read/mutate/write closure and the same generation, so this is the same call
+	 * typed once rather than a new policy.
+	 */
+	private enqueueViewStateWrite(run: (provider: ClineProvider) => Promise<void>): Promise<void> {
+		return ClineProvider.enqueuePersistedViewStateWrite({
+			provider: this,
+			generation: this.viewStateGeneration,
+			run,
+		})
+	}
+
 	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
 		const run = async (provider: ClineProvider): Promise<void> => {
 			const states = provider.getPersistedViewStates({ fresh: true })
@@ -994,11 +1007,7 @@ export class ClineProvider
 			await provider.contextProxy.setValue("viewStates", states)
 		}
 
-		await ClineProvider.enqueuePersistedViewStateWrite({
-			provider: this,
-			generation: this.viewStateGeneration,
-			run,
-		})
+		await this.enqueueViewStateWrite(run)
 	}
 
 	/** Re-bind a claim-less entry with a fresh claim; unowned selections are dropped. */
@@ -1017,11 +1026,7 @@ export class ClineProvider
 			rebound = true
 		}
 
-		await ClineProvider.enqueuePersistedViewStateWrite({
-			provider: this,
-			generation: this.viewStateGeneration,
-			run,
-		})
+		await this.enqueueViewStateWrite(run)
 
 		return rebound ? claimToken : undefined
 	}
@@ -1170,11 +1175,7 @@ export class ClineProvider
 			provider.wroteUnderTemporaryViewStateId = false
 		}
 
-		await ClineProvider.enqueuePersistedViewStateWrite({
-			provider: this,
-			generation: this.viewStateGeneration,
-			run,
-		})
+		await this.enqueueViewStateWrite(run)
 	}
 
 	/** Register the stable view id and load its persisted selections; a claim must match. */
