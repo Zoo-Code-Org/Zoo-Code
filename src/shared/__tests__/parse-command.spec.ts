@@ -1289,6 +1289,17 @@ describe("parseCommand", () => {
 			expect(commands).toEqual(["diff", "printf %s a #b", "/dev/null"])
 		})
 
+		it("starts a # comment after a real blank inside a process substitution", () => {
+			// The control for the escaped-blank pin above: with a real blank
+			// before the `#` the frame-comment rule must fire. The comment
+			// runs to end of line, so bash loses the frame's closer to it and
+			// refuses the input with an unexpected-EOF error; the scan loses
+			// the closer to the same comment and fails the frame closed.
+			const input = "diff <(printf %s x #y) /dev/null"
+			expect(structuralError(input)?.quoteType).toBe("process-substitution")
+			expect(parseCommand(input).commands).toEqual([input])
+		})
+
 		it("does not treat exotic JS-\\s bytes as shell word separators", () => {
 			// bash word-splits on the default $IFS blanks (space, tab, newline)
 			// only. JS `\s` is wider — VT, FF, NBSP, U+3000, U+2001, U+2028 —
