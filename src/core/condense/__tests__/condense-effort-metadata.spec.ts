@@ -1,6 +1,6 @@
 // npx vitest run src/core/condense/__tests__/condense-effort-metadata.spec.ts
 //
-// DTE series 2/5 — the summarizer boundary. Task hands the task-local thinking-effort override
+// The summarizer boundary: Task hands the task-local thinking effort override to
 // to summarizeConversation inside request metadata. This checks the other half of that hand-off:
 // the real summarizer forwards the metadata to the handler's createMessage instead of dropping
 // the effort. The Task-side tests cover Task-to-summarizer propagation only.
@@ -52,7 +52,7 @@ function conversationHistory(): ApiMessage[] {
 	]
 }
 
-describe("summarizeConversation reasoning-effort forwarding (DTE series 2/5)", () => {
+describe("summarizeConversation reasoning-effort forwarding", () => {
 	beforeEach(() => {
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])

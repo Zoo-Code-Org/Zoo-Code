@@ -1,6 +1,6 @@
 // npx vitest run src/core/task/__tests__/Task.runtime-thinking-effort.test.ts
 //
-// DTE series 2/5 — task-local thinking effort state on Task:
+// Task-local thinking effort state on Task:
 // setRuntimeThinkingEffort / getRuntimeThinkingEffort, the in-memory
 // effective-effort handler rebuild (the profile-derived apiConfiguration
 // projection never carries the override).
@@ -11,6 +11,7 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { buildApiHandler } from "../../../api"
+import { DeepSeekHandler } from "../../../api/providers/deepseek"
 import { disposeApiHandler } from "../../../api/dispose-api-handler"
 import { summarizeConversation } from "../../condense"
 import { ApiStreamChunk } from "../../../api/transform/stream"
@@ -120,7 +121,7 @@ function getPrivateAccess(task: Task): RuntimeThinkingEffortAccess {
 
 const SETTINGS_EFFORT: ReasoningEffortExtended = "low"
 
-describe("Task runtime thinking effort (DTE series 2/5)", () => {
+describe("Task runtime thinking effort override", () => {
 	let mockProvider: Record<string, unknown>
 	let mockApiConfiguration: ProviderSettings
 	let task: Task
@@ -194,6 +195,10 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 
 	describe("setRuntimeThinkingEffort", () => {
 		it("stores effort + source and rebuilds the handler with the override applied", () => {
+			// The handler this task owned before the swap must be disposed by the swap:
+			// handlers that hold host listeners (VS Code LM, GitHub Copilot) leak otherwise.
+			const handlerBefore = task.api
+			vi.mocked(disposeApiHandler).mockClear()
 			task.setRuntimeThinkingEffort("xhigh", "test-source")
 
 			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "xhigh", source: "test-source" })
@@ -207,10 +212,47 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 				}),
 			)
 			// The handler is rebuilt with the override applied (last build call)...
+			// Exact configuration, not a shape subset: dropping any other profile field
+			// from the rebuild would fail here.
 			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
-			expect(lastCall?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "xhigh" }))
+			expect(lastCall?.[0]).toEqual({ ...mockApiConfiguration, reasoningEffort: "xhigh" })
 			// ...from a fresh copy, not the settings object itself.
 			expect(lastCall?.[0]).not.toBe(mockApiConfiguration)
+			const disposedHandlers = vi.mocked(disposeApiHandler).mock.calls.map(([api]) => api)
+			expect(disposedHandlers.filter((api) => api === handlerBefore)).toHaveLength(1)
+		})
+
+		it("hands buildApiHandler a configuration a real provider handler honours", async () => {
+			// The mocked builder proves the override reaches buildApiHandler; this feeds
+			// the configuration it handed over to the REAL builder and checks that an
+			// actual provider resolves it. deepseek's model-params step reads
+			// `options.reasoningEffort` and outranks the model's own default ("high"),
+			// while the profile asks for SETTINGS_EFFORT, so all three values differ.
+			const { buildApiHandler: buildRealHandler } =
+				await vi.importActual<typeof import("../../../api")>("../../../api")
+			// The real builder routes this configuration to deepseek's handler, whose
+			// model-params step is what reads the effort.
+			const deepSeekEffortOf = (configuration: ProviderSettings): ReasoningEffortExtended | undefined => {
+				const handler = buildRealHandler({
+					...configuration,
+					apiProvider: providerIdentifiers.deepseek,
+					apiModelId: "deepseek-v4-flash",
+				})
+				if (!(handler instanceof DeepSeekHandler)) {
+					throw new Error("the real builder must route this configuration to deepseek's handler")
+				}
+				return handler.getModel().reasoningEffort
+			}
+
+			expect(deepSeekEffortOf(mockApiConfiguration)).toBe(SETTINGS_EFFORT)
+
+			task.setRuntimeThinkingEffort("max", "real-builder")
+			const handedConfiguration = vi.mocked(buildApiHandler).mock.calls.at(-1)?.[0] as ProviderSettings
+			expect(deepSeekEffortOf(handedConfiguration)).toBe("max")
+
+			task.setRuntimeThinkingEffort(undefined)
+			const clearedConfiguration = vi.mocked(buildApiHandler).mock.calls.at(-1)?.[0] as ProviderSettings
+			expect(deepSeekEffortOf(clearedConfiguration)).toBe(SETTINGS_EFFORT)
 		})
 
 		it("replaces effort + source when re-set while active and restores on clear", () => {
@@ -221,10 +263,12 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			const lastSet = vi.mocked(buildApiHandler).mock.calls.at(-1)
 			expect(lastSet?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "medium" }))
 
-			// Clearing rebuilds from the profile projection, not the intermediate effort.
+			// Clearing rebuilds from the profile projection itself — the same object, not
+			// a copy carrying the intermediate effort.
 			task.setRuntimeThinkingEffort(undefined)
 			const lastClear = vi.mocked(buildApiHandler).mock.calls.at(-1)
-			expect(lastClear?.[0]).toEqual(expect.objectContaining({ reasoningEffort: SETTINGS_EFFORT }))
+			expect(lastClear?.[0]).toBe(task.apiConfiguration)
+			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
 		})
 
 		it("restores the settings-derived effort when cleared with undefined", () => {
@@ -232,6 +276,9 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			const lastSet = vi.mocked(buildApiHandler).mock.calls.at(-1)
 			expect(lastSet?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "max" }))
 
+			// The handler that served the override must be disposed by the clearing swap.
+			const handlerUnderOverride = task.api
+			vi.mocked(disposeApiHandler).mockClear()
 			// A label passed on the clearing call must not survive into source.
 			task.setRuntimeThinkingEffort(undefined, "stale-source")
 
@@ -246,9 +293,12 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 					reasoningEffort: SETTINGS_EFFORT,
 				}),
 			)
-			// The handler is rebuilt from the projection.
+			// The handler is rebuilt from the projection object itself, and the handler
+			// that served the override is gone.
 			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
-			expect(lastCall?.[0]).toEqual(expect.objectContaining({ reasoningEffort: SETTINGS_EFFORT }))
+			expect(lastCall?.[0]).toBe(task.apiConfiguration)
+			const disposedHandlers = vi.mocked(disposeApiHandler).mock.calls.map(([api]) => api)
+			expect(disposedHandlers.filter((api) => api === handlerUnderOverride)).toHaveLength(1)
 		})
 
 		it("never lets the override enter apiConfiguration (webview projection + profile save contract)", () => {

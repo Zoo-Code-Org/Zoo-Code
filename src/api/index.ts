@@ -129,11 +129,13 @@ export interface ApiHandlerCreateMessageMetadata {
 	 */
 	abortSignal?: AbortSignal
 	/**
-	 * Per-request thinking effort override (DTE series 2/5).
-	 * When defined, takes precedence over the settings-derived `reasoningEffort`
-	 * wherever the effective effort is resolved (see `resolveEffectiveReasoningEffort`).
-	 * Task-scoped and transient: it applies to this request only (the next request
-	 * after being set — no mid-stream effect) and is never persisted to settings.
+	 * Per-request thinking effort override applied by rebuilding the handler.
+	 * Providers resolve effort from the handler options (each provider reads
+	 * `options.reasoningEffort` through its own model-params step), so passing the
+	 * override in the configuration handed to `buildApiHandler` is what takes effect;
+	 * it outranks the settings-derived `reasoningEffort` for the handler built from
+	 * this object. Task-scoped and transient: it applies to the next request only
+	 * (no mid-stream effect) and is never persisted to settings.
 	 */
 	reasoningEffort?: ReasoningEffortExtended
 }

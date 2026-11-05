@@ -419,7 +419,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// API
 	apiConfiguration: ProviderSettings
 	api: ApiHandler
-	// DTE series 2/5: task-local thinking effort override. Transient per-task state —
+	// Task-local thinking effort override. Transient per-task state —
 	// never persisted to settings; cleared on dispose (see dispose()).
 	private runtimeThinkingEffort?: ReasoningEffortExtended
 	private runtimeThinkingEffortSource?: string
@@ -2494,7 +2494,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates the API configuration and rebuilds the API handler.
 	 * There is no tool-protocol switching or tool parser swapping.
 	 *
-	 * DTE series 2/5: when a task-local thinking effort override is active
+	 * When a task-local thinking effort override is active
 	 * (`setRuntimeThinkingEffort`), the incoming configuration's `reasoningEffort`
 	 * becomes the new restore value and the override is re-applied on top of the
 	 * fresh in-memory copy — clearing the override later restores the NEW profile's
@@ -2507,7 +2507,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// VS Code LM / GitHub Copilot own host listeners, so the old one is
 		// released — immediately when idle, or when the last request, retry,
 		// background drain, or condense that leased it settles.
-		// DTE series 2/5: apiConfiguration stays the profile-derived projection;
+		// apiConfiguration stays the profile-derived projection;
 		// an active task-local override is applied to the rebuilt handler only, so
 		// a profile switch keeps the override live and clearing it later restores
 		// the NEW profile's value (it is the configuration itself now).
@@ -2544,7 +2544,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * DTE series 2/5: sets — or clears with `undefined` — the task-local thinking
+	 * Sets — or clears with `undefined` — the task-local thinking
 	 * effort override.
 	 *
 	 * Resolution order for the affected requests (strongest first): this
@@ -2557,6 +2557,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * from it can never carry the task-local effort. `undefined` clears the
 	 * override and rebuilds the handler from the projection.
 	 *
+	 * Not inherited: child, handoff, and resumed tasks construct their own Task and
+	 * start with no override — it lives in this task's private fields and is never
+	 * persisted.
 	 * @param effort - The task-local effort, or `undefined` to clear.
 	 * @param source - Optional provenance label (UI wiring lands in a later PR).
 	 */
@@ -2592,7 +2595,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * DTE series 2/5: reads the current task-local thinking effort override.
+	 * Reads the current task-local thinking effort override.
 	 */
 	public getRuntimeThinkingEffort(): { effort?: ReasoningEffortExtended; source?: string } {
 		return {
@@ -2602,7 +2605,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * DTE series 2/5: metadata fragment carrying the active task-local effort
+	 * Metadata fragment carrying the active task-local effort
 	 * override on a single request. Empty when no override is active, so the
 	 * existing settings resolution applies unchanged.
 	 */
@@ -2789,7 +2792,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
-			// DTE series 2/5: carry the active task-local effort override.
+			// Carry the active task-local effort override.
 			...this.getRuntimeThinkingEffortMetadata(),
 		}
 		// Generate environment details to include in the condensed summary
@@ -4891,7 +4894,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
-
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4908,7 +4910,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
@@ -5607,7 +5608,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
-			// DTE series 2/5: carry the active task-local effort override.
+			// Carry the active task-local effort override.
 			...this.getRuntimeThinkingEffortMetadata(),
 		}
 
@@ -5887,7 +5888,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							parallelToolCalls: true,
 						}
 					: {}),
-				// DTE series 2/5: carry the active task-local effort override.
+				// Carry the active task-local effort override.
 				...this.getRuntimeThinkingEffortMetadata(),
 			}
 
@@ -6058,7 +6059,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
 			abortSignal,
-			// DTE series 2/5: carry the active task-local effort override for this request.
+			// Carry the active task-local effort override for this request.
 			...this.getRuntimeThinkingEffortMetadata(),
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
