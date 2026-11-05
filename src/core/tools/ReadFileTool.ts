@@ -216,22 +216,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read text file content with lossy UTF-8 conversion
 					// Reading as Buffer first allows graceful handling of non-UTF8 bytes
 					// (they become U+FFFD replacement characters instead of throwing)
+					// Observe the on-disk version before reading so the token can never be newer than
+					// the bytes this read returns; see observeReadVersion.
+					const version = await computeVersionToken(fullPath).catch(() => undefined)
 					const buffer = await fs.readFile(fullPath)
 					const fileContent = buffer.toString("utf-8")
 					const result = this.processTextFile(fileContent, entry)
 
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
-					// A2 (plan #33 / epic #1375): record the observed on-disk version for the future write guard.
-					// A stat failure leaves the target unobserved and never fails the read. It must also
-					// drop any earlier entry, otherwise the guard still holds a token from a previous
-					// read that no longer describes this one.
-					const version = await computeVersionToken(fullPath).catch(() => undefined)
-					if (version) {
-						task.observationRegistry.observe(fullPath, version)
-					} else {
-						task.observationRegistry.forget(fullPath)
-					}
+					observeReadVersion(task, fullPath, version)
 
 					updateFileResult(relPath, {
 						nativeContent: `File: ${relPath}\n${result}`,
@@ -782,6 +776,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				}
 
 				// Read text file
+				// Observe the on-disk version before reading so the token can never be newer than
+				// the bytes this read returns; see observeReadVersion.
+				const version = await computeVersionToken(fullPath).catch(() => undefined)
 				const rawContent = await fs.readFile(fullPath, "utf8")
 
 				// Handle line ranges if specified
@@ -814,16 +811,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// Track file in context
 				await task.fileContextTracker.trackFileContext(relPath, "read_tool")
 
-				// A2 (plan #33 / epic #1375): mirror the native path — record the observed
-				// on-disk version so legacy-format reads also feed the future write guard.
-				// A stat failure leaves the target unobserved and never fails the read, and drops any
-				// entry from an earlier read so the guard cannot compare against a stale token.
-				const version = await computeVersionToken(fullPath).catch(() => undefined)
-				if (version) {
-					task.observationRegistry.observe(fullPath, version)
-				} else {
-					task.observationRegistry.forget(fullPath)
-				}
+				observeReadVersion(task, fullPath, version)
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
@@ -839,3 +827,24 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 }
 
 export const readFileTool = new ReadFileTool()
+
+/**
+ * Record (or drop) the version of a file this tool just read, in one place so the
+ * native and legacy read paths cannot drift apart.
+ *
+ * A present token is stored as observed. A missing token means the stat failed, so
+ * the target is unobserved and any earlier entry must be dropped: that token came from
+ * a previous read and no longer describes this file, and leaving it would let the write
+ * guard compare against a stale version. The token itself is taken before the read by
+ * both call sites, which is deliberate - a token taken afterwards could be newer than
+ * the content the model saw, and a guard built on it would green-light a stale write.
+ * The conservative direction is the one chosen here: a mutation during the read yields
+ * a token that mismatches and blocks the guarded write.
+ */
+function observeReadVersion(task: Task, fullPath: string, version: string | undefined): void {
+	if (version) {
+		task.observationRegistry.observe(fullPath, version)
+	} else {
+		task.observationRegistry.forget(fullPath)
+	}
+}

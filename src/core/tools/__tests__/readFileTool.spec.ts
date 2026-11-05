@@ -196,7 +196,17 @@ describe("ReadFileTool", () => {
 		vi.clearAllMocks()
 
 		// Default mock implementations
-		mockedFsStat.mockResolvedValue({ isDirectory: () => false } as any)
+		// Full BigIntStats shape: a partial double makes computeVersionToken throw a
+		// TypeError that its .catch swallows, which launders a mock gap into "no token"
+		// and silently skips observation in every test that does not override this mock.
+		mockedFsStat.mockResolvedValue({
+			isDirectory: () => false,
+			dev: BigInt(1),
+			ino: BigInt(2),
+			size: BigInt(300),
+			mtimeNs: BigInt(4_000_000_000n),
+			ctimeNs: BigInt(5_000_000_000n),
+		} as unknown as Stats)
 		mockedIsBinaryFile.mockResolvedValue(false)
 		mockedFsReadFile.mockResolvedValue(Buffer.from("test content"))
 		mockedReadWithSlice.mockReturnValue({
@@ -1726,13 +1736,55 @@ describe("ReadFileTool", () => {
 				// Verify the tool called observe exactly once with a valid token.
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
-				expect(calledPath).toContain("existing.ts")
+				expect(calledPath).toBe(path.resolve("/test/workspace", "existing.ts"))
 				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
 
 				// Verify get() returns the same data using the spy-captured key.
 				const obs = reg.get(calledPath)
 				expect(obs).toBeDefined()
 				expect(obs!.version).toBe(calledVersion)
+			})
+			it("observes the token taken before the read, not the one after it", async () => {
+				// A token computed after the read can describe bytes the model never saw: if the
+				// file changes between the read and the stat, the registry ends up holding a newer
+				// token than the content the tool returned, and the write guard would then accept a
+				// stale write. This fixture mutates the file inside the read itself, so the pre-read
+				// and post-read tokens differ and the assertion names which one may be recorded. The
+				// direction is chosen deliberately: a mid-read mutation must mismatch and block the
+				// guarded write, which is the conservative answer for a guard.
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				// The directory-check stat and the token stat share this mock. Only the token
+				// lookup passes { bigint: true }, so the mutation flag decides which token shape it
+				// returns; readStarted records whether the read had already happened.
+				let readStarted = false
+				mockedFsStat.mockImplementation(
+					async (_path: unknown, options?: { bigint?: boolean }) =>
+						({
+							isDirectory: () => false,
+							dev: BigInt(1),
+							ino: BigInt(2),
+							size: BigInt(300),
+							mtimeNs: BigInt(options?.bigint && readStarted ? 9_000_000_000n : 4_000_000_000n),
+							ctimeNs: BigInt(5_000_000_000n),
+						}) as unknown as Stats,
+				)
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockImplementation(async () => {
+					readStarted = true
+					return Buffer.from("content")
+				})
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [, calledVersion] = observeSpy.mock.calls[0]
+				// 4000000000 is the pre-read mtimeNs; 9000000000 is the mutated file.
+				expect(calledVersion).toBe("1:2:300:4000000000:5000000000")
+				expect(readStarted).toBe(true)
 			})
 
 			it("a failed read (absent path) leaves the registry size 0 and does not throw", async () => {
@@ -1813,11 +1865,13 @@ describe("ReadFileTool", () => {
 
 				// Each read stats the path twice: once to rule out a directory and once for
 				// the version token. Only the token lookup is made to fail.
-				let statCalls = 0
+				// Only computeVersionToken asks for bigint stats, so arm the failure on that
+				// call rather than on call parity, which ties the test to how many stats a
+				// read happens to make.
 				let failTokenLookup = false
-				mockedFsStat.mockImplementation(async () => {
-					statCalls++
-					if (failTokenLookup && statCalls % 2 === 0) {
+				mockedFsStat.mockImplementation(async (_path: unknown, options?: { bigint?: boolean }) => {
+					// Cast: the mock only needs the option the real caller passes.
+					if (failTokenLookup && options?.bigint === true) {
 						throw new Error("EACCES")
 					}
 					return okStats
@@ -1928,11 +1982,13 @@ describe("ReadFileTool", () => {
 
 				// Each read stats the path twice: once to rule out a directory and once for
 				// the version token. Only the token lookup is made to fail.
-				let statCalls = 0
+				// Only computeVersionToken asks for bigint stats, so arm the failure on that
+				// call rather than on call parity, which ties the test to how many stats a
+				// read happens to make.
 				let failTokenLookup = false
-				mockedFsStat.mockImplementation(async () => {
-					statCalls++
-					if (failTokenLookup && statCalls % 2 === 0) {
+				mockedFsStat.mockImplementation(async (_path: unknown, options?: { bigint?: boolean }) => {
+					// Cast: the mock only needs the option the real caller passes.
+					if (failTokenLookup && options?.bigint === true) {
 						throw new Error("EACCES")
 					}
 					return okStats
@@ -1948,7 +2004,7 @@ describe("ReadFileTool", () => {
 				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [observedPath, observedVersion] = observeSpy.mock.calls[0]
-				expect(observedPath).toContain("legacy.ts")
+				expect(observedPath).toBe(path.resolve("/test/workspace", "legacy.ts"))
 				expect(reg.get(observedPath)?.version).toBe(observedVersion)
 
 				failTokenLookup = true
@@ -1996,7 +2052,7 @@ describe("ReadFileTool", () => {
 
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
-				expect(calledPath).toContain("legacy.ts")
+				expect(calledPath).toBe(path.resolve("/test/workspace", "legacy.ts"))
 				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
 			})
 

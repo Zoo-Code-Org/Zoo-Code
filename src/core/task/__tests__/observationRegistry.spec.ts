@@ -3,14 +3,21 @@ import { describe, it, expect, vi } from "vitest"
 import { ObservationRegistry } from "../observationRegistry"
 
 describe("ObservationRegistry", () => {
-	it("observe → get returns the recorded version and observedAt", () => {
-		const reg = new ObservationRegistry()
-		reg.observe("/a/b/c.ts", "1:2:300:4000000000:5000000000")
-
-		const obs = reg.get("/a/b/c.ts")
-		expect(obs).toBeDefined()
-		expect(obs!.version).toBe("1:2:300:4000000000:5000000000")
-		expect(typeof obs!.observedAt).toBe("number")
+	it("observe → get returns the recorded version and the clock time it observed at", () => {
+		// typeof number accepts 0 and NaN, so pin the exact timestamp instead: a
+		// broken clock that returns some other number must not pass.
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(Date.UTC(2025, 0, 1, 0, 0, 0, 0)))
+		try {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "1:2:300:4000000000:5000000000")
+			const obs = reg.get("/a/b/c.ts")
+			expect(obs).toBeDefined()
+			expect(obs!.version).toBe("1:2:300:4000000000:5000000000")
+			expect(obs!.observedAt).toBe(Date.UTC(2025, 0, 1, 0, 0, 0, 0))
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("re-observe replaces the entry with a fresh observedAt", () => {
