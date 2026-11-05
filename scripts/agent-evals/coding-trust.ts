@@ -168,6 +168,25 @@ const PROCESS_ENV_ALLOWLIST = [
 	"PATHEXT",
 ] as const
 
+// Container client endpoint and TLS configuration. Provider credentials are
+// handled separately and never forwarded to the container CLI.
+export const CONTAINER_ENDPOINT_ALLOWLIST = [
+	"DOCKER_HOST",
+	"DOCKER_CONTEXT",
+	"DOCKER_CONFIG",
+	"DOCKER_CERT_PATH",
+	"DOCKER_TLS_VERIFY",
+] as const
+
+export function buildContainerCliEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const child = buildWorktreeEnvironment(env)
+	for (const name of [...CONTAINER_ENDPOINT_ALLOWLIST, "HOME"] as const) {
+		const value = env[name]
+		if (value !== undefined) child[name] = value
+	}
+	return child
+}
+
 // Environment for the side process: the shared allowlist plus the one named
 // credential variable and the side label.
 export function buildSideEnvironment(
@@ -176,7 +195,7 @@ export function buildSideEnvironment(
 	side: "baseline" | "candidate",
 ): NodeJS.ProcessEnv {
 	const child: NodeJS.ProcessEnv = {}
-	for (const name of PROCESS_ENV_ALLOWLIST) {
+	for (const name of [...PROCESS_ENV_ALLOWLIST, ...CONTAINER_ENDPOINT_ALLOWLIST]) {
 		const value = env[name]
 		if (value !== undefined) child[name] = value
 	}

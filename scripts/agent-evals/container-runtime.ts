@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { buildWorktreeEnvironment } from "./coding-trust.ts"
+import { buildContainerCliEnvironment } from "./coding-trust.ts"
 import { randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -35,9 +35,11 @@ export interface ContainerCli {
 	imageDigest(image: string): Promise<string | undefined>
 }
 
-const defaultDetect = async (): Promise<ContainerExecutable | undefined> => {
+export const defaultDetect = async (
+	probe: (candidate: ContainerExecutable) => Promise<boolean> = probeExecutable,
+): Promise<ContainerExecutable | undefined> => {
 	for (const candidate of ["docker", "podman"] as const) {
-		const usable = await probeExecutable(candidate)
+		const usable = await probe(candidate)
 		if (usable) return candidate
 	}
 	return undefined
@@ -64,12 +66,12 @@ const probeExecutable = async (candidate: ContainerExecutable): Promise<boolean>
 	return probePath(executable)
 }
 
-const probePath = (candidate: string): Promise<boolean> =>
+export const probePath = (candidate: string): Promise<boolean> =>
 	new Promise((resolve) => {
 		try {
-			const child = spawn(candidate, ["--version"], {
+			const child = spawn(candidate, ["info"], {
 				stdio: "ignore",
-				env: buildWorktreeEnvironment(process.env),
+				env: buildContainerCliEnvironment(process.env),
 			})
 			const timer = setTimeout(() => {
 				child.kill("SIGKILL")
@@ -106,7 +108,7 @@ export const exec = (
 		try {
 			const child = spawn(file, [...args], {
 				stdio: ["ignore", "pipe", "pipe"],
-				env: buildWorktreeEnvironment(process.env),
+				env: buildContainerCliEnvironment(process.env),
 				timeout: timeoutMs,
 				killSignal: "SIGKILL",
 			})
