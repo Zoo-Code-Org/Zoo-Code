@@ -1,6 +1,7 @@
 import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName, type TelemetryProperties } from "@roo-code/types"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { WebviewFocusTracker } from "../../core/webview/WebviewFocusTracker"
 import { ContextProxy } from "../../core/config/ContextProxy"
@@ -59,10 +60,32 @@ vi.mock("../../shared/package", () => ({
 	},
 }))
 
+// The real telemetry client derives every event's properties from the provider that was bound
+// last (BaseTelemetryClient holds it as a WeakRef), so the binding order is observable through
+// the properties of an event captured afterwards.
+const telemetryBinding = vi.hoisted(() => ({
+	current: undefined as { getTelemetryProperties(): Promise<Record<string, unknown>> } | undefined,
+	events: [] as Record<string, unknown>[],
+	pending: [] as Promise<void>[],
+}))
+
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureTitleButtonClicked: vi.fn(),
+			setProvider: vi.fn((provider: { getTelemetryProperties(): Promise<Record<string, unknown>> }) => {
+				telemetryBinding.current = provider
+			}),
+			captureEvent: vi.fn((event: string, properties?: Record<string, unknown>) => {
+				telemetryBinding.pending.push(
+					(async () => {
+						const providerProperties = telemetryBinding.current
+							? await telemetryBinding.current.getTelemetryProperties()
+							: {}
+						telemetryBinding.events.push({ event, ...providerProperties, ...(properties || {}) })
+					})(),
+				)
+			}),
 		},
 	},
 }))
@@ -798,6 +821,85 @@ describe("openClineInNewTab", () => {
 			type: "action",
 			action: "didBecomeVisible",
 		})
+	})
+
+	it("rebinds telemetry to the tab provider that survived the race before disposing the constructed one", async () => {
+		const trackedPanel = {
+			reveal: vi.fn().mockResolvedValue(undefined),
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		}
+		// TelemetryProperties requires the app-level fields; only the task id identifies the tab.
+		const tabProperties = (taskId: string): TelemetryProperties => ({
+			language: "en",
+			mode: "act",
+			appName: "zoo-code",
+			appVersion: "0.0.0",
+			vscodeVersion: "1.0.0",
+			platform: "win32",
+			editorName: "VS Code",
+			taskId,
+		})
+
+		// Each provider reports the task id of the tab it owns, the way
+		// ClineProvider.getTelemetryProperties reports the properties of its own view.
+		const trackedProvider = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+			getTelemetryProperties: async () => tabProperties("surviving-tab"),
+		}
+		const constructedProvider = {
+			// Its teardown is the only window in which the binding can still point at the
+			// instance being thrown away, so the event is captured from inside dispose():
+			// whatever reads telemetry while this provider is going down must already see the
+			// tab that is actually being returned.
+			dispose: vi.fn().mockImplementation(() => {
+				TelemetryService.instance.captureEvent(TelemetryEventName.TAB_SHOWN)
+				return Promise.resolve()
+			}),
+			getTelemetryProperties: async () => tabProperties("disposed-tab"),
+		}
+
+		// A tracked tab appears during the construction window, as it does on the API path or
+		// after a sidebar-to-tab move. The constructed provider binds telemetry on the way in,
+		// exactly as the real constructor does (ClineProvider.ts calls
+		// TelemetryService.instance.setProvider(this)).
+		vi.mocked(ClineProvider).mockImplementationOnce(function () {
+			setPanel(trackedPanel as never, "tab")
+			;(ClineProvider.getInstanceForView as Mock).mockReturnValue(trackedProvider)
+			TelemetryService.instance.setProvider(constructedProvider)
+			return constructedProvider
+		} as never)
+
+		telemetryBinding.current = undefined
+		telemetryBinding.events.length = 0
+		telemetryBinding.pending.length = 0
+
+		const returned = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		// The raced path disposed the constructed provider and the caller got the tracked one.
+		expect(returned).toBe(trackedProvider)
+		expect(constructedProvider.dispose).toHaveBeenCalledTimes(1)
+
+		// BaseTelemetryClient merges the properties of whichever provider is bound into every
+		// event, so a stale binding surfaces as the disposed tab's task id. The first event was
+		// captured by the disposal itself: it must already carry the surviving tab. The second
+		// one is captured after the call returned, which is what later events see.
+		await Promise.all(telemetryBinding.pending)
+		expect(telemetryBinding.events).toHaveLength(1)
+		expect(telemetryBinding.events[0]).toMatchObject({ taskId: "surviving-tab" })
+		expect(telemetryBinding.events[0]).not.toMatchObject({ taskId: "disposed-tab" })
+
+		TelemetryService.instance.captureEvent(TelemetryEventName.TAB_SHOWN)
+		await Promise.all(telemetryBinding.pending)
+		expect(telemetryBinding.events).toHaveLength(2)
+		expect(telemetryBinding.events[1]).toMatchObject({ taskId: "surviving-tab" })
+		expect(telemetryBinding.current).toBe(trackedProvider)
 	})
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		const webviewFocusTracker = new WebviewFocusTracker()

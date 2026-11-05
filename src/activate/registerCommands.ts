@@ -503,6 +503,12 @@ const createTabPanelUnlocked = async ({
 			if (racedProvider) {
 				await tabPanel.reveal()
 				await racedProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+				// The constructor above rebound telemetry to this provider (ClineProvider binds itself
+				// with TelemetryService.setProvider) and the client keeps only a weak reference to
+				// whatever was bound last, so rebinding has to happen before the dispose: otherwise
+				// later events read properties off the disposed instance instead of off the tab that
+				// was actually returned.
+				TelemetryService.instance.setProvider(racedProvider)
 				await tabProvider.dispose()
 				return racedProvider
 			}
