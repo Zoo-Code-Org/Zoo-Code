@@ -300,6 +300,81 @@ describe("appearanceSettingWrites", () => {
 			expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
 		})
 
+		describe("a rollback that waits behind the slow rollback of a newer save", () => {
+			/** The rollback of the newer save puts back 120, and that store is the one that hangs. */
+			const slowRollbackProxy = () => {
+				const releases: Array<() => void> = []
+				const proxy = {
+					getValue: (key: string) => stored.get(key),
+					setValue: vi.fn(async (key: string, value: unknown) => {
+						if (value === 120 && stored.get(key) === 150)
+							await new Promise<void>((resolve) => releases.push(resolve))
+						stored.set(key, value)
+					}),
+				} as unknown as ContextProxy
+				return { proxy, release: () => releases.splice(0).forEach((release) => release()) }
+			}
+
+			/** Two saves that both stored their value (the first 120, the second 150), and the second one's rollback is slow. */
+			const bothStoredThenFail = async () => {
+				const { proxy, release } = slowRollbackProxy()
+				const first = beginSettingWrite("interfaceFontScale", 100, 120)
+				await performSettingWrite(proxy, first)
+				const second = beginSettingWrite("interfaceFontScale", 120, 150)
+				await performSettingWrite(proxy, second)
+				const secondUndone = undoSettingWrite(proxy, second)
+				secondUndone.catch(() => undefined) // what the test expects of it is asserted where it is awaited
+				await vi.advanceTimersByTimeAsync(0) // the rollback of the second save has started, and hangs
+				return { proxy, release, first, secondUndone }
+			}
+
+			it("is not lost when the wait goes past the timeout: it runs when its turn comes, and puts the original value back", async () => {
+				const { proxy, release, first, secondUndone } = await bothStoredThenFail()
+				const firstUndone = undoSettingWrite(proxy, first)
+				firstUndone.catch(() => undefined)
+
+				await vi.advanceTimersByTimeAsync(15_000) // both callers give up waiting
+				await expect(firstUndone).rejects.toThrow("did not finish")
+				await expect(secondUndone).rejects.toThrow("did not finish")
+				release() // the slow rollback of the second save lands: 120, the value of the first save
+				await vi.advanceTimersByTimeAsync(0)
+
+				// Both saves failed: what the first one stored is put back too, not left behind.
+				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("is not lost when its provider is disposed while it waits", async () => {
+				const sidebar = {}
+				const { proxy, release, first, secondUndone } = await bothStoredThenFail()
+				const firstUndone = undoSettingWrite(proxy, first, { owner: sidebar })
+				firstUndone.catch(() => undefined)
+
+				disposeSettingWrites(sidebar) // the view is closed while the rollback waits for its turn
+				await vi.advanceTimersByTimeAsync(15_000)
+				await expect(firstUndone).rejects.toThrow("did not finish")
+				await expect(secondUndone).rejects.toThrow("did not finish")
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("is run once the rollback ahead of it settles even when its caller has not given up yet, and leaves no bookkeeping", async () => {
+				const { proxy, release, first, secondUndone } = await bothStoredThenFail()
+				const firstUndone = undoSettingWrite(proxy, first)
+
+				await vi.advanceTimersByTimeAsync(5_000)
+				release() // the rollback ahead of it settles within the wait
+				await vi.advanceTimersByTimeAsync(0)
+				await firstUndone // it was waiting, and did not time out
+				await secondUndone // nor did the rollback ahead of it
+				await vi.advanceTimersByTimeAsync(15_000)
+
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+		})
+
 		it("drops a write whose caller gave up before it started, so it never lands later", async () => {
 			const { proxy, landLate } = deferredProxy()
 			const first = beginSettingWrite("interfaceFontScale", 100, 120) // the store that hangs

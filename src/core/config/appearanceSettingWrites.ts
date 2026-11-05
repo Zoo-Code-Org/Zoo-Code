@@ -321,10 +321,27 @@ export const undoSettingWrite = async (
 		return
 	}
 
-	// This write may have stored its value (it started, and then failed), so it has to be put back even if its provider
-	// was disposed meanwhile: a disposed owner is refused, so the rollback runs under the ContextProxy, which is shared
-	// and never disposed. The provider is still detached: nothing is called back into it.
-	await queuedSettingWrite(disposedOwners.has(owner) ? contextProxy : owner, key, restore)
+	// This write may have stored its value (it started, and then failed), so it has to be put back whatever happens
+	// to its caller or its provider. It is queued behind what is outstanding for the key (another write's rollback, a
+	// store), and kept: it is not refused when the provider was disposed, not dropped when it is disposed while the
+	// rollback waits, and has no timeout of its own, so a slow rollback ahead of it cannot cost it its turn. The caller
+	// stops waiting after the usual time, and the rollback runs when its turn comes. The provider is still detached:
+	// nothing is called back into it.
+	const rollback = queuedSettingWrite(owner, key, restore, true)
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const gaveUp = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(() => {
+			void rollback.catch((error: unknown) =>
+				console.error(`Failed to restore setting "${key}" after its write failed:`, error),
+			)
+			reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
+		}, SETTING_WRITE_TIMEOUT_MS)
+	})
+	try {
+		await Promise.race([rollback, gaveUp])
+	} finally {
+		clearTimeout(timer)
+	}
 }
 
 /**
