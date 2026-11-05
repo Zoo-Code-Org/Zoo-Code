@@ -4677,13 +4677,13 @@ describe("ClineProvider", () => {
 		}
 
 		provider["initialModeConfigIds"] = Promise.resolve({ architect: "test-id" })
-		;(provider as any).providerSettingsManager = {
+		;(provider as MemberSwapTarget).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			setModeConfig: vi.fn(),
 			getProfile: vi.fn().mockResolvedValue(profile),
-		} as any
+		}
 
 		// Switch to architect mode
 		await messageHandler({ type: "mode", text: "architect" })
@@ -4929,7 +4929,7 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-		;(provider as any).providerSettingsManager = {
+		;(provider as MemberSwapTarget).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
@@ -4937,7 +4937,7 @@ describe("ClineProvider", () => {
 					{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
 				]),
 			setModeConfig: vi.fn(),
-		} as any
+		}
 
 		await provider.setValue("currentApiConfigName", "current-config")
 
@@ -4958,12 +4958,12 @@ describe("ClineProvider", () => {
 			name: "new-config",
 		}
 
-		;(provider as any).providerSettingsManager = {
+		;(provider as MemberSwapTarget).providerSettingsManager = {
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
-		} as any
+		}
 
 		// First set the mode
 		await messageHandler({ type: "mode", text: "architect" })
@@ -4985,12 +4985,12 @@ describe("ClineProvider", () => {
 			apiProvider: providerIdentifiers.anthropic,
 		}
 
-		;(provider as any).providerSettingsManager = {
+		;(provider as MemberSwapTarget).providerSettingsManager = {
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
-		} as any
+		}
 
 		// First set the mode
 		await messageHandler({ type: "mode", text: "architect" })
@@ -5161,7 +5161,7 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-		;(provider as any).providerSettingsManager = {
+		;(provider as MemberSwapTarget).providerSettingsManager = {
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([
@@ -5169,7 +5169,7 @@ describe("ClineProvider", () => {
 				]),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
-		} as any
+		}
 
 		// Update API configuration
 		await messageHandler({
@@ -5512,13 +5512,13 @@ describe("ClineProvider", () => {
 			}
 
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "saved-config-id" })
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				activateProfile: vi.fn().mockResolvedValue(profile),
 				setModeConfig: vi.fn(),
 				getProfile: vi.fn().mockResolvedValue(profile),
-			} as any
+			}
 
 			// Switch to architect mode
 			await provider.handleModeSwitch("architect")
@@ -5535,8 +5535,8 @@ describe("ClineProvider", () => {
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
 
-		test("keeps the current config locally when switching to a mode without a config", async () => {
-			;(provider as any).providerSettingsManager = {
+		test("saves current config when switching to mode without config", async () => {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -5544,7 +5544,7 @@ describe("ClineProvider", () => {
 						{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
 					]),
 				setModeConfig: vi.fn(),
-			} as any
+			}
 
 			// Mock the ContextProxy's getValue method to return the current config name
 			const contextProxy = (provider as any).contextProxy
@@ -5572,13 +5572,13 @@ describe("ClineProvider", () => {
 			const listConfig = vi.fn().mockResolvedValue([])
 			const activateProfile = vi.fn().mockResolvedValue({})
 
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				getModeConfigId,
 				listConfig,
 				activateProfile,
 				setModeConfig: vi.fn(),
 				getProfile: vi.fn(),
-			} as any
+			}
 
 			const controller = new AbortController()
 			controller.abort()
@@ -5603,13 +5603,13 @@ describe("ClineProvider", () => {
 			})
 			const activateProfile = vi.fn().mockResolvedValue(profile)
 
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				getModeConfigId,
 				listConfig,
 				activateProfile,
 				setModeConfig: vi.fn(),
 				getProfile: vi.fn().mockResolvedValue(profile),
-			} as any
+			}
 
 			await provider["handleModeSwitchUnlocked"]("architect", undefined, controller.signal)
 
@@ -5920,14 +5920,14 @@ describe("ClineProvider", () => {
 
 			const activateProfile = vi.fn().mockResolvedValue({ name: "survivor" })
 
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				activateProfile,
 				getProfile: vi.fn().mockResolvedValue({
 					name: "survivor",
 					apiProvider: providerIdentifiers.anthropic,
 				}),
-			} as any
+			}
 
 			await provider.deleteProviderProfile(profileToDelete)
 
@@ -6405,14 +6405,14 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
-			} as any
+			}
 
 			// Mock getState to provide necessary data
 			vi.spyOn(provider, "getState").mockResolvedValue({
@@ -6438,7 +6438,7 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -6446,7 +6446,7 @@ describe("ClineProvider", () => {
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
-			} as any
+			}
 
 			const testApiConfig = {
 				apiProvider: providerIdentifiers.anthropic,
@@ -6483,7 +6483,7 @@ describe("ClineProvider", () => {
 			;(buildApiHandler as any).mockImplementationOnce(() => {
 				throw new Error("API handler error")
 			})
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -6491,7 +6491,7 @@ describe("ClineProvider", () => {
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
-			} as any
+			}
 
 			// Setup Task instance with auto-mock from the top of the file
 			const mockCline = new Task(defaultTaskOptions) // Create a new mocked instance
@@ -6526,7 +6526,7 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-			;(provider as any).providerSettingsManager = {
+			;(provider as MemberSwapTarget).providerSettingsManager = {
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -6534,7 +6534,7 @@ describe("ClineProvider", () => {
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
-			} as any
+			}
 
 			const testApiConfig = {
 				apiProvider: providerIdentifiers.anthropic,
@@ -10492,7 +10492,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
-				;(provider as any).providerSettingsManager = {
+				;(provider as MemberSwapTarget).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -10513,7 +10513,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			it("logs and posts state when profile persistence fails", async () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				;(provider as any).providerSettingsManager = {
+				;(provider as MemberSwapTarget).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -10589,7 +10589,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			it("does nothing when no cached auth token exists", async () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
-				;(provider as any).providerSettingsManager = {
+				;(provider as MemberSwapTarget).providerSettingsManager = {
 					listConfig: vi.fn(),
 				}
 
