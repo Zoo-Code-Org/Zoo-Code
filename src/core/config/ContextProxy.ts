@@ -30,6 +30,37 @@ type RooCodeSettingsKey = keyof RooCodeSettings
 
 const PASS_THROUGH_STATE_KEYS = ["taskHistory"]
 
+/** `ContextProxy.setValues` could not store every key: which ones it stored, which it did not, and the first failure. */
+export class SettingsWriteError extends Error {
+	constructor(
+		readonly committed: string[],
+		readonly failed: string[],
+		override readonly cause: unknown,
+	) {
+		super(
+			`Could not store ${failed.join(", ")}${committed.length > 0 ? ` (stored: ${committed.join(", ")})` : ""}: ${
+				cause instanceof Error ? cause.message : String(cause)
+			}`,
+		)
+		this.name = "SettingsWriteError"
+	}
+}
+
+/** How long the read-back of a failed secret may take: the write error must reach the caller even if it never settles. */
+const SECRET_READBACK_TIMEOUT_MS = 5_000
+
+const withinReadBackDeadline = <T>(read: PromiseLike<T>, key: string): Promise<T> =>
+	new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(
+			() =>
+				reject(new Error(`Reading back ${key} did not finish in ${SECRET_READBACK_TIMEOUT_MS / 1000} seconds`)),
+			SECRET_READBACK_TIMEOUT_MS,
+		)
+		Promise.resolve(read)
+			.then(resolve, reject)
+			.finally(() => clearTimeout(timer))
+	})
+
 export const isPassThroughStateKey = (key: string) => PASS_THROUGH_STATE_KEYS.includes(key)
 
 const globalSettingsExportSchema = globalSettingsSchema.omit({
@@ -427,43 +458,42 @@ export class ContextProxy {
 		return value !== undefined ? value : defaultValue
 	}
 
+	/**
+	 * The write that last set each cached key, so a failed write only corrects the cache while it is still the latest:
+	 * a newer write of the key has its own outcome, and an older failure must not replace its value.
+	 */
+	private readonly stateWriteOwner = new Map<string, object>()
+	private readonly secretWriteOwner = new Map<string, object>()
+	/** How many writes of each secret were started. Unlike the owners, it is not cleared when a write is over. */
+	private readonly secretWriteCount = new Map<string, number>()
+
 	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
 
-		// Update the cache first so reads reflect the new value immediately, but restore
-		// the last durable value if the durable write fails so the cache cannot diverge
-		// from storage. The rollback uses the durable record (not the cache value at
-		// call time) because a superseded in-flight write may have overwritten that
-		// value since this write started; restoring it after its own failure would
-		// leave the cache ahead of storage. A key with no durable record yet can only
-		// hold undefined in its cache (no successful write or initialize has landed
-		// for it), so reading the record is exact in every reachable state.
-		const token = Symbol()
-		const writeGeneration = this.resetGeneration
-		this.stateWriteTokens.set(key, token)
+		// The cache is updated first, so a read right after the call sees the value. If the store rejects, the cache is
+		// read back from the Memento (`globalState.get`) so that it shows what the Memento holds. This is best effort: a
+		// Memento can keep the attempted value in memory after a rejected update, in which case the cache and the
+		// Memento agree and only the durable copy, which cannot be read, may differ until the key is written again.
+		// The entry of the key is removed when the write is over (if it is still the latest), so the map only holds the
+		// writes that are in flight. An update that throws at once is turned into a rejection, so it is handled the same.
+		const owner = {}
+		this.stateWriteOwner.set(key, owner)
 		this.stateCache[key] = value
-		return Promise.resolve(this.originalContext.globalState.update(key, value))
-			.then(() => {
-				// The durable write landed: the cache value is now the durable value.
-				// Skip the record if a reset/refresh re-seeded the durable maps in the
-				// meantime: this write completed from before that re-seed, so its value
-				// is obsolete relative to the re-seeded storage.
-				if (this.resetGeneration !== writeGeneration) {
-					return
+		const release = () => {
+			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
+		}
+		return (async () => this.originalContext.globalState.update(key, value))().then(release, (error: unknown) => {
+			try {
+				if (this.stateWriteOwner.get(key) === owner) {
+					this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
 				}
-				this.durableState.set(key, value)
-			})
-			.catch((error) => {
-				// Only the write that is still current for this key may roll back: a newer
-				// write may have moved the cache and its success record is not in yet (see
-				// the field comment), so rolling back over it would lose that value.
-				if (this.stateWriteTokens.get(key) === token) {
-					this.stateCache[key] = this.durableState.get(key) as GlobalState[K]
-				}
-				throw error
-			})
+			} finally {
+				release()
+			}
+			throw error
+		})
 	}
 
 	private getAllGlobalState(): GlobalState {
@@ -480,39 +510,55 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
-		// Update the cache first so reads reflect the new value immediately, but restore
-		// the last durable value if the durable write fails so the cache cannot diverge
-		// from storage (the durable record is exact in every reachable state: see
-		// updateGlobalState).
-		const token = Symbol()
-		const writeGeneration = this.resetGeneration
-		this.secretWriteTokens.set(key, token)
+		// Update cache.
+		const owner = {}
+		this.secretWriteOwner.set(key, owner)
+		this.secretWriteCount.set(key, (this.secretWriteCount.get(key) ?? 0) + 1)
 		this.secretCache[key] = value
 
-		// Write directly to context.
-		return Promise.resolve(
+		// Write directly to context. If the write rejects, the cache is read back from the secret storage while this
+		// write is still the latest of the key; if that fails too, the value that was never stored is dropped from the
+		// cache (it stays empty until the next write, `refreshSecrets` or a restart) rather than being served.
+		// The entry of the key is removed when the write and its read-back are over (if it is still the latest). A store
+		// that throws at once is turned into a rejection, so it is handled the same.
+		const release = () => {
+			if (this.secretWriteOwner.get(key) === owner) this.secretWriteOwner.delete(key)
+		}
+		const stored = (async () =>
 			value === undefined
 				? this.originalContext.secrets.delete(key)
-				: this.originalContext.secrets.store(key, value),
-		)
-			.then(() => {
-				// The durable write (or delete) landed: the cache value is now the
-				// durable value. Skip the record if a reset/refresh re-seeded the
-				// durable maps in the meantime (see updateGlobalState).
-				if (this.resetGeneration !== writeGeneration) {
-					return
+				: this.originalContext.secrets.store(key, value))()
+		return stored.then(release, async (error: unknown) => {
+			try {
+				if (this.secretWriteOwner.get(key) === owner) {
+					try {
+						const readBack = await withinReadBackDeadline(this.originalContext.secrets.get(key), key)
+						if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = readBack
+					} catch (readError) {
+						logger.error(
+							`Error reading back secret ${key}: ${readError instanceof Error ? readError.message : String(readError)}`,
+						)
+						if (this.secretWriteOwner.get(key) === owner) this.secretCache[key] = undefined
+					}
 				}
-				this.durableSecrets.set(key, value)
-			})
-			.catch((error) => {
-				// Only the write that is still current for this key may roll back (see
-				// updateGlobalState): a newer write may have moved the cache and its
-				// success record is not in yet.
-				if (this.secretWriteTokens.get(key) === token) {
-					this.secretCache[key] = this.durableSecrets.get(key) as string | undefined
-				}
-				throw error
-			})
+			} finally {
+				release()
+			}
+			throw error
+		})
+	}
+
+	/**
+	 * Loads one secret into the cache. A write of the key that started while the secret was being read has its own
+	 * outcome, even if it is already over, so the (older) value that was read is dropped. Otherwise the load takes over the key from a write that is
+	 * still pending, so that a failure of that write cannot replace what was just loaded.
+	 */
+	private async refreshSecret(key: SecretStateKey) {
+		const writes = this.secretWriteCount.get(key)
+		const value = await this.originalContext.secrets.get(key)
+		if (this.secretWriteCount.get(key) !== writes) return
+		this.secretWriteOwner.delete(key)
+		this.secretCache[key] = value
 	}
 
 	/**
@@ -532,9 +578,7 @@ export class ContextProxy {
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
-					this.secretCache[key] = await this.originalContext.secrets.get(key)
-					// Freshly loaded value is the durable value: re-seed the rollback record.
-					this.durableSecrets.set(key, this.secretCache[key])
+					await this.refreshSecret(key)
 				} catch (error) {
 					logger.error(
 						`Error refreshing secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -543,9 +587,7 @@ export class ContextProxy {
 			}),
 			...GLOBAL_SECRET_KEYS.map(async (key) => {
 				try {
-					this.secretCache[key] = await this.originalContext.secrets.get(key)
-					// Freshly loaded value is the durable value: re-seed the rollback record.
-					this.durableSecrets.set(key, this.secretCache[key])
+					await this.refreshSecret(key)
 				} catch (error) {
 					logger.error(
 						`Error refreshing global secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -691,17 +733,36 @@ export class ContextProxy {
 		return { ...globalState, ...secretState }
 	}
 
+	/**
+	 * Writes every value at once. This is not a transaction, for any setting: each key is stored on its own, and the
+	 * stores that completed are not undone. If any store rejects, every store is still awaited (the call stays pending
+	 * until the last one has settled) and then rejects with a `SettingsWriteError` that says which keys were stored and
+	 * which were not. A failed store has already read its key back into the cache (see `updateGlobalState` and
+	 * `storeSecret`; best effort for global state, whose Memento may keep the attempted value). Callers that need more than this, such as a
+	 * rollback, must provide it themselves.
+	 */
 	public async setValues(values: RooCodeSettings) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
-		// Settle every started write before rejecting: with Promise.all an early
-		// rejection would leave a sibling write in flight, and that write could land
-		// after a caller (e.g. API.setConfiguration) restored the prior values,
-		// re-persisting part of the failed configuration.
 		const results = await Promise.allSettled(entries.map(([key, value]) => this.setValue(key, value)))
-		const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
-		if (rejected) {
-			throw rejected.reason
+
+		const committed: string[] = []
+		const failed: string[] = []
+		let cause: unknown
+		let hasCause = false
+		for (const [index, [key]] of entries.entries()) {
+			const result = results[index]
+			if (result.status === "fulfilled") {
+				committed.push(key)
+				continue
+			}
+			// The first failure is the cause, even when it was rejected without a reason.
+			if (!hasCause) {
+				cause = result.reason
+				hasCause = true
+			}
+			failed.push(key)
 		}
+		if (failed.length > 0) throw new SettingsWriteError(committed, failed, cause)
 	}
 
 	/**

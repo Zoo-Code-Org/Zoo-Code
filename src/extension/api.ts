@@ -39,6 +39,7 @@ import { Package } from "../shared/package"
 import { getAllModes, type Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import type { Task } from "../core/task/Task"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
@@ -891,10 +892,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	// Serializes setConfiguration calls; see the method comment.
 	private configurationWriteQueue: Promise<unknown> = Promise.resolve()
 
-	public async setConfiguration(values: RooCodeSettings): Promise<void> {
-		// Overlapping calls snapshot and compensate against each other's writes:
-		// the whole snapshot/write/compensate group runs through a per-instance queue
-		// so each call sees the settled result of the previous one.
+	/**
+	 * Stores the settings, then the API profile and the mode profiles. The settings are written with
+	 * `ContextProxy.setValues`, which is not a transaction (see there): if a setting cannot be stored, this rejects
+	 * with a `SettingsWriteError` that lists the keys that were stored and the keys that were not (the cache of the
+	 * failed keys has been read back from storage), the stored settings stay, and nothing after the settings is
+	 * written. Invalid values of the display settings are dropped and logged first. Overlapping calls are
+	 * serialized: each call runs its snapshot/write/compensate group through a per-instance queue, so it sees the
+	 * settled result of the previous call, and a failure compensates the writes that already landed before the
+	 * original error surfaces.
+	 */
+	public async setConfiguration(allValues: RooCodeSettings): Promise<void> {
+		const values = withoutInvalidDisplaySettings(allValues, (key) =>
+			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
+		)
 		const run = this.configurationWriteQueue.then(() => this.applyConfiguration(values))
 		// The queue must survive failures: chain the settled-only view of this run.
 		this.configurationWriteQueue = run.catch(() => {})
