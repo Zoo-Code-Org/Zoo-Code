@@ -64,6 +64,7 @@ type TaskTestAccess = {
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
 	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
+	maybeWaitForProviderRateLimit: (retryAttempt: number) => Promise<void>
 	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
 	condenseContextWithActiveApi: () => Promise<void>
 	retiredApis: Set<unknown>
@@ -629,6 +630,107 @@ describe("Cline", () => {
 			// (100k), where the OpenAI accounting of the new profile would report the 0 input tokens as they are.
 			expect(call![1].inputTokens).toBe(100_000)
 			expect(call![1].cost).toBeCloseTo(0.6, 9)
+		})
+	})
+
+	describe("the protocol that prices a request follows the handler that serves it", () => {
+		const openAiModelInfo = {
+			contextWindow: 128_000,
+			supportsPromptCache: true,
+			inputPrice: 3,
+			outputPrice: 15,
+			cacheWritesPrice: 3.75,
+			cacheWritesPrice1h: 6,
+			cacheReadsPrice: 0.3,
+		} as ModelInfo
+
+		// The handler is shared by the tests of this file, so what is replaced on it is put back after each test.
+		const spies: Array<{ mockRestore: () => void }> = []
+		afterEach(() => {
+			for (const spy of spies.splice(0)) spy.mockRestore()
+		})
+
+		const run = async (switchProfileBeforeTheRequestStarts: boolean) => {
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+			captureLlmCompletion.mockClear() // earlier tests spied on it too: only the calls of this one are wanted
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			if (switchProfileBeforeTheRequestStarts) {
+				// The profile is switched while the request waits to start, so the handler that serves it is the new one,
+				// which prices requests the OpenAI way.
+				spies.push(
+					vi.spyOn(getTaskTestAccess(task), "maybeWaitForProviderRateLimit").mockImplementation(async () => {
+						task.apiConfiguration = {
+							...mockApiConfig,
+							apiProvider: providerIdentifiers.openai,
+							apiModelId: "gpt-4o",
+						}
+					}),
+					vi.spyOn(task.api, "getModel").mockReturnValue({ id: "gpt-4o", info: openAiModelInfo }),
+				)
+			}
+			const lastRequestRecord = () =>
+				JSON.parse([...task.clineMessages].reverse().find((m) => m.say === "api_req_started")?.text ?? "{}")
+			let recordedAtStart: Record<string, unknown> = {}
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						// The request has been bound to its handler by now, and is not finished.
+						recordedAtStart = lastRequestRecord()
+						yield { type: "text", text: "partial response" }
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 200_000,
+							cacheWrite1hTokens: 200_000,
+							cacheReadTokens: 0,
+						}
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 200_000),
+				).toBe(true),
+			)
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 200_000)
+			return { payload: call![1], recorded: lastRequestRecord(), recordedAtStart }
+		}
+
+		it("prices the request with the OpenAI formula when the profile was switched to an OpenAI one before it started", async () => {
+			const { payload, recorded, recordedAtStart } = await run(true)
+
+			// OpenAI accounting: the input tokens are what was reported (none), where the Anthropic accounting of the profile the
+			// request was written with would add the cache writes back in (200k).
+			expect(payload.inputTokens).toBe(0)
+			expect(payload.cost).toBeCloseTo(1.2, 9) // 200k tokens written for an hour, at 6 per million
+			// The record says the same, from the moment the request is bound: the provider, the model and the protocol of
+			// the handler that serves it, and not those of the placeholder that was written before the switch.
+			expect(recordedAtStart).toMatchObject({
+				apiProtocol: "openai",
+				apiProvider: providerIdentifiers.openai,
+				modelId: "gpt-4o",
+			})
+			expect(recorded).toMatchObject({
+				apiProtocol: "openai",
+				apiProvider: providerIdentifiers.openai,
+				modelId: "gpt-4o",
+			})
+		})
+
+		it("still prices an unswitched request with the formula of the profile it started with", async () => {
+			const { payload, recorded, recordedAtStart } = await run(false)
+
+			// Anthropic accounting: the cache writes are added to the input tokens.
+			expect(payload.inputTokens).toBe(200_000)
+			expect(recordedAtStart).toMatchObject({ apiProtocol: "anthropic", apiProvider: mockApiConfig.apiProvider })
+			expect(recorded).toMatchObject({ apiProtocol: "anthropic", apiProvider: mockApiConfig.apiProvider })
 		})
 	})
 

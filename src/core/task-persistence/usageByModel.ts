@@ -81,6 +81,8 @@ export function bindRequestToHandler(
 		apiProvider: string | undefined
 		configuredModelId: string | undefined
 		servedModelId: string | undefined
+		/** The pricing protocol of that handler, when it is known: it replaces the one the placeholder was written with. */
+		apiProtocol?: string
 	},
 ): string {
 	let existing: Record<string, unknown> = {}
@@ -92,6 +94,7 @@ export function bindRequestToHandler(
 
 	return JSON.stringify({
 		...existing,
+		...(handler.apiProtocol ? { apiProtocol: handler.apiProtocol } : {}),
 		apiProvider: handler.apiProvider,
 		modelId: resolveRecordedModelId(handler.configuredModelId, handler.servedModelId),
 	})

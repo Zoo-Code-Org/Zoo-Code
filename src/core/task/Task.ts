@@ -3966,7 +3966,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Determine API protocol based on provider and model
 			const modelId = getModelId(this.apiConfiguration)
 			const apiProvider = this.apiConfiguration.apiProvider
-			const apiProtocol = getApiProtocol(
+			// A placeholder: it is replaced below by the protocol of the handler that serves the request, which may be
+			// another one if the profile is switched during the waits that come first.
+			let apiProtocol = getApiProtocol(
 				apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
 				modelId,
 			)
@@ -4198,13 +4200,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				served.modelId = this.cachedStreamingModel.id
 
 				// The handler that serves this request is known now. The placeholder was written before the waits
-				// above, so bring its provider and model in line with this handler.
+				// above, so bring its provider, model and pricing protocol in line with this handler: the cost is
+				// worked out with the model info of this handler, so it needs the protocol of the same one. (The
+				// protocol is fixed from here on: a profile switch while the usage is still being collected does not
+				// change how this request is priced.)
+				const servingProvider = this.apiConfiguration.apiProvider
+				apiProtocol = getApiProtocol(
+					servingProvider && !isRetiredProvider(servingProvider) ? servingProvider : undefined,
+					resolveRecordedModelId(getModelId(this.apiConfiguration), served.modelId),
+				)
 				this.clineMessages[lastApiReqIndex].text = bindRequestToHandler(
 					this.clineMessages[lastApiReqIndex].text,
 					{
-						apiProvider: this.apiConfiguration.apiProvider,
+						apiProvider: servingProvider,
 						configuredModelId: getModelId(this.apiConfiguration),
 						servedModelId: served.modelId,
+						apiProtocol,
 					},
 				)
 

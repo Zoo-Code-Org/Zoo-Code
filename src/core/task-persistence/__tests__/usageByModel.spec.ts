@@ -239,6 +239,27 @@ describe("bindRequestToHandler", () => {
 		expect(bound).toEqual({ apiProtocol: "openai", apiProvider: "new-provider", modelId: "new-model" })
 	})
 
+	it("records the pricing protocol of the handler too, over the one the placeholder was written with", () => {
+		const bound = JSON.parse(
+			bindRequestToHandler(placeholder, {
+				apiProvider: "new-provider",
+				configuredModelId: "new-model",
+				servedModelId: undefined,
+				apiProtocol: "anthropic",
+			}),
+		)
+
+		expect(bound).toEqual({ apiProtocol: "anthropic", apiProvider: "new-provider", modelId: "new-model" })
+	})
+
+	it("keeps the protocol of the placeholder when the handler's is not given", () => {
+		const bound = JSON.parse(
+			bindRequestToHandler(placeholder, { apiProvider: "p", configuredModelId: "m", servedModelId: undefined }),
+		)
+
+		expect(bound.apiProtocol).toBe("openai")
+	})
+
 	it("records the model the handler reports when the profile names none", () => {
 		const bound = JSON.parse(
 			bindRequestToHandler(placeholder, {
