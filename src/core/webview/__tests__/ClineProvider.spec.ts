@@ -6975,6 +6975,127 @@ describe("ClineProvider", () => {
 			})
 			await provider.dispose()
 		})
+		// The activation group's shared name write must not carry this view's per-view mirror with it.
+		it("restores this activation's mode binding when this view's durable write rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "prior-key",
+			}
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("next-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+			// The mode starts bound to the profile this activation replaces; by the time the rollback runs
+			// it points at this activation's profile, which is what the restore must recognise as its own.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId")
+				.mockResolvedValueOnce("prior-id")
+				.mockResolvedValue("next-id")
+			const setModeConfig = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			// Only this view's durable write fails; every shared store lands. The seam stays open, so
+			// the rollback's own durable write fails with the same reason and the save reports both.
+			const contextProxy = provider.contextProxy
+			const updateGlobalState = contextProxy.updateGlobalState.bind(contextProxy)
+			vi.spyOn(contextProxy, "updateGlobalState").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("viewStates write failed")
+				}
+				return updateGlobalState(key, value)
+			})
+			const setValue = contextProxy.setValue.bind(contextProxy)
+			vi.spyOn(contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("viewStates write failed")
+				}
+				return setValue(key, value)
+			})
+
+			await expect(
+				provider["persistProviderProfile"](
+					"next-profile",
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("viewStates write failed")
+
+			// The failed per-view write used to restore the shared name through this.setValue, and that
+			// restore advanced the shared-selection generation this activation was tracked against. The
+			// mode-binding restore is gated on that generation, so the rollback read its own undo as
+			// another view's write and left the mode bound to the profile whose activation failed.
+			expect(setModeConfig).toHaveBeenNthCalledWith(1, "code", "next-id")
+			expect(setModeConfig).toHaveBeenNthCalledWith(2, "code", "prior-id")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping the mode-binding restore"))
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping the shared-selection restore"))
+			expect(provider.getValues().currentApiConfigName).toBe("prior-profile")
+			await provider.dispose()
+		})
+
+		// A rollback must restore the settings the buffer held, not only the name it held.
+		it("restores this view's buffered settings when an activating save rolls back", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "prior-key",
+			}
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("next-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("prior-id")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			// The mirror mutation lands; the shared provider-settings write is what rejects.
+			vi.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockRejectedValueOnce(new Error("provider settings write failed"))
+				.mockResolvedValue(undefined)
+
+			await expect(
+				provider["persistProviderProfile"](
+					"next-profile",
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("provider settings write failed")
+
+			// Restoring only the name paired the restored profile with the settings of the profile whose
+			// activation failed: getValues() overlays the buffer over the shared store, so the view
+			// served the previous name together with the new provider and model.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("prior-profile")
+			expect(provider["viewLocalState"].apiConfiguration?.apiKey).toBe("prior-key")
+			expect(provider.getValues().currentApiConfigName).toBe("prior-profile")
+			expect(provider.getValues().apiProvider).toBe(providerIdentifiers.anthropic)
+			expect(provider["viewLocalState"].apiConfiguration?.apiProvider).toBe(providerIdentifiers.anthropic)
+			await provider.dispose()
+		})
+
 		it("should undo this activation's mode binding and settings while it still owns them", async () => {
 			const provider = new ClineProvider(
 				mockContext,

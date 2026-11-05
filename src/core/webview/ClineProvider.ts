@@ -2866,6 +2866,10 @@ export class ClineProvider
 			const previousList = this.contextProxy.getValue("listApiConfigMeta")
 			const previousName = this.contextProxy.getValue("currentApiConfigName")
 			const previousViewName = this.viewLocalState.currentApiConfigName
+			// The buffered settings belong to the profile this view was running under. Restoring only the
+			// name would leave the failed profile's settings pinned to the restored name, which is the
+			// mismatched pair getValues() serves from the overlay.
+			const previousViewApiConfiguration = this.viewLocalState.apiConfiguration
 			// This activation owns the shared selection until a newer write bumps the generation.
 			const expectedNameGeneration = this.contextProxy.getStateWriteGeneration("currentApiConfigName") + 1
 			// The profile list needs its own ownership signal: a non-activating save from another view
@@ -2883,7 +2887,12 @@ export class ClineProvider
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				// Shared write: adds/updates the profile list entry and the current-profile name.
-				this.setValue("currentApiConfigName", name),
+				// It goes straight to ContextProxy rather than through this.setValue: the per-view mirror
+				// inside setValue restores the shared name itself when this view's write rejects, and that
+				// restore advances the shared-selection generation this activation is tracked against, so the
+				// rollback below would read its own undo as another view's write and skip restoring this
+				// activation's mode binding, leaving the mode on the profile whose activation failed.
+				this.contextProxy.setValue("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 				// setProviderSettings bypasses the buffer path; the mutation below refreshes this view.
@@ -2933,7 +2942,10 @@ export class ClineProvider
 					await this.contextProxy.setValue("listApiConfigMeta", previousList)
 				})
 				await restore("view-local selection", () =>
-					this._saveViewLocalStateFromMutation({ currentApiConfigName: previousViewName }),
+					this._saveViewLocalStateFromMutation({
+						currentApiConfigName: previousViewName,
+						apiConfiguration: previousViewApiConfiguration,
+					}),
 				)
 				await restore("mode binding", async () => {
 					// A newer activation from another view re-pointed this mode: its binding wins.
