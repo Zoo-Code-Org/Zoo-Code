@@ -81,6 +81,7 @@ export class ContextProxy {
 
 	constructor(context: vscode.ExtensionContext) {
 		this.originalContext = context
+
 		this.stateCache = {}
 		this.secretCache = {}
 		this._isInitialized = false
@@ -400,6 +401,12 @@ export class ContextProxy {
 	 */
 	private readonly stateWriteOwner = new Map<string, object>()
 	private readonly secretWriteOwner = new Map<string, object>()
+	/**
+	 * The secret writes that are still in flight, each paired with the claim it took,
+	 * so a reset can wait for them to settle before it deletes the keys. Without the
+	 * pairing a reset cannot tell a settled-but-orphaned write from a live one.
+	 */
+	private readonly pendingSecretWrites = new Map<string, Set<{ settle: Promise<void> }>>()
 	/** How many writes of each secret were started. Unlike the owners, it is not cleared when a write is over. */
 	private readonly secretWriteCount = new Map<string, number>()
 
@@ -457,7 +464,19 @@ export class ContextProxy {
 		// cache (it stays empty until the next write, `refreshSecrets` or a restart) rather than being served.
 		// The entry of the key is removed when the write and its read-back are over (if it is still the latest). A store
 		// that throws at once is turned into a rejection, so it is handled the same.
+		const pending = this.pendingSecretWrites.get(key) ?? new Set<{ settle: Promise<void> }>()
+		let settleWrite: () => void = () => {}
+		const entry: { settle: Promise<void> } = {
+			settle: new Promise<void>((resolve) => {
+				settleWrite = resolve
+			}),
+		}
+		pending.add(entry)
+		this.pendingSecretWrites.set(key, pending)
 		const release = () => {
+			pending.delete(entry)
+			if (pending.size === 0) this.pendingSecretWrites.delete(key)
+			settleWrite()
 			if (this.secretWriteOwner.get(key) === owner) this.secretWriteOwner.delete(key)
 		}
 		const stored = (async () =>
@@ -719,6 +738,13 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
+		// A secret write that is in flight at this moment has already committed nothing, but it will
+		// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
+		// after them. Wait for the pending writes first, then end the claims, then delete, so the
+		// cleared copy is the last one to land in storage and the cache stays empty afterwards.
+		const inFlight = [...this.pendingSecretWrites.values()].flatMap((writes) => [...writes].map((w) => w.settle))
+		await Promise.allSettled(inFlight)
+
 		// Clear in-memory caches
 		this.stateCache = {}
 		this.secretCache = {}
