@@ -5850,6 +5850,63 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("deletes the persisted mode when a view-local save clears it", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const stored = () =>
+				mockContext.globalState.get<Record<string, { mode?: string; currentApiConfigName?: string }>>(
+					"viewStates",
+				) ?? {}
+
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			expect(stored()[provider["viewStateId"]]).toMatchObject({
+				mode: "architect",
+				currentApiConfigName: "cfg-a",
+			})
+
+			const cleared = await provider.saveViewState("mode", undefined)
+			expect(cleared).toEqual({ persisted: true, claim: "none" })
+			expect(stored()[provider["viewStateId"]]).not.toHaveProperty("mode")
+			expect(stored()[provider["viewStateId"]]).toMatchObject({ currentApiConfigName: "cfg-a" })
+			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-a")
+
+			await provider.dispose()
+		})
+
+		it("removes the record when the last persisted field is cleared", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const stored = () =>
+				mockContext.globalState.get<Record<string, { mode?: string; currentApiConfigName?: string }>>(
+					"viewStates",
+				) ?? {}
+
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "cfg-a")
+			expect(stored()).toHaveProperty(provider["viewStateId"])
+
+			await provider.saveViewState("mode", undefined)
+			const cleared = await provider.saveViewState("currentApiConfigName", undefined)
+			expect(cleared).toEqual({ persisted: true, claim: "none" })
+			// Deleting the last field deletes the entry rather than leaving an empty shell behind.
+			expect(stored()).not.toHaveProperty(provider["viewStateId"])
+			expect(provider["viewLocalState"]).toStrictEqual({})
+
+			await provider.dispose()
+		})
 	})
 
 	describe("view state restoration retry", () => {
@@ -5934,7 +5991,8 @@ describe("ClineProvider", () => {
 			// A claim-less entry is adoptable at the first read, but a concurrent registration
 			// binds the key while this launch's queued re-bind is waiting its turn.
 			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
-			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve().then(async () => {
+			ClineProvider["pendingViewStateWrites"] = []
+			ClineProvider["viewStateWritesPump"] = Promise.resolve().then(async () => {
 				await provider.contextProxy.setValue("viewStates", {
 					"legacy-view": { claimToken: "winner", updatedAt: 2 },
 				})
@@ -5948,7 +6006,8 @@ describe("ClineProvider", () => {
 			expect(provider["viewStateId"]).toBe(beforeViewStateId)
 			const states = provider.contextProxy.getValue("viewStates") as Record<string, { claimToken?: string }>
 			expect(states["legacy-view"].claimToken).toBe("winner")
-			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve()
+			ClineProvider["pendingViewStateWrites"] = []
+			ClineProvider["viewStateWritesPump"] = Promise.resolve()
 			postSpy.mockRestore()
 			await provider.dispose()
 		})
@@ -5963,7 +6022,8 @@ describe("ClineProvider", () => {
 			)
 			await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
 			// A concurrent registration binds this key while the re-bind write is queued.
-			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve().then(async () => {
+			ClineProvider["pendingViewStateWrites"] = []
+			ClineProvider["viewStateWritesPump"] = Promise.resolve().then(async () => {
 				await provider.contextProxy.setValue("viewStates", {
 					"legacy-view": { claimToken: "winner", updatedAt: 2 },
 				})
@@ -5976,7 +6036,8 @@ describe("ClineProvider", () => {
 			expect(claim).toBeUndefined()
 			const states = provider.contextProxy.getValue("viewStates") as Record<string, { claimToken?: string }>
 			expect(states["legacy-view"].claimToken).toBe("winner")
-			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve()
+			ClineProvider["pendingViewStateWrites"] = []
+			ClineProvider["viewStateWritesPump"] = Promise.resolve()
 			await provider.dispose()
 		})
 
@@ -6511,7 +6572,8 @@ describe("ClineProvider", () => {
 		beforeEach(() => {
 			// The write queue is static and shared: start from a drained queue so a closure an
 			// earlier test left on it cannot hold this one open.
-			ClineProvider["persistedViewStateWriteQueue"] = Promise.resolve()
+			ClineProvider["pendingViewStateWrites"] = []
+			ClineProvider["viewStateWritesPump"] = Promise.resolve()
 		})
 
 		it("drops a queued write instead of applying it to a disposed provider", async () => {
@@ -6597,10 +6659,15 @@ describe("ClineProvider", () => {
 				releaseWrite = resolve
 			})
 			// Only the viewStates write is held open, so the rest of dispose() still runs.
-			const setValueSpy = vi.spyOn(victim.contextProxy, "setValue").mockImplementation(async (key) => {
+			// The write must actually land for the rollback below to be observable, so the gate
+			// forwards to the real setter instead of swallowing the call.
+			const passThrough = victim.contextProxy.setValue.bind(victim.contextProxy)
+			const setValueSpy = vi.spyOn(victim.contextProxy, "setValue").mockImplementation(async (key, value) => {
 				if (key === "viewStates") {
 					await writeGate
 				}
+
+				return passThrough(key, value)
 			})
 			const postSpy = vi.spyOn(victim, "postMessageToWebview").mockResolvedValue(true)
 
@@ -6622,12 +6689,193 @@ describe("ClineProvider", () => {
 				postSpy.mock.calls.map(([message]) => message).filter((message) => message.type === "viewStateClaim"),
 			).toHaveLength(0)
 
-			// The entry is durable and carries a token this provider will never post: the save is a
-			// partial success, and its result says so instead of resolving like a completed write.
-			expect(saveResult).toEqual({ persisted: true, claim: "dropped" })
+			// The write landed and was then undone. This provider minted the entry's claim, no
+			// renderer was ever handed it, and the only provider that could post it is gone, so the
+			// record goes back to what it held before the write instead of carrying a binding nobody
+			// can ever present. The restore is the second viewStates write.
+			expect(setValueSpy.mock.calls.filter(([key]) => key === "viewStates")).toHaveLength(2)
+			expect(storedEntries()).not.toHaveProperty(victim["viewStateId"])
+			expect(saveResult).toEqual({ persisted: false, claim: "none" })
 
 			setValueSpy.mockRestore()
 			postSpy.mockRestore()
+		})
+
+		it("leaves the key adoptable by the next provider after rolling an orphaned write back", async () => {
+			const victim = createProvider()
+			const strandedKey = victim["viewStateId"]
+			let releaseWrite!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			const passThrough = victim.contextProxy.setValue.bind(victim.contextProxy)
+			const setValueSpy = vi.spyOn(victim.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					await writeGate
+				}
+
+				return passThrough(key, value)
+			})
+
+			const save = victim.saveViewState("mode", "architect")
+			await vi.waitFor(() => {
+				expect(setValueSpy.mock.calls.some(([key]) => key === "viewStates")).toBe(true)
+			})
+
+			await victim.dispose()
+			releaseWrite()
+
+			expect(await save).toEqual({ persisted: false, claim: "none" })
+			setValueSpy.mockRestore()
+
+			// Before the rollback the next provider could not take this key at all: the record still
+			// carried the dead provider's token, and a registration whose presented claim does not
+			// match is refused side-effect free, so the entry was durable state no provider could
+			// restore. With the write undone the key is simply absent.
+			expect(storedEntries()).not.toHaveProperty(strandedKey)
+
+			const fresh = createProvider()
+			const registration = await fresh.setViewStateId(strandedKey)
+			expect(registration.adopted).toBe(true)
+			expect(storedEntries()[strandedKey]).toBeUndefined()
+
+			// And the key now takes a binding this provider can actually hand to its own renderer.
+			const saved = await fresh.saveViewState("mode", "code")
+			expect(saved).toEqual({ persisted: true, claim: "queued" })
+			expect(storedEntries()[strandedKey]?.mode).toBe("code")
+			expect(storedEntries()[strandedKey]?.claimToken).toEqual(expect.any(String))
+
+			await fresh.dispose()
+		})
+
+		it("keeps a durable write a concurrent provider already re-bound and reports the dropped claim", async () => {
+			const victim = createProvider()
+			const writeKey = victim["viewStateId"]
+			let releaseWrite!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			// The storage write lands carrying another provider's binding, as if a concurrent
+			// registration had re-bound this key while the write was in flight.
+			const passThrough = victim.contextProxy.setValue.bind(victim.contextProxy)
+			const setValueSpy = vi.spyOn(victim.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					await writeGate
+					return passThrough(key, { [writeKey]: { claimToken: "winner", mode: "plan", updatedAt: 1 } })
+				}
+
+				return passThrough(key, value)
+			})
+
+			const save = victim.saveViewState("mode", "architect")
+			await vi.waitFor(() => {
+				expect(setValueSpy.mock.calls.some(([key]) => key === "viewStates")).toBe(true)
+			})
+			await victim.dispose()
+			releaseWrite()
+
+			expect(await save).toEqual({ persisted: true, claim: "dropped" })
+			// Only the original write ran: the rollback is skipped rather than deleting a binding
+			// that now belongs to a provider that is still alive.
+			expect(setValueSpy.mock.calls.filter(([key]) => key === "viewStates")).toHaveLength(1)
+			expect(storedEntries()[writeKey]).toMatchObject({ claimToken: "winner", mode: "plan" })
+
+			setValueSpy.mockRestore()
+		})
+
+		it("detaches a provider's queued writes when it disposes", async () => {
+			const blocked = createProvider()
+			let releaseBlocked!: () => void
+			const blockedGate = new Promise<void>((resolve) => {
+				releaseBlocked = resolve
+			})
+			const blockedWriteSpy = vi.spyOn(blocked.contextProxy, "setValue").mockImplementation(async () => {
+				await blockedGate
+			})
+
+			const victim = createProvider()
+			const victimWriteSpy = vi.spyOn(victim.contextProxy, "setValue")
+
+			const blockedWrite = blocked.saveViewState("mode", "plan")
+			const victimWrite = victim.saveViewState("mode", "architect")
+
+			// The victim's write is queued behind the stalled one and has not run yet: its entry is on
+			// the shared queue and its storage call has not started.
+			await vi.waitFor(() => {
+				expect(victim["scheduledViewStateWrites"].length).toBeGreaterThan(0)
+			})
+			expect(victimWriteSpy).not.toHaveBeenCalled()
+
+			// The entry the victim queued points at it, and it is still on the shared array because
+			// the stalled write ahead of it has not released the queue.
+			const queued = victim["scheduledViewStateWrites"][0]
+			expect(queued.provider).toBe(victim)
+			expect(ClineProvider["pendingViewStateWrites"]).toContain(queued)
+
+			await victim.dispose()
+
+			// Detachment is what keeps a disposed provider off the queue: the entry leaves the shared
+			// array and its provider slot is cleared, so nothing still queued can reach the provider.
+			expect(ClineProvider["pendingViewStateWrites"]).not.toContain(queued)
+			expect(queued.provider).toBeNull()
+			expect(victim["scheduledViewStateWrites"]).toHaveLength(0)
+
+			releaseBlocked()
+			await victimWrite
+			await blockedWrite
+
+			expect(victimWriteSpy).not.toHaveBeenCalled()
+			expect(storedEntries()[victim["viewId"]]).toBeUndefined()
+
+			blockedWriteSpy.mockRestore()
+			victimWriteSpy.mockRestore()
+			await blocked.dispose()
+		})
+	})
+	describe("webview-originated configuration boundary", () => {
+		it("refuses a viewStates key carried by a newTask taskConfiguration", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The host record the posted configuration must not be able to rewrite: a view's
+			// selections and the claim token that binds them belong to the view that minted them.
+			await provider.contextProxy.setValue("viewStates", {
+				"host-view": { claimToken: "host-token", mode: "code", updatedAt: 5 },
+			})
+
+			const view = {
+				...mockWebviewView,
+				webview: {
+					...mockWebviewView.webview,
+					onDidReceiveMessage: vi.fn(),
+					postMessage: vi.fn().mockResolvedValue(true),
+				},
+			}
+			await provider.resolveWebviewView(view)
+			const messageHandler = (view.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+			await messageHandler({
+				type: "newTask",
+				text: "hello",
+				taskConfiguration: {
+					viewStates: { "host-view": { claimToken: "stolen", mode: "plan", updatedAt: 9 } },
+					mode: "program",
+				},
+			})
+
+			const stored =
+				mockContext.globalState.get<Record<string, { claimToken?: string; mode?: string }>>("viewStates") ?? {}
+			// The webview could not smuggle the host-only key in through the task configuration:
+			// the record still carries the host's own token and selections.
+			expect(stored["host-view"]).toMatchObject({ claimToken: "host-token", mode: "code" })
+			// The legitimate part of the same payload was applied.
+			expect(await provider.getMode()).toBe("program")
+
+			await provider.dispose()
 		})
 	})
 })

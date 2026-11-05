@@ -569,7 +569,14 @@ export class ContextProxy {
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
+		// viewStates is host-owned: per-view selections and the claim token that binds them are
+		// minted by the extension host, so no configuration path may carry them. Every caller of
+		// this setter takes input that did not originate inside the host - a posted updateSettings,
+		// a newTask taskConfiguration, the external API, an imported settings file - so the filter
+		// lives here rather than at whichever caller a reviewer happened to point at. The host's
+		// own view-state methods write through setValue("viewStates", ...), which stays open.
+		const portableEntries = Object.entries(values).filter(([key]) => !isNonPortableSettingsKey(key))
+		const entries = portableEntries as [RooCodeSettingsKey, unknown][]
 		await Promise.all(entries.map(([key, value]) => this.setValue(key, value)))
 	}
 
