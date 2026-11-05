@@ -324,9 +324,22 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 	// is in flight — openInNewTab and popoutButtonClicked both dispatch
 	// through here — awaits it instead of creating a second panel: exactly
 	// one panel is created and every caller receives the same provider.
-	const pendingCreation = pendingTabPanelCreation
+	//
+	// The join is re-entered rather than trusted once. A creation can resolve
+	// to a disposed provider - the panel closed mid-flight - and several callers
+	// may be parked on that same settled promise. The first of them to wake
+	// starts the replacement and stores it in the slot; the others must re-read
+	// the slot and join that replacement instead of falling through, or each
+	// wake-up creates its own panel and the serialization is lost exactly where
+	// it matters. Re-entry terminates: each pass either returns a live provider
+	// or consumes a settled creation and moves to a strictly newer one, so it
+	// cannot outlive the number of callers.
+	for (;;) {
+		const pendingCreation = pendingTabPanelCreation
+		if (!pendingCreation) {
+			break
+		}
 
-	if (pendingCreation) {
 		// The panel can close while the creation is still awaiting its post-creation delay or the
 		// editor-group lock, and a closing panel disposes its provider: a caller that arrives then
 		// would receive that disposed provider from the shared promise and open no editor tab at
@@ -352,11 +365,12 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 		// Clear once settled (success or failure) so the next call starts
 		// fresh: the reuse path in createTabPanelUnlocked then takes over
 		// for the tracked panel. Guard the clear so this settlement cannot
-		// clobber a replacement already stored in the slot. That clobber is
-		// unreachable in single-threaded settlement order: while the slot
-		// holds this in-flight creation, every other caller receives that
-		// same promise (guard above), so no replacement can be stored before
-		// this finally block runs — the equality check pins the invariant.
+		// clobber a replacement already stored in the slot. A joining caller
+		// that woke on the disposed creation can reach the slot first - it
+		// re-enters the loop, sees the slot empty, and stores its own
+		// creation before this finally block runs - so the equality check is
+		// what keeps this settlement from dropping that replacement and
+		// letting a fourth call open a third panel.
 		if (pendingTabPanelCreation === creation) {
 			pendingTabPanelCreation = undefined
 		}

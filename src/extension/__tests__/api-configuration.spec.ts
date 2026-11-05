@@ -184,8 +184,18 @@ describe("API - configuration", () => {
 	// Rollback regression: getConfiguration() merges this view's overlay, so its mode and pin
 	// are not the shared values the rollback should put back for every other view.
 	it("restores the shared mode and profile pin from shared state, not this view's overlay", async () => {
-		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
-		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
+		// Both the failing refresh and the compensation replay go through provider.setValues, and the
+		// shared-pair restore goes through contextProxy.setValues: tag every call so the test can
+		// assert the order of the two channels, not merely that each one happened.
+		const writeOrder: string[] = []
+		const setValues = vi.fn().mockImplementation(() => {
+			writeOrder.push("provider.setValues")
+			return Promise.reject(new Error("refresh down"))
+		})
+		const sharedSetValues = vi.fn().mockImplementation(() => {
+			writeOrder.push("contextProxy.setValues")
+			return Promise.resolve(undefined)
+		})
 		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
 		const deleteConfig = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -233,6 +243,14 @@ describe("API - configuration", () => {
 		// replay, so other unpinned views end on the mode and profile they had before this call
 		// rather than on this view's.
 		expect(sharedSetValues).toHaveBeenCalledWith({ mode: "code", currentApiConfigName: "shared-profile" })
+		// Order is the fix, and presence alone cannot prove it. The replay above writes this view’s
+		// merged mode and pin into the shared store; the shared pair must be written after that
+		// replay, so moving the shared restore earlier - where the replay would overwrite it -
+		// fails here instead of leaving every unpinned view on this view’s mode and profile.
+		expect(writeOrder.filter((entry) => entry === "provider.setValues").length).toBe(2)
+		expect(writeOrder.indexOf("contextProxy.setValues")).toBeGreaterThan(
+			writeOrder.lastIndexOf("provider.setValues"),
+		)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 	it("restores the previous record when rolling back a save over an existing profile", async () => {

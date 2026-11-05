@@ -109,6 +109,25 @@ const mockGetAccountId = vi.mocked(openAiCodexOAuthManager.getAccountId)
 const mockFetchOpenAiCodexRateLimitInfo = vi.mocked(fetchOpenAiCodexRateLimitInfo)
 
 // Mock ClineProvider
+// The Zoo Gateway sign-out tests hand the handler a per-scenario proxy / manager / upsert stub on
+// the provider double. The real members are readonly, so the tests assign through a mutable view
+// of the provider type instead of `as any` (AGENTS.md: no new `as any`); only the members the
+// sweep touches are declared, which keeps the doubles honest about the rest.
+type Mutable<T> = { -readonly [K in keyof T]: T[K] }
+type MutableSignOutProvider = Mutable<Omit<ClineProvider, "contextProxy" | "providerSettingsManager">> & {
+	contextProxy: {
+		setValue: (key: string, value: unknown) => Promise<void>
+		getValue: (key: string) => unknown
+		getProviderSettings: () => Record<string, unknown>
+		getValues: () => { currentApiConfigName?: string } & Record<string, unknown>
+	}
+	providerSettingsManager: {
+		listConfig: () => Promise<Array<{ name: string; apiProvider?: string }>>
+		getProfile: (params: { name?: string; id?: string }) => Promise<Record<string, unknown>>
+		saveConfig: (name: string, config: Record<string, unknown>) => Promise<string | undefined>
+	}
+	upsertProviderProfile: (settings: Record<string, unknown>, profileId?: string) => Promise<string | undefined>
+}
 const mockClineProvider = {
 	getState: vi.fn(),
 	postMessageToWebview: vi.fn(),
@@ -129,6 +148,10 @@ const mockClineProvider = {
 		},
 		setValue: vi.fn(),
 		getValue: vi.fn(),
+		// Declared on the double so the sign-out tests can hand the handler the reads it makes on
+		// the proxy, and re-satisfy the proxy shape when they replace it.
+		getProviderSettings: vi.fn(),
+		getValues: vi.fn(),
 	},
 	// Delegates to contextProxy.setValue so existing assertions keep holding while
 	// the updateSettings flow is exercised through the provider-level mutation path.
@@ -1135,6 +1158,16 @@ describe("webviewMessageHandler - image mentions", () => {
 		const mockHandleWebviewAskResponse = vi.fn()
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			cwd: "/mock/workspace",
+			// Declared on the double: the sign-out sweep reaches the manager for the profile records, and
+			// the tests hand it a per-scenario record store.
+			providerSettingsManager: {
+				listConfig: vi.fn(),
+				getProfile: vi.fn(),
+				saveConfig: vi.fn(),
+			},
+			// The sweep needs the upsert’s confirmation value (the saved profile id), so each test hands
+			// in its own stub instead of casting the provider.
+			upsertProviderProfile: vi.fn(),
 			rooIgnoreController: undefined,
 			handleWebviewAskResponse: mockHandleWebviewAskResponse,
 		} as any)
@@ -2427,6 +2460,16 @@ describe("webviewMessageHandler - requestCommands", () => {
 		const getTaskMode = vi.fn().mockResolvedValue("code")
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			cwd: "/mock/workspace",
+			// Declared on the double: the sign-out sweep reaches the manager for the profile records, and
+			// the tests hand it a per-scenario record store.
+			providerSettingsManager: {
+				listConfig: vi.fn(),
+				getProfile: vi.fn(),
+				saveConfig: vi.fn(),
+			},
+			// The sweep needs the upsert’s confirmation value (the saved profile id), so each test hands
+			// in its own stub instead of casting the provider.
+			upsertProviderProfile: vi.fn(),
 			getTaskMode,
 		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
 
@@ -2501,6 +2544,16 @@ describe("webviewMessageHandler - requestCommands", () => {
 		const getTaskMode = vi.fn().mockResolvedValue("code")
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			cwd: "/mock/workspace",
+			// Declared on the double: the sign-out sweep reaches the manager for the profile records, and
+			// the tests hand it a per-scenario record store.
+			providerSettingsManager: {
+				listConfig: vi.fn(),
+				getProfile: vi.fn(),
+				saveConfig: vi.fn(),
+			},
+			// The sweep needs the upsert’s confirmation value (the saved profile id), so each test hands
+			// in its own stub instead of casting the provider.
+			upsertProviderProfile: vi.fn(),
 			getTaskMode,
 		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
 
@@ -2571,6 +2624,16 @@ describe("webviewMessageHandler - requestCommands", () => {
 
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			cwd: "/mock/workspace",
+			// Declared on the double: the sign-out sweep reaches the manager for the profile records, and
+			// the tests hand it a per-scenario record store.
+			providerSettingsManager: {
+				listConfig: vi.fn(),
+				getProfile: vi.fn(),
+				saveConfig: vi.fn(),
+			},
+			// The sweep needs the upsert’s confirmation value (the saved profile id), so each test hands
+			// in its own stub instead of casting the provider.
+			upsertProviderProfile: vi.fn(),
 		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
 
 		vi.mocked(mockClineProvider.getSkillsManager).mockReturnValue(undefined)
@@ -2692,15 +2755,19 @@ describe("zooCodeSignOut", () => {
 
 	it("disconnects Zoo Code and clears tokens from all Zoo Gateway profiles", async () => {
 		const { disconnectZooCode } = await import("../../../services/zoo-code-auth")
-		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		// The resolved value is the saved profile's id: it is the store's confirmation that the
+		// token write landed, which the handler now requires before it logs a clear.
+		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
 		const saveConfig = vi.fn().mockResolvedValue(undefined)
 
-		;(mockClineProvider as any).contextProxy = {
-			...mockClineProvider.contextProxy,
+		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
+		;(mockClineProvider as unknown as MutableSignOutProvider).contextProxy = {
+			// Spread carries the double’s own setValue/getValue across the replacement.
+			...providerWithSignOutStubs.contextProxy,
 			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
-		;(mockClineProvider as any).providerSettingsManager = {
+		;(mockClineProvider as unknown as MutableSignOutProvider).providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([
 				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -2718,7 +2785,7 @@ describe("zooCodeSignOut", () => {
 				}),
 			saveConfig,
 		}
-		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+		;(mockClineProvider as ClineProvider).upsertProviderProfile = upsertProviderProfile
 
 		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
 
@@ -2738,18 +2805,89 @@ describe("zooCodeSignOut", () => {
 			false,
 		)
 		expect(saveConfig).not.toHaveBeenCalled()
+
+		// The success line is the user-visible claim that the credential is gone, so its wording is
+		// pinned per profile: the active profile also had its in-memory handler updated, and a
+		// persisted-only profile must not claim that it did.
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Cleared zooSessionToken from "Zoo Gateway" profile and updated in-memory handler',
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Cleared zooSessionToken from "Backup Zoo" profile',
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("reports a failed token cleanup when the profile upsert confirms nothing", async () => {
+		// upsertProviderProfile owns its failure: it logs, shows an error message and resolves to
+		// undefined instead of rejecting, so the sign-out sweep cannot separate a clear from a
+		// swallowed write by control flow alone. An undefined profile id has to travel through the
+		// per-profile error path, otherwise sign-out announces "Cleared zooSessionToken" while the
+		// stored profile still holds the credential.
+		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
+		;(mockClineProvider as unknown as MutableSignOutProvider).contextProxy = {
+			// Spread carries the double’s own setValue/getValue across the replacement.
+			...providerWithSignOutStubs.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as unknown as MutableSignOutProvider).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
+			]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					apiProvider: providerIdentifiers.zooGateway,
+					zooSessionToken: "token-active",
+				})
+				.mockResolvedValueOnce({
+					apiProvider: providerIdentifiers.zooGateway,
+					zooSessionToken: "token-backup",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		;(mockClineProvider as ClineProvider).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		// The sweep keeps going after an unconfirmed clear: the second profile must still be
+		// attempted, or one failed write leaves a later profile holding its token.
+		expect(upsertProviderProfile).toHaveBeenCalledTimes(2)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining('Failed to clear profile token for "Zoo Gateway"'),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining('Failed to clear profile token for "Backup Zoo"'),
+		)
+
+		// Pinned in full, not just the prefix: this line is the only record that the stored profile may
+		// still hold the credential, so it has to name the profile and say why the clear is unconfirmed.
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Failed to clear profile token for "Zoo Gateway": upsertProviderProfile returned no profile id for "Zoo Gateway"; the stored profile may still hold zooSessionToken',
+		)
+		// No success line may be claimed for a write the store did not confirm.
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(expect.stringContaining("Cleared zooSessionToken"))
+		// State is still pushed so the webview stops showing the signed-in account.
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 
 	it("still clears the in-memory handler when the active profile token is already empty on disk", async () => {
-		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		// The resolved value is the saved profile's id: it is the store's confirmation that the
+		// token write landed, which the handler now requires before it logs a clear.
+		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
 
-		;(mockClineProvider as any).contextProxy = {
-			...mockClineProvider.contextProxy,
+		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
+		;(mockClineProvider as unknown as MutableSignOutProvider).contextProxy = {
+			// Spread carries the double’s own setValue/getValue across the replacement.
+			...providerWithSignOutStubs.contextProxy,
 			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
-		;(mockClineProvider as any).providerSettingsManager = {
+		;(mockClineProvider as unknown as MutableSignOutProvider).providerSettingsManager = {
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -2759,7 +2897,7 @@ describe("zooCodeSignOut", () => {
 			}),
 			saveConfig: vi.fn(),
 		}
-		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+		;(mockClineProvider as ClineProvider).upsertProviderProfile = upsertProviderProfile
 
 		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
 
@@ -2768,6 +2906,92 @@ describe("zooCodeSignOut", () => {
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
 		)
+	})
+
+	it("leaves a profile that is neither active nor token-bearing out of the cleanup sweep", async () => {
+		// The sweep rewrites the active profile (to clear its in-memory handler) and any persisted-only
+		// profile that had a token to drop. A zoo-gateway profile that is neither of those has nothing
+		// to clear: routing it through the queue anyway would rewrite a profile sign-out never touched.
+		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
+
+		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
+		;(mockClineProvider as unknown as MutableSignOutProvider).contextProxy = {
+			// Spread carries the double’s own setValue/getValue across the replacement.
+			...providerWithSignOutStubs.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as unknown as MutableSignOutProvider).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Quiet Zoo", apiProvider: providerIdentifiers.zooGateway },
+			]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					apiProvider: providerIdentifiers.zooGateway,
+					zooSessionToken: "token-active",
+				})
+				.mockResolvedValueOnce({ apiProvider: providerIdentifiers.zooGateway }),
+			saveConfig: vi.fn(),
+		}
+		;(mockClineProvider as ClineProvider).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(upsertProviderProfile).toHaveBeenCalledTimes(1)
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"Zoo Gateway",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			true,
+		)
+		expect(upsertProviderProfile).not.toHaveBeenCalledWith("Quiet Zoo", expect.anything(), expect.anything())
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(expect.stringContaining("Quiet Zoo"))
+	})
+
+	it("logs the in-memory handler update only for the profile that is actually active", async () => {
+		// The shared selection names "Backup Zoo", so that profile reaches the in-memory handler
+		// path while "Zoo Gateway" stays persisted-only: its clear must be reported as a record
+		// rewrite and nothing more.
+		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
+
+		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
+		;(mockClineProvider as unknown as MutableSignOutProvider).contextProxy = {
+			// Spread carries the double’s own setValue/getValue across the replacement.
+			...providerWithSignOutStubs.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Backup Zoo" }),
+		}
+		;(mockClineProvider as unknown as MutableSignOutProvider).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
+			]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					apiProvider: providerIdentifiers.zooGateway,
+					zooSessionToken: "token-gateway",
+				})
+				.mockResolvedValueOnce({
+					apiProvider: providerIdentifiers.zooGateway,
+					zooSessionToken: "token-backup",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		;(mockClineProvider as ClineProvider).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(upsertProviderProfile).toHaveBeenCalledWith("Zoo Gateway", expect.anything(), false)
+		expect(upsertProviderProfile).toHaveBeenCalledWith("Backup Zoo", expect.anything(), true)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Cleared zooSessionToken from "Zoo Gateway" profile',
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Cleared zooSessionToken from "Backup Zoo" profile and updated in-memory handler',
+		)
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(expect.stringContaining("Failed to clear profile token"))
 	})
 })
 

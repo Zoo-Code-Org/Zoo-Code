@@ -1267,10 +1267,19 @@ describe("openClineInNewTab", () => {
 		// The panel closes while the creation is still awaiting its post-creation work, and a
 		// closing panel disposes its provider: the shared promise then resolves to a provider that
 		// can open no tab, so a later call must start its own creation instead of joining it.
+		// Only the first provider is the closing tab. A spy that flags every provider as disposed
+		// would mark the replacement disposed too, and the identity assertions below would then
+		// pass while the caller is handed a provider that can serve no tab.
+		let sawClosingTab = false
 		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockImplementation(async function (
 			this: ClineProvider,
 		) {
-			this["_disposed"] = true
+			// The automocked ClineProvider carries no _disposed field at all, so the double writes
+			// one: the closing tab's provider gets the flag, every later provider is written live.
+			this["_disposed"] = !sawClosingTab
+			if (!sawClosingTab) {
+				sawClosingTab = true
+			}
 		})
 
 		const [first, second] = await Promise.all([
@@ -1289,12 +1298,59 @@ describe("openClineInNewTab", () => {
 		const ctor = vi.mocked(ClineProvider)
 		const disposedProvider = ctor.mock.instances[0]
 		expect(first).toBe(disposedProvider)
+		expect(disposedProvider["_disposed"]).toBe(true)
 
 		// The joined call saw a disposed provider and re-ran the creation: a second panel exists and
 		// the caller receives the live provider, not the closed tab's one.
 		expect(second).not.toBe(disposedProvider)
 		expect(second).toBe(ctor.mock.instances[1])
+		// "Live" has to mean something here: the replacement is the provider this caller can post to,
+		// so it must not carry the disposal flag the closing tab's provider carries.
+		expect(second["_disposed"]).toBe(false)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+
+		resolveSpy.mockRestore()
+	})
+
+	it("joins the shared replacement when three opens wake on one disposed creation", async () => {
+		// Three overlapping opens park on the same in-flight creation and the panel closes before it
+		// settles. The call that started the creation keeps the provider it built; the two callers
+		// parked on it must not each start their own replacement - the first of them stores one in
+		// the shared slot and the other joins it - or a single menu gesture opens two editor tabs.
+		let sawClosingTab = false
+		const resolveSpy = vi.spyOn(ClineProvider.prototype, "resolveWebviewView").mockImplementation(async function (
+			this: ClineProvider,
+		) {
+			// The automocked ClineProvider carries no _disposed field at all, so the double writes
+			// one: the closing tab's provider gets the flag, every later provider is written live.
+			this["_disposed"] = !sawClosingTab
+			if (!sawClosingTab) {
+				sawClosingTab = true
+			}
+		})
+
+		const open = () =>
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+
+		const [first, second, third] = await Promise.all([open(), open(), open()])
+
+		const ctor = vi.mocked(ClineProvider)
+		const disposedProvider = ctor.mock.instances[0]
+		expect(first).toBe(disposedProvider)
+		expect(disposedProvider["_disposed"]).toBe(true)
+
+		// Exactly one replacement panel exists, and both late callers received it: the slot is joined,
+		// not re-created, once a replacement is in flight.
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+		expect(ctor.mock.instances).toHaveLength(2)
+		expect(second).toBe(ctor.mock.instances[1])
+		expect(third).toBe(second)
+		expect(second["_disposed"]).toBe(false)
+		expect(third["_disposed"]).toBe(false)
 
 		resolveSpy.mockRestore()
 	})

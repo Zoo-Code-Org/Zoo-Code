@@ -518,19 +518,42 @@ vi.mock("../../services/marketplace", () => ({
 }))
 
 // Mock ProviderSettingsManager
+// Mock ProviderSettingsManager
 vi.mock("../../config/ProviderSettingsManager", () => ({
 	ProviderSettingsManager: vi.fn().mockImplementation(function () {
+		// The real manager keeps a gate of its own in the secrets-backed profiles file: the profile
+		// its store selects and the complete mode -> profile id mapping. This double carries the same
+		// two values so a test can read what the store reports after a partial mutation, which is
+		// what the delete compensation gates its own restore on.
+		const gate: { currentApiConfigName: string; modeApiConfigs: Record<string, string | undefined> } = {
+			currentApiConfigName: "default",
+			modeApiConfigs: {},
+		}
 		return {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([]),
 			getProfile: vi.fn().mockResolvedValue({}),
-			activateProfile: vi.fn().mockImplementation(async (args: { name?: string; id?: string }) => ({
-				name: args.name ?? "default",
-				id: args.id ?? "test-id",
-				apiProvider: providerIdentifiers.anthropic,
+			activateProfile: vi.fn().mockImplementation(async (args: { name?: string; id?: string }) => {
+				const name = args.name ?? "default"
+				gate.currentApiConfigName = name
+				return {
+					name,
+					id: args.id ?? "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+			}),
+			setModeConfig: vi.fn().mockImplementation(async (mode: string, configId: string | undefined) => {
+				if (configId === undefined) {
+					delete gate.modeApiConfigs[mode]
+				} else {
+					gate.modeApiConfigs[mode] = configId
+				}
+			}),
+			getModeConfigId: vi.fn().mockImplementation(async (mode: string) => gate.modeApiConfigs[mode]),
+			getSelectionAndModeConfigs: vi.fn().mockImplementation(async () => ({
+				currentApiConfigName: gate.currentApiConfigName,
+				modeApiConfigs: { ...gate.modeApiConfigs },
 			})),
-			setModeConfig: vi.fn().mockResolvedValue(undefined),
-			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 			// The delete path classifies a rejected getProfile snapshot as absence with hasConfig; the
@@ -1329,11 +1352,31 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// The replacement's settings cannot be resolved. Re-pointing by name alone is what the
+			// The replacement’s settings cannot be resolved. Re-pointing by name alone is what the
 			// finding rejects, so the deletion fails closed and the compensation below runs.
-			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
-				new Error("profile store unavailable"),
+			// Only the replacement’s settings are unresolvable. The doomed profile’s own record is
+			// returned, so the pre-delete snapshot is a real record and the compensation below has
+			// something to restore; a blanket rejection made the record restore unobservable - the
+			// snapshot was classified absent and that leg never ran.
+			const doomedRecord = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "doomed-key",
+			}
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					if (args.name === "doomed-profile") {
+						return doomedRecord as unknown as Awaited<
+							ReturnType<typeof providerA.providerSettingsManager.getProfile>
+						>
+					}
+					return Promise.reject(new Error("profile replacement-profile not found"))
+				},
 			)
+			const saveConfigSpy = vi
+				.spyOn(providerA.providerSettingsManager, "saveConfig")
+				.mockResolvedValue("doomed-id")
 
 			await expect(
 				providerA.deleteProviderProfile({
@@ -1343,14 +1386,28 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				}),
 			).rejects.toThrow("Unable to resolve API profile 'replacement-profile'")
 
-			// B is left whole: its pin still names the profile it was pinned to and no partial
-			// overlay was minted for it, because a name-only re-point is the half-state this
-			// finding is about.
+			// B is left whole: the deletion aborted, so its pin still names the profile it was
+			// pinned to and the overlay under that pin carries that profile’s own settings.
 			expect(providerB["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
-			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+			// With the doomed record readable, B keeps its own pin *and* its own settings: the overlay
+			// carries the doomed profile’s credentials rather than the replacement’s. A sibling left
+			// naming its old profile while serving the replacement’s provider and key is the
+			// half-state this finding is about.
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject({
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "doomed-key",
+			})
 			// The committed manager delete is compensated: the shared profile list is restored
 			// with the deleted profile back in it.
 			expect(providerA.getProviderProfileEntries().map(({ name }) => name)).toContain("doomed-profile")
+			// The list entry coming back is only half the restore: the secrets-backed record must come
+			// back too, under its original id, or the restored entry names a profile whose settings
+			// are gone. This is the leg the blanket rejection above used to skip.
+			expect(saveConfigSpy).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ id: "doomed-id", apiKey: "doomed-key" }),
+			)
 			expect(logSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Unable to resolve API profile 'replacement-profile'"),
 			)
@@ -1401,8 +1458,12 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// A pins a third profile: a view pinned to the deleted profile or with no pin of its
 			// own would have taken the activation branch instead.
 			await providerA.saveViewState("currentApiConfigName", "third-profile")
-			// B pins that same third profile and holds no API overlay of its own.
-			await providerB.setValue("currentApiConfigName", "third-profile")
+			// B pins that same third profile and holds no API overlay of its own. saveViewState, not
+			// setValue: setValue writes the shared store first and only then the view-local pin, so
+			// this setup line would also move the shared selection onto the third profile. The
+			// deletion below reads that shared value fresh; with one shared cache the snapshot branch
+			// this test covers would stop running while the test still passed.
+			await providerB.saveViewState("currentApiConfigName", "third-profile")
 
 			vi.spyOn(providerA.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([keeperEntry, thirdEntry])
@@ -1437,6 +1498,462 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await providerA.dispose()
 			await providerB.dispose()
+		})
+
+		// The manager owns a gate of its own - the profile its store selects and the mode -> profile
+		// id mapping - and activating the replacement rewrites both. The restores for the record,
+		// list, shared selection, shared settings and view pins cannot reach that gate, so this test
+		// reads all three surfaces the compensation owns after the replacement activation landed.
+		it("restores the manager selection and mode configs when a later delete write fails", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedEntry: ProviderSettingsEntry = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// The double answers a name-only activation with "test-id", so the keeper entry carries
+			// that same id: the id the activation writes into the mode mapping is then the id the
+			// compensation compares the manager’s current report against.
+			const keeperEntry: ProviderSettingsEntry = {
+				id: "test-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const doomedRecord: ProviderSettingsWithId & { name: string } = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "doomed-key",
+			}
+			const keeperRecord: ProviderSettingsWithId & { name: string } = {
+				id: "test-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "keeper-url",
+			}
+			await providerA.contextProxy.setValue("listApiConfigMeta", [doomedEntry, keeperEntry])
+			// The doomed profile is the globally selected one, so the deletion activates the
+			// replacement, and that activation is what moves the manager gate.
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+
+			const manager = providerA.providerSettingsManager
+			await manager.activateProfile({ name: "doomed-profile" })
+			await manager.setModeConfig("code", "doomed-id")
+			await manager.setModeConfig("architect", "doomed-id")
+			// The ask mapping already names the id the replacement activation is about to write into
+			// the mode mapping. Nothing this deletion does change ask, so the restore has to leave it
+			// alone even though it points at the activated profile - only a mapping whose value this
+			// deletion actually moved is a restore target.
+			await manager.setModeConfig("ask", "test-id")
+			const gateBefore = await manager.getSelectionAndModeConfigs()
+			expect(gateBefore).toEqual({
+				currentApiConfigName: "doomed-profile",
+				modeApiConfigs: { architect: "doomed-id", ask: "test-id", code: "doomed-id" },
+			})
+
+			vi.spyOn(manager, "listConfig").mockResolvedValue([keeperEntry])
+			vi.spyOn(manager, "getProfile").mockImplementation(async (args: { name?: string; id?: string }) =>
+				args.name === "keeper-profile" ? keeperRecord : doomedRecord,
+			)
+			const saveConfigSpy = vi.spyOn(manager, "saveConfig").mockResolvedValue("doomed-id")
+			// The activation commits its own gate writes first - the store selection, the shared
+			// provider keys, and the mode mapping for the mode it activated into - and only then posts
+			// state. Fail that post so the whole activation, gate included, had landed by the time
+			// compensation starts. (The view is unpinned, so the deletion takes the activation path and
+			// returns straight after it; this is the last write that path makes.)
+			// The seeded gate writes would otherwise count against the assertions below.
+			vi.mocked(manager.activateProfile).mockClear()
+			vi.mocked(manager.setModeConfig).mockClear()
+
+			vi.spyOn(providerA, "postStateToWebview").mockRejectedValueOnce(new Error("state post failed"))
+
+			await expect(providerA.deleteProviderProfile(doomedEntry)).rejects.toThrow("state post failed")
+
+			// Surface one: the secrets-backed record, back under its original id.
+			expect(saveConfigSpy).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ id: "doomed-id", apiKey: "doomed-key" }),
+			)
+			// Surfaces two and three: the store’s own selection and every mode mapping, each put
+			// back through the manager’s own write paths - activateProfile for the selection,
+			// setModeConfig for the mappings - so the gate ends exactly where it was before the
+			// deletion moved it.
+			expect(await manager.getSelectionAndModeConfigs()).toEqual(gateBefore)
+			expect(manager.activateProfile).toHaveBeenLastCalledWith({ name: "doomed-profile" })
+
+			// Surfaces three, second half: the mapping this deletion moved comes back through the
+			// manager’s own write path, and the mapping it did not move is left untouched rather
+			// than replayed just because it happens to name the activated profile.
+			expect(manager.setModeConfig).toHaveBeenCalledWith("code", "doomed-id")
+			expect(manager.setModeConfig).not.toHaveBeenCalledWith("ask", "test-id")
+
+			await providerA.dispose()
+		})
+
+		// The manager gate restores only while the manager still reports what this deletion wrote. A
+		// concurrent activation that lands between the replacement activation and the failure owns the
+		// gate by then, so replaying the pre-delete selection over it would undo that newer work.
+		it("leaves the manager gate alone when a concurrent activation moved it during the delete", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedEntry: ProviderSettingsEntry = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperEntry: ProviderSettingsEntry = {
+				id: "test-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const doomedRecord: ProviderSettingsWithId & { name: string } = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "doomed-key",
+			}
+			const keeperRecord: ProviderSettingsWithId & { name: string } = {
+				id: "test-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "keeper-url",
+			}
+			const laterRecord: ProviderSettingsWithId & { name: string } = {
+				id: "test-id",
+				name: "later-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "later-url",
+			}
+			await providerA.contextProxy.setValue("listApiConfigMeta", [doomedEntry, keeperEntry])
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+
+			const manager = providerA.providerSettingsManager
+			await manager.activateProfile({ name: "doomed-profile" })
+			await manager.setModeConfig("code", "doomed-id")
+			await manager.setModeConfig("architect", "doomed-id")
+			const gateBefore = await manager.getSelectionAndModeConfigs()
+			expect(gateBefore).toEqual({
+				currentApiConfigName: "doomed-profile",
+				modeApiConfigs: { architect: "doomed-id", code: "doomed-id" },
+			})
+			// The seeded gate writes above are not part of the deletion under test, so the manager spy
+			// history starts here: the assertions below are about the writes the deletion and its
+			// compensation make, not about the setup that seeded the gate.
+			vi.mocked(manager.activateProfile).mockClear()
+			vi.mocked(manager.setModeConfig).mockClear()
+			vi.mocked(manager.getSelectionAndModeConfigs).mockClear()
+			const gateAfterConcurrentActivation = {
+				currentApiConfigName: "later-profile",
+				modeApiConfigs: { architect: "later-id", code: "later-id" },
+			}
+
+			vi.spyOn(manager, "listConfig").mockResolvedValue([keeperEntry])
+			const saveConfigSpy = vi.spyOn(manager, "saveConfig").mockResolvedValue("doomed-id")
+			vi.spyOn(manager, "getProfile").mockImplementation(async (args: { name?: string; id?: string }) => {
+				if (args.name === "keeper-profile") {
+					return keeperRecord
+				}
+				if (args.name === "later-profile") {
+					return laterRecord
+				}
+				return doomedRecord
+			})
+			const setModeConfigSpy = vi.spyOn(manager, "setModeConfig")
+			// The replacement activation lands on the gate, and then this view's own post fails. The
+			// post doubles as the window where a sibling activation lands on the same manager: it points
+			// the gate at a third profile (a different id, so the mode gate has something to compare
+			// against) and only then rejects, which is the order a concurrent write really has.
+			const postSpy = vi.spyOn(providerA, "postStateToWebview").mockImplementationOnce(async () => {
+				await manager.activateProfile({ id: "later-id", name: "later-profile" })
+				await manager.setModeConfig("architect", "later-id")
+				await manager.setModeConfig("code", "later-id")
+				throw new Error("state post failed")
+			})
+			const logSpy = vi.spyOn(providerA, "log")
+
+			await expect(providerA.deleteProviderProfile(doomedEntry)).rejects.toThrow("state post failed")
+			expect(postSpy).toHaveBeenCalledOnce()
+
+			// The record and the list come back - the deletion committed them - but the gate keeps the
+			// concurrent owner's selection and mappings: replaying this deletion's pre-delete values over
+			// them would silently revert a write the deletion never made.
+			expect(saveConfigSpy).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ id: "doomed-id", apiKey: "doomed-key" }),
+			)
+			expect(providerA.getProviderProfileEntries().map(({ name }) => name)).toContain("doomed-profile")
+			expect(await manager.getSelectionAndModeConfigs()).toEqual(gateAfterConcurrentActivation)
+			expect(manager.activateProfile).not.toHaveBeenCalledWith({ name: "doomed-profile" })
+			expect(setModeConfigSpy).not.toHaveBeenCalledWith("code", "doomed-id")
+			expect(setModeConfigSpy).not.toHaveBeenCalledWith("architect", "doomed-id")
+			expect(logSpy).not.toHaveBeenCalledWith(
+				expect.stringContaining("failed to restore the manager selection and mode configs"),
+			)
+
+			await providerA.dispose()
+		})
+
+		// Restoring the manager gate is best effort, like every other restore in this compensation: a
+		// manager that cannot be read must not stop the shared selection, the shared provider settings,
+		// the profile list or the view pin from being put back, and the caller still sees the deletion
+		// own failure.
+		it("keeps the other restores running when the manager gate cannot be read back", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedEntry: ProviderSettingsEntry = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const ghostEntry: ProviderSettingsEntry = {
+				id: "test-id",
+				name: "ghost-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const doomedSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "doomed-key" }
+			const ghostSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "ghost-key" }
+			const doomedRecord: ProviderSettingsWithId & { name: string } = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				...doomedSettings,
+			}
+			const ghostRecord: ProviderSettingsWithId & { name: string } = {
+				id: "test-id",
+				name: "ghost-profile",
+				...ghostSettings,
+			}
+			await providerA.contextProxy.setValue("listApiConfigMeta", [doomedEntry, ghostEntry])
+			await providerA.contextProxy.setValue("modeApiConfigs", { architect: "doomed-id", code: "doomed-id" })
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await providerA.contextProxy.setProviderSettings(doomedSettings)
+			await providerA.saveViewState("currentApiConfigName", "doomed-profile")
+			providerA["viewLocalState"] = {
+				mode: "code",
+				currentApiConfigName: "doomed-profile",
+				apiConfiguration: doomedSettings,
+			}
+
+			const manager = providerA.providerSettingsManager
+			vi.spyOn(manager, "listConfig").mockResolvedValue([ghostEntry])
+			vi.spyOn(manager, "getProfile").mockImplementation(async (args: { name?: string; id?: string }) =>
+				args.name === "ghost-profile" ? ghostRecord : doomedRecord,
+			)
+			// The pre-delete snapshot read succeeds; the read that opens the compensation is the one
+			// that fails, so the gate restores cannot even be attempted.
+			let gateReads = 0
+			const gateReadSpy = vi.spyOn(manager, "getSelectionAndModeConfigs").mockImplementation(async () => {
+				gateReads++
+				if (gateReads === 2) {
+					throw new Error("gate read failed")
+				}
+				return {
+					currentApiConfigName: "doomed-profile",
+					modeApiConfigs: { architect: "doomed-id", code: "doomed-id" },
+				}
+			})
+			const setValueSpy = vi.spyOn(providerA.contextProxy, "setValue")
+			const setProviderSettingsSpy = vi.spyOn(providerA.contextProxy, "setProviderSettings")
+			const logSpy = vi.spyOn(providerA, "log")
+			// The view pins the doomed profile, so the deletion takes the activation branch, and that
+			// activation last write is the one that fails - the point at which the compensation runs.
+			vi.spyOn(providerA, "postStateToWebview").mockRejectedValueOnce(new Error("state post failed"))
+
+			await expect(providerA.deleteProviderProfile(doomedEntry)).rejects.toThrow("state post failed")
+
+			expect(gateReadSpy).toHaveBeenCalledTimes(2)
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("failed to restore the manager selection and mode configs: gate read failed"),
+			)
+			expect(manager.activateProfile).not.toHaveBeenCalledWith({ name: "doomed-profile" })
+			// The restores behind the gate are independent of it: the deleted record comes back, the
+			// shared metadata, selection and provider settings are put back, and this view pin is merged
+			// back onto the deleted profile rather than left on the replacement.
+			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "doomed-profile")
+			expect(setValueSpy).toHaveBeenCalledWith(
+				"listApiConfigMeta",
+				expect.arrayContaining([ghostEntry, doomedEntry]),
+			)
+			expect(setProviderSettingsSpy).toHaveBeenCalledWith(doomedSettings)
+			// The pin restore is a durable merge, not an in-memory rewrite: the entry this view pinned
+			// before the deletion is back on the deleted profile, while the live overlay of the view that
+			// ran the activation keeps the replacement it activated into.
+			const durablePins = mockContext.globalState.get("viewStates") as Record<
+				string,
+				{ currentApiConfigName?: string } | undefined
+			>
+			expect(Object.values(durablePins).some((pin) => pin?.currentApiConfigName === "doomed-profile")).toBe(true)
+
+			await providerA.dispose()
+		})
+
+		// The deletion activates whatever the shared selection names, even a profile the durable list
+		// does not carry - a stale selection is possible when another instance pruned a profile. The
+		// pre-delete gate snapshot reads that target back out of the pre-delete entries, so it has to
+		// tolerate the target being absent instead of assuming an id is there.
+		it("completes the deletion when the shared selection names a profile the list does not carry", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedEntry: ProviderSettingsEntry = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperEntry: ProviderSettingsEntry = {
+				id: "test-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const doomedRecord: ProviderSettingsWithId & { name: string } = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "doomed-key",
+			}
+			const ghostRecord: ProviderSettingsWithId & { name: string } = {
+				id: "test-id",
+				name: "ghost-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "ghost-url",
+			}
+			await providerA.contextProxy.setValue("listApiConfigMeta", [doomedEntry, keeperEntry])
+			// A selection the durable list does not name, and not the deleted profile, so it becomes the
+			// activation target as-is and the snapshot lookup for it comes up empty.
+			await providerA.contextProxy.setValue("currentApiConfigName", "ghost-profile")
+
+			const manager = providerA.providerSettingsManager
+			vi.spyOn(manager, "listConfig").mockResolvedValue([keeperEntry])
+			vi.spyOn(manager, "getProfile").mockImplementation(async (args: { name?: string; id?: string }) =>
+				args.name === "ghost-profile" ? ghostRecord : doomedRecord,
+			)
+			vi.spyOn(manager, "deleteConfig").mockResolvedValue(undefined)
+			const gateBefore = await manager.getSelectionAndModeConfigs()
+
+			await providerA.deleteProviderProfile(doomedEntry)
+
+			// The deletion completes and hands the manager the selection it was told to activate.
+			expect(manager.activateProfile).toHaveBeenLastCalledWith({ name: "ghost-profile" })
+			expect(await manager.getSelectionAndModeConfigs()).toEqual({
+				currentApiConfigName: "ghost-profile",
+				modeApiConfigs: { code: "test-id" },
+			})
+			// The snapshot the compensation would restore from is the pre-delete gate, and reading it
+			// alongside an absent activation target is the case that must not throw.
+			expect(gateBefore).toEqual({ currentApiConfigName: "default", modeApiConfigs: {} })
+			expect(providerA.getProviderProfileEntries().map(({ name }) => name)).toEqual(["keeper-profile"])
+
+			await providerA.dispose()
+		})
+
+		// Two of the three manager-gate guards are about ownership rather than values: the gate is
+		// restored only while this deletion owns it. Here the manager already selected the profile
+		// the deletion goes on to activate, and the one mapping that changed between the snapshot
+		// and the failure was cleared by somebody else, so neither half of the gate is this
+		// deletion’s write to undo.
+		it("leaves the manager gate alone when it already selected the profile the deletion activates", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedEntry: ProviderSettingsEntry = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperEntry: ProviderSettingsEntry = {
+				id: "test-id",
+				name: "keeper-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const doomedRecord: ProviderSettingsWithId & { name: string } = {
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "doomed-key",
+			}
+			const ghostRecord: ProviderSettingsWithId & { name: string } = {
+				id: "test-id",
+				name: "ghost-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "ghost-url",
+			}
+			await providerA.contextProxy.setValue("listApiConfigMeta", [doomedEntry, keeperEntry])
+			// The shared selection names a profile the durable entry list does not carry, so the
+			// deletion activates that profile and finds no pre-delete entry to read an id from.
+			await providerA.contextProxy.setValue("currentApiConfigName", "ghost-profile")
+			const manager = providerA.providerSettingsManager
+			// The manager already points at the very profile this deletion will activate, and it
+			// maps architect onto the doomed profile.
+			await manager.activateProfile({ name: "ghost-profile" })
+			await manager.setModeConfig("architect", "doomed-id")
+			const gateBefore = await manager.getSelectionAndModeConfigs()
+			expect(gateBefore).toEqual({
+				currentApiConfigName: "ghost-profile",
+				modeApiConfigs: { architect: "doomed-id" },
+			})
+			vi.spyOn(manager, "listConfig").mockResolvedValue([keeperEntry])
+			vi.spyOn(manager, "getProfile").mockImplementation(async (args: { name?: string; id?: string }) =>
+				args.name === "doomed-profile" ? doomedRecord : ghostRecord,
+			)
+			const saveConfigSpy = vi.spyOn(manager, "saveConfig").mockResolvedValue("doomed-id")
+			vi.spyOn(manager, "deleteConfig").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(providerA, "log")
+			// The seeded gate writes would otherwise count against the assertions below.
+			vi.mocked(manager.activateProfile).mockClear()
+			vi.mocked(manager.setModeConfig).mockClear()
+			// The activation commits its own gate writes; before its last write an unrelated mutation
+			// clears the architect mapping, and that last write then fails, so compensation starts
+			// with a gate whose selection this deletion never moved and whose changed mapping it did
+			// not make.
+			vi.spyOn(providerA, "postStateToWebview").mockImplementationOnce(async () => {
+				await manager.setModeConfig("architect", undefined)
+				throw new Error("state post failed")
+			})
+			await expect(providerA.deleteProviderProfile(doomedEntry)).rejects.toThrow("state post failed")
+			// The record restore is untouched by any of this.
+			expect(saveConfigSpy).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ id: "doomed-id", apiKey: "doomed-key" }),
+			)
+			// The selection half stays where the activation put it, and activateProfile ran once -
+			// the activation itself - instead of a second time with the snapshot value.
+			expect(manager.activateProfile).toHaveBeenCalledTimes(1)
+			expect(manager.activateProfile).toHaveBeenLastCalledWith({ name: "ghost-profile" })
+			// The mapping half is left alone too: architect was cleared by the other mutation, and
+			// with no pre-delete entry for the activated profile there is nothing that identifies any
+			// mapping as this deletion’s write to replay.
+			expect(manager.setModeConfig).not.toHaveBeenCalledWith("architect", "doomed-id")
+			expect(await manager.getSelectionAndModeConfigs()).toEqual({
+				currentApiConfigName: "ghost-profile",
+				modeApiConfigs: { code: "test-id" },
+			})
+			expect(logSpy).not.toHaveBeenCalledWith(
+				expect.stringContaining("failed to restore the manager selection and mode configs"),
+			)
+			await providerA.dispose()
 		})
 	})
 

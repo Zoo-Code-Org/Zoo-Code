@@ -5234,6 +5234,12 @@ describe("ClineProvider", () => {
 				activateProfile: vi.fn().mockResolvedValue(keeperProfile),
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
 				setModeConfig: vi.fn(),
+				// The delete compensation snapshots the manager gate (its selection and mode map) before
+				// committing; this double reports a gate the deletion never moved, so the gated restore
+				// legs stay inert here.
+				getSelectionAndModeConfigs: vi
+					.fn()
+					.mockResolvedValue({ currentApiConfigName: "default", modeApiConfigs: {} }),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
@@ -5550,6 +5556,12 @@ describe("ClineProvider", () => {
 					.mockResolvedValue({ name: "keeper-profile", id: "keeper-id", ...keeperSettings }),
 				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
 				setModeConfig: vi.fn(),
+				// The delete compensation snapshots the manager gate (its selection and mode map) before
+				// committing; this double reports a gate the deletion never moved, so the gated restore
+				// legs stay inert here.
+				getSelectionAndModeConfigs: vi
+					.fn()
+					.mockResolvedValue({ currentApiConfigName: "default", modeApiConfigs: {} }),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
@@ -5696,6 +5708,12 @@ describe("ClineProvider", () => {
 				// getProfile wraps a missing record and a storage read failure in one plain Error,
 				// so the deletion classifies absence with hasConfig: this record is absent.
 				hasConfig: vi.fn().mockResolvedValue(false),
+				// The delete compensation snapshots the manager gate (its selection and mode map) before
+				// committing; this double reports a gate the deletion never moved, so the gated restore
+				// legs stay inert here.
+				getSelectionAndModeConfigs: vi
+					.fn()
+					.mockResolvedValue({ currentApiConfigName: "default", modeApiConfigs: {} }),
 			}
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
@@ -5842,6 +5860,12 @@ describe("ClineProvider", () => {
 					apiProvider: providerIdentifiers.openrouter,
 				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				// The delete compensation snapshots the manager gate (its selection and mode map) before
+				// committing; this double reports a gate the deletion never moved, so the gated restore
+				// legs stay inert here.
+				getSelectionAndModeConfigs: vi
+					.fn()
+					.mockResolvedValue({ currentApiConfigName: "default", modeApiConfigs: {} }),
 			}
 			const setProviderSettingsSpy = vi
 				.spyOn(provider.contextProxy, "setProviderSettings")

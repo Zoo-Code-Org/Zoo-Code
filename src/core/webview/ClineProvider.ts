@@ -3376,6 +3376,17 @@ export class ClineProvider
 		const previousSelection = globalSettings.currentApiConfigName
 		const previousSharedSettings = this.contextProxy.getProviderSettings()
 		const previousViewStates = this.getPersistedViewStates({ fresh: true })
+		// The manager owns a gate of its own - the profile its store selects and the mode ->
+		// profile mapping - and activating the replacement below rewrites both. It lives in the
+		// secrets-backed profiles file behind the manager lock, so none of the context-gate
+		// restores in the catch below can reach it: snapshot it here, before the delete commits,
+		// through the manager’s own read (a copy of the map, not the live object).
+		const previousManagerGate = await this.providerSettingsManager.getSelectionAndModeConfigs()
+		// What the activation below writes into that gate: the replacement’s name, and its id as
+		// the profile list records it (the mode mapping is keyed by id). The restore legs compare
+		// the manager’s current report against these, and only roll back while they still match.
+		const activatedManagerGateName = profileToActivate
+		const activatedManagerGateId = previousEntries.find((entry) => entry.name === profileToActivate)?.id
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
 		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
@@ -3540,6 +3551,42 @@ export class ClineProvider
 			} catch (restoreError) {
 				this.log(
 					`[deleteProviderProfile] failed to restore the profile list: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
+			}
+			// The manager gate the activation moved onto the replacement. Restored through the same
+			// write paths the activation used - activateProfile for the selection, setModeConfig for
+			// each mapping - and only while the manager still reports what this deletion wrote: a
+			// concurrent activation or a later mutation may own the gate by now, and replaying the
+			// pre-delete values over it would undo that work. The record and list restores above run
+			// first so the name and ids being restored still exist.
+			try {
+				const currentManagerGate = await this.providerSettingsManager.getSelectionAndModeConfigs()
+				if (
+					previousManagerGate.currentApiConfigName !== activatedManagerGateName &&
+					currentManagerGate.currentApiConfigName === activatedManagerGateName
+				) {
+					await this.providerSettingsManager.activateProfile({
+						name: previousManagerGate.currentApiConfigName,
+					})
+				}
+				const previousModeConfigs = previousManagerGate.modeApiConfigs ?? {}
+				const currentModeConfigs = currentManagerGate.modeApiConfigs ?? {}
+				for (const mode of new Set([...Object.keys(previousModeConfigs), ...Object.keys(currentModeConfigs)])) {
+					const previousModeConfigId = previousModeConfigs[mode]
+					const currentModeConfigId = currentModeConfigs[mode]
+					if (
+						activatedManagerGateId !== undefined &&
+						currentModeConfigId === activatedManagerGateId &&
+						previousModeConfigId !== currentModeConfigId
+					) {
+						await this.providerSettingsManager.setModeConfig(mode as Mode, previousModeConfigId)
+					}
+				}
+			} catch (restoreError) {
+				this.log(
+					`[deleteProviderProfile] failed to restore the manager selection and mode configs: ${
+						restoreError instanceof Error ? restoreError.message : String(restoreError)
+					}`,
 				)
 			}
 			try {

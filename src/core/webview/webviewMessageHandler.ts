@@ -3288,19 +3288,37 @@ export const webviewMessageHandler = async (
 							// rewritten only when they previously had a token to avoid no-op disk writes.
 							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
 
-							if (isThisProfileActive) {
-								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
-								provider.log(
-									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
-								)
-							} else if (profile.zooSessionToken) {
-								// Route through the provider's mutation queue so live views pinned to this profile drop the
-								// token too: a direct saveConfig rewrites the record only, and a pinned view keeps buffering
-								// the cleared token, which its getState() reports and new tasks send. activate=false keeps the
-								// shared selection on the profile that was actually active.
-								await provider.upsertProviderProfile(entry.name, cleanedProfile, false)
-								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
+							if (!isThisProfileActive && !profile.zooSessionToken) {
+								continue
 							}
+
+							// Route through the provider's mutation queue so live views pinned to this profile drop the
+							// token too: a direct saveConfig rewrites the record only, and a pinned view keeps buffering
+							// the cleared token, which its getState() reports and new tasks send. activate=false keeps the
+							// shared selection on the profile that was actually active.
+							//
+							// The queue result is the store's confirmation of the clear: upsertProviderProfile catches
+							// its own failure and resolves to undefined - persistProviderProfile only ever resolves to
+							// the id that saveConfig returned - so an undefined id here means the write group failed and
+							// the stored profile can still hold the token. Reporting the clear anyway would log a cleanup
+							// that never happened and leave a reader trusting a credential that is still live. A failed
+							// cleanup belongs to the per-profile error path below, which logs it and moves on to the
+							// next profile.
+							const clearedProfileId = await provider.upsertProviderProfile(
+								entry.name,
+								cleanedProfile,
+								isThisProfileActive,
+							)
+
+							if (clearedProfileId === undefined) {
+								throw new Error(
+									`upsertProviderProfile returned no profile id for "${entry.name}"; the stored profile may still hold zooSessionToken`,
+								)
+							}
+
+							provider.log(
+								`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile${isThisProfileActive ? " and updated in-memory handler" : ""}`,
+							)
 						} catch (profileError) {
 							// Log but continue to the next profile so one failure doesn't
 							// leave other profiles holding a stale token.

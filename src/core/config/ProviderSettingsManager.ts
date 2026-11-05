@@ -596,6 +596,28 @@ export class ProviderSettingsManager {
 			throw new Error(`Failed to get mode config: ${error}`)
 		}
 	}
+	/**
+	 * Read this store’s own gate - the selected profile and the complete mode mapping - in one
+	 * locked snapshot, for callers that must compare what they wrote against what the store
+	 * reports after a partial mutation. The mode map is returned as a copy rather than the
+	 * live object so a caller can hold the snapshot across awaits while a later write replaces
+	 * it. Read-only: nothing here stores, so this adds no new write path.
+	 */
+	public async getSelectionAndModeConfigs(): Promise<
+		Pick<ProviderProfiles, "currentApiConfigName" | "modeApiConfigs">
+	> {
+		try {
+			return await this.lock(async () => {
+				const { currentApiConfigName, modeApiConfigs } = await this.load()
+				return {
+					currentApiConfigName,
+					modeApiConfigs: modeApiConfigs ? { ...modeApiConfigs } : undefined,
+				}
+			})
+		} catch (error) {
+			throw new Error(`Failed to read the profile selection and mode configs: ${error}`)
+		}
+	}
 
 	public async export() {
 		try {
