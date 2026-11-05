@@ -2758,6 +2758,10 @@ export const webviewMessageHandler = async (
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 							await removeOwnRenameRecord()
 						} catch (rollbackError) {
+							// Neither the rename nor its rollback landed, so both names can stay stored: the same
+							// inconsistent state the catch above warns about. The user needs to know that, not
+							// only the log, and the existing rename_api_config string is the honest one to show.
+							vscode.window.showWarningMessage(t("common:errors.rename_api_config"))
 							provider.log(
 								`Rename activation failed and the pre-rename state could not be restored: ${JSON.stringify(rollbackError, Object.getOwnPropertyNames(rollbackError), 2)}`,
 							)

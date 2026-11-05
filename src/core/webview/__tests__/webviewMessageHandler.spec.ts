@@ -3124,6 +3124,51 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// delete of the name it just restored.
 		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("currentApiConfigName", expect.anything())
 	})
+
+	it("warns the user when a rename's activation rollback cannot restore the pre-rename state", async () => {
+		// Review row DOSK-bwM6z6Vop: the two rename compensations that give up show the user the
+		// rename_api_config warning; this one - the activation failure whose own rollback also fails -
+		// only logged, so the inconsistent state was visible to nobody but the log file. The existing
+		// key is reused across the locale bundles; no new string is invented for it.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		// The forward re-point moves the views old-profile -> new-profile; the rollback calls it the
+		// other way round. Rejecting only the reverse direction is what makes the rollback itself fail.
+		const repoint = vi.fn(async (from: string) => {
+			if (from === "new-profile") {
+				throw new Error("rollback failed")
+			}
+		})
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockRejectedValue(new Error("activation failed"))
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		expect(repoint).toHaveBeenCalledWith(
+			"new-profile",
+			"old-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Rename activation failed and the pre-rename state could not be restored"),
+		)
+		// The log is not something the user can act on: the rename committed, its activation failed and
+		// the rollback failed too, so both names can stay stored and the user has to be told - the same
+		// way the sibling compensation catch tells them.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
+		// The localized string, not the raw rollback error the log carries.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("rollback failed"))
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("rename"))
+	})
 	it("leaves another rename's record alone when its own compensation runs", async () => {
 		provider.providerSettingsManager = {
 			hasConfig: vi.fn().mockResolvedValue(false),
