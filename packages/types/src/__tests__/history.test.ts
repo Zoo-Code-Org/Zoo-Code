@@ -63,4 +63,19 @@ describe("historyItemSchema", () => {
 	it("leaves title unset when absent", () => {
 		expect(historyItemSchema.parse(baseItem)).not.toHaveProperty("title")
 	})
+
+	it.each([
+		{ value: undefined, expected: undefined },
+		{ value: null, expected: undefined },
+		{ value: "abc", expected: undefined },
+		{ value: 42, expected: undefined },
+		{ value: {}, expected: undefined },
+		{ value: [42], expected: undefined },
+		{ value: [], expected: [] },
+		{ value: ["mcp--a--b", null, 42], expected: ["mcp--a--b"] },
+	])("normalizes persisted attachments $value without losing the task", ({ value, expected }) => {
+		const parsed = historyItemSchema.parse({ ...baseItem, attachedMcpToolNames: value })
+		expect(parsed.id).toBe(baseItem.id)
+		expect(parsed.attachedMcpToolNames).toEqual(expected)
+	})
 })

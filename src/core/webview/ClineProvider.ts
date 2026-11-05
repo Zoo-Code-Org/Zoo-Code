@@ -59,6 +59,7 @@ import {
 	RooCodeEventName,
 	requestyDefaultModelId,
 	openRouterDefaultModelId,
+	resolveMcpDynamicLoadSettings,
 	DEFAULT_WRITE_DELAY_MS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
@@ -3261,6 +3262,8 @@ export class ClineProvider
 			terminalZdotdir,
 			terminalProfile,
 			mcpEnabled,
+			"mcp.dynamicLoad.threshold": mcpDynamicLoadThreshold,
+			"mcp.dynamicLoad.initialK": mcpDynamicLoadInitialK,
 			currentApiConfigName,
 			listApiConfigMeta,
 			pinnedApiConfigs,
@@ -3388,6 +3391,8 @@ export class ClineProvider
 			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
 		}
 
+		const mcpDynamicLoad = resolveMcpDynamicLoadSettings(mcpDynamicLoadThreshold, mcpDynamicLoadInitialK)
+
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
 			apiConfiguration: currentTaskApiConfiguration ?? apiConfiguration,
@@ -3442,6 +3447,8 @@ export class ClineProvider
 			terminalZdotdir: terminalZdotdir ?? false,
 			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
+			"mcp.dynamicLoad.threshold": mcpDynamicLoad.threshold,
+			"mcp.dynamicLoad.initialK": mcpDynamicLoad.initialK,
 			currentApiConfigName: currentTask ? currentTaskApiConfigName : currentApiConfigName,
 			listApiConfigMeta: listApiConfigMeta ?? [],
 			pinnedApiConfigs: pinnedApiConfigs ?? {},
@@ -3633,6 +3640,11 @@ export class ClineProvider
 
 		const taskSyncEnabled: boolean = false
 
+		const mcpDynamicLoad = resolveMcpDynamicLoadSettings(
+			stateValues["mcp.dynamicLoad.threshold"],
+			stateValues["mcp.dynamicLoad.initialK"],
+		)
+
 		// Return the same structure as before.
 		return {
 			apiConfiguration: providerSettings,
@@ -3687,6 +3699,8 @@ export class ClineProvider
 			mode: stateValues.mode ?? defaultModeSlug,
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
+			"mcp.dynamicLoad.threshold": mcpDynamicLoad.threshold,
+			"mcp.dynamicLoad.initialK": mcpDynamicLoad.initialK,
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
 			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
 			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
