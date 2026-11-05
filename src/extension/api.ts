@@ -887,7 +887,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	 * dropped and logged first.
 	 *
 	 * The profile writes that follow the settings are wrapped by this unit. The existence check, the
-	 * prior-record read and the save run inside the manager cross-instance critical section, and the
+	 * prior-record read and the save run inside the manager cross-instance critical section, while the
+	 * prior mode-mapping read runs just before that section so a failed read aborts the call with
+	 * nothing mutated, and the
 	 * compensation runs in its own section after re-reading the record, so a record another view
 	 * created is never deleted by this call rollback. On failure the call restores the prior record,
 	 * the prior shared settings, the prior shared mode and profile pin, and the prior mapping of every
@@ -922,6 +924,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// view mode and profile.
 		const previousSharedMode = this.sidebarProvider.contextProxy.getValue("mode")
 		const previousSharedProfileName = this.sidebarProvider.contextProxy.getValue("currentApiConfigName")
+		// Capture the prior mapping of every mode this payload touches, so a partial mode fan-out rolls
+		// back completely - including mappings this call creates for the first time (an undefined prior
+		// id restores the no-mapping semantics getModeConfigId reports) - and so that this read joins the
+		// fail-closed reads below: a rejection here aborts the call before the profile record is created
+		// or overwritten, which is the state the compensation cannot reconstruct. Held outside the
+		// critical section on purpose - it lengthens no cross-instance hold, and the mode writes it
+		// guards happen after the section anyway.
+		const previousModeConfigs: Array<[Mode, string | undefined]> = []
+		if (values.modeApiConfigs) {
+			for (const mode of Object.keys(values.modeApiConfigs)) {
+				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
+			}
+		}
+
 		// The existence check, the prior-record read and the save run as one critical section of the
 		// manager cross-instance lock - the same lock the profile rename, the persist path and the
 		// handler deletions already join. Left unserialised the sequence is: we read the name as absent,
@@ -949,15 +965,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			const id = await manager.saveConfig(savedProfileName, forwardValues)
 			return { recordExisted: existed, previousRecord: priorRecord, savedId: id }
 		})
-		// Capture the prior mapping of every mode this payload touches, so a partial mode fan-out rolls
-		// back completely - including mappings this call creates for the first time (an undefined prior
-		// id restores the no-mapping semantics getModeConfigId reports).
-		const previousModeConfigs: Array<[Mode, string | undefined]> = []
-		if (values.modeApiConfigs) {
-			for (const mode of Object.keys(values.modeApiConfigs)) {
-				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
-			}
-		}
 		try {
 			await this.sidebarProvider.setValues(
 				// Only the keys this call owns travel forward; see the filter comment above.
@@ -1020,7 +1027,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			const replayValues: RooCodeSettings = Object.fromEntries(
 				Object.entries(snapshotValues).filter(([key]) => writtenKeys.has(key)),
 			)
-			const previousProfileName = replayValues.currentApiConfigName || "default"
+			// Which profile the views return to is read from the snapshot, not from the replay
+			// filter: a payload that never wrote currentApiConfigName leaves the pin out of the
+			// replay, and defaulting it here would refresh the overlays pinned to "default" with
+			// this profile settings and skip the credential replay for the profile that was
+			// actually active. When the payload did write the pin the two readings are the same
+			// value, because the replay holds the snapshot value for every key it carries.
+			const previousProfileName = snapshotValues.currentApiConfigName || "default"
 			try {
 				await this.sidebarProvider.setValues(replayValues, { savedProfileName: previousProfileName })
 			} catch (restoreError) {

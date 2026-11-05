@@ -101,6 +101,60 @@ describe("API - configuration", () => {
 		expect(setModeConfig).toHaveBeenCalledWith("architect", "architect-config")
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
+	it("aborts before the profile save when the prior mode mapping read fails", async () => {
+		const store = makeProfileStoreDouble({
+			default: { id: "prior-id", settings: { apiProvider: providerIdentifiers.openrouter } },
+		})
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		// The prior mapping of each mode the payload touches is read before anything is written, so
+		// the read joins the fail-closed reads the critical section below already runs.
+		const getModeConfigId = vi.fn().mockRejectedValue(new Error("mode mapping read failed"))
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+			},
+			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				...store,
+				setModeConfig,
+				getModeConfigId,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "default",
+				apiProvider: providerIdentifiers.openrouter,
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode mapping read failed")
+
+		// Nothing may have been mutated: the record this call found must still be the record it found,
+		// with its own id, and no shared write may have run. A rejection after the save would leave a
+		// created-or-overwritten record that the compensation never sees, because the compensation
+		// only runs for failures of the writes that follow the capture.
+		expect(store.saveConfig).not.toHaveBeenCalled()
+		expect(setValues).not.toHaveBeenCalled()
+		expect(setModeConfig).not.toHaveBeenCalled()
+		expect(postStateToWebview).not.toHaveBeenCalled()
+		expect(store.entries.get("default")).toEqual({
+			id: "prior-id",
+			settings: { apiProvider: providerIdentifiers.openrouter },
+		})
+	})
 
 	it("does not persist mode mappings when none are supplied", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
@@ -596,6 +650,79 @@ describe("API - configuration", () => {
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 
+	it("keeps a record another view rewrote between the save and the compensation", async () => {
+		// The reject path of the id comparison. This call creates the name, so its own rollback
+		// would delete it; a locked writer that replaces the record in between owns the name now,
+		// and deleting it here would remove that other view record together with its secret. The
+		// store is live-backed so the re-read inside the section sees the rewrite, which a static
+		// hasConfig mock cannot model.
+		const records = new Map<string, { id: string; settings: Record<string, unknown> }>()
+		const hasConfig = vi.fn((name: string) => Promise.resolve(records.has(name)))
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			const entry = records.get(name)
+			return entry
+				? Promise.resolve({ name, id: entry.id, ...entry.settings })
+				: Promise.reject(new Error(`Profile "${name}" does not exist`))
+		})
+		const saveConfig = vi.fn((name: string, settings: Record<string, unknown>) => {
+			records.set(name, { id: "this-call-id", settings })
+			return Promise.resolve("this-call-id")
+		})
+		const deleteConfig = vi.fn((name: string) => {
+			records.delete(name)
+			return Promise.resolve()
+		})
+		const setModeConfig = vi.fn(async () => {
+			// The interleaving the guard is for: another locked writer replaces the record this
+			// call had created, under its own id.
+			records.set("pinned", { id: "other-view-id", settings: { apiKey: "other-view-secret" } })
+			throw new Error("mode write failed")
+		})
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn(() => ({ currentApiConfigName: "pinned" })),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				hasConfig,
+				getProfile,
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		// The existence check saw the name absent, so the rollback reaches the delete branch; the
+		// id its own save returned is not the id on the record any more, and the record stays.
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(records.get("pinned")).toEqual({
+			id: "other-view-id",
+			settings: expect.objectContaining({ apiKey: "other-view-secret" }),
+		})
+		expect(saveConfig).toHaveBeenCalledTimes(1)
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+
 	it("replays only the keys this call wrote and leaves keys another view changed alone", async () => {
 		// A rollback may restore what this call changed and nothing else, because anything the
 		// snapshot happens to hold otherwise belongs to a writer that has moved on since it was
@@ -794,6 +921,68 @@ describe("API - configuration", () => {
 		// its own stored record - not the credential-less non-secret snapshot.
 		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "pinned-old-key" }))
 		expect(refreshSpy).toHaveBeenCalledWith("old-profile", expect.objectContaining({ apiKey: "old-profile-key" }))
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("names the profile the snapshot was on when the payload never carried the pin", async () => {
+		// Which profile the views return to has to come from the snapshot the call captured. The
+		// replay map only holds the keys this call wrote, so a payload that never carried
+		// currentApiConfigName leaves the pin out of it: defaulting the name there refreshes the
+		// overlays pinned to "default" with another profile settings and skips the credential
+		// replay for the profile that was actually active.
+		const store: Record<string, unknown> = {
+			currentApiConfigName: "my-profile",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const profileStore = makeProfileStoreDouble({
+			"my-profile": {
+				id: "my-id",
+				settings: { apiProvider: providerIdentifiers.openrouter, apiKey: "my-profile-key" },
+			},
+		})
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const refreshSpy = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([{ name: "my-profile", id: "my-id" }]),
+			// Live-backed so the snapshot is this view of the store at snapshot time.
+			getValues: vi.fn(() => ({ ...store })),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.openrouter }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				hasConfig: profileStore.hasConfig,
+				getProfile: profileStore.getProfile,
+				saveConfig: profileStore.saveConfig,
+				deleteConfig: profileStore.deleteConfig,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		// A payload that changes only a model setting: this call never touched the profile pin.
+		await expect(
+			api.setConfiguration({ apiModelId: "gpt-5-codex", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		// The saved profile falls back to "default" because the payload omitted the pin, but the
+		// profile the overlays must be considered on again is the one the snapshot names, and that
+		// profile overlays must be replayed from its own record.
+		expect(setValues).toHaveBeenLastCalledWith(expect.any(Object), { savedProfileName: "my-profile" })
+		expect(refreshSpy).toHaveBeenCalledWith("my-profile", expect.objectContaining({ apiKey: "my-profile-key" }))
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 
