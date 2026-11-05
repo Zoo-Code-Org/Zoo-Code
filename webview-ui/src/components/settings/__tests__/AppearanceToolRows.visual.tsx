@@ -7,8 +7,8 @@ import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
 const fontSize = (locator: Locator) =>
 	locator.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
 
-// Real layout, because the sizes are `calc()` of two variables, which jsdom does not compute. No screenshot is taken:
-// the sizes are what is checked, so the test needs no baseline.
+// Real layout, because the sizes are `calc()` of two variables, which jsdom does not compute. The computed sizes are
+// what is checked; the screenshot of the scaled rows is one focused picture of the same state.
 test("the names, arguments, descriptions and badges of the tool rows follow the interface scale, and removing it restores them", async ({
 	mount,
 	page,
@@ -75,6 +75,7 @@ test("the names, arguments, descriptions and badges of the tool rows follow the 
 	for (const { name, locator, offset } of texts) {
 		expect(await fontSize(locator), name).toBeCloseTo(base * 1.5 + offset, 1)
 	}
+	await expect(story).toHaveScreenshot(`appearance-tool-rows-${visualThemes[0].name}-set.png`)
 
 	// Removed again: every text is back on its size.
 	await story.getByTestId("remove-scale").click()
