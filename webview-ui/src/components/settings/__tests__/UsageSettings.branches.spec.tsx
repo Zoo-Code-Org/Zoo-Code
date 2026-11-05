@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
+import i18next from "i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
@@ -303,7 +304,16 @@ describe("UsageSettings – branches", () => {
 			unpriced("large task", 5000, 500),
 		]
 
+		// The magnitude suffixes come from the translations, which this spec does not load: give them as in English.
+		const suffixes: Record<string, string> = {
+			"common:number_format.thousand_suffix": "k",
+			"common:number_format.million_suffix": "M",
+			"common:number_format.billion_suffix": "B",
+		}
+		const translate = vi.spyOn(i18next, "t").mockImplementation(((key: string) => suffixes[key] ?? key) as never)
+
 		render(<UsageSettings />)
+		translate.mockRestore()
 
 		const rows = within(screen.getByTestId("usage-top-tasks")).getAllByRole("button")
 		expect(rows).toHaveLength(3)
@@ -313,9 +323,9 @@ describe("UsageSettings – branches", () => {
 			"small",
 		])
 		// Each is shown by its tokens (input and output together): there is no price to show.
-		expect(rows.map((row) => /gpt-5(5\.5|1\.1|110)/.exec(row.textContent ?? "")?.[1])).toEqual([
-			"5.5",
-			"1.1",
+		expect(rows.map((row) => /gpt-5(.+?)common:time_ago/.exec(row.textContent ?? "")?.[1])).toEqual([
+			"5.5k",
+			"1.1k",
 			"110",
 		])
 		expect(screen.getByTestId("usage-top-tasks").textContent).not.toContain("$")
