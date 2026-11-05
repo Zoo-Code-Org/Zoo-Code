@@ -40,7 +40,16 @@ export class ToolRouter {
 		// keeping task scopes and changed tool descriptions isolated.
 		const key = createHash("sha256").update(JSON.stringify(scopedTools)).digest("hex")
 		if (this.indexedTools?.key !== key) {
-			this.indexedTools = { key, tools: scopedTools.map((tool) => ({ ...tool })) }
+			// Canonical names can collide after sanitizing or truncating. Keep the
+			// first tool per name before ranking so collisions do not use Top-K slots.
+			const unique = new Map<string, ToolDoc>()
+			for (const tool of scopedTools) {
+				const name = buildMcpToolName(tool.serverName, tool.toolName)
+				if (!unique.has(name)) {
+					unique.set(name, { ...tool })
+				}
+			}
+			this.indexedTools = { key, tools: [...unique.values()] }
 		}
 		this.ranker ??= createRanker()
 		const ranked = await this.ranker.rank(query, this.indexedTools.tools, Math.floor(k))

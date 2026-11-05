@@ -54,6 +54,20 @@ describe("ToolRouter", () => {
 		).toEqual(["mcp--github--issues", "mcp--jira--issues"])
 	})
 
+	it.each(["attachInitial", "search"] as const)("%s drops colliding canonical names before Top-K", async (method) => {
+		const result = await ToolRouter.getInstance()[method](
+			"tickets",
+			[
+				{ serverName: "a b", toolName: "t", description: "tickets" },
+				{ serverName: "a_b", toolName: "t", description: "tickets" },
+				{ serverName: "other", toolName: "u", description: "tickets" },
+			],
+			2,
+		)
+		expect(result).toHaveLength(2)
+		expect(result).toEqual(expect.arrayContaining(["mcp--a_b--t", "mcp--other--u"]))
+	})
+
 	it.each(["attachInitial", "search"] as const)("%s validates and floors limits", async (method) => {
 		const router = ToolRouter.getInstance()
 		for (const limit of [NaN, Infinity, -Infinity, -1, 0, 0.5]) {

@@ -1,6 +1,7 @@
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
+import type { Mock } from "vitest"
 import type { McpServer } from "@roo-code/types"
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
@@ -13,6 +14,9 @@ vi.mock("../../../core/webview/ClineProvider")
 describe("ToolRouter with McpHub", () => {
 	let directory: string
 	let hub: McpHub
+	// The hub holds its provider weakly, so the suite keeps the strong reference.
+	let provider: Partial<ClineProvider>
+	let post: Mock<ClineProvider["postMessageToWebview"]>
 	const router = ToolRouter.getInstance()
 	const tools = [{ serverName: "github", toolName: "issues", description: "search tickets" }]
 	function addServer(): McpServer {
@@ -28,10 +32,11 @@ describe("ToolRouter with McpHub", () => {
 
 	beforeEach(async () => {
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "tool-router-"))
-		const provider: Partial<ClineProvider> = {
+		post = vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined)
+		provider = {
 			cwd: directory,
 			ensureSettingsDirectoryExists: async () => directory,
-			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			postMessageToWebview: post,
 			getState: vi.fn().mockResolvedValue({ mcpEnabled: false }),
 		}
 		// The hub uses only cwd, settings directory, state, and webview posting.
@@ -117,14 +122,37 @@ describe("ToolRouter with McpHub", () => {
 		})
 		const changed = vi.fn()
 		hub.onServerListChanged(changed)
-		addServer()
-		const post = vi.spyOn(hub["providerRef"].deref()!, "postMessageToWebview")
+		const server = addServer()
+		post.mockClear()
 		await expect(hub["notifyWebviewOfServerChanges"]()).resolves.toBeUndefined()
-		expect(post).toHaveBeenCalled()
+		expect(post).toHaveBeenCalledWith({ type: "mcpServers", mcpServers: [server] })
 		expect(changed).toHaveBeenCalledTimes(1)
 		expect(log).toHaveBeenCalledWith("[McpHub] Server-list change listener failed:", failure)
 		await expect(hub.dispose()).resolves.toBeUndefined()
 		expect(changed).toHaveBeenCalledTimes(2)
 		expect(hub["serverListEvents"].listenerCount("changed")).toBe(0)
+	})
+
+	it("fires the event before the settings read can fail", async () => {
+		await fs.writeFile(path.join(directory, GlobalFileNames.mcpSettings), "{ not json")
+		const changed = vi.fn()
+		hub.onServerListChanged(changed)
+		addServer()
+		await expect(hub["notifyWebviewOfServerChanges"]()).rejects.toThrow()
+		expect(changed).toHaveBeenCalledTimes(1)
+	})
+
+	it("fires the event and keeps going when the webview post rejects", async () => {
+		const failure = new Error("post failed")
+		const log = vi.spyOn(console, "error").mockImplementation(() => {})
+		const changed = vi.fn()
+		hub.onServerListChanged(changed)
+		addServer()
+		post.mockClear()
+		post.mockRejectedValueOnce(failure)
+		await expect(hub["notifyWebviewOfServerChanges"]()).resolves.toBeUndefined()
+		expect(post).toHaveBeenCalledTimes(1)
+		expect(changed).toHaveBeenCalledTimes(1)
+		expect(log).toHaveBeenCalledWith("[McpHub] Error calling targetProvider.postMessageToWebview:", failure)
 	})
 })
