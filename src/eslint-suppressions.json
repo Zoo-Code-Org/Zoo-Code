@@ -84,11 +84,6 @@
 			"count": 36
 		}
 	},
-	"api/providers/__tests__/lm-studio-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -324,11 +319,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/qwen-code.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/requesty.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -506,7 +496,7 @@
 	},
 	"core/checkpoints/__tests__/checkpoint.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 3
 		}
 	},
 	"core/checkpoints/index.ts": {
@@ -949,11 +939,6 @@
 			"count": 12
 		}
 	},
-	"core/webview/__tests__/checkpointRestoreHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/webview/__tests__/diagnosticsHandler.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
@@ -972,11 +957,6 @@
 	"core/webview/__tests__/telemetrySettingsTracking.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.checkpoint.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"core/webview/__tests__/webviewMessageHandler.cloudAuth.spec.ts": {

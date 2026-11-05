@@ -133,6 +133,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
+import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -243,6 +244,14 @@ const PROFILE_MODEL_RESET_ONLY_KEYS: ReadonlySet<string> = new Set([
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
+}
+
+function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, task: Task): void {
+	const cleanupFunctions = listeners.get(task)
+	if (cleanupFunctions) {
+		cleanupFunctions.forEach((cleanup) => cleanup())
+		listeners.delete(task)
+	}
 }
 
 export class ClineProvider
@@ -1188,11 +1197,7 @@ export class ClineProvider
 		this.taskRegistry.remove(task.taskId)
 		task.emit(RooCodeEventName.TaskUnfocused)
 
-		const cleanupFunctions = this.taskEventListeners.get(task)
-		if (cleanupFunctions) {
-			cleanupFunctions.forEach((cleanup) => cleanup())
-			this.taskEventListeners.delete(task)
-		}
+		removeTaskEventListeners(this.taskEventListeners, task)
 
 		try {
 			await task.dispose()
@@ -1338,8 +1343,8 @@ export class ClineProvider
 	/**
 	 * Sets a pending edit operation with automatic timeout cleanup
 	 */
-	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): void {
-		this.pendingEditOperations.set(operationId, editData)
+	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): object {
+		return this.pendingEditOperations.set(operationId, editData)
 	}
 
 	/**
@@ -1352,8 +1357,8 @@ export class ClineProvider
 	/**
 	 * Clears a specific pending edit operation
 	 */
-	private clearPendingEditOperation(operationId: string): boolean {
-		return this.pendingEditOperations.clear(operationId)
+	public clearPendingEditOperation(operationId: string, owner?: object): boolean {
+		return this.pendingEditOperations.clear(operationId, owner)
 	}
 
 	/**
@@ -1879,11 +1884,38 @@ export class ClineProvider
 		// transition so both callers cannot observe the same previous registry
 		// state and schedule distinct Task instances for one history item.
 		// Fail forward so one rejected restoration does not poison the queue.
+		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
+			ClineProvider,
+			[() => Promise<Task>],
+			Promise<Task>
+		>(this, () => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options))
+	}
+
+	/**
+	 * Rehydrates `task` from history only if it is still current when the queued
+	 * step runs, so a navigation queued earlier is never evicted.
+	 */
+	public restartTaskIfCurrent(task: Task): Promise<boolean> {
+		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
+			ClineProvider,
+			[() => Promise<boolean>],
+			Promise<boolean>
+		>(this, async () => {
+			if (this.getCurrentTask() !== task) {
+				return false
+			}
+			const { historyItem } = await this.getTaskWithId(task.taskId)
+			if (this.getCurrentTask() !== task) {
+				return false
+			}
+			await ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem)
+			return true
+		})
+	}
+
+	private enqueueHistoryTaskTransition<T>(transition: () => Promise<T>): Promise<T> {
 		const previous = this.historyTaskCreationQueue ?? Promise.resolve()
-		const run = previous.then(
-			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
-			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
-		)
+		const run = previous.then(transition, transition)
 		this.historyTaskCreationQueue = run.then(
 			() => {},
 			() => {},
@@ -1950,7 +1982,10 @@ export class ClineProvider
 							const hasActualSettings = !!fullProfile.apiProvider
 
 							if (hasActualSettings) {
-								await this.activateProviderProfile({ name: profile.name })
+								await this.activateProviderProfile(
+									{ name: profile.name },
+									{ persistModeConfig: false, expectedCurrentTaskId: historyItem.id },
+								)
 							} else {
 								// The task will continue with the current/default configuration.
 							}
@@ -1982,7 +2017,11 @@ export class ClineProvider
 					if (profile.apiProvider) {
 						await this.activateProviderProfile(
 							{ name: profile.name },
-							{ persistModeConfig: false, persistTaskHistory: false },
+							{
+								persistModeConfig: false,
+								persistTaskHistory: false,
+								expectedCurrentTaskId: historyItem.id,
+							},
 						)
 					}
 				} catch (error) {
@@ -2032,6 +2071,13 @@ export class ClineProvider
 			// Replace the current task in-place to avoid UI flicker
 			const oldTask = this.taskRegistry.current
 
+			// The current task may have changed or been removed during the awaits above; never touch it.
+			if (oldTask !== currentTask) {
+				removeTaskEventListeners(this.taskEventListeners, task)
+				await task.abortTask(true).catch(() => {})
+				return task
+			}
+
 			if (oldTask) {
 				// Abort the old task to stop running processes and mark as abandoned
 				try {
@@ -2042,12 +2088,7 @@ export class ClineProvider
 					)
 				}
 
-				// Remove event listeners from the old task
-				const cleanupFunctions = this.taskEventListeners.get(oldTask)
-				if (cleanupFunctions) {
-					cleanupFunctions.forEach((cleanup) => cleanup())
-					this.taskEventListeners.delete(oldTask)
-				}
+				removeTaskEventListeners(this.taskEventListeners, oldTask)
 
 				// Replace in-place: preserves stack index and current pointer
 				this.taskRegistry.replace(oldTask.taskId, task)
@@ -2589,11 +2630,11 @@ export class ClineProvider
 	 */
 	private updateTaskApiHandlerIfNeeded(
 		providerSettings: ProviderSettings,
-		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean } = {},
+		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): void {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
-		if (!task) return
+		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) return
 
 		const { forceRebuild = false } = options
 
@@ -2847,11 +2888,11 @@ export class ClineProvider
 
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: { skipCurrentTaskRebuild?: boolean } = {},
+		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
-		if (!task) {
+		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) {
 			return
 		}
 
@@ -2881,6 +2922,8 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			/** Rebuild and sticky-write only when this task is still current. */
+			expectedCurrentTaskId?: string
 		},
 	) {
 		return this.enqueueProviderProfileMutation((signal) =>
@@ -2893,6 +2936,7 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			expectedCurrentTaskId?: string
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
@@ -2920,12 +2964,20 @@ export class ClineProvider
 		}
 
 		// Change the provider for the current task.
-		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
+		const expectedCurrentTaskId = options?.expectedCurrentTaskId
+		this.updateTaskApiHandlerIfNeeded(providerSettings, {
+			forceRebuild: true,
+			skipCurrentTaskRebuild,
+			expectedCurrentTaskId,
+		})
 
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
+			await this.persistStickyProviderProfileToCurrentTask(name, {
+				skipCurrentTaskRebuild,
+				expectedCurrentTaskId,
+			})
 		}
 
 		if (!skipCurrentTaskRebuild) {
@@ -3593,6 +3645,9 @@ export class ClineProvider
 			historyPreviewCollapsed,
 			reasoningBlockCollapsed,
 			chatFontSize,
+			timeFormat,
+			dateFormat,
+			showRelativeTimes,
 			enterBehavior,
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -3774,6 +3829,9 @@ export class ClineProvider
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,
+			timeFormat: timeFormat ?? "auto",
+			dateFormat: dateFormat ?? "auto",
+			showRelativeTimes: showRelativeTimes ?? true,
 			enterBehavior: enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
@@ -4007,6 +4065,9 @@ export class ClineProvider
 			historyPreviewCollapsed: stateValues.historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
 			chatFontSize: stateValues.chatFontSize,
+			timeFormat: stateValues.timeFormat ?? "auto",
+			dateFormat: stateValues.dateFormat ?? "auto",
+			showRelativeTimes: stateValues.showRelativeTimes ?? true,
 			enterBehavior: stateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -4130,7 +4191,9 @@ export class ClineProvider
 		return this.contextProxy.getValues()
 	}
 	public async setValues(values: RooCodeSettings) {
-		await this.contextProxy.setValues(values)
+		await this.contextProxy.setValues(
+			withoutInvalidDisplaySettings(values, (key) => this.log(`[setValues] Ignored an invalid value for ${key}`)),
+		)
 	}
 
 	/** Persist the durable subset first, then update the in-memory buffer. */
