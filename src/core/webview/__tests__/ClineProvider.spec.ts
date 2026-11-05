@@ -5907,6 +5907,44 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		it("evicts exactly the oldest entry when a save crosses the persisted-view cap", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const cap = ClineProvider["MAX_PERSISTED_VIEW_STATES"]
+			expect(cap).toBe(50)
+
+			// One entry over the cap, each with its own timestamp so the eviction order is forced
+			// rather than left to insertion order.
+			const seeded: Record<string, { claimToken: string; mode: string; updatedAt: number }> = {}
+
+			for (let i = 0; i < cap; i++) {
+				seeded["seed-" + i] = { claimToken: "token-" + i, mode: "code", updatedAt: i + 1 }
+			}
+
+			await provider.contextProxy.setValue("viewStates", seeded as GlobalState["viewStates"])
+
+			const saved = await provider["savePersistedViewState"]({ mode: "architect", updatedAt: cap + 1 })
+			expect(saved).toEqual({ persisted: true, claim: "queued" })
+
+			const stored =
+				mockContext.globalState.get<Record<string, { mode?: string; updatedAt?: number }>>("viewStates") ?? {}
+			expect(Object.keys(stored)).toHaveLength(cap)
+			expect(stored[provider["viewStateId"]]).toMatchObject({ mode: "architect", updatedAt: cap + 1 })
+			// The oldest entry is the one that goes. A cap that evicted an arbitrary survivor
+			// would satisfy the count above just as easily.
+			expect(stored).not.toHaveProperty("seed-0")
+			expect(stored["seed-1"]).toMatchObject({ updatedAt: 2 })
+			expect(stored["seed-" + (cap - 1)]).toMatchObject({ updatedAt: cap })
+			// And the write that triggered the eviction is never the entry evicted by it.
+			expect(Object.keys(stored).filter((key) => key.startsWith("seed-"))).toHaveLength(cap - 1)
+
+			await provider.dispose()
+		})
 	})
 
 	describe("view state restoration retry", () => {
@@ -5973,6 +6011,62 @@ describe("ClineProvider", () => {
 
 			expect(provider["viewLocalState"].mode).toBe("architect")
 			expect(provider["pendingViewStateRestorations"].size).toBe(0)
+
+			await provider.dispose()
+		})
+		it("applies the restored view fields to both the consumer state and the posted webview state", async () => {
+			const provider = createProvider()
+			// The shared values the restored view has to override on both read paths.
+			await provider.contextProxy.setValues({ mode: "code", currentApiConfigName: "shared-cfg" })
+			await provider.contextProxy.setValue("viewStates", {
+				"overlay-view": {
+					claimToken: "host-token",
+					mode: "architect",
+					currentApiConfigName: "profile-a",
+					updatedAt: 1,
+				},
+			})
+			const profile: ProviderSettingsEntry = {
+				name: "profile-a",
+				id: "profile-a-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const getProfileSpy = vi.spyOn(provider["providerSettingsManager"], "getProfile").mockResolvedValue(profile)
+
+			await provider["setViewStateId"]("overlay-view", "host-token")
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			// The restoration is only real once the consumers see it: getState is the extension
+			// host's read path and getStateToPostToWebview is what the renderer paints, and the
+			// same three fields are read from the same overlay on both.
+			const state = await provider.getState()
+			expect(state.mode).toBe("architect")
+			expect(state.currentApiConfigName).toBe("profile-a")
+			expect(state.apiConfiguration).toMatchObject({ apiProvider: providerIdentifiers.anthropic })
+			// The profile's own name is settings metadata, not part of its apiConfiguration.
+			expect(state.apiConfiguration).not.toHaveProperty("name")
+
+			const posted = await provider.getStateToPostToWebview()
+			expect(posted.mode).toBe("architect")
+			expect(posted.currentApiConfigName).toBe("profile-a")
+			expect(posted.apiConfiguration).toMatchObject({ apiProvider: providerIdentifiers.anthropic })
+
+			getProfileSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("keeps the shared values when a view holds no restored or buffered field", async () => {
+			const provider = createProvider()
+			await provider.contextProxy.setValues({ mode: "code", currentApiConfigName: "shared-cfg" })
+
+			// With an empty buffer the overlay is inert: the shared settings still answer.
+			const state = await provider.getState()
+			expect(state.mode).toBe("code")
+			expect(state.currentApiConfigName).toBe("shared-cfg")
+
+			const posted = await provider.getStateToPostToWebview()
+			expect(posted.mode).toBe("code")
+			expect(posted.currentApiConfigName).toBe("shared-cfg")
 
 			await provider.dispose()
 		})
@@ -6829,6 +6923,60 @@ describe("ClineProvider", () => {
 
 			blockedWriteSpy.mockRestore()
 			victimWriteSpy.mockRestore()
+			await blocked.dispose()
+		})
+		it("detaches the provider's entry after a queued write resolves", async () => {
+			// A long-lived view must not accumulate the history of every write it scheduled,
+			// so the queue step drops the entry it has finished running.
+			const keeper = createProvider()
+
+			await keeper.saveViewState("mode", "code")
+
+			expect(keeper["scheduledViewStateWrites"]).toHaveLength(0)
+			expect(ClineProvider["pendingViewStateWrites"].some((entry) => entry.provider === keeper)).toBe(false)
+
+			await keeper.dispose()
+		})
+
+		it("detaches the owner's entry when a queued write rejects", async () => {
+			const blocked = createProvider()
+			let releaseBlocked!: () => void
+			const blockedGate = new Promise<void>((resolve) => {
+				releaseBlocked = resolve
+			})
+			const blockedWriteSpy = vi.spyOn(blocked.contextProxy, "setValue").mockImplementation(async () => {
+				await blockedGate
+			})
+
+			const owner = createProvider()
+			// The owner's write runs behind the stalled one and then fails at storage.
+			const ownerWriteSpy = vi
+				.spyOn(owner.contextProxy, "setValue")
+				.mockRejectedValue(new Error("storage write failed"))
+
+			const blockedWrite = blocked.saveViewState("mode", "plan")
+			const ownerWrite = owner.saveViewState("mode", "architect")
+
+			await vi.waitFor(() => {
+				expect(owner["scheduledViewStateWrites"].length).toBeGreaterThan(0)
+			})
+			const entry = owner["scheduledViewStateWrites"][0]
+
+			releaseBlocked()
+			// The failure still surfaces to the caller that scheduled the write, and the queue
+			// keeps advancing so a later view's write still runs.
+			await expect(ownerWrite).rejects.toThrow("storage write failed")
+			await blockedWrite
+
+			// Detachment happens whether the write resolved or rejected. Without it a view whose
+			// write rejected kept the entry, its run closure, and every value that closure
+			// captured for as long as the process lived.
+			expect(owner["scheduledViewStateWrites"]).toHaveLength(0)
+			expect(ClineProvider["pendingViewStateWrites"]).not.toContain(entry)
+
+			blockedWriteSpy.mockRestore()
+			ownerWriteSpy.mockRestore()
+			await owner.dispose()
 			await blocked.dispose()
 		})
 	})

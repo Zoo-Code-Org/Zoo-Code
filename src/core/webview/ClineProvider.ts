@@ -288,6 +288,20 @@ type ViewStateWriteEntry = {
 	readonly run: (provider: ClineProvider) => Promise<void>
 }
 
+/** The fields a view owns in its buffer and in its durable record. */
+type ViewLocalStateField = "mode" | "currentApiConfigName" | "apiConfiguration"
+
+/** Writes one field of a partial record, or deletes it when the update is nullish. */
+function assignOrClearField<T, K extends keyof T>(target: Partial<T>, key: K, value: T[K] | null | undefined): void {
+	if (value === undefined || value === null) {
+		delete target[key]
+
+		return
+	}
+
+	target[key] = value
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -495,6 +509,9 @@ export class ClineProvider
 	 */
 	private pendingViewStateClaims = new Map<string, string>()
 
+	/** This provider's entries on the shared write queue; detached by `dispose()`. */
+	private scheduledViewStateWrites: ViewStateWriteEntry[] = []
+
 	/**
 	 * Bumped at the start of dispose(). View-state persistence is serialized on a
 	 * static queue shared by every provider, so a closure this instance scheduled can
@@ -504,8 +521,6 @@ export class ClineProvider
 	 * longer matches, instead of applying them to a disposed provider and holding it
 	 * retained until the queue advances.
 	 */
-	/** This provider's entries on the shared write queue; detached by `dispose()`. */
-	private scheduledViewStateWrites: ViewStateWriteEntry[] = []
 
 	private viewStateGeneration = 0
 
@@ -747,15 +762,8 @@ export class ClineProvider
 		// hold a null or primitive value under a key, and prunePersistedViewStates reads
 		// `updatedAt` from every entry it is given - one such entry rejects the queued
 		// write and loses the selection this writer was about to store.
-		const states: Record<string, PersistedViewState> = Object.create(null)
-
-		for (const [viewStateId, entry] of Object.entries(viewStates)) {
-			if (entry && typeof entry === "object") {
-				states[viewStateId] = entry
-			}
-		}
-
-		return states
+		const kept = Object.entries(viewStates).filter(([, entry]) => entry && typeof entry === "object")
+		return Object.assign(Object.create(null), Object.fromEntries(kept))
 	}
 
 	/** Whether view-state work scheduled under `generation` may still apply effects. */
@@ -776,15 +784,31 @@ export class ClineProvider
 		const settled = ClineProvider.viewStateWritesPump.then(async () => {
 			const index = ClineProvider.pendingViewStateWrites.indexOf(entry)
 
-			if (index === -1) {
-				// Detached by dispose() while it waited: the view is gone, so its turn is skipped.
-				return
-			}
+			// Detached by dispose() while it waited: the view is gone, so its turn
+			// is skipped.
+			if (index === -1) return
 
 			ClineProvider.pendingViewStateWrites.splice(index, 1)
 
-			if (entry.provider) {
-				await entry.run(entry.provider)
+			// The generation check lives in the queue step rather than in whichever
+			// writer a reviewer pointed at, so every entry on the queue - including one a
+			// future caller adds - is skipped the same way once the view it was scheduled
+			// for is gone.
+			const owner = entry.provider
+
+			if (owner && owner.isViewStateGenerationLive(entry.generation)) {
+				try {
+					await entry.run(owner)
+				} finally {
+					// Detach the entry from the provider that scheduled it, whether this write
+					// resolved or rejected. Only this removal keeps a long-lived provider from
+					// holding every entry it ever scheduled, together with the run closure and
+					// the values that closure captured.
+					const scheduled = owner.scheduledViewStateWrites
+					const ownIndex = scheduled.indexOf(entry)
+
+					if (ownIndex !== -1) scheduled.splice(ownIndex, 1)
+				}
 			}
 		})
 
@@ -809,16 +833,8 @@ export class ClineProvider
 		// renderer.
 		let rolledBackEntry = false
 		const run = async (provider: ClineProvider): Promise<void> => {
-			if (!provider.isViewStateGenerationLive(generation)) {
-				// The queue advanced after this view was disposed: the entry belongs to a view
-				// that no longer exists, so the write is dropped instead of applied.
-				return
-			}
-
 			const states = provider.getPersistedViewStates({ fresh: true })
 			// Snapshot what this key held before the write, so a write interrupted by disposal can be
-			// restored to exactly that value.
-			const hadPreviousEntry = Object.prototype.hasOwnProperty.call(states, viewStateId)
 			const previousEntry = states[viewStateId]
 			// The first write to an unowned temporary id claims the slot instead of merging
 			// into it: temporary names restart from 0 on every host start, so an entry under
@@ -829,21 +845,10 @@ export class ClineProvider
 			const current = ownsTargetEntry ? (states[viewStateId] ?? {}) : {}
 			const next: PersistedViewState = { ...current }
 
-			if ("mode" in values) {
-				if (values.mode === undefined || values.mode === null) {
-					delete next.mode
-				} else {
-					next.mode = values.mode
-				}
-			}
+			if ("mode" in values) assignOrClearField(next, "mode", values.mode)
 
-			if ("currentApiConfigName" in values) {
-				if (values.currentApiConfigName === undefined || values.currentApiConfigName === null) {
-					delete next.currentApiConfigName
-				} else {
-					next.currentApiConfigName = values.currentApiConfigName
-				}
-			}
+			if ("currentApiConfigName" in values)
+				assignOrClearField(next, "currentApiConfigName", values.currentApiConfigName)
 
 			let wroteEntry = false
 			if (!next.mode && !next.currentApiConfigName) {
@@ -877,11 +882,7 @@ export class ClineProvider
 					// Undo only this write's binding: a later provider that already re-bound the key
 					// stored its own token, and that write must survive the rollback.
 					if (after[viewStateId]?.claimToken === mintedClaimToken) {
-						if (hadPreviousEntry && previousEntry) {
-							after[viewStateId] = previousEntry
-						} else {
-							delete after[viewStateId]
-						}
+						assignOrClearField(after, viewStateId, previousEntry)
 
 						await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(after))
 						rolledBackEntry = true
@@ -894,23 +895,16 @@ export class ClineProvider
 			// Authorship is recorded only after the durable write lands: a failed persistence
 			// must not mark the temporary id as owned, or a later load would adopt an entry
 			// that was never actually stored.
-			if (wroteEntry && viewStateId === provider.viewId) {
-				provider.wroteUnderTemporaryViewStateId = true
-			}
+			if (wroteEntry && viewStateId === provider.viewId) provider.wroteUnderTemporaryViewStateId = true
 		}
 
-		const write = ClineProvider.enqueuePersistedViewStateWrite({ provider: this, generation, run })
-		await write
+		await ClineProvider.enqueuePersistedViewStateWrite({ provider: this, generation, run })
 
-		if (!storedEntry) {
-			// The queue dropped this write before it reached storage: nothing was persisted, so
-			// nothing about a claim may be reported as settled either.
-			return { persisted: false, claim: "none" }
-		}
-
-		if (rolledBackEntry) {
-			// The durable write was undone: the claim this write minted could never reach a renderer,
-			// so nothing about it may be reported as durable either.
+		if (!storedEntry || rolledBackEntry) {
+			// Either the queue dropped this write before it reached storage, or the durable
+			// write was undone because its claim could never reach a renderer: in both
+			// cases nothing was persisted, so nothing about a claim may be reported as
+			// settled either.
 			return { persisted: false, claim: "none" }
 		}
 
@@ -935,35 +929,25 @@ export class ClineProvider
 	 * Runs through the serialized write queue to avoid racing concurrent view-state writes.
 	 */
 	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
-		const generation = this.viewStateGeneration
 		const run = async (provider: ClineProvider): Promise<void> => {
-			if (!provider.isViewStateGenerationLive(generation)) {
-				// A clear that only now reaches the queue head belongs to a disposed view:
-				// its entry is already unreferenced by this provider, so leave the map alone.
-				return
-			}
-
 			const states = provider.getPersistedViewStates({ fresh: true })
 			delete states[viewStateId]
 			await provider.contextProxy.setValue("viewStates", states)
 		}
 
-		await ClineProvider.enqueuePersistedViewStateWrite({ provider: this, generation, run })
+		await ClineProvider.enqueuePersistedViewStateWrite({
+			provider: this,
+			generation: this.viewStateGeneration,
+			run,
+		})
 	}
 
 	/** Re-bind a claim-less entry with a fresh claim; unowned selections are dropped. */
 	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string | undefined> {
 		const claimToken = crypto.randomUUID()
 		let rebound = false
-		const generation = this.viewStateGeneration
 
 		const run = async (provider: ClineProvider): Promise<void> => {
-			if (!provider.isViewStateGenerationLive(generation)) {
-				// Nothing is re-bound for a view that is gone, and the undefined return makes
-				// the caller refuse the adoption instead of delivering a claim nobody owns.
-				return
-			}
-
 			const states = provider.getPersistedViewStates({ fresh: true })
 			const current = states[viewStateId]
 			// A concurrent registration may have bound this key while this write was queued:
@@ -976,7 +960,11 @@ export class ClineProvider
 			rebound = true
 		}
 
-		await ClineProvider.enqueuePersistedViewStateWrite({ provider: this, generation, run })
+		await ClineProvider.enqueuePersistedViewStateWrite({
+			provider: this,
+			generation: this.viewStateGeneration,
+			run,
+		})
 
 		return rebound ? claimToken : undefined
 	}
@@ -1006,16 +994,22 @@ export class ClineProvider
 			return "dropped"
 		}
 
+		// Every non-delivery keeps the exact token for the next webviewDidLaunch flush
+		// and reports the reason, so a lost post stays visible instead of silently
+		// dropping a claim the durable entry already carries.
+		const queueUndelivered = (reason: string): ViewStateClaimDelivery => {
+			this.pendingViewStateClaims.set(viewStateId, claimToken)
+			this.log(`[viewStateClaim] Claim for ${viewStateId} to view ${this.viewId}: ${reason}`)
+
+			return "queued"
+		}
+
 		if (!this.view || !this.isViewLaunched) {
 			// Held rather than posted. The renderer only attaches its message listener once the
 			// webview launches, and the Webview API permits a message posted before that to be lost
 			// while postMessage still resolves true - which would delete a claim the webview never
 			// saw. Queuing keeps the exact token for the webviewDidLaunch flush.
-			this.pendingViewStateClaims.set(viewStateId, claimToken)
-			this.log(
-				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: the webview has not launched yet.`,
-			)
-			return "queued"
+			return queueUndelivered("not delivered: the webview has not launched yet")
 		}
 
 		let delivered: boolean
@@ -1027,19 +1021,13 @@ export class ClineProvider
 			})
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : String(error)
-			this.pendingViewStateClaims.set(viewStateId, claimToken)
-			this.log(`[viewStateClaim] Delivery for ${viewStateId} to view ${this.viewId} failed: ${reason}`)
-			return "queued"
+			return queueUndelivered("delivery failed: " + reason)
 		}
 
 		if (!delivered) {
 			// A hidden or closing webview resolves the post as not delivered: the claim stays queued so
 			// the same token reaches the webview once it can accept messages again.
-			this.pendingViewStateClaims.set(viewStateId, claimToken)
-			this.log(
-				`[viewStateClaim] Claim for ${viewStateId} not delivered to view ${this.viewId}: the webview rejected the message.`,
-			)
-			return "queued"
+			return queueUndelivered("not delivered: the webview rejected the message")
 		}
 
 		this.pendingViewStateClaims.delete(viewStateId)
@@ -1081,28 +1069,21 @@ export class ClineProvider
 	/** Re-key this instance's authored pre-launch entry to the stable id. */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
 		const previousViewStateId = this.viewId
-		const generation = this.viewStateGeneration
 
 		const run = async (provider: ClineProvider): Promise<void> => {
-			if (!provider.isViewStateGenerationLive(generation)) {
-				// A re-key that only now reaches the queue head belongs to a disposed view:
-				// the entry stays where it is for the pruning pass to collect.
-				return
-			}
+			// Captured inside the turn so the post-write check can tell a generation that
+			// moved while this write was in flight from the one the queue step verified.
+			const scheduledGeneration = provider.viewStateGeneration
 
 			// An entry under this name can belong to a different session, because temporary
 			// ids restart from 0 on every extension host start. Only re-key entries this
 			// instance wrote, otherwise a stale entry from another session is adopted.
-			if (!provider.wroteUnderTemporaryViewStateId) {
-				return
-			}
+			if (!provider.wroteUnderTemporaryViewStateId) return
 
 			const states = provider.getPersistedViewStates({ fresh: true })
 			const previous = states[previousViewStateId]
 
-			if (!previous) {
-				return
-			}
+			if (!previous) return
 
 			delete states[previousViewStateId]
 
@@ -1123,7 +1104,7 @@ export class ClineProvider
 
 			await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(states))
 
-			if (!provider.isViewStateGenerationLive(generation)) {
+			if (!provider.isViewStateGenerationLive(scheduledGeneration)) {
 				// The move landed but the view is gone: keep the authorship flag as dispose
 				// left it rather than mutating a disposed provider.
 				return
@@ -1134,7 +1115,11 @@ export class ClineProvider
 			provider.wroteUnderTemporaryViewStateId = false
 		}
 
-		await ClineProvider.enqueuePersistedViewStateWrite({ provider: this, generation, run })
+		await ClineProvider.enqueuePersistedViewStateWrite({
+			provider: this,
+			generation: this.viewStateGeneration,
+			run,
+		})
 	}
 
 	/** Register the stable view id and load its persisted selections; a claim must match. */
@@ -1142,6 +1127,13 @@ export class ClineProvider
 		viewStateId: string | undefined,
 		presentedClaim?: string,
 	): Promise<ViewStateRegistrationResult> {
+		// A refused registration reports why and adopts nothing, and its claim field says
+		// explicitly that no claim came out of it.
+		const refuseRegistration = (detail: string): ViewStateRegistrationResult => {
+			this.log(`[setViewStateId] ${detail}`)
+
+			return { adopted: false, claim: "none" }
+		}
 		// The webview generates this id on purpose - it has to survive a webview reload,
 		// which recreates the view on both sides - so the host cannot mint it instead.
 		// What the host owns is which view may hold a given persisted key, so everything
@@ -1149,8 +1141,7 @@ export class ClineProvider
 		if (typeof viewStateId !== "string") {
 			// A crafted postMessage can carry any JSON value here even though the message
 			// type declares a string; the persisted key must stay a string.
-			this.log(`[setViewStateId] Ignoring a non-string viewStateId for view ${this.viewId}.`)
-			return { adopted: false, claim: "none" }
+			return refuseRegistration(`Ignoring a non-string viewStateId for view ${this.viewId}.`)
 		}
 
 		const normalizedViewStateId = viewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_")
@@ -1176,10 +1167,9 @@ export class ClineProvider
 		// Bound the key: the webview generates a UUID, so a much longer value is not a
 		// view id, and an unbounded key is unbounded growth in the shared viewStates map.
 		if (normalizedViewStateId.length > ClineProvider.MAX_VIEW_STATE_ID_LENGTH) {
-			this.log(
-				`[setViewStateId] Ignoring an oversized viewStateId (${normalizedViewStateId.length} chars) for view ${this.viewId}.`,
+			return refuseRegistration(
+				`Ignoring an oversized viewStateId (${normalizedViewStateId.length} chars) for view ${this.viewId}.`,
 			)
-			return { adopted: false, claim: "none" }
 		}
 
 		const claimant = ClineProvider.getAllInstances().find(
@@ -1190,10 +1180,9 @@ export class ClineProvider
 			// would load that view's pinned profile, nested overlay, and mode into this
 			// provider, and this webview could then overwrite that view's persisted entry.
 			// Staying on the temporary id keeps this view working against the shared state.
-			this.log(
-				`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: already claimed by live view ${claimant.viewId}.`,
+			return refuseRegistration(
+				`Refusing ${normalizedViewStateId} for view ${this.viewId}: already claimed by live view ${claimant.viewId}.`,
 			)
-			return { adopted: false, claim: "none" }
 		}
 
 		// Claim binding, checked before any re-key or load so a refused registration can
@@ -1220,10 +1209,9 @@ export class ClineProvider
 					// A concurrent registration bound the key while the re-bind was queued: this
 					// launch adopts a key another webview now owns, so refuse it instead of
 					// handing out a claim that is not ours.
-					this.log(
-						`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: bound concurrently by another registration.`,
+					return refuseRegistration(
+						`Refusing ${normalizedViewStateId} for view ${this.viewId}: bound concurrently by another registration.`,
 					)
-					return { adopted: false, claim: "none" }
 				}
 
 				claimDelivery = await this.postViewStateClaimToWebview(normalizedViewStateId, reboundClaim)
@@ -1234,10 +1222,9 @@ export class ClineProvider
 				// Fail closed: the entry belongs to a webview that never presented this view's
 				// claim. Rejection is side-effect free, so presenting an id cannot probe, mutate
 				// or delete another view's entry.
-				this.log(
-					`[setViewStateId] Refusing viewStateId ${normalizedViewStateId} for view ${this.viewId}: claim missing or mismatched.`,
+				return refuseRegistration(
+					`Refusing ${normalizedViewStateId} for view ${this.viewId}: claim missing or mismatched.`,
 				)
-				return { adopted: false, claim: "none" }
 			}
 		}
 
@@ -4221,8 +4208,18 @@ export class ClineProvider
 		const taskSyncEnabled: boolean = false
 
 		// Return the same structure as before.
+		// The three fields a view owns come from this view's own buffer first: the
+		// restored record's values and this view's edits belong to it, and the shared
+		// settings are the fallback for a field this view does not hold. apiConfiguration
+		// merges on top of the shared settings because a view's buffer can hold a partial
+		// profile update rather than a whole profile.
+		const viewLocalState = this.viewLocalState
+		const viewLocalApiConfiguration = viewLocalState.apiConfiguration
+			? { ...providerSettings, ...viewLocalState.apiConfiguration }
+			: providerSettings
+
 		return {
-			apiConfiguration: providerSettings,
+			apiConfiguration: viewLocalApiConfiguration,
 			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
 			customInstructions: stateValues.customInstructions,
 			apiModelId: stateValues.apiModelId,
@@ -4271,11 +4268,11 @@ export class ClineProvider
 			terminalZshP10k: stateValues.terminalZshP10k ?? false,
 			terminalZdotdir: stateValues.terminalZdotdir ?? false,
 			terminalProfile: stateValues.terminalProfile,
-			mode: stateValues.mode ?? defaultModeSlug,
+			mode: viewLocalState.mode ?? stateValues.mode ?? defaultModeSlug,
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
-			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
+			currentApiConfigName: viewLocalState.currentApiConfigName ?? stateValues.currentApiConfigName ?? "default",
 			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
 			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
 			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),
@@ -6230,31 +6227,13 @@ export class ClineProvider
 
 	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
 		this.bumpViewLocalStateWriteVersions(values)
-		if ("mode" in values) {
-			const val = values.mode
-			if (val === undefined || val === null) {
-				delete this.viewLocalState.mode
-			} else {
-				this.viewLocalState.mode = val
-			}
-		}
+		if ("mode" in values) assignOrClearField(this.viewLocalState, "mode", values.mode)
 
-		if ("currentApiConfigName" in values) {
-			const val = values.currentApiConfigName
-			if (val === undefined || val === null) {
-				delete this.viewLocalState.currentApiConfigName
-			} else {
-				this.viewLocalState.currentApiConfigName = val
-			}
-		}
+		if ("currentApiConfigName" in values)
+			assignOrClearField(this.viewLocalState, "currentApiConfigName", values.currentApiConfigName)
 
 		if ("apiConfiguration" in values) {
-			const val = values.apiConfiguration
-			if (val === undefined || val === null) {
-				delete this.viewLocalState.apiConfiguration
-			} else {
-				this.viewLocalState.apiConfiguration = val
-			}
+			assignOrClearField(this.viewLocalState, "apiConfiguration", values.apiConfiguration)
 		} else if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
 			const providerSettingsUpdate = PROVIDER_SETTINGS_KEYS.reduce((acc, key) => {
 				if (key in values) {
@@ -6283,13 +6262,9 @@ export class ClineProvider
 	): Promise<ViewStatePersistenceResult> {
 		const persistedValues: Partial<PersistedViewState> = {}
 
-		if ("mode" in values) {
-			persistedValues.mode = values.mode as PersistedViewState["mode"]
-		}
+		if ("mode" in values) persistedValues.mode = values.mode as PersistedViewState["mode"]
 
-		if ("currentApiConfigName" in values) {
-			persistedValues.currentApiConfigName = values.currentApiConfigName
-		}
+		if ("currentApiConfigName" in values) persistedValues.currentApiConfigName = values.currentApiConfigName
 
 		if ("mode" in persistedValues || "currentApiConfigName" in persistedValues) {
 			return this.savePersistedViewState(persistedValues)
@@ -6309,9 +6284,7 @@ export class ClineProvider
 		// session-local name. Temporary names restart from 0 on every host start, so an
 		// entry under the same name can belong to a different session. Load only entries
 		// this instance authored.
-		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) {
-			return
-		}
+		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) return
 		try {
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
@@ -6353,34 +6326,26 @@ export class ClineProvider
 				return
 			}
 
-			// Diff each field so in-flight edits win over the loaded values (including clears)
-			// while untouched fields keep the persisted values authoritative.
+			// Diff each field so in-flight edits win over the loaded values (including
+			// clears) while untouched fields keep the persisted values authoritative.
 			const postLoadBuffer = this.viewLocalState
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
-			if (preLoadVersions.mode !== this.viewLocalStateWriteVersions.mode) {
-				if (postLoadBuffer.mode === undefined) {
-					delete mergedState.mode
-				} else {
-					mergedState.mode = postLoadBuffer.mode
+			const reapplyViewLocalField = <K extends ViewLocalStateField>(key: K): void => {
+				if (preLoadVersions[key] !== this.viewLocalStateWriteVersions[key]) {
+					const buffered = postLoadBuffer[key]
+
+					if (buffered === undefined) {
+						delete mergedState[key]
+					} else {
+						mergedState[key] = buffered
+					}
 				}
 			}
 
-			if (preLoadVersions.currentApiConfigName !== this.viewLocalStateWriteVersions.currentApiConfigName) {
-				if (postLoadBuffer.currentApiConfigName === undefined) {
-					delete mergedState.currentApiConfigName
-				} else {
-					mergedState.currentApiConfigName = postLoadBuffer.currentApiConfigName
-				}
-			}
-
-			if (preLoadVersions.apiConfiguration !== this.viewLocalStateWriteVersions.apiConfiguration) {
-				if (postLoadBuffer.apiConfiguration === undefined) {
-					delete mergedState.apiConfiguration
-				} else {
-					mergedState.apiConfiguration = postLoadBuffer.apiConfiguration
-				}
-			}
+			reapplyViewLocalField("mode")
+			reapplyViewLocalField("currentApiConfigName")
+			reapplyViewLocalField("apiConfiguration")
 
 			this.viewLocalState = mergedState
 			this.pendingViewStateRestorations.delete(loadedForViewId)
