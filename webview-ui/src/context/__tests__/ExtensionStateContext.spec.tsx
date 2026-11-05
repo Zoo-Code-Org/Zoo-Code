@@ -618,6 +618,48 @@ describe("ExtensionStateContext", () => {
 		expect(historyCache?.size).toBe(historySize)
 	})
 
+	it("does not intern messages from stale sequenced state updates", () => {
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		render(
+			<ExtensionStateContextProvider initialState={{ clineMessagesSeq: 5 }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		internSpy.mockClear()
+		const staleMessage = { ts: 1, type: "say", say: "text", text: "stale" } as ClineMessage
+		const currentMessage = { ts: 2, type: "say", say: "text", text: "current" } as ClineMessage
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { clineMessages: [staleMessage], clineMessagesSeq: 5 } },
+				}),
+			)
+		})
+		expect(internSpy).not.toHaveBeenCalledWith(staleMessage)
+		expectMessages([])
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { clineMessages: [currentMessage], clineMessagesSeq: 6 } },
+				}),
+			)
+		})
+		expect(internSpy).toHaveBeenCalledWith(currentMessage)
+		expectMessages([currentMessage])
+		internSpy.mockClear()
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { clineMessages: [staleMessage], clineMessagesSeq: 6 } },
+				}),
+			)
+		})
+		expect(internSpy).not.toHaveBeenCalledWith(staleMessage)
+		expectMessages([currentMessage])
+	})
+
 	it("does not intern an update for a message outside the current task", () => {
 		const currentMessage = { ts: 1, type: "say", say: "text", text: "current" } as ClineMessage
 		const unknownMessage = { ts: 2, type: "say", say: "text", text: "late" } as ClineMessage

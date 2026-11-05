@@ -293,20 +293,28 @@ describe("API task controls", () => {
 			// Disposal resolves viewStateReadiness to release waiters (see ClineProvider.dispose)
 			// and marks the provider disposed first: the wait must then fail instead of
 			// creating a task against the disposed view.
+			vi.useFakeTimers()
 			let resolveReady!: () => void
 			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
 				resolveReady = resolve
 			})
 
 			const started = api.startNewTask({ configuration, text: "new task" })
-			await new Promise((resolve) => setTimeout(resolve, 50))
-			sidebarProvider.isDisposed = true
-			resolveReady()
-
-			await expect(started).rejects.toThrow(
+			const settled = expect(started).rejects.toThrow(
 				"The provider was disposed while waiting for the view state to become ready",
 			)
-			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			try {
+				// The readiness bound arms exactly one timer when the wait is entered, so an
+				// armed timer proves the wait started; elapsed wall-clock time does not.
+				await vi.advanceTimersByTimeAsync(0)
+				expect(vi.getTimerCount()).toBe(1)
+				sidebarProvider.isDisposed = true
+				resolveReady()
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 	})
 
@@ -642,16 +650,23 @@ describe("API task controls - per-view review fixes", () => {
 			newTabProvider.viewStateReadiness = readiness
 			openClineInNewTabMock.mockResolvedValue(newTabProvider)
 
+			vi.useFakeTimers()
 			const started = api.startNewTask({ configuration, text: "wait for view state", newTab: true })
 
-			// The task must not start while the view persisted state is still loading.
-			await new Promise((resolve) => setTimeout(resolve, 50))
-			expect(newTabProvider.createTask).not.toHaveBeenCalled()
+			try {
+				// The task must not start while the view persisted state is still loading, and
+				// the bound's armed timer is what proves the wait was entered.
+				await vi.advanceTimersByTimeAsync(0)
+				expect(vi.getTimerCount()).toBe(1)
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
 
-			resolveReadiness()
+				resolveReadiness()
 
-			await expect(started).resolves.toBe("new-tab-task")
-			expect(newTabProvider.createTask).toHaveBeenCalled()
+				await expect(started).resolves.toBe("new-tab-task")
+				expect(newTabProvider.createTask).toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 	})
 
