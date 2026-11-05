@@ -1342,5 +1342,98 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(values.currentApiConfigName).toBe("other-survivor")
 			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "other-survivor"])
 		})
+
+		it("leaves a sibling view's shared settings on the survivor it activated mid-deletion", async () => {
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const otherId = await provider.providerSettingsManager.saveConfig("other-survivor", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "other-survivor", id: otherId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// The cross-view half of this deletion is only observable from another view: the deletion names
+			// the survivor in the shared store, but whether the survivor's settings actually land in a second
+			// view's provider keys is a property of that view. Production builds the tab view on the same
+			// ContextProxy as the sidebar view (activate/registerCommands.ts:449 passes the sidebar's
+			// contextProxy; ClineProvider.ts:3634 documents that the two views share it while their queues
+			// and settings-manager locks stay per instance), so the sibling here shares provider.contextProxy
+			// and keeps its own settings-manager, which is exactly the shape that lets it move the selection
+			// mid-deletion.
+			// resolved webview.
+			const siblingView = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://sibling-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn().mockImplementation(() => {
+					return { dispose: vi.fn() }
+				}),
+				onDidChangeVisibility: vi.fn().mockImplementation(() => {
+					return { dispose: vi.fn() }
+				}),
+			} as unknown as vscode.WebviewView
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				provider.contextProxy,
+				new WebviewFocusTracker(),
+			)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			sibling.getMcpHub = vi.fn().mockReturnValue({
+				listTools: vi.fn().mockResolvedValue([]),
+				callTool: vi.fn().mockResolvedValue({ content: [] }),
+				listResources: vi.fn().mockResolvedValue([]),
+				readResource: vi.fn().mockResolvedValue({ contents: [] }),
+				getAllServers: vi.fn().mockReturnValue([]),
+			})
+			await sibling.resolveWebviewView(siblingView)
+
+			const manager = provider.providerSettingsManager
+			const deleteStoredConfig = manager.deleteConfig.bind(manager)
+			manager.deleteConfig = async (name: string) => {
+				// A sibling view moves the shared selection onto another survivor and activates it there while
+				// the record delete is in flight; the deletion must follow that choice instead of pushing its
+				// own entry-time pick back onto the sibling's provider keys.
+				await provider.contextProxy.setValue("currentApiConfigName", "other-survivor")
+				await sibling.activateProviderProfile({ name: "other-survivor" })
+				return deleteStoredConfig(name)
+			}
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			expect(sibling.contextProxy.getValues().currentApiConfigName).toBe("other-survivor")
+			expect(sibling.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4o")
+			// The same shared store is what the acting view reads: if the deletion pushed its own entry-time
+			// survivor's settings over the sibling's activation, this is where it shows up.
+			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4o")
+		})
 	})
 })

@@ -983,6 +983,20 @@ describe("ProviderSettingsManager", () => {
 			)
 		})
 
+		it("should not surface a storage read failure as ProviderSettingsNotFoundError", async () => {
+			// deleteProviderProfile() branches on the not-found type to prune a stale list entry as an
+			// idempotent success, so a storage outage must stay distinguishable from a missing profile:
+			// typed as not-found it would prune the entry while the stored record is still there.
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			const error = await providerSettingsManager.deleteConfig("nonexistent").catch((caught: unknown) => caught)
+
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error).toMatchObject({ message: expect.stringContaining("Failed to delete config:") })
+			// Nothing was rewritten: the outage refused before the profile list was touched.
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
 		it("should throw error when trying to delete last remaining config", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -1120,6 +1134,20 @@ describe("ProviderSettingsManager", () => {
 				name: "named",
 				apiProvider: providerIdentifiers.anthropic,
 			})
+		})
+
+		it("should not surface a storage read failure as ProviderSettingsNotFoundError", async () => {
+			// getProfile() is the entry point deleteProviderProfile() and the mode mapping use to treat an
+			// already-deleted profile as an idempotent no-op, so an outage must not arrive as not-found:
+			// that would read as "the profile is gone" when the record could not be read at all.
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			const error = await providerSettingsManager
+				.getProfile({ name: "nonexistent" })
+				.catch((caught: unknown) => caught)
+
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error).toMatchObject({ message: expect.stringContaining("Failed to get profile:") })
 		})
 
 		it("should throw error if secrets storage fails", async () => {
