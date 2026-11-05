@@ -608,7 +608,9 @@ describe("OpenRouterHandler", () => {
 
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "API Error",
+					// handleStreamingError throws the instance it captured, so the
+					// payload carries the same caller-facing message.
+					message: "openrouter API Error 500: API Error",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "createMessage",
@@ -736,7 +738,7 @@ describe("OpenRouterHandler", () => {
 
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "Rate limit exceeded",
+					message: "openrouter API Error 429: Rate limit exceeded",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "createMessage",
@@ -1107,7 +1109,7 @@ describe("OpenRouterHandler", () => {
 			// Verify telemetry was captured
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "API Error",
+					message: "openrouter API Error 500: API Error",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "completePrompt",
@@ -1223,7 +1225,7 @@ describe("OpenRouterHandler", () => {
 			// captureException is called, but PostHogTelemetryClient filters out 429 errors internally
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "Rate limit exceeded",
+					message: "openrouter API Error 429: Rate limit exceeded",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "completePrompt",
