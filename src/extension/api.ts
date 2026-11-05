@@ -634,12 +634,26 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	 * `ContextProxy.setValues`, which is not a transaction (see there): if a setting cannot be stored, this rejects
 	 * with a `SettingsWriteError` that lists the keys that were stored and the keys that were not (the cache of the
 	 * failed keys has been read back from storage), the stored settings stay, and nothing after the settings is
-	 * written. Invalid values of the display settings are dropped and logged first.
+	 * written. Invalid values of the display settings are dropped and logged first, and a caller-supplied
+	 * `viewStates` map is dropped too: the registered map is host-owned, rewritten by the extension host from
+	 * a full read of storage.
 	 */
 	public async setConfiguration(allValues: RooCodeSettings) {
 		const values = withoutInvalidDisplaySettings(allValues, (key) =>
 			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
 		)
+		// The registered viewStates map is host-owned: ClineProvider rewrites it from a full read of storage
+		// (savePersistedViewState, clearPersistedViewState, prunePersistedViewStates), so a map handed in here
+		// would replace every other view's durable entry - in globalState, and below in the profile file written
+		// from the same object - and an explicit unset would erase it, since ContextProxy reads undefined as a
+		// delete. The key is dropped rather than sanitised; the rest of the settings object is the caller's to
+		// set.
+		if ("viewStates" in values) {
+			this.sidebarProvider.log(
+				"[setConfiguration] Ignored a caller-supplied viewStates map; the registered map is written by the extension host.",
+			)
+			delete values.viewStates
+		}
 		await this.sidebarProvider.contextProxy.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {

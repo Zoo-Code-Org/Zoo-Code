@@ -68,6 +68,38 @@ describe("API - configuration", () => {
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
 
+	it("drops a caller-supplied viewStates map so the registered map stays host-written", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("default-id")
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const log = vi.fn()
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log,
+			contextProxy: { setValues },
+			providerSettingsManager: { saveConfig, setModeConfig: vi.fn().mockResolvedValue(undefined) },
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		// The registered map is written by the extension host from a full read of storage, so a map handed in by
+		// an API caller replaces every other view's durable entry in globalState and in the profile file written
+		// from the same object. An explicit unset is the same hazard, since ContextProxy reads undefined as a
+		// delete. The rest of the settings object is the caller's to set.
+		await api.setConfiguration({
+			viewStates: { "crafted-view": { mode: "ask", currentApiConfigName: "crafted" } },
+			soundEnabled: true,
+		} as unknown as RooCodeSettings)
+
+		expect(setValues).toHaveBeenCalledWith({ soundEnabled: true })
+		expect(saveConfig).toHaveBeenCalledWith("default", { soundEnabled: true })
+		expect(log).toHaveBeenCalledWith(
+			"[setConfiguration] Ignored a caller-supplied viewStates map; the registered map is written by the extension host.",
+		)
+	})
+
 	describe("the display settings", () => {
 		const setup = () => {
 			const setValues = vi.fn().mockResolvedValue(undefined)
