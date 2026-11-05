@@ -225,6 +225,57 @@ describe("API - configuration", () => {
 		expect(setProviderSettings).not.toHaveBeenCalled()
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
+	it("keeps a record another view rewrote while this call's mode mapping was landing", async () => {
+		const store = makeProfileStoreDouble({
+			pinned: { id: "pinned-id", settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "before" } },
+		})
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = store
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		// Another view saves the same name through a locked writer while this call is still landing
+		// its mode mappings; the mapping write then fails, so the compensation runs after that save.
+		const setModeConfig = vi.fn().mockImplementation(async () => {
+			await saveConfig("pinned", { apiProvider: providerIdentifiers.openrouter, apiKey: "another-view" })
+			throw new Error("mode mapping down")
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "code-config" } }),
+		).rejects.toThrow("mode mapping down")
+
+		// The id comparison cannot catch this: saveConfig keeps the existing id when it overwrites a
+		// record, so the current id still equals the one this call wrote. Only the record comparison can.
+		expect(store.entries.get("pinned")?.settings).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "another-view",
+		})
+	})
 	it("restores the stored profile and shared settings when the refresh fails after the save", async () => {
 		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
 		// The store double keeps the compensation re-read honest: this call creates the record, so the
@@ -347,17 +398,17 @@ describe("API - configuration", () => {
 		// pinned to the saved profile already hold the new settings, so rollback
 		// must replay the restored record to those overlays as well.
 		const setValues = vi.fn().mockResolvedValue(undefined)
-		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		// The store double has to be stateful here: the compensation compares the record that is in the
+		// store against the one this call wrote, so a getProfile mock that always answers the pre-call
+		// record would model a store that never took this call's save.
+		const store = makeProfileStoreDouble({
+			pinned: { id: "pinned-id", settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "old-key" } },
+		})
+		const { saveConfig, hasConfig, getProfile } = store
 		const deleteConfig = vi.fn().mockResolvedValue(undefined)
 		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
 		const refreshSpy = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
-		const previousRecord = {
-			name: "pinned",
-			id: "pinned-id",
-			apiProvider: providerIdentifiers.anthropic,
-			apiKey: "old-key",
-		}
 		const provider = {
 			context: {},
 			on: vi.fn(),
@@ -377,8 +428,8 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				deleteConfig,
-				hasConfig: vi.fn().mockResolvedValue(true),
-				getProfile: vi.fn().mockResolvedValue(previousRecord),
+				hasConfig,
+				getProfile,
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},

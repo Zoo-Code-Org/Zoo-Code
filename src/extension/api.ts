@@ -1,3 +1,4 @@
+import deepEqual from "fast-deep-equal"
 import { EventEmitter } from "events"
 import fs from "fs/promises"
 import * as path from "path"
@@ -742,6 +743,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			try {
 				await manager.runExclusiveAcrossInstances(async () => {
 					if (recordExisted && previousSettings) {
+						// Another view may have saved this name after the critical section above. The id
+						// comparison cannot see it (saveConfig keeps the existing id), so compare the record
+						// itself against what this call wrote before replaying the pre-call settings over it.
+						const currentRecord = await manager.getProfile({ name: savedProfileName })
+						const { name: _currentName, id: _currentId, ...currentSettings } = currentRecord
+						if (!deepEqual(currentSettings, values)) {
+							this.log(
+								`[setConfiguration] kept the profile record '${savedProfileName}': another view wrote ` +
+									`it after this call saved.`,
+							)
+							return
+						}
 						await manager.saveConfig(savedProfileName, previousSettings)
 						return
 					}
