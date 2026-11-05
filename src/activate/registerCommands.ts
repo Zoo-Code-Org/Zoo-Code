@@ -378,7 +378,7 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
  */
 export const openClineInNewTabForApi = async (options: OpenClineInNewTabOptions): Promise<ClineProvider> => {
 	const previous = apiTabPanelCreation ?? Promise.resolve()
-	const creation = previous.then(() => createTabPanelUnlocked({ ...options, reuseTrackedPanel: false }))
+	const creation = previous.then(() => createTabPanelUnlocked({ ...options, forceNew: true }))
 	apiTabPanelCreation = creation.then(
 		() => undefined,
 		() => undefined,
@@ -498,7 +498,7 @@ const createTabPanelUnlocked = async ({
 		// can install a tracked panel, and creating here would replace it instead of reusing it.
 		// The provider built above never receives a panel on this path, so it has to be disposed or
 		// it stays registered with its listeners attached.
-		if (reuseTrackedPanel && tabPanel) {
+		if (!forceNew && tabPanel) {
 			const racedProvider = ClineProvider.getInstanceForView(tabPanel)
 			if (racedProvider) {
 				await tabPanel.reveal()
@@ -549,7 +549,7 @@ const createTabPanelUnlocked = async ({
 		newPanel.onDidDispose(
 			() => {
 				if (tabPanel === newPanel) {
-				// A recovery may already have installed a replacement panel.
+					// A recovery may already have installed a replacement panel.
 					setPanel(undefined, "tab")
 				}
 			},

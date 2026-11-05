@@ -377,14 +377,10 @@ export class ContextProxy {
 		this.stateCache[key] = value
 
 		return Promise.resolve(this.originalContext.globalState.update(key, value)).catch((error: unknown) => {
-			// Roll back only while this write is still the newest one for the key, so a rejected
-			// older write cannot clobber a newer value. The value put back is the one the store
-			// actually reports: another writer may have persisted in the meantime, and callers
-			// (ClineProvider's viewStates compensation) restore their durable state from the
-			// store as well, so a cached pre-write snapshot would delete entries this proxy never
-			// wrote. When the store reports nothing, fall back to this proxy's own last known value.
+			// Restore only while this write still owns the cache: a newer write may have
+			// replaced the value (even with the same value) before this rejection surfaced.
 			if (this.stateWriteGenerations.get(key) === generation) {
-				this.stateCache[key] = this.originalContext.globalState.get(key) ?? previousCachedValue
+				this.stateCache[key] = previousCachedValue
 			}
 			throw error
 		})

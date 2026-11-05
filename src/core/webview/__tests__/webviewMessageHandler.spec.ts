@@ -979,28 +979,6 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
-	it("drops the deleted profile's overlay and re-posts state when re-pinning the view", async () => {
-		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
-			async (name: string) => name === "shared-profile",
-		)
-
-		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
-		await new Promise((resolve) => setImmediate(resolve))
-
-		// A reload on a live provider skips loadViewState, so an overlay resolved before the
-		// profile was deleted would keep serving that profile's provider and key under the
-		// global name. The re-pin must drop it...
-		const clearIndex = vi
-			.mocked(mockClineProvider.saveViewState)
-			.mock.calls.findIndex((call) => call[0] === "apiConfiguration" && call[1] === undefined)
-		expect(clearIndex).toBeGreaterThanOrEqual(0)
-		// ...and push the corrected state: the launch flow already posted state once, with the
-		// missing pin still in it, and only listApiConfig is posted afterwards.
-		const clearOrder = vi.mocked(mockClineProvider.saveViewState).mock.invocationCallOrder[clearIndex]
-		const posts = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
-		expect(posts[posts.length - 1]).toBeGreaterThan(clearOrder)
-	})
-
 	it("re-pins the view to the shared global profile rather than the first listed profile", async () => {
 		double.providerSettingsManager.listConfig = vi.fn().mockResolvedValue([
 			{ name: "first-listed", apiProvider: providerIdentifiers.anthropic },
@@ -1026,32 +1004,6 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		// The repair's post must be the LAST state post, after the list refresh.
 		expect(statePostOrders.length).toBeGreaterThan(0)
 		expect(statePostOrders[statePostOrders.length - 1]).toBeGreaterThan(postMessageOrders[listConfigIndex])
-	})
-
-	it("clears the stale overlay before persisting the re-pin so a failed pin stays retryable", async () => {
-		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
-			async (name: string) => name === "shared-profile",
-		)
-		const calls: Array<[string, unknown]> = []
-		const originalSaveViewState = mockClineProvider.saveViewState
-		mockClineProvider.saveViewState = vi.fn(async (key: string, value: unknown) => {
-			calls.push([key, value])
-			if (key === "currentApiConfigName") {
-				throw new Error("pin write failed")
-			}
-		})
-		try {
-			await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
-			await new Promise((resolve) => setImmediate(resolve))
-		} finally {
-			mockClineProvider.saveViewState = originalSaveViewState
-		}
-
-		// The overlay clear must land first: if the pin write then fails, the merged
-		// selection stays invalid and the repair retries on the next launch, instead of
-		// a valid pin serving the deleted profile's buffered settings.
-		expect(calls[0]).toEqual(["apiConfiguration", undefined])
-		expect(calls).toContainEqual(["currentApiConfigName", "shared-profile"])
 	})
 
 	it("clears the stale overlay before persisting the re-pin so a failed pin stays retryable", async () => {
@@ -3061,8 +3013,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			hasConfig: ReturnType<typeof vi.fn>
 		}
 		repointViewLocalStateAfterProfileRename: ReturnType<typeof vi.fn>
-		activateProviderProfileUnlocked: ReturnType<typeof vi.fn>
-		runProviderProfileMutation: <T>(fn: () => Promise<T>) => Promise<T>
+		activateProviderProfile: ReturnType<typeof vi.fn>
 	}
 	// Capture the pre-suite values for the members this suite reassigns:
 	// vi.clearAllMocks() only resets call history - it never restores property
@@ -3071,8 +3022,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 	const originalRenameMembers = {
 		providerSettingsManager: provider.providerSettingsManager,
 		repointViewLocalStateAfterProfileRename: provider.repointViewLocalStateAfterProfileRename,
-		activateProviderProfileUnlocked: provider.activateProviderProfileUnlocked,
-		runProviderProfileMutation: provider.runProviderProfileMutation,
+		activateProviderProfile: provider.activateProviderProfile,
 	}
 
 	afterEach(() => {
@@ -3097,8 +3047,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			order.push("repoint")
 		})
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3209,8 +3158,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		}
 		const repoint = vi.fn().mockRejectedValueOnce(new Error("repoint failed"))
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3229,7 +3177,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		})
 		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("old-profile")
 		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
-		expect(provider.activateProviderProfileUnlocked).not.toHaveBeenCalled()
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 
@@ -3246,8 +3194,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		}
 		const repoint = vi.fn().mockResolvedValue(undefined)
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3262,7 +3209,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			id: "profile-id",
 		})
 		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
-		expect(provider.activateProviderProfileUnlocked).not.toHaveBeenCalled()
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 
@@ -3279,8 +3226,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		}
 		const repoint = vi.fn().mockResolvedValue(undefined)
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3305,8 +3251,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
 		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3335,8 +3280,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		}
 		const repoint = vi.fn().mockResolvedValue(undefined)
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3349,7 +3293,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// same id, and no view is re-pointed onto an unverifiable record.
 		expect(repoint).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
-		expect(provider.activateProviderProfileUnlocked).not.toHaveBeenCalled()
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 
@@ -3377,8 +3321,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		}
 		const repoint = vi.fn().mockResolvedValue(undefined)
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3393,42 +3336,6 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			id: "profile-id",
 			apiModelId: "old-model",
 		})
-	})
-
-	it("points the shared selection at the renamed profile when the selection write fails", async () => {
-		// deleteConfig(oldName) has already run by the time the shared selection is updated, so the
-		// rollback inside provider.setValue (which restores the value it read, oldName) leaves the
-		// shared selection naming a profile that no longer exists. The handler must repoint it at the
-		// stored newName instead.
-		provider.providerSettingsManager = {
-			hasConfig: vi.fn().mockResolvedValue(false),
-			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
-			saveConfig: vi.fn().mockResolvedValue(undefined),
-			deleteConfig: vi.fn().mockResolvedValue(undefined),
-		}
-		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		// The shared selection still names the old profile, which is what sends the handler through
-		// the re-point below.
-		const withSelection = mockClineProvider as unknown as { getValue: (key: string) => unknown }
-		withSelection.getValue = () => "old-profile"
-		// The selection write itself fails; everything written after it goes through normally.
-		const proxySetValue = vi.mocked(mockClineProvider.contextProxy.setValue)
-		proxySetValue.mockClear()
-		proxySetValue.mockRejectedValueOnce(new Error("selection write down"))
-
-		await webviewMessageHandler(mockClineProvider, {
-			type: "renameApiConfiguration",
-			values: { oldName: "old-profile", newName: "new-profile" },
-			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
-		})
-
-		// One write is the failed selection update, the second is the repair that points the
-		// selection at the profile which still exists. Without the repair there is only the failed
-		// write, whose recorded call says "new-profile" even though it never landed.
-		const selectionWrites = proxySetValue.mock.calls.filter(([key]) => key === "currentApiConfigName")
-		expect(selectionWrites.map(([, value]) => value)).toEqual(["new-profile", "new-profile"])
 	})
 
 	it("logs a failed rename compensation", async () => {
@@ -3448,8 +3355,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			}
 		})
 		provider.repointViewLocalStateAfterProfileRename = repoint
-		provider.activateProviderProfileUnlocked = vi.fn().mockResolvedValue(undefined)
-		provider.runProviderProfileMutation = (fn) => fn()
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",

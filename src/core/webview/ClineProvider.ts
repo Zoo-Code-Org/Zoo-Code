@@ -172,7 +172,6 @@ type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
  * non-secret subset, persisted durably per stable view id.
  */
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
-type PersistedViewLocalStateKey = "mode" | "currentApiConfigName" | "apiConfiguration"
 
 /**
  * The keys the view-local mutation helper actually applies. A wider key would update
@@ -435,21 +434,8 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
-	// Shared across instances: profile mutations rewrite the shared ContextProxy stores, so a
-	// per-instance queue lets another view commit between this view's shared write and its
-	// snapshot compensation, and the compensation would restore a stale copy over the newer
-	// write. One queue serializes every view's profile mutations against each other.
-	private static providerProfileMutationQueue = Promise.resolve()
+	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
-	// Ownership token for the shared mode. A timed-out mutation keeps running after the queue
-	// advances, so a newer switch can commit while the cancelled one is still in flight; only the
-	// operation that still owns the latest mode mutation may write the mode again.
-	private modeMutationGeneration = 0
-
-	// What a cancelled switch must put back in the task stores it already wrote: the history
-	// mode and `_taskMode` the switch replaced. Cleared once the switch commits or compensates.
-	private cancelledModeSwitchSnapshot:
-		{ task: Task; previousHistoryMode: string | undefined; previousTaskMode: Mode | undefined } | undefined
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
@@ -540,8 +526,7 @@ export class ClineProvider
 
 	/**
 	 * Stable identifier for persisted per-view state keys.
-	 * Defaults to a session-unique temporary key until the webview reports its
-	 * VS Code-persisted id.
+	 * Defaults to viewId until the webview reports its VS Code-persisted id.
 	 */
 	private viewStateId: string
 
@@ -608,10 +593,7 @@ export class ClineProvider
 		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
 		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
 		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
-		// Unique per provider instance: the counter in viewId collides across windows and
-		// reloads that share globalState.
-		this.temporaryViewStateId = `${this.viewId}-${crypto.randomUUID()}`
-		this.viewStateId = this.temporaryViewStateId
+		this.viewStateId = this.viewId
 		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
@@ -801,45 +783,6 @@ export class ClineProvider
 	 * When fresh is set, the map is read directly from globalState (bypassing the
 	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
 	 */
-	/**
-	 * Writes the shared viewStates map and restores the pre-write map if the storage write
-	 * rejects. ContextProxy#updateGlobalState puts the value in the in-memory cache BEFORE
-	 * awaiting globalState.update, so a rejected write would otherwise leave every other
-	 * view reading a map that was never committed to disk - and the next successful write
-	 * would merge into that phantom state. The map put back is the one storage actually
-	 * holds, read fresh: callers build `states` from a fresh read too, so a cached snapshot
-	 * can be older than storage, and writing it back would delete entries another writer
-	 * persisted in the meantime.
-	 */
-	private async writePersistedViewStates(states: Record<string, PersistedViewState>): Promise<void> {
-		// What storage actually holds right now - the only safe rollback target. The in-memory
-		// cache may be older than storage when another writer persisted in between.
-		// Read raw, not through getPersistedViewStates: when nothing is persisted the map is
-		// absent, and a rollback must not manufacture an empty one.
-		const previousPersisted = this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
-		try {
-			await this.contextProxy.setValue("viewStates", states)
-		} catch (error) {
-			try {
-				// Re-read storage at rollback time instead of replaying the pre-write snapshot:
-				// another view can persist its own map between the snapshot above and this
-				// rejection, and writing the snapshot back would delete that entry from the cache
-				// and the store. The read still bypasses the cache, which currently holds the
-				// phantom map the rejected write put there.
-				const currentPersisted =
-					this.context.globalState.get<GlobalState["viewStates"]>("viewStates") ?? previousPersisted
-				await this.contextProxy.setValue("viewStates", currentPersisted)
-			} catch (rollbackError) {
-				this.log(
-					`[ClineProvider] Failed to restore the persisted viewStates after a rejected write: ${
-						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-					}`,
-				)
-			}
-			throw error
-		}
-	}
-
 	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
 		const viewStates = options.fresh
 			? this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
@@ -1041,56 +984,6 @@ export class ClineProvider
 	}
 
 	/**
-	 * Re-points persisted view pins that reference a removed profile so views do not
-	 * rehydrate a missing profile name after a reload. Runs through the serialized
-	 * write queue like every other viewStates mutation.
-	 */
-	private async repointPersistedViewStates(
-		removedProfileName: string,
-		replacementProfileName: string,
-	): Promise<void> {
-		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-			const states = this.getPersistedViewStates({ fresh: true })
-			let changed = false
-
-			for (const [viewId, entry] of Object.entries(states)) {
-				if (entry?.currentApiConfigName !== removedProfileName) {
-					continue
-				}
-
-				changed = true
-				const { currentApiConfigName: _removed, ...rest } = entry
-
-				if (rest.mode) {
-					states[viewId] = { ...rest, currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
-				} else {
-					states[viewId] = { currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
-				}
-			}
-
-			if (changed) {
-				try {
-					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
-				} catch (error) {
-					// updateGlobalState applies the new map to the in-memory cache
-					// before the durable write: restore the cache to the value durable
-					// storage actually holds so closed-view pins cannot serve re-pointed
-					// names that never reached disk, then let the caller compensate.
-					try {
-						await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
-					} catch {
-						// The cache is updated before the durable attempt: it matches the
-						// durable value regardless of whether this restore write landed.
-					}
-					throw error
-				}
-			}
-		})
-
-		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
-		await write
-	}
-	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
@@ -1124,7 +1017,7 @@ export class ClineProvider
 	 * queue like every other viewStates mutation.
 	 */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
-		const previousViewStateId = this.temporaryViewStateId
+		const previousViewStateId = this.viewId
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			// An entry under this name can belong to a different session, because temporary
@@ -1187,10 +1080,6 @@ export class ClineProvider
 		await write
 	}
 
-	/**
-	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
-	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
-	 */
 	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
@@ -1308,14 +1197,12 @@ export class ClineProvider
 			}
 
 			if (persisted?.currentApiConfigName) {
+				loadedState.currentApiConfigName = persisted.currentApiConfigName
+
 				try {
 					const { name: _name, ...apiConfiguration } = await this.providerSettingsManager.getProfile({
 						name: persisted.currentApiConfigName,
 					})
-					// Pin the name only together with the configuration it resolves to: a name
-					// without its overlay would make getState() pair it with whatever shared
-					// settings currently sit under that name.
-					loadedState.currentApiConfigName = persisted.currentApiConfigName
 					loadedState.apiConfiguration = apiConfiguration as ProviderSettings
 				} catch (error) {
 					this.log(
@@ -3068,9 +2955,6 @@ export class ClineProvider
 		if (targetTask !== null) {
 			await this.postStateToWebview()
 		}
-
-		// The switch committed: no later checkpoint can compensate it any more.
-		this.cancelledModeSwitchSnapshot = undefined
 	}
 
 	// Provider Profile Management
@@ -3689,19 +3573,6 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
-		// Deletion snapshots and compensates the same durable stores that upsert,
-		// activation, and mode switch mutate, so it has to run serialized against them:
-		// an overlapping mutation could otherwise land between the snapshot and the
-		// rollback, and the compensation would restore a stale copy over the newer write.
-		return this.enqueueProviderProfileMutation((signal) =>
-			this.deleteProviderProfileUnlocked(profileToDelete, signal),
-		)
-	}
-
-	private async deleteProviderProfileUnlocked(
-		profileToDelete: ProviderSettingsEntry,
-		signal: AbortSignal,
-		): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -3733,10 +3604,6 @@ export class ClineProvider
 		const previousSelection = globalSettings.currentApiConfigName
 		const previousSharedSettings = this.contextProxy.getProviderSettings()
 		const previousViewStates = this.getPersistedViewStates({ fresh: true })
-		// Tracks whether the scoped activation compensation inside the try
-		// already ran, so the outer write-group restore does not run a second,
-		// conflicting compensation.
-		let innerCompensationRan = false
 
 		// Remember what each live sibling's overlay holds before anything is rewritten, so
 		// the compensation can undo the re-pin: leaving a sibling on the survivor after a
@@ -3793,18 +3660,6 @@ export class ClineProvider
 			// tracked as its own unit rather than widened into this method.
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
 			deletedWasGlobal = profileToDelete.name === selectionAfterDelete
-
-			// The mutation timeout already released the caller with a timeout rejection, so the
-			// forward half of the deletion stops here: everything below rewrites the shared
-			// selection, the shared provider settings, and other views' pins, completing a
-			// deletion no caller is waiting for any more. Throwing routes through the
-			// compensation below, which restores the landed writes while the queue is still held.
-			if (signal.aborted) {
-				this.log(
-					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
-				)
-				throw new Error("Profile deletion was cancelled before the selection and settings rewrite")
-			}
 
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
@@ -3905,20 +3760,8 @@ export class ClineProvider
 			// the next load. Re-point those persisted pins to the survivor too.
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
-			// Same contract on the non-active path: the deletion stands even if this post fails.
-			await this.postStateToWebview().catch((postError: unknown) =>
-				this.log(
-					`deleteProviderProfile: deletion committed, but posting state failed: ${postError instanceof Error ? postError.message : String(postError)}`,
-				),
-			)
+			await this.postStateToWebview()
 		} catch (error) {
-			// Two failures must NOT be compensated here: a replacement activation
-			// failure after the deletion committed (documented contract: the
-			// deletion stands), and any failure whose scoped compensation
-			// already ran inside the try.
-			if (error instanceof ProfileDeletionActivationError || innerCompensationRan) {
-				throw error
-			}
 			// The manager delete committed but a later write failed: restore the
 			// deleted record first, then the shared metadata, selection, and shared
 			// settings the deletion had rewritten, and finally merge the affected
@@ -4231,7 +4074,7 @@ export class ClineProvider
 		return this.enqueueProviderProfileMutation(() => this.activateProviderProfileUnlocked(args, options))
 	}
 
-	async activateProviderProfileUnlocked(
+	private async activateProviderProfileUnlocked(
 		args: { name: string } | { id: string },
 		options?: {
 			persistModeConfig?: boolean
@@ -4362,30 +4205,16 @@ export class ClineProvider
 	}
 
 	/**
-	 * Refresh the view-local apiConfiguration buffer of the other live views after a
-	 * profile upsert/activation. Both cases come from the same shape: the shared store
-	 * holds exactly one "current profile" settings blob, while each view pins its own
-	 * profile name.
-	 *
-	 * - Pinned to THIS profile: the upsert rewrote the profile's settings in the
-	 *   store-backed manager, so a buffer that loaded them earlier keeps shadowing the
-	 *   stale settings in getState(). Push the new settings into it.
-	 * - Pinned to ANOTHER profile: activation wrote the activated profile's settings into
-	 *   the shared blob, and this refresh does not touch that other profile. Without a
-	 *   reload, that view's getState() reports its pinned profile's NAME next to the
-	 *   activated profile's SETTINGS. Reload the pinned profile from the manager so the
-	 *   name and the settings stay consistent.
-	 *
-	 * A view with no pin follows the shared store and needs nothing. The originating view
-	 * refreshes its own buffer at the mutation site - but only when it ACTIVATED the
-	 * profile, because activation clears its overlay. A save that does not activate leaves
-	 * the acting view's own overlay untouched, so those callers pass includeSelf and this
-	 * view refreshes too when its pin names the profile that was just saved.
+	 * Refresh the view-local apiConfiguration buffer of the other live views
+	 * pinned to the given profile. An upsert/activation rewrites the profile's
+	 * settings in the shared store and the store-backed manager, but a view
+	 * whose buffer loaded the profile earlier keeps shadowing the stale
+	 * settings in its getState() until its own next mutation. The originating
+	 * view refreshes its buffer at the mutation site itself.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
-		includeSelf = false,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
 			// Direct private access: compile-time safe across sibling instances. A sibling that has
@@ -4614,61 +4443,19 @@ export class ClineProvider
 		// with the replacement's settings and re-point the sticky name, or the running
 		// conversation keeps sending the deleted profile's configuration even though the view's
 		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
-		try {
-			for (const snapshot of snapshots) {
-				// Only re-point when the task actually runs under the deleted profile:
-				// a view pinned to it can hold a task that follows a different sticky
-				// profile, and forcing the replacement would silently switch that
-				// conversation and rewrite its persisted profile name without the user
-				// asking.
-				if (snapshot.instance._disposed) {
-					continue
+		for (const snapshot of snapshots) {
+			// Only re-point when the task actually runs under the deleted profile:
+			// a view pinned to it can hold a task that follows a different sticky
+			// profile, and forcing the replacement would silently switch that
+			// conversation and rewrite its persisted profile name without the user
+			// asking.
+			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
+				if (replacementSettings) {
+					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
 				}
-				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-					if (replacementSettings) {
-						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
-					}
-					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
-				}
-				await snapshot.instance.postStateToWebview()
+				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
 			}
-		} catch (taskStepError: unknown) {
-			// This step runs after every sibling's buffer was re-pointed, so the rollback above
-			// never ran for it: the deletion's own compensation covers the shared stores and this
-			// view's pin only, which would leave each sibling serving the replacement profile's
-			// name and overlay while the deletion reports failure. Put every sibling's buffer back,
-			// one restore at a time so a failing restore cannot skip the next.
-			const restoreFailures: string[] = []
-
-			for (const snapshot of snapshots) {
-				// A provider that has begun disposal owns an orphaned viewStates key and is being
-				// torn down; writing durable state through it is the defect the guards above exist
-				// to avoid.
-				if (snapshot.instance._disposed) {
-					continue
-				}
-				try {
-					await snapshot.instance._saveViewLocalStateFromMutation({
-						currentApiConfigName: snapshot.previousPin,
-						apiConfiguration: snapshot.previousOverlay,
-					})
-				} catch (restoreError: unknown) {
-					const message = restoreError instanceof Error ? restoreError.message : String(restoreError)
-					snapshot.instance.log(
-						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed task re-point: ${message}`,
-					)
-					restoreFailures.push(`view ${snapshot.instance.viewId}: ${message}`)
-				}
-			}
-
-			if (restoreFailures.length > 0) {
-				const prefix = taskStepError instanceof Error ? taskStepError.message : String(taskStepError)
-				throw new Error(`${prefix}; sibling restore also failed: ${restoreFailures.join("; ")}`, {
-					cause: taskStepError instanceof Error ? taskStepError : undefined,
-				})
-			}
-
-			throw taskStepError
+			await snapshot.instance.postStateToWebview()
 		}
 	}
 
