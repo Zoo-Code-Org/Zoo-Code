@@ -10,6 +10,14 @@ vi.mock("@/i18n/TranslationContext", () => ({
 const root = () => screen.getByTestId("appearance-preview")
 
 describe("AppearancePreview", () => {
+	it("is a named group, so that its accessible name is exposed (a div without a role cannot carry one)", () => {
+		render(<AppearancePreview values={{}} />)
+
+		const group = screen.getByRole("group", { name: "settings:ui.appearance.preview" })
+
+		expect(group).toBe(root())
+	})
+
 	it("resets every unset value to `initial`, so the live CSS fallback chain applies and nothing is inherited from <html>", () => {
 		render(<AppearancePreview values={{}} />)
 		const style = root().style

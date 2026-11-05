@@ -104,10 +104,12 @@ export interface SettingsViewRef {
 
 /**
  * How long the form waits for the host to answer a save that changes an appearance value, or a time or date value.
- * The host always answers
- * (success or failure), but a write that never settles would otherwise leave the form locked until the webview reloads.
- * After this the save is treated as failed: the edits stay, Save and Done work again, and an answer that arrives
- * later is ignored (the host refreshes the state after it saves, so the form is brought up to date by that).
+ * The host always answers (success or failure), but a write that never settles would otherwise leave the form locked
+ * until the webview reloads. After this the outcome of the save is unknown, not failed: the edits stay, Save and Done
+ * work again, and the save is kept (`timedOutSaves`) because the host may still store it. If its answer comes later, a
+ * success is reconciled with the form (the stored values are what it compares with from then on, and the values the
+ * user is not editing take them) and a failure changes nothing. Until then, leaving the page warns that the save may
+ * still complete.
  */
 export const SAVE_ANSWER_TIMEOUT_MS = 20_000
 

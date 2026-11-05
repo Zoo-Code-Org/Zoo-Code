@@ -52,6 +52,7 @@ export const AppearancePreview = ({ values, chatFontSize }: AppearancePreviewPro
 		<div
 			className="rounded-md border border-vscode-panel-border bg-vscode-editor-background overflow-hidden"
 			style={vars as CSSProperties}
+			role="group"
 			aria-label={t("settings:ui.appearance.preview")}
 			data-testid="appearance-preview">
 			<div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-vscode-descriptionForeground border-b border-vscode-panel-border">
