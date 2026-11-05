@@ -10658,19 +10658,20 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
-			// The up-to-date guard reads every zoo-gateway profile rather than one end of the list, and it
-			// skips profiles that belong to another provider. With a single profile in the store a
-			// first-only, a last-only and an every-profile check all behave the same, so the order of the
-			// two rows below is what pins the guard down.
+			// The up-to-date guard reads every zoo-gateway profile rather than one end of the list, and
+			// it skips profiles that belong to another provider. With a single profile in the store a
+			// first-only, a last-only and an every-profile check all behave the same, so the order of
+			// the two rows below is what pins the guard down. "Other" leads the store in both rows so
+			// that a guard which stopped filtering by provider is caught by either row, not by one.
 			it.each([
 				{
 					title: "re-seeds when a later zoo-gateway profile is stale and the first is current",
-					profiles: ["Zoo Gateway", "Other", "Zoo Gateway 2"],
+					profiles: ["Other", "Zoo Gateway", "Zoo Gateway 2"],
 					staleProfile: "Zoo Gateway 2",
 				},
 				{
 					title: "re-seeds when the first zoo-gateway profile is stale and the last is current",
-					profiles: ["Zoo Gateway", "Other", "Zoo Gateway 2"],
+					profiles: ["Other", "Zoo Gateway", "Zoo Gateway 2"],
 					staleProfile: "Zoo Gateway",
 				},
 			])("$title", async ({ profiles, staleProfile }) => {
