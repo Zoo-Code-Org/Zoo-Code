@@ -181,12 +181,6 @@ describe("ContextProxy", () => {
 			setTimeout(settle, 0)
 			await proxy.resetAllState()
 			await pending
-			expect.soft([
-				await mockSecrets.get("apiKey"),
-				proxy.getSecret("apiKey"),
-				mockSecrets.delete.mock.calls.length,
-			])
-
 			// The pending store is held open on a double that only puts the value into storage
 			// when it settles, so the ordering is observable: the reset must wait for the write to
 			// settle and then delete the keys, so neither the cache nor the durable copy keeps the
