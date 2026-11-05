@@ -5755,21 +5755,19 @@ describe("ClineProvider", () => {
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
 			])
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				activateProfile: vi.fn().mockResolvedValue({
-					name: "new-profile",
-					id: "new-id",
-					apiProvider: providerIdentifiers.openai,
-				}),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
-					]),
-				getCurrentProfileName: vi.fn().mockResolvedValue("old-profile"),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Typed spies on the real manager (instance-scoped): the direct-activation path reads only
+			// these methods, so the manager stays in place and a method the path starts calling later is
+			// still the real one rather than undefined.
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "new-id",
+				apiProvider: providerIdentifiers.openai,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValue(
 				new Error("shared settings write failed"),
 			)

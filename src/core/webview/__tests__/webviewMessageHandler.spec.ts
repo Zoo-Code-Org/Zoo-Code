@@ -965,6 +965,16 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
 			async (name: string) => name === "shared-profile",
 		)
+		// The order matters more than the individual calls: the re-pin changes what this view
+		// resolves to, and neither write below posts anything by itself.
+		const order: string[] = []
+		vi.mocked(mockClineProvider.saveViewState).mockImplementation(async (...args: unknown[]) => {
+			order.push(`save:${String(args[0])}`)
+		})
+		vi.mocked(mockClineProvider.postStateToWebview).mockImplementation(async () => {
+			order.push("post")
+		})
+
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
 		// The view pin is re-pinned to the first available profile,
@@ -979,6 +989,13 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 			"shared-profile",
 		)
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+
+		// A repaired pin is half a repair until the state is posted: the listApiConfig message
+		// that follows the re-pin carries the profile list only, so without a state post the
+		// webview keeps rendering the profile that no longer resolves until some other message
+		// arrives.
+		expect(order).toContain("post")
+		expect(order.lastIndexOf("post")).toBeGreaterThan(order.lastIndexOf("save:currentApiConfigName"))
 	})
 
 	it("re-pins the view to the shared global profile rather than the first listed profile", async () => {
@@ -2893,7 +2910,9 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 			}),
 		}
 		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
-		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn(async () => {
+			events.push("activate")
+		})
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -2909,9 +2928,12 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(events).toContain("hasConfig")
 		expect(events).toContain("saveConfig")
 		expect(events).toContain("deleteConfig")
-		// The activation that follows takes the provider's mutation queue, not the
-		// manager lock, so it runs after the critical section closed.
-		expect(events.at(-1)).toBe("exit")
+		// The activation that follows takes the provider's mutation queue, not the manager lock,
+		// so it runs after the critical section closed. The double records the activation in the
+		// same event log the rest of the case reads, instead of leaving the claim in prose.
+		expect(events).toContain("activate")
+		expect(events.indexOf("activate")).toBeGreaterThan(events.indexOf("exit"))
+		expect(events.at(-1)).toBe("activate")
 	})
 
 	it("rolls the new profile back when the re-point fails", async () => {

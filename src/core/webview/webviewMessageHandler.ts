@@ -681,6 +681,11 @@ export const webviewMessageHandler = async (
 								// keys with the repair skipped.
 								await provider.saveViewState("apiConfiguration", undefined)
 								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The repair changes what this view resolves to, so the state has to be posted: the
+								// two writes above update provider state without posting it, and the listApiConfig
+								// message below carries the profile list only, so without this the webview keeps
+								// rendering the profile that no longer resolves until another message arrives.
+								await provider.postStateToWebview()
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
