@@ -5008,15 +5008,17 @@ export class ClineProvider
 					)
 				: []
 
-			// Register the batch's custom modes before setValues validates `mode`: a mode
-			// selected in the same configuration is not known to the manager yet.
-			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
-				}
-			}
+			// Registration lives inside the try below: a mode whose write fails partway through
+			// the batch must trigger the same rollback as a failure after setValues.
 
 			try {
+				// Register the batch's custom modes before setValues validates `mode`: a mode
+				// selected in the same configuration is not known to the manager yet.
+				if (configuration.customModes?.length) {
+					for (const mode of configuration.customModes) {
+						await this.customModesManager.updateCustomMode(mode.slug, mode)
+					}
+				}
 				await this.setValues(configuration)
 
 				if (configuration.allowedCommands) {

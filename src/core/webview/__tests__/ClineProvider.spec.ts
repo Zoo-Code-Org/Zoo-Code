@@ -6949,11 +6949,14 @@ describe("ClineProvider", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		const existingMode = { slug: "existing-mode", name: "Existing", roleDefinition: "r", groups: ["read" as const] }
+		const savedMode = { slug: "existing-mode", name: "Existing", roleDefinition: "r", groups: ["read" as const] }
+		// The batch hands in a different definition for the slug that already exists, so the restore
+		// call below cannot be satisfied by the registration call that preceded it.
+		const existingMode = { ...savedMode, name: "Overridden", roleDefinition: "changed" }
 		const newMode = { slug: "new-mode", name: "New", roleDefinition: "r", groups: ["read" as const] }
 		const manager = provider["customModesManager"]
 		Object.assign(manager, {
-			getCustomModes: vi.fn().mockResolvedValue([existingMode]),
+			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
 			updateCustomMode: vi.fn().mockResolvedValue(undefined),
 			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
 		})
@@ -6965,9 +6968,56 @@ describe("ClineProvider", () => {
 
 		// The slug that already existed is restored to its earlier definition; the slug this batch
 		// introduced is removed, and only through the rules-folder-safe path.
-		expect(manager.updateCustomMode).toHaveBeenCalledWith("existing-mode", existingMode)
+		expect(manager.updateCustomMode).toHaveBeenCalledWith("existing-mode", savedMode)
 		expect(manager.removeCustomModeEntry).toHaveBeenCalledWith("new-mode")
 		expect(manager.removeCustomModeEntry).not.toHaveBeenCalledWith("existing-mode")
+
+		await provider.dispose()
+	})
+	it("should roll back the modes a registration left half-installed", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const savedMode = { slug: "existing-mode", name: "Existing", roleDefinition: "r", groups: ["read" as const] }
+		// The batch re-registers the slug that already exists under a different definition, so a
+		// restore call is distinguishable from the registration call.
+		const overriddenMode = { ...savedMode, name: "Overridden", roleDefinition: "changed" }
+		const newMode = { slug: "new-mode", name: "New", roleDefinition: "r", groups: ["read" as const] }
+		const calls: Array<[string, string]> = []
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
+			updateCustomMode: vi.fn((slug: string, mode: typeof savedMode) => {
+				calls.push([slug, mode.name])
+				// The batch's second registration is the one that throws.
+				if (slug === "new-mode") {
+					return Promise.reject(new Error("mode registration failed"))
+				}
+				return Promise.resolve(undefined)
+			}),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		const setValuesSpy = vi.spyOn(provider, "setValues").mockResolvedValue(undefined)
+
+		await expect(
+			provider.createTask("text", undefined, undefined, {}, { customModes: [overriddenMode, newMode] }),
+		).rejects.toThrow("mode registration failed")
+
+		// Registration order first, then the rollback: the slug that already existed is rewritten to
+		// the snapshot taken before the batch, and the slug this batch introduced is removed through
+		// the rules-folder-safe path. Nothing downstream of the failed registration runs.
+		expect(calls).toEqual([
+			["existing-mode", "Overridden"],
+			["new-mode", "New"],
+			["existing-mode", "Existing"],
+		])
+		expect(manager.removeCustomModeEntry).toHaveBeenCalledWith("new-mode")
+		expect(manager.removeCustomModeEntry).not.toHaveBeenCalledWith("existing-mode")
+		expect(setValuesSpy).not.toHaveBeenCalled()
 
 		await provider.dispose()
 	})
