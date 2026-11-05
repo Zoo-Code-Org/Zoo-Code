@@ -989,7 +989,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		)
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
-		// The view pin is re-pinned to the first available profile,
+		// The view pin is re-pinned to the still-valid shared global selection,
 		// and the shared global selection is left untouched: no global write, no global activation.
 		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
 		// The stale view-local overlay is cleared with the pin: a buffer still
