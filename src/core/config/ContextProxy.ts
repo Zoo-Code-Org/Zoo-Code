@@ -89,6 +89,9 @@ export class ContextProxy {
 	// Raised for the whole duration of a reset and cleared in a finally, so a reset that fails
 	// mid-way cannot leave the store refusing every later secret write; see resetAllState.
 	private resetting = false
+	// A reset that is already running. Overlapping callers join it instead of starting a second
+	// delete pass whose end could lower the guard while the first one is still writing.
+	private resetInFlight: Promise<void> | null = null
 
 	constructor(context: vscode.ExtensionContext) {
 		this.originalContext = context
@@ -768,27 +771,46 @@ export class ContextProxy {
 	 * This clears all data from both the in-memory caches and the VSCode storage.
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
-	public async resetAllState() {
-		this.resetting = true
-		try {
-			this.stateCache = {}
-			this.secretCache = {}
-			// A write that started before this reset must not restore its pre-reset value when it
-			// rejects afterwards, so advance every generation the pending writes still hold.
-			for (const key of this.stateWriteGenerations.keys()) {
-				this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
-			}
-
-			await Promise.all([
-				...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-				...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-				...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			])
-
-			await this.initialize()
-		} finally {
-			this.resetting = false
+	public resetAllState(): Promise<void> {
+		// Two resets can overlap (a second webview, or the same command twice). A boolean guard lets the
+		// first pass to finish lower it while the second is still deleting, and a secret stored in that
+		// gap is erased by the pass that is still running - so overlapping callers join the running pass.
+		if (this.resetInFlight) {
+			return this.resetInFlight
 		}
+
+		this.resetting = true
+		const pass = (async () => {
+			try {
+				this.stateCache = {}
+				this.secretCache = {}
+				// A write that started before this reset must not restore its pre-reset value when it
+				// rejects afterwards, so advance every generation the pending writes still hold.
+				for (const key of this.stateWriteGenerations.keys()) {
+					this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+				}
+
+				// Promise.all rejects on the first failure while the other updates and deletes are still
+				// pending, and the finally below would then admit a storeSecret that a still-running
+				// delete erases. Settle every delete first, then surface the first failure.
+				const deletions = await Promise.allSettled([
+					...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+					...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+					...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				])
+				const deletionFailure = deletions.find((result) => result.status === "rejected")
+				if (deletionFailure) {
+					throw deletionFailure.reason
+				}
+
+				await this.initialize()
+			} finally {
+				this.resetting = false
+				this.resetInFlight = null
+			}
+		})()
+		this.resetInFlight = pass
+		return pass
 	}
 
 	private static _instance: ContextProxy | null = null
