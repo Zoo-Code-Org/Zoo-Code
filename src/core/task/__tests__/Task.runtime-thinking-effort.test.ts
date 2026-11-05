@@ -166,7 +166,7 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 	})
 
 	describe("dispose", () => {
-		it("clears an active override without rebuilding or double-disposing the handler", async () => {
+		it("clears the override and leaves the profile-derived apiConfiguration unchanged", async () => {
 			task.setRuntimeThinkingEffort("xhigh", "test-source")
 			const access = getPrivateAccess(task)
 			const handlerBefore = (task as unknown as { api: unknown }).api
@@ -177,6 +177,11 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 
 			expect(access.runtimeThinkingEffort).toBeUndefined()
 			expect(access.runtimeThinkingEffortSource).toBeUndefined()
+			// The public read reports the same cleared state. Nothing is restored into
+			// apiConfiguration here: it is the profile-derived projection and never carried
+			// the override, so disposal can only leave the profile value it already had.
+			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: undefined, source: undefined })
+			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
 			// A disposed task never serves another request: disposal must not rebuild
 			// a replacement handler it would then have to collect and dispose.
 			expect(vi.mocked(buildApiHandler).mock.calls.length).toBe(buildsBefore)
@@ -364,19 +369,6 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 
 			task.setRuntimeThinkingEffort(undefined)
 			expect(getPrivateAccess(task).getRuntimeThinkingEffortMetadata()).not.toHaveProperty("reasoningEffort")
-		})
-	})
-
-	describe("dispose", () => {
-		it("clears the task-local override and restores the settings-derived API configuration at task end", async () => {
-			task.setRuntimeThinkingEffort("xhigh", "source")
-			await task.dispose()
-
-			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: undefined, source: undefined })
-			const access = getPrivateAccess(task)
-			expect(access.runtimeThinkingEffort).toBeUndefined()
-			expect(access.runtimeThinkingEffortSource).toBeUndefined()
-			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
 		})
 	})
 
