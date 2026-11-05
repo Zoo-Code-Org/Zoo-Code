@@ -786,11 +786,15 @@ export const webviewMessageHandler = async (
 
 				// Checked before anything else happens, so an invalid value changes nothing: no side effect runs and
 				// no setting is stored, not even the valid ones sent with it.
+				// A value that is already stored is not a change, so it is not checked: the webview sends the chat font
+				// size with every save, and a stored value that is out of bounds (from an older version, or a hand-edited
+				// file) must not make every other save fail until the user edits it.
 				for (const [key, schema] of Object.entries(APPEARANCE_VALUE_SCHEMAS)) {
-					if (
-						key in message.updatedSettings &&
-						!schema.safeParse(Reflect.get(message.updatedSettings, key)).success
-					) {
+					if (!(key in message.updatedSettings)) continue
+					const incoming = Reflect.get(message.updatedSettings, key)
+					if (Object.is(incoming, provider.contextProxy.getValue(key as keyof RooCodeSettings))) continue
+
+					if (!schema.safeParse(incoming).success) {
 						failedKey = key
 						throw new Error(`Invalid value for ${key}`)
 					}

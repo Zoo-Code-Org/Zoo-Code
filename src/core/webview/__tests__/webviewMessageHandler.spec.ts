@@ -2495,6 +2495,54 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.settings_save_failed")
 		})
 
+		describe("a value that is already stored", () => {
+			// Out of bounds, as an older version or a hand-edited file could have left it.
+			const outOfBounds = {
+				interfaceFontScale: 500,
+				terminalFontSize: 99,
+				editorFontSize: 1,
+				spacingScale: 10,
+				chatFontSize: 99,
+			}
+
+			it.each(keys)(
+				"is not checked again, so a save that sends the stored %s still goes through",
+				async (key) => {
+					stored[key] = outOfBounds[key]
+
+					await save({ [key]: outOfBounds[key], soundEnabled: true })
+
+					expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+						expect.objectContaining({ requestId: "save-1", success: true }),
+					)
+					expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+					expect(stored.soundEnabled).toBe(true) // the rest of the save was stored
+				},
+			)
+
+			it("does not excuse another invalid value: the stored one is let through, the changed one is refused", async () => {
+				stored.chatFontSize = 99
+
+				await save({ chatFontSize: 99, terminalFontSize: 500, soundEnabled: true })
+
+				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+				expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({ success: false, error: "Invalid value for terminalFontSize" }),
+				)
+			})
+
+			it("is still checked when it is changed to another invalid value", async () => {
+				stored.chatFontSize = 99
+
+				await save({ chatFontSize: 100 })
+
+				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+				expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({ success: false, error: "Invalid value for chatFontSize" }),
+				)
+			})
+		})
+
 		it("changes nothing at all when one value is invalid, not even the valid ones sent with it", async () => {
 			vi.mocked(ensureDcgInstalled).mockClear()
 
