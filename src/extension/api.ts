@@ -32,6 +32,7 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { isNonPortableSettingsKey } from "../core/config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
@@ -623,9 +624,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	// Global Settings Management
 
+	/**
+	 * The settings an external caller may read. Secrets are the host's, and so are the per-view
+	 * selections plus the claim token that binds them: a caller that could read viewStates could
+	 * replay another view's identity, so both are dropped here rather than at whichever caller a
+	 * reviewer happened to point at. getValues() still serves the host's own consumers.
+	 */
 	public getConfiguration(): RooCodeSettings {
 		return Object.fromEntries(
-			Object.entries(this.sidebarProvider.getValues()).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries(this.sidebarProvider.getValues()).filter(
+				([key]) => !isSecretStateKey(key) && !isNonPortableSettingsKey(key),
+			),
 		)
 	}
 

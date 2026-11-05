@@ -127,4 +127,27 @@ describe("API - configuration", () => {
 			expect(log).toHaveBeenCalledWith(`[setConfiguration] Ignored an invalid value for ${key}`)
 		})
 	})
+
+	it("omits host-owned viewStates from the settings the API returns", () => {
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getValues: () => ({
+				currentApiConfigName: "default",
+				// Minted by the host: per-view selections plus the claim token that binds them.
+				viewStates: { "view-1": { claimToken: "claim-token-1", mode: "code" } },
+			}),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		expect(configuration.currentApiConfigName).toBe("default")
+		expect(Object.keys(configuration)).not.toContain("viewStates")
+		expect("viewStates" in configuration).toBe(false)
+		// The value must not escape either: the claim token is host-owned state.
+		expect(JSON.stringify(configuration)).not.toContain("claim-token-1")
+	})
 })
