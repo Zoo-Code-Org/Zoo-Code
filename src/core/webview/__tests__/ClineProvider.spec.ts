@@ -6902,6 +6902,79 @@ describe("ClineProvider", () => {
 			expect(provider["viewLocalState"].apiConfiguration?.apiKey).toBe("next-key")
 			await provider.dispose()
 		})
+		it("names the newly activated profile in the view buffer and its durable pin on an activating save", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			await provider["setViewStateId"]("stable-sidebar-view")
+			// The scenario the review row describes: this view is pinned to profile A in its buffer and
+			// in the durable record, and it is holding A settings. saveViewState writes both halves, so
+			// the pin is a real pin and not a primed field.
+			await provider.saveViewState("currentApiConfigName", "prior-profile")
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "prior-key",
+			}
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("next-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+
+			// Record every write this view makes to its own buffer and durable pin, in order, by
+			// wrapping the private mutation entry point. Bracket access reaches the private member
+			// without an assertion, and the wrapper delegates so behaviour is unchanged.
+			const viewWrites: (Partial<RooCodeSettings> & Partial<ExtensionState>)[] = []
+			const mirrorWrite = provider["_saveViewLocalStateFromMutation"]
+			provider["_saveViewLocalStateFromMutation"] = async (values) => {
+				// The buffer is mutated in place, so record a snapshot of the payload rather
+				// than the object the mutation path hands over.
+				viewWrites.push({ ...values })
+				await mirrorWrite.call(provider, values)
+			}
+
+			// A save that activates: the shared stores and this view mirror must agree on B.
+			await provider["persistProviderProfile"](
+				"next-profile",
+				{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" },
+				true,
+				new AbortController().signal,
+			)
+
+			// getValues() overlays this view buffer over the shared store. The reviewer fix is that one
+			// mutation carries the name together with the settings, so this view is never read in a
+			// state where a new name sits on the previous profile settings. Pin that, then both halves
+			// of the end state.
+			expect(viewWrites.some((values) => "currentApiConfigName" in values && "apiConfiguration" in values)).toBe(
+				true,
+			)
+			// The ordering this branch keeps on top of their group: the self refresh that follows the
+			// group still runs last, after every activation write landed.
+			expect(viewWrites.at(-1)?.apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "new-model",
+			})
+			// A mirror that carried only apiConfiguration would leave the buffered name A shadowing the
+			// profile that was just activated, which is what the webview would then be shown.
+			expect(provider.getValues().currentApiConfigName).toBe("next-profile")
+			expect(provider["viewLocalState"].apiConfiguration?.openRouterModelId).toBe("new-model")
+			// The durable pin has to follow too: a reload restores the entry below, and an entry that
+			// still names A loses the activation the user just performed.
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"stable-sidebar-view": { currentApiConfigName: "next-profile" },
+			})
+			await provider.dispose()
+		})
 		it("should undo this activation's mode binding and settings while it still owns them", async () => {
 			const provider = new ClineProvider(
 				mockContext,
