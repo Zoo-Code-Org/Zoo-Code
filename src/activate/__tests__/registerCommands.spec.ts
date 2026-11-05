@@ -1003,7 +1003,10 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("falls back to an undefined MdmService when MdmService.getInstance throws", async () => {
-		;(MdmService.getInstance as Mock).mockImplementation(() => {
+		// Scoped to the single lookup openClineInNewTab performs: this file's beforeEach only
+		// clears call history, so a plain mockImplementation would keep throwing for every
+		// later test in this file.
+		;(MdmService.getInstance as Mock).mockImplementationOnce(() => {
 			throw new Error("MDM service not initialized")
 		})
 
