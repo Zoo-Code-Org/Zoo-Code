@@ -78,9 +78,6 @@ export class ContextProxy {
 	private stateCache: GlobalState
 	private stateWriteGenerations = new Map<GlobalStateKey, number>()
 
-	// The value storage last accepted per key: a failed write must roll the cache back to
-	// what is actually persisted, not to another pending write's unpersisted value.
-	private statePersistedCache = new Map<GlobalStateKey, unknown>()
 	private secretCache: SecretState
 	private _isInitialized = false
 
@@ -100,11 +97,6 @@ export class ContextProxy {
 			try {
 				// Revert to original assignment
 				this.stateCache[key] = this.originalContext.globalState.get(key)
-				// Storage is the baseline of the rollback path: without this entry, a failed write
-				// on a key that has never been written through this proxy falls back to the
-				// previous cached value - which an overlapping write may have made its own
-				// unpersisted one.
-				this.statePersistedCache.set(key, this.stateCache[key])
 			} catch (error) {
 				logger.error(`Error loading global ${key}: ${error instanceof Error ? error.message : String(error)}`)
 			}
@@ -432,22 +424,16 @@ export class ContextProxy {
 		const release = () => {
 			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
 		}
-		return (async () => this.originalContext.globalState.update(key, value))().then(
-			() => {
-				this.statePersistedCache.set(key, value)
-				release()
-			},
-			(error: unknown) => {
-				try {
-					if (this.stateWriteOwner.get(key) === owner) {
-						this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
-					}
-				} finally {
-					release()
+		return (async () => this.originalContext.globalState.update(key, value))().then(release, (error: unknown) => {
+			try {
+				if (this.stateWriteOwner.get(key) === owner) {
+					this.stateCache[key] = this.originalContext.globalState.get<GlobalState[K]>(key)
 				}
-				throw error
-			},
-		)
+			} finally {
+				release()
+			}
+			throw error
+		})
 	}
 
 	/** Current per-key write generation, used by callers whose rollback must not clobber a newer write. */
