@@ -297,10 +297,9 @@ describe("ClineProvider - Sticky Mode", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			// Register only: firing the callback here disposes the view before resolveWebviewView finishes,
+			// which sends the later stale-check down the sidebar branch. Tests that need a disposal fire it.
+			onDidDispose: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
