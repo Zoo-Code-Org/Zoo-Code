@@ -6192,6 +6192,132 @@ describe("ClineProvider", () => {
 			await detached.dispose()
 		})
 
+		test("holds a claim minted after a renderer replacement and delivers it on the next launch", async () => {
+			// The interleaving the queue exists for: replacing the view drops the renderer's message
+			// listener, a durable view-state mutation mints a claim while the replacement renderer has
+			// no listener yet, and a post that resolves true against the page being replaced deletes a
+			// claim that renderer never received, so its launch cannot adopt this view's state.
+			const replaced = createProvider()
+			const firstView = {
+				...mockWebviewView,
+				webview: {
+					...mockWebviewView.webview,
+					onDidReceiveMessage: vi.fn(),
+					postMessage: vi.fn().mockResolvedValue(true),
+				},
+			}
+			await replaced.resolveWebviewView(firstView)
+			const firstLaunch = (firstView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
+			await firstLaunch({ type: "webviewDidLaunch" })
+			expect(replaced.isViewLaunched).toBe(true)
+
+			// A different view replaces the first one. The replacement renderer has not sent
+			// `webviewDidLaunch`, so nothing listens yet, yet its postMessage still resolves true -
+			// exactly the webview that swallows a claim the host believes was delivered.
+			const secondView = {
+				...mockWebviewView,
+				webview: {
+					...mockWebviewView.webview,
+					onDidReceiveMessage: vi.fn(),
+					postMessage: vi.fn().mockResolvedValue(true),
+				},
+			}
+			await replaced.resolveWebviewView(secondView)
+			expect(replaced.isViewLaunched).toBe(false)
+
+			const result = await replaced.saveViewState("mode", "architect")
+			const mintedClaim = storedEntries()[replaced.viewId]?.claimToken
+
+			// Held rather than posted: the entry keeps the token it just minted and the queue holds
+			// that same token for the launch that can actually receive it.
+			expect(result).toEqual({ persisted: true, claim: "queued" })
+			expect(mintedClaim).toEqual(expect.any(String))
+			expect(replaced["pendingViewStateClaims"].get(replaced.viewId)).toBe(mintedClaim)
+			expect(
+				secondView.webview.postMessage.mock.calls
+					.map((call: unknown[]) => call[0])
+					.filter(
+						(message: unknown): message is { type: string; viewStateId: string; viewStateClaim: string } =>
+							typeof message === "object" &&
+							message !== null &&
+							(message as { type?: unknown }).type === "viewStateClaim",
+					),
+			).toEqual([])
+
+			// The replacement renderer launches: the claim it never received arrives carrying the token
+			// the record already stores, which is what lets that launch adopt this view's state.
+			const secondLaunch = (secondView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock.calls[0][0]
+			await secondLaunch({ type: "webviewDidLaunch" })
+
+			const claimPosts = secondView.webview.postMessage.mock.calls
+				.map((call: unknown[]) => call[0])
+				.filter(
+					(message: unknown): message is { type: string; viewStateId: string; viewStateClaim: string } =>
+						typeof message === "object" &&
+						message !== null &&
+						(message as { type?: unknown }).type === "viewStateClaim",
+				)
+			expect(claimPosts).toEqual([
+				{ type: "viewStateClaim", viewStateId: replaced.viewId, viewStateClaim: mintedClaim },
+			])
+			expect(replaced["pendingViewStateClaims"].size).toBe(0)
+
+			await replaced.dispose()
+		})
+
+		test("lowers the launched flag when recovery replaces the renderer's HTML", async () => {
+			// Assigning new HTML discards the live document, listener included. A provider that still
+			// believes the renderer is launched posts claims into a page that is being replaced.
+			// Recovery schedules its own confirmation timer; fake timers keep it off the run so it
+			// cannot log after the environment is gone.
+			vi.useFakeTimers()
+			const recovered = createProvider()
+			recovered["view"] = mockWebviewView
+			recovered.isViewLaunched = true
+			recovered["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
+			const postMessageSpy = vi.spyOn(recovered, "postMessageToWebview").mockResolvedValue(true)
+
+			await recovered["reloadWebviewForRecovery"]()
+
+			expect(recovered.isViewLaunched).toBe(false)
+
+			// A claim minted after the swap is held for the regenerated renderer's own launch instead
+			// of being posted into a page whose listener is already gone.
+			const result = await recovered.saveViewState("mode", "architect")
+			const storedClaim = storedEntries()[recovered.viewId]?.claimToken
+			expect(result).toEqual({ persisted: true, claim: "queued" })
+			expect(storedClaim).toEqual(expect.any(String))
+			expect(recovered["pendingViewStateClaims"].get(recovered.viewId)).toBe(storedClaim)
+			expect(
+				postMessageSpy.mock.calls
+					.map((call: unknown[]) => call[0])
+					.filter(
+						(message: unknown): message is { type: string; viewStateId: string; viewStateClaim: string } =>
+							typeof message === "object" &&
+							message !== null &&
+							(message as { type?: unknown }).type === "viewStateClaim",
+					),
+			).toEqual([])
+
+			// The regenerated renderer reports its own launch and the held claim reaches it.
+			recovered.isViewLaunched = true
+			await recovered.deliverPendingViewStateClaims()
+			expect(
+				postMessageSpy.mock.calls
+					.map((call: unknown[]) => call[0])
+					.filter(
+						(message: unknown): message is { type: string; viewStateId: string; viewStateClaim: string } =>
+							typeof message === "object" &&
+							message !== null &&
+							(message as { type?: unknown }).type === "viewStateClaim",
+					),
+			).toEqual([{ type: "viewStateClaim", viewStateId: recovered.viewId, viewStateClaim: storedClaim }])
+
+			recovered["clearWebviewRecoveryConfirmation"]()
+			postMessageSpy.mockRestore()
+			await recovered.dispose()
+			vi.useRealTimers()
+		})
 		test("reports a queued claim on the save result when the webview has not launched", async () => {
 			// The persistence-integrity gap this result exists to close: the durable entry carries a
 			// claim the webview has never been handed. A save that resolves as a complete success

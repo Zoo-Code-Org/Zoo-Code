@@ -1509,6 +1509,11 @@ export class ClineProvider
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		this.stopWebviewWatchdog()
+		// The renderer behind this view is gone or about to be replaced, and its message
+		// listener dies with it: a post can still resolve true while nobody is there to receive
+		// it. The flag goes down here so a claim minted before the replacement launches is held
+		// in the queue and flushed by that replacement's own `webviewDidLaunch`.
+		this.isViewLaunched = false
 		// Invalidate any recovery reload still awaiting its HTML so it cannot
 		// reassign webview.html on the disposed view.
 		this.webviewRecoveryEpoch++
@@ -4556,6 +4561,10 @@ export class ClineProvider
 			) {
 				return
 			}
+			// Assigning new HTML discards the live document and its message listener, so the launched
+			// flag goes down with it; the regenerated renderer re-arms it from its own
+			// `webviewDidLaunch`, and any claim queued in between reaches it then.
+			this.isViewLaunched = false
 			view.webview.html = html
 			this.resetWebviewHeartbeatGrace()
 			const revision = this.webviewHeartbeatRevision
