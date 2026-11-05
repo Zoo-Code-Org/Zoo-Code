@@ -530,6 +530,14 @@ export class ClineProvider
 		return this.viewLocalState.currentApiConfigName
 	}
 
+	/**
+	 * This view's pinned mode slug from the view-local buffer, or undefined when the view
+	 * follows the shared selection. Exposed so a custom-mode deletion can key the reset
+	 * onto the view it actually applies to instead of moving every view's pin.
+	 */
+	get pinnedModeName(): string | undefined {
+		return this.viewLocalState.mode
+	}
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability

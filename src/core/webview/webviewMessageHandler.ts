@@ -2907,10 +2907,21 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Switch back to default mode after deletion, through the provider so this view's
-				// durable pin follows the slug being written: a direct ContextProxy write would move
-				// the shared store and leave a view pinned to the mode it just deleted pinning it.
-				await provider.setValue("mode", defaultModeSlug)
+				// Move onto the default mode only for the view this call applies to: the one whose
+				// effective mode - its durable pin, or the shared selection when it has no pin of
+				// its own - is the slug being deleted. Routing that write through the provider keeps
+				// this view's pin and the shared store on the same slug. A view pinned to a mode this
+				// deletion did not touch keeps its pin: moving it here used to overwrite an unrelated
+				// selection with the default. When the shared selection is the deleted slug but this
+				// view pins something else, only the shared layer moves, so the views that follow it
+				// do not resolve to a slug that no longer exists while this view keeps its own.
+				const pinnedMode = provider.pinnedModeName
+				const sharedMode = getGlobalState("mode")
+				if ((pinnedMode ?? sharedMode) === message.slug) {
+					await provider.setValue("mode", defaultModeSlug)
+				} else if (sharedMode === message.slug) {
+					await updateGlobalState("mode", defaultModeSlug)
+				}
 				await provider.postStateToWebview()
 			}
 			break

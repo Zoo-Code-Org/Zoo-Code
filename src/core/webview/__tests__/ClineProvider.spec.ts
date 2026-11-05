@@ -10547,6 +10547,26 @@ describe("ClineProvider", () => {
 		// getState() is what the fan-out serializes for this view: it merges the view's pin
 		// over the shared store, so it is the mode the webview actually renders.
 		const servedMode = async () => (await provider.getState()).mode
+		// Both slugs the cases below name, so the mode the provider validates against always
+		// carries the mode the view under test is pinned to.
+		const seedTwoModes = () => {
+			Object.assign(provider.customModesManager, {
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "gone-mode",
+						name: "Gone Mode",
+						roleDefinition: "A mode that is about to be deleted",
+						groups: ["read"] as const,
+					},
+					{
+						slug: "keep-mode",
+						name: "Keep Mode",
+						roleDefinition: "A mode this view is pinned to",
+						groups: ["read"] as const,
+					},
+				]),
+			})
+		}
 
 		it("moves a view pinned to the deleted mode onto the default mode", async () => {
 			const messageHandler = await handlerForView("pinned-deleted-view")
@@ -10567,6 +10587,9 @@ describe("ClineProvider", () => {
 
 		it("reports the default mode to a view that has no pin of its own", async () => {
 			const messageHandler = await handlerForView("unpinned-deleted-view")
+			// The shared selection is the slug being deleted - the selection this reset exists
+			// for - and the view has no pin of its own to keep it away from it.
+			await provider.contextProxy.setValue("mode", "gone-mode")
 
 			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
 
@@ -10578,6 +10601,38 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
 				"unpinned-deleted-view": { mode: "code" },
 			})
+		})
+
+		// Deleting one mode must not move a view that is pinned to a different one: the reset
+		// keys off the mode this view actually resolves to - its pin, or the shared selection
+		// when it has no pin of its own.
+		it("keeps a view pinned to another mode on that mode when a different mode is deleted", async () => {
+			const messageHandler = await handlerForView("pinned-other-view")
+			seedTwoModes()
+			await provider.saveViewState("mode", "keep-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			expect(await servedMode()).toBe("keep-mode")
+			expect(provider["viewLocalState"].mode).toBe("keep-mode")
+			// The shared selection was never the deleted slug, so nothing writes over it here.
+			expect(provider.contextProxy.getValue("mode")).toBeUndefined()
+		})
+
+		it("resets the shared selection without moving a view pinned to another mode", async () => {
+			const messageHandler = await handlerForView("pinned-other-shared-view")
+			seedTwoModes()
+			// The shared selection is the mode being deleted while this view pins another one:
+			// the shared layer must move so unpinned views stop resolving to the deleted slug,
+			// while this view keeps its own pin.
+			await provider.contextProxy.setValue("mode", "gone-mode")
+			await provider.saveViewState("mode", "keep-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("keep-mode")
+			expect(await servedMode()).toBe("keep-mode")
 		})
 
 		it("moves the pin onto the mode a pinned view just saved", async () => {
