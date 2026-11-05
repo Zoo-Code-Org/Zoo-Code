@@ -6898,6 +6898,52 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	it("leaves the entry under the temporary id and keeps authorship when the compensating re-key write also fails", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const temporaryId = await seedPreLaunchEntry(provider)
+		moveGenerationDuringViewStatesWrite(provider)
+
+		// The move is already stored when the generation check runs, so the recovery path is the
+		// compensating write. Reject the storage update whose payload puts the entry back under the
+		// temporary id and leave every other write behaving normally - payload-keyed so it hits that
+		// write and not the queue calls that precede it.
+		let compensatingWrites = 0
+		const mementoUpdate = mockContext.globalState.update
+		mockContext.globalState.update = ((key: string, value: unknown) => {
+			const payload = value as Record<string, unknown> | undefined
+			if (key === "viewStates" && payload && Object.prototype.hasOwnProperty.call(payload, temporaryId)) {
+				compensatingWrites++
+				return Promise.reject(new Error("storage rejected the compensating write"))
+			}
+			return mementoUpdate(key, value)
+		}) as typeof mockContext.globalState.update
+
+		await provider["rekeyPersistedViewStateEntry"]("stable-view")
+
+		expect(compensatingWrites).toBe(1) // the recovery write was attempted exactly once
+		const stored = mockContext.globalState.get<Record<string, { mode?: string }>>("viewStates") ?? {}
+		const cached =
+			(provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }> | undefined) ?? {}
+		// The recovery write never landed, so storage still holds the entry under the stable id from the
+		// forward write. The rollback exists so the cache ContextProxy keeps for the key says the same
+		// thing: without it the cache claims the entry moved back under a temporary id that durable
+		// storage never received, and every later read of the key serves a value nothing backs.
+		expect(stored["stable-view"]?.mode).toBe("architect")
+		expect(cached["stable-view"]?.mode).toBe("architect")
+		expect(cached[temporaryId]).toBeUndefined()
+		// Authorship stays claimed: storage still holds the entry under the stable id and a later launch
+		// has to re-key it, which is what the forward path already guarantees for its own failures.
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
+
+		await provider.dispose()
+	})
+
 	it("keeps the re-key applied and clears authorship while the view generation is live", async () => {
 		const provider = new ClineProvider(
 			mockContext,

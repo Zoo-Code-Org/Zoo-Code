@@ -1123,7 +1123,17 @@ export class ClineProvider
 				if (moved) {
 					delete after[nextViewStateId]
 					after[previousViewStateId] = moved
-					await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(after))
+					try {
+						await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(after))
+					} catch {
+						// The comment above promises best effort for the storage write only. If that write fails
+						// the entry is still under the stable id in storage, so the in-memory re-key above has to be
+						// undone as well: otherwise memory claims the temporary name is gone while storage still
+						// holds it, and authorship is cleared below even though a later launch still has to re-key
+						// the entry. Undo the re-key and keep the claim so the next launch can try again.
+						delete after[previousViewStateId]
+						after[nextViewStateId] = moved
+					}
 				}
 				return
 			}
