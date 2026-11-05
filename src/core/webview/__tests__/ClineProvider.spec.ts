@@ -3631,9 +3631,9 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// Each instance should have a unique viewId
-			expect(provider1.viewId).toBeDefined()
-			expect(provider2.viewId).toBeDefined()
+			// Each instance gets a unique viewId, prefixed by the render context it was built for.
+			expect(provider1.viewId).toMatch(/^sidebar-\d+$/)
+			expect(provider2.viewId).toMatch(/^editor-\d+$/)
 			expect(provider1.viewId).not.toBe(provider2.viewId)
 
 			await provider1.dispose()

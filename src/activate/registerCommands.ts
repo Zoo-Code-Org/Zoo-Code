@@ -381,9 +381,6 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 		// Clear once settled (success or failure) so the next call starts
 		// fresh: the reuse path in createTabPanelUnlocked then takes over
 		// for the tracked panel. Guard the clear so this settlement cannot
-		// clobber a replacement already stored in the slot. That clobber is
-		// unreachable in single-threaded settlement order: while the slot
-		// holds this in-flight creation, every other caller receives that
 		// clobber a replacement already stored in the slot. A joining caller
 		// that woke on the disposed creation can reach the slot first - it
 		// re-enters the loop, sees the slot empty, and stores its own
