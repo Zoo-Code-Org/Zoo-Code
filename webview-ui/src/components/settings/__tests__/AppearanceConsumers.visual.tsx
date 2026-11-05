@@ -54,7 +54,7 @@ for (const theme of visualThemes) {
 		expect(before.diff).not.toBe(22)
 		expect(before.code).not.toBe(22)
 		await expect(page.locator("html")).not.toHaveClass(/zoo-editor-font-set/)
-		await expect.soft(story).toHaveScreenshot(`appearance-consumers-${theme.name}-unset.png`)
+		await expect(story).toHaveScreenshot(`appearance-consumers-${theme.name}-unset.png`)
 
 		// Set: interface 150%, terminal 20px, editor 22px, spacing 150%.
 		await story.getByTestId("apply-appearance").click()
@@ -68,7 +68,7 @@ for (const theme of visualThemes) {
 		expect(await px(terminal, "font-size")).toBe(20)
 		expect(await px(diffCode, "font-size")).toBe(22)
 		expect(await px(code, "font-size")).toBe(22)
-		await expect.soft(story).toHaveScreenshot(`appearance-consumers-${theme.name}-set.png`)
+		await expect(story).toHaveScreenshot(`appearance-consumers-${theme.name}-set.png`)
 
 		// Removed again: every consumer is back on its default.
 		await story.getByTestId("remove-appearance").click()
@@ -83,7 +83,7 @@ for (const theme of visualThemes) {
 		expect(await px(diffCode, "font-size")).toBeCloseTo(before.diff, 1)
 		expect(await px(code, "font-size")).toBeCloseTo(before.code, 1)
 		// ...and it looks the way it did before: the same picture as the unset state.
-		await expect.soft(story).toHaveScreenshot(`appearance-consumers-${theme.name}-unset.png`)
+		await expect(story).toHaveScreenshot(`appearance-consumers-${theme.name}-unset.png`)
 	})
 }
 
