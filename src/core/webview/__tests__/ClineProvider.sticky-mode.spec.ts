@@ -531,7 +531,10 @@ describe("ClineProvider - Sticky Mode", () => {
 				totalCost: 0,
 			}
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
-			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+			// The double lands the write in the item the store hands back, so the assertions below can
+			// compare the persisted entry with the conversation instead of only the call arguments.
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item: HistoryItem) => {
+				historyItem.mode = item.mode
 				return Promise.resolve([])
 			})
 			await provider.addClineToStack(mockTask)
@@ -542,14 +545,141 @@ describe("ClineProvider - Sticky Mode", () => {
 			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
 
 			expect(provider.getValue("mode")).toBe("code")
-			// The pin the failed switch created must be cleared again rather than left
-			// holding the restored shared mode.
+			// A listener failure is not a persistence failure: the history write and the mode the task runs
+			// both committed, so they have to name the same mode. Before the emit moved out of the
+			// persistence try the entry named "ask" while the conversation still ran "code", so resuming
+			// from history restored a mode nobody chose, and the switch reported failure on a mode it had
+			// already stored.
+			expect(provider["getTaskHistoryItem"]("test-task-id")?.mode).toBe(mockTask["_taskMode"])
+			// No pin exists on this path: the failure lands before setValue touches any per-view state, so
+			// these two assertions describe the shape of the failure rather than a cleanup. The path where
+			// the pin really lands is the one below; _saveViewLocalStateFromMutation persists before it
+			// updates the buffer (ClineProvider.ts 5928-5937), so nothing here can be half-written.
 			expect(provider["viewLocalState"].mode).toBeUndefined()
-			expect(provider.getValues().mode).toBe("code")
 			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
-			// Either no entry was written for this view or the entry carries no mode key; what
-			// must not happen is a persisted pin holding the restored shared mode.
+			expect(provider.getValues().mode).toBe("code")
+			// Either no entry was written for this view or the entry carries no mode key; what must not
+			// happen is a persisted pin holding the restored shared mode.
 			expect(persisted.mode).toBeUndefined()
+		})
+
+		it("keeps the history entry on the mode the conversation runs when a TaskModeSwitched listener throws", async () => {
+			// The public API relay registers a TaskModeSwitched listener (src/extension/api.ts), so a consumer
+			// that throws makes EventEmitter.emit throw synchronously here. The emit used to sit between the
+			// history write and the in-memory mode assignment, inside the persistence try, so a listener
+			// failure reported a rejected switch while the history item already named the mode the switch
+			// rejected and the conversation still ran the old one: resuming from history then restores a
+			// mode nobody chose.
+			const emit = vi.fn()
+			emit.mockImplementation((event: string) => {
+				if (event === "taskModeSwitched") {
+					throw new Error("listener failed")
+				}
+			})
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "listener-fail-task",
+					taskMode: "code",
+					_taskMode: "code",
+					emit,
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "listener-fail-task",
+				ts: Date.now(),
+				task: "listener task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			// The double lands the write in the item the store hands back, so the assertions below compare
+			// the persisted entry with the conversation instead of only the arguments of the call.
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item: HistoryItem) => {
+				historyItem.mode = item.mode
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
+
+			// Bracket access: getTaskHistoryItem is private, and this asserts the state the method leaves
+			// behind rather than the calls it made.
+			expect(provider["getTaskHistoryItem"]("listener-fail-task")?.mode).toBe(mockTask["_taskMode"])
+			expect(provider["getTaskHistoryItem"]("listener-fail-task")?.mode).toBe("ask")
+			// The shared store still keeps the old mode: a listener failure is not a durable write failure,
+			// and that half of the contract is unchanged by moving the emit.
+			expect(provider.getValue("mode")).toBe("code")
+			expect(emit).toHaveBeenCalledWith("taskModeSwitched", "listener-fail-task", "ask")
+		})
+
+		it("keeps the mode pin it wrote when only the profile tail of the switch fails", async () => {
+			// The assertions above guard a path that writes no pin at all: the emit throws before setValue
+			// runs. This is the path where the pin really lands - the shared mode write and the per-view
+			// write both settle - and the failure arrives later, from the mode's saved-config lookup. A
+			// switch that fails there must not walk the pin back: the shared mode, the conversation and
+			// this view's record all moved together, and clearing only the pin would put this view back
+			// on the old mode while everything else runs the new one.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "pin-landed-task",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "pin-landed-task",
+				ts: Date.now(),
+				task: "pin landed",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item: HistoryItem) => {
+				historyItem.mode = item.mode
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			// The switch only reaches the mode's saved-config lookup after both mode writes settled,
+			// so this rejection arrives with the pin already in place.
+			const getModeConfigId = vi
+				.spyOn(provider.providerSettingsManager, "getModeConfigId")
+				.mockRejectedValue(new Error("mode config read failed"))
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow(
+				"mode config read failed",
+			)
+
+			expect(getModeConfigId).toHaveBeenCalledWith("ask")
+			expect(provider.getValue("mode")).toBe("ask")
+			expect(provider["viewLocalState"].mode).toBe("ask")
+			expect(mockTask["_taskMode"]).toBe("ask")
+			expect(historyItem.mode).toBe("ask")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			expect(persisted.mode).toBe("ask")
 		})
 
 		it("proceeds normally when no cancellation state exists", async () => {

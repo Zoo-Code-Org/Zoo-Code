@@ -2352,6 +2352,72 @@ describe("webviewMessageHandler - profile deletion routes through the provider m
 		)
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith("common:errors.delete_api_config")
 	})
+
+	it("prunes a stale list entry whose stored record is already gone", async () => {
+		// The secrets-backed record is gone while the entry still shows in the selector. listConfig
+		// reads the store and cannot find it, so the handler falls back to the UI-facing list and
+		// lets ClineProvider prune the entry idempotently instead of refusing to delete it.
+		writable.providerSettingsManager = {
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([
+					{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+				]),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const deleteProviderProfile = vi.fn().mockResolvedValue(undefined)
+		mockClineProvider.deleteProviderProfile = deleteProviderProfile
+		// The UI-facing list is read through contextProxy (webviewMessageHandler.ts:167).
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "listApiConfigMeta"
+				? [{ name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter }]
+				: undefined,
+		)
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "deleteApiConfiguration",
+			text: "doomed-profile",
+		})
+
+		expect(deleteProviderProfile).toHaveBeenCalledWith({
+			name: "doomed-profile",
+			id: "doomed-id",
+			apiProvider: providerIdentifiers.openrouter,
+		})
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("does not invent an entry for a name in neither the store nor the UI list", async () => {
+		// The fallback must not turn an unknown name into a delete: there is nothing to prune, so
+		// the provider is never called and no store is touched. The only effect is the existing
+		// delete-failure toast.
+		writable.providerSettingsManager = {
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([
+					{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+				]),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const deleteProviderProfile = vi.fn().mockResolvedValue(undefined)
+		mockClineProvider.deleteProviderProfile = deleteProviderProfile
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "listApiConfigMeta"
+				? [{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic }]
+				: undefined,
+		)
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "deleteApiConfiguration",
+			text: "ghost-profile",
+		})
+
+		expect(deleteProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.delete_api_config")
+	})
 })
 
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {

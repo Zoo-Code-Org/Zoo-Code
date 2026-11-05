@@ -439,8 +439,11 @@ async function disposeFailedTabCreation(
 	}
 }
 
-// The unserialized tab-creation body. Only openClineInNewTab may call it,
-// after it has stored the shared in-flight promise.
+// The unserialized tab-creation body. Its callers each serialize through their own in-flight
+// promise and start the body only after storing it: openClineInNewTab through
+// pendingTabPanelCreation (which also carries the forced-call and reuse rules above), and
+// openClineInNewTabForApi through apiTabPanelCreation. The two queues are not exclusive of
+// each other, so pendingTabPanelCreation does not cover API creations.
 const createTabPanelUnlocked = async ({
 	context,
 	outputChannel,

@@ -124,6 +124,9 @@ vi.mock("../../i18n", () => ({
 	t: (key: string) => key,
 }))
 
+vi.mock("../../services/diagnostics", () => ({
+	createDiagnosticsReport: vi.fn(),
+}))
 vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 }))
@@ -250,6 +253,24 @@ describe("registerCommands handlers", () => {
 		const disposable = mock.mock.results[0]?.value
 		expect(mock).toHaveBeenCalled()
 		expect(mockContext.subscriptions).toContain(disposable)
+	})
+
+	it("creates the diagnostics report from every provider instance, visible or not", async () => {
+		// Re-adopted from main's copy of this file: the command was added with the privacy-safe
+		// diagnostics report, and the click-origin rework of the title-bar handlers left it alone,
+		// so it still feeds every instance to the service instead of only the visible one.
+		const { createDiagnosticsReport } = await import("../../services/diagnostics")
+		const providers = [mockProvider as unknown as ClineProvider, mockVisibleProviderInstance]
+		vi.mocked(ClineProvider.getAllInstances).mockReturnValue(providers)
+		vi.mocked(ClineProvider.getVisibleInstance).mockReturnValue(undefined)
+
+		handlers["zoo-code.createDiagnosticsReport"]()
+
+		expect(vi.mocked(createDiagnosticsReport)).toHaveBeenCalledWith({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			providers,
+		})
 	})
 
 	it("passes the shared focus tracker to the newTask handler", async () => {

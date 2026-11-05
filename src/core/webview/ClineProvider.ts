@@ -2833,8 +2833,6 @@ export class ClineProvider
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
 				}
 
-				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
-
 				// Only update the task's mode after successful persistence.
 				;(task as any)._taskMode = newMode
 			} catch (error) {
@@ -2847,8 +2845,17 @@ export class ClineProvider
 				// This ensures the in-memory state remains consistent with persisted state.
 				throw error
 			}
-		}
 
+			// Emit after the assignment and outside the persistence try. EventEmitter.emit rethrows a
+			// listener's error synchronously, and the extension API registers a relay listener for this
+			// event (src/extension/api.ts), so a consumer that throws used to fail the switch *after* the
+			// history entry had already moved: the entry named the mode the caller was told the switch
+			// rejected while the conversation, the shared mode and the view's pin kept the old one, and a
+			// later resume from history restored a mode nobody chose. Emitting below the assignment keeps
+			// the entry and the conversation on the same mode whatever a listener does; the reported
+			// failure and the shared-store behaviour are unchanged.
+			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
+		}
 		// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
 		// buffer stays in sync with the durable global write: getValues() merges
 		// viewLocalState on top of the ContextProxy values, so an unsynced stale
@@ -3574,6 +3581,16 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
+		// The same queue that serialises activation, mode switch, save and rename. This deletion
+		// snapshots every store it rewrites and compensates them as a group, so a mutation that
+		// interleaves with it gets undone by the other's rollback: an activation that started
+		// mid-deletion would have its selection rolled back to the profile being removed, and a
+		// deletion that started mid-activation would compensate a pin for the profile the user had
+		// just left. Nothing below enqueues again, so holding the queue here cannot deadlock.
+		return this.enqueueProviderProfileMutation(() => this.deleteProviderProfileUnlocked(profileToDelete))
+	}
+
+	private async deleteProviderProfileUnlocked(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -3638,6 +3655,18 @@ export class ClineProvider
 		// the try block scope.
 		let deletedWasGlobal = false
 		let viewWasPinnedToDeleted = false
+
+		// Captured outside the write group. When this view was pinned to the deleted profile the write group
+		// re-points this view's own pin and overlay onto the survivor, and the conversation's sticky profile
+		// name and history entry move with them; none of that is part of restoring the shared stores, so it
+		// is snapshotted here and put back by the compensation below when the deletion is rolled back.
+		const actingViewPinBefore = this.viewLocalState.currentApiConfigName
+		const actingViewOverlayBefore = this.viewLocalState.apiConfiguration
+		const actingTaskAtEntry = this.getCurrentTask()
+		const actingTaskPreviousName = actingTaskAtEntry?.taskApiConfigName
+		const actingTaskPreviousHistoryItem = actingTaskAtEntry
+			? this.getTaskHistoryItem(actingTaskAtEntry.taskId)
+			: undefined
 
 		try {
 			const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
@@ -3744,12 +3773,14 @@ export class ClineProvider
 			// the sticky name moves to the survivor as well, or a later reload re-resolves
 			// a profile that no longer exists.
 			if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+				// Strict: a task left naming the deleted profile must fail the deletion so the write
+				// group above is rolled back instead of reporting a successful deletion.
+				// It runs before the rebuild below on purpose: a rebuilt API handler is not part of that
+				// rollback, so a rejected sticky write must not leave this conversation on the survivor's settings.
+				await this.persistStickyProviderProfileToCurrentTask(profileToActivate, { strictPersistence: true })
 				if (survivingSettings) {
 					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
 				}
-				// Strict: a task left naming the deleted profile must fail the deletion so the write
-				// group above is rolled back instead of reporting a successful deletion.
-				await this.persistStickyProviderProfileToCurrentTask(profileToActivate, { strictPersistence: true })
 			}
 			// Re-pin other live views still buffered on the deleted profile: their
 			// buffer and durable viewStates entry would otherwise keep serving the
@@ -3835,6 +3866,46 @@ export class ClineProvider
 				this.log(
 					`[deleteProviderProfile] failed to restore the shared provider settings: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				)
+			}
+			if (recordRestored && viewWasPinnedToDeleted) {
+				// The shared stores are back, so this view's own re-point has to go back with them: the caller
+				// was told the deletion failed and the deleted profile exists again, so this view must not stay
+				// switched to the survivor - live and durable, because a reload reads the durable entry. Only
+				// undo a pin this deletion actually moved: if the user or a later activation moved this view
+				// onto a different profile during the failure window, that choice is newer than this snapshot.
+				// Same three-part rule as the sibling loop above: the record came back, this view was the one
+				// pinned to the deleted profile, and the pin still names what this operation wrote.
+				try {
+					if (this.viewLocalState.currentApiConfigName === profileToActivate) {
+						await this._saveViewLocalStateFromMutation({
+							currentApiConfigName: actingViewPinBefore,
+							apiConfiguration: actingViewOverlayBefore,
+						})
+					}
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore this view's own pin: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
+				// The conversation's sticky profile name and its history entry moved with the pin. The strict
+				// write puts both back when it is the write that fails, so this only covers a later write in
+				// the same group failing after the sticky write had already landed.
+				try {
+					if (actingTaskAtEntry && actingTaskAtEntry.taskApiConfigName !== actingTaskPreviousName) {
+						actingTaskAtEntry.setTaskApiConfigName(actingTaskPreviousName)
+						if (actingTaskPreviousHistoryItem) {
+							await this.updateTaskHistory(actingTaskPreviousHistoryItem)
+						}
+					}
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore the acting task's sticky profile: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
 			}
 			try {
 				const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
@@ -4337,11 +4408,22 @@ export class ClineProvider
 		// Snapshot every affected view BEFORE any write starts: a failure in one sibling
 		// has to roll back the siblings that already landed too, otherwise the deletion
 		// leaves some views pinned to a profile that no longer exists.
-		const snapshots = affected.map((instance) => ({
-			instance,
-			previousPin: instance.viewLocalState.currentApiConfigName,
-			previousOverlay: instance.viewLocalState.apiConfiguration,
-		}))
+		const snapshots = affected.map((instance) => {
+			// Decided before any write starts. The strict sticky persistence inside the settled loop moves
+			// this conversation's own profile name and its history entry, and neither is part of restoring
+			// the view's pin, so all of them are captured here. The eligibility flag is read before the
+			// write as well, because that same write re-points taskApiConfigName.
+			const task = instance.getCurrentTask()
+			return {
+				instance,
+				previousPin: instance.viewLocalState.currentApiConfigName,
+				previousOverlay: instance.viewLocalState.apiConfiguration,
+				taskAtSnapshot: task,
+				previousTaskApiConfigName: task?.taskApiConfigName,
+				previousTaskHistoryItem: task ? instance.getTaskHistoryItem(task.taskId) : undefined,
+				taskWasUnderDeletedProfile: task?.taskApiConfigName === deletedProfileName,
+			}
+		})
 
 		const results = await Promise.allSettled(
 			snapshots.map(async (snapshot) => {
@@ -4380,13 +4462,13 @@ export class ClineProvider
 				// hold a task that follows a different sticky profile, and forcing the
 				// replacement would silently switch that conversation and rewrite its
 				// persisted profile name without the user asking.
-				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-					if (replacementSettings) {
-						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
-					}
+				if (snapshot.taskWasUnderDeletedProfile) {
 					// Strict: the allSettled below turns a rejected task-history write into a rejected sibling,
 					// which rolls every affected view back and rejects the deletion, instead of leaving that
 					// sibling's conversation on the deleted profile while its view was already re-pointed.
+					// The matching handler rebuild is deliberately NOT here: a rebuilt API handler is not part of the
+					// rollback below, so rebuilding inside the settled loop leaves a sibling whose own write landed
+					// holding the replacement's handler while another sibling's rejected write rolls its pin back.
 					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName, {
 						strictPersistence: true,
 					})
@@ -4402,7 +4484,7 @@ export class ClineProvider
 			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
 			// cannot skip the next one.
 			const restoreFailures: string[] = []
-			for (const snapshot of snapshots) {
+			for (const [index, snapshot] of snapshots.entries()) {
 				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
 				// the monotonic nextViewId counter, so no future view ever reads that entry again and
 				// prunePersistedViewStates() bounds it. Re-checked here too: the sibling can start
@@ -4425,6 +4507,31 @@ export class ClineProvider
 					// caller, or a sibling left pinned to the deleted profile is invisible.
 					restoreFailures.push(`view ${snapshot.instance.viewId}: ${message}`)
 				}
+				// The strict sticky persistence inside the settled loop also moved this conversation's own profile
+				// name and its history entry. Only the sibling whose own write FAILED is self-restored by that call,
+				// so a sibling whose write landed would keep naming the replacement while its pin goes back to the
+				// deleted profile - the same split state the pin restore above exists to prevent. Skipped when
+				// nothing actually moved: that covers the rejected sibling, which already put both back itself,
+				// and a sibling that a disposal guard returned early.
+				const task = snapshot.taskAtSnapshot
+				if (
+					results[index]?.status === "fulfilled" &&
+					task &&
+					task.taskApiConfigName !== snapshot.previousTaskApiConfigName
+				) {
+					try {
+						task.setTaskApiConfigName(snapshot.previousTaskApiConfigName)
+						if (snapshot.previousTaskHistoryItem) {
+							await snapshot.instance.updateTaskHistory(snapshot.previousTaskHistoryItem)
+						}
+					} catch (rollbackError: unknown) {
+						const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						snapshot.instance.log(
+							`[rePinViewLocalStateForDeletedProfile] Could not restore the task profile for view ${snapshot.instance.viewId} after a failed re-pin: ${message}`,
+						)
+						restoreFailures.push(`view ${snapshot.instance.viewId} task profile: ${message}`)
+					}
+				}
 			}
 			const original = rejected[0].reason
 			if (restoreFailures.length > 0) {
@@ -4445,16 +4552,15 @@ export class ClineProvider
 		// conversation keeps sending the deleted profile's configuration even though the view's
 		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
 		for (const snapshot of snapshots) {
-			// Only re-point when the task actually runs under the deleted profile:
-			// a view pinned to it can hold a task that follows a different sticky
-			// profile, and forcing the replacement would silently switch that
-			// conversation and rewrite its persisted profile name without the user
-			// asking.
-			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-				if (replacementSettings) {
-					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
-				}
-				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+			// The only place a task handler moves: a rebuilt handler cannot be compensated, so it waits for
+			// every sibling to land. The eligibility flag comes from before the writes, because the strict
+			// sticky persistence in the settled loop has already re-pointed taskApiConfigName for exactly
+			// this set - reading it here again would skip every conversation that needed the swap. Only
+			// conversations that actually ran under the deleted profile are re-pointed: a view pinned to it
+			// can hold a task that follows a different sticky profile, and forcing the replacement would
+			// silently switch that conversation and rewrite its persisted profile name without the user asking.
+			if (snapshot.taskWasUnderDeletedProfile && replacementSettings) {
+				snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
 			}
 			await snapshot.instance.postStateToWebview()
 		}

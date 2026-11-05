@@ -2811,9 +2811,12 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const profileToDelete = (await provider.providerSettingsManager.listConfig()).find(
-					(profile) => profile.name === oldName,
-				)
+				const profileToDelete =
+					(await provider.providerSettingsManager.listConfig()).find((profile) => profile.name === oldName) ??
+					// The stored record can already be gone while the entry still shows in the selector:
+					// deleteProviderProfile treats that delete as an idempotent prune, so falling back to
+					// the UI-facing list clears the stale entry instead of stranding it in the selector.
+					(getGlobalState("listApiConfigMeta") ?? []).find((profile) => profile.name === oldName)
 
 				if (!profileToDelete) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))

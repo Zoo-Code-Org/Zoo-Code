@@ -158,6 +158,49 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
 		})
 
+		it("does not resurrect a pre-reset value when a write rejects after resetAllState", async () => {
+			// The owner-token design (ContextProxy.ts:401-432) corrects a rejected write by re-reading the
+			// Memento while the writer is still the owner of the key. resetAllState writes undefined for
+			// every global key before it re-initializes, so a write that is still in flight when the reset
+			// runs reads back undefined on its rejection instead of putting the pre-reset value back.
+			// The fixture models a Memento whose get and update agree, so the read-back sees what the
+			// reset actually stored rather than a value the mock kept on its own.
+			const store = new Map<string, unknown>()
+			let holdNextWrite = false
+			let heldWrite: { reject?: (error: Error) => void } | null = null
+			mockGlobalState.get = vi.fn((key: string) => store.get(key))
+			mockGlobalState.update = vi.fn((key: string, value: unknown) => {
+				if (holdNextWrite) {
+					holdNextWrite = false
+					const slot: { reject?: (error: Error) => void } = {}
+					heldWrite = slot
+					return new Promise<void>((resolve, reject) => {
+						slot.reject = reject
+					})
+				}
+				store.set(key, value)
+				return Promise.resolve(undefined)
+			})
+			await proxy.initialize()
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+
+			holdNextWrite = true
+			const pendingWrite = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// The reset runs while that write is still in flight.
+			await proxy.resetAllState()
+			expect(mockGlobalState.update).toHaveBeenCalledWith("apiProvider", undefined)
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+
+			heldWrite!.reject!(new Error("write failed after reset"))
+			await expect(pendingWrite).rejects.toThrow("write failed after reset")
+
+			// The rejection handler is still the owner of the key, so it writes back what the Memento now
+			// holds - undefined - rather than the value the cache carried before the reset.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
