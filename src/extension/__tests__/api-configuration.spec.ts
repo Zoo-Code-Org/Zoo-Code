@@ -12,6 +12,37 @@ vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},
 }))
 
+// A manager double runs a cross-instance critical section inline, which is what the real queue
+// does whenever no other view holds it. The queue itself is exercised by the interleaving test
+// below, which installs its own.
+const runManagerSectionInline = <T>(cb: () => Promise<T>): Promise<T> => cb()
+
+// The manager double for the profile store: hasConfig, getProfile, saveConfig and deleteConfig all
+// read and write one map, so the existence re-read that the compensation runs inside the critical
+// section sees the record this call saved - which is what the section orders in production. A
+// static hasConfig mock cannot model that: it answers "absent" both before the save and after it.
+const makeProfileStoreDouble = (seed: Record<string, { id: string; settings: Record<string, unknown> }> = {}) => {
+	const entries = new Map(Object.entries(seed))
+	const hasConfig = vi.fn((name: string) => Promise.resolve(entries.has(name)))
+	const getProfile = vi.fn(({ name }: { name: string }) => {
+		const entry = entries.get(name)
+		if (!entry) {
+			return Promise.reject(new Error(`Profile "${name}" does not exist`))
+		}
+		return Promise.resolve({ name, id: entry.id, ...entry.settings })
+	})
+	const saveConfig = vi.fn((name: string, settings: Record<string, unknown>) => {
+		const id = entries.get(name)?.id ?? "created-id"
+		entries.set(name, { id, settings })
+		return Promise.resolve(id)
+	})
+	const deleteConfig = vi.fn((name: string) => {
+		entries.delete(name)
+		return Promise.resolve()
+	})
+	return { entries, hasConfig, getProfile, saveConfig, deleteConfig }
+}
+
 describe("API - configuration", () => {
 	it("persists every supplied mode API config mapping", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
@@ -31,6 +62,7 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
 			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				setModeConfig,
 				hasConfig: vi.fn().mockResolvedValue(false),
@@ -80,6 +112,7 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
 			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				setModeConfig,
 				hasConfig: vi.fn().mockResolvedValue(false),
@@ -115,6 +148,7 @@ describe("API - configuration", () => {
 				setProviderSettings,
 			},
 			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				deleteConfig,
 				setModeConfig,
@@ -139,8 +173,8 @@ describe("API - configuration", () => {
 	})
 	it("restores the stored profile and shared settings when the refresh fails after the save", async () => {
 		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
-		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
-		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		// The store double keeps the compensation re-read honest: this call creates the record, so the
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
 		const setModeConfig = vi.fn().mockResolvedValue(undefined)
 		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -162,11 +196,10 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig,
+				getProfile,
 				setModeConfig,
-				// Existence is read from the store: the profile did not exist before this
-				// call, so compensation must delete the record the save created.
-				hasConfig: vi.fn().mockResolvedValue(false),
-				getProfile: vi.fn(),
+				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -199,8 +232,8 @@ describe("API - configuration", () => {
 			writeOrder.push("contextProxy.setValues")
 			return Promise.resolve(undefined)
 		})
-		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
-		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		// The store double keeps the compensation re-read honest: this call creates the record, so the
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		// The shared store carries one mode and pin; this view's overlay carries another, and
 		// getConfiguration() - which the rollback replays - merges the overlay over shared state.
@@ -221,11 +254,10 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig,
+				getProfile,
 				setModeConfig: vi.fn().mockResolvedValue(undefined),
-				// The profile did not exist before this call: compensation deletes the record the
-				// save created, which keeps the focus here on the settings restore.
-				hasConfig: vi.fn().mockResolvedValue(false),
-				getProfile: vi.fn(),
+				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -288,6 +320,7 @@ describe("API - configuration", () => {
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
 			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				deleteConfig,
 				hasConfig: vi.fn().mockResolvedValue(true),
@@ -315,8 +348,9 @@ describe("API - configuration", () => {
 
 	it("rolls back the complete mutation when a mode mapping write fails", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
-		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
-		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		// The store double keeps the compensation re-read honest: this call creates the record, so
+		// the re-read inside the critical section must find it rather than repeat the pre-call answer.
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
 		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
 		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
 		// The shared-pair restore below writes the shared store directly, so it gets its own
@@ -340,13 +374,14 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig,
+				getProfile,
 				setModeConfig,
-				// The profile did not exist before the call.
-				hasConfig: vi.fn().mockResolvedValue(false),
 				// The code mode had no mapping before: rollback must clear the
 				// mapping this call created rather than leave it pointing at the
 				// config the failed fan-out chose.
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -382,8 +417,9 @@ describe("API - configuration", () => {
 		// list #2226 filters the read side with. getValues() itself keeps the key: the host's
 		// own consumers still need it.
 		const setValues = vi.fn().mockResolvedValue(undefined)
-		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
-		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		// The store double keeps the compensation re-read honest: this call creates the record, so
+		// the re-read inside the critical section must find it rather than repeat the pre-call answer.
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
 		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
 		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
 		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
@@ -407,9 +443,11 @@ describe("API - configuration", () => {
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
+				hasConfig,
+				getProfile,
 				setModeConfig,
-				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -436,6 +474,193 @@ describe("API - configuration", () => {
 			expect(JSON.stringify(values)).not.toContain("payload-pin")
 			expect(JSON.stringify(values)).not.toContain("snapshot-pin")
 		})
+	})
+
+	it("restores a same-name record another view created instead of deleting it", async () => {
+		// The interleaving this critical section exists to close. A second view enters the manager
+		// cross-instance queue and parks there while it creates the profile this call is about to
+		// save. Our call must queue behind it, so the create lands before our existence check, our
+		// own write then fails, and the rollback restores that view record instead of deleting it
+		// together with its secret.
+		let queue: Promise<unknown> = Promise.resolve()
+		const runExclusiveAcrossInstances = <T>(cb: () => Promise<T>): Promise<T> => {
+			const run = queue.then(cb)
+			// A settled-clean owner keeps one failed section from poisoning the queue for the next
+			// caller, which is why the production queue stores one.
+			queue = run.then(
+				() => {},
+				() => {},
+			)
+			return run
+		}
+		const callOrder: string[] = []
+		const records = new Map<string, { id: string; settings: Record<string, unknown> }>()
+		let releaseOtherView: (() => void) | undefined
+		const otherViewCreate = new Promise<void>((resolve) => {
+			releaseOtherView = resolve
+		})
+		const otherView = runExclusiveAcrossInstances(async () => {
+			callOrder.push("other view entered the section")
+			await otherViewCreate
+			records.set("pinned", { id: "other-view-id", settings: { apiKey: "other-view-secret" } })
+			callOrder.push("other view created the record")
+		})
+		const hasConfig = vi.fn((name: string) => {
+			callOrder.push("this call checked existence")
+			return Promise.resolve(records.has(name))
+		})
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			const entry = records.get(name)
+			return entry
+				? Promise.resolve({ name, id: entry.id, ...entry.settings })
+				: Promise.reject(new Error(`Profile "${name}" does not exist`))
+		})
+		const saveConfig = vi.fn((name: string, settings: Record<string, unknown>) => {
+			// A store that keeps an existing record id on an overwrite is what the production
+			// manager does, and it is the reason the compensation has to compare ids.
+			const id = records.get(name)?.id ?? "this-call-id"
+			records.set(name, { id, settings })
+			callOrder.push("this call saved the record")
+			return Promise.resolve(id)
+		})
+		const deleteConfig = vi.fn((name: string) => {
+			records.delete(name)
+			callOrder.push("this call deleted the record")
+			return Promise.resolve()
+		})
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			// Releasing the parked create from the snapshot read keeps the interleaving
+			// deterministic: the snapshot is taken before this call enters the section, so the
+			// other view wakes, finishes its create, and releases the lock before our existence
+			// check runs - and only because our call queued behind it.
+			getValues: vi.fn().mockImplementation(() => {
+				releaseOtherView?.()
+				return { currentApiConfigName: "old-profile" }
+			}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				runExclusiveAcrossInstances,
+				hasConfig,
+				getProfile,
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+		await otherView
+
+		// The create beat our existence check, which is what joining the section means: without it
+		// this call reads the name as absent, overwrites the record, and rolls back by deleting it.
+		expect(callOrder.indexOf("other view created the record")).toBeLessThan(
+			callOrder.indexOf("this call checked existence"),
+		)
+		// The other view record survives our rollback, id and secret included, and the restore
+		// re-applies its stored settings rather than removing the record.
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(records.get("pinned")).toEqual({
+			id: "other-view-id",
+			settings: expect.objectContaining({ apiKey: "other-view-secret" }),
+		})
+		expect(saveConfig).toHaveBeenCalledTimes(2)
+		expect(saveConfig).toHaveBeenLastCalledWith("pinned", expect.objectContaining({ apiKey: "other-view-secret" }))
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("replays only the keys this call wrote and leaves keys another view changed alone", async () => {
+		// A rollback may restore what this call changed and nothing else, because anything the
+		// snapshot happens to hold otherwise belongs to a writer that has moved on since it was
+		// taken. The payload writes two settings; after this call snapshots the configuration and
+		// before its mode write fails, another view writes a shared setting and the pass-through
+		// taskHistory key. Neither may be written back from this call stale snapshot.
+		const store: Record<string, unknown> = {
+			currentApiConfigName: "old-profile",
+			modeApiConfigs: { code: "old-code-config" },
+			terminalOutputLineLimit: 1000,
+			taskHistory: "snapshot-tasks",
+		}
+		const written: Array<Record<string, unknown>> = []
+		const setValues = vi.fn((values: Record<string, unknown>) => {
+			written.push({ ...values })
+			return Promise.resolve(undefined)
+		})
+		const setModeConfig = vi.fn(async () => {
+			// Another view lands between the snapshot above and this failure.
+			store.terminalOutputLineLimit = 42
+			store.taskHistory = "other-view-tasks"
+			throw new Error("mode write failed")
+		})
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
+		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			// Live-backed so the snapshot is this call view of the store at snapshot time.
+			getValues: vi.fn(() => ({ ...store })),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: sharedSetValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		// Two settings writes in this call: the payload forward, then the rollback replay.
+		expect(written).toHaveLength(2)
+		expect(written[0]).toEqual(expect.objectContaining({ currentApiConfigName: "pinned" }))
+		// The replay carries exactly the keys this call wrote, at their pre-call values: the shared
+		// setting and the pass-through key another view changed are not in it at all.
+		expect(Object.keys(written[1]).sort()).toEqual(["currentApiConfigName", "modeApiConfigs"])
+		expect(written[1]).toEqual({ currentApiConfigName: "old-profile", modeApiConfigs: { code: "old-code-config" } })
+		expect(JSON.stringify(written[1])).not.toContain("terminalOutputLineLimit")
+		expect(JSON.stringify(written[1])).not.toContain("snapshot-tasks")
+		// And the other view values are still where that view put them.
+		expect(store.terminalOutputLineLimit).toBe(42)
+		expect(store.taskHistory).toBe("other-view-tasks")
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 	it("replays the restored overlay after the configuration restore for the active profile", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
@@ -469,6 +694,7 @@ describe("API - configuration", () => {
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
 			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				deleteConfig,
 				hasConfig: vi.fn().mockResolvedValue(true),
@@ -530,6 +756,7 @@ describe("API - configuration", () => {
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
 			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
 				deleteConfig,
 				hasConfig: vi.fn().mockResolvedValue(true),
@@ -566,6 +793,7 @@ describe("API - configuration", () => {
 		const setup = () => {
 			const setValues = vi.fn().mockResolvedValue(undefined)
 			const log = vi.fn()
+			const profileStore = makeProfileStoreDouble()
 			const provider = {
 				context: {},
 				on: vi.fn(),
@@ -580,11 +808,15 @@ describe("API - configuration", () => {
 					setValues,
 				},
 				providerSettingsManager: {
-					saveConfig: vi.fn().mockResolvedValue("default-id"),
-					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					// The store double answers the compensation re-read with the record this call saved,
+					// which a static hasConfig mock cannot do: it answers "absent" on both readings.
+					saveConfig: profileStore.saveConfig,
+					deleteConfig: profileStore.deleteConfig,
+					hasConfig: profileStore.hasConfig,
+					getProfile: profileStore.getProfile,
 					setModeConfig: vi.fn().mockResolvedValue(undefined),
-					hasConfig: vi.fn().mockResolvedValue(false),
 					getModeConfigId: vi.fn().mockResolvedValue(undefined),
+					runExclusiveAcrossInstances: runManagerSectionInline,
 				},
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 			} as unknown as ClineProvider

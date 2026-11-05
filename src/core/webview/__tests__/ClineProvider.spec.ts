@@ -6810,8 +6810,19 @@ describe("ClineProvider", () => {
 
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "openrouter/old-model",
+				openRouterApiKey: "view-key",
 			})
+
+			await provider.setValues({ apiProvider: providerIdentifiers.anthropic, apiKey: "flat-key" })
+
+			// The overlay is removed, not merely out-shadowed: the merged read serves this view's
+			// flat write and carries no per-view apiConfiguration left behind, so a later shared
+			// update from another view cannot be hidden behind an older copy of this view's own.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(provider.getValues().apiConfiguration).toBeUndefined()
+			expect(provider.getValues().apiProvider).toBe(providerIdentifiers.anthropic)
+			expect(provider.getValues().apiKey).toBe("flat-key")
+
 			await provider.dispose()
 		})
 

@@ -43,6 +43,8 @@ describe("API.setConfiguration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
 			providerSettingsManager: {
+				// A single view holds no other claim on the cross-instance section: run it inline.
+				runExclusiveAcrossInstances: <T>(cb: () => Promise<T>): Promise<T> => cb(),
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 				// The accept path records whether the profile existed before saving; without it
 				// the call throws and the test only passes through the catch fallback.

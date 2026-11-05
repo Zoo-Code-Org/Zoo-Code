@@ -42,6 +42,10 @@ export class VSCodeAPIWrapper {
 		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 	}
 
+	// The host enforces the same bound (ClineProvider.MAX_VIEW_STATE_ID_LENGTH) when it accepts
+	// this id, and it enforces it on every launch, so the webview must not hand it a longer one.
+	private static readonly MAX_VIEW_STATE_ID_LENGTH = 64
+
 	/**
 	 * Returns the stable view state identifier for this webview, creating and persisting
 	 * one on first use so the extension can keep per-view state isolated across providers.
@@ -54,16 +58,24 @@ export class VSCodeAPIWrapper {
 				: {}
 		const existingViewStateId = stateObject.viewStateId
 
-		// Mirror the ClineProvider.setViewStateId validation so the webview never
-		// registers an id the extension would reject: trim, replace unsafe
-		// characters, and drop whitespace-only values plus every Object.prototype
-		// member name. "__proto__" alone is not enough: ids like "constructor" or
-		// "toString" survive the host's normalization and would be refused there
-		// forever, stranding this view's pre-launch entry under the temporary id.
+		// Keep this one an id the extension will accept. ClineProvider.setViewStateId trims and
+		// rewrites unsafe characters exactly as the line below does, and then rejects only two
+		// things: an empty result and the "__proto__" key. So "constructor" and "toString" are
+		// accepted by the host, and this side is deliberately stricter - it refuses every
+		// Object.prototype name, because writing states["constructor"] hits an inherited key that a
+		// later spread can drop. The host also refuses ids longer than MAX_VIEW_STATE_ID_LENGTH,
+		// which is applied here too: a stored id above that bound would be rejected on every
+		// launch, which is exactly the stranding of this view pre-launch entry this guard exists to
+		// avoid. Being stricter than the peer is the point - the webview must never register an id
+		// the host will not take.
 		const normalizedViewStateId =
 			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
 
-		if (normalizedViewStateId && !Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)) {
+		if (
+			normalizedViewStateId &&
+			normalizedViewStateId.length <= VSCodeAPIWrapper.MAX_VIEW_STATE_ID_LENGTH &&
+			!Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
+		) {
 			return normalizedViewStateId
 		}
 

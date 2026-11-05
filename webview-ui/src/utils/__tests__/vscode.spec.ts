@@ -306,6 +306,44 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "proto-refused-view" })
 	})
 
+	it("generates a fresh id when the persisted id exceeds the extension length bound", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "long-refilled-view") },
+		})
+		// ClineProvider.setViewStateId refuses an id longer than MAX_VIEW_STATE_ID_LENGTH. Without
+		// the same bound here this view would keep claiming a 65-character id the extension refuses
+		// on every launch, and its pre-launch entry would stay stranded under the temporary id.
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "a".repeat(65) }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("long-refilled-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "long-refilled-view" })
+	})
+
+	it("reuses a persisted id of exactly the extension length bound", () => {
+		const randomUUID = vi.fn(() => "should-not-be-generated")
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID },
+		})
+		// The bound is inclusive: the host refuses ids longer than 64 characters, so a 64-character
+		// stored id is still this view id and must be reused rather than regenerated and re-keyed.
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "b".repeat(64) }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("b".repeat(64))
+		expect(randomUUID).not.toHaveBeenCalled()
+	})
+
 	it("keeps one generated id when a write fails while stale persisted state stays readable", () => {
 		const randomUUID = vi.fn().mockReturnValueOnce("gen-one").mockReturnValueOnce("gen-two")
 		Object.defineProperty(globalThis, "crypto", {
