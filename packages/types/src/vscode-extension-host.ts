@@ -50,6 +50,7 @@ export interface ExtensionMessage {
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotSignInResult
+		| "settingsSaveResult"
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -342,6 +343,9 @@ export type ExtensionState = Pick<
 	| "includeTaskHistoryInEnhance"
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
+	| "timeFormat"
+	| "dateFormat"
+	| "showRelativeTimes"
 	| "enterBehavior"
 	| "includeCurrentTime"
 	| "includeCurrentCost"
