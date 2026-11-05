@@ -106,6 +106,49 @@ describe("safeWriteText", () => {
 	})
 
 	describe("staging and cleanup", () => {
+		// The staging directory is private, and it must stay the only thing that is. Created inside
+		// a parent that does not exist yet, the recursive mkdirSync that makes it also makes that
+		// parent -- with the staging mode -- so the target ends up published into an owner-only
+		// directory it never asked for. What matters is the order of the two creations and the
+		// mode each one carries, recorded across both filesystem APIs this write uses.
+		it("creates the target's parent directory before the private staging directory", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const parentDir = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const creations: Array<{ path: string; mode?: number }> = []
+			try {
+				vi.mocked(fs.mkdir).mockImplementation(async (p: Parameters<typeof fs.mkdir>[0]) => {
+					creations.push({ path: String(p) })
+					return undefined
+				})
+				const syncMkdir = vi.mocked(fsSync.mkdirSync)
+				syncMkdir.mockImplementation(((p: string | Buffer | URL, options?: unknown) => {
+					creations.push({
+						path: String(p),
+						mode: (options as { mode?: number }).mode,
+					})
+				}) as unknown as typeof fsSync.mkdirSync)
+
+				await safeWriteText(targetPath, "hello world", { platform: "linux" })
+
+				const parent = creations.findIndex((c) => c.path === parentDir)
+				const staging = creations.findIndex((c) => c.path.includes(".file-safety-staging"))
+				expect(parent).toBeGreaterThanOrEqual(0)
+				expect(staging).toBeGreaterThanOrEqual(0)
+				// The parent is made first, by the plain recursive mkdir, which carries no mode of
+				// its own and therefore gets the directory default.
+				expect(staging).toBeGreaterThan(parent)
+				expect(creations[parent].mode).toBeUndefined()
+				// The private mode is still applied -- to the staging directory alone.
+				expect(creations[staging].mode).toBe(0o700)
+			} finally {
+				vi.mocked(fs.mkdir).mockReset()
+				vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+				vi.mocked(fsSync.mkdirSync).mockReset()
+			}
+		})
+
 		it("creates a temp file in the staging dir, fsyncs it, renames to target, and cleans up on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -630,17 +673,16 @@ describe("safeWriteText", () => {
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
 
 	describe("win32 DACL", () => {
-		it.skipIf(process.platform !== "win32")(
-			"copies target DACL onto staging file via icacls before rename on Windows",
-			async () => {
-				const targetPath = "/tmp/test-dir/target.txt"
-				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-				await safeWriteText(targetPath, "data", { platform: "win32" })
+		// The case hands in the platform it wants the writer to believe, so it does not need a
+		// Windows host: the neighbouring cases in this describe already run on every lane.
+		it("copies target DACL onto staging file via icacls before rename on Windows", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-				// icacls dump + restore were called (execFile is callback-based mock)
-				expect(execFile).toHaveBeenCalledTimes(2)
-			},
-		)
+			// icacls dump + restore were called (execFile is callback-based mock)
+			expect(execFile).toHaveBeenCalledTimes(2)
+		})
 
 		it("non-win32: DACL path is unreachable when platform is not win32", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -689,31 +731,31 @@ describe("safeWriteText", () => {
 			expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
 		})
 
-		it.skipIf(process.platform !== "win32")(
-			"bounds every icacls call with a finite timeout under the lock staleness window",
-			async () => {
-				const targetPath = "/tmp/test-dir/target.txt"
-				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-				vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The platform here is an argument, not the host: this asserts what every icacls call is
+		// bounded by while the write is open, and the neighbouring cases below hand in the same
+		// option and already run on every lane, so skipping it off Windows only hid coverage.
+		it("bounds every icacls call with a finite timeout under the lock staleness window", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
-				await safeWriteText(targetPath, "data", { platform: "win32" })
+			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-				const calls = vi.mocked(execFile).mock.calls
-				expect(calls).toHaveLength(2)
-				for (const call of calls) {
-					expect(call[0]).toBe("icacls")
-					// An execFile without a timeout waits for its child forever. While it waits,
-					// this write is open and - for a safeWriteJson caller - the per-file advisory
-					// lock is held while every other writer of the same file burns its retries.
-					const timeout = Number((call[2] as { timeout?: number } | undefined)?.timeout)
-					expect(Number.isFinite(timeout)).toBe(true)
-					expect(timeout).toBeGreaterThan(0)
-					// Below LOCK_STALE_MS (src/utils/fileLock.ts) so a hung helper cannot outlive
-					// the staleness window the lock protocol is written around.
-					expect(timeout).toBeLessThan(31_000)
-				}
-			},
-		)
+			const calls = vi.mocked(execFile).mock.calls
+			expect(calls).toHaveLength(2)
+			for (const call of calls) {
+				expect(call[0]).toBe("icacls")
+				// An execFile without a timeout waits for its child forever. While it waits,
+				// this write is open and - for a safeWriteJson caller - the per-file advisory
+				// lock is held while every other writer of the same file burns its retries.
+				const timeout = Number((call[2] as { timeout?: number } | undefined)?.timeout)
+				expect(Number.isFinite(timeout)).toBe(true)
+				expect(timeout).toBeGreaterThan(0)
+				// Below LOCK_STALE_MS (src/utils/fileLock.ts) so a hung helper cannot outlive
+				// the staleness window the lock protocol is written around.
+				expect(timeout).toBeLessThan(31_000)
+			}
+		})
 
 		it("win32: a timed-out icacls degrades to the designed skip-DACL path and still commits", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"

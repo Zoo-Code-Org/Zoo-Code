@@ -346,15 +346,25 @@ export async function safeWriteText(
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
 	} else {
+		// The staging directory lives inside the target's own parent, so the parent has to exist
+		// before _stagingDir runs: mkdirSync's recursive creation applies its mode to every
+		// directory it creates and never chmods one that already exists, so a self-staged write
+		// into a missing parent would publish the target into a directory left at the private
+		// staging mode (0o700) instead of the directory default. Nothing validates a self-staged
+		// path ahead of this, so creating the parent here cannot create a directory on behalf of
+		// a write that is about to be rejected -- and it is the order safeWriteJson already uses
+		// for its own staging directory.
+		await fs.mkdir(dirPath, { recursive: true })
 		stagingDir = _stagingDir(dirPath)
 		tempPath = _tempName(stagingDir, "safeWriteText")
 	}
 
-	// The parent directory is created only after the staging path this write will actually use has
-	// been accepted (mirrors safeWriteJson behaviour). mkdir -p ahead of the caller-supplied checks
-	// let a *rejected* write create a directory in the target's own tree before anything was
-	// validated. A self-staged write has already created it through _stagingDir's
-	// mkdirSync(recursive:true).
+	// A caller-supplied staging path defers this until that path has been accepted (mirrors
+	// safeWriteJson behaviour): mkdir -p ahead of the caller-supplied checks let a *rejected*
+	// write create a directory in the target's own tree before anything was validated. For
+	// the self-staged branch above this re-runs on a directory that already exists -- a
+	// recursive mkdir never chmods an existing directory, so it cannot repair a mode inherited
+	// from the staging creation -- and fs.access still confirms the directory is usable.
 	await fs.mkdir(dirPath, { recursive: true })
 	await fs.access(dirPath)
 
