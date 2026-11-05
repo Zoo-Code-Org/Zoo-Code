@@ -534,6 +534,59 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("cache-write TTL split in telemetry", () => {
+		it("bills a 1h cache write at the 1h rate when usage is captured after a cancelled stream", async () => {
+			// glm P1: the telemetry cost recompute inside captureUsageData must receive
+			// the per-TTL split. Before the fix it passed only the aggregate write count,
+			// so a 1h write was billed at the 5m rate (0.375 instead of 0.6 for 100k
+			// tokens at claude-3-5-sonnet's 3.0 input price).
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			// A stream that reports the split but never yields a final cost chunk, which is
+			// the shape a cancelled request leaves behind. The second call throws so the
+			// request loop terminates the way the neighbouring tests do.
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					stream([
+						{
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 100_000,
+							cacheWrite1hTokens: 100_000,
+							cacheReadTokens: 0,
+						},
+						{ type: "text", text: "partial response" },
+					]),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			// The drain is fire-and-forget and reaches `captureLlmCompletion` after several
+			// awaits, some of which touch the filesystem. A fixed sleep races that work on a
+			// loaded worker, so poll for the captured call instead.
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
+
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
+			expect(call).toBeDefined()
+
+			// claude-3-5-sonnet-20241022: input 3.0, cacheWritesPrice 3.75, cacheWritesPrice1h 6.0.
+			// 1h writes: (6.0 / 1_000_000) * 100_000 = 0.6
+			// The pre-fix lumped behaviour billed (3.75 / 1_000_000) * 100_000 = 0.375.
+			expect(call![1].cost).toBeCloseTo(0.6, 9)
+			expect(call![1].cost).not.toBeCloseTo(0.375, 9)
+		})
+	})
+
 	describe("request continuation", () => {
 		it("sends the no-tool-use reminder in a second request when the first response has no tool use", async () => {
 			const task = await createTaskWithManualRetries()
@@ -2492,6 +2545,96 @@ describe("Cline", () => {
 			// the model info; the second argument must be the snapshot threaded
 			// into the handler, not a fresh re-read.
 			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo)
+		})
+
+		describe("emergency condense reporting (#1769)", () => {
+			const ctxModelInfo: ModelInfo = { contextWindow: 50_000, maxTokens: 1024, supportsPromptCache: false }
+
+			// Overflow the 50k window so the real handler reaches manageContext's condense branch.
+			const createOverflowingTask = async (state: ProviderState) => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.getTaskMode()
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 100_000,
+				})
+				vi.spyOn(task.api, "getModel").mockReturnValue({ id: "ctx-model", info: ctxModelInfo })
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+				task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
+				const say = vi.spyOn(task, "say").mockResolvedValue(undefined)
+				return { task, say }
+			}
+
+			it("emits the summary's condenseId and summarizes with the task's condense settings", async () => {
+				const { task, say } = await createOverflowingTask(
+					providerStateWith({ customSupportPrompts: { CONDENSE: "custom condense prompt" } }),
+				)
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: [{ role: "user", content: [{ type: "text", text: "condensed" }], ts: Date.now() }],
+					summary: "summary",
+					cost: 0,
+					newContextTokens: 1,
+					condenseId: "emergency-condense-id",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				// Rewind cleanup can only remove the summary if the event carries its condenseId.
+				const condenseCall = say.mock.calls.find(([type]) => type === "condense_context")
+				expect(condenseCall?.[7]).toMatchObject({ condenseId: "emergency-condense-id" })
+				const [options] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+				expect(options).toMatchObject({ customCondensingPrompt: "custom condense prompt", cwd: task.cwd })
+			})
+
+			it("surfaces a failed emergency condense as condense_context_error", async () => {
+				const { task, say } = await createOverflowingTask(providerStateWith())
+				// Enough visible messages for the 50% fallback to hide a pair (floor(4 * 0.5) = 2).
+				task.apiConversationHistory = ["a", "b", "c", "d", "e"].map((text, index) => ({
+					role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+					content: [{ type: "text" as const, text }],
+					ts: index + 1,
+				}))
+				const overwrite = vi.mocked(task.overwriteApiConversationHistory)
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: task.apiConversationHistory,
+					summary: "",
+					cost: 0,
+					error: "Condensing failed: rate limited",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				expect(say).toHaveBeenCalledWith("condense_context_error", "Condensing failed: rate limited")
+				// The sliding-window fallback still reports its truncation after the error row.
+				expect(say.mock.calls.map(([type]) => type)).toEqual([
+					"condense_context_error",
+					"sliding_window_truncation",
+				])
+
+				const truncatedHistory = requireDefined(overwrite.mock.calls.at(-1))[0]
+				const marker = requireDefined(truncatedHistory.find((message) => message.isTruncationMarker))
+				const truncationCall = requireDefined(
+					say.mock.calls.find(([type]) => type === "sliding_window_truncation"),
+				)
+				const reported = requireDefined(truncationCall[8])
+				expect(reported.truncationId).toBe(marker.truncationId)
+				expect(reported.messagesRemoved).toBe(2)
+				expect(
+					truncatedHistory.filter((message) => message.truncationParent === reported.truncationId),
+				).toHaveLength(2)
+				expect(reported.prevContextTokens).toBeGreaterThanOrEqual(100_000)
+				expect(reported.newContextTokens).toBeGreaterThan(0)
+				expect(reported.newContextTokens).toBeLessThan(reported.prevContextTokens)
+			})
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {

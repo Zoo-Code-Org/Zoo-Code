@@ -112,7 +112,7 @@ import { type AssistantMessageContent, presentAssistantMessage } from "../assist
 import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { manageContext, willManageContext } from "../context-management"
+import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -4038,6 +4038,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			try {
 				let cacheWriteTokens = 0
+				let cacheWrite1hTokens = 0
+				let cacheWrite12hTokens = 0
 				let cacheReadTokens = 0
 				let inputTokens = 0
 				let outputTokens = 0
@@ -4073,6 +4075,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 							: calculateApiCostOpenAI(
 									streamModelInfo,
@@ -4080,6 +4084,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									undefined,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 
 					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
@@ -4227,6 +4234,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens += chunk.inputTokens
 								outputTokens += chunk.outputTokens
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
+								cacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+								cacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
 								break
@@ -4467,6 +4476,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						input: inputTokens,
 						output: outputTokens,
 						cacheWrite: cacheWriteTokens,
+						cacheWrite1h: cacheWrite1hTokens,
+						cacheWrite12h: cacheWrite12hTokens,
 						cacheRead: cacheReadTokens,
 						total: totalCost,
 					}
@@ -4483,6 +4494,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						let bgInputTokens = currentTokens.input
 						let bgOutputTokens = currentTokens.output
 						let bgCacheWriteTokens = currentTokens.cacheWrite
+						let bgCacheWrite1hTokens = currentTokens.cacheWrite1h
+						let bgCacheWrite12hTokens = currentTokens.cacheWrite12h
 						let bgCacheReadTokens = currentTokens.cacheRead
 						let bgTotalCost = currentTokens.total
 
@@ -4492,6 +4505,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								input: number
 								output: number
 								cacheWrite: number
+								cacheWrite1h: number
+								cacheWrite12h: number
 								cacheRead: number
 								total?: number
 							},
@@ -4508,6 +4523,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens = tokens.input
 								outputTokens = tokens.output
 								cacheWriteTokens = tokens.cacheWrite
+								cacheWrite1hTokens = tokens.cacheWrite1h
+								cacheWrite12hTokens = tokens.cacheWrite12h
 								cacheReadTokens = tokens.cacheRead
 								totalCost = tokens.total
 
@@ -4529,7 +4546,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									modelId,
 								)
 
-								// Use the appropriate cost function based on the API protocol
+								// Use the appropriate cost function based on the API protocol.
+								// The per-TTL split must be passed here too: without it this
+								// telemetry recompute bills every write at the short-TTL rate,
+								// which is exactly the under-report this PR exists to fix.
 								const costResult =
 									apiProtocol === "anthropic"
 										? calculateApiCostAnthropic(
@@ -4538,6 +4558,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 										: calculateApiCostOpenAI(
 												streamModelInfo,
@@ -4545,6 +4567,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												undefined,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 
 								TelemetryService.instance.captureLlmCompletion(this.taskId, {
@@ -4585,6 +4610,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgInputTokens += chunk.inputTokens
 									bgOutputTokens += chunk.outputTokens
 									bgCacheWriteTokens += chunk.cacheWriteTokens ?? 0
+									bgCacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+									bgCacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 									bgCacheReadTokens += chunk.cacheReadTokens ?? 0
 									bgTotalCost = chunk.totalCost
 								}
@@ -4603,6 +4630,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -4628,6 +4657,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -5399,6 +5430,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this.api.getModel().info
 	}
 
+	/**
+	 * Report a manageContext result to the webview. Shared by the automatic and emergency
+	 * condense paths so both emit the same events: a surfaced error, and a condense event
+	 * carrying the condenseId that rewind cleanup uses to remove the matching summary.
+	 */
+	private async reportContextManagementResult(result: ContextManagementResult): Promise<void> {
+		if (result.error) {
+			await this.say("condense_context_error", result.error)
+		}
+		if (result.summary) {
+			const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = result
+			const contextCondense: ContextCondense = {
+				summary,
+				cost,
+				newContextTokens,
+				prevContextTokens,
+				condenseId,
+			}
+			await this.say(
+				"condense_context",
+				undefined /* text */,
+				undefined /* images */,
+				false /* partial */,
+				undefined /* checkpoint */,
+				undefined /* progressStatus */,
+				{ isNonInteractive: true } /* options */,
+				contextCondense,
+			)
+		} else if (result.truncationId) {
+			// Sliding window truncation occurred (fallback when condensing fails or is disabled)
+			const contextTruncation: ContextTruncation = {
+				truncationId: result.truncationId,
+				messagesRemoved: result.messagesRemoved ?? 0,
+				prevContextTokens: result.prevContextTokens,
+				newContextTokens: result.newContextTokensAfterTruncation ?? 0,
+			}
+			await this.say(
+				"sliding_window_truncation",
+				undefined /* text */,
+				undefined /* images */,
+				false /* partial */,
+				undefined /* checkpoint */,
+				undefined /* progressStatus */,
+				{ isNonInteractive: true } /* options */,
+				undefined /* contextCondense */,
+				contextTruncation,
+			)
+		}
+	}
+
 	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
@@ -5475,6 +5556,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// Generate environment details to include in the condensed summary
 			const environmentDetails = await getEnvironmentDetails(this, true)
+			const filesReadByRoo = await this.getFilesReadByRooSafely("handleContextWindowExceededError")
 
 			// Force aggressive truncation by keeping only 75% of the conversation history
 			const truncateResult = await manageContext({
@@ -5487,50 +5569,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
 				systemPrompt: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
+				// Recovery must summarize like the automatic path: same prompt and folded file context.
+				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
 				profileThresholds,
 				currentProfileId,
 				metadata,
 				environmentDetails,
+				filesReadByRoo,
+				cwd: this.cwd,
+				rooIgnoreController: this.rooIgnoreController,
 				useAvailableInputForContextPercent,
 			})
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
-
-			if (truncateResult.summary) {
-				const { summary, cost, prevContextTokens, newContextTokens = 0 } = truncateResult
-				const contextCondense: ContextCondense = { summary, cost, newContextTokens, prevContextTokens }
-				await this.say(
-					"condense_context",
-					undefined /* text */,
-					undefined /* images */,
-					false /* partial */,
-					undefined /* checkpoint */,
-					undefined /* progressStatus */,
-					{ isNonInteractive: true } /* options */,
-					contextCondense,
-				)
-			} else if (truncateResult.truncationId) {
-				// Sliding window truncation occurred (fallback when condensing fails or is disabled)
-				const contextTruncation: ContextTruncation = {
-					truncationId: truncateResult.truncationId,
-					messagesRemoved: truncateResult.messagesRemoved ?? 0,
-					prevContextTokens: truncateResult.prevContextTokens,
-					newContextTokens: truncateResult.newContextTokensAfterTruncation ?? 0,
-				}
-				await this.say(
-					"sliding_window_truncation",
-					undefined /* text */,
-					undefined /* images */,
-					false /* partial */,
-					undefined /* checkpoint */,
-					undefined /* progressStatus */,
-					{ isNonInteractive: true } /* options */,
-					undefined /* contextCondense */,
-					contextTruncation,
-				)
-			}
+			await this.reportContextManagementResult(truncateResult)
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
 			// IMPORTANT: Must always be sent to dismiss the spinner, even on error
@@ -5787,48 +5841,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
-				if (truncateResult.error) {
-					await this.say("condense_context_error", truncateResult.error)
-				}
-				if (truncateResult.summary) {
-					const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = truncateResult
-					const contextCondense: ContextCondense = {
-						summary,
-						cost,
-						newContextTokens,
-						prevContextTokens,
-						condenseId,
-					}
-					await this.say(
-						"condense_context",
-						undefined /* text */,
-						undefined /* images */,
-						false /* partial */,
-						undefined /* checkpoint */,
-						undefined /* progressStatus */,
-						{ isNonInteractive: true } /* options */,
-						contextCondense,
-					)
-				} else if (truncateResult.truncationId) {
-					// Sliding window truncation occurred (fallback when condensing fails or is disabled)
-					const contextTruncation: ContextTruncation = {
-						truncationId: truncateResult.truncationId,
-						messagesRemoved: truncateResult.messagesRemoved ?? 0,
-						prevContextTokens: truncateResult.prevContextTokens,
-						newContextTokens: truncateResult.newContextTokensAfterTruncation ?? 0,
-					}
-					await this.say(
-						"sliding_window_truncation",
-						undefined /* text */,
-						undefined /* images */,
-						false /* partial */,
-						undefined /* checkpoint */,
-						undefined /* progressStatus */,
-						{ isNonInteractive: true } /* options */,
-						undefined /* contextCondense */,
-						contextTruncation,
-					)
-				}
+				await this.reportContextManagementResult(truncateResult)
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show
