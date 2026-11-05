@@ -423,6 +423,12 @@ function scanShellSyntax(text: string): ScanOutcome {
 	// only frame-kind pops set this index.
 	// Stryker disable next-line UnaryOperator: the guard only consults this sentinel at a frame-comment position, and the scan index is never 1 inside a frame (frame content starts at least two past the opener), so no reachable input distinguishes `+1` from `-1`.
 	let frameCloseEnd = -1
+	// Index just past the most recent `\c` escape pair consumed inside an open
+	// frame, or -1. To the shell the escaped character is an ordinary word
+	// character, so a `#` directly after the pair continues the word instead of
+	// starting a comment, even when the escaped character is a blank.
+	// Stryker disable next-line NumberLiteral,UnaryOperator: the replacements for this -1 sentinel (0, 1, and +1) can never equal the scan index at a frame-comment position — frame content starts at least two past the frame's opener — so no reachable input distinguishes them from `-1`.
+	let frameEscapeEnd = -1
 	// Index just past the most recent `\c` escape pair that the scan emitted
 	// at host level, or -1. To the shell, the escaped character is an ordinary
 	// word character. The word continues past the pair. A `#` directly at this
@@ -1333,12 +1339,19 @@ function scanShellSyntax(text: string): ScanOutcome {
 		// the group path never sets this index.
 		// Stryker disable next-line UnaryOperator: every walk starts at or past index 2 and frame content starts later still, so the sentinel `+1` can never equal the scan index at a frame-comment position, and no reachable input distinguishes it from `-1`.
 		let frameCloseEnd = -1
+		// Index just past the most recent `\c` escape pair consumed inside a
+		// frame, or -1. The escaped character is word content to the shell, so
+		// a `#` directly after the pair continues the word even when the
+		// escaped character is a blank.
+		// Stryker disable next-line NumberLiteral,UnaryOperator: the replacements for this -1 sentinel (0, 1, +1) can never equal the scan index at a frame-comment position — frame content starts past index 2 — so no reachable input distinguishes them from `-1`.
+		let frameEscapeEnd = -1
 		let i = start
 		while (i < end) {
 			const char = text[i]
 			const top = frames[frames.length - 1]
 			if (top) {
 				if (top.escaped && char === "\\") {
+					frameEscapeEnd = i + 2
 					i += 2
 					continue
 				}
@@ -1355,11 +1368,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 				// a word. A missed comment lets its `)` slice the payload, so
 				// the boundary must be exact. Directly at `frameCloseEnd` the
 				// word also continues: a closer that popped a nested frame ends
-				// the expansion, not the word.
+				// the expansion, not the word. Directly at `frameEscapeEnd` it
+				// continues too: the escaped character — a blank included — is
+				// word content, so the raw blank before the `#` is not a real
+				// word boundary.
 				if (
 					char === "#" &&
 					(top.kind === "command-substitution" || top.kind === "process-substitution") &&
 					i !== frameCloseEnd &&
+					i !== frameEscapeEnd &&
 					WORD_BOUNDARY_BEFORE.test(text[i - 1])
 				) {
 					// Clamp at the region end. A comment that runs past it
@@ -1845,6 +1862,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 
 		if (top) {
 			if (top.escaped && char === "\\") {
+				frameEscapeEnd = i + 2
 				i += 2
 				continue
 			}
@@ -1924,11 +1942,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// metacharacters that end a word, so a `#` glued to a word stays
 			// word text. Directly at `frameCloseEnd` the word continues as
 			// well: a closer that popped a nested frame ends the expansion,
-			// not the word.
+			// not the word. Directly at `frameEscapeEnd` it continues too: the
+			// escaped character — a blank included — is word content, so the
+			// raw blank before the `#` is not a real word boundary.
 			if (
 				char === "#" &&
 				(top.kind === "command-substitution" || top.kind === "process-substitution") &&
 				i !== frameCloseEnd &&
+				i !== frameEscapeEnd &&
 				WORD_BOUNDARY_BEFORE.test(text[i - 1])
 			) {
 				i = endOfLine(i)

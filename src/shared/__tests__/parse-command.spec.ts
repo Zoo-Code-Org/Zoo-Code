@@ -1224,6 +1224,71 @@ describe("parseCommand", () => {
 			expect(commands).toEqual(["cat <<E\n$(echo $(echo a)#b)\nE", "echo", "echo a", "#b"])
 		})
 
+		it("keeps a # after an escaped blank word-internal inside a frame", () => {
+			// A `\c` escape pair inside a frame leaves the escaped character
+			// as word content. When `c` is a blank, the raw blank before a
+			// following `#` is not a real word boundary: bash prints `a #b`
+			// for this input, so the frame-comment rule must skip a `#`
+			// directly after the pair, as the top-level rule already does.
+			// The frame never closes if the comment is honored, and the
+			// fail-closed rule refuses a command bash runs. The control row
+			// pins the exact boundary: after the escaped blank, a real blank
+			// is one, and the `#` it exposes starts the comment bash starts —
+			// bash loses the frame closer to that comment too and fails.
+			const rows = [
+				{
+					input: "echo $(printf %s a\\ #b)",
+					commands: ["echo", "printf %s a #b"],
+					error: null,
+				},
+				{
+					input: "echo $(a\\  #b)",
+					commands: ["echo $(a\\  #b)"],
+					error: "command-substitution",
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("keeps a # after an escaped blank word-internal in a heredoc body", () => {
+			// The body walk carries the same escape tracker as the main scan:
+			// the body's `$(…)` frame closes and bash prints `echo a #b`, so
+			// the `#` after the frame's escaped blank continues the word. The
+			// control row keeps the body walk's boundary exact: with a real
+			// blank before the `#` the comment starts, bash loses the frame
+			// closer while expanding the body, and the region fails closed.
+			const rows = [
+				{
+					input: "cat <<EOF\necho $(printf %s a\\ #b)\nEOF",
+					commands: ["cat <<EOF\necho $(printf %s a\\ #b)\nEOF", "printf %s a #b"],
+					error: null,
+				},
+				{
+					input: "cat <<EOF\necho $(a\\  #b)\nEOF",
+					commands: ["cat <<EOF\necho $(a\\  #b)\nEOF"],
+					error: "command-substitution",
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("keeps a # after an escaped blank word-internal in a process substitution", () => {
+			// The process-substitution frame takes the same exclusion: bash
+			// runs the diff (the exit status is irrelevant to parsing) with
+			// the escaped blank keeping the `#` inside the frame's word.
+			const { commands, parseError } = parseCommand("diff <(printf %s a\\ #b) /dev/null")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["diff", "printf %s a #b", "/dev/null"])
+		})
+
 		it("does not treat exotic JS-\\s bytes as shell word separators", () => {
 			// bash word-splits on the default $IFS blanks (space, tab, newline)
 			// only. JS `\s` is wider — VT, FF, NBSP, U+3000, U+2001, U+2028 —
