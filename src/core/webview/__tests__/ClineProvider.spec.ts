@@ -30,6 +30,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
+import type { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -426,11 +427,10 @@ afterAll(() => {
 	vi.restoreAllMocks()
 })
 
-type StalledProfile = {
-	name: string
-	apiProvider?: string
-	openRouterModelId?: string
-}
+// The stalled profile is typed from the manager's own return type so the profile spies below need no
+// assertion, and the shape stays what a real getProfile resolves to (id optional, so the doubles that omit
+// it keep matching what the load path receives).
+type StalledProfile = Awaited<ReturnType<ProviderSettingsManager["getProfile"]>>
 
 function stallProviderSettingsProfile(provider: ClineProvider) {
 	let resolveProfile: (value: StalledProfile) => void = () => {}
@@ -445,8 +445,10 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 		}
 		return new Promise<StalledProfile>((resolve) => (resolveProfile = resolve))
 	})
-	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
-	provider.providerSettingsManager = { getProfile: getProfileSpy }
+	// The manager field is readonly and getProfile is the only member this scenario reaches, so the spy goes on the
+	// method rather than onto a replacement manager: the double stays checked against the real signature, the
+	// one-call guard below still fails loudly on a second lookup, and no suppression directive is needed.
+	vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(() => getProfileSpy())
 	// Return a stable wrapper around the closure binding: resolveProfile is
 	// reassigned to the pending promise's resolver once getProfile is called,
 	// so returning the variable directly would hand the test the initial no-op.
@@ -6181,8 +6183,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace providerSettingsManager with a failing test double.
-			provider.providerSettingsManager = { getProfile: vi.fn().mockRejectedValue(new Error("profile missing")) }
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(new Error("profile missing"))
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
@@ -6200,13 +6201,10 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace providerSettingsManager with a test double that registers a newer id.
-			provider.providerSettingsManager = {
-				getProfile: vi.fn().mockImplementation(() => {
-					provider["viewStateId"] = "superseded-view"
-					return Promise.resolve({ name: "my-profile", apiProvider: providerIdentifiers.openrouter })
-				}),
-			}
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(() => {
+				provider["viewStateId"] = "superseded-view"
+				return Promise.resolve({ name: "my-profile", apiProvider: providerIdentifiers.openrouter })
+			})
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
@@ -6224,8 +6222,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			// The file-level modes mock resolves every slug to a mode; drop the pinned slug.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
@@ -6256,8 +6253,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -6548,13 +6544,11 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			const getProfileSpy = vi.fn().mockResolvedValue({
+			const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
 				name: "my-profile",
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "model-x",
 			})
-			// @ts-ignore - Replace providerSettingsManager with a test double for the profile lookup.
-			provider.providerSettingsManager = { getProfile: getProfileSpy }
 			// The ownership check requires the writer to release the id before the
 			// next view adopts it; the durable entry it wrote stays in storage.
 			await writer.dispose()
@@ -6654,8 +6648,7 @@ describe("ClineProvider", () => {
 			new WebviewFocusTracker(),
 		)
 		const logSpy = vi.spyOn(provider, "log")
-		// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-		provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+		vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 		// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
 		const modesModule = vi.mocked(await import("../../../shared/modes"))
 		const originalMode = modesModule.getModeBySlug("code")
@@ -6712,8 +6705,8 @@ describe("ClineProvider", () => {
 			new WebviewFocusTracker(),
 		)
 		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-		// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
-		provider.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
+		// The real resetCustomModes writes the modes file, so the method is stubbed rather than the manager replaced.
+		vi.spyOn(provider.customModesManager, "resetCustomModes").mockResolvedValue(undefined)
 		// The modal answer is a string label; the last-typed vscode overload expects a
 		// MessageItem. A double assertion is the last-resort cast here (AGENTS.md): the
 		// production path compares the answer against the string label directly, so the
@@ -6776,12 +6769,13 @@ describe("ClineProvider", () => {
 			new WebviewFocusTracker(),
 		)
 		await pinned.setValue("currentApiConfigName", "shared-profile")
-		// @ts-ignore - The double only backs the profile-store calls of the save path.
-		saver.providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("shared-id"),
-			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
-			setModeConfig: vi.fn().mockResolvedValue(undefined),
-		}
+		// Only these three profile-store calls are exercised by the save path, so each is stubbed on the real manager
+		// instead of replacing it, which keeps the stubs checked against the declared signatures.
+		vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("shared-id")
+		vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+			{ name: "shared-profile", id: "shared-id" },
+		])
+		vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 		const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 
 		await saver.upsertProviderProfile("shared-profile", providerSettings, false)
@@ -6809,12 +6803,13 @@ describe("ClineProvider", () => {
 			new WebviewFocusTracker(),
 		)
 		await pinned.setValue("currentApiConfigName", "shared-profile")
-		// @ts-ignore - The double only backs the profile-store calls of the save path.
-		saver.providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("shared-id"),
-			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
-			setModeConfig: vi.fn().mockResolvedValue(undefined),
-		}
+		// Only these three profile-store calls are exercised by the save path, so each is stubbed on the real manager
+		// instead of replacing it, which keeps the stubs checked against the declared signatures.
+		vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("shared-id")
+		vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+			{ name: "shared-profile", id: "shared-id" },
+		])
+		vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 		const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 
 		await saver.upsertProviderProfile("shared-profile", providerSettings, true)
