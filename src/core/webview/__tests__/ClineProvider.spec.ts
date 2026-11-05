@@ -6366,6 +6366,115 @@ describe("ClineProvider", () => {
 			await saver.dispose()
 			await pinned.dispose()
 		})
+
+		// The task-handler rebuild is keyed on the task's own profile name rather than on the view's
+		// pin: a task restored from history can follow profile A while its view pins profile B, and only
+		// the matching side gets its handler rebuilt with forceRebuild (ClineProvider.ts:2897-2902).
+		// These two cases are the matching and non-matching halves of that branch, which is the coverage
+		// the review row on this file asked for.
+		it("rebuilds a sibling task's API handler with a forced rebuild when that task follows the saved profile", async () => {
+			const saver = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runner = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The rebuild itself is stubbed so the case asserts the call and its options rather than the
+			// internals of a handler build. The assertion-free cast is needed because
+			// updateTaskApiHandlerIfNeeded is private on ClineProvider and vi.spyOn needs the object and
+			// the key together; the private-field alternative of instance["name"] cannot be spied.
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskApiConfigName", { value: "shared-profile" })
+			vi.spyOn(runner, "getCurrentTask").mockReturnValue(task)
+			vi.spyOn(saver, "getCurrentTask").mockReturnValue(undefined)
+			const rebuildTarget = runner as unknown as {
+				updateTaskApiHandlerIfNeeded: (
+					settings: Record<string, unknown>,
+					options?: { forceRebuild?: boolean },
+				) => void
+			}
+			const rebuild = vi.spyOn(rebuildTarget, "updateTaskApiHandlerIfNeeded").mockImplementation(() => {})
+			vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("shared-id")
+			vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "shared-profile", id: "shared-id" },
+			])
+			vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+
+			await saver.upsertProviderProfile(
+				"shared-profile",
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" },
+				false,
+			)
+
+			// Forced, because the saved settings can change with the provider and model both the same,
+			// and a rebuild that skipped on equality would leave the running task on the old client.
+			expect(rebuild).toHaveBeenCalledWith(
+				expect.objectContaining({ apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }),
+				{ forceRebuild: true },
+			)
+			expect(rebuild).toHaveBeenCalledTimes(1)
+
+			await saver.dispose()
+			await runner.dispose()
+			vi.restoreAllMocks()
+		})
+
+		it("leaves a sibling task alone when that task follows a different profile than the one saved", async () => {
+			const saver = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runner = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Same shape as the case above with one value changed: the sibling's task follows another
+			// profile, so its handler must keep the settings it was built with rather than inherit this
+			// save's settings. Its overlay refresh is a separate question and is covered by the two cases
+			// above this one; this case is only about the rebuild's own selector.
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskApiConfigName", { value: "other-profile" })
+			vi.spyOn(runner, "getCurrentTask").mockReturnValue(task)
+			vi.spyOn(saver, "getCurrentTask").mockReturnValue(undefined)
+			const rebuildTarget = runner as unknown as {
+				updateTaskApiHandlerIfNeeded: (
+					settings: Record<string, unknown>,
+					options?: { forceRebuild?: boolean },
+				) => void
+			}
+			const rebuild = vi.spyOn(rebuildTarget, "updateTaskApiHandlerIfNeeded").mockImplementation(() => {})
+			vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("shared-id")
+			vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "shared-profile", id: "shared-id" },
+			])
+			vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+
+			await saver.upsertProviderProfile(
+				"shared-profile",
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" },
+				false,
+			)
+
+			expect(rebuild).not.toHaveBeenCalled()
+
+			await saver.dispose()
+			await runner.dispose()
+			vi.restoreAllMocks()
+		})
 	})
 
 	describe("saveViewState", () => {
