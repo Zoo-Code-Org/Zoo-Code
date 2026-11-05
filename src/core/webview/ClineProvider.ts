@@ -3822,8 +3822,6 @@ export class ClineProvider
 			// naming the deleted profile would rehydrate a missing profile name on
 			// the next load. Re-point those persisted pins to the survivor too.
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
-
-			await this.postStateToWebview()
 		} catch (error) {
 			// The manager delete committed but a later write failed: restore the
 			// deleted record first, then the shared metadata, selection, and shared
@@ -3969,6 +3967,26 @@ export class ClineProvider
 				)
 			}
 			throw error
+		}
+
+		// The deletion has committed once the group above succeeds, so the state refresh runs
+		// outside the compensated group. postStateToWebview awaits getStateToPostToWebview, which
+		// reads custom modes, task history and auth state, so it can reject after every forward
+		// write landed; that leaves the webview showing stale state, which the activation below,
+		// a later post, or a sibling view's post repairs. Inside the group it entered the catch,
+		// which restored the record, the list entry, the selection and the shared settings while
+		// the sibling re-pins and the sticky re-points had already moved to the survivor: a
+		// profile that exists again with conversations still running the replacement profile, and
+		// the caller told the deletion failed. Same placement the activation block below gives its
+		// own side effects - log it, and let the caller report the deletion it actually performed.
+		try {
+			await this.postStateToWebview()
+		} catch (error) {
+			this.log(
+				`[deleteProviderProfile] deletion committed but the state post failed: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
 		}
 
 		// The old deleteApiConfiguration path ended with activateProviderProfile, which

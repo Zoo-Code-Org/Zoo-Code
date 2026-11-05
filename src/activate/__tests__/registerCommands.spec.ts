@@ -98,6 +98,29 @@ vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 }))
 
+// A tab panel double: shaped the way the survivor rule reads a panel - active and visible
+// state plus the registration hooks the creation path installs - so a test asserts against
+// panel identity rather than structure.
+const makeTabPanel = (title: string, viewState: { active: boolean; visible: boolean }): vscode.WebviewPanel => ({
+	viewType: "zoo-code.TabPanelProvider",
+	title,
+	webview: {
+		options: {},
+		html: "",
+		cspSource: "test-webview",
+		postMessage: vi.fn().mockResolvedValue(true),
+		onDidReceiveMessage: vi.fn(),
+		asWebviewUri: vi.fn((uri) => uri),
+	},
+	options: {},
+	viewColumn: vscode.ViewColumn.Two,
+	...viewState,
+	onDidChangeViewState: vi.fn(),
+	onDidDispose: vi.fn(),
+	reveal: vi.fn(),
+	dispose: vi.fn(),
+})
+
 describe("getVisibleProviderOrLog", () => {
 	let mockOutputChannel: vscode.OutputChannel
 
@@ -209,6 +232,11 @@ describe("registerCommands handlers", () => {
 		// Reset module-level panel state to prevent leakage between tests.
 		setPanel(undefined, "sidebar")
 		setPanel(undefined, "tab")
+		// vi.clearAllMocks drops call history but keeps implementations, so an
+		// implementation installed on either static registry lookup would otherwise leak into
+		// every later test and make its result depend on execution order.
+		;(ClineProvider.getInstanceForView as Mock).mockReset()
+		;(ClineProvider.getAllInstances as Mock).mockReset().mockReturnValue([])
 	})
 
 	it("registers the ripgrep diagnostic command and stores its disposable in context.subscriptions", async () => {
@@ -509,26 +537,6 @@ describe("registerCommands handlers", () => {
 	// synchronously at its start (ClineProvider.ts:1653-1659). These tests model liveness
 	// the same way: a view is live while a map entry for it exists, and disposing a tab
 	// removes that entry.
-	const makeTabPanel = (title: string, viewState: { active: boolean; visible: boolean }): vscode.WebviewPanel => ({
-		viewType: "zoo-code.TabPanelProvider",
-		title,
-		webview: {
-			options: {},
-			html: "",
-			cspSource: "test-webview",
-			postMessage: vi.fn().mockResolvedValue(true),
-			onDidReceiveMessage: vi.fn(),
-			asWebviewUri: vi.fn((uri) => uri),
-		},
-		options: {},
-		viewColumn: vscode.ViewColumn.Two,
-		...viewState,
-		onDidChangeViewState: vi.fn(),
-		onDidDispose: vi.fn(),
-		reveal: vi.fn(),
-		dispose: vi.fn(),
-	})
-
 	let providersByView: Map<vscode.WebviewView | vscode.WebviewPanel, ClineProvider>
 	const liveInstances = (): ClineProvider[] => [...providersByView.values()]
 
@@ -962,6 +970,15 @@ describe("openClineInNewTab", () => {
 		setPanel(undefined, "tab")
 	})
 
+	// Same reset as the handlers block above: vi.clearAllMocks leaves implementations
+	// installed by a test in this block in place for the tests that follow it, and the
+	// survivor rule reads both lookups, so an instance left behind here would decide a
+	// later test that never registered it.
+	afterEach(() => {
+		;(ClineProvider.getInstanceForView as Mock).mockReset()
+		;(ClineProvider.getAllInstances as Mock).mockReset().mockReturnValue([])
+	})
+
 	it.each([false, true])(
 		"clears a closed tab reference only if it is still current (replacement: %s)",
 		async (replaced) => {
@@ -981,6 +998,69 @@ describe("openClineInNewTab", () => {
 		},
 	)
 
+	it("leaves a live tab panel tracked when a failed creation clears the ref", async () => {
+		const survivorPanel = makeTabPanel("survivor-tab", { active: true, visible: true })
+		// View -> live instance, which is what the survivor rule reads through getAllInstances
+		// and getInstanceForView (ClineProvider.ts:1744-1756). The creation that fails below is
+		// deliberately absent from this map: its provider is disposed before the ref is
+		// cleared, and dispose unregisters the instance synchronously at its start
+		// (ClineProvider.ts:1653-1659), so the half-built panel cannot be picked.
+		const providerByView = new Map<vscode.WebviewPanel, ClineProvider>()
+		;(ClineProvider.getAllInstances as Mock).mockImplementation(() => [...providerByView.values()])
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: vscode.WebviewPanel) =>
+			providerByView.get(view),
+		)
+		vi.mocked(vscode.window.createWebviewPanel).mockReturnValueOnce(survivorPanel)
+		const survivorProvider = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		// The resolve assigns the panel to the provider's own view (ClineProvider.ts:1896);
+		// the automocked constructor does not run it, so make the assignment here.
+		survivorProvider["view"] = survivorPanel
+		providerByView.set(survivorPanel, survivorProvider)
+		expect(getPanel()).toBe(survivorPanel)
+
+		// A forced call - startNewTask({ newTab: true }) - builds its own panel and makes it
+		// the tracked ref the moment it exists (registerCommands.ts:530). The failure lands
+		// after resolveWebviewView, at the visibility-listener registration, so the cleanup
+		// path is the one holding the ref.
+		// The panel double's registration hooks are read-only on the type, so the failing
+		// listener goes in through a fresh object literal rather than an assignment.
+		const failingPanel: vscode.WebviewPanel = {
+			...makeTabPanel("failing-tab", { active: true, visible: true }),
+			onDidChangeViewState: vi.fn(() => {
+				throw new Error("view state listener registration failed")
+			}),
+		}
+		vi.mocked(vscode.window.createWebviewPanel).mockReturnValueOnce(failingPanel)
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+				forceNew: true,
+			}),
+		).rejects.toThrow("view state listener registration failed")
+
+		// Same rule as onDidDispose: the ref goes to a live panel, not to nothing.
+		expect(getPanel()).toBe(survivorPanel)
+		expect(mockOutputChannel.appendLine).not.toHaveBeenCalledWith(expect.stringContaining("cleanup was incomplete"))
+
+		// The symptom a cleared ref produces: the next ordinary "Open in editor" reveals the
+		// panel that is still on screen instead of building a third one beside it.
+		const revealed = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		expect(revealed).toBe(survivorProvider)
+		expect(survivorPanel.reveal).toHaveBeenCalledTimes(1)
+		// The survivor panel, then the failed one: no third panel was created.
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+	})
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		const webviewFocusTracker = new WebviewFocusTracker()
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker })

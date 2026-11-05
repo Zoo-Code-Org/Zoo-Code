@@ -6353,9 +6353,12 @@ describe("ClineProvider", () => {
 					apiProvider: providerIdentifiers.openrouter,
 					openRouterApiKey: "sibling-secret",
 				}
-				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				// A durable entry under a stable view id, so this case covers the rollback of the
+				// persisted pin as well as the live one.
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
 				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("sibling-id")
+
 				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
 					const name = "name" in args ? args.name : ""
 
@@ -6374,16 +6377,100 @@ describe("ClineProvider", () => {
 						apiKey: "keeper-key",
 					}
 				})
-				// The re-pin of the sibling is already committed by the time this write fails.
-				vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post state failed"))
+				// The re-pin of the sibling is already committed by the time this write fails. The
+				// failing step is the sibling's own state post inside the re-pin, which sits inside the
+				// compensated group whichever way this deletion's own post is placed. The deleting
+				// view's post is deliberately not the failure: a post that rejects after the deletion
+				// committed must not resurrect the record, which is the case the next test pins.
+				vi.spyOn(sibling, "postStateToWebview").mockRejectedValue(new Error("sibling post failed"))
 
-				await expect(provider.deleteProviderProfile(deletedProfile)).rejects.toThrow("post state failed")
+				await expect(provider.deleteProviderProfile(deletedProfile)).rejects.toThrow("sibling post failed")
 				await ClineProvider["persistedViewStateWriteQueue"]
 
 				// The manager record is back, so the sibling goes back to the pin it had; leaving
 				// it on the survivor would be a state no caller asked for.
 				expect(sibling.pinnedProfileName).toBe("sibling-profile")
 				expect(sibling["viewLocalState"].apiConfiguration?.openRouterApiKey).toBe("sibling-secret")
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+
+		it("keeps a committed deletion and its re-pins when the state post after it fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const deletedProfile: ProviderSettingsEntry = {
+					name: "sibling-profile",
+					id: "sibling-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [deletedProfile, keeperProfile])
+				// Only the sibling's own pin names the profile being deleted: the global selection
+				// already names the survivor.
+				await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+				sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "sibling-secret",
+				}
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+				const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("sibling-id")
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+					const name = "name" in args ? args.name : ""
+					if (name === "sibling-profile") {
+						return {
+							name: "sibling-profile",
+							id: "sibling-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "sibling-secret",
+						}
+					}
+					return {
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}
+				})
+				// Every forward write of the deletion has landed when this one fails: the post is
+				// the last step of the group, and it reads custom modes, task history and auth
+				// state through getStateToPostToWebview, so it can reject after the deletion
+				// committed. That must not undo the deletion.
+				vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("post state failed"))
+				const logSpy = vi.spyOn(provider, "log")
+
+				await provider.deleteProviderProfile(deletedProfile)
+
+				// saveConfig is the restore write of the compensation: none was attempted, so the
+				// record stays deleted and the caller saw a successful deletion.
+				expect(saveSpy).not.toHaveBeenCalled()
+				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("post state failed"))
+				// The sibling stays on the survivor. Rolling back here would put the record back
+				// while this view's pin and tasks had already moved, which is the mixed state the
+				// compensation exists to avoid.
+				expect(sibling.pinnedProfileName).toBe("keeper-profile")
+				expect(sibling["viewLocalState"].apiConfiguration?.apiKey).toBe("keeper-key")
 				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
@@ -6428,7 +6515,7 @@ describe("ClineProvider", () => {
 					...snapshot,
 					"closed-view": { currentApiConfigName: "gone-profile" },
 				})
-				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
 				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("gone-id")
 				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
@@ -6448,23 +6535,31 @@ describe("ClineProvider", () => {
 						apiProvider: providerIdentifiers.openrouter,
 					}
 				})
-				// The sibling commits its own choice after the deletion re-pointed its entry,
-				// and then the deletion fails.
-				vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
-					await sibling.saveViewState("currentApiConfigName", "third-profile")
-					throw new Error("post state failed")
+				// The sibling commits a newer choice while the deletion is still inside its
+				// compensated group, and then this sibling's own state post fails, which rejects the
+				// re-pin and the deletion. The deleting view's post is left working: it no longer sits
+				// inside the compensated group, so it cannot be the failure this interleaving needs.
+				vi.spyOn(sibling, "postStateToWebview").mockImplementation(async () => {
+					// A wholesale durable write, the same shape as any concurrent viewStates commit:
+					// it rewrites the stale closed-view entry to a newer profile name.
+					await provider.contextProxy.setValue("viewStates", {
+						...provider["getPersistedViewStates"]({ fresh: true }),
+						"closed-view": { currentApiConfigName: "third-profile" },
+					})
+					throw new Error("sibling post failed")
 				})
 
-				await expect(provider.deleteProviderProfile(deletedProfile)).rejects.toThrow("post state failed")
+				await expect(provider.deleteProviderProfile(deletedProfile)).rejects.toThrow("sibling post failed")
 				await ClineProvider["persistedViewStateWriteQueue"]
 
 				const states = provider["getPersistedViewStates"]({ fresh: true })
-				// The sibling's newer write survives: the rollback only undoes pins this deletion
-				// actually wrote, instead of resurrecting a deleted profile's name.
-				expect(states["stable-editor-view"]?.currentApiConfigName).toBe("third-profile")
-				// The entry nobody touched since the snapshot is restored to the deleted profile,
-				// because the manager record is back.
-				expect(states["closed-view"]?.currentApiConfigName).toBe("gone-profile")
+				// A durable commit that lands during the failure window names a newer profile for
+				// closed-view: newer than this deletion's snapshot, so the rollback merge leaves it
+				// alone instead of resurrecting the deleted profile's name.
+				expect(states["closed-view"]?.currentApiConfigName).toBe("third-profile")
+				// The affected view's own re-pin is the write that failed, so its durable entry goes
+				// back to the deleted profile together with its live pin.
+				expect(states["stable-editor-view"]?.currentApiConfigName).toBe("gone-profile")
 				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()

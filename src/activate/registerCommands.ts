@@ -435,7 +435,9 @@ async function disposeFailedTabCreation(
 
 	if (panel) {
 		if (tabPanel === panel) {
-			setPanel(undefined, "tab")
+			// Same rule as onDidDispose below: hand the ref to a live tab panel if one
+			// remains, instead of stranding the panels that outlive this failed creation.
+			setPanel(pickTabPanelSurvivor(), "tab")
 		}
 		try {
 			panel.dispose()
