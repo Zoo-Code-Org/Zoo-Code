@@ -230,6 +230,56 @@ describe("ContextProxy", () => {
 			expect(await mockSecrets.get("apiKey")).toBe("newer-secret")
 		})
 
+		it("erases a secret whose write begins after the reset has snapshotted the pending writes", async () => {
+			const durable = new Map<string, string | undefined>()
+			let deleteCalls = 0
+			let settleFirstDelete: () => void = () => {}
+			let markDeletePassStarted: () => void = () => {}
+			const deletePassStarted = new Promise<void>((resolve) => {
+				markDeletePassStarted = resolve
+			})
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			// Park the reset inside its own delete pass so a write can begin in the window the in-flight
+			// snapshot cannot cover. Only the first delete is held open; the rest settle normally, so
+			// releasing the park lets the reset finish.
+			mockSecrets.delete.mockImplementation((key: string) => {
+				deleteCalls++
+				durable.delete(key)
+				if (deleteCalls === 1) {
+					return new Promise<undefined>((resolve) => {
+						markDeletePassStarted()
+						settleFirstDelete = () => resolve(undefined)
+					})
+				}
+				return Promise.resolve(undefined)
+			})
+
+			const reset = proxy.resetAllState()
+			await deletePassStarted
+
+			// The reset has taken its in-flight snapshot, cleared both caches and dropped both write
+			// claims, and is standing inside the delete pass. This write is invisible to all of it.
+			const late = proxy.storeSecret("apiKey", "late-secret")
+			settleFirstDelete()
+			await reset
+			await late.catch(() => undefined)
+
+			// All three reads matter. Durable storage is what a reset is supposed to empty, the cache is
+			// what this provider instance shows the user, and re-initializing is what a restarted
+			// provider does - which is how a secret that survived the reset reaches the user after the
+			// fact, so the middle read alone would understate the finding.
+			expect(await mockSecrets.get("apiKey")).toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			await proxy.initialize()
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			// The caller is told: a write the reset cannot honour is refused rather than dropped, so
+			// the save surfaces as a failure instead of vanishing.
+			await expect(late).rejects.toThrow()
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
