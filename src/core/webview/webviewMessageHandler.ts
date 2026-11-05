@@ -852,32 +852,15 @@ export const webviewMessageHandler = async (
 						}
 
 						const currentScopes = readCommandListScopes(key, getGlobalState(key), inspection)
-						// An entry the settings file gained while the dialog was open has
-						// the same shape as an entry the user deleted: present in the file,
-						// absent from the submitted list. Only the dialog's last-displayed
-						// baseline separates the two, so file entries outside that baseline
-						// are re-admitted before the split (deletions of baseline entries
-						// still apply). A sender that shows no lists sends no baseline, and
-						// its submitted list is written unclassified.
-						const baseline = message.commandListBaseline?.[key]
-						const externallyAdded = Array.isArray(baseline)
-							? [...new Set([...currentScopes.workspace, ...currentScopes.global])].filter(
-									(entry) => !baseline.includes(entry) && !incoming.includes(entry),
-								)
-							: []
-						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
-							[...incoming, ...externallyAdded],
-							currentScopes.workspace,
-							currentScopes.global,
-						)
 
 						// Shadowing is cross-directional, so the hidden-entry set
 						// needs the opposite key's global layer as input. It comes
 						// from the save-start snapshot, not a fresh read: an
 						// earlier iteration of this loop may already have written
 						// that key. The layer only feeds the additive preservation
-						// below and never this key's split, target, or rollback,
-						// which stay on the per-key configuration snapshot.
+						// below and this key's external-addition classification, and
+						// never this key's split, target, or rollback, which stay on
+						// the per-key configuration snapshot.
 						const otherKey = key === "allowedCommands" ? "deniedCommands" : "allowedCommands"
 						const otherScopes = readCommandListScopes(otherKey, commandListGlobalsAtSaveStart[otherKey])
 						const { hiddenWorkspaceAllow, hiddenWorkspaceDeny } = resolveEffectiveCommandLists(
@@ -893,6 +876,33 @@ export const webviewMessageHandler = async (
 						// file.
 						const hiddenWorkspaceEntries =
 							key === "allowedCommands" ? hiddenWorkspaceAllow : hiddenWorkspaceDeny
+
+						// An entry the settings file gained while the dialog was open has
+						// the same shape as an entry the user deleted: present in the file,
+						// absent from the submitted list. Only the dialog's last-displayed
+						// baseline separates the two, so file entries outside that baseline
+						// are re-admitted before the split (deletions of baseline entries
+						// still apply). Hidden entries never appear in that baseline, yet
+						// the workspace-layer re-add below preserves them, so classifying
+						// them as external additions would repeat a false "settings file
+						// changed" warning on every save. A sender that shows no lists
+						// sends no baseline, and its submitted list is written
+						// unclassified.
+						const baseline = message.commandListBaseline?.[key]
+						const externallyAdded = Array.isArray(baseline)
+							? [...new Set([...currentScopes.workspace, ...currentScopes.global])].filter(
+									(entry) =>
+										!baseline.includes(entry) &&
+										!incoming.includes(entry) &&
+										!hiddenWorkspaceEntries.includes(entry),
+								)
+							: []
+						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
+							[...incoming, ...externallyAdded],
+							currentScopes.workspace,
+							currentScopes.global,
+						)
+
 						const workspaceWrite = [...new Set([...keptWorkspaceWrite, ...hiddenWorkspaceEntries])]
 						const workspaceTarget = resolveWorkspaceWriteTarget(key, inspection)
 

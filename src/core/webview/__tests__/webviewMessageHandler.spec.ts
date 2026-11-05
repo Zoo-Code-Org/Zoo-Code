@@ -2828,6 +2828,110 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("docker"))
 	})
+
+	// A file-side extra the hidden-entry re-add already preserves was never
+	// displayed, so naming it in the changed-settings warning would repeat that
+	// warning on every save while the file stays unchanged.
+	it.each([
+		{
+			name: "hidden while the workspace gate is off",
+			gateEnabled: false,
+			hiddenEntry: "docker",
+			prepare: () => {
+				vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+			},
+		},
+		{
+			name: "shadowed by a global allow while the gate is on",
+			gateEnabled: true,
+			hiddenEntry: "git push",
+			prepare: () => {
+				vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+					key === "allowedCommands" ? ["git"] : undefined,
+				)
+			},
+		},
+	])(
+		"re-adds a $name deny entry without warning that the settings file changed",
+		async ({ gateEnabled, hiddenEntry, prepare }) => {
+			prepare()
+			const { update } = mockCommandConfiguration(
+				{ workspaceValue: [hiddenEntry] },
+				undefined,
+				undefined,
+				gateEnabled,
+			)
+
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { deniedCommands: [] },
+				// The dialog displayed the effective deny list, which never
+				// contained the hidden entry, so the baseline omits it.
+				commandListBaseline: { deniedCommands: [] },
+			})
+
+			expect(update).toHaveBeenCalledWith("deniedCommands", [hiddenEntry], vscode.ConfigurationTarget.Workspace)
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		},
+	)
+
+	it("warns only about the genuine file addition when a hidden entry is also present", async () => {
+		// Mixed divergence in one save: "git push" is hidden by the global allow
+		// "git" and preserved by the re-add, while "wget" arrived in the visible
+		// part of the file after the dialog opened. The warning must name only
+		// the genuine addition.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push", "curl", "wget"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl"] },
+			// The dialog displayed the shadow-filtered deny list: "curl" was
+			// visible and kept, "git push" was never displayed, and "wget"
+			// arrived in the settings file after the dialog opened.
+			commandListBaseline: { deniedCommands: ["curl"] },
+		})
+
+		// "git push" survives through the hidden-entry re-add, "wget" through
+		// the external-addition re-admission; the global layer stays empty.
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["curl", "wget", "git push"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("1 entry was"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("wget"))
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(expect.stringContaining("git push"))
+	})
+
+	it("still warns about a visible workspace addition alongside the hidden-entry exclusion", async () => {
+		// Regression witness for the hidden-entry exclusion: an entry that
+		// arrived in the displayed part of the file is a genuine external
+		// addition, is kept in the layer the snapshot found it in, and is named
+		// in the warning.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ workspaceValue: ["git", "curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git"] },
+			commandListBaseline: { allowedCommands: ["git"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git", "curl"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+	})
 })
 
 describe("webviewMessageHandler - terminalProfile", () => {
