@@ -47,6 +47,7 @@
 		"cannot_access_path": "Zugriff auf Pfad {{path}} nicht möglich: {{error}}",
 		"path_outside_workspace": "Pfad liegt außerhalb des Arbeitsbereichs",
 		"settings_import_failed": "Fehler beim Importieren der Einstellungen: {{error}}.",
+		"settings_export_failed": "Fehler beim Exportieren der Einstellungen: {{error}}",
 		"mistake_limit_guidance": "Dies kann auf einen Fehler im Denkprozess des Modells oder die Unfähigkeit hinweisen, ein Tool richtig zu verwenden, was durch Benutzerführung behoben werden kann (z.B. \"Versuche, die Aufgabe in kleinere Schritte zu unterteilen\").",
 		"violated_organization_allowlist": "Aufgabe konnte nicht ausgeführt werden: Das aktuelle Profil ist nicht kompatibel mit den Einstellungen deiner Organisation",
 		"condense_failed": "Fehler beim Verdichten des Kontexts",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Kein Terminal-Inhalt ausgewählt",
 		"auto_import_failed": "Fehler beim automatischen Import der ZooCode-Einstellungen: {{error}}",
+		"settings_export_location_not_remembered": "Einstellungen wurden nach {{path}} exportiert, aber der Speicherort konnte für den nächsten Export nicht gemerkt werden: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Es wurde kein Roo Code-Aufgabenverlauf zum Importieren von {{domain}} gefunden.",
 			"alreadyImported_one": "Der {{count}} Roo Code-Aufgabenverlauf wurde bereits in Zoo Code importiert.",
@@ -134,6 +136,7 @@
 		"custom_storage_path_set": "Benutzerdefinierter Speicherpfad festgelegt: {{path}}",
 		"default_storage_path": "Auf Standardspeicherpfad zurückgesetzt",
 		"settings_imported": "Einstellungen erfolgreich importiert.",
+		"settings_exported": "Einstellungen wurden nach {{path}} exportiert.",
 		"auto_import_success": "ZooCode-Einstellungen automatisch importiert aus {{filename}}",
 		"image_copied_to_clipboard": "Bild-Daten-URI in die Zwischenablage kopiert",
 		"image_saved": "Bild gespeichert unter {{path}}",

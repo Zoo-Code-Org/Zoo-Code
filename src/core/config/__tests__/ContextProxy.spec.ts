@@ -194,6 +194,179 @@ describe("ContextProxy", () => {
 			expect(storedValue).toBe(historyItems)
 			expect(mockGlobalState.get).toHaveBeenCalledWith("taskHistory")
 		})
+
+		it("restores the value read from storage at startup when the first write is rejected", async () => {
+			// The usual shape in the field: storage already holds a value (read into the
+			// cache at startup) and the session's first write of that key fails.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "openrouter" : undefined))
+			proxy = new ContextProxy(mockContext)
+			await proxy.initialize()
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "openai")).rejects.toThrow("globalState write failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+		})
+
+		it("keeps the value that is actually on disk when an update is rejected", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "openai")).rejects.toThrow("globalState write failed")
+
+			// The rejected value never reached disk, so it must not live in the cache;
+			// the value that is on disk must survive the failed write next to it.
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+		})
+
+		it("leaves a key unset when its first update is rejected", async () => {
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.setValue("lastSettingsExportPath", "/usb/zoo-code-settings.json")).rejects.toThrow(
+				"globalState write failed",
+			)
+
+			// Nothing was remembered: the export dialog default stays where the user
+			// last left it instead of pointing at a location that was never stored.
+			expect(proxy.getValue("lastSettingsExportPath")).toBeUndefined()
+			expect(mockGlobalState.update).toHaveBeenCalledWith("lastSettingsExportPath", "/usb/zoo-code-settings.json")
+		})
+
+		it("restores the persisted value when same-key writes share a rejected batch", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			// Memento batches writes to one key: both calls receive the same pending
+			// promise, so the second call captures the first call's unflushed value as its
+			// "previous" one - rolling back to that would report a value that never existed
+			// on disk.
+			const sharedBatch = Promise.reject(new Error("globalState write failed"))
+			mockGlobalState.update.mockReturnValue(sharedBatch)
+
+			const first = proxy.updateGlobalState("apiProvider", "openai")
+			const second = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			await expect(first).rejects.toThrow("globalState write failed")
+			await expect(second).rejects.toThrow("globalState write failed")
+
+			// Only the newest write may touch the cache, and it rolls back to what is
+			// actually persisted.
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+		})
+
+		it("keeps a newer persisted value when an older write for the same key rejects", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (rejectFirst = reject)),
+			)
+			const first = proxy.updateGlobalState("apiProvider", "openai")
+
+			mockGlobalState.update.mockResolvedValueOnce(undefined)
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+
+			rejectFirst(new Error("globalState write failed"))
+			await expect(first).rejects.toThrow("globalState write failed")
+
+			// The late rejection belongs to a superseded write; the value that persisted
+			// after it stays in the cache.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
+		it("does not roll back a pending write when an older one for the same key fails", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			let resolveSecond: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (rejectFirst = reject)),
+			)
+			const first = proxy.updateGlobalState("apiProvider", "openai")
+
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (resolveSecond = resolve)))
+			const second = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			// The older write fails while the newer one is still in flight, so the only
+			// value it could roll back to is one storage never held.
+			rejectFirst(new Error("globalState write failed"))
+			await expect(first).rejects.toThrow("globalState write failed")
+
+			// Read the cache while the newer write is still in flight. Reading only after
+			// it settles would also pass an implementation that clobbered the key here and
+			// wrote it again on success.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+
+			resolveSecond(undefined)
+			await second
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
+		it("drops a rejected write from the cache and repairs it when an older one lands", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let settleFirst: (value: undefined) => void = () => {}
+			let failSecond: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleFirst = resolve)))
+			const first = proxy.updateGlobalState("apiProvider", "openai")
+
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (failSecond = reject)),
+			)
+			const second = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			// The newer write is the one storage would have ended up with, so its rejection
+			// is rolled back to the newest value that persisted even while the older write
+			// is still running.
+			failSecond(new Error("globalState write failed"))
+			await expect(second).rejects.toThrow("globalState write failed")
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+
+			// The older write lands afterwards, so it is what storage holds and what the
+			// cache has to report once nothing is in flight.
+			settleFirst(undefined)
+			await first
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+			// `getValues()` is the mirror `export()` and `getState()` read from;
+			// `export()` itself runs it through `globalSettingsExportSchema`, which
+			// deliberately leaves provider settings such as `apiProvider` out.
+			expect(proxy.getValues().apiProvider).toBe("openai")
+		})
+
+		it("keeps the landed value when the last write standing for the key rejects", async () => {
+			await proxy.updateGlobalState("apiProvider", "deepseek")
+
+			let settleOldest: (value: undefined) => void = () => {}
+			let rejectMiddle: (error: Error) => void = () => {}
+			let rejectNewest: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleOldest = resolve)))
+			const oldest = proxy.updateGlobalState("apiProvider", "openai")
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (rejectMiddle = reject)),
+			)
+			const middle = proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (rejectNewest = reject)),
+			)
+			const newest = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// The newest write fails first, so the mirror falls back to what storage held
+			// before these three writes.
+			rejectNewest(new Error("globalState write failed"))
+			await expect(newest).rejects.toThrow("globalState write failed")
+			expect(proxy.getGlobalState("apiProvider")).toBe("deepseek")
+
+			// The oldest write lands, so storage now holds its value while the middle one
+			// is still in flight.
+			settleOldest(undefined)
+			await oldest
+
+			// The middle write is the last one standing and it fails too: the mirror has
+			// to report what landed, not what was there before all three writes.
+			rejectMiddle(new Error("globalState write failed"))
+			await expect(middle).rejects.toThrow("globalState write failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+			expect(proxy.getValues().apiProvider).toBe("openai")
+		})
 	})
 
 	describe("getSecret", () => {
@@ -475,6 +648,132 @@ describe("ContextProxy", () => {
 
 			// Should reinitialize caches
 			expect(initializeSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("forgets what it had persisted, so a write rejected after a reset leaves the key unset", async () => {
+			await proxy.updateGlobalState("lastSettingsExportPath", "/usb/zoo-code-settings.json")
+			expect(proxy.getGlobalState("lastSettingsExportPath")).toBe("/usb/zoo-code-settings.json")
+
+			await proxy.resetAllState()
+
+			// The reset wrote every key, this one included, and cleared the write bookkeeping
+			// with the caches, so a rejection afterwards has no pre-reset value to fall back to.
+			expect(mockGlobalState.update).toHaveBeenCalledWith("lastSettingsExportPath", undefined)
+			expect(proxy.getGlobalState("lastSettingsExportPath")).toBeUndefined()
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+
+			await expect(proxy.updateGlobalState("lastSettingsExportPath", "/c/other.json")).rejects.toThrow(
+				"globalState write failed",
+			)
+
+			expect(proxy.getGlobalState("lastSettingsExportPath")).toBeUndefined()
+		})
+
+		it("ignores a write issued before the reset when it lands afterwards", async () => {
+			let settlePending: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settlePending = resolve)))
+			const pending = proxy.updateGlobalState("apiProvider", "openai")
+
+			await proxy.resetAllState()
+
+			settlePending(undefined)
+			await pending
+
+			// The write belongs to storage state the reset discarded. Landing late must not
+			// put its value back into the cache or into the rollback record.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+
+			mockGlobalState.update.mockRejectedValueOnce(new Error("globalState write failed"))
+			await expect(proxy.updateGlobalState("apiProvider", "anthropic")).rejects.toThrow(
+				"globalState write failed",
+			)
+
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+
+		it("keeps a rejected pre-reset write from rolling back a write issued after the reset", async () => {
+			let failPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (failPending = reject)),
+			)
+			const preReset = proxy.updateGlobalState("apiProvider", "openai")
+
+			await proxy.resetAllState()
+
+			// A write issued after the reset reuses this key's first sequence number, so a
+			// late rejection of the pre-reset write must not be mistaken for it.
+			let settlePostReset: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settlePostReset = resolve)))
+			const postReset = proxy.updateGlobalState("apiProvider", "anthropic")
+
+			failPending(new Error("globalState write failed"))
+			await expect(preReset).rejects.toThrow("globalState write failed")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+
+			settlePostReset(undefined)
+			await postReset
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
+		it("keeps a rejected pre-reset write out of the in-flight count of newer writes", async () => {
+			let failPreReset: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (failPreReset = reject)),
+			)
+			const preReset = proxy.updateGlobalState("apiProvider", "openai")
+
+			await proxy.resetAllState()
+
+			let settleOlder: (value: undefined) => void = () => {}
+			let settleNewer: (value: undefined) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleOlder = resolve)))
+			const older = proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleNewer = resolve)))
+			const newer = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// The stale rejection must not retire one of the post-reset writes; if it did,
+			// the older landing below would look like the last write standing.
+			failPreReset(new Error("globalState write failed"))
+			await expect(preReset).rejects.toThrow("globalState write failed")
+
+			settleOlder(undefined)
+			await older
+
+			// The newer write is still in flight, so its value is what the mirror holds.
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+
+			settleNewer(undefined)
+			await newer
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+		})
+
+		it("restores the write that landed after the reset when a newer one is rejected", async () => {
+			await proxy.resetAllState()
+
+			let settleOlder: (value: undefined) => void = () => {}
+			let failNewer: (error: Error) => void = () => {}
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((resolve) => (settleOlder = resolve)))
+			const older = proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockImplementationOnce(() => new Promise((_resolve, reject) => (failNewer = reject)))
+			const newer = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			settleOlder(undefined)
+			await older
+
+			// The newer write is still in flight, so the mirror still holds its value.
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+
+			failNewer(new Error("globalState write failed"))
+			await expect(newer).rejects.toThrow("globalState write failed")
+
+			// The reset emptied both the mirror and the rollback record, so the landing of
+			// the older write is the only thing storage holds - the rejected newer write
+			// falls back to it, not to nothing.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+			expect(proxy.getValues().apiProvider).toBe("anthropic")
 		})
 	})
 
