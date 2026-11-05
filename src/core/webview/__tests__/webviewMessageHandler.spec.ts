@@ -2744,13 +2744,19 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// The rename legitimately deletes old-profile before the activation runs, so the ordering is
 		// the assertion that matters: restoring the record before that delete would let the delete
 		// undo the restore and leave the selection naming a missing profile again.
-		const deleteOldCall = vi
-			.mocked(mockClineProvider.providerSettingsManager.deleteConfig)
-			.mock.calls.findIndex(([name]) => name === "old-profile")
-		const restoreOldCall = vi
-			.mocked(mockClineProvider.providerSettingsManager.saveConfig)
-			.mock.calls.findIndex(([name]) => name === "old-profile")
-		expect(restoreOldCall).toBeGreaterThan(deleteOldCall)
+		const deleteOldMock = vi.mocked(mockClineProvider.providerSettingsManager.deleteConfig)
+		const saveOldMock = vi.mocked(mockClineProvider.providerSettingsManager.saveConfig)
+		const deleteOldCall = deleteOldMock.mock.calls.findIndex(([name]) => name === "old-profile")
+		const restoreOldCall = saveOldMock.mock.calls.findIndex(([name]) => name === "old-profile")
+		// The two indices come from two different mocks, so they are not comparable: which slot
+		// deleteConfig used says nothing about when saveConfig ran, and the pair below stays
+		// 0-and-1 whichever way the handler orders the two calls. Vitest numbers
+		// mock.invocationCallOrder across every call, and that array is parallel to calls, so the
+		// index picks the call and the value read from it is the order the events really happened
+		// in - the same shape the deleteCustomMode test above uses.
+		expect(saveOldMock.mock.invocationCallOrder[restoreOldCall]).toBeGreaterThan(
+			deleteOldMock.mock.invocationCallOrder[deleteOldCall],
+		)
 		// The fallback must not move the shared selection on its own, and it must not resurrect a
 		// delete of the name it just restored.
 		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("currentApiConfigName", expect.anything())

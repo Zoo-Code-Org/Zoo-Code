@@ -1302,6 +1302,17 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				currentApiConfigName: "subtask-child-profile",
 			})
 
+			// Seed the shared provider settings the way a real activation leaves them: through the same
+			// 'setProviderSettings' call an activation makes, holding the payload of the profile the
+			// selection names once the sibling view has switched to 'other-survivor'. The assertion at the
+			// bottom then has something to lose - every profile in this test was stored with a
+			// different model id, so pairing the survivor name with another profile's settings shows up.
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// This deletion selects the first survivor at entry, because that is what the shared
@@ -1324,6 +1335,11 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			const values = provider.contextProxy.getValues()
 			expect(values.currentApiConfigName).toBe("other-survivor")
 			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "other-survivor"])
+			// Invariant: no shared write may pair the survivor's name with another profile's settings. The shared
+			// provider keys carry the settings of the profile the selection names, and the selection
+			// moved onto 'other-survivor' mid-deletion, so the store must now hold that profile's payload -
+			// "openai/gpt-4o", a model id no other profile in this test was stored with.
+			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4o")
 		})
 	})
 })
