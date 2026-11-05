@@ -591,7 +591,7 @@ export class ProviderSettingsManager {
 	/**
 	 * Set the API config for a specific mode.
 	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId: string | undefined) {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -599,8 +599,13 @@ export class ProviderSettingsManager {
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
 				}
-				// Assign the chosen config ID to this mode
-				providerProfiles.modeApiConfigs[mode] = configId
+				// Assign the chosen config ID to this mode. Restoring a mode that had no config
+				// removes the entry instead of persisting an undefined value.
+				if (configId === undefined) {
+					delete providerProfiles.modeApiConfigs[mode]
+				} else {
+					providerProfiles.modeApiConfigs[mode] = configId
+				}
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
@@ -619,6 +624,28 @@ export class ProviderSettingsManager {
 			})
 		} catch (error) {
 			throw new Error(`Failed to get mode config: ${error}`)
+		}
+	}
+	/**
+	 * Read this store’s own gate - the selected profile and the complete mode mapping - in one
+	 * locked snapshot, for callers that must compare what they wrote against what the store
+	 * reports after a partial mutation. The mode map is returned as a copy rather than the
+	 * live object so a caller can hold the snapshot across awaits while a later write replaces
+	 * it. Read-only: nothing here stores, so this adds no new write path.
+	 */
+	public async getSelectionAndModeConfigs(): Promise<
+		Pick<ProviderProfiles, "currentApiConfigName" | "modeApiConfigs">
+	> {
+		try {
+			return await this.lock(async () => {
+				const { currentApiConfigName, modeApiConfigs } = await this.load()
+				return {
+					currentApiConfigName,
+					modeApiConfigs: modeApiConfigs ? { ...modeApiConfigs } : undefined,
+				}
+			})
+		} catch (error) {
+			throw new Error(`Failed to read the profile selection and mode configs: ${error}`)
 		}
 	}
 

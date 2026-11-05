@@ -29,12 +29,29 @@ describe("API.setConfiguration", () => {
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},
 			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([
+				{
+					name: "default",
+					id: "default-id",
+				},
+			]),
+			getValues: vi.fn().mockReturnValue({}),
 			setValues: vi.fn().mockResolvedValue(undefined),
 			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
 				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
 			providerSettingsManager: {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				// The accept path records whether the profile existed before saving; without it
+				// the call throws and the test only passes through the catch fallback.
+				hasConfig: vi.fn().mockResolvedValue(true),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "default",
+					id: "default-id",
+					apiProvider: providerIdentifiers.bedrock,
+				}),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
@@ -55,10 +72,11 @@ describe("API.setConfiguration", () => {
 		// Exact side-effect counts: a regression that repeats any of these operations
 		// (duplicate settings write, duplicate profile save, duplicate webview post) fails.
 		expect(provider.setValues).toHaveBeenCalledTimes(1)
-		expect(provider.setValues).toHaveBeenCalledWith(configuration)
+		expect(provider.setValues).toHaveBeenCalledWith(configuration, { savedProfileName: "default" })
 		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledTimes(1)
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
+		expect(provider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("default")
 		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })

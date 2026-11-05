@@ -84,11 +84,6 @@
 			"count": 36
 		}
 	},
-	"api/providers/__tests__/lm-studio-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -322,11 +317,6 @@
 	"api/providers/poe.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
-		}
-	},
-	"api/providers/qwen-code.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"api/providers/requesty.ts": {
@@ -931,7 +921,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 192
+			"count": 188
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1006,7 +996,7 @@
 	},
 	"core/webview/__tests__/webviewMessageHandler.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 35
+			"count": 29
 		}
 	},
 	"core/webview/messageEnhancer.ts": {

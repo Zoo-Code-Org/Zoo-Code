@@ -1,7 +1,7 @@
 import * as vscode from "vscode"
 import delay from "delay"
 
-import type { CommandId } from "@roo-code/types"
+import type { CommandId, ExtensionMessage } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getCommand } from "../utils/commands"
@@ -31,9 +31,32 @@ export function getVisibleProviderOrLog(outputChannel: vscode.OutputChannel): Cl
 let sidebarPanel: vscode.WebviewView | undefined = undefined
 let tabPanel: vscode.WebviewPanel | undefined = undefined
 
+// Tab panels that are still open. When the tracked panel closes, its dispose
+// handler re-points the tracked ref at one of these: the remaining panel may
+// not emit onDidChangeViewState (its own visibility did not change), so
+// without this the tab-scoped title-bar commands and focusInput would be left
+// without a target.
+const liveTabPanels = new Set<vscode.WebviewPanel>()
+
+/**
+ * Test-only: clears the module-level registry so tab panels created by one
+ * spec cannot leak into another's tracked-panel re-pointing.
+ * @internal Exported for focused implementation tests.
+ */
+export function __resetLiveTabPanelsForTests(): void {
+	liveTabPanels.clear()
+}
+
+// In-flight "open in editor" creation shared by overlapping calls: a
+// double-click starts before the first call tracks its new panel, so
+// concurrent callers must share one creation instead of racing to create
+// two tab panels.
+let pendingTabPanelCreation: Promise<ClineProvider> | undefined
+
 /**
  * Get the currently active panel
  * @returns WebviewPanel或WebviewView
+ * @internal Exported for focused implementation tests.
  */
 export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined {
 	return tabPanel || sidebarPanel
@@ -95,6 +118,23 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // type while rejecting direct calls with arguments. VS Code dispatches positional
 // arguments dynamically; `unknown` requires callers to inspect returned values.
 type CommandCallback = (...args: never[]) => unknown
+
+// Posts each action in order to the target instance. Failures are logged
+// (not thrown) with the handler-specific prefix so a failed post stays
+// attributable in the output channel.
+const postActions = (
+	outputChannel: vscode.OutputChannel,
+	target: ClineProvider,
+	actions: readonly NonNullable<ExtensionMessage["action"]>[],
+	logPrefix: string,
+) => {
+	for (const action of actions) {
+		void target
+			.postMessageToWebview({ type: "action", action })
+			.catch((error) => outputChannel.appendLine(`[${logPrefix}] postMessageToWebview failed: ${error}`))
+	}
+}
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -141,13 +181,8 @@ const getCommandsMap = ({
 	settingsButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void provider
-			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
-		// Also explicitly post the visibility message to trigger scroll reliably
-		void provider
-			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
+		// Also explicitly post the visibility message to trigger scroll reliably.
+		postActions(outputChannel, provider, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
 	},
 	settingsButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -157,23 +192,17 @@ const getCommandsMap = ({
 
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[settingsButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			.catch((error) =>
-				outputChannel.appendLine(`[settingsButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
+		postActions(
+			outputChannel,
+			tabProvider,
+			["settingsButtonClicked", "didBecomeVisible"],
+			"settingsButtonClickedInTab",
+		)
 	},
 	historyButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void provider
-			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[historyButtonClicked] postMessageToWebview failed: ${error}`))
+		postActions(outputChannel, provider, ["historyButtonClicked"], "historyButtonClicked")
 	},
 	historyButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -183,29 +212,17 @@ const getCommandsMap = ({
 
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[historyButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, tabProvider, ["historyButtonClicked"], "historyButtonClickedInTab")
 	},
 	marketplaceButtonClicked: () => {
-		void provider
-			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, provider, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
 	},
 	marketplaceButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
 		if (!tabProvider) {
 			return
 		}
-		void tabProvider
-			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[marketplaceButtonClickedInTab] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, tabProvider, ["marketplaceButtonClicked"], "marketplaceButtonClickedInTab")
 	},
 	newTask: (params: { prompt?: string } | null | undefined) => handleNewTask(params, provider.webviewFocusTracker),
 	setCustomStoragePath: async () => {
@@ -238,11 +255,15 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only when the sidebar panel was
-			// focused: the tab takes selection priority in focusPanel, so
-			// the sidebar receives the message only when no tab panel is
-			// tracked.
-			if (sidebarPanel && !tabPanel) {
+			// Post to the surface focusPanel selected: the tab takes
+			// selection priority, so the sidebar is targeted only when no
+			// tab panel is tracked.
+			if (tabPanel) {
+				const tabProvider = getTabProvider()
+				if (tabProvider) {
+					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				}
+			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {
@@ -294,45 +315,71 @@ type OpenClineInNewTabOptions = {
 	webviewFocusTracker: WebviewFocusTracker
 }
 
-/**
- * The tab creation currently in flight, if any.
- *
- * The tab panel is tracked before the creation resolves, and the provider is bound to that
- * panel as soon as `resolveWebviewView` assigns the view, so while the creation is still
- * awaiting its webview the reuse check below already finds a provider whose creation can
- * still fail. Overlapping callers join this creation instead: they wait for its outcome,
- * including a rejection, instead of returning a provider whose tab never finished
- * initializing.
- */
-let tabCreationInFlight: Promise<ClineProvider> | undefined = undefined
-
-/**
- * Record a cleanup that failed after tab initialization already failed. Both
- * failures stay in one line so the reason the tab broke is not lost behind the
- * error its own teardown threw.
- */
-const logInitFailureCleanupError = (
-	what: string,
-	cleanupError: unknown,
-	initError: unknown,
-	outputChannel: vscode.OutputChannel,
-): void => {
-	const reason = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
-	const cause = initError instanceof Error ? initError.message : String(initError)
-	outputChannel.appendLine(
-		`[openClineInNewTab] ${what} failed after initialization failure: ${reason} (initialization error: ${cause})`,
-	)
-}
-
 export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
-	// Join a creation that is still in flight before looking at the tracked panel: its
-	// provider is already registered on that panel while it initializes, so the reuse below
-	// would hand this caller a provider whose creation can still reject, and the rejection
-	// would reach nobody.
-	if (tabCreationInFlight) {
-		return tabCreationInFlight
+	// Serialize overlapping "Open in editor" calls: a double-click starts
+	// before the first call tracks its new panel, so without a shared
+	// in-flight creation both calls would race to create two tab panels.
+	// The shared promise is stored before the creation body awaits
+	// ContextProxy.getInstance, so every caller started while the creation
+	// is in flight — openInNewTab and popoutButtonClicked both dispatch
+	// through here — awaits it instead of creating a second panel: exactly
+	// one panel is created and every caller receives the same provider.
+	//
+	// The join is re-entered rather than trusted once. A creation can resolve
+	// to a disposed provider - the panel closed mid-flight - and several callers
+	// may be parked on that same settled promise. The first of them to wake
+	// starts the replacement and stores it in the slot; the others must re-read
+	// the slot and join that replacement instead of falling through, or each
+	// wake-up creates its own panel and the serialization is lost exactly where
+	// it matters. Re-entry terminates: each pass either returns a live provider
+	// or consumes a settled creation and moves to a strictly newer one, so it
+	// cannot outlive the number of callers.
+	for (;;) {
+		const pendingCreation = pendingTabPanelCreation
+		if (!pendingCreation) {
+			break
+		}
+
+		// The panel can close while the creation is still awaiting its post-creation delay or the
+		// editor-group lock, and a closing panel disposes its provider: a caller that arrives then
+		// would receive that disposed provider from the shared promise and open no editor tab at
+		// all. Reuse the in-flight creation only when the provider it resolves to is still live -
+		// bracket access: _disposed is the only liveness signal ClineProvider exposes.
+		const resolvedProvider = await pendingCreation
+
+		if (!resolvedProvider["_disposed"]) {
+			return resolvedProvider
+		}
+
+		if (pendingTabPanelCreation === pendingCreation) {
+			pendingTabPanelCreation = undefined
+		}
 	}
 
+	const creation = createTabPanelUnlocked(options)
+	pendingTabPanelCreation = creation
+
+	try {
+		return await creation
+	} finally {
+		// Clear once settled (success or failure) so the next call starts
+		// fresh: the reuse path in createTabPanelUnlocked then takes over
+		// for the tracked panel. Guard the clear so this settlement cannot
+		// clobber a replacement already stored in the slot. A joining caller
+		// that woke on the disposed creation can reach the slot first - it
+		// re-enters the loop, sees the slot empty, and stores its own
+		// creation before this finally block runs - so the equality check is
+		// what keeps this settlement from dropping that replacement and
+		// letting a fourth call open a third panel.
+		if (pendingTabPanelCreation === creation) {
+			pendingTabPanelCreation = undefined
+		}
+	}
+}
+
+// The unserialized tab-creation body. Only openClineInNewTab may call it,
+// after it has stored the shared in-flight promise.
+const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// Reuse the tracked tab instead of opening a second one: a repeated
 	// "Open in editor" click reveals the existing tab's panel.
 	if (tabPanel) {
@@ -344,20 +391,6 @@ export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
 		}
 	}
 
-	const creation = createClineTab(options)
-	tabCreationInFlight = creation
-
-	try {
-		return await creation
-	} finally {
-		// Cleared for every outcome, so a failed creation cannot wedge the next click.
-		if (tabCreationInFlight === creation) {
-			tabCreationInFlight = undefined
-		}
-	}
-}
-
-const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).
@@ -368,8 +401,9 @@ const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: O
 	let mdmService: MdmService | undefined
 	try {
 		mdmService = MdmService.getInstance()
-	} catch {
-		// MDM service not initialized, which is fine - extension can work without it
+	} catch (error) {
+		// MDM service unavailable: log the fallback and continue without it.
+		outputChannel.appendLine(`[openClineInNewTab] MDM service unavailable, continuing without it: ${error}`)
 		mdmService = undefined
 	}
 
@@ -401,6 +435,7 @@ const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: O
 
 	// Save as tab type panel.
 	setPanel(newPanel, "tab")
+	liveTabPanels.add(newPanel)
 
 	// TODO: Use better svg icon with light and dark variants (see
 	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
@@ -409,13 +444,65 @@ const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: O
 		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
 	}
 
-	// Register the panel's listeners before resolving the webview: the cleanup below
-	// guards on state this creation owns, and the dispose listener is the only thing
-	// that would ever clear the tracked panel if the rejection were left unhandled.
+	// Handle panel closing events: clear the tracked ref only if this panel
+	// is still the tracked one, so a late disposal of an already-replaced
+	// panel cannot clobber the replacement's ref. The handler is registered
+	// before the webview is resolved because a rejected resolve must not skip
+	// it — it is the only path that removes the panel from liveTabPanels.
+	newPanel.onDidDispose(
+		() => {
+			liveTabPanels.delete(newPanel)
+			if (tabPanel === newPanel) {
+				// Re-point the tracked ref at a remaining live tab (active first,
+				// then visible) so the tab-scoped title-bar commands and
+				// focusInput keep resolving an instance; clear the ref as before
+				// when nothing remains. The identity guard above keeps a late
+				// disposal of an already-replaced panel from clobbering the
+				// replacement's ref.
+				const remaining =
+					[...liveTabPanels].find((panel) => panel.active) ??
+					[...liveTabPanels].find((panel) => panel.visible)
+				setPanel(remaining, "tab")
+			}
+		},
+		null,
+		context.subscriptions, // Also register dispose listener
+	)
+
+	// A rejected resolve leaves a panel whose webview never came up: dispose
+	// it so the handler above removes it from liveTabPanels and re-points or
+	// clears the tracked ref, then rethrow so the command handler observes
+	// the same failure as before the guard existed.
+	try {
+		await tabProvider.resolveWebviewView(newPanel)
+	} catch (error) {
+		newPanel.dispose()
+		// Dispose the provider too. Its own onDidDispose handler (the one
+		// resolveWebviewView registers that calls this.dispose()) is only
+		// registered after that method's awaited getHtmlContent/getState
+		// calls, so a rejection before that point would otherwise strand the
+		// provider in ClineProvider.activeInstances with its constructor-time
+		// resources alive. The second dispose of the panel is a no-op, and a
+		// failing provider dispose must not mask the original resolve error.
+		await tabProvider
+			.dispose()
+			.catch((disposeError) =>
+				outputChannel.appendLine(`[openClineInNewTab] provider dispose failed: ${disposeError}`),
+			)
+		throw error
+	}
+
 	// Add listener for visibility changes to notify webview
 	newPanel.onDidChangeViewState(
 		(e) => {
 			const panel = e.webviewPanel
+			// Re-point the tracked tab ref at the panel the user is actually
+			// looking at: several tab panels can stay visible at once, but
+			// only the active one is the current tab, and the title-bar
+			// commands must resolve that instance, not the last created one.
+			if (panel.active) {
+				setPanel(panel, "tab")
+			}
 			if (panel.visible) {
 				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
 			}
@@ -423,41 +510,6 @@ const createClineTab = async ({ context, outputChannel, webviewFocusTracker }: O
 		null, // First null is for `thisArgs`
 		context.subscriptions, // Register listener for disposal
 	)
-
-	// Handle panel closing events.
-	newPanel.onDidDispose(
-		() => {
-			// A recovery may already have installed a replacement panel.
-			if (tabPanel === newPanel) setPanel(undefined, "tab")
-		},
-		null,
-		context.subscriptions, // Also register dispose listener
-	)
-
-	try {
-		await tabProvider.resolveWebviewView(newPanel)
-	} catch (error) {
-		// The panel is on screen and tracked. Left alone, the next "Open in editor" click
-		// reuses the provider whose creation just failed, and the tracked panel keeps
-		// pointing at one the user can close with nothing left to clear it. Only state
-		// that still belongs to this panel is touched - a recovery may have replaced it.
-		if (tabPanel === newPanel) {
-			setPanel(undefined, "tab")
-			try {
-				newPanel.dispose()
-			} catch (panelError) {
-				logInitFailureCleanupError("panel disposal", panelError, error, outputChannel)
-			}
-			try {
-				await tabProvider.dispose()
-			} catch (disposeError) {
-				logInitFailureCleanupError("provider disposal", disposeError, error, outputChannel)
-			}
-		}
-		// A cleanup failure is logged, never thrown: teardown noise must not replace the
-		// initialization error that explains why the tab broke.
-		throw error
-	}
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.
 	await delay(100)

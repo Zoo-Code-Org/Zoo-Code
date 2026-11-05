@@ -37,6 +37,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -671,26 +672,18 @@ export const webviewMessageHandler = async (
 
 							if (globalStillValid && globalConfigName) {
 								// Re-pin this view to the still-valid shared global selection (not the
-								// first listed profile) through the activation path so the view adopts
-								// the shared choice's settings: a name-only re-pin would leave the
-								// invalid profile's stale apiConfiguration in place. The activation
-								// writes the shared slot back with the same value, so the global
-								// selection itself is left untouched, and the first listed profile's
-								// name (absent on legacy shapes) is irrelevant to this branch.
-								// Skip both persistence steps: this is a launch-time repair of this
-								// view's own selection, and persisting would silently rewrite the
-								// current mode's saved profile (setModeConfig) and the task's sticky
-								// profile, which every other view reads. Also leave a current task that follows
-								// a different sticky profile alone: this repair must not swap that task's API
-								// handler (preserveForeignTask).
-								await provider.activateProviderProfile(
-									{ name: globalConfigName },
-									{
-										persistModeConfig: false,
-										persistTaskHistory: false,
-										preserveForeignTask: true,
-									},
-								)
+								// first listed profile) so the view adopts the shared choice; the
+								// global selection itself is left untouched.
+								// Clear the buffered overlay first: it belongs to the profile that
+								// no longer resolves. If the pin write below then fails, the invalid
+								// selection stays retryable on the next launch; pinning first would
+								// leave a valid pin serving the stale profile's provider, model, and
+								// keys with the repair skipped.
+								await provider.saveViewState("apiConfiguration", undefined)
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The re-pin must reach this webview before the profile-list
+								// continuation below, otherwise it keeps rendering the stale name.
+								await provider.postStateToWebview()
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
@@ -792,8 +785,18 @@ export const webviewMessageHandler = async (
 			}
 			break
 
-		case "updateSettings":
-			if (message.updatedSettings) {
+		case "updateSettings": {
+			// The settings are written one at a time, in the order sent, and not as a transaction. If a write fails, the
+			// ones before it stay stored and the ones after it are not written. The display settings only change how
+			// times are shown, so a partial save is harmless, and saving again completes it. Either way the webview is
+			// refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`): the
+			// settings page keeps the user's edits as unsaved after a failure. The error is then thrown, as it always was.
+			let failed = false
+			let failure: unknown
+
+			try {
+				if (!message.updatedSettings) break
+
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
@@ -813,6 +816,12 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// An invalid display value is ignored, before anything is done for it.
+					if (isInvalidDisplayValue(key, value)) {
+						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {
@@ -938,11 +947,33 @@ export const webviewMessageHandler = async (
 					// consistent with the other mutation paths.
 					await provider.setValue(key as keyof RooCodeSettings, newValue)
 				}
-
-				await provider.postStateToWebview()
+			} catch (error) {
+				failed = true
+				failure = error
 			}
 
+			// A failed refresh must neither undo a stored save nor keep the webview from getting the result.
+			try {
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			if (message.requestId) {
+				await provider.postMessageToWebview({
+					type: "settingsSaveResult",
+					requestId: message.requestId,
+					success: !failed,
+					...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+				})
+			}
+
+			if (failed) throw failure
+
 			break
+		}
 
 		case "terminalOperation":
 			if (message.terminalOperation) {
@@ -3327,15 +3358,37 @@ export const webviewMessageHandler = async (
 							// rewritten only when they previously had a token to avoid no-op disk writes.
 							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
 
-							if (isThisProfileActive) {
-								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
-								provider.log(
-									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
-								)
-							} else if (profile.zooSessionToken) {
-								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
-								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
+							if (!isThisProfileActive && !profile.zooSessionToken) {
+								continue
 							}
+
+							// Route through the provider's mutation queue so live views pinned to this profile drop the
+							// token too: a direct saveConfig rewrites the record only, and a pinned view keeps buffering
+							// the cleared token, which its getState() reports and new tasks send. activate=false keeps the
+							// shared selection on the profile that was actually active.
+							//
+							// The queue result is the store's confirmation of the clear: upsertProviderProfile catches
+							// its own failure and resolves to undefined - persistProviderProfile only ever resolves to
+							// the id that saveConfig returned - so an undefined id here means the write group failed and
+							// the stored profile can still hold the token. Reporting the clear anyway would log a cleanup
+							// that never happened and leave a reader trusting a credential that is still live. A failed
+							// cleanup belongs to the per-profile error path below, which logs it and moves on to the
+							// next profile.
+							const clearedProfileId = await provider.upsertProviderProfile(
+								entry.name,
+								cleanedProfile,
+								isThisProfileActive,
+							)
+
+							if (clearedProfileId === undefined) {
+								throw new Error(
+									`upsertProviderProfile returned no profile id for "${entry.name}"; the stored profile may still hold zooSessionToken`,
+								)
+							}
+
+							provider.log(
+								`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile${isThisProfileActive ? " and updated in-memory handler" : ""}`,
+							)
 						} catch (profileError) {
 							// Log but continue to the next profile so one failure doesn't
 							// leave other profiles holding a stale token.
