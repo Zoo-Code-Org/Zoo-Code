@@ -211,6 +211,10 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"edit",
+					// ApplyDiffTool composes the patch from the bytes its own read produced, and the
+					// guard must judge that observation: a stale token stays stale, a partial read stays
+					// partial. This caller does not re-observe the basis.
+					false,
 				)
 			} else {
 				// Original behavior with diff view

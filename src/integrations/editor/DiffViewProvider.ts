@@ -745,6 +745,51 @@ export class DiffViewProvider {
 		return true
 	}
 	/**
+	 * The version this session's own Auto Save left on disk, when the bytes prove it.
+	 *
+	 * A rejection never publishes, so the rollback has no lastWrittenToken to bind to and
+	 * falls back on openToken. Auto Save (afterDelay or onFocusChange) writes the diff's
+	 * modified document - the real file URI - so a rejection can find the proposed edit on
+	 * disk under a token this session never recorded. Those bytes came from this session,
+	 * which makes them a session write rather than a peer mutation: the rollback has to be
+	 * able to recognise them. This is the principle adoptAlreadyPublishedContent() already
+	 * encodes for the publish path, with the same stat-bracketed read.
+	 *
+	 * The comparison is against the encoded text of the buffer exactly as the publish path
+	 * would write it - encoding and line endings included - so a CRLF target is not matched
+	 * against LF text. A disk state that matches neither originalContent nor the buffer is a
+	 * genuine peer write: this answers undefined and the caller keeps reporting
+	 * RollbackConflictError. The bracketed read declines to answer when the version moved
+	 * across the read, because such a token is already unsafe to bind.
+	 */
+	private async sessionAutoSavedToken(
+		absolutePath: string,
+		bufferText: string,
+		encoding: string,
+	): Promise<string | undefined> {
+		const before = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (before === undefined) {
+			return undefined
+		}
+		const disk = await fs.readFile(absolutePath).catch(() => undefined)
+		if (disk === undefined) {
+			return undefined
+		}
+		const after = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (after === undefined || versionTokenOfStat(before) !== versionTokenOfStat(after)) {
+			return undefined
+		}
+		const encodedBuffer = vscode.workspace.encode
+			? await vscode.workspace.encode(bufferText, { encoding })
+			: undefined
+		const bufferBytes = encodedBuffer ?? new Uint8Array(Buffer.from(bufferText, "utf8"))
+		if (Buffer.compare(Buffer.from(disk), Buffer.from(bufferBytes)) !== 0) {
+			return undefined
+		}
+		return versionTokenOfStat(after)
+	}
+
+	/**
 	 * Whether a byte-for-byte match on disk may be adopted as this save's publish.
 	 *
 	 * Adoption exists for one shape: the preview (or an autosave of it) already put
@@ -1302,7 +1347,23 @@ export class DiffViewProvider {
 							// what this session recorded.
 							const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 							const diskToken = diskStat === undefined ? undefined : versionTokenOfStat(diskStat)
-							const oursToken = this.lastWrittenToken ?? this.placeholderVersion
+							let oursToken = this.lastWrittenToken ?? this.placeholderVersion
+							// The same recognition as the modify rollback: Auto Save writes the create preview's
+							// buffer to the real file URI, which moves the token off placeholderVersion and leaves the
+							// rejected edit standing in the file this session created. When the file holds exactly the
+							// encoded text of that buffer, the version is this session's own write and the unlink may
+							// bind to it. Bytes that match neither the placeholder nor the buffer are a peer's, and the
+							// conflict stays.
+							if (diskToken !== undefined && oursToken !== diskToken) {
+								const autoSavedToken = await this.sessionAutoSavedToken(
+									absolutePath,
+									updatedDocument.getText(),
+									updatedDocument.encoding,
+								)
+								if (autoSavedToken !== undefined && autoSavedToken === diskToken) {
+									oursToken = autoSavedToken
+								}
+							}
 							if (oursToken === undefined || diskToken === undefined || diskToken !== oursToken) {
 								// Ownership is unknown - this session recorded no token (an
 								// identity-only or failed stat-bracketed create), or the disk
@@ -1375,12 +1436,29 @@ export class DiffViewProvider {
 							? await vscode.workspace.encode(originalText, { encoding: updatedDocument.encoding })
 							: undefined
 						const originalBytes = encodedOriginal ?? new Uint8Array(Buffer.from(originalText, "utf8"))
-						const expectedToken = this.lastWrittenToken
+						let expectedToken = this.lastWrittenToken
 						// The CAS needs both sides of the comparison: the version this session
 						// left and the version the disk reports. The probe below only decides
 						// eligibility - replaceIfVersion re-reads the version under the lock,
 						// and that read is the authoritative check the publish is bound to.
 						const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+						// This session's own Auto Save is not a peer mutation. A rejection never publishes, so
+						// lastWrittenToken is undefined here, while Auto Save of the diff's modified document -
+						// which is the real file URI - has moved the disk version off openToken and left this
+						// session's proposed bytes on disk. When the target holds exactly the encoded text of the
+						// buffer being rolled back, that version is this session's own write and the restore may
+						// bind to it instead of reporting a conflict no peer caused. Bytes that match neither the
+						// buffer nor originalContent are a genuine peer write, and the conflict stays.
+						if (expectedToken === undefined && diskStat !== undefined) {
+							const autoSavedToken = await this.sessionAutoSavedToken(
+								absolutePath,
+								updatedDocument.getText(),
+								updatedDocument.encoding,
+							)
+							if (autoSavedToken !== undefined) {
+								expectedToken = autoSavedToken
+							}
+						}
 						if (expectedToken === undefined || diskStat === undefined) {
 							// One side of the comparison has no version: the session never
 							// recorded what it left (a publish whose token read failed), or the
@@ -2238,6 +2316,16 @@ export class DiffViewProvider {
 		writeKind: GuardedWriteKind = "create",
 		// Completeness the caller earned elsewhere; a move carries the source's
 		// view through the publish instead of claiming completeness for lines it never read.
+		// Whether this caller may re-observe the target's basis before the guard runs. The axis
+		// is the caller's authority over the basis, not writeKind: writeKind says how the content
+		// is shaped, not whether the writer saw the bytes it builds on. A caller that composes its
+		// content from bytes it just read (EditTool, SearchReplaceTool, EditFileTool,
+		// ApplyPatchTool) may record what that read proves about the current version. A caller
+		// whose bytes come from somewhere else may not: re-observing for WriteToFileTool (whose
+		// content is the model's) or ApplyDiffTool (which must keep the observation its own read
+		// earned) would upgrade a stale or partial model observation, or authorize a target the
+		// model never read, before the guard ever sees it.
+		reobserveBasis: boolean = false,
 		completeOverride?: boolean,
 	): Promise<{
 		newProblemsMessage: string | undefined
@@ -2260,26 +2348,14 @@ export class DiffViewProvider {
 			// unreachable and the write cannot be guarded.
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
-		await createDirectoriesForFile(absolutePath)
-		// The guard decides from the observation registry, and a direct save has no preview
-		// to authorize it: the consumer built `content` from bytes it read outside this class
-		// and hands them over as `originalContent`. Bracket that read here - stat, compare the
-		// target's current bytes against the basis bytes, stat again - and record what it
-		// authorized before publishing. Both sides agreeing on one token AND the target still
-		// holding exactly the basis bytes means this publish replaces content the consumer saw in
-		// full, which is what a complete observation claims. Anything else - the file moved
-		// during the bracket, or the target no longer matches what the content was built from -
-		// means the publish rests on a slice of something else, so the observation stays partial
-		// and the completeness gate refuses a full-file replacement until the model re-reads.
-		// "create" is left alone: an absent target needs no authorization, and a target that is
-		// already there must be refused as unobserved rather than quietly overwritten.
-		// Only a full-file replacement may have its basis re-observed. An "edit" save is a targeted patch
-		// whose authorization comes from the observation the model's own read recorded: ApplyDiffTool
-		// deliberately keeps a stale entry so the guard refuses a save against the newer disk version, and
-		// keeps complete: false so that a partial read is not silently promoted. Re-bracketing that entry
-		// here would refresh the stale token to the current one and upgrade the partial claim before
-		// guardedWrite() ever ran - the very blindness the edit kind exists to avoid.
-		if (writeKind === "update" && this.originalContent !== undefined) {
+		// Re-observe the target only for a caller that built the published content from the
+		// bytes it just read. writeKind is not the axis: it describes the shape of the content,
+		// not whether the writer saw the basis it is building on, and gating on it made the
+		// stale-read and partial-read guarantees depend on which kind string a caller happened
+		// to pass. With the flag off the registry keeps whatever the model's own read recorded,
+		// so guardedWrite() judges a stale, partial, or absent observation exactly as the
+		// diff-view path would.
+		if (reobserveBasis && this.originalContent !== undefined) {
 			await this.observeDirectSaveBasis(task, absolutePath)
 		}
 		const landedToken = await guardedWrite(task, relPath, content, writeKind, completeOverride)

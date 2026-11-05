@@ -222,6 +222,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				diagnosticsEnabled,
 				writeDelayMs,
 				"create",
+				// The patch was applied to the bytes this tool just read, so it may re-observe what
+				// that read proves about the current version.
+				true,
 			)
 		} else {
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
@@ -425,6 +428,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"create",
+					// The patch was applied to the bytes this tool just read, so it may re-observe what
+					// that read proves about the current version.
+					true,
 				)
 			} else {
 				// Write to new path and delete old file
@@ -453,6 +459,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"update",
+					// The patch was applied to the bytes this tool just read, so it may re-observe what
+					// that read proves about the current version.
+					true,
 				)
 			} else {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)

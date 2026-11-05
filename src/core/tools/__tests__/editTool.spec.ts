@@ -173,6 +173,9 @@ describe("editTool", () => {
 		const calls = (mockTask.diffViewProvider.saveDirectly as unknown as ReturnType<typeof vi.fn>).mock.calls
 		expect(calls).toHaveLength(1)
 		expect(calls[0]?.[5]).toBe("update")
+		// Index 6 is the basis-authority flag: EditTool built this edit from the bytes it just read,
+		// so it is the kind of caller that may re-observe what that read proves.
+		expect(calls[0]?.[6]).toBe(true)
 		expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 	})
 

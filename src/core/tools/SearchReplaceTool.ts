@@ -217,6 +217,9 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"update",
+					// The replacement was built from the bytes this tool just read, so it may re-observe
+					// what that read proves about the current version.
+					true,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties

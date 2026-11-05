@@ -1214,13 +1214,13 @@ describe("DiffViewProvider", () => {
 				mockTask.observationRegistry.clear()
 				vi.mocked(fs.access).mockRejectedValue(enoent())
 
-				await diffViewProvider.saveDirectly("moved-out.ts", "content", false, false, 0, "create", false)
+				await diffViewProvider.saveDirectly("moved-out.ts", "content", false, false, 0, "create", true, false)
 				expect(mockTask.observationRegistry.get(`${mockCwd}/moved-out.ts`)).toMatchObject({
 					version: "v1",
 					complete: false,
 				})
 
-				await diffViewProvider.saveDirectly("moved-in.ts", "content", false, false, 0, "create", true)
+				await diffViewProvider.saveDirectly("moved-in.ts", "content", false, false, 0, "create", true, true)
 				expect(mockTask.observationRegistry.get(`${mockCwd}/moved-in.ts`)).toMatchObject({
 					version: "v1",
 					complete: true,
@@ -1414,7 +1414,7 @@ describe("DiffViewProvider", () => {
 			// written - rather than the blanket "was not read" refusal, because the bytes were read
 			// here, just not tie-ably to the preview this session opened.
 			await expect(
-				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "update"),
+				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "update", true),
 			).rejects.toThrow(/Stale version -- the file changed since you read it/)
 		})
 		it("saveDirectly records a complete observation for the bytes its content was built from", async () => {
@@ -1429,7 +1429,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
 
 			await expect(
-				diffViewProvider.saveDirectly("basis.ts", "replacement content", false, false, 0, "update"),
+				diffViewProvider.saveDirectly("basis.ts", "replacement content", false, false, 0, "update", true),
 			).resolves.toMatchObject({ finalContent: "replacement content" })
 
 			const observation = mockTask.observationRegistry.get(`${mockCwd}/basis.ts`)
@@ -1448,7 +1448,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(fs.readFile).mockResolvedValue("someone else's content")
 
 			await expect(
-				diffViewProvider.saveDirectly("basis.ts", "replacement content", false, false, 0, "update"),
+				diffViewProvider.saveDirectly("basis.ts", "replacement content", false, false, 0, "update", true),
 			).rejects.toThrow(/only partially read/)
 
 			expect(safeWriteText).not.toHaveBeenCalled()
@@ -1513,7 +1513,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
 
 			await expect(
-				diffViewProvider.saveDirectly("crlf.ts", "replacement content", false, false, 0, "update"),
+				diffViewProvider.saveDirectly("crlf.ts", "replacement content", false, false, 0, "update", true),
 			).resolves.toMatchObject({ finalContent: "replacement content" })
 
 			const observation = mockTask.observationRegistry.get(`${mockCwd}/crlf.ts`)
@@ -1561,7 +1561,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(fs.readFile).mockResolvedValue("basis content")
 			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
 
-			await diffViewProvider.saveDirectly("slice-edit.ts", "replacement content", false, false, 0, "edit")
+			await diffViewProvider.saveDirectly("slice-edit.ts", "replacement content", false, false, 0, "edit", false)
 
 			expect(mockTask.observationRegistry.get(`${mockCwd}/slice-edit.ts`)?.complete).toBe(false)
 		})
@@ -1580,7 +1580,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
 
 			await expect(
-				diffViewProvider.saveDirectly("stale-edit.ts", "replacement content", false, false, 0, "edit"),
+				diffViewProvider.saveDirectly("stale-edit.ts", "replacement content", false, false, 0, "edit", false),
 			).rejects.toThrow(/Stale version/)
 
 			expect(mockTask.observationRegistry.get(`${mockCwd}/stale-edit.ts`)?.version).toBe(staleToken)
@@ -3802,6 +3802,10 @@ describe("DiffViewProvider", () => {
 			diffViewProvider.editType = "modify"
 			diffViewProvider["originalContent"] = "original"
 			diffViewProvider["lastWrittenToken"] = undefined
+			// The disk holds bytes this session never wrote: no baseline plus a peer write, which is
+			// the case the conflict exists for. (Bytes equal to the buffer would be this session's own
+			// Auto Save, and the rollback recognises those instead of reporting a conflict.)
+			vi.mocked(fs.readFile).mockResolvedValue("peer bytes")
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
 
 			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({
@@ -3944,6 +3948,9 @@ describe("DiffViewProvider", () => {
 					save: vi.fn().mockResolvedValue(undefined),
 				}),
 			})
+			// The disk still carries the bytes open() read, which are not this session's buffer text:
+			// nothing moved, so there is no session write to recognise and the rollback reloads instead.
+			vi.mocked(fs.readFile).mockResolvedValue("bytes open() read")
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 
 			// A session with no baseline, whose disk still carries exactly the version
@@ -3957,6 +3964,244 @@ describe("DiffViewProvider", () => {
 			expect(safeWriteText).not.toHaveBeenCalled()
 			// The session is finalized: a later rollback has nothing left to restore.
 			expect(diffViewProvider.isEditing).toBe(false)
+		})
+
+		it("saveDirectly does not upgrade a stale observation for a caller that never read the basis", async () => {
+			// WriteToFileTool's shape: its bytes come from the model, and the previewed basis still
+			// matches the target, so a whole-file re-observation would record the current token and let
+			// a full replacement built from v1 overwrite v2. The diff-view path for that same tool
+			// refuses this, so the direct path must keep the model's stale entry for the guard.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "basis content"
+			const staleToken = "1:2:300:1000000000:1000000000"
+			mockTask.observationRegistry.observe(`${mockCwd}/stale-direct.ts`, staleToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("basis content")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(
+				diffViewProvider.saveDirectly(
+					"stale-direct.ts",
+					"replacement content",
+					false,
+					false,
+					0,
+					"update",
+					false,
+				),
+			).rejects.toThrow(/Stale version/)
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/stale-direct.ts`)?.version).toBe(staleToken)
+		})
+
+		it("saveDirectly does not upgrade a partial observation for a caller that never read the basis", async () => {
+			// The other half of the same shape: the target holds exactly the bytes the tool previewed, so
+			// a whole-file re-observation would upgrade the model's partial read to complete and accept a
+			// replacement built from a partial view. Without basis authority the guard sees
+			// complete: false and refuses, which is what the diff-view path does.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "basis content"
+			mockTask.observationRegistry.observe(
+				`${mockCwd}/partial-direct.ts`,
+				versionTokenOfStat(previewStats),
+				false,
+			)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("basis content")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(
+				diffViewProvider.saveDirectly(
+					"partial-direct.ts",
+					"replacement content",
+					false,
+					false,
+					0,
+					"update",
+					false,
+				),
+			).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- ",
+			)
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/partial-direct.ts`)?.complete).toBe(false)
+		})
+
+		it("saveDirectly authorizes nothing for an unread target when the caller never read the basis", async () => {
+			// The third effect the finding names: an existing file the model never read. A whole-file
+			// re-observation against the tool's own preview would hand the guard a complete observation
+			// for a target nobody read, authorizing the write. With no basis authority the registry stays
+			// empty and the guard asks for the read first.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "model written content"
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("existing bytes the model never read")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(
+				diffViewProvider.saveDirectly(
+					"unread-direct.ts",
+					"model written content",
+					false,
+					false,
+					0,
+					"update",
+					false,
+				),
+			).rejects.toBeInstanceOf(GuardRejectedError)
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/unread-direct.ts`)).toBeUndefined()
+		})
+
+		it("revertChanges() recognises this session's own Auto Save bytes instead of reporting a conflict", async () => {
+			// A rejection never publishes, so lastWrittenToken is undefined and the rollback would bind
+			// to openToken. Auto Save of the diff's modified document - the real file URI - already wrote
+			// this session's proposed edit, moving the disk version off openToken. Reporting a conflict
+			// here strands the rejected edit on disk and blames a peer that never wrote, so the rollback
+			// recognises its own bytes and restores originalContent under the disk's current version.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("proposed edit"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["lastWrittenToken"] = undefined
+			diffViewProvider["openToken"] = "token-open-recorded"
+			vi.mocked(vscode.workspace.encode).mockImplementation(async (content: string) =>
+				new TextEncoder().encode(content),
+			)
+			// Auto Save moved the version: the disk holds the proposed edit, not what open() read.
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("proposed edit")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			// The restore published under the Auto Save version, and the buffer came back to the original.
+			expect(safeWriteText).toHaveBeenCalledTimes(1)
+			// The rollback encoded originalContent and published once - under the version Auto Save left,
+			// which the resolve above already proves it bound to.
+			expect(vscode.workspace.encode).toHaveBeenCalledWith("original", { encoding: "utf8" })
+			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
+		})
+
+		it("revertChanges() still reports a peer write when Auto Save is on and the bytes are not the session's", async () => {
+			// The recognition must not become a blank cheque: Auto Save moved the version, but the file
+			// holds neither this session's buffer nor originalContent, so a peer wrote it and the rollback
+			// has to preserve those bytes and report the conflict.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("proposed edit"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["lastWrittenToken"] = undefined
+			diffViewProvider["openToken"] = "token-open-recorded"
+			vi.mocked(vscode.workspace.encode).mockImplementation(async (content: string) =>
+				new TextEncoder().encode(content),
+			)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("peer bytes")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({ name: "RollbackConflictError" })
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() unlinks a created file whose Auto Save bytes are this session's own", async () => {
+			// The create path fails the same way: Auto Save moves the token off placeholderVersion, so the
+			// file carrying the rejected edit survives the rollback and the session stays open on a file it
+			// created itself. Those bytes are the session's, so the unlink binds to that version.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/new-file.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("proposed new file"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "new-file.ts"
+			diffViewProvider.editType = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["placeholderVersion"] = "token-placeholder"
+			diffViewProvider["lastWrittenToken"] = undefined
+			vi.mocked(vscode.workspace.encode).mockImplementation(async (content: string) =>
+				new TextEncoder().encode(content),
+			)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("proposed new file")
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/new-file.ts`)
+		})
+
+		it("revertChanges() keeps a peer's file when the created path holds bytes this session never wrote", async () => {
+			// Same create path, peer content: Auto Save moved the version, but the bytes are not this
+			// session's buffer, so the unlink would delete a file this session no longer owns.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/new-file.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("proposed new file"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "new-file.ts"
+			diffViewProvider.editType = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["placeholderVersion"] = "token-placeholder"
+			diffViewProvider["lastWrittenToken"] = undefined
+			vi.mocked(vscode.workspace.encode).mockImplementation(async (content: string) =>
+				new TextEncoder().encode(content),
+			)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("peer bytes")
+
+			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({ name: "RollbackConflictError" })
+
+			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
 		it("drops the rollback baseline when the session is finalized", async () => {

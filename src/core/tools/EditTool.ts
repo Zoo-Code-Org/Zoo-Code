@@ -221,6 +221,9 @@ export class EditTool extends BaseTool<"edit"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"update",
+					// The edit was applied to the bytes this tool just read, so it may re-observe what
+					// that read proves about the current version.
+					true,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties

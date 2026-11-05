@@ -167,6 +167,9 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			// No basis authority: ApplyDiffTool keeps the observation its own read recorded, so the
+			// guard still judges the patch against the version that read saw.,
+			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
@@ -329,6 +332,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(stat).toHaveBeenCalledTimes(2)
@@ -367,6 +371,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(stat).toHaveBeenCalledTimes(2)
