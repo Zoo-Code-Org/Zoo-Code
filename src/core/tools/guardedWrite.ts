@@ -259,6 +259,9 @@ class TargetOutsideHeldLocksError extends Error {
  */
 async function withBothIdentityLocks<T>(
 	absolutePath: string,
+	// The caller's spelling is what the model gets to see: the resolved path under a symlinked or aliased
+	// workspace is a user-specific absolute path, and it has no business in model-facing text.
+	displayPath: string,
 	operation: (retainedTarget: string) => Promise<T>,
 ): Promise<T> {
 	for (let attempt = 1; ; attempt++) {
@@ -286,11 +289,14 @@ async function withBothIdentityLocks<T>(
 				throw error
 			}
 			if (attempt >= MAX_LOCK_REACQUISITIONS) {
+				// Both halves of this rejection reach the model: the message and the error's path field carry the
+				// caller's own spelling of the file rather than the resolved referent, which under an alias is a
+				// user-specific absolute path.
 				throw new GuardRejectedError(
 					"File was retargeted while this write was queued -- nothing was published; re-read " +
-						absolutePath +
+						displayPath +
 						" and retry.",
-					absolutePath,
+					displayPath,
 				)
 			}
 		}
@@ -314,7 +320,7 @@ export async function createIfAbsent(
 	// Lock both identities of the write: the resolved referent every other
 	// writer to this file uses, and the alias entry a link-swapping protocol
 	// writer holds.
-	return withBothIdentityLocks(absolutePath, async (publishTarget) => {
+	return withBothIdentityLocks(absolutePath, displayPath, async (publishTarget) => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		// publishTarget is the retained target the helper fixed under the held locks and verified
 		// those locks cover.
@@ -390,7 +396,7 @@ export async function replaceIfVersion(
 	// Lock both identities of the write: the resolved referent every other
 	// writer to this file uses, and the alias entry a link-swapping protocol
 	// writer holds.
-	return withBothIdentityLocks(absolutePath, async (publishTarget) => {
+	return withBothIdentityLocks(absolutePath, displayPath, async (publishTarget) => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		// publishTarget is fixed under the held locks and verified to be covered by them: the
 		// version comparison and the publish below both act on this one target, so a symlink
@@ -570,19 +576,31 @@ export async function guardedWrite(
 				cursor = parent
 			}
 		})
-		// A relative task path is workspace-scoped by construction: the caller named it relative to
-		// task.cwd and the tool layer approved it as an in-workspace path. Canonicalizing it can still
-		// land outside the workspace - the ordinary shape is a link directory inside the workspace whose
-		// referent is elsewhere - and the clause below cannot catch that, because it only binds the
-		// retained target when the alias looks inside the canonical root. An alias that itself escapes
-		// would read as an intentional outside-workspace write, indistinguishable here from an absolute
-		// path the caller named outright. So the alias's own containment is checked for relative paths
-		// only, and it fails closed: the approved bytes were approved for a path inside the workspace.
-		// An absolute caller path keeps its own authorization and is left to the clause below.
-		if (!path.isAbsolute(relPathOrAbsolute) && !isInsideDirectory(canonicalWorkspaceRoot, canonicalAlias)) {
+		// A relative task path is workspace-scoped in its *lexical* spelling: the caller named it relative
+		// to task.cwd and the tool layer approved it as an in-workspace path. Canonicalizing such a path
+		// can still land outside the workspace - the ordinary shape is a link directory inside the
+		// workspace whose referent is elsewhere - and the clause below cannot catch that, because it only
+		// binds the retained target when the alias looks inside the canonical root; an alias that itself
+		// escapes would read as an intentional outside-workspace write. So the alias's own containment is
+		// checked for relative paths that are lexically inside task.cwd, and it fails closed there: the
+		// approved bytes were approved for a path inside the workspace. A relative path that is already
+		// lexically outside task.cwd is a different animal - the tools spell an approved absolute
+		// outside-workspace target that way (EditFileTool converts it with path.relative(task.cwd,
+		// file_path) after the user approves the outside edit), and that caller keeps its own
+		// authorization, exactly like an absolute path named outright.
+		if (
+			!path.isAbsolute(relPathOrAbsolute) &&
+			isInsideDirectory(task.cwd, absolutePath) &&
+			!isInsideDirectory(canonicalWorkspaceRoot, canonicalAlias)
+		) {
+			// The escaped alias is named relative to the canonical workspace root rather than as an absolute
+			// path: this rejection goes straight into the model's context, and the resolved spelling of a
+			// workspace reached through a link is a user-specific path the model does not need. The relative
+			// form still lists the components in order, which is what the model has to re-read under.
+			const escapedAlias = path.relative(canonicalWorkspaceRoot, canonicalAlias)
 			throw new GuardRejectedError(
 				"The write path resolves outside the workspace (" +
-					canonicalAlias +
+					escapedAlias +
 					") -- nothing was written; re-read the file under its canonical path, then retry.",
 				displayPath,
 			)

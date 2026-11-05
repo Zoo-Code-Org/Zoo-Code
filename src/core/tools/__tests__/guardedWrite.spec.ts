@@ -1308,10 +1308,35 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 
 			await expect(guardedWrite(task, rel, "hello", "update")).rejects.toThrow(
-				path.join(referentDir, "deeper", "deeper2", "new-file.txt"),
+				// The reconstructed alias relative to the canonical root: the components stay in order (that
+				// is what the model has to re-read under), and no user-specific absolute path leaks.
+				path.join("..", "external", "child", "deeper", "deeper2", "new-file.txt"),
 			)
 
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite leaves an approved outside target spelled ../ to its own authorization", async () => {
+			// The scoping that keeps the relative-alias rule from colliding with a shipped flow:
+			// EditFileTool turns an approved absolute outside-workspace target into a ../ path
+			// (path.relative(task.cwd, file_path)) before the save reaches the guard. That path is
+			// lexically outside task.cwd already, so it is the caller's approved outside write and stays
+			// authorized; only a relative path that is lexically *inside* the workspace is bound to it by
+			// the alias check.
+			const reg = new ObservationRegistry()
+			const rel = path.join("..", "external", "new-file.txt")
+			const lexAbs = path.resolve(WORKSPACE, rel)
+			reg.observe(lexAbs, "v1", true)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(lexAbs)
+			vi.mocked(fs.realpath).mockImplementation(async (value) => path.resolve(String(value)))
+
+			await guardedWrite(task, rel, "hello", "update")
+
+			expect(mockedSafeWriteText.mock.calls[0]?.[0]).toBe(lexAbs)
+			expect(mockedSafeWriteText.mock.calls[0]?.[1]).toBe("hello")
 		})
 
 		it("guardedWrite leaves an absolute alias that canonicalizes outside the workspace to its own authorization", async () => {
@@ -1448,8 +1473,10 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedComputeVersionToken.mockResolvedValue("v1")
 
 			await expect(replaceIfVersion(alias, "v1", "bytes", "foo.ts")).rejects.toThrow(
+				// The caller's spelling, not the resolved referent: this string goes into the model's context,
+				// and the referent under an alias is a user-specific absolute path.
 				"File was retargeted while this write was queued -- nothing was published; re-read " +
-					alias +
+					"foo.ts" +
 					" and retry.",
 			)
 

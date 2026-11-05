@@ -1500,6 +1500,92 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider.isEditing).toBe(false)
 		})
 
+		it("saveDirectly does not downgrade a CRLF target whose consumer normalized to LF", async () => {
+			// EditTool and SearchReplaceTool normalize the content they build on to LF before assigning
+			// originalContent (EditTool.ts:94, SearchReplaceTool.ts:99) while the file on disk is still
+			// CRLF. Compared raw, that difference looks like an unread-in-full basis and the "update" gets
+			// refused as partially read under preventFocusDisruption, so both sides of the comparison are
+			// normalized before they are compared.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "line one\nline two"
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("line one\r\nline two")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(
+				diffViewProvider.saveDirectly("crlf.ts", "replacement content", false, false, 0, "update"),
+			).resolves.toMatchObject({ finalContent: "replacement content" })
+
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/crlf.ts`)
+			expect(observation?.complete).toBe(true)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+		})
+
+		it("settles the session reservation when open() throws out of the existing-file read", async () => {
+			// The exits the manual settlements missed: only the openDiffEditor failure path and normal
+			// completion used to settle the reservation, so a throw from the existing-file read - or from
+			// existingDocument.save(), directory or placeholder creation, or undoPartialOpen() - left a
+			// pending reservation that reset() then joined forever while isEditing stayed set. The
+			// transition now runs inside try/finally, so every exit settles it.
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.window).visibleTextEditors = []
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, open 'read-throws.ts'"), { code: "EACCES" }),
+			)
+			diffViewProvider.editType = "modify"
+			diffViewProvider["sessionFinalizationClaimed"] = false
+			diffViewProvider["teardownInFlight"] = undefined
+
+			await expect(diffViewProvider.open("read-throws.ts")).rejects.toThrow(/EACCES/)
+
+			// reset() has to be able to finish: before the finally it joined a reservation that no exit
+			// would ever settle, and the session's flags stayed claimed by nobody.
+			await diffViewProvider.reset()
+			expect(diffViewProvider["sessionStartInFlight"]).toBeUndefined()
+			expect(diffViewProvider.isEditing).toBe(false)
+		})
+
+		it("saveDirectly leaves a partial observation partial for an edit save", async () => {
+			// The other half of the same preservation: a patch over a file the model only read part of must
+			// not upgrade the claim to a complete read on the strength of the bytes this save is about to
+			// write. Whether the guard then publishes the patch or refuses it, the entry it recorded for the
+			// read is what stays in the registry, so a later full-file replacement is still refused.
+			mockTask.observationRegistry.clear()
+			// The content the patch was built from, and the bytes the target still holds: a whole-file
+			// basis observation would call this a complete read, which is exactly the upgrade a patch must
+			// not buy for a file the model only read part of.
+			diffViewProvider.originalContent = "basis content"
+			mockTask.observationRegistry.observe(`${mockCwd}/slice-edit.ts`, versionTokenOfStat(previewStats), false)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("basis content")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await diffViewProvider.saveDirectly("slice-edit.ts", "replacement content", false, false, 0, "edit")
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/slice-edit.ts`)?.complete).toBe(false)
+		})
+
+		it("saveDirectly leaves a stale observation stale for an edit save", async () => {
+			// ApplyDiffTool keeps the observation its own read recorded even after the file moved on, so
+			// that the guard refuses the patch against the newer disk version. Re-observing the whole-file
+			// basis here - which is what a full-file "update" caller needs - would refresh the stale token
+			// to the current one and hand the guard a compare-and-swap win it never earned.
+			mockTask.observationRegistry.clear()
+			diffViewProvider.originalContent = "replacement content"
+			const staleToken = "1:2:300:1000000000:1000000000"
+			mockTask.observationRegistry.observe(`${mockCwd}/stale-edit.ts`, staleToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("basis content")
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(previewStats))
+
+			await expect(
+				diffViewProvider.saveDirectly("stale-edit.ts", "replacement content", false, false, 0, "edit"),
+			).rejects.toThrow(/Stale version/)
+
+			expect(mockTask.observationRegistry.get(`${mockCwd}/stale-edit.ts`)?.version).toBe(staleToken)
+		})
+
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
 			const mockEditor = mockTextEditor(`${mockCwd}/brand-new.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
@@ -3880,6 +3966,47 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["lastWrittenToken"] = "our-token"
 			await diffViewProvider.reset()
 			expect(diffViewProvider["lastWrittenToken"]).toBeUndefined()
+		})
+
+		it("revertChanges() stops removing created directories at the first failure instead of abandoning the cleanup", async () => {
+			// undoPartialOpen() and the rejected-save cleanup already stop at the first rmdir failure; this
+			// loop did not. A peer that drops a file into one of the directories open() created makes rmdir
+			// reject with ENOTEMPTY, and a rejection escaping the cleanup aborted the teardown before
+			// restorePreviewTabs() and reset() could run: isEditing stayed set, the preview observation
+			// stayed registered, and abortStream() received a raw rejection for a cleanup that had nothing
+			// left to protect. The delete that matters - the placeholder this session owns - still lands.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("placeholder"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "create"
+			diffViewProvider["placeholderVersion"] = versionTokenOfStat(previewStats)
+			diffViewProvider["createdDirs"] = [`${mockCwd}/r6-dirs`, `${mockCwd}/r6-dirs/nested`]
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.rmdir).mockRejectedValue(
+				Object.assign(new Error("ENOTEMPTY: directory not empty, rmdir"), { code: "ENOTEMPTY" }),
+			)
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			// The placeholder is gone, the directories stop at the one that refused, and the teardown's tail
+			// still runs: isEditing is cleared rather than left claimed by a session nobody is rolling back.
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
+			expect(vi.mocked(fs.rmdir)).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(fs.rmdir)).toHaveBeenCalledWith(`${mockCwd}/r6-dirs/nested`)
+			expect(diffViewProvider.isEditing).toBe(false)
 		})
 
 		it("keeps a peer's file when the create placeholder was replaced before the rollback", async () => {

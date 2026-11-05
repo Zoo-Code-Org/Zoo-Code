@@ -238,14 +238,29 @@ export class DiffViewProvider {
 		// listeners and a deferred scroll timer that no live session owns.
 		// The reservation settles only when the transition ends, not when the previous session's cleanup
 		// does, so a reset() that joins it finalizes a session whose claiming is finished instead of
-		// running against fields open() has not written yet. Every exit from the transition settles
-		// it: the openDiffEditor failure path and the end of open() below are the two exits this
-		// transition has today.
+		// running against fields open() has not written yet. The transition runs inside try/finally so
+		// that every exit settles it: a throw from existingDocument.save(), the existing-file read,
+		// directory or placeholder creation, or undoPartialOpen() used to leave a pending reservation
+		// that reset() then waited on forever while isEditing stayed set.
 		let settleSessionStart: () => void = () => {}
 		const startReservation = new Promise<void>((resolve) => {
 			settleSessionStart = resolve
 		})
 		this.sessionStartInFlight = startReservation
+		try {
+			await this.runOpenTransition(relPath)
+		} finally {
+			// Clear the field only while it still refers to this reservation. A newer open() that began
+			// while this one was unwinding owns it, and this exit must not release someone else's claim.
+			if (this.sessionStartInFlight === startReservation) {
+				this.sessionStartInFlight = undefined
+			}
+			settleSessionStart()
+		}
+	}
+
+	/** The transition itself. open() guards it with the session reservation. */
+	private async runOpenTransition(relPath: string): Promise<void> {
 		await this.finalizationInFlight?.catch(() => {})
 		await this.teardownInFlight?.catch(() => {})
 		this.relPath = relPath
@@ -437,9 +452,6 @@ export class DiffViewProvider {
 			// revertChanges() to undo, so the unapproved file (and the directories made for
 			// it) would stay on disk: undo that part of the open here.
 			await this.undoPartialOpen(absolutePath)
-			// The transition ended without claiming a session: release the reservation.
-			this.sessionStartInFlight = undefined
-			settleSessionStart()
 			this.isEditing = false
 			this.createdDirs = []
 			this.placeholderVersion = undefined
@@ -520,11 +532,6 @@ export class DiffViewProvider {
 				}
 			}
 		})
-		// The session is claimed and its listeners are registered, so the reservation has done its job.
-		// A later reset() joining a settled reservation is a no-op; releasing only keeps the field honest
-		// about what is still in flight.
-		this.sessionStartInFlight = undefined
-		settleSessionStart()
 	}
 
 	/**
@@ -1330,9 +1337,18 @@ export class DiffViewProvider {
 							await this.closeFileTab(absolutePath)
 							await fs.unlink(absolutePath)
 
-							// Remove only the directories we created, in reverse order.
+							// Remove only the directories we created, in reverse order, and stop at the first failure: a peer
+							// that drops a file into one of them makes rmdir reject with ENOTEMPTY, and a rejection escaping
+							// this cleanup aborts the teardown before restorePreviewTabs() and reset() run - isEditing would
+							// stay true, the preview observation would not be withdrawn, and abortStream() would receive a raw
+							// rejection for a cleanup that has nothing left to protect. undoPartialOpen() and the rejected-save
+							// cleanup already stop at the first rmdir failure for exactly this reason.
 							for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-								await fs.rmdir(this.createdDirs[i])
+								try {
+									await fs.rmdir(this.createdDirs[i])
+								} catch {
+									break
+								}
 							}
 						}
 						// The modify rollback publishes through replaceIfVersion below: it
@@ -2257,7 +2273,13 @@ export class DiffViewProvider {
 		// and the completeness gate refuses a full-file replacement until the model re-reads.
 		// "create" is left alone: an absent target needs no authorization, and a target that is
 		// already there must be refused as unobserved rather than quietly overwritten.
-		if (writeKind !== "create" && this.originalContent !== undefined) {
+		// Only a full-file replacement may have its basis re-observed. An "edit" save is a targeted patch
+		// whose authorization comes from the observation the model's own read recorded: ApplyDiffTool
+		// deliberately keeps a stale entry so the guard refuses a save against the newer disk version, and
+		// keeps complete: false so that a partial read is not silently promoted. Re-bracketing that entry
+		// here would refresh the stale token to the current one and upgrade the partial claim before
+		// guardedWrite() ever ran - the very blindness the edit kind exists to avoid.
+		if (writeKind === "update" && this.originalContent !== undefined) {
 			await this.observeDirectSaveBasis(task, absolutePath)
 		}
 		const landedToken = await guardedWrite(task, relPath, content, writeKind, completeOverride)
@@ -2353,10 +2375,18 @@ export class DiffViewProvider {
 			// guard is left to refuse rather than adopt a claim about bytes nobody observed.
 			return
 		}
+		// The consumers hand over LF-normalized text - EditTool and SearchReplaceTool both run
+		// replace(/\r\n/g, "\n") before assigning originalContent - while the target on disk may still be
+		// CRLF. Compared raw, that difference downgrades a sound basis to "partial" purely because of
+		// line endings and refuses an update nobody should have to retry, so both sides are normalized
+		// before they are compared.
+		const basis = this.originalContent
+		const normalizeLineEndings = (value: string): string => value.replace(/\r\n/g, "\n")
 		const basisIsTheCurrentContent =
 			before !== undefined &&
+			basis !== undefined &&
 			versionTokenOfStat(before) === versionTokenOfStat(after) &&
-			currentBytes === this.originalContent
+			normalizeLineEndings(currentBytes) === normalizeLineEndings(basis)
 		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), basisIsTheCurrentContent)
 	}
 }

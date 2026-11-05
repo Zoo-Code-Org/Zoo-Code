@@ -816,6 +816,49 @@ describe("safeWriteText", () => {
 			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
+		it("win32: a DACL-capture refusal does not unlink a caller staging name it no longer owns", async () => {
+			// The early unlink-by-name in the capture-refusal branch ran without the identity check the
+			// outer failure handler is given. For a caller-supplied staging path - the shape safeWriteJson
+			// passes - another principal that replaced the entry in the shared target directory between
+			// validation and the refusal had its file deleted by us.
+			const targetPath = "/tmp/test-dir/target.txt"
+			const callerTemp = "/tmp/test-dir/acl-staged.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStatsWithIdentity(5n, 5n))
+			// icacls /save fails, so the write refuses before the commit rename.
+			vi.mocked(execFile).mockImplementation((_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+				if (typeof cb === "function") (cb as (e: Error | null) => void)(new Error("icacls error"))
+				return fakeChild
+			})
+			let stagingChecks = 0
+			vi.mocked(fs.lstat).mockImplementation(async (p: unknown, opts: unknown) => {
+				// Match on the name: the guard hands down whichever spelling it computed, and the identity
+				// has to follow the file.
+				const ours = String(p).includes("acl-staged")
+				if ((opts as { bigint?: boolean })?.bigint === true) {
+					if (!ours) {
+						return _fileStatsWithIdentity(9n, 8n)
+					}
+					// Validation sees this write's own staging file; the cleanup re-check lands on the
+					// replacement that another principal planted afterwards.
+					return ++stagingChecks === 1 ? _fileStatsWithIdentity(5n, 5n) : _fileStatsWithIdentity(77n, 77n)
+				}
+				const numeric = _fileStats(false)
+				numeric.ino = ours ? 5 : 9
+				numeric.dev = 8
+				return numeric
+			})
+
+			await expect(
+				safeWriteText(targetPath, "hello", { platform: "win32", tempPath: callerTemp }),
+			).rejects.toThrow(DaclCaptureError)
+
+			// The refusal still reports the capture failure, and the name that is no longer ours survives:
+			// only the outer handler decides what to remove, and it asks who owns the entry first.
+			expect(fs.unlink).not.toHaveBeenCalledWith(callerTemp)
+		})
+
 		it("win32: a captured-DACL publish over a symbolic link is refused before the commit rename", async () => {
 			const targetPath = "/tmp/test-dir/link.json"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

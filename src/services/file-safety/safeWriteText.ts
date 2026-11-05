@@ -789,11 +789,12 @@ export async function safeWriteText(
 					// the destination directory grants - a change in who can read the file, decided
 					// silently by a helper that failed. The refusal happens BEFORE the commit rename,
 					// so the target still holds its previous content under its previous ACL; the
-					// staging file this write created is removed with the refusal.
-					await fs.unlink(tempPath).catch(() => {})
-					if (stagingDir) {
-						await fs.rmdir(stagingDir).catch(() => {})
-					}
+					// staging file this write created is removed with the refusal - by the outer failure handler, not
+					// here. The commit never happened, so stagingCommitted is still false and that handler already owns
+					// this case: it re-identifies the staging entry from a bigint lstat before unlinking it, and it
+					// already rmdir's the staging directory. Unlinking by name here would skip that identity check, and
+					// for a caller-supplied staging path - the shape safeWriteJson passes - a replacement entry that
+					// another principal planted in the shared target directory would be deleted by us.
 					throw new DaclCaptureError(targetPath)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {

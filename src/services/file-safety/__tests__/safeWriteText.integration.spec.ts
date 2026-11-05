@@ -84,9 +84,24 @@ describe("safeWriteText against a real filesystem", () => {
 			expect(await fs.readFile(targetPath, "utf8")).toBe("new bytes")
 			const acl = execFileSync("icacls", [targetPath], { encoding: "utf8" })
 			if (!acl.includes("(I)")) {
-				// A narrowing was accepted instead of a restore; then it must be the verified one.
-				expect(acl.toLowerCase()).toContain(identity.toLowerCase())
-				expect(acl).toContain("(F)")
+				// A narrowing was accepted instead of a restore; then it must be the verified one. icacls
+				// echoes the target path on its first line, and that path sits under os.tmpdir() -
+				// C:\Users\<user>\... - so searching the raw output finds the user's name in the echo alone
+				// and cannot tell a verified narrowing from a DACL that grants the user nothing. Drop the
+				// echo, then require every ACE entry that remains to belong to the current user and to be a
+				// full-control grant: a grant to some other principal is not our narrowing either.
+				const entries = acl
+					.split(targetPath)
+					.slice(1)
+					.join(targetPath)
+					.split("\n")
+					.map((line) => line.trim())
+					.filter((line) => line.length > 0)
+				expect(entries.length).toBeGreaterThan(0)
+				for (const entry of entries) {
+					expect(entry.toLowerCase()).toContain(identity.toLowerCase())
+					expect(entry).toContain("(F)")
+				}
 			}
 			// No dump or backup residue survives either outcome.
 			expect((await fs.readdir(dir)).filter((n) => !n.endsWith(".txt"))).toEqual([])
