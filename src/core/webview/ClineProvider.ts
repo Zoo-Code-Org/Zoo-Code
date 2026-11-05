@@ -135,6 +135,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
+import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -4652,6 +4653,9 @@ export class ClineProvider
 			historyPreviewCollapsed,
 			reasoningBlockCollapsed,
 			chatFontSize,
+			timeFormat,
+			dateFormat,
+			showRelativeTimes,
 			enterBehavior,
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -4833,6 +4837,9 @@ export class ClineProvider
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,
+			timeFormat: timeFormat ?? "auto",
+			dateFormat: dateFormat ?? "auto",
+			showRelativeTimes: showRelativeTimes ?? true,
 			enterBehavior: enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
@@ -5088,6 +5095,9 @@ export class ClineProvider
 			historyPreviewCollapsed: mergedStateValues.historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: mergedStateValues.reasoningBlockCollapsed ?? true,
 			chatFontSize: mergedStateValues.chatFontSize,
+			timeFormat: mergedStateValues.timeFormat ?? "auto",
+			dateFormat: mergedStateValues.dateFormat ?? "auto",
+			showRelativeTimes: mergedStateValues.showRelativeTimes ?? true,
 			enterBehavior: mergedStateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -5265,7 +5275,9 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings, options?: { savedProfileName?: string }) {
-		const sanitizedValues = { ...values }
+		const sanitizedValues = withoutInvalidDisplaySettings(values, (key) =>
+			this.log(`[setValues] Ignored an invalid value for ${key}`),
+		)
 
 		if (sanitizedValues.mode !== undefined) {
 			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:

@@ -32,6 +32,7 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -628,7 +629,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		)
 	}
 
-	public async setConfiguration(values: RooCodeSettings) {
+	/**
+	 * Stores the settings, then the API profile and the mode profiles. The settings are written with
+	 * `ContextProxy.setValues`, which is not a transaction (see there): if a setting cannot be stored, this rejects
+	 * with a `SettingsWriteError` that lists the keys that were stored and the keys that were not (the cache of the
+	 * failed keys has been read back from storage), the stored settings stay, and nothing after the settings is
+	 * written. Invalid values of the display settings are dropped and logged first.
+	 *
+	 * The profile writes that follow the settings are wrapped by this unit: the prior record, the prior shared
+	 * settings, the prior shared mode and profile pin, and the prior mapping of every mode the payload touches are
+	 * snapshotted before the first write, and a failure after any of them restores all of them and rethrows the
+	 * original error. Invalid values of the display settings are dropped and logged first, before anything is stored.
+	 */
+	public async setConfiguration(allValues: RooCodeSettings) {
+		const values = withoutInvalidDisplaySettings(allValues, (key) =>
+			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
+		)
 		// Derive the saved profile name once so the sibling refresh and the save
 		// agree on the empty-string fallback.
 		const savedProfileName = values.currentApiConfigName || "default"
