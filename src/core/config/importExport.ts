@@ -106,9 +106,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 		}
 
 		if (isNonPortableSettingsKey(key)) {
-			warnings.push(
-				`Setting "${path}" was skipped: per-view state and its host-minted claim token are not portable through settings files.`,
-			)
+			warnings.push(`Setting "${path}" was skipped: host-owned view state is not portable.`)
 			continue
 		}
 
