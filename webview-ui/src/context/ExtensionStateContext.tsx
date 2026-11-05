@@ -144,6 +144,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	terminalFontSize?: number
 	editorFontSize?: number
 	spacingScale?: number
+	timeFormat?: "auto" | "12h" | "24h"
+	dateFormat?: "auto" | "mdy" | "dmy" | "ymd"
+	showRelativeTimes?: boolean
 	setChatFontSize: (value: number | undefined) => void
 	enterBehavior?: "send" | "newline"
 	setEnterBehavior: (value: "send" | "newline") => void
@@ -694,6 +697,9 @@ export const ExtensionStateContextProvider: React.FC<{
 		terminalFontSize: state.terminalFontSize ?? undefined,
 		editorFontSize: state.editorFontSize ?? undefined,
 		spacingScale: state.spacingScale ?? undefined,
+		timeFormat: state.timeFormat ?? "auto",
+		dateFormat: state.dateFormat ?? "auto",
+		showRelativeTimes: state.showRelativeTimes ?? true,
 		reasoningBlockCollapsed: state.reasoningBlockCollapsed ?? true,
 		didHydrateState,
 		showWelcome,

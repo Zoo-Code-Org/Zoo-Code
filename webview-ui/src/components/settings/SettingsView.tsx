@@ -103,7 +103,8 @@ export interface SettingsViewRef {
 }
 
 /**
- * How long the form waits for the host to answer a save that changes an appearance value. The host always answers
+ * How long the form waits for the host to answer a save that changes an appearance value, or a time or date value.
+ * The host always answers
  * (success or failure), but a write that never settles would otherwise leave the form locked until the webview reloads.
  * After this the save is treated as failed: the edits stay, Save and Done work again, and an answer that arrives
  * later is ignored (the host refreshes the state after it saves, so the form is brought up to date by that).
@@ -265,6 +266,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalFontSize,
 		editorFontSize,
 		spacingScale,
+		timeFormat,
+		dateFormat,
+		showRelativeTimes,
 		enterBehavior,
 		includeCurrentTime,
 		includeCurrentCost,
@@ -438,10 +442,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const savedAppearanceValue = (key: AppearanceKey) =>
 		key in appearanceSaved.current ? appearanceSaved.current[key] : extensionState[key]
 
+	// The time and date values are written one at a time on the host, and a write can fail: a save that changes one of
+	// them waits for the host's answer too.
+	const displayChanged =
+		(cachedState.timeFormat ?? "auto") !== (extensionState.timeFormat ?? "auto") ||
+		(cachedState.dateFormat ?? "auto") !== (extensionState.dateFormat ?? "auto") ||
+		(cachedState.showRelativeTimes ?? true) !== (extensionState.showRelativeTimes ?? true)
+
 	const handleSubmit = () => {
 		if (isSettingValid) {
-			// Only a save that changes an appearance value waits for the host's answer: those are saved
-			// all-or-nothing, and a failed save has to keep the edits. Every other save behaves as it always did.
+			// Only a save that changes an appearance value, or a time or date value, waits for the host's answer: the
+			// appearance values are saved all-or-nothing, and a failed save has to keep the edits. Every other save
+			// behaves as it always did.
 			// Only the appearance values this form changed are sent, and null (not undefined) for a reset so it
 			// survives JSON and clears the stored value. A save that changes none sends none of them, so it neither
 			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
@@ -456,7 +468,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					.map((key) => [key, cachedState[key] ?? null]),
 			)
 			const appearanceEdited = Object.keys(changedAppearance).length > 0
-			const saveId = appearanceEdited ? nextSaveRequestId() : undefined
+			const saveId = appearanceEdited || displayChanged ? nextSaveRequestId() : undefined
 			if (saveId) {
 				pendingSaveChangeCount.current = changeCount
 				pendingAppearanceSent.current = changedAppearance
@@ -527,6 +539,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
 					...changedAppearance,
+					timeFormat: timeFormat ?? "auto",
+					dateFormat: dateFormat ?? "auto",
+					showRelativeTimes: showRelativeTimes ?? true,
 					enterBehavior: enterBehavior ?? "send",
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
@@ -1190,7 +1205,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 						{/* Language Section */}
 						{renderTab === "language" && (
-							<LanguageSettings language={language || "en"} setCachedStateField={setCachedStateField} />
+							<LanguageSettings
+								language={language || "en"}
+								timeFormat={timeFormat}
+								dateFormat={dateFormat}
+								showRelativeTimes={showRelativeTimes}
+								setCachedStateField={setCachedStateField}
+							/>
 						)}
 
 						{/* About Section */}

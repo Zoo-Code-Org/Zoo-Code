@@ -137,6 +137,7 @@ import {
 	isAppearanceSetting,
 	setValuesThroughWriteChain,
 } from "../config/appearanceSettingWrites"
+import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -3196,6 +3197,9 @@ export class ClineProvider
 			terminalFontSize,
 			editorFontSize,
 			spacingScale,
+			timeFormat,
+			dateFormat,
+			showRelativeTimes,
 			enterBehavior,
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -3382,6 +3386,9 @@ export class ClineProvider
 			editorFontSize,
 			spacingScale,
 			appearanceSeq,
+			timeFormat: timeFormat ?? "auto",
+			dateFormat: dateFormat ?? "auto",
+			showRelativeTimes: showRelativeTimes ?? true,
 			enterBehavior: enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
@@ -3619,6 +3626,9 @@ export class ClineProvider
 			terminalFontSize: stateValues.terminalFontSize,
 			editorFontSize: stateValues.editorFontSize,
 			spacingScale: stateValues.spacingScale,
+			timeFormat: stateValues.timeFormat ?? "auto",
+			dateFormat: stateValues.dateFormat ?? "auto",
+			showRelativeTimes: stateValues.showRelativeTimes ?? true,
 			enterBehavior: stateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -3745,10 +3755,14 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await setValuesThroughWriteChain(this.contextProxy, values, {
-			owner: this,
-			onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
-		})
+		await setValuesThroughWriteChain(
+			this.contextProxy,
+			withoutInvalidDisplaySettings(values, (key) => this.log(`[setValues] Ignored an invalid value for ${key}`)),
+			{
+				owner: this,
+				onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
+			},
+		)
 	}
 
 	// dev

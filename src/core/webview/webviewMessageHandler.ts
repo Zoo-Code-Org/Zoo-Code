@@ -46,6 +46,7 @@ import {
 	undoSettingWrite,
 	type SettingWrite,
 } from "../config/appearanceSettingWrites"
+import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -771,6 +772,10 @@ export const webviewMessageHandler = async (
 			// written, so a write that failed after changing the stored value is put back too (see `undoSettingWrite`
 			// for when a key is left alone). A failure while writing any other setting is not handled here: it
 			// follows the existing error path, after the appearance values have been put back.
+			// The time and date settings are not part of that: they only change how times are shown, so they are written
+			// like any other setting, with no rollback (a partial save is harmless, and saving again completes it). A
+			// value of theirs that the webview's own controls cannot send is ignored and logged. Either way the webview
+			// is refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`).
 			const written: SettingWrite[] = []
 			let failure: string | undefined
 			let failedKey: string | undefined
@@ -810,6 +815,12 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// An invalid display value is ignored, before anything is done for it.
+					if (isInvalidDisplayValue(key, value)) {
+						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
 					failedKey = key
 					const previous = provider.contextProxy.getValue(key as keyof RooCodeSettings)
 					let newValue = value

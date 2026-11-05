@@ -33,6 +33,7 @@ import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { setValuesThroughWriteChain } from "../core/config/appearanceSettingWrites"
+import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -629,7 +630,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		)
 	}
 
-	public async setConfiguration(values: RooCodeSettings) {
+	/**
+	 * Stores the settings, then the API profile and the mode profiles. The appearance values are written one at a time,
+	 * with a rollback if one fails (see `setValuesThroughWriteChain`); the other settings are written with
+	 * `ContextProxy.setValues`, which is not a transaction (see there): if one cannot be stored, this rejects with a
+	 * `SettingsWriteError` that lists the keys that were stored and the keys that were not, the stored settings stay,
+	 * and nothing after the settings is written. Invalid values of the display settings are dropped and logged first.
+	 */
+	public async setConfiguration(allValues: RooCodeSettings) {
+		const values = withoutInvalidDisplaySettings(allValues, (key) =>
+			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
+		)
 		await setValuesThroughWriteChain(this.sidebarProvider.contextProxy, values, {
 			owner: this.sidebarProvider,
 			onDeferredSettled: () => void this.sidebarProvider.postStateToWebview().catch(() => undefined),
