@@ -107,6 +107,10 @@ vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 }))
 
+vi.mock("../../services/diagnostics", () => ({
+	createDiagnosticsReport: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe("getVisibleProviderOrLog", () => {
 	let mockOutputChannel: vscode.OutputChannel
 
@@ -279,6 +283,21 @@ describe("registerCommands handlers", () => {
 
 	// The sidebar title-bar handlers target the registered provider (the
 	// sidebar click origin) directly, not the visible-instance heuristic.
+	it("creates diagnostics from all provider instances without requiring a visible provider", async () => {
+		const { createDiagnosticsReport } = await import("../../services/diagnostics")
+		const providers = [{}, {}]
+		;(ClineProvider.getAllInstances as Mock).mockReturnValue(providers)
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.createDiagnosticsReport"]()
+
+		expect(createDiagnosticsReport).toHaveBeenCalledWith({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			providers,
+		})
+	})
+
 	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions on the registered provider", () => {
 		handlers["zoo-code.settingsButtonClicked"]()
 

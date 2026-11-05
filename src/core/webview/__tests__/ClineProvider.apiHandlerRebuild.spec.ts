@@ -996,6 +996,38 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
+		test("a mutation queued without runToCompletion aborts its in-flight callback and advances the queue", async () => {
+			vi.useFakeTimers()
+			const logSpy = vi.spyOn(provider, "log")
+			let mutationSignal: AbortSignal | undefined
+			let started = 0
+			const runMutation = (work: (signal: AbortSignal) => Promise<void>) =>
+				provider["enqueueProviderProfileMutation"]((signal) => {
+					mutationSignal = signal
+					started += 1
+					return work(signal)
+				})
+
+			try {
+				const hanging = runMutation(() => new Promise<void>(() => undefined))
+				const rejected = expect(hanging).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await rejected
+
+				// The default path aborts the mutation the caller stopped waiting for, so the
+				// callback sees a cancelled signal and the log names the abort.
+				expect(started).toBe(1)
+				expect(mutationSignal?.aborted).toBe(true)
+				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+
+				// The queue advanced on the timeout instead of waiting for the aborted run.
+				await runMutation(() => Promise.resolve())
+				expect(started).toBe(2)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		test("mode switch preserves its default task when queued behind a profile mutation", async () => {
 			let releaseProfileActivation!: () => void
 			const profileActivation = new Promise<void>((resolve) => {
