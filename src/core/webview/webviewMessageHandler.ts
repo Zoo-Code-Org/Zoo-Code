@@ -2803,10 +2803,14 @@ export const webviewMessageHandler = async (
 					const isNewMode = !existingModes.some((mode) => mode.slug === message.modeConfig?.slug)
 
 					await provider.customModesManager.updateCustomMode(message.modeConfig.slug, message.modeConfig)
-					// Update state after saving the mode
+					// Update state after saving the mode. Both keys go through provider.setValue so
+					// this view's mode pin and local buffer follow the slug this call just wrote, as in
+					// the updateSettings path; a direct ContextProxy write moves the shared store and
+					// leaves a view pinned elsewhere on that earlier slug. The webview refresh stays
+					// after the writes so the fan-out still reports what was stored.
 					const customModes = await provider.customModesManager.getCustomModes()
-					await updateGlobalState("customModes", customModes)
-					await updateGlobalState("mode", message.modeConfig.slug)
+					await provider.setValue("customModes", customModes)
+					await provider.setValue("mode", message.modeConfig.slug)
 					await provider.postStateToWebview()
 
 					// Track telemetry for custom mode creation or update
@@ -2903,8 +2907,21 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Switch back to default mode after deletion
-				await updateGlobalState("mode", defaultModeSlug)
+				// Move onto the default mode only for the view this call applies to: the one whose
+				// effective mode - its durable pin, or the shared selection when it has no pin of
+				// its own - is the slug being deleted. Routing that write through the provider keeps
+				// this view's pin and the shared store on the same slug. A view pinned to a mode this
+				// deletion did not touch keeps its pin: moving it here used to overwrite an unrelated
+				// selection with the default. When the shared selection is the deleted slug but this
+				// view pins something else, only the shared layer moves, so the views that follow it
+				// do not resolve to a slug that no longer exists while this view keeps its own.
+				const pinnedMode = provider.pinnedModeName
+				const sharedMode = getGlobalState("mode")
+				if ((pinnedMode ?? sharedMode) === message.slug) {
+					await provider.setValue("mode", defaultModeSlug)
+				} else if (sharedMode === message.slug) {
+					await updateGlobalState("mode", defaultModeSlug)
+				}
 				await provider.postStateToWebview()
 			}
 			break

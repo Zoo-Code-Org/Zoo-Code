@@ -530,6 +530,14 @@ export class ClineProvider
 		return this.viewLocalState.currentApiConfigName
 	}
 
+	/**
+	 * This view's pinned mode slug from the view-local buffer, or undefined when the view
+	 * follows the shared selection. Exposed so a custom-mode deletion can key the reset
+	 * onto the view it actually applies to instead of moving every view's pin.
+	 */
+	get pinnedModeName(): string | undefined {
+		return this.viewLocalState.mode
+	}
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
@@ -1706,12 +1714,13 @@ export class ClineProvider
 		// release steps, the first error is preserved, and it is reported once
 		// every step has run.
 		let cleanupError: unknown
-		void this.loadViewState()
 
 		const cleanupStep = async (label: string, fn: () => unknown | Promise<unknown>) => {
 			// #1562 seam: the constructor's `void this.loadViewState()` (construction-time hydrate)
 			// is the other #1562 consumer of the delivery signal; it has no caller to report to, so
-			// a false return there is intentionally dropped - the dispose-time load below re-runs it.
+			// a false return there is intentionally dropped. Disposal does not re-hydrate: there is
+			// no live view left to deliver to, and a load started here would mutate the view-local
+			// state while the teardown is already running.
 			try {
 				await fn()
 			} catch (error) {
@@ -1805,13 +1814,9 @@ export class ClineProvider
 		await cleanupStep("taskHistoryStore", () => this.taskHistoryStore.dispose())
 
 		this.log("Disposed all disposables")
-		ClineProvider.activeInstances.delete(this)
-		this.diagnosticsRequestBroker.dispose()
-
-		// Clean up any event listeners attached to this provider
-		this.removeAllListeners()
-
-		McpServerManager.unregisterProvider(this)
+		// The releases themselves live in dispose's finally, not here: the body used to duplicate
+		// all four after this log, so every dispose ran the broker release, the listener removal
+		// and the MCP unregistration twice.
 
 		if (cleanupError !== undefined) {
 			throw cleanupError
@@ -3673,11 +3678,21 @@ export class ClineProvider
 			// do not rehydrate a missing profile name after a reload.
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
-			const viewPinsDeletedProfile =
+			// Whether this deletion has to re-anchor this view onto the replacement. The second leg
+			// is a view whose own pin names the deleted profile. The first leg is narrower than it
+			// reads: a view with no pin of its own does not resolve to the deleted profile, it
+			// follows the shared selection, and the deletion hands that selection to it through
+			// activation regardless of which profile was removed - the same hand-off the manager
+			// gate and the current task handler depend on. Measured both deletions: with the shared
+			// selection pointing at a survivor, deleting an unrelated profile still activates the
+			// selection for this view and leaves it pinned to it; deleting the profile the selection
+			// names activates the replacement. Either way what the view serves afterwards is the
+			// profile the shared store holds.
+			const viewFollowsDeletedProfile =
 				this.viewLocalState.currentApiConfigName === undefined ||
 				this.viewLocalState.currentApiConfigName === profileToDelete.name
 
-			if (viewPinsDeletedProfile) {
+			if (viewFollowsDeletedProfile) {
 				// Apply the replacement through the activation path so this view's
 				// viewLocalState.apiConfiguration and the current task's api handler are
 				// refreshed; a name-only update would leave the deleted profile's settings

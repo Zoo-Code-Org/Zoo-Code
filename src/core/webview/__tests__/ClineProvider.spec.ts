@@ -39,6 +39,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 import { t } from "../../../i18n"
 
 import { ClineProvider } from "../ClineProvider"
+import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { MdmService } from "../../../services/mdm/MdmService"
 import { Terminal } from "../../../integrations/terminal/Terminal"
@@ -3630,9 +3631,9 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// Each instance should have a unique viewId
-			expect(provider1.viewId).toBeDefined()
-			expect(provider2.viewId).toBeDefined()
+			// Each instance gets a unique viewId, prefixed by the render context it was built for.
+			expect(provider1.viewId).toMatch(/^sidebar-\d+$/)
+			expect(provider2.viewId).toMatch(/^editor-\d+$/)
 			expect(provider1.viewId).not.toBe(provider2.viewId)
 
 			await provider1.dispose()
@@ -3698,6 +3699,62 @@ describe("ClineProvider", () => {
 
 			// ...and disposal releases it.
 			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		})
+		// Measured before the fix: one dispose() ran each of these releases twice - the teardown
+		// body performed the broker release, the listener removal and the MCP unregistration after
+		// the caller's finally had already done them. The second dispose() was already a no-op, so
+		// the existing guard test could not see the doubling; only a count across the pair can.
+		it("releases the broker, the listeners and the MCP registration exactly once across a double dispose", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await new Promise((resolve) => setImmediate(resolve))
+
+			const broker = vi.spyOn(provider["diagnosticsRequestBroker"], "dispose")
+			const listeners = vi.spyOn(provider, "removeAllListeners")
+			const unregister = vi.spyOn(McpServerManager, "unregisterProvider")
+
+			await provider.dispose()
+			await provider.dispose()
+
+			expect(broker).toHaveBeenCalledTimes(1)
+			expect(listeners).toHaveBeenCalledTimes(1)
+			expect(unregister).toHaveBeenCalledTimes(1)
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+
+			broker.mockRestore()
+			listeners.mockRestore()
+			unregister.mockRestore()
+		})
+
+		// The dispose-time hydrate was a merge artifact that neither parent carried: it started a
+		// state load against a provider that is already closing, with no live view to deliver to.
+		it("does not start a view-state load while disposing", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// loadViewState is private and private keys sit outside keyof, so the spy needs one
+			// assertion onto the method shape it actually has (AGENTS.md: last resort, commented).
+			const load = vi.spyOn(
+				ClineProvider.prototype as unknown as { loadViewState: () => Promise<boolean> },
+				"loadViewState",
+			)
+
+			await provider.dispose()
+
+			expect(load).not.toHaveBeenCalled()
+
+			load.mockRestore()
 		})
 
 		it("releases the provider and reports the failure when a cleanup step rejects", async () => {
@@ -6700,6 +6757,145 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([replacementProfile, pinnedProfile])
 			await provider.dispose()
 		})
+	})
+
+	// The two deletions an unpinned view can meet, measured separately rather than averaged.
+	// This one removes a profile the shared selection does not name, so nothing this view
+	// resolves through disappears; the deletion still hands the view the selection through
+	// activation, and the durable record gains a pin the view never authored.
+	it("anchors a view with no pin of its own on the shared selection when an unrelated profile is deleted", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const oldProfile: ProviderSettingsEntry = {
+			name: "old-profile",
+			id: "old-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const keeperProfile: ProviderSettingsEntry = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+		await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "keeper-shared",
+		})
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const keeperSettings = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const activateProfile = vi.fn().mockResolvedValue(keeperSettings)
+		// @ts-ignore - Replace the manager with a structural double for this deletion.
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			activateProfile,
+			listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+			setModeConfig: vi.fn(),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+			getProfile: vi
+				.fn()
+				.mockImplementation(async ({ name }: { name: string }) =>
+					name === "keeper-profile"
+						? keeperSettings
+						: { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter },
+				),
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+				currentApiConfigName: "keeper-profile",
+				modeApiConfigs: {},
+			}),
+		}
+
+		await provider.deleteProviderProfile(oldProfile)
+
+		const served = await provider.getState({ includeTaskHistory: false })
+
+		// Measured on the current head: the deletion still takes the activation path here, so the
+		// view comes back anchored to the selection it was following. What it serves is unchanged -
+		// the shared store already held that profile's settings - but the pin is new. The case
+		// below isolates the deletion the activation path is actually for.
+		expect(activateProfile).toHaveBeenCalledWith({ name: "keeper-profile" })
+		expect(provider.pinnedProfileName).toBe("keeper-profile")
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+		expect(served.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+		expect(served.currentApiConfigName).toBe("keeper-profile")
+		await provider.dispose()
+	})
+
+	// The matching leg for the same unpinned view: when the deleted profile is the shared
+	// selection this view resolves through, the replacement must be activated for it - the
+	// shared store still carries the deleted profile's settings until this path replaces
+	// them. Measured identical before and after the tightened condition below.
+	it("activates the replacement for a view with no pin when the deleted profile is the shared selection", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const oldProfile: ProviderSettingsEntry = {
+			name: "old-profile",
+			id: "old-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const keeperProfile: ProviderSettingsEntry = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+		await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "old-shared",
+		})
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const keeperSettings = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const activateProfile = vi.fn().mockResolvedValue(keeperSettings)
+		// @ts-ignore - Replace the manager with a structural double for this deletion.
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			activateProfile,
+			listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+			setModeConfig: vi.fn(),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+			getProfile: vi
+				.fn()
+				.mockImplementation(async ({ name }: { name: string }) =>
+					name === "keeper-profile"
+						? keeperSettings
+						: { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter },
+				),
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+				currentApiConfigName: "keeper-profile",
+				modeApiConfigs: {},
+			}),
+		}
+
+		await provider.deleteProviderProfile(oldProfile)
+
+		const served = await provider.getState({ includeTaskHistory: false })
+
+		expect(activateProfile).toHaveBeenCalledWith({ name: "keeper-profile" })
+		expect(provider.pinnedProfileName).toBe("keeper-profile")
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+		expect(served.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+		await provider.dispose()
 	})
 
 	describe("local state isolation", () => {
@@ -10318,6 +10514,158 @@ describe("ClineProvider", () => {
 					}),
 				}),
 			)
+		})
+	})
+
+	// A custom-mode deletion or save writes "mode" straight into the shared store, so this
+	// view's durable pin keeps the slug the call just wrote away from it: a view pinned to a
+	// deleted mode goes on reporting a slug that no longer exists. The pinned and the
+	// unpinned view are held apart here instead of averaged into one case.
+	describe("custom-mode deletion and the mode pin", () => {
+		beforeEach(() => {
+			// The harness CustomModesManager double has no deleteCustomMode member, so it is
+			// installed on the instance the way the mutation-queue test installs it.
+			Object.assign(provider.customModesManager, {
+				deleteCustomMode: vi.fn().mockResolvedValue(undefined),
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "gone-mode",
+						name: "Gone Mode",
+						roleDefinition: "A mode that is about to be deleted",
+						groups: ["read"] as const,
+					},
+				]),
+			})
+		})
+
+		const handlerForView = async (viewStateId: string) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider["setViewStateId"](viewStateId)
+			return vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls[0][0]
+		}
+
+		// getState() is what the fan-out serializes for this view: it merges the view's pin
+		// over the shared store, so it is the mode the webview actually renders.
+		const servedMode = async () => (await provider.getState()).mode
+		// Both slugs the cases below name, so the mode the provider validates against always
+		// carries the mode the view under test is pinned to.
+		const seedTwoModes = () => {
+			Object.assign(provider.customModesManager, {
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "gone-mode",
+						name: "Gone Mode",
+						roleDefinition: "A mode that is about to be deleted",
+						groups: ["read"] as const,
+					},
+					{
+						slug: "keep-mode",
+						name: "Keep Mode",
+						roleDefinition: "A mode this view is pinned to",
+						groups: ["read"] as const,
+					},
+				]),
+			})
+		}
+
+		it("moves a view pinned to the deleted mode onto the default mode", async () => {
+			const messageHandler = await handlerForView("pinned-deleted-view")
+			await provider.saveViewState("mode", "gone-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			expect(provider.customModesManager.deleteCustomMode).toHaveBeenCalledWith("gone-mode")
+			// Before the routing fix the shared store moved to the default slug while this view
+			// kept pinning the deleted one, so the webview was shown "gone-mode" and the next
+			// task would record a slug no mode list contains.
+			expect(await servedMode()).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"pinned-deleted-view": { mode: "code" },
+			})
+		})
+
+		it("reports the default mode to a view that has no pin of its own", async () => {
+			const messageHandler = await handlerForView("unpinned-deleted-view")
+			// The shared selection is the slug being deleted - the selection this reset exists
+			// for - and the view has no pin of its own to keep it away from it.
+			await provider.contextProxy.setValue("mode", "gone-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			// An unpinned view follows the shared store either way; what routing adds is the
+			// record. A mode write through the provider pins this view's copy to the slug the
+			// shared store now holds, which is the rule the updateSettings path already follows.
+			expect(await servedMode()).toBe("code")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"unpinned-deleted-view": { mode: "code" },
+			})
+		})
+
+		// Deleting one mode must not move a view that is pinned to a different one: the reset
+		// keys off the mode this view actually resolves to - its pin, or the shared selection
+		// when it has no pin of its own.
+		it("keeps a view pinned to another mode on that mode when a different mode is deleted", async () => {
+			const messageHandler = await handlerForView("pinned-other-view")
+			seedTwoModes()
+			await provider.saveViewState("mode", "keep-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			expect(await servedMode()).toBe("keep-mode")
+			expect(provider["viewLocalState"].mode).toBe("keep-mode")
+			// The shared selection was never the deleted slug, so nothing writes over it here.
+			expect(provider.contextProxy.getValue("mode")).toBeUndefined()
+		})
+
+		it("resets the shared selection without moving a view pinned to another mode", async () => {
+			const messageHandler = await handlerForView("pinned-other-shared-view")
+			seedTwoModes()
+			// The shared selection is the mode being deleted while this view pins another one:
+			// the shared layer must move so unpinned views stop resolving to the deleted slug,
+			// while this view keeps its own pin.
+			await provider.contextProxy.setValue("mode", "gone-mode")
+			await provider.saveViewState("mode", "keep-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("keep-mode")
+			expect(await servedMode()).toBe("keep-mode")
+		})
+
+		it("moves the pin onto the mode a pinned view just saved", async () => {
+			const messageHandler = await handlerForView("pinned-saved-view")
+			await provider.saveViewState("mode", "gone-mode")
+			Object.assign(provider.customModesManager, {
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "new-mode",
+						name: "New Mode",
+						roleDefinition: "A custom mode this view just saved",
+						groups: ["read"] as const,
+					},
+				]),
+			})
+
+			await messageHandler({
+				type: "updateCustomMode",
+				modeConfig: {
+					slug: "new-mode",
+					name: "New Mode",
+					roleDefinition: "A custom mode this view just saved",
+					groups: ["read"] as const,
+				},
+			})
+
+			// Saving a mode makes this view use it; a view pinned elsewhere must follow, not
+			// stay on the earlier slug while the shared store moved on.
+			expect(await servedMode()).toBe("new-mode")
+			expect(provider["viewLocalState"].mode).toBe("new-mode")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"pinned-saved-view": { mode: "new-mode" },
+			})
 		})
 	})
 

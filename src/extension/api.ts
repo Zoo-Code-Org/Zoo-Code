@@ -1027,7 +1027,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			const replayValues: RooCodeSettings = Object.fromEntries(
 				Object.entries(snapshotValues).filter(([key]) => writtenKeys.has(key)),
 			)
-			const previousProfileName = replayValues.currentApiConfigName || "default"
+			// Which profile the views return to is read from the snapshot, not from the replay
+			// filter: a payload that never wrote currentApiConfigName leaves the pin out of the
+			// replay, and defaulting it here would refresh the overlays pinned to "default" with
+			// this profile settings and skip the credential replay for the profile that was
+			// actually active. When the payload did write the pin the two readings are the same
+			// value, because the replay holds the snapshot value for every key it carries.
+			const previousProfileName = snapshotValues.currentApiConfigName || "default"
 			try {
 				await this.sidebarProvider.setValues(replayValues, { savedProfileName: previousProfileName })
 			} catch (restoreError) {
