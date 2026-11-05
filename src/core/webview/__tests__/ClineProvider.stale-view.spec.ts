@@ -400,6 +400,21 @@ describe("ClineProvider - stale view lifecycle", () => {
 		expect(first.disposed.listenerCount()).toBe(0)
 	})
 
+	test("a different view replacing the current one stops the provider-limit requests of the replaced view", async () => {
+		const first = createSidebarView()
+		const second = createSidebarView()
+		await provider.resolveWebviewView(first.view)
+		vi.mocked(abortProviderQuotaRequests).mockClear()
+
+		await provider.resolveWebviewView(second.view) // a crashed view never sends its own cancel
+
+		expect(abortProviderQuotaRequests).toHaveBeenCalledWith(provider)
+		// Resolving the same view again replaces nothing, so it does not cancel the requests of the current view.
+		vi.mocked(abortProviderQuotaRequests).mockClear()
+		await provider.resolveWebviewView(second.view)
+		expect(abortProviderQuotaRequests).not.toHaveBeenCalled()
+	})
+
 	test("events from a replaced view are ignored and do not disturb the current view", async () => {
 		const first = createSidebarView(true)
 		const second = createSidebarView()

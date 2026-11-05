@@ -999,6 +999,46 @@ describe("Task persistence", () => {
 
 			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
 		})
+		describe("overwriteClineMessages", () => {
+			const replacement = [{ ts: 1, type: "say" as const, say: "text" as const, text: "replacement" }]
+			const newTask = () =>
+				new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+			it("reports a lost write to the caller, so that the flow does not go on to save the messages again", async () => {
+				mockSaveTaskMessages.mockRejectedValueOnce(new Error("disk full"))
+				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+				const task = newTask()
+
+				await expect(task.overwriteClineMessages(replacement)).rejects.toThrow("Failed to save the messages")
+
+				consoleError.mockRestore()
+				// The messages are replaced in memory all the same, and the history entry was not written for them.
+				expect(task.clineMessages.map((message) => message.text)).toEqual(["replacement"])
+				expect(mockTaskMetadata).not.toHaveBeenCalled()
+			})
+
+			it("resolves once the messages and the history entry are written", async () => {
+				mockSaveTaskMessages.mockResolvedValueOnce(replacement)
+				const task = newTask()
+
+				await expect(task.overwriteClineMessages(replacement)).resolves.toBeUndefined()
+
+				expect(mockTaskMetadata).toHaveBeenCalledTimes(1)
+			})
+
+			it("writes nothing, and cannot fail, when it is told not to persist", async () => {
+				const task = newTask()
+
+				await expect(task.overwriteClineMessages(replacement, false)).resolves.toBeUndefined()
+
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			})
+		})
 
 		it("can hydrate UI history without persisting it", async () => {
 			const task = new Task({

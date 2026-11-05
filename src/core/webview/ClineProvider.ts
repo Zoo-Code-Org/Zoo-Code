@@ -902,6 +902,9 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		// The view that asked for provider limits is gone or replaced: stop fetching them. A replaced view may not get
+		// to send its cancel message (a crashed one never does), and the new view asks again by itself.
+		abortProviderQuotaRequests(this)
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		this.stopWebviewWatchdog()
 		// Invalidate any recovery reload still awaiting its HTML so it cannot
@@ -1188,8 +1191,6 @@ export class ClineProvider
 				} else {
 					this.log("Clearing webview resources for sidebar view")
 					this.view = undefined
-					// The view that asked for provider limits is gone: stop fetching them.
-					abortProviderQuotaRequests(this)
 					this.clearWebviewResources()
 				}
 			},

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
 
@@ -36,8 +36,16 @@ vi.mock("@src/components/ui", () => ({
 	),
 }))
 
-const NOW = Date.now()
-const DAY = 24 * 60 * 60 * 1000
+// A fixed local time, so the tests do not depend on when they run, on the time zone, or on a change of daylight saving
+// time (a local day is 23 or 25 hours long on that day, so "24 hours ago" can skip a calendar day).
+const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime()
+
+/** The same time of day, `days` local calendar days before NOW. */
+const daysBefore = (days: number) => {
+	const day = new Date(NOW)
+	day.setDate(day.getDate() - days)
+	return day.getTime()
+}
 
 /** The text under each bar of a chart. */
 const labelsUnder = (chart: HTMLElement) =>
@@ -86,9 +94,16 @@ const withUsage = (overrides: Partial<HistoryItem> & { cost?: number; cacheReads
 
 describe("UsageSettings – branches", () => {
 	beforeEach(() => {
+		// Only the date is frozen: the view reads "now" from it, the timers stay real.
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(NOW)
 		post.mockClear()
 		state.taskHistory = []
 		state.cwd = "/ws/a"
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
 	})
 
 	it("widening the scope to all workspaces includes tasks from other workspaces", () => {
@@ -180,7 +195,7 @@ describe("UsageSettings – branches", () => {
 	})
 
 	it("labels chart bars by date when more than a week of days is charted", () => {
-		state.taskHistory = Array.from({ length: 9 }, (_, i) => withUsage({ ts: NOW - i * DAY }))
+		state.taskHistory = Array.from({ length: 9 }, (_, i) => withUsage({ ts: daysBefore(i) }))
 		render(<UsageSettings />)
 		fireEvent.click(screen.getByTestId("usage-range-all"))
 		const chart = screen.getByTestId("usage-daily-chart")
@@ -283,7 +298,7 @@ describe("UsageSettings – branches", () => {
 	})
 
 	it("excludes tasks older than the range", () => {
-		state.taskHistory = [withUsage({ cost: 1 }), withUsage({ cost: 9, ts: NOW - 20 * DAY })]
+		state.taskHistory = [withUsage({ cost: 1 }), withUsage({ cost: 9, ts: daysBefore(20) })]
 		render(<UsageSettings />)
 		expect(screen.getByTestId("usage-stats").textContent).not.toContain("$10.00")
 	})

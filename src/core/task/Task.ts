@@ -1732,7 +1732,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public async overwriteClineMessages(newMessages: ClineMessage[], persist = true) {
 		this.hydrateClineMessages(newMessages)
 		if (persist) {
-			await this.saveClineMessages(false)
+			// A failed write is reported to the caller: the delete, edit and checkpoint flows go on to save the
+			// messages again, and carrying on after a lost write would leave the history entry (and its usage
+			// breakdown) describing messages that are no longer the ones on disk.
+			if (!(await this.saveClineMessages(false))) throw new Error("Failed to save the messages")
 		}
 	}
 
