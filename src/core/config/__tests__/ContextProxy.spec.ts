@@ -232,6 +232,49 @@ describe("ContextProxy", () => {
 			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
 			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
 		})
+		// Overlapping resets are the second half of the same defect: on its own the finally only
+		// guarantees the flag falls when the pass it belongs to ends. Single-flight is the shape here
+		// because it makes the invariant structural - a second caller joins the reset already running
+		// rather than starting a second delete pass whose end could clear the flag while the first was
+		// still writing.
+		it("joins an in-flight reset instead of starting a second pass and keeps the guard raised until it ends", async () => {
+			// Every apiKey erase handed back by the double, with its rejecter kept so the test can settle
+			// them all at once: a held-open erase is what keeps the guard raised across the join check,
+			// and the reset issues more than one erase per pass, so they must all be settled or the delete
+			// pass never finishes.
+			const erases: { reject: (error: Error) => void }[] = []
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						erases.push({ reject })
+					})
+				}
+				return Promise.resolve()
+			})
+
+			const first = proxy.resetAllState()
+			const second = proxy.resetAllState()
+
+			// One pass, not two racing delete passes: the second caller joins the reset already running.
+			expect(second).toBe(first)
+			// The reset yields once before it reaches its delete pass, so give it a macrotask to get there
+			// rather than counting erases that have not been issued yet. Two passes would by now have issued
+			// two apiKey erases, which is the defect this half of the row describes.
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(erases.length).toBe(1)
+
+			erases.forEach((erase) => {
+				erase.reject(new Error("keychain locked"))
+			})
+			await expect(first).rejects.toThrow("keychain locked")
+			await expect(second).rejects.toThrow("keychain locked")
+
+			// The guard is down for both joiners, so the store accepts writes again.
+			await expect(proxy.storeSecret("apiKey", "after-joined-reset")).resolves.toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBe("after-joined-reset")
+		})
 
 		it("adopts a secret write issued after a reset that waited for a pending write", async () => {
 			const durable = new Map<string, string | undefined>()

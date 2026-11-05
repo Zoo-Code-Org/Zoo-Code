@@ -410,6 +410,9 @@ export class ContextProxy {
 	// A reset is in progress: the caches are meaningless mid-reset, and a secret write begun
 	// inside it would commit after the delete pass and survive the erase.
 	private resetting = false
+	// The reset pass currently in flight, if any: single-flight so that two callers cannot each run a
+	// delete pass and have whichever finishes first lower the guard under the other.
+	private resetInFlight: Promise<void> | null = null
 	/** How many writes of each secret were started. Unlike the owners, it is not cleared when a write is over. */
 	private readonly secretWriteCount = new Map<string, number>()
 
@@ -747,38 +750,48 @@ export class ContextProxy {
 	 * This clears all data from both the in-memory caches and the VSCode storage.
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
-	public async resetAllState() {
-		this.resetting = true
-		try {
-			// A secret write that is in flight at this moment has already committed nothing, but it will
-			// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
-			// after them. Wait for the pending writes first, then end the claims, then delete, so the
-			// cleared copy is the last one to land in storage and the cache stays empty afterwards.
-			const inFlight = [...this.pendingSecretWrites.values()].flatMap((writes) =>
-				[...writes].map((w) => w.settle),
-			)
-			await Promise.allSettled(inFlight)
-
-			// Clear in-memory caches
-			this.stateCache = {}
-			this.secretCache = {}
-			// A reset also ends write ownership: a write that is still in flight reads the Memento back
-			// into the cache it just lost, so clearing the caches is not enough to keep pre-reset state
-			// out. Ownership is what the rejection handlers gate on.
-			this.stateWriteOwner.clear()
-			this.secretWriteOwner.clear()
-
-			await Promise.all([
-				...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-				...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-				...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			])
-
-			await this.initialize()
-			this.resetting = false
-		} finally {
-			this.resetting = false
+	public resetAllState(): Promise<void> {
+		if (this.resetInFlight) {
+			// A caller that arrives mid-reset joins the pass already running rather than starting a
+			// second delete pass whose end could lower the guard while the first was still writing.
+			return this.resetInFlight
 		}
+		this.resetting = true
+		const pass = (async () => {
+			try {
+				// A secret write that is in flight at this moment has already committed nothing, but it will
+				// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
+				// after them. Wait for the pending writes first, then end the claims, then delete, so the
+				// cleared copy is the last one to land in storage and the cache stays empty afterwards.
+				const inFlight = [...this.pendingSecretWrites.values()].flatMap((writes) =>
+					[...writes].map((w) => w.settle),
+				)
+				await Promise.allSettled(inFlight)
+
+				// Clear in-memory caches
+				this.stateCache = {}
+				this.secretCache = {}
+				// A reset also ends write ownership: a write that is still in flight reads the Memento back
+				// into the cache it just lost, so clearing the caches is not enough to keep pre-reset state
+				// out. Ownership is what the rejection handlers gate on.
+				this.stateWriteOwner.clear()
+				this.secretWriteOwner.clear()
+
+				await Promise.all([
+					...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+					...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+					...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				])
+
+				await this.initialize()
+				this.resetting = false
+			} finally {
+				this.resetting = false
+				this.resetInFlight = null
+			}
+		})()
+		this.resetInFlight = pass
+		return pass
 	}
 
 	private static _instance: ContextProxy | null = null
