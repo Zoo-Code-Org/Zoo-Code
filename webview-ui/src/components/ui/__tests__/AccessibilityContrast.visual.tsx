@@ -206,3 +206,51 @@ for (const theme of visualThemes) {
 		await expect(component).toHaveScreenshot(`accessibility-gallery-focus-${theme.name}.png`)
 	})
 }
+
+// The theme that is applied before an audit makes colours transition. The audit must measure the colour that the
+// transition ends on, not one on the way: half-way between transparent and black the border has too little contrast.
+test.describe("a colour that is still transitioning", () => {
+	const addBox = (borderColor: string) =>
+		(async () => {
+			const frame = document.createElement("div")
+			frame.id = "transition-frame"
+			frame.style.cssText = "background: #fff; padding: 8px; position: fixed; top: 0; left: 0;"
+			const box = document.createElement("div")
+			box.id = "transition-box"
+			box.style.cssText =
+				"border: 1px solid transparent; width: 40px; height: 40px; transition: border-color 1s linear;"
+			frame.append(box)
+			document.body.append(frame)
+			void box.offsetWidth // the transparent border is the start of the transition
+			box.style.borderColor = borderColor
+		})()
+
+	test("is measured once the transition has ended", async ({ mount, page }) => {
+		mountedStory(await mount("accessibility-contrast"))
+		await page.evaluate(addBox, "#000")
+
+		const box = page.locator("#transition-box")
+		const ratio = await expectContrast(box, {
+			background: page.locator("#transition-frame"),
+			foregroundProperty: "border-color",
+			minimum: 3,
+			label: "transitioning border",
+		})
+
+		expect(ratio.ratio).toBeGreaterThan(20) // black on white, not the half-way colour
+	})
+
+	test("still fails when the colour it ends on has too little contrast", async ({ mount, page }) => {
+		mountedStory(await mount("accessibility-contrast"))
+		await page.evaluate(addBox, "#eeeeee")
+
+		await expect(
+			expectContrast(page.locator("#transition-box"), {
+				background: page.locator("#transition-frame"),
+				foregroundProperty: "border-color",
+				minimum: 3,
+				label: "settled pale border",
+			}),
+		).rejects.toThrow("settled pale border")
+	})
+})

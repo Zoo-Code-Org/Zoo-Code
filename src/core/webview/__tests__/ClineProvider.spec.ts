@@ -3979,6 +3979,79 @@ describe("ClineProvider", () => {
 			expect(provider["appearanceSeq"]).toBe(seq)
 		})
 
+		it.each(posters)("%s posts nothing when the provider is already disposed", async (_name, poster) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.dispose()
+			const build = track(vi.spyOn(provider, "getStateToPostToWebview"))
+			const post = track(vi.spyOn(provider, "postMessageToWebview"))
+
+			await poster(provider)
+
+			expect(build).not.toHaveBeenCalled()
+			expect(post).not.toHaveBeenCalled()
+		})
+
+		it.each(posters)(
+			"%s posts nothing when the provider is disposed after the build has returned",
+			async (_name, poster) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const realBuild = provider.getStateToPostToWebview.bind(provider)
+				track(vi.spyOn(provider, "getStateToPostToWebview")).mockImplementation(async (options) => {
+					const state = await realBuild(options)
+					await provider.dispose() // the build is done: the last thing left is to post it
+					return state
+				})
+				const post = track(vi.spyOn(provider, "postMessageToWebview"))
+				post.mockClear()
+
+				await poster(provider)
+
+				expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+			},
+		)
+
+		it.each(posters)("%s passes on a failure of the build that is not a disposal", async (_name, poster) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			track(vi.spyOn(provider, "getStateToPostToWebview")).mockRejectedValue(new Error("settings unreadable"))
+			const post = track(vi.spyOn(provider, "postMessageToWebview"))
+			post.mockClear()
+
+			await expect(poster(provider)).rejects.toThrow("settings unreadable")
+
+			expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
+		it("passes on a failure of the build that is not a disposal, for the prompt update too", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			track(vi.spyOn(provider, "getStateToPostToWebview")).mockRejectedValue(new Error("settings unreadable"))
+
+			await expect(provider.buildStateUnlessDisposed()).rejects.toThrow("settings unreadable")
+		})
+
+		it("stores the prompt of a mode, and posts no state, when the provider is disposed while the state is built", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const realGetState = provider.getState.bind(provider)
+			track(vi.spyOn(provider, "getState")).mockImplementation(async (options) => {
+				const state = await realGetState(options)
+				await provider.dispose()
+				return state
+			})
+			const post = track(vi.spyOn(provider, "postMessageToWebview"))
+			post.mockClear()
+
+			await webviewMessageHandler(provider, {
+				type: "updatePrompt",
+				promptMode: "code",
+				customPrompt: { roleDefinition: "a new role" },
+			})
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"customModePrompts",
+				expect.objectContaining({ code: { roleDefinition: "a new role" } }),
+			)
+			expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
 		it("builds nothing for the prompt update of a provider that was disposed meanwhile", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			await provider.dispose()
