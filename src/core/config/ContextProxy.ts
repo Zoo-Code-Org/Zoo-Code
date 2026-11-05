@@ -535,11 +535,10 @@ export class ContextProxy {
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
 	async refreshSecrets(): Promise<void> {
-		// The refresh re-syncs the whole secret cache from storage and re-seeds the
-		// durable records with the loaded values, so a later rollback of a pending
-		// pre-refresh write restores the freshly loaded value (the in-write token
-		// guard still protects the interleaving where a newer write has moved the
-		// cache but its success is not confirmed yet).
+		// The refresh reloads every secret from storage. refreshSecret leaves a key alone when a
+		// write of it started during the read (secretWriteCount), and otherwise takes ownership of
+		// the key away from a write that is still in flight (secretWriteOwner), so the loaded value
+		// is what the cache holds afterwards and that older write cannot roll it back on failure.
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
@@ -757,10 +756,10 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
-		// Clear in-memory caches. The write tokens are left in place: the durable
-		// records below carry the rollback protection (see the in-write token guard,
-		// which still covers the interleaving where a newer write has moved the cache
-		// but its success is not confirmed yet).
+		// Clear in-memory caches. The owner maps are left in place: a write that started before
+		// the reset still owns its key, so when it fails it reads the key back from storage rather
+		// than restoring a pre-reset cache value, and it drops its entry only if no newer write
+		// took the key in the meantime.
 		this.stateCache = {}
 		this.secretCache = {}
 

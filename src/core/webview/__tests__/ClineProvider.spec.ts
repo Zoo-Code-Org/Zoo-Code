@@ -5509,6 +5509,93 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		// The deletion is the third writer to the profile store: the rename and the save already
+		// hold the cross-instance section across their check, write and compensation.
+		it("waits for another view's critical section before deleting the profile record", async () => {
+			const events: string[] = []
+			let releaseOtherView!: () => void
+			const otherViewHold = new Promise<void>((resolve) => {
+				releaseOtherView = resolve
+			})
+			// A promise-chain double, matching the real shared lock: a caller queues behind
+			// whoever holds the section instead of running inline.
+			let section: Promise<unknown> = Promise.resolve()
+			const runExclusiveAcrossInstances = <T>(cb: () => Promise<T>): Promise<T> => {
+				const run = section.then(cb)
+				section = run.then(
+					() => {},
+					() => {},
+				)
+				return run
+			}
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const deletedProfile: ProviderSettingsEntry = {
+				name: "renamed-away",
+				id: "renamed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const replacementProfile: ProviderSettingsEntry = {
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const pinnedProfile: ProviderSettingsEntry = {
+				name: "view-pin",
+				id: "pin-id",
+				apiProvider: providerIdentifiers.zai,
+			}
+			// The shared selection names the profile being deleted while this view pins an
+			// unrelated one, so the deletion stops at the record and the shared list prune.
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				deletedProfile,
+				replacementProfile,
+				pinnedProfile,
+			])
+			await provider.contextProxy.setValue("currentApiConfigName", "renamed-away")
+			await provider.contextProxy.setValue("viewStates", {
+				"pinning-view": { currentApiConfigName: "view-pin", updatedAt: Date.now() },
+			})
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				runExclusiveAcrossInstances,
+				deleteConfig: vi.fn(async () => {
+					events.push("deleteConfig")
+				}),
+				activateProfile: vi.fn().mockResolvedValue(replacementProfile),
+				listConfig: vi.fn().mockResolvedValue([replacementProfile, pinnedProfile]),
+				setModeConfig: vi.fn(),
+				getProfile: vi.fn().mockResolvedValue(pinnedProfile),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider["setViewStateId"]("pinning-view")
+
+			// Another view renames the profile this view is deleting: its section spans the name
+			// check, the save under the new name and the re-point, so a deletion that skipped the
+			// section could run in the middle of it and remove the record the rename moved.
+			const heldSection = runExclusiveAcrossInstances(async () => {
+				events.push("otherViewEnter")
+				await otherViewHold
+				events.push("otherViewExit")
+			})
+			const deletion = provider.deleteProviderProfile(deletedProfile)
+			await new Promise((resolve) => setImmediate(resolve))
+
+			expect(events).toEqual(["otherViewEnter"])
+
+			releaseOtherView()
+			await deletion
+			await heldSection
+
+			expect(events).toEqual(["otherViewEnter", "otherViewExit", "deleteConfig"])
+			await provider.dispose()
+		})
+
 		it("leaves the durable pin and the shared list untouched when the settings deletion fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

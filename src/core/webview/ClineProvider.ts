@@ -3296,8 +3296,17 @@ export class ClineProvider
 		// (e.g. refusing to delete the last remaining configuration) propagates before
 		// the compensating writes run. Matching message text instead would let a
 		// profile whose name contains "not found" swallow an unrelated failure.
+		// The record deletion joins the manager cross-instance critical section, the way the
+		// rename and the profile save do: a rename running in another view holds that section
+		// across its name check, its save under the new name and its compensation delete, so a
+		// deletion that skipped it could run between the rename re-pointing the views and its
+		// delete of the old name and leave both names gone. Only the store write is wrapped; the
+		// re-point, the list prune and the activation below stay on the per-instance mutation
+		// queue, so the shared lock is never held across the activation work.
 		try {
-			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+			await this.providerSettingsManager.runExclusiveAcrossInstances(() =>
+				this.providerSettingsManager.deleteConfig(profileToDelete.name),
+			)
 		} catch (error) {
 			if (!(error instanceof ProviderSettingsNotFoundError)) {
 				throw error
