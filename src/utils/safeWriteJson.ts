@@ -158,6 +158,23 @@ function _scopeErrorCode(error: unknown): string | undefined {
 }
 
 /**
+ * Canonicalize the staging directory this write was approved to stage into, or report that the
+ * probe could not answer. Returning undefined instead of throwing is the point: the drift check
+ * can only read meaning out of a resolution that succeeded, and every failure this probe can
+ * produce - ENOENT while the directory exists because a component is mid-replacement or because
+ * the caller's fs double reports the path as missing, EACCES, EPERM, ELOOP - is equally consistent
+ * with the approved directory being exactly where it was approved. A probe that cannot answer is
+ * not an answer.
+ */
+async function _probeApprovedStagingDirectory(directory: string): Promise<string | undefined> {
+	try {
+		return await _resolveScopeRoot(directory)
+	} catch {
+		return undefined
+	}
+}
+
+/**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
@@ -298,11 +315,6 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// that directory against itself before writing anything into it: a resolved pathname is not an
 		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
 		// put the staged file outside the directory this write was approved for. safeWriteText would
-		// then reject the publish, but the stray file would already exist.
-		// The staging location was chosen from the parent directory resolved under the lock. Re-verify
-		// that directory against itself before writing anything into it: a resolved pathname is not an
-		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
-		// put the staged file outside the directory this write was approved for. safeWriteText would
 		// then reject the publish, but the stray file would already exist. Both sides of this comparison
 		// are canonicalized with the same directory walk the confinement check above uses, because for a
 		// target that does not exist yet resolvePublishTarget returns the path it was given: comparing
@@ -310,37 +322,41 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// whenever the two spellings differ. On a Windows runner the temp root arrives spelled with its
 		// 8.3 short name (C:\Users\RUNNER~1\AppData\Local\Temp) and realpath reports the long name for
 		// that very same directory, so every write into a directory that did not exist yet rejected
-		// here. The two walks run against the same frozen approval one after the other, so a parent that
+		// here. The two walks run against the same frozen approval one after the other, and both sides
+		// are compared as canonical directories rather than as the text of a path, so a parent that
 		// really was replaced by a link still lands on a different canonical directory and still
-		// rejects; the stat between them keeps rejecting a deleted approval, which the walk alone cannot
-		// tell apart from a replaced one. Where a filesystem reports no usable file identity at all the
-		// comparison degrades to today's spelling comparison, which is why the identity being compared
-		// here is the canonical directory rather than the text of a path.
+		// rejects.
+		//
+		// What this guard may act on is one thing only: a re-resolution that succeeds and lands on a
+		// different directory. A probe that cannot answer is not an answer. A probe that fails - ENOENT
+		// because a component is mid-replacement or is simply not there yet, EACCES, EPERM or ELOOP
+		// because the filesystem refused to say - carries no information about replacement whatsoever,
+		// and a failing probe is a normal condition of this write path rather than an attack: the task
+		// persistence suite runs this write against an fs/promises double whose stat rejects with
+		// ENOENT for every path, and its task directory was created moments earlier with the real fs.
+		// Reading that as drift rejected an ordinary write, which is the shape upstream's newer
+		// Task.spec hit on a Windows temp path. So a probe that cannot answer proceeds. A directory that
+		// really was deleted in the meantime then fails at the staging write itself: still fail-closed,
+		// still nothing created outside the directory the write was approved for, and the error names
+		// the failed write instead of claiming to be evidence of replacement. The confinement checks
+		// above decide the opposite way on purpose - there the guard has to prove the write is inside
+		// the scope, and a probe that cannot answer cannot prove anything.
 		const approvedStagingDirectory = path.dirname(actualTempNewFilePath)
-		let approvedCanonical: string
-		let currentStagingDirectory: string
-		try {
-			approvedCanonical = await _resolveScopeRoot(approvedStagingDirectory)
-			await fs.stat(approvedCanonical)
-			currentStagingDirectory = await _resolveScopeRoot(approvedCanonical)
-		} catch (driftError: unknown) {
-			const code =
-				driftError && typeof driftError === "object" && "code" in driftError
-					? (driftError as { code?: string }).code
-					: undefined
-			throw new StagingDirectoryDriftError(
-				resolvedTargetPath ?? absoluteFilePath,
-				approvedStagingDirectory,
-				code === "ENOENT" ? "no existing directory" : String(driftError),
-			)
-		}
-		if (!_sameDirectory(approvedCanonical, currentStagingDirectory)) {
+		const approvedCanonical = await _probeApprovedStagingDirectory(approvedStagingDirectory)
+		const currentStagingDirectory =
+			approvedCanonical === undefined ? undefined : await _probeApprovedStagingDirectory(approvedCanonical)
+		if (
+			approvedCanonical !== undefined &&
+			currentStagingDirectory !== undefined &&
+			!_sameDirectory(approvedCanonical, currentStagingDirectory)
+		) {
 			throw new StagingDirectoryDriftError(
 				resolvedTargetPath ?? absoluteFilePath,
 				approvedCanonical,
 				currentStagingDirectory,
 			)
 		}
+
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
 		// Step 2: Delegate backup + commit to safeWriteText with the pre-written

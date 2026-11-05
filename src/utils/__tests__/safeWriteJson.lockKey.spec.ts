@@ -207,11 +207,29 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		currentLink = ""
 
 		// The staging location is chosen from the parent directory resolved under the lock, and the
-		// staged file is written here in safeWriteJson before safeWriteText runs. Replace that
-		// directory with a link pointing outside it in between, and the staged JSON lands outside the
-		// directory this write was approved for - safeWriteText can still reject the publish, but the
-		// stray file already exists. Canonicalizing the parent is the only thing that can see the swap.
-		mockedRealpath.mockImplementation(async (t) => (String(t) === dir ? outside : String(t)))
+		// staged file is written here in safeWriteJson before safeWriteText runs. Replace that directory
+		// with a link pointing outside it between the guard's approval of it and its re-verification,
+		// and the staged JSON lands outside the directory this write was approved for - safeWriteText
+		// can still reject the publish, but the stray file already exists. Canonicalizing the parent is
+		// the only thing that can see the swap, and it sees it as the re-verification landing somewhere
+		// the approval did not. (A swap planted before the first reading is invisible to this guard by
+		// construction: both readings then agree, and safeWriteText's own beside-the-target check is
+		// what rejects it.)
+		let readings = 0
+		mockedRealpath.mockImplementation(async (t) => {
+			const key = String(t)
+			if (key !== dir) {
+				return key
+			}
+			// Readings 1 and 2 are the lock-key canonicalization before and after the lock, reading 3
+			// is the guard approving the directory as it currently resolves, and reading 4 is the guard
+			// re-verifying it - the one a planted swap has to move. This case used to pass off the guard's
+			// separate existence probe instead: its stub named a path that never existed, so the guard's
+			// fs.stat of the resolution failed and the write was rejected for "no existing directory",
+			// which was never evidence about a re-point. The readings below are what make it evidence.
+			readings += 1
+			return readings <= 3 ? dir : outside
+		})
 		mockedLstat.mockImplementation(
 			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
 		)
@@ -223,6 +241,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow(
 			"the directory this write was approved for",
 		)
+		expect(readings).toBe(4) // the guard really did take its second reading of the approved directory
 
 		expect(released).toBe(true)
 		// Nothing was staged: no target, and no .new_*.tmp left behind in the directory.
