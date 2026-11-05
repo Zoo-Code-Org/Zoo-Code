@@ -124,6 +124,24 @@ const postActions = (
 	}
 }
 
+// The sidebar title-bar commands are also reachable from the command palette, which can fire
+// them before resolveWebviewView has handed the activation-time provider its view, and
+// postMessageToWebview returns without sending while the view is unset: posting straight away
+// would do nothing and log nothing. Focus the pane and wait for the resolution that call
+// starts before posting. The wait releases on one of three things: this provider receives its
+// view, the sidebar view is disposed (the pane was closed before resolving), or the provider is
+// disposed. It has no clock of its own, so a view that is neither resolved nor torn down leaves
+// the command pending until one of those happens. On the menu path the view is already
+// resolved and this is a no-op.
+const waitForSidebarView = async (target: ClineProvider): Promise<void> => {
+	if (target.isViewLaunched) {
+		return
+	}
+
+	await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+	await target.whenViewResolved()
+}
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -143,20 +161,9 @@ const getCommandsMap = ({
 		await provider.evictCurrentTask()
 		await provider.refreshWorkspace()
 
-		// The worktree auto-open flow (`extension.ts`) invokes this command without a sidebar click,
-		// so the view may not be resolved yet: focus it explicitly instead of posting into a webview
-		// that does not exist. On the menu path the view is already resolved and this is a no-op.
-		if (!provider.isViewLaunched) {
-			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
-			// The focus command settles when VS Code opens the pane, not when resolveWebviewView
-			// hands this provider its view, and postMessageToWebview returns without sending while the
-			// view is unset - both actions below would be dropped. Wait for the resolution that this
-			// command just asked VS Code to start. The wait releases on one of three things: this
-			// provider receives its view, the sidebar view is disposed (the pane was closed before
-			// resolving), or the provider is disposed. It has no clock of its own, so a view that is
-			// neither resolved nor torn down leaves this command pending until one of those happens.
-			await provider.whenViewResolved()
-		}
+		// Palette invocations and the worktree auto-open flow (`extension.ts`) can reach this
+		// command before the sidebar view exists (see waitForSidebarView).
+		await waitForSidebarView(provider)
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		// Send focusInput action immediately after chatButtonClicked
 		// This ensures the focus happens after the view has switched
@@ -182,8 +189,10 @@ const getCommandsMap = ({
 	},
 	openInNewTab: () =>
 		openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker }),
-	settingsButtonClicked: () => {
+	settingsButtonClicked: async () => {
 		TelemetryService.instance.captureTitleButtonClicked("settings")
+
+		await waitForSidebarView(provider)
 
 		// Also explicitly post the visibility message to trigger scroll reliably.
 		postActions(outputChannel, provider, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
@@ -203,8 +212,10 @@ const getCommandsMap = ({
 			"settingsButtonClickedInTab",
 		)
 	},
-	historyButtonClicked: () => {
+	historyButtonClicked: async () => {
 		TelemetryService.instance.captureTitleButtonClicked("history")
+
+		await waitForSidebarView(provider)
 
 		postActions(outputChannel, provider, ["historyButtonClicked"], "historyButtonClicked")
 	},
@@ -218,7 +229,9 @@ const getCommandsMap = ({
 
 		postActions(outputChannel, tabProvider, ["historyButtonClicked"], "historyButtonClickedInTab")
 	},
-	marketplaceButtonClicked: () => {
+	marketplaceButtonClicked: async () => {
+		await waitForSidebarView(provider)
+
 		postActions(outputChannel, provider, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
 	},
 	marketplaceButtonClickedInTab: () => {

@@ -176,6 +176,7 @@ describe("registerCommands handlers", () => {
 		webviewFocusTracker: WebviewFocusTracker
 		retryWebviewRecovery: Mock<() => Promise<void>>
 		whenViewResolved: Mock<() => Promise<void>>
+		isViewLaunched: boolean
 	}
 	let mockVisibleProviderInstance: ClineProvider
 	let handlers: Record<string, (...args: unknown[]) => unknown>
@@ -210,7 +211,9 @@ describe("registerCommands handlers", () => {
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 			webviewFocusTracker: new WebviewFocusTracker(),
-			// plusButtonClicked waits for the view before posting, so the double needs the gate.
+			// The title-bar menu path implies the view is already resolved, so the gate releases at
+			// once here; the palette case, where the view is still unset, has its own tests below.
+			isViewLaunched: true,
 			whenViewResolved: vi.fn().mockResolvedValue(undefined),
 		}
 		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(mockVisibleProvider)
@@ -299,8 +302,8 @@ describe("registerCommands handlers", () => {
 
 	// The sidebar title-bar handlers target the registered provider (the
 	// sidebar click origin) directly, not the visible-instance heuristic.
-	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions on the registered provider", () => {
-		handlers["zoo-code.settingsButtonClicked"]()
+	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions on the registered provider", async () => {
+		await handlers["zoo-code.settingsButtonClicked"]()
 
 		expect(TelemetryService.instance.captureTitleButtonClicked).toHaveBeenCalledWith("settings")
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -315,8 +318,8 @@ describe("registerCommands handlers", () => {
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it("historyButtonClicked posts historyButtonClicked action on the registered provider", () => {
-		handlers["zoo-code.historyButtonClicked"]()
+	it("historyButtonClicked posts historyButtonClicked action on the registered provider", async () => {
+		await handlers["zoo-code.historyButtonClicked"]()
 
 		expect(TelemetryService.instance.captureTitleButtonClicked).toHaveBeenCalledWith("history")
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -326,14 +329,90 @@ describe("registerCommands handlers", () => {
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it("marketplaceButtonClicked posts marketplaceButtonClicked action on the registered provider", () => {
-		handlers["zoo-code.marketplaceButtonClicked"]()
+	it("marketplaceButtonClicked posts marketplaceButtonClicked action on the registered provider", async () => {
+		await handlers["zoo-code.marketplaceButtonClicked"]()
 
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",
 			action: "marketplaceButtonClicked",
 		})
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	// Palette invocations reach these three commands before resolveWebviewView has handed the
+	// activation-time provider its view (the `*InTab` ids are hidden from the palette, these three
+	// are not), and postMessageToWebview returns without sending while the view is unset. Each test
+	// drives that state and checks the three things the finding describes: the pane is asked to
+	// open, nothing is posted or logged before the view resolves, and after it resolves the actions
+	// arrive in order - plus the log entry that must exist when a post fails, so neither a dropped
+	// post nor a failed one stays silent.
+	it.each([
+		{
+			command: "zoo-code.settingsButtonClicked",
+			prefix: "settingsButtonClicked",
+			actions: [
+				{ type: "action", action: "settingsButtonClicked" },
+				{ type: "action", action: "didBecomeVisible" },
+			],
+		},
+		{
+			command: "zoo-code.historyButtonClicked",
+			prefix: "historyButtonClicked",
+			actions: [{ type: "action", action: "historyButtonClicked" }],
+		},
+		{
+			command: "zoo-code.marketplaceButtonClicked",
+			prefix: "marketplaceButtonClicked",
+			actions: [{ type: "action", action: "marketplaceButtonClicked" }],
+		},
+	])("waits for the sidebar view to resolve before posting $command", async ({ command, prefix, actions }) => {
+		let settleGate!: () => void
+		const gate = new Promise<void>((resolve) => {
+			settleGate = resolve
+		})
+		const sidebarProvider = Object.assign({} as ClineProvider, {
+			isViewLaunched: false,
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			whenViewResolved: vi.fn().mockReturnValue(gate),
+		})
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, cb: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = cb
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({ context: mockContext, outputChannel: mockOutputChannel, provider: sidebarProvider })
+
+		const handler = commandHandlers[command]()
+
+		// The pane was asked to open, but nothing may be posted until the view itself resolves. Drain
+		// the microtask queue so the handler reaches the gate and stops there.
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith(expect.stringContaining("SidebarProvider.focus"))
+		expect(sidebarProvider.whenViewResolved).toHaveBeenCalledTimes(1)
+		expect(sidebarProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+
+		settleGate()
+		await handler
+
+		expect(sidebarProvider.postMessageToWebview).toHaveBeenCalledTimes(actions.length)
+		actions.forEach((action, index) => {
+			expect(sidebarProvider.postMessageToWebview).toHaveBeenNthCalledWith(index + 1, action)
+		})
+
+		// The other half of "does nothing and writes no log": a post that fails has to leave the
+		// handler-prefixed entry in the output channel. Arm one rejection, with the view now resolved
+		// so the rejection is the only thing between the command and the log.
+		const boom = new Error(`${prefix} post failed`)
+		sidebarProvider.postMessageToWebview.mockReset()
+		sidebarProvider.postMessageToWebview.mockRejectedValueOnce(boom)
+		sidebarProvider.postMessageToWebview.mockResolvedValue(undefined)
+		await commandHandlers[command]()
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledTimes(1)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(`[${prefix}] postMessageToWebview failed: ${boom}`)
 	})
 
 	// The `*InTab` handlers serve the `editor/title` menu: they target the
@@ -1304,7 +1383,9 @@ describe("openClineInNewTab", () => {
 	it("constructs the tab provider with the 'editor' context and the live MdmService instance", async () => {
 		// MdmService has a private constructor, so pin a sentinel stand-in.
 		const mockMdm = Object.assign({} as MdmService, { name: "mock-mdm" })
-		;(MdmService.getInstance as Mock).mockReturnValue(mockMdm)
+		// One-shot: this file's beforeEach only clears call history, so a persistent implementation
+		// would hand mockMdm to every later tab creation's constructor input as well.
+		;(MdmService.getInstance as Mock).mockReturnValueOnce(mockMdm)
 
 		const provider = await openClineInNewTab({
 			context: mockContext,
@@ -1432,7 +1513,12 @@ describe("openClineInNewTab", () => {
 		const gate = new Promise<void>((resolve) => {
 			resolveContextProxy = resolve
 		})
-		;(ContextProxy.getInstance as Mock).mockReturnValue(gate)
+		// Two one-shot returns: the gate has to serve exactly the two independent creations this
+		// test starts (the ordinary one and the forced one), and the third call joins the ordinary
+		// creation's promise without reaching ContextProxy. A persistent return value would stay
+		// installed for later tests, and a single one-shot return would serve the forced creation
+		// instead of one of each.
+		;(ContextProxy.getInstance as Mock).mockReturnValueOnce(gate).mockReturnValueOnce(gate)
 
 		const ordinary = openClineInNewTab({
 			context: mockContext,
@@ -1472,7 +1558,9 @@ describe("openClineInNewTab", () => {
 		const gate = new Promise<void>((resolve) => {
 			resolveContextProxy = resolve
 		})
-		;(ContextProxy.getInstance as Mock).mockReturnValue(gate)
+		// One-shot: only the forced creation reaches ContextProxy.getInstance; the later call joins
+		// its in-flight promise, so nothing is left queued for the tests that follow.
+		;(ContextProxy.getInstance as Mock).mockReturnValueOnce(gate)
 
 		const forced = openClineInNewTab({
 			context: mockContext,
@@ -1498,7 +1586,9 @@ describe("openClineInNewTab", () => {
 		// Defer the first creation at ContextProxy.getInstance so both command
 		// handlers can start while the creation is still in flight.
 		let resolveContextProxy!: () => void
-		;(ContextProxy.getInstance as Mock).mockReturnValue(
+		// One-shot: the first caller starts the creation and the second joins its in-flight
+		// promise, so only this test's first ContextProxy.getInstance call is gated.
+		;(ContextProxy.getInstance as Mock).mockReturnValueOnce(
 			new Promise<void>((resolve) => {
 				resolveContextProxy = resolve
 			}),

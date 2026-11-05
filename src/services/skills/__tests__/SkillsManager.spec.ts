@@ -3312,6 +3312,17 @@ describe("SkillsManager disposal during initialization", () => {
 			await manager.dispose()
 			releaseDiscovery()
 			await initializing
+
+			// Asserted inside the try, while the call history still exists: the finally block calls
+			// mockReset(), which drops it, so an assertion after that passes even when initialization
+			// did create a watcher. Three facts kept apart - the manager ends up holding no watcher at
+			// all (the observable), it never created one (the call history), and nothing it created is
+			// left undisposed. A single "no leak" assertion would pass a build that created watchers
+			// and never disposed them, and a call-history assertion placed after the reset would pass
+			// any build at all.
+			expect(watchers).toHaveLength(0)
+			expect(createWatcher).not.toHaveBeenCalled()
+			expect(watchers.filter((w) => vi.mocked(w.dispose).mock.calls.length === 0)).toHaveLength(0)
 		} finally {
 			// Restoring after an await would skip the restore when initialize or dispose rejects,
 			// and assigning undefined writes the string "undefined" rather than unsetting.
@@ -3325,11 +3336,5 @@ describe("SkillsManager disposal during initialization", () => {
 				createWatcher.mockImplementation(originalWatcherImpl)
 			}
 		}
-
-		// Two facts asserted apart: nothing was created after the disposal, and nothing created is
-		// left undisposed. A single "no leak" assertion would pass a build that created watchers and
-		// never disposed them.
-		expect(createWatcher).not.toHaveBeenCalled()
-		expect(watchers.filter((w) => vi.mocked(w.dispose).mock.calls.length === 0)).toHaveLength(0)
 	})
 })
