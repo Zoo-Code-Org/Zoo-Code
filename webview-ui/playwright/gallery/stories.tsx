@@ -420,6 +420,11 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/__tests__/AppearanceConsumers.visual.fixture")
 		return <AppearanceConsumersStory />
 	},
+	"appearance-tool-rows": async () => {
+		const { AppearanceToolRowsStory } =
+			await import("@/components/settings/__tests__/AppearanceToolRows.visual.fixture")
+		return <AppearanceToolRowsStory />
+	},
 	"appearance-preview": async () => {
 		const { AppearancePreviewStory } =
 			await import("@/components/settings/__tests__/AppearancePreview.visual.fixture")
