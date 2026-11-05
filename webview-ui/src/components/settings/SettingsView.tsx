@@ -636,7 +636,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			clearTimeout(timer)
 			window.removeEventListener("message", onResult)
 		}
-	}, [pendingSaveId])
+	}, [pendingSaveId, latestCachedState, latestChangeCount])
 
 	// The answer to a save that was given up on. If it stored the values, the form is brought up to date with them: the
 	// values the user is not editing now take the stored value, and every value is compared with it from now on.
@@ -674,7 +674,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		window.addEventListener("message", onLateResult)
 		return () => window.removeEventListener("message", onLateResult)
-	}, [])
+	}, [latestCachedState, latestChangeCount])
 
 	// Once the live state shows an appearance value it is the one to compare with again (it may also be newer, if
 	// another webview changed it).
