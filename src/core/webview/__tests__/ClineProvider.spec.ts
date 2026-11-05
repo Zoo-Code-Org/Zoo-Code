@@ -5785,6 +5785,15 @@ describe("ClineProvider", () => {
 			// guard early-returning for an id that was never persisted.
 			expect(provider["viewStateId"]).toBe(provider.viewId)
 
+			// Pin what the failure left in each store: the durable record still keys the entry under
+			// the temporary id (the re-key wrote nothing durable), and the payload ContextProxy holds for
+			// viewStates is the same map the durable store holds, so a rolled-back registration cannot be
+			// visible through one store and invisible through the other.
+			const durableAfterFailure = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+			expect(durableAfterFailure[provider.viewId]?.mode).toBe("architect")
+			expect(durableAfterFailure["stable-sidebar-view"]).toBeUndefined()
+			expect(provider.contextProxy.getValue("viewStates")).toEqual(durableAfterFailure)
+
 			// A later retry succeeds once the storage write works again, and the
 			// pre-launch entry lands under the registered id.
 			setValueSpy.mockRestore()
