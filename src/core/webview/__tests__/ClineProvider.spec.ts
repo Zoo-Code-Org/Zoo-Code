@@ -5888,6 +5888,72 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		it("normalises a registered viewStateId and keys the adopted entry by it", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The key the host may store, plus a decoy under the raw name a normalizer never
+			// produces: adopting that entry would load another view's selections.
+			await provider.contextProxy.setValue("viewStates", {
+				norm_view: { claimToken: "norm-token", mode: "architect", currentApiConfigName: "cfg-norm" },
+				"norm/view": { claimToken: "decoy-token", mode: "code", currentApiConfigName: "cfg-decoy" },
+				"norm/view ": { claimToken: "decoy2-token", mode: "ask", currentApiConfigName: "cfg-decoy2" },
+			})
+			const result = await provider["setViewStateId"]("  norm/view  ", "norm-token")
+			expect(result.adopted).toBe(true)
+			expect(provider["viewStateId"]).toBe("norm_view")
+			// The selections that came through are the normalized key's, not the decoy's.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-norm")
+			const states = provider["getPersistedViewStates"]()
+			// The durable entry the registration read and adopted is the normalized one, and
+			// nothing was ever stored under the padded name the webview actually sent.
+			expect(states["norm_view"].claimToken).toBe("norm-token")
+			expect(Object.keys(states)).not.toContain("  norm/view  ")
+			// The decoys sit under names a normalizer never produces: adopted, they would load
+			// another view's selections; here they stay exactly as seeded.
+			expect(states["norm/view"].claimToken).toBe("decoy-token")
+			expect(states["norm/view"].mode).toBe("code")
+			expect(states["norm/view "].claimToken).toBe("decoy2-token")
+			await provider.dispose()
+		})
+
+		it("resolves to true when the webview accepts the message", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.resolveWebviewView({ ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } })
+			// The spy replaces the resolve-time double so only this post is under test.
+			const postMessage = vi.spyOn(provider["view"]!.webview, "postMessage").mockResolvedValue(true)
+			await expect(provider.postMessageToWebview({ type: "action", action: "focusInput" })).resolves.toBe(true)
+			expect(postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+			// The delivery result must reach the caller: a caller that rolls back on a failed
+			// post needs the true case to be true, not merely non-throwing.
+			await provider.dispose()
+		})
+
+		it("resolves to false when the webview refuses the delivery", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.resolveWebviewView({ ...mockWebviewView, webview: { ...mockWebviewView.webview, html: "" } })
+			const postMessage = vi.spyOn(provider["view"]!.webview, "postMessage").mockResolvedValue(false)
+			await expect(provider.postMessageToWebview({ type: "action", action: "focusInput" })).resolves.toBe(false)
+			expect(postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+			await provider.dispose()
+		})
 
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
