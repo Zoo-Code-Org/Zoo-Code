@@ -911,6 +911,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		providerSettingsManager: {
 			listConfig: () => Promise<unknown[]>
 			hasConfig: (name: string) => Promise<boolean>
+			getProfile: (options: { name: string }) => Promise<unknown>
 		}
 		activateProviderProfile: (options: { name: string }) => Promise<void>
 		getMcpHub: () => unknown
@@ -933,6 +934,12 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 				.fn()
 				.mockResolvedValue([{ name: "shared-profile", apiProvider: providerIdentifiers.anthropic }]),
 			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({
+				id: "shared-profile-id",
+				name: "shared-profile",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sk-shared-profile",
+			}),
 		}
 		double.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 		double.getMcpHub = vi.fn().mockReturnValue(undefined)
@@ -980,10 +987,17 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		// The view pin is re-pinned to the first available profile,
 		// and the shared global selection is left untouched: no global write, no global activation.
 		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
-		// The stale view-local overlay is cleared with the pin: a buffer still
-		// holding the missing profile's settings would keep serving them on top of
-		// the re-pinned selection.
-		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("apiConfiguration", undefined)
+		// A re-pin that leaves the overlay empty is half a repair: a view whose overlay carries a
+		// name but no apiConfiguration resolves that field from the shared store, so it would
+		// display its own pin while running whatever profile the shared selection names next. The
+		// seed mirrors loadViewState - the stored record without its name.
+		expect(double.providerSettingsManager.getProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("apiConfiguration", {
+			id: "shared-profile-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "sk-shared-profile",
+		})
+		expect(mockClineProvider.saveViewState).not.toHaveBeenCalledWith("apiConfiguration", undefined)
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
 			"currentApiConfigName",
 			"shared-profile",
@@ -1015,7 +1029,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
-	it("clears the stale overlay before persisting the re-pin so a failed pin stays retryable", async () => {
+	it("seeds the re-pinned profile's settings before persisting the re-pin so a failed pin stays retryable", async () => {
 		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
 			async (name: string) => name === "shared-profile",
 		)
@@ -1034,11 +1048,33 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 			mockClineProvider.saveViewState = originalSaveViewState
 		}
 
-		// The overlay clear must land first: if the pin write then fails, the merged
-		// selection stays invalid and the repair retries on the next launch, instead of
-		// a valid pin serving the deleted profile's buffered settings.
-		expect(calls[0]).toEqual(["apiConfiguration", undefined])
+		// The seed must land before the pin write: a failed seed leaves the pin unwritten, so the
+		// merged selection stays invalid and the repair retries on the next launch instead of a
+		// valid pin serving the deleted profile's buffered settings.
+		expect(calls[0]).toEqual([
+			"apiConfiguration",
+			{ id: "shared-profile-id", apiProvider: providerIdentifiers.anthropic, apiKey: "sk-shared-profile" },
+		])
 		expect(calls).toContainEqual(["currentApiConfigName", "shared-profile"])
+	})
+
+	it("re-pins without a settings snapshot when the profile record vanishes before the seed read", async () => {
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+		vi.mocked(double.providerSettingsManager.getProfile).mockRejectedValue(new Error("profile vanished mid-flight"))
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		// A seed read that fails must not cost the view the repair: the overlay falls back to empty
+		// and the pin still lands, so the re-pin is not swallowed by the catch around this block.
+		expect(double.providerSettingsManager.getProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("apiConfiguration", undefined)
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining('Seed read failed for "shared-profile"'),
+		)
 	})
 
 	it("records the legacy repair without activating a profile when no name is listed", async () => {

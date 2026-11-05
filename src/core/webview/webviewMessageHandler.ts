@@ -674,12 +674,35 @@ export const webviewMessageHandler = async (
 								// Re-pin this view to the still-valid shared global selection (not the
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
-								// Clear the buffered overlay first: it belongs to the profile that
-								// no longer resolves. If the pin write below then fails, the invalid
-								// selection stays retryable on the next launch; pinning first would
-								// leave a valid pin serving the stale profile's provider, model, and
-								// keys with the repair skipped.
-								await provider.saveViewState("apiConfiguration", undefined)
+								// Seed the pinned profile's snapshot instead of only clearing the buffer: a view whose
+								// overlay carries a name but no apiConfiguration resolves that field from the shared
+								// ContextProxy - getState merges viewLocalState over it at ClineProvider.ts:4913 - so the
+								// view would show its own pin while running whatever profile the shared store names next.
+								// The snapshot is taken the way loadViewState takes it (ClineProvider.ts:1137-1140): the
+								// stored record without its name.
+								// Seed before the pin write. A seed write that fails leaves the pin unwritten, so the
+								// invalid selection stays retryable on the next launch, and a seed that lands while the
+								// pin write fails leaves the view holding the settings of the profile it is about to be
+								// pinned to rather than the missing profile's stale buffer.
+								let seedSettings: ProviderSettings | undefined
+								try {
+									const { name: _seedProfileName, ...seedProfile } =
+										await provider.providerSettingsManager.getProfile({
+											name: globalConfigName,
+										})
+									seedSettings = seedProfile as ProviderSettings
+								} catch (error) {
+									// The record can vanish between the hasConfig check above and this read. Fall back to
+									// an empty overlay - what a re-pin left before the seed existed - so the pin write
+									// still lands instead of the whole repair being lost to this error.
+									provider.log(
+										`[webviewDidLaunch] Seed read failed for "${globalConfigName}"; re-pinning without a settings snapshot: ${String(error)}`,
+									)
+								}
+								// The durable view entry carries only mode and currentApiConfigName (see
+								// _persistViewLocalStateFromMutation), so this seed is an in-memory overlay write; the
+								// pin below is what persists.
+								await provider.saveViewState("apiConfiguration", seedSettings)
 								await provider.saveViewState("currentApiConfigName", globalConfigName)
 								// The repair changes what this view resolves to, so the state has to be posted: the
 								// two writes above update provider state without posting it, and the listApiConfig
