@@ -4599,8 +4599,12 @@ export class ClineProvider
 		ClineProvider.viewStatesResetGeneration += 1
 		await this.contextProxy.resetAllState()
 
-		// The reset cleared the shared store: drop this view's buffered selections too, or
-		// getValues()/getConfiguration() keep serving pre-reset values.
+		// The reset cleared the shared store: drop EVERY live view's buffered selections too. Each view
+		// keeps its own buffer and getValues()/getConfiguration() read it before the shared store, so a
+		// sibling would otherwise keep serving its pre-reset mode and settings.
+		for (const instance of ClineProvider.getAllInstances()) {
+			instance.viewLocalState = {}
+		}
 		this.viewLocalState = {}
 
 		await this.providerSettingsManager.resetAllConfigs()
