@@ -1149,7 +1149,7 @@
 			"cacheReads": "Önbellek okumaları"
 		},
 		"label": "Hizmet seviyesi",
-		"tooltip": "Daha hızlı API isteği işleme için öncelikli işleme hizmeti seviyesini deneyin. Daha düşük gecikme süresiyle daha düşük fiyatlar için esnek işleme seviyesini deneyin."
+		"tooltip": "Daha hızlı API isteği işleme için öncelikli işleme hizmeti seviyesini deneyin. Daha yüksek gecikme süresiyle daha düşük fiyatlar için esnek işleme seviyesini deneyin."
 	},
 	"ui": {
 		"collapseThinking": {

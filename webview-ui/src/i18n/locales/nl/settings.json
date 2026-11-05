@@ -1272,8 +1272,8 @@
 		}
 	},
 	"promptCaching": {
-		"label": "Prompt caching inschakelen",
-		"description": "Indien ingeschakeld, gebruikt Zoo dit model met prompt caching om kosten te verlagen."
+		"label": "Prompt caching uitschakelen",
+		"description": "Indien aangevinkt, gebruikt Zoo geen prompt caching voor dit model."
 	},
 	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
 	"maxOutputTokensLabel": "Maximale output tokens",
