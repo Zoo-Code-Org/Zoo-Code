@@ -1,8 +1,7 @@
 {
 	"landing": {
 		"greeting": "Welcome to Zoo Code!",
-		"introduction": "With a range of built-in and extensible Modes, Zoo Code lets you plan, architect, code, debug and boost your productivity like never before.",
-		"getStarted": "Choose your provider"
+		"introduction": "With a range of built-in and extensible Modes, Zoo Code lets you plan, architect, code, debug and boost your productivity like never before."
 	},
 	"providerSignup": {
 		"heading": "Choose your provider",

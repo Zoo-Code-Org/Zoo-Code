@@ -54,6 +54,7 @@ import {
 	type ExtensionMessage,
 	type ExtensionState,
 	type WebviewThemeFixture,
+	type WebviewDiagnosticsSnapshot,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -111,6 +112,11 @@ import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-m
 import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import {
+	DiagnosticsRecorder,
+	DiagnosticsRequestBroker,
+	type DiagnosticsProviderSourceSnapshot,
+} from "../../services/diagnostics"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -126,6 +132,7 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
+import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
@@ -223,6 +230,14 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, task: Task): void {
+	const cleanupFunctions = listeners.get(task)
+	if (cleanupFunctions) {
+		cleanupFunctions.forEach((cleanup) => cleanup())
+		listeners.delete(task)
+	}
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -306,6 +321,8 @@ export class ClineProvider
 		500,
 		{ leading: true, trailing: true, maxWait: 1000 },
 	)
+	private readonly diagnosticsRecorder = new DiagnosticsRecorder(200)
+	private readonly diagnosticsRequestBroker = new DiagnosticsRequestBroker()
 	private readonly rateLimitClock: RateLimitClock = createRateLimitClock()
 
 	private recentTasksCache?: string[]
@@ -420,6 +437,7 @@ export class ClineProvider
 		)
 
 		ClineProvider.activeInstances.add(this)
+		this.diagnosticsRecorder.record({ boundary: "provider", phase: "success", type: "created" })
 
 		this.mdmService = mdmService
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
@@ -542,6 +560,8 @@ export class ClineProvider
 	 * Initialize the TaskHistoryStore and migrate from globalState if needed.
 	 */
 	private async initializeTaskHistoryStore(): Promise<void> {
+		const startedAt = Date.now()
+		this.diagnosticsRecorder.record({ boundary: "task-history", phase: "start", type: "initialize" })
 		try {
 			await this.taskHistoryStore.initialize()
 
@@ -562,7 +582,19 @@ export class ClineProvider
 			}
 
 			this.taskHistoryStoreInitialized = true
+			this.diagnosticsRecorder.record({
+				boundary: "task-history",
+				phase: "success",
+				type: "initialize",
+				elapsedMs: Date.now() - startedAt,
+			})
 		} catch (error) {
+			this.diagnosticsRecorder.record({
+				boundary: "task-history",
+				phase: "failure",
+				type: "initialize",
+				elapsedMs: Date.now() - startedAt,
+			})
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
 	}
@@ -694,11 +726,7 @@ export class ClineProvider
 		this.taskRegistry.remove(task.taskId)
 		task.emit(RooCodeEventName.TaskUnfocused)
 
-		const cleanupFunctions = this.taskEventListeners.get(task)
-		if (cleanupFunctions) {
-			cleanupFunctions.forEach((cleanup) => cleanup())
-			this.taskEventListeners.delete(task)
-		}
+		removeTaskEventListeners(this.taskEventListeners, task)
 
 		try {
 			await task.dispose()
@@ -844,8 +872,8 @@ export class ClineProvider
 	/**
 	 * Sets a pending edit operation with automatic timeout cleanup
 	 */
-	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): void {
-		this.pendingEditOperations.set(operationId, editData)
+	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): object {
+		return this.pendingEditOperations.set(operationId, editData)
 	}
 
 	/**
@@ -858,8 +886,8 @@ export class ClineProvider
 	/**
 	 * Clears a specific pending edit operation
 	 */
-	private clearPendingEditOperation(operationId: string): boolean {
-		return this.pendingEditOperations.clear(operationId)
+	public clearPendingEditOperation(operationId: string, owner?: object): boolean {
+		return this.pendingEditOperations.clear(operationId, owner)
 	}
 
 	/**
@@ -925,6 +953,7 @@ export class ClineProvider
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
+		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -974,6 +1003,7 @@ export class ClineProvider
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
+		this.diagnosticsRequestBroker.dispose()
 
 		// Clean up any event listeners attached to this provider
 		this.removeAllListeners()
@@ -1133,6 +1163,11 @@ export class ClineProvider
 		this.pendingSidebarRecovery = false
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
+		this.diagnosticsRecorder.record({
+			boundary: "provider",
+			phase: "success",
+			type: "view-resolved",
+		})
 
 		// Register disposal before awaiting HTML or state so closing the view during
 		// either load invalidates this resolve and prevents later listener installation.
@@ -1245,6 +1280,11 @@ export class ClineProvider
 					return
 				}
 
+				this.diagnosticsRecorder.record({
+					boundary: "provider",
+					phase: "success",
+					type: this.view?.visible ? "view-visible" : "view-hidden",
+				})
 				if (this.view?.visible) {
 					// Hidden webviews throttle timers, so grant a fresh grace
 					// window instead of counting throttled heartbeats as a crash.
@@ -1264,6 +1304,11 @@ export class ClineProvider
 					return
 				}
 
+				this.diagnosticsRecorder.record({
+					boundary: "provider",
+					phase: "success",
+					type: this.view?.visible ? "view-visible" : "view-hidden",
+				})
 				if (this.view?.visible) {
 					// Hidden webviews throttle timers, so grant a fresh grace
 					// window instead of counting throttled heartbeats as a crash.
@@ -1369,11 +1414,38 @@ export class ClineProvider
 		// transition so both callers cannot observe the same previous registry
 		// state and schedule distinct Task instances for one history item.
 		// Fail forward so one rejected restoration does not poison the queue.
+		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
+			ClineProvider,
+			[() => Promise<Task>],
+			Promise<Task>
+		>(this, () => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options))
+	}
+
+	/**
+	 * Rehydrates `task` from history only if it is still current when the queued
+	 * step runs, so a navigation queued earlier is never evicted.
+	 */
+	public restartTaskIfCurrent(task: Task): Promise<boolean> {
+		return ClineProvider.prototype.enqueueHistoryTaskTransition.call<
+			ClineProvider,
+			[() => Promise<boolean>],
+			Promise<boolean>
+		>(this, async () => {
+			if (this.getCurrentTask() !== task) {
+				return false
+			}
+			const { historyItem } = await this.getTaskWithId(task.taskId)
+			if (this.getCurrentTask() !== task) {
+				return false
+			}
+			await ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem)
+			return true
+		})
+	}
+
+	private enqueueHistoryTaskTransition<T>(transition: () => Promise<T>): Promise<T> {
 		const previous = this.historyTaskCreationQueue ?? Promise.resolve()
-		const run = previous.then(
-			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
-			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
-		)
+		const run = previous.then(transition, transition)
 		this.historyTaskCreationQueue = run.then(
 			() => {},
 			() => {},
@@ -1441,7 +1513,10 @@ export class ClineProvider
 							const hasActualSettings = !!fullProfile.apiProvider
 
 							if (hasActualSettings) {
-								await this.activateProviderProfile({ name: profile.name })
+								await this.activateProviderProfile(
+									{ name: profile.name },
+									{ persistModeConfig: false, expectedCurrentTaskId: historyItem.id },
+								)
 							} else {
 								// The task will continue with the current/default configuration.
 							}
@@ -1473,7 +1548,11 @@ export class ClineProvider
 					if (profile.apiProvider) {
 						await this.activateProviderProfile(
 							{ name: profile.name },
-							{ persistModeConfig: false, persistTaskHistory: false },
+							{
+								persistModeConfig: false,
+								persistTaskHistory: false,
+								expectedCurrentTaskId: historyItem.id,
+							},
 						)
 					}
 				} catch (error) {
@@ -1523,6 +1602,13 @@ export class ClineProvider
 			// Replace the current task in-place to avoid UI flicker
 			const oldTask = this.taskRegistry.current
 
+			// The current task may have changed or been removed during the awaits above; never touch it.
+			if (oldTask !== currentTask) {
+				removeTaskEventListeners(this.taskEventListeners, task)
+				await task.abortTask(true).catch(() => {})
+				return task
+			}
+
 			if (oldTask) {
 				// Abort the old task to stop running processes and mark as abandoned
 				try {
@@ -1533,12 +1619,7 @@ export class ClineProvider
 					)
 				}
 
-				// Remove event listeners from the old task
-				const cleanupFunctions = this.taskEventListeners.get(oldTask)
-				if (cleanupFunctions) {
-					cleanupFunctions.forEach((cleanup) => cleanup())
-					this.taskEventListeners.delete(oldTask)
-				}
+				removeTaskEventListeners(this.taskEventListeners, oldTask)
 
 				// Replace in-place: preserves stack index and current pointer
 				this.taskRegistry.replace(oldTask.taskId, task)
@@ -1619,13 +1700,48 @@ export class ClineProvider
 	}
 
 	public async postMessageToWebview(message: ExtensionMessage) {
+		const startedAt = Date.now()
+		const taskId = this.getCurrentTask()?.taskId
+		this.diagnosticsRecorder.record({
+			boundary: "webview-out",
+			phase: "start",
+			type: message.type,
+			action: message.action,
+			stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+			taskId,
+		})
 		if (this._disposed) {
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				taskId,
+			})
 			return
 		}
 
 		try {
-			await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
+			const delivered = await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: delivered ? "success" : "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+				taskId,
+			})
 		} catch {
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				taskId,
+			})
 			// View disposed, drop message silently
 		}
 	}
@@ -1665,6 +1781,34 @@ export class ClineProvider
 			pending.reject(error)
 		}
 		this.pendingThemeFixtureProbes.clear()
+	}
+
+	public getDiagnosticsSnapshot(): DiagnosticsProviderSourceSnapshot {
+		const currentTask = this.getCurrentTask()
+		const events = this.diagnosticsRecorder.snapshot(100)
+		return {
+			renderContext: this.renderContext,
+			disposed: this._disposed,
+			viewPresent: Boolean(this.view),
+			visible: this.view?.visible === true,
+			launched: this.isViewLaunched,
+			taskHistoryInitialized: this.taskHistoryStoreInitialized,
+			taskCount: this.taskRegistry.length,
+			currentTaskId: currentTask?.taskId,
+			currentMessageCount: currentTask?.clineMessages.length ?? 0,
+			currentTodoCount: currentTask?.todoList?.length ?? 0,
+			history: this.taskHistoryStore.getAll(),
+			events: events.events,
+			eventsTruncated: events.truncated,
+		}
+	}
+
+	public requestWebviewDiagnostics(timeoutMs = 1_000): Promise<WebviewDiagnosticsSnapshot | undefined> {
+		if (this._disposed || !this.view) return Promise.resolve(undefined)
+		return this.diagnosticsRequestBroker.request(
+			(requestId) => this.postMessageToWebview({ type: "diagnosticsRequest", requestId }),
+			timeoutMs,
+		)
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -1864,7 +2008,29 @@ export class ClineProvider
 				return
 			}
 
-			await webviewMessageHandler(this, message, this.marketplaceManager)
+			const startedAt = Date.now()
+			this.diagnosticsRecorder.record({ boundary: "webview-in", phase: "start", type: message.type })
+			try {
+				if (message.type === "diagnosticsResponse" && message.requestId) {
+					this.diagnosticsRequestBroker.resolve(message.requestId, message.diagnostics)
+				} else {
+					await webviewMessageHandler(this, message, this.marketplaceManager)
+				}
+				this.diagnosticsRecorder.record({
+					boundary: "webview-in",
+					phase: "success",
+					type: message.type,
+					elapsedMs: Date.now() - startedAt,
+				})
+			} catch (error) {
+				this.diagnosticsRecorder.record({
+					boundary: "webview-in",
+					phase: "failure",
+					type: message.type,
+					elapsedMs: Date.now() - startedAt,
+				})
+				throw error
+			}
 		}
 
 		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
@@ -1997,11 +2163,11 @@ export class ClineProvider
 	 */
 	private updateTaskApiHandlerIfNeeded(
 		providerSettings: ProviderSettings,
-		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean } = {},
+		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): void {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
-		if (!task) return
+		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) return
 
 		const { forceRebuild = false } = options
 
@@ -2243,11 +2409,11 @@ export class ClineProvider
 
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: { skipCurrentTaskRebuild?: boolean } = {},
+		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
-		if (!task) {
+		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) {
 			return
 		}
 
@@ -2277,6 +2443,8 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			/** Rebuild and sticky-write only when this task is still current. */
+			expectedCurrentTaskId?: string
 		},
 	) {
 		return this.enqueueProviderProfileMutation((signal) =>
@@ -2290,6 +2458,7 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			expectedCurrentTaskId?: string
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
@@ -2317,12 +2486,20 @@ export class ClineProvider
 		}
 
 		// Change the provider for the current task.
-		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
+		const expectedCurrentTaskId = options?.expectedCurrentTaskId
+		this.updateTaskApiHandlerIfNeeded(providerSettings, {
+			forceRebuild: true,
+			skipCurrentTaskRebuild,
+			expectedCurrentTaskId,
+		})
 
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
+			await this.persistStickyProviderProfileToCurrentTask(name, {
+				skipCurrentTaskRebuild,
+				expectedCurrentTaskId,
+			})
 		}
 
 		if (!skipCurrentTaskRebuild) {
@@ -2584,13 +2761,39 @@ export class ClineProvider
 	}
 
 	async showTaskWithId(id: string) {
-		if (id !== this.getCurrentTask()?.taskId) {
-			// Non-current task.
-			const { historyItem } = await this.getTaskWithId(id)
-			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
-		}
+		const startedAt = Date.now()
+		this.diagnosticsRecorder.record({
+			boundary: "task-navigation",
+			phase: "start",
+			type: "show-task",
+			taskId: id,
+		})
+		try {
+			if (id !== this.getCurrentTask()?.taskId) {
+				// Non-current task.
+				const { historyItem } = await this.getTaskWithId(id)
+				await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+			}
 
-		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+			this.diagnosticsRecorder.record({
+				boundary: "task-navigation",
+				phase: "success",
+				type: "show-task",
+				taskId: id,
+				elapsedMs: Date.now() - startedAt,
+				messageCount: this.getCurrentTask()?.clineMessages.length ?? 0,
+			})
+		} catch (error) {
+			this.diagnosticsRecorder.record({
+				boundary: "task-navigation",
+				phase: "failure",
+				type: "show-task",
+				taskId: id,
+				elapsedMs: Date.now() - startedAt,
+			})
+			throw error
+		}
 	}
 
 	async exportTaskWithId(id: string) {
@@ -2967,6 +3170,9 @@ export class ClineProvider
 			historyPreviewCollapsed,
 			reasoningBlockCollapsed,
 			chatFontSize,
+			timeFormat,
+			dateFormat,
+			showRelativeTimes,
 			enterBehavior,
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -3148,6 +3354,9 @@ export class ClineProvider
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,
+			timeFormat: timeFormat ?? "auto",
+			dateFormat: dateFormat ?? "auto",
+			showRelativeTimes: showRelativeTimes ?? true,
 			enterBehavior: enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
@@ -3381,6 +3590,9 @@ export class ClineProvider
 			historyPreviewCollapsed: stateValues.historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
 			chatFontSize: stateValues.chatFontSize,
+			timeFormat: stateValues.timeFormat ?? "auto",
+			dateFormat: stateValues.dateFormat ?? "auto",
+			showRelativeTimes: stateValues.showRelativeTimes ?? true,
 			enterBehavior: stateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -3507,7 +3719,9 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await this.contextProxy.setValues(values)
+		await this.contextProxy.setValues(
+			withoutInvalidDisplaySettings(values, (key) => this.log(`[setValues] Ignored an invalid value for ${key}`)),
+		)
 	}
 
 	// dev
