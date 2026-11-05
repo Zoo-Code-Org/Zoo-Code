@@ -7045,17 +7045,20 @@ describe("ClineProvider", () => {
 			)
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toHaveLength(2)
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
-			// The landed compensation restores the manager record, the profile list, the shared
-			// selection and the durable pins, but not this view's own live buffer: the deletion had
-			// already re-pointed the buffer at the survivor, and rolling the deletion back does not
-			// undo that re-point - the durable entry below is what a reload reads.
-			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
-			// The durable entry keeps the survivor pin: the compensation puts back the record, the
-			// list, the shared selection, the shared settings and the *other* views' pins, but it does not
-			// undo this view's own re-point, live or durable.
+			// The landed compensation restores the manager record, the profile list, the shared selection,
+			// the OTHER views' pins and this view's own pin and overlay: a deletion the caller was told
+			// failed must not leave this view switched to the survivor, in memory or on disk.
+			// (Before the round that added that restore the code produced the opposite - buffer and durable
+			// entry stayed on the survivor - and these lines documented that behaviour rather than promising
+			// it; the review round on head 48198939b7 turned the description into the promise.)
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+			// The durable entry is what a reload reads, so it goes back with the live buffer.
 			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
-			// (the durable map is what a reload reads; the live buffer above is not part of the rollback)
-			expect(persisted.currentApiConfigName).toBe("keeper-profile")
+			expect(persisted.currentApiConfigName).toBe("doomed-profile")
 			await provider.dispose()
 		})
 
@@ -7067,6 +7070,9 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
+			// One log across both mutations: the assertions below compare when the upsert reached its
+			// save against when the deletion settled.
+			const events: string[] = []
 			const doomedProfile: ProviderSettingsEntry = {
 				name: "doomed-profile",
 				id: "doomed-id",
@@ -7089,7 +7095,12 @@ describe("ClineProvider", () => {
 					apiKey: "keeper-secret",
 				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
-				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+				saveConfig: vi.fn().mockImplementation((name: string) => {
+					// Filtered by profile name: the deletion's own restore calls this with the deleted
+					// profile, so a bare index into this mock says nothing about which mutation wrote.
+					events.push("save:" + name)
+					return Promise.resolve("doomed-id")
+				}),
 				listConfig: vi.fn().mockResolvedValue(["doomed-profile", "keeper-profile", "new-profile"]),
 			}
 
@@ -7107,13 +7118,13 @@ describe("ClineProvider", () => {
 					await failingWrite
 					throw new Error("provider settings write failed")
 				})
-
 			const deletion = provider.deleteProviderProfile(doomedProfile)
+
 			while (!parked) {
 				await new Promise((resolve) => setImmediate(resolve))
 			}
-			// The upsert starts while the deletion is mid-flight: if the two are not
-			// serialized, its list write lands inside the deletion's snapshot/rollback window.
+			// The upsert starts while the deletion is mid-flight. With the queue it waits for the
+			// deletion to settle; unqueued it runs straight through the deletion half-applied.
 			const upsert = provider.upsertProviderProfile(
 				"new-profile",
 				{ apiProvider: providerIdentifiers.anthropic },
@@ -7125,9 +7136,16 @@ describe("ClineProvider", () => {
 			await upsert
 			setProviderSettingsSpy.mockRestore()
 
-			// The upsert's newer list write must survive. An unserialized deletion rolls back
-			// to the snapshot it took before the upsert ran and silently drops the new profile.
+			// The deletion's restore call is the marker: it can only happen after the parked write
+			// settled and the deletion entered its catch. An upsert that reached its save afterwards
+			// never overlapped the deletion; unserialized it saves while the deletion is still
+			// half-applied, which is what the ordering below rejects.
 			expect(JSON.stringify(provider.contextProxy.getValue("listApiConfigMeta"))).toContain("new-profile")
+			const upsertSave = events.indexOf("save:new-profile")
+			const deletionRestore = events.indexOf("save:doomed-profile")
+			expect(upsertSave).toBeGreaterThan(-1)
+			expect(deletionRestore).toBeGreaterThan(-1)
+			expect(upsertSave).toBeGreaterThan(deletionRestore)
 			await provider.dispose()
 		})
 
@@ -7568,6 +7586,106 @@ describe("ClineProvider", () => {
 			}
 		})
 
+		it("restores the acting view's own pin and overlay when its own strict sticky write fails", async () => {
+			// Crosses two findings on purpose. The acting view moves its own pin and overlay onto the survivor
+			// before the strict task-history write runs, and a rebuilt API handler cannot be rolled back: so the
+			// sticky write has to come first, and the compensation has to put this view's own pin and overlay
+			// back as well as the shared stores it already restores.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				await provider["setViewStateId"]("acting-crossover-view")
+				await provider.saveViewState("currentApiConfigName", "doomed-profile")
+				const actingTask = {
+					taskId: "acting-crossover-task",
+					taskApiConfigName: "doomed-profile",
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "deepseek/deepseek-coder",
+					},
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn((name: string) => {
+						actingTask.taskApiConfigName = name
+					}),
+				}
+				// Structural double: the deletion path only touches the sticky name and the API handler here,
+				// so a minimal task keeps the assertion on what the write group actually mutates.
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					actingTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				provider.taskHistoryStore["cache"].set(actingTask.taskId, {
+					id: actingTask.taskId,
+					task: "crossover acting",
+					ts: Date.now(),
+					number: 1,
+					mode: "code",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					apiConfigName: "doomed-profile",
+				})
+				vi.spyOn(provider, "updateTaskHistory").mockRejectedValue(new Error("acting history write failed"))
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const doomedProfile: ProviderSettingsEntry = {
+					name: "doomed-profile",
+					id: "doomed-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					getProfile: vi.fn(async ({ name }: { name: string }) =>
+						name === "doomed-profile"
+							? {
+									name: "doomed-profile",
+									id: "doomed-id",
+									apiProvider: providerIdentifiers.openrouter,
+									openRouterApiKey: "doomed-secret",
+								}
+							: { name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+					),
+					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+				}
+
+				await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow(
+					"acting history write failed",
+				)
+
+				// The handler rebuild must not have run: it is the irreversible half of the write group, and the
+				// deletion is being undone.
+				expect(actingTask.updateApiConfiguration).not.toHaveBeenCalled()
+				expect(actingTask.apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "deepseek/deepseek-coder",
+				})
+				// This view's own pin and overlay went onto the survivor inside the same write group, and the
+				// compensation restores the record, the list, the shared selection and the OTHER views' pins -
+				// so it has to restore this view's own too, live and durable, or a failed deletion still leaves
+				// the user looking at the survivor also after a reload.
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+				expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+				await ClineProvider["persistedViewStateWriteQueue"]
+				const persisted = provider["getPersistedViewStates"]({ fresh: true })[provider["viewStateId"]] ?? {}
+				expect(persisted.currentApiConfigName).toBe("doomed-profile")
+				expect(actingTask.setTaskApiConfigName.mock.calls.at(-1)?.[0]).toBe("doomed-profile")
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+				expect(ClineProvider.getAllInstances()).toContain(provider)
+			} finally {
+				await provider.dispose()
+			}
+		})
 		it("rejects the deletion when the acting task's history entry cannot be re-pointed", async () => {
 			// Same contract on the deleting view itself: the write group rebuilds the conversation and
 			// moves its sticky profile name; if the durable half of that fails, the deletion has to

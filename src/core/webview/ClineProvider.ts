@@ -3633,6 +3633,18 @@ export class ClineProvider
 		let deletedWasGlobal = false
 		let viewWasPinnedToDeleted = false
 
+		// Captured outside the write group. When this view was pinned to the deleted profile the write group
+		// re-points this view's own pin and overlay onto the survivor, and the conversation's sticky profile
+		// name and history entry move with them; none of that is part of restoring the shared stores, so it
+		// is snapshotted here and put back by the compensation below when the deletion is rolled back.
+		const actingViewPinBefore = this.viewLocalState.currentApiConfigName
+		const actingViewOverlayBefore = this.viewLocalState.apiConfiguration
+		const actingTaskAtEntry = this.getCurrentTask()
+		const actingTaskPreviousName = actingTaskAtEntry?.taskApiConfigName
+		const actingTaskPreviousHistoryItem = actingTaskAtEntry
+			? this.getTaskHistoryItem(actingTaskAtEntry.taskId)
+			: undefined
+
 		try {
 			const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
@@ -3738,12 +3750,14 @@ export class ClineProvider
 			// the sticky name moves to the survivor as well, or a later reload re-resolves
 			// a profile that no longer exists.
 			if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+				// Strict: a task left naming the deleted profile must fail the deletion so the write
+				// group above is rolled back instead of reporting a successful deletion.
+				// It runs before the rebuild below on purpose: a rebuilt API handler is not part of that
+				// rollback, so a rejected sticky write must not leave this conversation on the survivor's settings.
+				await this.persistStickyProviderProfileToCurrentTask(profileToActivate, { strictPersistence: true })
 				if (survivingSettings) {
 					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
 				}
-				// Strict: a task left naming the deleted profile must fail the deletion so the write
-				// group above is rolled back instead of reporting a successful deletion.
-				await this.persistStickyProviderProfileToCurrentTask(profileToActivate, { strictPersistence: true })
 			}
 			// Re-pin other live views still buffered on the deleted profile: their
 			// buffer and durable viewStates entry would otherwise keep serving the
@@ -3829,6 +3843,46 @@ export class ClineProvider
 				this.log(
 					`[deleteProviderProfile] failed to restore the shared provider settings: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				)
+			}
+			if (recordRestored && viewWasPinnedToDeleted) {
+				// The shared stores are back, so this view's own re-point has to go back with them: the caller
+				// was told the deletion failed and the deleted profile exists again, so this view must not stay
+				// switched to the survivor - live and durable, because a reload reads the durable entry. Only
+				// undo a pin this deletion actually moved: if the user or a later activation moved this view
+				// onto a different profile during the failure window, that choice is newer than this snapshot.
+				// Same three-part rule as the sibling loop above: the record came back, this view was the one
+				// pinned to the deleted profile, and the pin still names what this operation wrote.
+				try {
+					if (this.viewLocalState.currentApiConfigName === profileToActivate) {
+						await this._saveViewLocalStateFromMutation({
+							currentApiConfigName: actingViewPinBefore,
+							apiConfiguration: actingViewOverlayBefore,
+						})
+					}
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore this view's own pin: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
+				// The conversation's sticky profile name and its history entry moved with the pin. The strict
+				// write puts both back when it is the write that fails, so this only covers a later write in
+				// the same group failing after the sticky write had already landed.
+				try {
+					if (actingTaskAtEntry && actingTaskAtEntry.taskApiConfigName !== actingTaskPreviousName) {
+						actingTaskAtEntry.setTaskApiConfigName(actingTaskPreviousName)
+						if (actingTaskPreviousHistoryItem) {
+							await this.updateTaskHistory(actingTaskPreviousHistoryItem)
+						}
+					}
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore the acting task's sticky profile: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
 			}
 			try {
 				const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
