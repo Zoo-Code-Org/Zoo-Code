@@ -786,6 +786,33 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
+	// The destination publishes before the source unlink is attempted, so a failed unlink
+	// leaves the source sitting on disk with its original bytes. Nothing was published at
+	// that path, and the only thing still able to authorize a later edit is the partial
+	// observation this call recorded for itself, so it has to be withdrawn here.
+	it("move: withdraws the source observation when its unlink fails after the destination published", async () => {
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const reg = mockTask.observationRegistry
+		mockedFsPromises.default.unlink.mockRejectedValueOnce(
+			Object.assign(new Error("EPERM: operation not permitted, unlink"), { code: "EPERM" }),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockSaveDirectly).toHaveBeenCalled()
+		expect(reg.has(sourceKey)).toBe(false)
+		// The consequence the finding names: with the source observation gone, a follow-up
+		// targeted write to the source needs a real read instead of riding on the leftover.
+		await expect(guardedWrite(mockTask as Task, "src/old.ts", "full replacement", "update")).rejects.toThrow(
+			"File already exists at src/old.ts and was not read before this write -- read the file first, then retry.",
+		)
+	})
+
 	it("update: surfaces the unobserved-existing remediation as a tool error", async () => {
 		const guardError = new Error(
 			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",

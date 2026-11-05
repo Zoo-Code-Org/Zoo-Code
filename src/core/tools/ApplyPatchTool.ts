@@ -612,18 +612,26 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
 			}
 
-			// Delete the original file
+			// Delete the original file. A failure here is logged and tolerated: the destination
+			// has already published, but the source is still sitting on disk with the bytes it
+			// had before the move, so nothing was published at that path.
+			let sourceRemoved = true
 			try {
 				await fs.unlink(absolutePath)
 			} catch (error) {
+				sourceRemoved = false
 				console.error(`Failed to delete original file after move: ${error}`)
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
-			// Both paths published: the destination through the save above and the source by being
-			// moved out of the way. Neither observation is left for the sweep to withdraw.
+			// The destination published through the save above, so its entry leaves the sweep.
+			// The source only counts as published once its own unlink succeeded: otherwise the
+			// partial observation this call recorded for it is withdrawn in the finally block,
+			// instead of authorizing a later edit on a file the model never read in full.
 			toolObservations.delete(moveAbsolutePath)
-			toolObservations.delete(absolutePath)
+			if (sourceRemoved) {
+				toolObservations.delete(absolutePath)
+			}
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
