@@ -84,6 +84,7 @@ import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
@@ -3080,6 +3081,52 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		})
 		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
 		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	// The old record can be gone before this delete runs: a competing writer that joined
+	// the same section may already have removed it. newName then holds the only copy of the
+	// profile, so the rollback must not touch it.
+	it("keeps the renamed profile when the old record was already gone", async () => {
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({
+				id: "profile-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new ProviderSettingsNotFoundError("Settings for profile 'old-profile' not found")
+				}
+			}),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The settings were already stored under newName and the views already follow it. The
+		// rollback would delete that copy and re-point the views at a name that resolves to
+		// nothing, which is the profile loss this guard exists to prevent.
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledTimes(1)
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		// Only the forward re-point runs. The reverse one is what would strand every pinned
+		// view on a name that no longer resolves to a record.
+		expect(repoint).toHaveBeenCalledTimes(1)
+		expect(repoint).toHaveBeenCalledWith("old-profile", "new-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("the old record was already removed"),
+		)
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 

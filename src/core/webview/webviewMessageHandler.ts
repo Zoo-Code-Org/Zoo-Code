@@ -38,6 +38,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
 import { isInvalidDisplayValue } from "../config/displaySettings"
+import { ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -2682,9 +2683,22 @@ export const webviewMessageHandler = async (
 						// pre-rename state survives intact. A failed compensation is logged: both
 						// names can then remain stored, and the log is the only trace of that
 						// inconsistency.
+						// The one case that does not roll back is a not-found rejection, handled below: the
+						// old record is already gone and newName holds the only copy.
 						try {
 							await provider.providerSettingsManager.deleteConfig(oldName)
 						} catch (error) {
+							// A not-found rejection means another writer that joined the same section already
+							// removed the old record. This call stored the settings under newName and re-pointed
+							// the live views onto it, so newName is the only surviving copy of the profile:
+							// rolling back would delete it and leave the views pinned to a name that resolves
+							// to nothing. Report the failed delete and keep the renamed profile.
+							if (error instanceof ProviderSettingsNotFoundError) {
+								provider.log(
+									`Rename of '${oldName}' to '${newName}': the old record was already removed; keeping '${newName}' and leaving the views on it`,
+								)
+								throw error
+							}
 							try {
 								await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 								await provider.providerSettingsManager.deleteConfig(newName)
