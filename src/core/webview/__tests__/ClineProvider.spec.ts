@@ -4916,6 +4916,69 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		it("names the store whose undo failed when a rollback write also rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.anthropic }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			await provider.contextProxy.setProviderSettings({ apiProvider: providerIdentifiers.anthropic })
+			// The activation group write rejects, and so does the undo of the same store.
+			const setModeConfig = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("mode binding write failed"))
+				.mockRejectedValueOnce(new Error("mode binding undo failed"))
+				.mockResolvedValue(undefined)
+			Object.assign(provider["providerSettingsManager"], {
+				saveConfig: vi.fn().mockResolvedValue("new-profile-id"),
+				listConfig: vi.fn().mockResolvedValue([]),
+				setModeConfig,
+				// First read: the binding this activation captured. Second read: still ours.
+				getModeConfigId: vi
+					.fn()
+					.mockResolvedValueOnce("previous-profile-id")
+					.mockResolvedValue("new-profile-id"),
+			})
+			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
+			const logSpy = vi.spyOn(provider, "log")
+			let failure: unknown
+			try {
+				await provider["persistProviderProfile"](
+					"test-profile",
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" },
+					true,
+					new AbortController().signal,
+				)
+				throw new Error("the activation was expected to fail")
+			} catch (error) {
+				failure = error
+			}
+			const rollbackError = failure as Error
+			// The original failure stays at the head of the message and stays the cause,
+			// so a caller can branch on either. The failed undo is named beside it.
+			expect(rollbackError.message).toContain("mode binding write failed")
+			expect(rollbackError.message).toContain(
+				"activation rollback also failed: mode binding: mode binding undo failed",
+			)
+			expect((rollbackError.cause as Error).message).toBe("mode binding write failed")
+			// Only the undo that failed is reported: the store is named, not the whole group.
+			expect(rollbackError.message).not.toContain("profile list:")
+			expect(rollbackError.message).not.toContain("shared selection:")
+			// Every other store this activation still owned was undone anyway.
+			expect(setModeConfig).toHaveBeenNthCalledWith(2, "code", "previous-profile-id")
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([priorEntry, nextEntry])
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("prior-profile")
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.anthropic)
+			// Nothing was skipped for ownership: the skips log, a failed undo throws.
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping the"))
+			await provider.dispose()
+		})
 	})
 
 	it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
