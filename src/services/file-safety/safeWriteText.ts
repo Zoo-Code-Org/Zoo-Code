@@ -201,6 +201,10 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 export async function safeWriteText(filePath: string, content: string, options?: SafeWriteTextOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
+	// A write is the natural place to retry backups an earlier one could not remove: the failure
+	// that left them behind is usually transient, and this keeps them owned instead of orphaned.
+	await flushPendingBackupRemovals()
+
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
 	const dirPath = path.dirname(targetPath)
