@@ -4102,6 +4102,18 @@ describe("ClineProvider", () => {
 		expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 	})
 
+	test.each([
+		["marks the state that follows a failed import for the settings form", 1_700_000_000_000],
+		["leaves the mark out of every other state", undefined],
+	])("%s", async (_name, markedAt) => {
+		await provider.resolveWebviewView(mockWebviewView)
+		provider.settingsImportRefreshedAt = markedAt
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.settingsImportRefreshedAt).toBe(markedAt)
+	})
+
 	test("isDisposed tells whether dispose has run", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		expect(provider.isDisposed).toBe(false)

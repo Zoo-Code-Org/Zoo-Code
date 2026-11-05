@@ -1,6 +1,6 @@
 import { globalSettingsSchema, type RooCodeSettings } from "@roo-code/types"
 
-import type { ContextProxy } from "./ContextProxy"
+import { SettingsWriteError, type ContextProxy } from "./ContextProxy"
 
 /** The appearance settings, whose writes are tracked so a failed save can be put back without undoing another one. */
 export const APPEARANCE_SETTING_KEYS = [
@@ -412,12 +412,21 @@ export async function setValuesThroughWriteChain(
 	if (failure) throw failure.reason
 }
 
+/** What a failed write of the settings that are not appearance values says about them. */
+const reportOthers = (reason: unknown): { stored: string[]; notStored: string[] } =>
+	reason instanceof SettingsWriteError
+		? { stored: [...reason.committed], notStored: [...reason.failed] }
+		: { stored: [], notStored: ["the other settings"] }
+
 /** What a write through the chain did: the first failure, and which settings were stored and which were not. */
 export interface WriteValuesReport {
 	failure?: { reason: unknown }
-	/** The appearance settings that were stored: they are final. */
+	/** The settings that were stored: they are final. */
 	stored: string[]
-	/** The settings that were not stored: the appearance settings that failed (and were put back), and the others as a group. */
+	/**
+	 * The settings that were not stored: the appearance settings that failed (and were put back), and the others, by name
+	 * when the store says which of them failed (`SettingsWriteError`) and as a group when it does not.
+	 */
 	notStored: string[]
 }
 
@@ -436,9 +445,9 @@ export async function writeValuesThroughWriteChain(
 	if (keys.length === 0) {
 		try {
 			await contextProxy.setValues(settings)
-			return { stored: [], notStored: [] }
+			return { stored: Object.keys(settings), notStored: [] }
 		} catch (reason) {
-			return { failure: { reason }, stored: [], notStored: ["the other settings"] }
+			return { failure: { reason }, ...reportOthers(reason) }
 		}
 	}
 
@@ -463,8 +472,10 @@ export async function writeValuesThroughWriteChain(
 	])
 
 	let failure = othersResult.status === "rejected" ? othersResult : undefined
-	const stored: string[] = []
-	const notStored: string[] = othersResult.status === "rejected" ? ["the other settings"] : []
+	const { stored, notStored } =
+		othersResult.status === "rejected"
+			? reportOthers(othersResult.reason)
+			: { stored: Object.keys(others), notStored: [] }
 	for (const [index, write] of writes.entries()) {
 		const result = writeResults[index]
 		if (result.status === "fulfilled") {

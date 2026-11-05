@@ -18,7 +18,7 @@ import {
 	exportSettings,
 } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
-import { ContextProxy } from "../ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../ContextProxy"
 import {
 	beginSettingWrite,
 	disposeSettingWrites,
@@ -476,6 +476,48 @@ describe("importExport", () => {
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
 
+			it("names the other settings that were stored and those that were not, when the store says which", async () => {
+				mockContextProxy.setValues.mockRejectedValue(
+					new SettingsWriteError(["mode"], ["autoApprovalEnabled"], new Error("secret storage unavailable")),
+				)
+				mockContextProxy.setValue.mockImplementation((async (_key: string, value: unknown) => {
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					error: "secret storage unavailable (not stored: autoApprovalEnabled, interfaceFontScale; stored: mode, terminalFontSize)",
+				})
+			})
+
+			it("names the other settings that were stored when an appearance value is what failed", async () => {
+				mockContextProxy.setValue.mockImplementation((async (_key: string, value: unknown) => {
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					error: "failed after storing (not stored: interfaceFontScale; stored: mode)",
+				})
+			})
+
+			it("names the other settings that were stored too when only they fail, with no appearance value", async () => {
+				mockContextProxy.setValues.mockRejectedValue(
+					new SettingsWriteError(["mode"], ["autoApprovalEnabled"], new Error("secret storage unavailable")),
+				)
+
+				const result = await importWith({ mode: "code", autoApprovalEnabled: true })
+
+				expect(result).toEqual({
+					success: false,
+					error: "secret storage unavailable (not stored: autoApprovalEnabled; stored: mode)",
+				})
+			})
+
 			it("keeps the appearance values that were stored when the other settings fail to store", async () => {
 				mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
 
@@ -498,7 +540,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
-					error: "storage unavailable (not stored: interfaceFontScale, terminalFontSize; stored: none of the appearance settings)",
+					error: "storage unavailable (not stored: interfaceFontScale, terminalFontSize; stored: none)",
 				})
 				expect(stored.get("interfaceFontScale")).toBe(100)
 			})
@@ -513,12 +555,17 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
-					error: "other settings failed (not stored: the other settings, interfaceFontScale; stored: none of the appearance settings)",
+					error: "other settings failed (not stored: the other settings, interfaceFontScale; stored: none)",
 				})
 			})
 
 			describe("an import that failed part of the way, through importSettingsWithFeedback", () => {
-				const importFailing = async (postStateToWebview: () => Promise<void>) => {
+				const importFailing = async (
+					postStateToWebview: () => Promise<void>,
+					provider: { postStateToWebview: () => Promise<void>; settingsImportRefreshedAt?: number } = {
+						postStateToWebview,
+					},
+				) => {
 					;(fs.access as Mock).mockResolvedValue(undefined)
 					;(fs.readFile as Mock).mockResolvedValue(
 						JSON.stringify({
@@ -542,7 +589,7 @@ describe("importExport", () => {
 							providerSettingsManager: mockProviderSettingsManager,
 							contextProxy: mockContextProxy,
 							customModesManager: mockCustomModesManager,
-							provider: { postStateToWebview },
+							provider,
 						},
 						"/mock/path/settings.json",
 					)
@@ -557,6 +604,67 @@ describe("importExport", () => {
 					expect(postStateToWebview).toHaveBeenCalledOnce()
 					expect(showErrorMessage).toHaveBeenCalledOnce()
 					showErrorMessage.mockRestore()
+				})
+
+				it("marks the refresh for the settings form while it is posted, and only then", async () => {
+					const seen: Array<number | undefined> = []
+					const provider = {
+						settingsImportRefreshedAt: undefined as number | undefined,
+						postStateToWebview: vi.fn(async () => {
+							seen.push(provider.settingsImportRefreshedAt)
+						}),
+					}
+
+					const showErrorMessage = await importFailing(provider.postStateToWebview, provider)
+
+					expect(seen).toHaveLength(1)
+					expect(seen[0]).toBeGreaterThan(0) // the form is told to take what the import stored
+					expect(provider.settingsImportRefreshedAt).toBeUndefined() // and it is not there on any later state
+					showErrorMessage.mockRestore()
+				})
+
+				it("does not mark the state of an import that succeeded as a refresh: that import replaces the form", async () => {
+					const seen: Array<number | undefined> = []
+					const provider = {
+						settingsImportedAt: undefined as number | undefined,
+						settingsImportRefreshedAt: undefined as number | undefined,
+						postStateToWebview: vi.fn(async () => {
+							seen.push(provider.settingsImportRefreshedAt)
+						}),
+					}
+					mockContextProxy.setValues.mockResolvedValue(undefined)
+					;(fs.access as Mock).mockResolvedValue(undefined)
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "test",
+								apiConfigs: {
+									test: {
+										apiProvider: providerIdentifiers.openai,
+										apiKey: "test-key",
+										id: "test-id",
+									},
+								},
+							},
+							globalSettings: { mode: "code" },
+						}),
+					)
+					const showInfoMessage = vi
+						.spyOn(vscode.window, "showInformationMessage")
+						.mockResolvedValue(undefined)
+
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider,
+						},
+						"/mock/path/settings.json",
+					)
+
+					expect(seen).toEqual([undefined])
+					showInfoMessage.mockRestore()
 				})
 
 				it("still tells the user when that refresh fails", async () => {

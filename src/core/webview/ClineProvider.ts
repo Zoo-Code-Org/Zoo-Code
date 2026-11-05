@@ -441,6 +441,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
+	public settingsImportRefreshedAt?: number
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
@@ -3471,6 +3472,7 @@ export class ClineProvider
 			maxImageFileSize: maxImageFileSize ?? 5,
 			maxTotalImageSize: maxTotalImageSize ?? 20,
 			settingsImportedAt: this.settingsImportedAt,
+			settingsImportRefreshedAt: this.settingsImportRefreshedAt,
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,

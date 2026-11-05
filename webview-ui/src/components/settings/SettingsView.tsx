@@ -138,7 +138,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
+	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, settingsImportRefreshedAt, mode } =
+		extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	// Whether the form has unsaved changes, and how many changes the user has made in all. The count only goes up: a
@@ -315,6 +316,32 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		editedAppearance.current.clear()
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
+
+	// An import that failed part of the way stored some of its settings: the form takes the values that changed with the
+	// state that follows it, and keeps every other value as it is, with the edits made to them (unlike after an import
+	// that succeeded, which replaces the form).
+	const handledImportRefreshAt = useRef<number | undefined>(undefined)
+	const liveStateBefore = useRef(extensionState)
+	useEffect(() => {
+		const before = liveStateBefore.current
+		liveStateBefore.current = extensionState
+		if (!settingsImportRefreshedAt || handledImportRefreshAt.current === settingsImportRefreshedAt) {
+			return
+		}
+
+		handledImportRefreshAt.current = settingsImportRefreshedAt
+		const stored: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(extensionState)) {
+			// Compared by value: the host builds new arrays and objects for every state it posts.
+			if (
+				key !== "settingsImportRefreshedAt" &&
+				JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(value)
+			) {
+				stored[key] = value
+			}
+		}
+		setCachedState((prevCachedState) => ({ ...prevCachedState, ...stored }))
+	}, [settingsImportRefreshedAt, extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {

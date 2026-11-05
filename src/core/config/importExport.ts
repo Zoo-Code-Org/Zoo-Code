@@ -17,7 +17,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
-import { ContextProxy } from "./ContextProxy"
+import { ContextProxy, SettingsWriteError } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
 import { writeValuesThroughWriteChain, type WriteValuesReport } from "./appearanceSettingWrites"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
@@ -44,6 +44,7 @@ type ExportOptions = {
 type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
+		settingsImportRefreshedAt?: number
 		postStateToWebview: () => Promise<void>
 	}
 }
@@ -87,8 +88,10 @@ function sanitizeProviderConfig(configName: string, apiConfig: unknown): { confi
  */
 function describeFailedWrite({ failure, stored, notStored }: WriteValuesReport): unknown {
 	if (notStored.length <= 1 && stored.length === 0) return failure?.reason
-	const reason = failure?.reason instanceof Error ? failure.reason.message : String(failure?.reason)
-	const storedText = stored.length > 0 ? stored.join(", ") : "none of the appearance settings"
+	// A store that says which settings failed has said it in its message: the cause is what is left to tell.
+	const cause = failure?.reason instanceof SettingsWriteError ? failure.reason.cause : failure?.reason
+	const reason = cause instanceof Error ? cause.message : String(cause)
+	const storedText = stored.length > 0 ? stored.join(", ") : "none"
 	return new Error(`${reason} (not stored: ${notStored.join(", ")}; stored: ${storedText})`, {
 		cause: failure?.reason,
 	})
@@ -456,8 +459,16 @@ export const importSettingsWithFeedback = async (
 		}
 	} else if (result.error) {
 		// An import that failed part of the way may have stored some of its settings: the webview is shown what is
-		// stored, not what it had before. A refresh that fails does not hide the answer.
-		await provider.postStateToWebview().catch(() => undefined)
+		// stored, not what it had before, and the settings form takes it without dropping the edits that were made to
+		// the other settings (unlike after an import that succeeded). A refresh that fails does not hide the answer.
+		provider.settingsImportRefreshedAt = Date.now()
+		try {
+			await provider.postStateToWebview()
+		} catch {
+			// Nobody is waiting for the refresh.
+		} finally {
+			provider.settingsImportRefreshedAt = undefined
+		}
 		await vscode.window.showErrorMessage(t("common:errors.settings_import_failed", { error: result.error }))
 	}
 }

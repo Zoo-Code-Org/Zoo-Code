@@ -402,6 +402,11 @@ export type ExtensionState = Pick<
 
 	renderContext: "sidebar" | "editor"
 	settingsImportedAt?: number
+	/**
+	 * Set only on the state that follows an import that failed part of the way: the settings form takes what the import
+	 * stored (the values that changed with this state), and keeps the edits that were made to the others.
+	 */
+	settingsImportRefreshedAt?: number
 	historyPreviewCollapsed?: boolean
 
 	cloudUserInfo: CloudUserInfo | null
