@@ -156,12 +156,18 @@ describe("UsageSettings – branches", () => {
 
 		it("formats the labels and the tooltips of the chart in the language of the application, not the browser's", () => {
 			state.taskHistory = [withUsage()]
-			translation.language = "de"
+			// A language that the runtime's own locale does not share, whichever that is: the labels and the dates differ.
+			const language = ["de", "ja"].find(
+				(candidate) =>
+					weekdayLabels(candidate).join() !== weekdayLabels().join() &&
+					new Intl.DateTimeFormat(candidate).format(NOW) !== new Intl.DateTimeFormat().format(NOW),
+			)
+			expect(language).toBeDefined()
+			translation.language = language
 			render(<UsageSettings />)
 
-			expect(weekdayLabels("de")).not.toEqual(weekdayLabels()) // the two differ, so this tells them apart
-			expect(labelsUnder(screen.getByTestId("usage-daily-chart"))).toEqual(weekdayLabels("de"))
-			expect(lastBarTitle()).toMatch(new RegExp(`^${new Intl.DateTimeFormat("de").format(NOW)} · `))
+			expect(labelsUnder(screen.getByTestId("usage-daily-chart"))).toEqual(weekdayLabels(language))
+			expect(lastBarTitle()).toMatch(new RegExp(`^${new Intl.DateTimeFormat(language).format(NOW)} · `))
 		})
 
 		it("follows a change of the language", () => {

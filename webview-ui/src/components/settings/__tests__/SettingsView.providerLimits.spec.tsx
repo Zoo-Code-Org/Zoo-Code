@@ -16,6 +16,12 @@ const postMessage = vi.mocked(vscode.postMessage)
 const posted = (type: string) =>
 	postMessage.mock.calls.map((call) => call[0] as { type: string; requestId?: string }).filter((m) => m.type === type)
 
+/** Settings hides its content (opacity-0) while it mounts every tab once to index it: wait until that is over. */
+const waitForIndexing = async () => {
+	await waitFor(() => expect(screen.getByTestId("settings-content")).not.toHaveClass("opacity-0"))
+	await act(async () => {}) // let the effects of the tab that is shown run
+}
+
 describe("SettingsView – provider limits", () => {
 	beforeEach(() => postMessage.mockClear())
 
@@ -25,11 +31,8 @@ describe("SettingsView – provider limits", () => {
 		})
 
 		// Settings mounts every tab once to index it (the Usage tab included) before it shows the one that was asked for.
+		await waitForIndexing()
 		await waitFor(() => expect(screen.getByTestId("provider-limits")).toBeTruthy())
-		await waitFor(() => expect(posted("requestProviderQuotas")).toHaveLength(1))
-		await act(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 50))
-		})
 
 		// One request, from the tab the user is looking at; the indexing pass sent none (and so cancelled none).
 		expect(posted("requestProviderQuotas")).toHaveLength(1)
@@ -41,10 +44,7 @@ describe("SettingsView – provider limits", () => {
 			queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
 		})
 
-		await waitFor(() => expect(screen.getByTestId("save-button")).toBeTruthy())
-		await act(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 50))
-		})
+		await waitForIndexing()
 
 		expect(posted("requestProviderQuotas")).toHaveLength(0)
 		expect(posted("cancelProviderQuotas")).toHaveLength(0)
