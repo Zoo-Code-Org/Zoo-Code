@@ -2138,6 +2138,29 @@ it("ignores a webview-supplied viewStates map in the generic updateSettings loop
 	)
 })
 
+// An unset is the shape that erases the stored map: ContextProxy reads an undefined value as a delete
+// (ContextProxy.ts:464-466 for secrets; globalState.update(key, undefined) deletes, which the repo relies
+// on at :173, :280-282, :305 and :346), and expect.anything() cannot see it because it excludes
+// undefined and null - so the matcher in the case above is not enough on its own, and the call itself
+// has to be pinned here. The asymmetry to copy when extending this family: the provider-side test is
+// erase-safe because it asserts on the stored state, while this double is a bare setValue mock and so
+// must pin the call and its value, exactly as the case above pins the unset shape for another key.
+it("ignores an unset viewStates map in the generic updateSettings loop", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { viewStates: undefined, alwaysDenyUnapprovedCommands: true },
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", undefined)
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	expect(mockClineProvider.log).toHaveBeenCalledWith(
+		expect.stringContaining("Ignored a webview-supplied viewStates map"),
+	)
+})
+
 // Both allowlists are normalized by the same branch, so both are held to the
 // same contract.
 describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {
