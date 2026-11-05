@@ -46,11 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.88.0 में नया क्या है
+## v3.94.0 में नया क्या है
 
-- ✨ **Provider और model समर्थन:** Grok Build और बेहतर custom-model समर्थन का उपयोग करें। यह release Bedrock model limits भी ठीक करती है और Codex verbosity setting भेजती है।
-- 🧭 **Task भरोसेमंदपन:** यह release cancellation handling, tool-turn continuation और task-message saving को ठीक करती है।
-- ⚡ **तेज़ editing और chat:** File writes अब डिफ़ॉल्ट रूप से कृत्रिम देरी का उपयोग नहीं करतीं। Chat messages कम file data रखते हैं, और code actions अंतिम सक्रिय chat तक पहुँचते हैं।
+- ✨ **और ज़्यादा models और providers का support:** Anthropic के ज़रिए Claude Haiku 5.5 इस्तेमाल करें, संगत VS Code LM models को images भेजें, OpenCode Go Responses models के लिए temperature tune करें और ज़्यादा providers पर requests को cleanly cancel करें।
+- 🔐 **ज़्यादा लचीला MCP OAuth:** Static OAuth client settings configure करें, custom callback paths इस्तेमाल करें, `WWW-Authenticate` से authentication details जानें और retry करने से पहले callback failures देखें।
+- 🧭 **बेहतर chats और लंबे sessions:** History में tasks का नाम बदलें, बिना Shift दबाए files को chat में drag करें, लंबे sessions में retain होने वाली memory घटाएं और subtask links तथा replaced webviews को stable रखें।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

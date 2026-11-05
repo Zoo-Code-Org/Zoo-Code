@@ -1,6 +1,7 @@
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import { DispatchState } from "../dispatchState"
 import * as fsReal from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -533,6 +534,59 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("cache-write TTL split in telemetry", () => {
+		it("bills a 1h cache write at the 1h rate when usage is captured after a cancelled stream", async () => {
+			// glm P1: the telemetry cost recompute inside captureUsageData must receive
+			// the per-TTL split. Before the fix it passed only the aggregate write count,
+			// so a 1h write was billed at the 5m rate (0.375 instead of 0.6 for 100k
+			// tokens at claude-3-5-sonnet's 3.0 input price).
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			// A stream that reports the split but never yields a final cost chunk, which is
+			// the shape a cancelled request leaves behind. The second call throws so the
+			// request loop terminates the way the neighbouring tests do.
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					stream([
+						{
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 100_000,
+							cacheWrite1hTokens: 100_000,
+							cacheReadTokens: 0,
+						},
+						{ type: "text", text: "partial response" },
+					]),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			// The drain is fire-and-forget and reaches `captureLlmCompletion` after several
+			// awaits, some of which touch the filesystem. A fixed sleep races that work on a
+			// loaded worker, so poll for the captured call instead.
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
+
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
+			expect(call).toBeDefined()
+
+			// claude-3-5-sonnet-20241022: input 3.0, cacheWritesPrice 3.75, cacheWritesPrice1h 6.0.
+			// 1h writes: (6.0 / 1_000_000) * 100_000 = 0.6
+			// The pre-fix lumped behaviour billed (3.75 / 1_000_000) * 100_000 = 0.375.
+			expect(call![1].cost).toBeCloseTo(0.6, 9)
+			expect(call![1].cost).not.toBeCloseTo(0.375, 9)
+		})
+	})
+
 	describe("request continuation", () => {
 		it("sends the no-tool-use reminder in a second request when the first response has no tool use", async () => {
 			const task = await createTaskWithManualRetries()
@@ -646,9 +700,11 @@ describe("Cline", () => {
 			expect(readiness()).toBe(false)
 			task.didCompleteReadingStream = true
 			expect(readiness()).toBe(true)
-			task.presentAssistantMessageLocked = true
+			task.dispatchState = DispatchState.SERIAL
 			expect(readiness()).toBe(false)
-			task.presentAssistantMessageLocked = false
+			task.dispatchState = DispatchState.PARALLEL
+			expect(readiness()).toBe(false)
+			task.dispatchState = DispatchState.IDLE
 			expect(readiness()).toBe(true)
 			task.assistantMessageContent[0].partial = true
 			expect(readiness()).toBe(false)
@@ -694,7 +750,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			task.didCompleteReadingStream = true
-			task.presentAssistantMessageLocked = false
+			task.dispatchState = DispatchState.IDLE
 			task.assistantMessageContent = [
 				{
 					type: "tool_use",
@@ -915,7 +971,7 @@ describe("Cline", () => {
 						content: "File: package.json\nfinished",
 					}),
 				])
-				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(task.dispatchState).toBe(DispatchState.IDLE)
 				expect(sawCompleteToolTurn).toBe(true)
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
@@ -982,13 +1038,13 @@ describe("Cline", () => {
 				await resultPushed
 				// Give the request loop several poll intervals to continue early.
 				await new Promise((resolve) => setTimeout(resolve, 50))
-				expect(task.presentAssistantMessageLocked).toBe(true)
+				expect(task.dispatchState).toBe(DispatchState.SERIAL)
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
 
 				releaseHandler?.()
 				await run
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
-				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(task.dispatchState).toBe(DispatchState.IDLE)
 			} finally {
 				releaseHandler?.()
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
@@ -1056,7 +1112,7 @@ describe("Cline", () => {
 
 				expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
 				expect(sawReadyWhileAborted).toBe(true)
-				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(task.dispatchState).toBe(DispatchState.IDLE)
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
 				readinessSpy.mockRestore()
@@ -1437,6 +1493,35 @@ describe("Cline", () => {
 				is_error: true,
 			})
 			expect(JSON.stringify(truncatedCallResult)).toContain("missing nativeArgs")
+		})
+	})
+
+	describe("create", () => {
+		it("rejects missing task inputs before constructing the task", () => {
+			const onCreated = vi.fn()
+
+			expect(() => Task.create({ provider: mockProvider, apiConfiguration: mockApiConfig, onCreated })).toThrow(
+				"Either historyItem or task/images must be provided",
+			)
+			expect(onCreated).not.toHaveBeenCalled()
+		})
+
+		it("returns the cached run promise", async () => {
+			const startTaskSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "startTask").mockResolvedValue(undefined)
+
+			try {
+				const [task, promise] = Task.create({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "x",
+				})
+
+				expect(task.run()).toBe(promise)
+				expect(startTaskSpy).toHaveBeenCalledExactlyOnceWith("x", undefined)
+				await promise
+			} finally {
+				startTaskSpy.mockRestore()
+			}
 		})
 	})
 
@@ -8263,7 +8348,7 @@ describe("pushToolResultToUserContent", () => {
 		expect(task.userMessageContent[0]).toEqual(errorResult)
 	})
 
-	it("should not interfere with other content types in userMessageContent", () => {
+	it("should preserve other content types while keeping tool_results contiguous", () => {
 		const task = new Task({
 			provider: mockProvider,
 			apiConfiguration: mockApiConfig,
@@ -8272,10 +8357,11 @@ describe("pushToolResultToUserContent", () => {
 		})
 
 		// Add text and image blocks manually
-		task.userMessageContent.push(
-			{ type: "text", text: "Some text" },
-			{ type: "image", source: { type: "base64", media_type: "image/png", data: "base64data" } },
-		)
+		const image: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "base64data" },
+		}
+		task.userMessageContent.push({ type: "text", text: "Some text" }, image)
 
 		const toolResult: Anthropic.ToolResultBlockParam = {
 			type: "tool_result",
@@ -8287,8 +8373,92 @@ describe("pushToolResultToUserContent", () => {
 
 		expect(added).toBe(true)
 		expect(task.userMessageContent).toHaveLength(3)
-		expect(task.userMessageContent[0].type).toBe("text")
-		expect(task.userMessageContent[1].type).toBe("image")
-		expect(task.userMessageContent[2]).toEqual(toolResult)
+		// Results must lead the message (Anthropic rejects other content ahead
+		// of or between tool_results), so the pre-existing text and image move
+		// after the result; blocks keep their relative order within each group.
+		expect(task.userMessageContent[0]).toEqual(toolResult)
+		expect(task.userMessageContent[1].type).toBe("text")
+		expect(task.userMessageContent[2]).toEqual(image)
+	})
+
+	it("keeps tool_result blocks contiguous when a later result has no images (GitHub #1307)", () => {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+
+		const toolResult1: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-1",
+			content: "Result 1",
+		}
+		const toolResult2: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-2",
+			content: "Result 2",
+		}
+		const image1: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "img1" },
+		}
+		const image2: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "img2" },
+		}
+
+		// First tool result arrives with its images appended right after it (as
+		// presentAssistantMessage does); a second result without images follows.
+		task.pushToolResultToUserContent(toolResult1)
+		task.userMessageContent.push(image1, image2)
+		task.pushToolResultToUserContent(toolResult2)
+
+		expect(task.userMessageContent.map((block) => block.type)).toEqual([
+			"tool_result",
+			"tool_result",
+			"image",
+			"image",
+		])
+		expect(task.userMessageContent[0]).toEqual(toolResult1)
+		expect(task.userMessageContent[1]).toEqual(toolResult2)
+		expect(task.userMessageContent[2]).toEqual(image1)
+		expect(task.userMessageContent[3]).toEqual(image2)
+	})
+
+	it("moves text as well as images behind the tool_results, preserving order within each group", () => {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+
+		const toolResult1: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-1",
+			content: "Result 1",
+		}
+		const toolResult2: Anthropic.ToolResultBlockParam = {
+			type: "tool_result",
+			tool_use_id: "id-2",
+			content: "Result 2",
+		}
+		const image: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "img1" },
+		}
+		const text1: Anthropic.TextBlockParam = { type: "text", text: "text one" }
+		const text2: Anthropic.TextBlockParam = { type: "text", text: "text two" }
+
+		// Interleaved arrival: image, text, r1, more text, r2. Grouping only
+		// images would leave text1 ahead of r1, which Anthropic rejects; every
+		// non-tool_result block must move behind the contiguous result run.
+		task.userMessageContent.push(image, text1)
+		task.pushToolResultToUserContent(toolResult1)
+		task.userMessageContent.push(text2)
+		task.pushToolResultToUserContent(toolResult2)
+
+		expect(task.userMessageContent).toEqual([toolResult1, toolResult2, image, text1, text2])
 	})
 })

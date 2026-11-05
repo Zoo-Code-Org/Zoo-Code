@@ -1,6 +1,4 @@
 {
-	"title": "Mode",
-	"done": "Selesai",
 	"modes": {
 		"title": "Mode",
 		"createNewMode": "Buat mode baru",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Ekspor Mode",
-		"description": "Ekspor mode ini ke file YAML dengan semua aturan yang disertakan untuk berbagi dengan mudah dengan orang lain.",
-		"export": "Ekspor Mode",
-		"exporting": "Mengekspor..."
+		"export": "Ekspor Mode"
 	},
 	"importMode": {
 		"selectLevel": "Pilih di mana akan mengimpor mode ini:",
@@ -81,7 +77,6 @@
 		"title": "System Prompt (mode {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Support Prompts",
 		"resetPrompt": "Reset prompt {{promptType}} ke default",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,11 +88,6 @@
 			"testEnhancement": "Uji Peningkatan",
 			"includeTaskHistory": "Sertakan riwayat tugas sebagai konteks",
 			"includeTaskHistoryDescription": "Ketika diaktifkan, 10 pesan terakhir dari percakapan saat ini akan disertakan sebagai konteks saat meningkatkan prompt, membantu menghasilkan saran yang lebih relevan dan sadar konteks."
-		},
-		"condense": {
-			"apiConfiguration": "Konfigurasi API untuk Peringkasan Konteks",
-			"apiConfigDescription": "Pilih konfigurasi API mana yang akan digunakan untuk operasi peringkasan konteks. Biarkan tidak dipilih untuk menggunakan konfigurasi aktif saat ini.",
-			"useCurrentConfig": "Gunakan konfigurasi API yang saat ini dipilih"
 		},
 		"types": {
 			"ENHANCE": {
@@ -196,7 +186,6 @@
 		"title": "Hapus Mode",
 		"message": "Anda yakin ingin menghapus mode \"{{modeName}}\"?",
 		"rulesFolder": "Mode ini memiliki folder aturan di {{folderPath}} yang juga akan dihapus.",
-		"descriptionNoRules": "Apakah Anda yakin ingin menghapus mode kustom ini?",
 		"confirm": "Hapus",
 		"cancel": "Batal"
 	}

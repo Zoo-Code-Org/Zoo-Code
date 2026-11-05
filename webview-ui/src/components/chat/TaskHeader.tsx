@@ -23,7 +23,9 @@ import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { vscode } from "@src/utils/vscode"
 
 import Thumbnails from "../common/Thumbnails"
+import { TaskTitleEditor } from "../history/TaskTitleEditor"
 import { TaskActions } from "./TaskActions"
+import { isShowableTimestamp, MessageTimestamp } from "./MessageTimestamp"
 import { ContextWindowProgress } from "./ContextWindowProgress"
 import { Mention } from "./Mention"
 import { TodoListDisplay } from "./TodoListDisplay"
@@ -63,9 +65,11 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const { apiConfiguration, currentTaskItem, timeFormat, dateFormat } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
+	const [isRenaming, setIsRenaming] = useState(false)
+	const customTitle = currentTaskItem?.title
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
@@ -179,10 +183,23 @@ const TaskHeader = ({
 				<div className="flex justify-between items-center gap-0">
 					<div className="flex items-center select-none grow min-w-0">
 						<div className="grow min-w-0">
-							{isTaskExpanded && <span className="font-bold">{t("chat:task.title")}</span>}
+							{isTaskExpanded &&
+								(isRenaming && currentTaskItem ? (
+									<TaskTitleEditor
+										item={currentTaskItem}
+										onDone={() => setIsRenaming(false)}
+										className="text-sm"
+									/>
+								) : (
+									<span className="font-bold">{customTitle || t("chat:task.title")}</span>
+								))}
 							{!isTaskExpanded && (
 								<div className="flex items-center gap-2 whitespace-nowrap overflow-hidden text-ellipsis">
-									<Mention text={task.text} />
+									{customTitle ? (
+										<span className="overflow-hidden text-ellipsis">{customTitle}</span>
+									) : (
+										<Mention text={task.text} />
+									)}
 								</div>
 							)}
 						</div>
@@ -335,8 +352,19 @@ const TaskHeader = ({
 						</div>
 						{task.images && task.images.length > 0 && <Thumbnails images={task.images} />}
 
+						{/* When the task's first message was sent (follows the Time/Date format settings). */}
+						{isShowableTimestamp(task.ts) && (
+							<div onClick={(e) => e.stopPropagation()}>
+								<MessageTimestamp ts={task.ts} timeFormat={timeFormat} dateFormat={dateFormat} />
+							</div>
+						)}
+
 						<div onClick={(e) => e.stopPropagation()}>
-							<TaskActions item={currentTaskItem} buttonsDisabled={buttonsDisabled} />
+							<TaskActions
+								item={currentTaskItem}
+								buttonsDisabled={buttonsDisabled}
+								onRename={isRenaming ? undefined : () => setIsRenaming(true)}
+							/>
 						</div>
 
 						<div className="pt-3 mt-2 -mx-2.5 px-2.5 border-t border-vscode-sideBar-background">

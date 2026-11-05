@@ -61,14 +61,7 @@ export const shouldUseReasoningEffort = ({
 	if (settings?.enableReasoningEffort === false) return false
 
 	// Selected effort from settings or model default
-	const selectedEffort = (settings?.reasoningEffort ?? (model as any).reasoningEffort) as
-		| "disable"
-		| "none"
-		| "minimal"
-		| "low"
-		| "medium"
-		| "high"
-		| undefined
+	const selectedEffort = settings?.reasoningEffort ?? model.reasoningEffort
 
 	// "disable" explicitly omits reasoning
 	if (selectedEffort === "disable") return false
@@ -87,13 +80,7 @@ export const shouldUseReasoningEffort = ({
 
 	// Not explicitly supported: only allow when the model itself defines a default effort
 	// Ignore settings-only selections when capability is absent/false
-	const modelDefaultEffort = (model as any).reasoningEffort as
-		| "none"
-		| "minimal"
-		| "low"
-		| "medium"
-		| "high"
-		| undefined
+	const modelDefaultEffort = model.reasoningEffort
 	return !!modelDefaultEffort
 }
 
@@ -197,6 +184,7 @@ const _dynamicProviderExtras = {
 	[providerIdentifiers.moonshot]: {} as { apiKey?: string; baseUrl?: string },
 	[providerIdentifiers.opencodeGo]: {} as { apiKey?: string },
 	[providerIdentifiers.kenari]: {} as { apiKey?: string },
+	[providerIdentifiers.ioIntelligence]: {} as { apiKey?: string },
 	[providerIdentifiers.nanogpt]: {} as { apiKey?: string },
 	[providerIdentifiers.kimiCode]: {} as { apiKey?: string },
 } as const satisfies Record<RouterName, object>

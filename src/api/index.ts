@@ -45,6 +45,7 @@ import {
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
 	KenariHandler,
+	IOIntelligenceHandler,
 	NanoGptHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
@@ -60,6 +61,14 @@ import { NativeOllamaHandler } from "./providers/native-ollama"
 export interface CompletePromptOptions extends Pick<ApiHandlerCreateMessageMetadata, "abortSignal"> {
 	/** Optional timeout override (ms) — falls back to provider default if omitted */
 	timeoutMs?: number
+	/**
+	 * Task the completion belongs to, when it belongs to one.
+	 *
+	 * Providers that key cache affinity off a body field use this to route repeated
+	 * completions for one task to the same bucket. Omit it when the completion is not
+	 * scoped to a task; providers then fall back to a per-handler key.
+	 */
+	taskId?: string
 }
 
 export interface SingleCompletionHandler {
@@ -263,6 +272,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new OpencodeGoHandler(options)
 		case providerIdentifiers.kenari:
 			return new KenariHandler(options)
+		case providerIdentifiers.ioIntelligence:
+			return new IOIntelligenceHandler(options)
 		case providerIdentifiers.nanogpt:
 			return new NanoGptHandler(options)
 		case providerIdentifiers.zooGateway:

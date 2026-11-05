@@ -26,12 +26,13 @@ import { ApiStreamChunk } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 import { addCacheBreakpoints as addAnthropicCacheBreakpoints } from "../transform/caching/anthropic"
 import { addCacheBreakpoints as addGeminiCacheBreakpoints } from "../transform/caching/gemini"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 import type { OpenRouterReasoningParams } from "../transform/reasoning"
 import { getModelParams } from "../transform/model-params"
 
 import { getModels } from "./fetchers/modelCache"
 import { getModelEndpoints } from "./fetchers/modelEndpointCache"
-import { getOpenRouterModels } from "./fetchers/openrouter"
+import { applyOpenRouterMoonshotK3Profile, getOpenRouterModels } from "./fetchers/openrouter"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
@@ -149,11 +150,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		const apiKey = this.options.openRouterApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({ baseURL, apiKey, defaultHeaders: DEFAULT_HEADERS, timeout: this.timeoutMs })
-
-		// Load models asynchronously to populate cache before getModel() is called
-		this.loadDynamicModels().catch((error) => {
-			console.error("[OpenRouterHandler] Failed to load dynamic models:", error)
-		})
 	}
 
 	override getModelCacheScope(): ModelCacheScope {
@@ -165,28 +161,30 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return getOpenRouterModels(undefined, ...fetchOpts)
 	}
 
-	private async loadDynamicModels(): Promise<void> {
-		try {
-			const [models, endpoints] = await Promise.all([
-				getModels({ provider: providerIdentifiers.openrouter }, this),
-				getModelEndpoints(
-					{
-						router: providerIdentifiers.openrouter,
-						modelId: this.options.openRouterModelId,
-						endpoint: this.options.openRouterSpecificProvider,
-					},
-					this,
-				),
-			])
+	/**
+	 * Whether the user pinned a concrete OpenRouter upstream provider. The
+	 * "[default]" sentinel means "let OpenRouter choose", so it behaves like no
+	 * selection at all.
+	 */
+	private get hasSpecificProvider(): boolean {
+		return (
+			Boolean(this.options.openRouterSpecificProvider) &&
+			this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME
+		)
+	}
 
-			this.models = models
-			this.endpoints = endpoints
-		} catch (error) {
-			console.error("[OpenRouterHandler] Error loading dynamic models:", {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			})
-		}
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			await this.fetchModel()
+			// fetchModel() returns model info, not the catalog, so report emptiness
+			// from the catalogs it assigned: an empty response must stay retryable.
+			// With a specific provider selected, the endpoint catalog is what
+			// getModel() uses, so an empty endpoint response is a failed load even
+			// when the model-level catalog arrived.
+			const hasModels = Object.keys(this.models).length > 0
+			const hasEndpoints = Object.keys(this.endpoints).length > 0
+			return hasModels && (!this.hasSpecificProvider || hasEndpoints)
+		}, signal)
 	}
 
 	getReasoningDetails(): any[] | undefined {
@@ -309,9 +307,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
 		if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
 			if (modelId.startsWith("google")) {
+				// Gemini markers keep their default TTL: ADR-0006 scopes the knob to
+				// Anthropic-shaped markers only, and Gemini has no 1h class.
 				addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
 			} else {
-				addAnthropicCacheBreakpoints(systemPrompt, openAiMessages)
+				// Capability comes from the resolved ModelInfo, never from the id.
+				addAnthropicCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, model.info))
 			}
 		}
 
@@ -576,6 +577,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		if (this.options.openRouterSpecificProvider && this.endpoints[this.options.openRouterSpecificProvider]) {
 			info = this.endpoints[this.options.openRouterSpecificProvider]
 		}
+
+		// Re-apply the Moonshot K3 profile at consumption time: model records are
+		// persisted in the model cache, so records cached before the profile existed
+		// still carry the fabricated max_tokens value and a boolean
+		// supportsReasoningEffort with no default effort.
+		info = applyOpenRouterMoonshotK3Profile(id, info)
 
 		// Apply tool preferences for models accessed through routers (OpenAI, Gemini)
 		info = applyRouterToolPreferences(id, info)

@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.88.0
+## Neu in v3.94.0
 
-- ✨ **Provider- und Modellunterstützung:** Nutze Grok Build und eine verbesserte Unterstützung für eigene Modelle. Diese Version behebt außerdem Bedrock-Modellgrenzen und sendet die Codex-Verbosity-Einstellung.
-- 🧭 **Zuverlässigkeit von Aufgaben:** Diese Version behebt die Behandlung von Abbrüchen, die Fortsetzung von Tool-Turns und das Speichern von Aufgabennachrichten.
-- ⚡ **Schnelleres Bearbeiten und Chatten:** Datei-Schreibvorgänge verwenden standardmäßig keine künstlichen Verzögerungen mehr. Chat-Nachrichten enthalten weniger Dateidaten, und Code-Aktionen erreichen den zuletzt aktiven Chat.
+- ✨ **Breitere Modell- und Providerunterstützung:** Nutze Claude Haiku 5.5 über Anthropic, schicke Bilder an kompatible VS Code LM-Modelle, stelle die Temperatur für OpenCode Go Responses-Modelle ein und brich Anfragen sauber bei mehr Providern ab.
+- 🔐 **Flexibleres MCP OAuth:** Konfiguriere statische OAuth-Client-Einstellungen, nutze eigene Callback-Pfade, ermittle Authentifizierungsdetails aus `WWW-Authenticate` und sieh Callback-Fehler, bevor du es erneut versuchst.
+- 🧭 **Flüssigere Chats und lange Sessions:** Benenne Aufgaben im Verlauf um, ziehe Dateien per Drag-and-drop in den Chat, ohne Shift gedrückt zu halten, reduziere den Speicherbedarf bei langen Sessions und halte Subtask-Links und ausgetauschte Webviews stabil.
 
 ## Was kann Zoo Code für DICH tun?
 

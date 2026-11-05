@@ -132,6 +132,7 @@ const mockClineProvider = {
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
+	renameTaskWithId: vi.fn(),
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
@@ -771,7 +772,7 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 	})
 })
 
-import { t } from "../../../i18n"
+import { changeLanguage, t } from "../../../i18n"
 
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
@@ -800,6 +801,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../../i18n", () => ({
+	changeLanguage: vi.fn(),
 	t: vi.fn((key: string, args?: Record<string, any>) => {
 		// For the delete confirmation with rules, we need to return the interpolated string
 		if (key === "common:confirmation.delete_custom_mode_with_rules" && args) {
@@ -1179,6 +1181,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.objectContaining({ provider: providerIdentifiers.kenari }),
 			expect.anything(),
 		)
+		// IO Intelligence's /models catalog is public and may optionally be scoped by a key.
+		expect(mockGetModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.ioIntelligence, apiKey: undefined },
+			expect.anything(),
+		)
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
@@ -1202,6 +1209,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -1476,6 +1484,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -1503,6 +1512,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
+			.mockResolvedValueOnce(mockModels) // io-intelligence
 			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1541,6 +1551,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -2882,8 +2893,7 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		// path is exercised, resolves (with its already-captured, now-stale value) only after
 		// the disable write above has fully landed.
 		const snapshotResolved = vi.mocked(providerForLaunch.getStateToPostToWebview).mock.results[0]?.value as
-			| Promise<unknown>
-			| undefined
+			Promise<unknown> | undefined
 		releaseSnapshot()
 
 		await Promise.all([launch, snapshotResolved])
@@ -2960,5 +2970,274 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - collapseCommandOutputByDefault", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it.each([true, false, undefined])(
+		"persists the output collapse preference (%s) without changing terminal mode",
+		async (value) => {
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { collapseCommandOutputByDefault: value },
+			})
+			expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(
+				"collapseCommandOutputByDefault",
+				value,
+			)
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
+				"terminalShellIntegrationDisabled",
+				expect.anything(),
+			)
+			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+		},
+	)
+})
+
+describe("updateProfileModel", () => {
+	let updateProfileModel: Mock<ClineProvider["updateProfileModel"]>
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		updateProfileModel = vi.fn<ClineProvider["updateProfileModel"]>().mockResolvedValue(undefined)
+		mockClineProvider.updateProfileModel = updateProfileModel
+	})
+
+	it("delegates a valid message to the provider", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateProfileModel",
+			text: "my-profile",
+			values: {
+				expectedProvider: providerIdentifiers.openrouter,
+				patch: { openRouterModelId: "a/b", reasoningEffort: null },
+			},
+		})
+
+		expect(updateProfileModel).toHaveBeenCalledWith("my-profile", providerIdentifiers.openrouter, {
+			openRouterModelId: "a/b",
+			reasoningEffort: null,
+		})
+	})
+
+	it.each([
+		["missing profile name", { values: { expectedProvider: providerIdentifiers.openrouter, patch: {} } }],
+		["missing expectedProvider", { text: "p", values: { patch: {} } }],
+		["non-object patch", { text: "p", values: { expectedProvider: providerIdentifiers.openrouter, patch: "x" } }],
+		["array patch", { text: "p", values: { expectedProvider: providerIdentifiers.openrouter, patch: [] } }],
+		["missing values", { text: "p" }],
+	])("ignores a malformed message: %s", async (_label, partial) => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateProfileModel",
+			...partial,
+		} as unknown as Parameters<typeof webviewMessageHandler>[1])
+
+		expect(updateProfileModel).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - renameTaskWithId", () => {
+	beforeEach(() => {
+		vi.mocked(mockClineProvider.renameTaskWithId).mockClear()
+	})
+
+	it.each([
+		["forwards taskId and text", { taskId: "task-1", text: "New name" }, [["task-1", "New name"]]],
+		["forwards an empty title so the provider can clear it", { taskId: "task-1", text: "" }, [["task-1", ""]]],
+		["skips the call when taskId is missing", { text: "New name" }, []],
+	])("%s", async (_label, payload, expectedCalls) => {
+		await webviewMessageHandler(mockClineProvider, { type: "renameTaskWithId", ...payload })
+
+		expect(vi.mocked(mockClineProvider.renameTaskWithId).mock.calls).toEqual(expectedCalls)
+	})
+})
+
+// The display settings are written like any other setting, but the webview is not trusted: a value that its own
+// controls cannot produce (a hand-written message) is ignored before anything is done for it.
+describe("updateSettings with the display settings", () => {
+	const save = (updatedSettings: Record<string, unknown>) =>
+		webviewMessageHandler(mockClineProvider, { type: "updateSettings", updatedSettings })
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockReset().mockResolvedValue(undefined)
+	})
+
+	it.each([
+		["timeFormat", "auto"],
+		["timeFormat", "12h"],
+		["timeFormat", "24h"],
+		["dateFormat", "auto"],
+		["dateFormat", "mdy"],
+		["dateFormat", "dmy"],
+		["dateFormat", "ymd"],
+		["showRelativeTimes", true],
+		["showRelativeTimes", false],
+		["timeFormat", undefined],
+		["showRelativeTimes", undefined],
+	])("persists %s = %j as it is", async (key, value) => {
+		await save({ [key]: value })
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, value)
+		expect(mockClineProvider.log).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it.each([["de"], ["ja"], ["zh-TW"]])("applies and stores the display language %s", async (language) => {
+		await save({ language })
+
+		expect(changeLanguage).toHaveBeenCalledWith(language)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("language", language)
+	})
+
+	it.each([[undefined], [null]])("uses the default language for %s", async (language) => {
+		await save({ language })
+
+		expect(changeLanguage).toHaveBeenCalledWith("en")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("language", "en")
+	})
+
+	it.each([
+		["timeFormat", "13h"],
+		["timeFormat", 24],
+		["dateFormat", "dd/mm"],
+		["showRelativeTimes", "yes"],
+		["language", "xx-not-a-language"],
+		["language", 42],
+		["language", ""],
+	])("ignores %s = %j, and says so in the log", async (key, value) => {
+		await save({ [key]: value })
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+		expect(changeLanguage).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(`[updateSettings] Ignored an invalid value for ${key}`)
+	})
+
+	it("still saves the other settings sent with an invalid display value, and refreshes the webview", async () => {
+		await save({ timeFormat: "13h", dateFormat: "ymd", soundEnabled: true })
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("timeFormat", expect.anything())
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("dateFormat", "ymd")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("soundEnabled", true)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("is not a transaction: if a write fails, the earlier ones stay, the later ones are not written, and the error is thrown", async () => {
+		const failure = new Error("storage unavailable")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key) => {
+			if (key === "dateFormat") throw failure
+		})
+
+		await expect(save({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })).rejects.toBe(failure)
+
+		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
+		expect(written).toEqual(["timeFormat", "dateFormat"])
+		// The webview is refreshed even so, to show what is really stored.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	describe("the save result", () => {
+		const saveWithId = (updatedSettings: Record<string, unknown>, requestId?: string) =>
+			webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId, updatedSettings })
+		const saveAs = (updatedSettings: Record<string, unknown>) => saveWithId(updatedSettings, "save-1")
+
+		const results = () =>
+			vi
+				.mocked(mockClineProvider.postMessageToWebview)
+				.mock.calls.map(([message]) => message)
+				.filter((message) => message.type === "settingsSaveResult")
+
+		it("reports a stored save, after the state was refreshed", async () => {
+			await saveAs({ timeFormat: "24h" })
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+			const [refreshOrder] = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
+			const [resultOrder] = vi.mocked(mockClineProvider.postMessageToWebview).mock.invocationCallOrder
+			expect(refreshOrder).toBeLessThan(resultOrder)
+		})
+
+		it.each([
+			["an Error", new Error("storage unavailable"), "storage unavailable"],
+			["something that is not an Error", "disk full", "disk full"],
+		])("reports a failed save with the reason, for %s, and still throws it", async (_name, failure, reason) => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValue(failure)
+
+			await expect(saveAs({ dateFormat: "ymd" })).rejects.toBe(failure)
+
+			expect(results()).toEqual([
+				{ type: "settingsSaveResult", requestId: "save-1", success: false, error: reason },
+			])
+		})
+
+		it("does nothing, and reports nothing, for a message that carries no settings", async () => {
+			await webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId: "save-1" })
+
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+			expect(results()).toEqual([])
+		})
+
+		it("sends no result for a save that has no request id", async () => {
+			await saveWithId({ timeFormat: "24h" })
+
+			expect(results()).toEqual([])
+		})
+
+		it("still reports a stored save when refreshing the state fails", async () => {
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce(new Error("webview gone"))
+
+			await saveAs({ timeFormat: "24h" })
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		})
+
+		it("reports a failed save when refreshing the state fails too", async () => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValue(new Error("no"))
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce("webview gone")
+
+			await expect(saveAs({ timeFormat: "24h" })).rejects.toThrow("no")
+
+			expect(results()).toEqual([
+				{ type: "settingsSaveResult", requestId: "save-1", success: false, error: "no" },
+			])
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		})
+	})
+
+	it("completes a partial save when the same values are saved again", async () => {
+		let failOnce = true
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key) => {
+			if (key === "dateFormat" && failOnce) {
+				failOnce = false
+				throw new Error("storage unavailable")
+			}
+		})
+		const values = { timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false }
+
+		await expect(save(values)).rejects.toThrow("storage unavailable")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockClear()
+		await save(values)
+
+		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
+		expect(written).toEqual(["timeFormat", "dateFormat", "showRelativeTimes"])
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(2) // once for the failed save, once for this one
+	})
+
+	it("does not take a key that only exists on every object for a display setting", async () => {
+		await save({ constructor: "x", toString: "y" })
+
+		expect(mockClineProvider.log).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("constructor", "x")
 	})
 })

@@ -164,10 +164,11 @@ describe("SecretStorageService", () => {
 	})
 
 	describe("client_info round-trip", () => {
-		it("should persist and retrieve full client_info", async () => {
+		it("should persist and retrieve full client_info and resource indicator", async () => {
 			const data: StoredMcpOAuthData = {
 				tokens: { access_token: "tok", token_type: "Bearer" },
 				expires_at: Date.now() + 3600_000,
+				resource_indicator: "https://api.example.com/",
 				client_info: {
 					client_id: "cid-123",
 					client_secret: "secret-456",
@@ -182,6 +183,7 @@ describe("SecretStorageService", () => {
 
 			const result = await service.getOAuthData("https://example.com/mcp")
 			expect(result).toEqual(data)
+			expect(result?.resource_indicator).toBe("https://api.example.com/")
 			expect(result?.client_info?.client_id).toBe("cid-123")
 			expect(result?.client_info?.client_secret).toBe("secret-456")
 			expect(result?.client_info?.token_endpoint_auth_method).toBe("client_secret_post")
@@ -233,6 +235,159 @@ describe("SecretStorageService", () => {
 			for (const [i, url] of urls.entries()) {
 				expect((await service.getOAuthData(url))?.tokens.access_token).toBe(`tok-${i}`)
 			}
+		})
+
+		it("should not collide between a static root client ID and a legacy dynamic path", async () => {
+			await service.saveOAuthData(
+				"https://example.test/",
+				{ tokens: { access_token: "static-token", token_type: "Bearer" }, expires_at: 1 },
+				"/mcp",
+			)
+
+			expect(await service.getOAuthData("https://example.test/mcp")).toBeUndefined()
+
+			await service.saveOAuthData("https://example.test/mcp", {
+				tokens: { access_token: "dynamic-token", token_type: "Bearer" },
+				expires_at: 2,
+			})
+
+			expect((await service.getOAuthData("https://example.test/", "/mcp"))?.tokens.access_token).toBe(
+				"static-token",
+			)
+			expect((await service.getOAuthData("https://example.test/mcp"))?.tokens.access_token).toBe("dynamic-token")
+		})
+
+		it("should isolate static OAuth clients for the same server URL", async () => {
+			await service.saveOAuthData(
+				"https://example.com/mcp",
+				{ tokens: { access_token: "client-a-token", token_type: "Bearer" }, expires_at: 1 },
+				"client-a",
+			)
+			await service.saveOAuthData(
+				"https://example.com/mcp",
+				{ tokens: { access_token: "client-b-token", token_type: "Bearer" }, expires_at: 2 },
+				"client-b",
+			)
+
+			expect((await service.getOAuthData("https://example.com/mcp", "client-a"))?.tokens.access_token).toBe(
+				"client-a-token",
+			)
+			expect((await service.getOAuthData("https://example.com/mcp", "client-b"))?.tokens.access_token).toBe(
+				"client-b-token",
+			)
+			expect(await service.getOAuthData("https://example.com/mcp")).toBeUndefined()
+		})
+
+		it("should isolate static OAuth credentials by URL scheme", async () => {
+			await service.saveOAuthData(
+				"http://example.com/mcp",
+				{ tokens: { access_token: "http-token", token_type: "Bearer" }, expires_at: 1 },
+				"shared-client",
+			)
+			await service.saveOAuthData(
+				"https://example.com/mcp",
+				{ tokens: { access_token: "https-token", token_type: "Bearer" }, expires_at: 2 },
+				"shared-client",
+			)
+
+			expect((await service.getOAuthData("http://example.com/mcp", "shared-client"))?.tokens.access_token).toBe(
+				"http-token",
+			)
+			expect((await service.getOAuthData("https://example.com/mcp", "shared-client"))?.tokens.access_token).toBe(
+				"https-token",
+			)
+		})
+
+		it("should isolate static OAuth credentials by URL query", async () => {
+			await service.saveOAuthData(
+				"https://example.com/mcp?tenant=a",
+				{ tokens: { access_token: "tenant-a-token", token_type: "Bearer" }, expires_at: 1 },
+				"shared-client",
+			)
+			await service.saveOAuthData(
+				"https://example.com/mcp?tenant=b",
+				{ tokens: { access_token: "tenant-b-token", token_type: "Bearer" }, expires_at: 2 },
+				"shared-client",
+			)
+
+			expect(
+				(await service.getOAuthData("https://example.com/mcp?tenant=a", "shared-client"))?.tokens.access_token,
+			).toBe("tenant-a-token")
+			expect(
+				(await service.getOAuthData("https://example.com/mcp?tenant=b", "shared-client"))?.tokens.access_token,
+			).toBe("tenant-b-token")
+			expect(await service.getOAuthData("https://example.com/mcp", "shared-client")).toBeUndefined()
+		})
+
+		describe("per-client isolation on one server URL", () => {
+			const url = "https://example.com/mcp"
+			const dynamicKey = "mcp.oauth.example.com.L21jcA.data"
+			// base64url("client-a") = Y2xpZW50LWE, base64url("client-b") = Y2xpZW50LWI
+			const clientAKey = "mcp.oauth.https://example.com.p-L21jcA.c-Y2xpZW50LWE.data"
+			const clientBKey = "mcp.oauth.https://example.com.p-L21jcA.c-Y2xpZW50LWI.data"
+			const tokenData = (accessToken: string): StoredMcpOAuthData => ({
+				tokens: { access_token: accessToken, token_type: "Bearer" },
+				expires_at: 1,
+			})
+
+			it("should report hasOAuthData only for the client that stored data", async () => {
+				await service.saveOAuthData(url, tokenData("client-a-token"), "client-a")
+
+				expect(await service.hasOAuthData(url, "client-a")).toBe(true)
+				expect(await service.hasOAuthData(url, "client-b")).toBe(false)
+				expect(await service.hasOAuthData(url)).toBe(false)
+
+				await service.saveOAuthData(url, tokenData("dynamic-token"))
+
+				expect(await service.hasOAuthData(url)).toBe(true)
+				expect(await service.hasOAuthData(url, "client-b")).toBe(false)
+			})
+
+			it("should delete only the entry for the given client", async () => {
+				await service.saveOAuthData(url, tokenData("client-a-token"), "client-a")
+				await service.saveOAuthData(url, tokenData("client-b-token"), "client-b")
+				await service.saveOAuthData(url, tokenData("dynamic-token"))
+
+				await service.deleteOAuthData(url, "client-a")
+
+				expect(context.secrets.delete).toHaveBeenCalledWith(clientAKey)
+				expect(await service.getOAuthData(url, "client-a")).toBeUndefined()
+				expect((await service.getOAuthData(url, "client-b"))?.tokens.access_token).toBe("client-b-token")
+				expect((await service.getOAuthData(url))?.tokens.access_token).toBe("dynamic-token")
+
+				await service.deleteOAuthData(url)
+
+				expect(context.secrets.delete).toHaveBeenLastCalledWith(dynamicKey)
+				expect(await service.getOAuthData(url)).toBeUndefined()
+				expect((await service.getOAuthData(url, "client-b"))?.tokens.access_token).toBe("client-b-token")
+			})
+
+			it("should fire onDidChange only for the subscribed client's key", () => {
+				const onClientA = vi.fn()
+				const onClientB = vi.fn()
+				const onDynamic = vi.fn()
+				service.onDidChange(url, onClientA, "client-a")
+				service.onDidChange(url, onClientB, "client-b")
+				service.onDidChange(url, onDynamic)
+
+				context.secrets._emit(clientAKey)
+
+				expect(onClientA).toHaveBeenCalledTimes(1)
+				expect(onClientB).not.toHaveBeenCalled()
+				expect(onDynamic).not.toHaveBeenCalled()
+
+				context.secrets._emit(dynamicKey)
+
+				expect(onDynamic).toHaveBeenCalledTimes(1)
+				expect(onClientA).toHaveBeenCalledTimes(1)
+				expect(onClientB).not.toHaveBeenCalled()
+
+				context.secrets._emit(clientBKey)
+
+				expect(onClientB).toHaveBeenCalledTimes(1)
+				expect(onClientA).toHaveBeenCalledTimes(1)
+				expect(onDynamic).toHaveBeenCalledTimes(1)
+			})
 		})
 	})
 })

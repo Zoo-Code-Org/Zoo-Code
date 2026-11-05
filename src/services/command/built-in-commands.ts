@@ -319,6 +319,8 @@ export async function getBuiltInCommand(name: string): Promise<Command | undefin
 
 /**
  * Get names of all built-in commands
+ *
+ * @internal
  */
 export async function getBuiltInCommandNames(): Promise<string[]> {
 	return Object.keys(BUILT_IN_COMMANDS)

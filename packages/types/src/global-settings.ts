@@ -49,6 +49,9 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
  */
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
+// Preserve the existing terminal-dependent output display until users opt in.
+export const DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT = false
+
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
 /**
@@ -236,6 +239,7 @@ export const globalSettingsSchema = z.object({
 	terminalOutputPreviewSize: z.enum(["small", "medium", "large"]).optional(),
 	terminalShellIntegrationTimeout: z.number().optional(),
 	terminalShellIntegrationDisabled: z.boolean().optional(),
+	collapseCommandOutputByDefault: z.boolean().optional(),
 	terminalCommandDelay: z.number().optional(),
 	terminalPowershellCounter: z.boolean().optional(),
 	terminalZshClearEolMark: z.boolean().optional(),
@@ -276,6 +280,21 @@ export const globalSettingsSchema = z.object({
 	 * When unset (or `null`), the webview inherits VS Code's `--vscode-font-size`.
 	 */
 	chatFontSize: z.number().int().min(8).max(32).nullish(),
+	/**
+	 * Clock format used when rendering timestamps. "auto" follows the display language's locale.
+	 * @default "auto"
+	 */
+	timeFormat: z.enum(["auto", "12h", "24h"]).optional(),
+	/**
+	 * How dates are written. "auto" follows the display language's locale.
+	 * @default "auto"
+	 */
+	dateFormat: z.enum(["auto", "mdy", "dmy", "ymd"]).optional(),
+	/**
+	 * Show relative times ("5 min ago") in task history; when off, show the absolute date/time.
+	 * @default true
+	 */
+	showRelativeTimes: z.boolean().optional(),
 	/**
 	 * Controls the keyboard behavior for sending messages in the chat input.
 	 * - "send": Enter sends message, Shift+Enter creates newline (default)
@@ -361,6 +380,7 @@ export const SECRET_STATE_KEYS = [
 	"vercelAiGatewayApiKey",
 	"opencodeGoApiKey",
 	"kenariApiKey",
+	"ioIntelligenceApiKey",
 	"nanoGptApiKey",
 	"basetenApiKey",
 ] as const
