@@ -5002,9 +5002,12 @@ export class ClineProvider
 		if (configuration) {
 			// Capture the modes this batch overrides before registering them: a later failure
 			// must restore a previously installed mode instead of leaving the batch's copy.
+			// Snapshot every definition of every slug this batch touches, one per source file. Filtering
+			// the merged list would keep only the project copy of a slug that exists in both files, and
+			// the rollback would then restore that copy while the global definition stayed overwritten.
 			const savedCustomModes = configuration.customModes?.length
-				? (await this.customModesManager.getCustomModes()).filter((mode) =>
-						configuration.customModes!.some((candidate) => candidate.slug === mode.slug),
+				? await this.customModesManager.getCustomModeDefinitions(
+						configuration.customModes.map((candidate) => candidate.slug),
 					)
 				: []
 

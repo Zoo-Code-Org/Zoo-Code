@@ -353,6 +353,28 @@ export class CustomModesManager {
 		}
 	}
 
+	/**
+	 * Every definition of a mode, per source file, without the project-over-global hiding that
+	 * `getCustomModes` applies. A rollback has to restore both: a batch that overwrites a global
+	 * definition through a slug that also exists as a project mode would otherwise leave the global
+	 * copy permanently replaced by the batch's version.
+	 */
+	public async getCustomModeDefinitions(slugs: readonly string[]): Promise<ModeConfig[]> {
+		const wanted = new Set(slugs)
+		const settingsPath = await this.getCustomModesFilePath()
+		const settingsModes = await this.loadModesFromFile(settingsPath)
+		const roomodesPath = await this.getWorkspaceRoomodes()
+		const roomodesModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
+
+		return [
+			...roomodesModes
+				.filter((mode) => wanted.has(mode.slug))
+				.map((mode) => ({ ...mode, source: "project" as const })),
+			...settingsModes
+				.filter((mode) => wanted.has(mode.slug))
+				.map((mode) => ({ ...mode, source: "global" as const })),
+		]
+	}
 	public async getCustomModes(): Promise<ModeConfig[]> {
 		// Check if we have a valid cached result.
 		const now = Date.now()

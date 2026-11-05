@@ -6936,6 +6936,56 @@ describe("ClineProvider", () => {
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
 	})
+	it("restores both definitions of a slug that exists as a project and a global mode", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const projectCopy = {
+			slug: "shared-slug",
+			name: "Project copy",
+			roleDefinition: "r",
+			groups: ["read" as const],
+			source: "project" as const,
+		}
+		const globalCopy = {
+			slug: "shared-slug",
+			name: "Global copy",
+			roleDefinition: "r",
+			groups: ["read" as const],
+			source: "global" as const,
+		}
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			// The merged read hides the global copy behind the project one; the rollback snapshot must
+			// not, or restoring it would write the project definition to the global file as well.
+			getCustomModes: vi.fn().mockResolvedValue([projectCopy]),
+			getCustomModeDefinitions: vi.fn().mockResolvedValue([projectCopy, globalCopy]),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		vi.spyOn(provider, "setValues").mockRejectedValue(new Error("configuration write failed"))
+
+		await expect(
+			provider.createTask(
+				"text",
+				undefined,
+				undefined,
+				{},
+				{ customModes: [{ ...globalCopy, name: "Batch copy" }] },
+			),
+		).rejects.toThrow("configuration write failed")
+
+		// Both copies are restored, each to its own file, so the batch's version cannot outlive the
+		// rollback in the global file while the project file gets the pre-batch definition back.
+		expect(manager.updateCustomMode).toHaveBeenCalledWith("shared-slug", projectCopy)
+		expect(manager.updateCustomMode).toHaveBeenCalledWith("shared-slug", globalCopy)
+
+		await provider.dispose()
+	})
 	it("should remove a custom mode the batch registered when the batch fails", async () => {
 		const provider = new ClineProvider(
 			mockContext,
@@ -6952,6 +7002,8 @@ describe("ClineProvider", () => {
 		const manager = provider["customModesManager"]
 		Object.assign(manager, {
 			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
+			// The rollback snapshot reads both source files, so the double answers that reader too.
+			getCustomModeDefinitions: vi.fn().mockResolvedValue([savedMode]),
 			updateCustomMode: vi.fn().mockResolvedValue(undefined),
 			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
 		})
@@ -6986,6 +7038,8 @@ describe("ClineProvider", () => {
 		const manager = provider["customModesManager"]
 		Object.assign(manager, {
 			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
+			// The rollback snapshot reads both source files, so the double answers that reader too.
+			getCustomModeDefinitions: vi.fn().mockResolvedValue([savedMode]),
 			updateCustomMode: vi.fn((slug: string, mode: typeof savedMode) => {
 				calls.push([slug, mode.name])
 				// The batch's second registration is the one that throws.
