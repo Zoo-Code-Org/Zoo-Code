@@ -1405,7 +1405,10 @@ describe("loadProfiles", () => {
 		const controller = new AbortController()
 		const source = {
 			listConfig: vi.fn(async () => [{ id: "a" }, { id: "b" }]),
-			getProfile: vi.fn(async () => ({ apiProvider: "x" }) as never),
+			// The parameters are declared, so that the calls it records are typed with them.
+			getProfile: vi.fn(
+				async (_params: { id: string }, _options?: { signal?: AbortSignal }) => ({ apiProvider: "x" }) as never,
+			),
 		}
 
 		await loadProfilesWithActive(source, controller.signal)
