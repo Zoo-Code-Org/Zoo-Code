@@ -1588,6 +1588,7 @@ export const ChatRowContent = ({
 						</div>
 					)
 				case "too_many_tools_warning": {
+					// Historical messages only; Task no longer emits this warning.
 					const warningData = safeJsonParse<{
 						toolCount: number
 						serverCount: number

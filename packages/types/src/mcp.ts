@@ -1,10 +1,21 @@
 import { z } from "zod"
 
-/**
- * Maximum number of MCP tools that can be enabled before showing a warning.
- * LLMs tend to perform poorly when given too many tools to choose from.
- */
+export const DEFAULT_MCP_DYNAMIC_LOAD_THRESHOLD = 50
+export const DEFAULT_MCP_DYNAMIC_LOAD_INITIAL_K = 30
+
+/** @deprecated Legacy catalog advisory. Runtime routing uses the dynamic-load settings. */
 export const MAX_MCP_TOOLS_THRESHOLD = 60
+
+export const mcpDynamicLoadThresholdSchema = z.number().int().min(0)
+export const mcpDynamicLoadInitialKSchema = z.number().int().min(1)
+
+/** Apply the same validation to persisted values and direct runtime callers. */
+export function resolveMcpDynamicLoadSettings(threshold: unknown, initialK: unknown) {
+	return {
+		threshold: mcpDynamicLoadThresholdSchema.safeParse(threshold).data ?? DEFAULT_MCP_DYNAMIC_LOAD_THRESHOLD,
+		initialK: mcpDynamicLoadInitialKSchema.safeParse(initialK).data ?? DEFAULT_MCP_DYNAMIC_LOAD_INITIAL_K,
+	}
+}
 
 /**
  * McpServerUse
@@ -155,7 +166,7 @@ export interface EnabledMcpToolsCount {
  * @example
  * const { enabledToolCount, enabledServerCount } = countEnabledMcpTools(mcpServers)
  * if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
- *   // Show warning
+ *   // Show the legacy catalog advisory, separate from task-scoped routing.
  * }
  */
 export function countEnabledMcpTools(servers: McpServer[]): EnabledMcpToolsCount {
