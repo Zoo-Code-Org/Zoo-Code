@@ -781,11 +781,18 @@ export class ContextProxy {
 			this.stateWriteOwner.clear()
 			this.secretWriteOwner.clear()
 
-			await Promise.all([
+			// Every delete has to settle before the guard comes down: Promise.all rejects on the first
+			// failure while the rest are still pending, and a storeSecret that lands after `finally`
+			// cleared `resetting` is then erased by a delete this pass had already given up on.
+			const deletions = await Promise.allSettled([
 				...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
 				...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 				...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 			])
+			const deletionFailure = deletions.find((result) => result.status === "rejected")
+			if (deletionFailure) {
+				throw deletionFailure.reason
+			}
 
 			await this.initialize()
 			this.resetting = false
