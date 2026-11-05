@@ -7372,6 +7372,112 @@ describe("ClineProvider", () => {
 			await failingSibling.dispose()
 		})
 
+		it("does not rebuild the healthy sibling's task handler when another sibling's re-pin fails", async () => {
+			// A rebuilt API handler is the one part of a re-pin that no compensation can undo. The sibling whose
+			// durable pin write lands must keep its conversation on the deleted profile until every sibling has
+			// landed: rebuilding inside the settled loop leaves this task on the survivor's settings while its
+			// own pin is rolled back to the profile the deletion failed to remove.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const healthySibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await healthySibling["setViewStateId"]("healthy-handler-view")
+			await healthySibling.saveViewState("currentApiConfigName", "doomed-profile")
+			const healthyTask = {
+				taskId: "healthy-handler-task",
+				taskApiConfigName: "doomed-profile",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "deepseek/deepseek-coder",
+				},
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					healthyTask.taskApiConfigName = name
+				}),
+			}
+			// Structural double: the re-pin only touches the sticky name and the API handler, so a minimal
+			// task is enough and keeps the assertion on the handler instead of on a Task internals list.
+			vi.spyOn(healthySibling, "getCurrentTask").mockReturnValue(
+				healthyTask as unknown as ReturnType<typeof healthySibling.getCurrentTask>,
+			)
+			const failingSiblingContext = {
+				...mockContext,
+				globalState: {
+					...mockContext.globalState,
+					update: (key: string, value: unknown) => {
+						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
+						if (
+							key === "viewStates" &&
+							states?.["failing-handler-view"]?.currentApiConfigName === "keeper-profile"
+						) {
+							return Promise.reject(new Error("sibling pin write failed"))
+						}
+						return mockContext.globalState.update(key, value)
+					},
+				},
+			}
+			const failingSibling = new ClineProvider(
+				failingSiblingContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(failingSiblingContext),
+				new WebviewFocusTracker(),
+			)
+			await failingSibling["setViewStateId"]("failing-handler-view")
+			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(healthySibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(failingSibling, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				// Name-aware so the compensation restores the deleted profile's own record.
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "doomed-profile"
+						? { name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter }
+						: { name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("sibling pin write failed")
+
+			// The sibling that landed has to go back to the profile its conversation still runs under,
+			// handler included: a survivor-built handler cannot be compensated out of a running task.
+			expect(healthyTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(healthyTask.apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "deepseek/deepseek-coder",
+			})
+			expect(healthyTask.setTaskApiConfigName.mock.calls.at(-1)?.[0]).toBe("doomed-profile")
+			expect(healthySibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			await ClineProvider["persistedViewStateWriteQueue"]
+			await provider.dispose()
+			await healthySibling.dispose()
+			await failingSibling.dispose()
+		})
 		it("rejects the deletion when a sibling's task history cannot follow the re-pin", async () => {
 			// The sibling conversation is part of the state the deletion rewrites: if its history entry
 			// and sticky name keep naming the deleted profile, the next request from that conversation

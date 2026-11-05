@@ -4331,11 +4331,22 @@ export class ClineProvider
 		// Snapshot every affected view BEFORE any write starts: a failure in one sibling
 		// has to roll back the siblings that already landed too, otherwise the deletion
 		// leaves some views pinned to a profile that no longer exists.
-		const snapshots = affected.map((instance) => ({
-			instance,
-			previousPin: instance.viewLocalState.currentApiConfigName,
-			previousOverlay: instance.viewLocalState.apiConfiguration,
-		}))
+		const snapshots = affected.map((instance) => {
+			// Decided before any write starts. The strict sticky persistence inside the settled loop moves
+			// this conversation's own profile name and its history entry, and neither is part of restoring
+			// the view's pin, so all of them are captured here. The eligibility flag is read before the
+			// write as well, because that same write re-points taskApiConfigName.
+			const task = instance.getCurrentTask()
+			return {
+				instance,
+				previousPin: instance.viewLocalState.currentApiConfigName,
+				previousOverlay: instance.viewLocalState.apiConfiguration,
+				taskAtSnapshot: task,
+				previousTaskApiConfigName: task?.taskApiConfigName,
+				previousTaskHistoryItem: task ? instance.getTaskHistoryItem(task.taskId) : undefined,
+				taskWasUnderDeletedProfile: task?.taskApiConfigName === deletedProfileName,
+			}
+		})
 
 		const results = await Promise.allSettled(
 			snapshots.map(async (snapshot) => {
@@ -4374,13 +4385,13 @@ export class ClineProvider
 				// hold a task that follows a different sticky profile, and forcing the
 				// replacement would silently switch that conversation and rewrite its
 				// persisted profile name without the user asking.
-				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-					if (replacementSettings) {
-						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
-					}
+				if (snapshot.taskWasUnderDeletedProfile) {
 					// Strict: the allSettled below turns a rejected task-history write into a rejected sibling,
 					// which rolls every affected view back and rejects the deletion, instead of leaving that
 					// sibling's conversation on the deleted profile while its view was already re-pointed.
+					// The matching handler rebuild is deliberately NOT here: a rebuilt API handler is not part of the
+					// rollback below, so rebuilding inside the settled loop leaves a sibling whose own write landed
+					// holding the replacement's handler while another sibling's rejected write rolls its pin back.
 					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName, {
 						strictPersistence: true,
 					})
@@ -4396,7 +4407,7 @@ export class ClineProvider
 			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
 			// cannot skip the next one.
 			const restoreFailures: string[] = []
-			for (const snapshot of snapshots) {
+			for (const [index, snapshot] of snapshots.entries()) {
 				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
 				// the monotonic nextViewId counter, so no future view ever reads that entry again and
 				// prunePersistedViewStates() bounds it. Re-checked here too: the sibling can start
@@ -4419,6 +4430,31 @@ export class ClineProvider
 					// caller, or a sibling left pinned to the deleted profile is invisible.
 					restoreFailures.push(`view ${snapshot.instance.viewId}: ${message}`)
 				}
+				// The strict sticky persistence inside the settled loop also moved this conversation's own profile
+				// name and its history entry. Only the sibling whose own write FAILED is self-restored by that call,
+				// so a sibling whose write landed would keep naming the replacement while its pin goes back to the
+				// deleted profile - the same split state the pin restore above exists to prevent. Skipped when
+				// nothing actually moved: that covers the rejected sibling, which already put both back itself,
+				// and a sibling that a disposal guard returned early.
+				const task = snapshot.taskAtSnapshot
+				if (
+					results[index]?.status === "fulfilled" &&
+					task &&
+					task.taskApiConfigName !== snapshot.previousTaskApiConfigName
+				) {
+					try {
+						task.setTaskApiConfigName(snapshot.previousTaskApiConfigName)
+						if (snapshot.previousTaskHistoryItem) {
+							await snapshot.instance.updateTaskHistory(snapshot.previousTaskHistoryItem)
+						}
+					} catch (rollbackError: unknown) {
+						const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						snapshot.instance.log(
+							`[rePinViewLocalStateForDeletedProfile] Could not restore the task profile for view ${snapshot.instance.viewId} after a failed re-pin: ${message}`,
+						)
+						restoreFailures.push(`view ${snapshot.instance.viewId} task profile: ${message}`)
+					}
+				}
 			}
 			const original = rejected[0].reason
 			if (restoreFailures.length > 0) {
@@ -4439,16 +4475,15 @@ export class ClineProvider
 		// conversation keeps sending the deleted profile's configuration even though the view's
 		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
 		for (const snapshot of snapshots) {
-			// Only re-point when the task actually runs under the deleted profile:
-			// a view pinned to it can hold a task that follows a different sticky
-			// profile, and forcing the replacement would silently switch that
-			// conversation and rewrite its persisted profile name without the user
-			// asking.
-			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
-				if (replacementSettings) {
-					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
-				}
-				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+			// The only place a task handler moves: a rebuilt handler cannot be compensated, so it waits for
+			// every sibling to land. The eligibility flag comes from before the writes, because the strict
+			// sticky persistence in the settled loop has already re-pointed taskApiConfigName for exactly
+			// this set - reading it here again would skip every conversation that needed the swap. Only
+			// conversations that actually ran under the deleted profile are re-pointed: a view pinned to it
+			// can hold a task that follows a different sticky profile, and forcing the replacement would
+			// silently switch that conversation and rewrite its persisted profile name without the user asking.
+			if (snapshot.taskWasUnderDeletedProfile && replacementSettings) {
+				snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
 			}
 			await snapshot.instance.postStateToWebview()
 		}
