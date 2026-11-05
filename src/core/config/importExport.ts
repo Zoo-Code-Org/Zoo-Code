@@ -33,6 +33,8 @@ export type ImportOptions = {
 	 * really stored (the import has been answered by then).
 	 */
 	onDeferredSettled?: () => void
+	/** Who is importing (the provider): disposing it detaches `onDeferredSettled` and refuses its writes. */
+	owner?: object
 }
 
 type ExportOptions = {
@@ -141,7 +143,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
  */
 export async function importSettingsFromPath(
 	filePath: string,
-	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled, owner }: ImportOptions,
 ) {
 	// Use a lenient schema that accepts any apiConfigs, then validate each individually
 	const lenientProviderProfilesSchema = providerProfilesSchema.extend({
@@ -234,7 +236,7 @@ export async function importSettingsFromPath(
 		// They will be imported automatically with the config - no special handling needed
 
 		await providerSettingsManager.import(providerProfiles)
-		await setValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings, { onDeferredSettled })
+		await setValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings, { onDeferredSettled, owner })
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
@@ -280,6 +282,7 @@ export const importSettings = async ({
 	contextProxy,
 	customModesManager,
 	onDeferredSettled,
+	owner,
 }: ImportOptions) => {
 	// Use the last export path as a sensible default, falling back to Downloads
 	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
@@ -302,6 +305,7 @@ export const importSettings = async ({
 		contextProxy,
 		customModesManager,
 		onDeferredSettled,
+		owner,
 	})
 }
 
@@ -314,7 +318,7 @@ export const importSettings = async ({
  * @returns Promise resolving to import result
  */
 export const importSettingsFromFile = async (
-	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled, owner }: ImportOptions,
 	fileUri: vscode.Uri,
 ) => {
 	return importSettingsFromPath(fileUri.fsPath, {
@@ -322,6 +326,7 @@ export const importSettingsFromFile = async (
 		contextProxy,
 		customModesManager,
 		onDeferredSettled,
+		owner,
 	})
 }
 
@@ -392,6 +397,7 @@ export const importSettingsWithFeedback = async (
 				contextProxy,
 				customModesManager,
 				onDeferredSettled,
+				owner: provider,
 			})
 		} catch (error) {
 			result = {
@@ -400,7 +406,13 @@ export const importSettingsWithFeedback = async (
 			}
 		}
 	} else {
-		result = await importSettings({ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled })
+		result = await importSettings({
+			providerSettingsManager,
+			contextProxy,
+			customModesManager,
+			onDeferredSettled,
+			owner: provider,
+		})
 	}
 
 	if (result.success) {

@@ -114,6 +114,14 @@ export interface SettingsViewRef {
  */
 export const SAVE_ANSWER_TIMEOUT_MS = 20_000
 
+/**
+ * How long, and how many, saves that were not answered are kept. A host that has not answered after this long is not
+ * going to: the save is forgotten (its late answer is ignored, and the warning that it may still complete goes away).
+ * The oldest is dropped beyond the limit, so a view that stays open cannot collect them without end.
+ */
+export const TIMED_OUT_SAVE_KEEP_MS = 10 * 60_000
+export const MAX_TIMED_OUT_SAVES = 10
+
 export const sectionNames = [
 	"providers",
 	"autoApprove",
@@ -168,7 +176,24 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// a later reset to the old value for "nothing changed" and not send it.
 	const appearanceSaved = useRef<Record<string, number | null>>({})
 	// Saves that were not answered in time. Their outcome is unknown: the host may still store them.
-	const timedOutSaves = useRef(new Map<string, { sent: Record<string, number | null>; changeCount: number }>())
+	const timedOutSaves = useRef(
+		new Map<
+			string,
+			{
+				sent: Record<string, number | null>
+				changeCount: number
+				expiry: ReturnType<typeof setTimeout>
+			}
+		>(),
+	)
+	// Nothing outlives the view: its timers are cleared, and what it kept is let go.
+	useEffect(() => {
+		const saves = timedOutSaves.current
+		return () => {
+			for (const { expiry } of saves.values()) clearTimeout(expiry)
+			saves.clear()
+		}
+	}, [])
 	const [saveOutcomeUnknown, setSaveOutcomeUnknown] = useState(false)
 	// The appearance values this form has edited. A value that only differs from the live state because the live state
 	// changed (another webview, a reset from the host) is not an edit and is never sent. A ref, not state: it is read
@@ -625,9 +650,20 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		const timer = setTimeout(() => {
 			// No answer is not a failure: the host may still store it. Its answer is waited for further on, and the
 			// user is told if they leave meanwhile.
-			timedOutSaves.current.set(pendingSaveId, {
+			const saves = timedOutSaves.current
+			while (saves.size >= MAX_TIMED_OUT_SAVES) {
+				const [oldest, entry] = saves.entries().next().value!
+				clearTimeout(entry.expiry)
+				saves.delete(oldest)
+			}
+			const saveId = pendingSaveId
+			saves.set(saveId, {
 				sent: { ...pendingAppearanceSent.current },
 				changeCount: pendingSaveChangeCount.current,
+				expiry: setTimeout(() => {
+					saves.delete(saveId)
+					setSaveOutcomeUnknown(saves.size > 0)
+				}, TIMED_OUT_SAVE_KEEP_MS),
 			})
 			setSaveOutcomeUnknown(true)
 			settle(false)
@@ -647,6 +683,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			const late = timedOutSaves.current.get(message.requestId)
 			if (!late) return
 
+			clearTimeout(late.expiry)
 			timedOutSaves.current.delete(message.requestId)
 			setSaveOutcomeUnknown(timedOutSaves.current.size > 0)
 			if (message.success !== true) return

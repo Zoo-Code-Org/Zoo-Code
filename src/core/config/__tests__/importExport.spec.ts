@@ -21,6 +21,7 @@ import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
 import {
 	beginSettingWrite,
+	disposeSettingWrites,
 	performSettingWrite,
 	settingWriteBookkeepingSize,
 	undoSettingWrite,
@@ -361,18 +362,19 @@ describe("importExport", () => {
 					const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
 
 					;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+					const provider = { postStateToWebview }
 					const done = importSettingsWithFeedback(
 						{
 							providerSettingsManager: mockProviderSettingsManager,
 							contextProxy: mockContextProxy,
 							customModesManager: mockCustomModesManager,
-							provider: { postStateToWebview },
+							provider,
 						},
 						viaDialog ? undefined : "/mock/path/settings.json",
 					)
 					await vi.advanceTimersByTimeAsync(15_000)
 					await done
-					return { release, showErrorMessage }
+					return { release, showErrorMessage, provider }
 				}
 
 				it.each([
@@ -391,6 +393,29 @@ describe("importExport", () => {
 						expect(showErrorMessage).toHaveBeenCalled() // the import was answered as failed
 						expect(stored.get("interfaceFontScale")).toBe(100)
 						expect(postStateToWebview.mock.calls.length).toBe(refreshesWhenAnswered + 1)
+						showErrorMessage.mockRestore()
+					},
+				)
+
+				it.each([
+					["a file path", false],
+					["the file dialog", true],
+				])(
+					"does not call back into a provider that was disposed meanwhile, for an import from %s",
+					async (_name, viaDialog) => {
+						const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+						const { release, showErrorMessage, provider } = await importWithFeedback(
+							postStateToWebview,
+							viaDialog,
+						)
+						const refreshesWhenAnswered = postStateToWebview.mock.calls.length
+
+						disposeSettingWrites(provider) // the view is closed before the late store lands
+						release.resolve()
+						await vi.advanceTimersByTimeAsync(0)
+
+						expect(stored.get("interfaceFontScale")).toBe(100) // the value is still put back
+						expect(postStateToWebview.mock.calls.length).toBe(refreshesWhenAnswered)
 						showErrorMessage.mockRestore()
 					},
 				)

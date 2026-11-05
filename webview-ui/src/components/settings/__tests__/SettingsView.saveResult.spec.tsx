@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderWithExtensionState } from "@/utils/test-utils"
 import { vscode } from "@src/utils/vscode"
 
-import SettingsView, { SAVE_ANSWER_TIMEOUT_MS, type SettingsViewRef } from "../SettingsView"
+import SettingsView, {
+	MAX_TIMED_OUT_SAVES,
+	SAVE_ANSWER_TIMEOUT_MS,
+	TIMED_OUT_SAVE_KEEP_MS,
+	type SettingsViewRef,
+} from "../SettingsView"
 import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
@@ -581,6 +586,98 @@ describe("SettingsView – a save the host never answers", () => {
 			act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
 			return id
 		}
+
+		describe("how long, and how many, are kept", () => {
+			const terminalFontSize = () =>
+				(screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value
+
+			const discardTheEdit = async () => {
+				fireEvent.click(doneButton())
+				fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+				expect(terminalFontSize()).toBe("12")
+			}
+
+			it("forgets a save the host has not answered for long: its late answer is ignored, and no warning is shown", async () => {
+				const id = await timeOutAfterAnEdit()
+				act(() => vi.advanceTimersByTime(TIMED_OUT_SAVE_KEEP_MS))
+
+				await discardTheEdit()
+				answerSave(id, { success: true })
+
+				expect(terminalFontSize()).toBe("12") // not brought up to date: nothing waits for that save any more
+				fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment"))
+				fireEvent.click(doneButton())
+				expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+				expect(noteShown()).not.toBeInTheDocument()
+			})
+
+			it("still waits for a save before that time is over", async () => {
+				const id = await timeOutAfterAnEdit()
+				act(() => vi.advanceTimersByTime(TIMED_OUT_SAVE_KEEP_MS - SAVE_ANSWER_TIMEOUT_MS))
+
+				await discardTheEdit()
+				answerSave(id, { success: true })
+
+				await waitFor(() => expect(terminalFontSize()).toBe("13"))
+			})
+
+			it("keeps only the latest saves, so a view that stays open does not collect them without end", async () => {
+				renderUiTab()
+				await makeAnEdit()
+				const ids: Array<string | undefined> = []
+				for (let attempt = 0; attempt <= MAX_TIMED_OUT_SAVES; attempt++) {
+					fireEvent.click(screen.getByTestId("save-button"))
+					ids.push(lastSaveRequestId(postMessage))
+					act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+				}
+				expect(new Set(ids).size).toBe(MAX_TIMED_OUT_SAVES + 1)
+
+				// The host answers (with a failure, which changes nothing) every save but the oldest, which was dropped to make
+				// room: if it had been kept, the user would still be told that a save may complete.
+				for (const id of ids.slice(1)) answerSave(id, { success: false, error: "nope" })
+
+				fireEvent.click(doneButton())
+				expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+				expect(noteShown()).not.toBeInTheDocument()
+			})
+
+			it("still tells the user about the saves it kept, up to the limit", async () => {
+				renderUiTab()
+				await makeAnEdit()
+				const ids: Array<string | undefined> = []
+				for (let attempt = 0; attempt < MAX_TIMED_OUT_SAVES; attempt++) {
+					fireEvent.click(screen.getByTestId("save-button"))
+					ids.push(lastSaveRequestId(postMessage))
+					act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+				}
+				for (const id of ids.slice(1)) answerSave(id, { success: false, error: "nope" })
+
+				fireEvent.click(doneButton())
+
+				expect(await screen.findByText("settings:unsavedChangesDialog.title")).toBeInTheDocument()
+				expect(noteShown()).toBeInTheDocument() // the first of them is still waited for
+			})
+
+			it("lets go of the timer of the save it kept when the view is closed", async () => {
+				// Other parts of the view leave timers too: what closing the view takes away is compared with a view that kept
+				// no save, and the difference is the timer of the one that was kept.
+				const timersTakenAwayByClosing = (view: { unmount: () => void }) => {
+					const before = vi.getTimerCount()
+					view.unmount()
+					return before - vi.getTimerCount()
+				}
+				const withoutASave = renderUiTab()
+				await makeAnEdit()
+				const takenWithoutASave = timersTakenAwayByClosing(withoutASave)
+
+				const withASave = renderUiTab()
+				await makeAnEdit()
+				fireEvent.click(screen.getByTestId("save-button"))
+				act(() => vi.advanceTimersByTime(SAVE_ANSWER_TIMEOUT_MS))
+
+				expect(timersTakenAwayByClosing(withASave)).toBe(takenWithoutASave + 1)
+			})
+		})
 
 		it("tells the user in the discard dialog that the save may still complete", async () => {
 			await timeOutAfterAnEdit()
