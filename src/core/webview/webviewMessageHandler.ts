@@ -2803,10 +2803,14 @@ export const webviewMessageHandler = async (
 					const isNewMode = !existingModes.some((mode) => mode.slug === message.modeConfig?.slug)
 
 					await provider.customModesManager.updateCustomMode(message.modeConfig.slug, message.modeConfig)
-					// Update state after saving the mode
+					// Update state after saving the mode. Both keys go through provider.setValue so
+					// this view's mode pin and local buffer follow the slug this call just wrote, as in
+					// the updateSettings path; a direct ContextProxy write moves the shared store and
+					// leaves a view pinned elsewhere on that earlier slug. The webview refresh stays
+					// after the writes so the fan-out still reports what was stored.
 					const customModes = await provider.customModesManager.getCustomModes()
-					await updateGlobalState("customModes", customModes)
-					await updateGlobalState("mode", message.modeConfig.slug)
+					await provider.setValue("customModes", customModes)
+					await provider.setValue("mode", message.modeConfig.slug)
 					await provider.postStateToWebview()
 
 					// Track telemetry for custom mode creation or update
@@ -2903,8 +2907,10 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Switch back to default mode after deletion
-				await updateGlobalState("mode", defaultModeSlug)
+				// Switch back to default mode after deletion, through the provider so this view's
+				// durable pin follows the slug being written: a direct ContextProxy write would move
+				// the shared store and leave a view pinned to the mode it just deleted pinning it.
+				await provider.setValue("mode", defaultModeSlug)
 				await provider.postStateToWebview()
 			}
 			break

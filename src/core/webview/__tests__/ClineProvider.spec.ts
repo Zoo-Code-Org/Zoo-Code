@@ -10378,6 +10378,103 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	// A custom-mode deletion or save writes "mode" straight into the shared store, so this
+	// view's durable pin keeps the slug the call just wrote away from it: a view pinned to a
+	// deleted mode goes on reporting a slug that no longer exists. The pinned and the
+	// unpinned view are held apart here instead of averaged into one case.
+	describe("custom-mode deletion and the mode pin", () => {
+		beforeEach(() => {
+			// The harness CustomModesManager double has no deleteCustomMode member, so it is
+			// installed on the instance the way the mutation-queue test installs it.
+			Object.assign(provider.customModesManager, {
+				deleteCustomMode: vi.fn().mockResolvedValue(undefined),
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "gone-mode",
+						name: "Gone Mode",
+						roleDefinition: "A mode that is about to be deleted",
+						groups: ["read"] as const,
+					},
+				]),
+			})
+		})
+
+		const handlerForView = async (viewStateId: string) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider["setViewStateId"](viewStateId)
+			return vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls[0][0]
+		}
+
+		// getState() is what the fan-out serializes for this view: it merges the view's pin
+		// over the shared store, so it is the mode the webview actually renders.
+		const servedMode = async () => (await provider.getState()).mode
+
+		it("moves a view pinned to the deleted mode onto the default mode", async () => {
+			const messageHandler = await handlerForView("pinned-deleted-view")
+			await provider.saveViewState("mode", "gone-mode")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			expect(provider.customModesManager.deleteCustomMode).toHaveBeenCalledWith("gone-mode")
+			// Before the routing fix the shared store moved to the default slug while this view
+			// kept pinning the deleted one, so the webview was shown "gone-mode" and the next
+			// task would record a slug no mode list contains.
+			expect(await servedMode()).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"pinned-deleted-view": { mode: "code" },
+			})
+		})
+
+		it("reports the default mode to a view that has no pin of its own", async () => {
+			const messageHandler = await handlerForView("unpinned-deleted-view")
+
+			await messageHandler({ type: "deleteCustomMode", slug: "gone-mode" })
+
+			// An unpinned view follows the shared store either way; what routing adds is the
+			// record. A mode write through the provider pins this view's copy to the slug the
+			// shared store now holds, which is the rule the updateSettings path already follows.
+			expect(await servedMode()).toBe("code")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"unpinned-deleted-view": { mode: "code" },
+			})
+		})
+
+		it("moves the pin onto the mode a pinned view just saved", async () => {
+			const messageHandler = await handlerForView("pinned-saved-view")
+			await provider.saveViewState("mode", "gone-mode")
+			Object.assign(provider.customModesManager, {
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "new-mode",
+						name: "New Mode",
+						roleDefinition: "A custom mode this view just saved",
+						groups: ["read"] as const,
+					},
+				]),
+			})
+
+			await messageHandler({
+				type: "updateCustomMode",
+				modeConfig: {
+					slug: "new-mode",
+					name: "New Mode",
+					roleDefinition: "A custom mode this view just saved",
+					groups: ["read"] as const,
+				},
+			})
+
+			// Saving a mode makes this view use it; a view pinned elsewhere must follow, not
+			// stay on the earlier slug while the shared store moved on.
+			expect(await servedMode()).toBe("new-mode")
+			expect(provider["viewLocalState"].mode).toBe("new-mode")
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"pinned-saved-view": { mode: "new-mode" },
+			})
+		})
+	})
+
 	describe("upsertApiConfiguration", () => {
 		test("handles error in upsertApiConfiguration gracefully", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
