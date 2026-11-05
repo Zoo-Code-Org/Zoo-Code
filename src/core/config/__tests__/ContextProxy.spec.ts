@@ -195,6 +195,35 @@ describe("ContextProxy", () => {
 			expect(proxy.getSecret("apiKey")).toBeUndefined()
 		})
 
+		// The delete pass is a single Promise.all over every key, so one keychain delete rejecting
+		// rejects resetAllState itself. Until now the only path on which the flag that guards
+		// storeSecret is cleared was the success path, so a single failed delete left every later
+		// secret write refused for the life of the instance. What is asserted below is that the
+		// store is usable again - the next save resolving and reading back through both the cache
+		// and storage - not merely that no error appears.
+		it("clears the reset guard when a secret delete rejects so the next save succeeds and reads back", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				if (key === "apiKey") {
+					throw new Error("keychain locked")
+				}
+				durable.delete(key)
+			})
+
+			// The original error is what propagates, not a wrapper: the caller has to be able to tell a
+			// failed erase from a refused write.
+			await expect(proxy.resetAllState()).rejects.toThrow("keychain locked")
+
+			const after = proxy.storeSecret("apiKey", "written-after-failed-reset")
+			await expect(after).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
+			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
+		})
+
 		it("adopts a secret write issued after a reset that waited for a pending write", async () => {
 			const durable = new Map<string, string | undefined>()
 			let settle: () => void = () => {}

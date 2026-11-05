@@ -757,35 +757,41 @@ export class ContextProxy {
 	 */
 	public async resetAllState() {
 		this.resetting = true
-		// A secret write that is in flight at this moment has already committed nothing, but it will
-		// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
-		// after them. Wait for the pending writes first, then end the claims, then delete, so the
-		// cleared copy is the last one to land in storage and the cache stays empty afterwards.
-		const inFlight = [...this.pendingSecretWrites.values()].flatMap((writes) => [...writes].map((w) => w.settle))
-		await Promise.allSettled(inFlight)
+		try {
+			// A secret write that is in flight at this moment has already committed nothing, but it will
+			// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
+			// after them. Wait for the pending writes first, then end the claims, then delete, so the
+			// cleared copy is the last one to land in storage and the cache stays empty afterwards.
+			const inFlight = [...this.pendingSecretWrites.values()].flatMap((writes) =>
+				[...writes].map((w) => w.settle),
+			)
+			await Promise.allSettled(inFlight)
 
-		// Clear in-memory caches
-		this.stateCache = {}
-		this.secretCache = {}
-		// A write that started before this reset must not restore its pre-reset value when it
-		// rejects afterwards, so advance every generation the pending writes still hold.
-		for (const key of this.stateWriteGenerations.keys()) {
-			this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+			// Clear in-memory caches
+			this.stateCache = {}
+			this.secretCache = {}
+			// A write that started before this reset must not restore its pre-reset value when it
+			// rejects afterwards, so advance every generation the pending writes still hold.
+			for (const key of this.stateWriteGenerations.keys()) {
+				this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+			}
+			// A reset also ends write ownership: a write that is still in flight reads the Memento back
+			// into the cache it just lost, so clearing the caches is not enough to keep pre-reset state
+			// out. Ownership is what the rejection handlers gate on.
+			this.stateWriteOwner.clear()
+			this.secretWriteOwner.clear()
+
+			await Promise.all([
+				...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+				...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+			])
+
+			await this.initialize()
+			this.resetting = false
+		} finally {
+			this.resetting = false
 		}
-		// A reset also ends write ownership: a write that is still in flight reads the Memento back
-		// into the cache it just lost, so clearing the caches is not enough to keep pre-reset state
-		// out. Ownership is what the rejection handlers gate on.
-		this.stateWriteOwner.clear()
-		this.secretWriteOwner.clear()
-
-		await Promise.all([
-			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-		])
-
-		await this.initialize()
-		this.resetting = false
 	}
 
 	private static _instance: ContextProxy | null = null
