@@ -40,9 +40,15 @@ export class VSCodeAPIWrapper {
 		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 	}
 
+	// The host enforces the same bound in ClineProvider.setViewStateId (its
+	// MAX_VIEW_STATE_ID_LENGTH); the webview must not hand back an id the host would refuse.
+	private static readonly MAX_VIEW_STATE_ID_LENGTH = 64
+
 	/**
 	 * Returns the stable view state identifier for this webview, creating and persisting
 	 * one on first use so the extension can keep per-view state isolated across providers.
+	 * Follow-up #2226 replaces this client-side validation with a host-minted claim token,
+	 * later in the merge order; until that lands this path has to apply the host's bound.
 	 */
 	public getViewStateId(): string {
 		const currentState = this.getState()
@@ -61,7 +67,15 @@ export class VSCodeAPIWrapper {
 		const normalizedViewStateId =
 			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
 
-		if (normalizedViewStateId && !Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)) {
+		// A stored value that breaks the host's length bound - an older build, a manual edit,
+		// a corrupted state - is one the host logs 'Ignoring an oversized viewStateId' for and
+		// refuses on every launch, which would strand this view's pre-launch entry forever. Fall
+		// through to a freshly generated id instead of reusing it.
+		if (
+			normalizedViewStateId &&
+			normalizedViewStateId.length <= VSCodeAPIWrapper.MAX_VIEW_STATE_ID_LENGTH &&
+			!Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
+		) {
 			return normalizedViewStateId
 		}
 

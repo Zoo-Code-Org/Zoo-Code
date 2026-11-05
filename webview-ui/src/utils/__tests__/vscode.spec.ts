@@ -53,6 +53,28 @@ describe("VSCodeAPIWrapper", () => {
 
 		expect(wrapper.getViewStateId()).toBe("persisted-view")
 	})
+	it("replaces a stored viewStateId longer than the host accepts with a generated one", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "generated-view") },
+		})
+		const oversized = "persisted-view".repeat(8)
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: oversized }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// ClineProvider.setViewStateId refuses anything longer than its 64-character bound and logs
+		// "Ignoring an oversized viewStateId", so reusing a stored value that long means the view
+		// never registers a durable id and its pre-launch entry stays under the temporary id on
+		// every launch with nothing that regenerates it. Only #2226's host-minted claim token makes
+		// this bound unnecessary on the webview side.
+		expect(oversized.length).toBeGreaterThan(64)
+		expect(wrapper.getViewStateId()).toBe("generated-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "generated-view" })
+	})
 
 	it("replaces a stored Object.prototype member id with a generated one", () => {
 		Object.defineProperty(globalThis, "crypto", {

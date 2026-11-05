@@ -1021,6 +1021,20 @@ describe("ProviderSettingsManager", () => {
 			)
 		})
 
+		it("should not surface a storage read failure as ProviderSettingsNotFoundError", async () => {
+			// deleteProviderProfile() branches on the not-found type to prune a stale list entry as an
+			// idempotent success, so a storage outage must stay distinguishable from a missing profile:
+			// typed as not-found it would prune the entry while the stored record is still there.
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			const error = await providerSettingsManager.deleteConfig("nonexistent").catch((caught: unknown) => caught)
+
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error).toMatchObject({ message: expect.stringContaining("Failed to delete config:") })
+			// Nothing was rewritten: the outage refused before the profile list was touched.
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
 		it("should throw error when trying to delete last remaining config", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -1128,6 +1142,50 @@ describe("ProviderSettingsManager", () => {
 			await expect(providerSettingsManager.getProfile({ id: "missing-id" })).rejects.toThrow(
 				"Config with ID 'missing-id' not found",
 			)
+		})
+		it("resolves a known id lookup to the profile that owns it", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: { config: {}, id: "default" },
+						named: {
+							apiProvider: providerIdentifiers.anthropic,
+							id: "known-id",
+						},
+					},
+				}),
+			)
+
+			const profile = await providerSettingsManager.getProfile({ id: "known-id" })
+
+			// The two reject cases above would still pass if getProfile refused every id. This is
+			// the accept path through the same public entry point, and it pins exactly what the
+			// mode mapping and deleteProviderProfile consume: the id, the name the id was found
+			// under, and the settings themselves.
+			// A deliberately non-empty config: an empty one is normalized away by load(), so
+			// asserting on it would not prove the settings themselves come back.
+			// Settings, not just identity: an empty config is normalized away by load(), so the
+			// setting is carried in the fixture the way the sibling cases do.
+			expect(profile).toMatchObject({
+				id: "known-id",
+				name: "named",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+		})
+
+		it("should not surface a storage read failure as ProviderSettingsNotFoundError", async () => {
+			// getProfile() is the entry point deleteProviderProfile() and the mode mapping use to treat an
+			// already-deleted profile as an idempotent no-op, so an outage must not arrive as not-found:
+			// that would read as "the profile is gone" when the record could not be read at all.
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			const error = await providerSettingsManager
+				.getProfile({ name: "nonexistent" })
+				.catch((caught: unknown) => caught)
+
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error).toMatchObject({ message: expect.stringContaining("Failed to get profile:") })
 		})
 
 		it("should throw error if secrets storage fails", async () => {
