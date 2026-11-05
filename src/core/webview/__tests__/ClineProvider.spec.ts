@@ -7610,7 +7610,7 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
-	it("should refresh the buffered overlay of another view pinned to the saved profile", async () => {
+	it("should refresh the buffered overlay of another view pinned to the activated profile", async () => {
 		const saver = new ClineProvider(
 			mockContext,
 			mockOutputChannel,
@@ -7636,11 +7636,86 @@ describe("ClineProvider", () => {
 
 		await saver.upsertProviderProfile("shared-profile", providerSettings, true)
 
-		// The pinned view buffered a copy of the profile's settings; a non-activating save must
-		// refresh it, or its getState() keeps serving the pre-save configuration.
+		// The pinned view buffered a copy of the profile's settings; activating the profile must
+		// refresh that copy, or its getState() keeps serving the pre-save configuration.
 		expect(pinned["viewLocalState"].apiConfiguration).toEqual(providerSettings)
 		await saver.dispose()
 		await pinned.dispose()
+	})
+
+	it("should refresh the buffered overlay of another view pinned to the saved profile on a non-activating save", async () => {
+		const saver = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const pinned = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await pinned["saveViewState"]("currentApiConfigName", "shared-profile")
+		// @ts-ignore - The double only backs the profile-store calls of the save path.
+		saver.providerSettingsManager = {
+			saveConfig: vi.fn().mockResolvedValue("shared-id"),
+			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
+			setModeConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
+
+		await saver.upsertProviderProfile("shared-profile", providerSettings, false)
+
+		// A save that does not activate still rewrites the profile on disk. Every other live view
+		// pinned to that profile buffered a copy of its settings, so without a refresh this save
+		// leaves them serving the previous token under the same profile name.
+		expect(pinned["viewLocalState"].apiConfiguration).toEqual(providerSettings)
+
+		await saver.dispose()
+		await pinned.dispose()
+	})
+
+	it("should rebuild a sibling task that follows the saved profile even when its view pins another", async () => {
+		const saver = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const sibling = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// A task restored from history can follow profile A while its view pins profile B: the pin
+		// must not be the condition for rebuilding that task's handler.
+		await sibling["saveViewState"]("currentApiConfigName", "another-profile")
+		// updateTaskApiHandlerIfNeeded is private to ClineProvider, so the double is bound through a
+		// structural view; the assertion goes through `never` rather than `any` (AGENTS.md).
+		const rebuildSpy = vi.fn()
+		;(sibling as never as { updateTaskApiHandlerIfNeeded: typeof rebuildSpy }).updateTaskApiHandlerIfNeeded =
+			rebuildSpy
+		vi.spyOn(sibling, "getCurrentTask").mockReturnValue({ taskApiConfigName: "shared-profile" } as never)
+		// @ts-ignore - The double only backs the profile-store calls of the save path.
+		saver.providerSettingsManager = {
+			saveConfig: vi.fn().mockResolvedValue("shared-id"),
+			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
+			setModeConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
+
+		await saver.upsertProviderProfile("shared-profile", providerSettings, false)
+
+		expect(rebuildSpy).toHaveBeenCalledWith(providerSettings, { forceRebuild: true })
+
+		await saver.dispose()
+		await sibling.dispose()
 	})
 
 	it("should roll back the shared writes when setValues per-view persistence fails", async () => {
