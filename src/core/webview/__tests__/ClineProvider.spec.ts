@@ -10437,6 +10437,73 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
+			// The up-to-date guard reads every zoo-gateway profile rather than one end of the list, and it
+			// skips profiles that belong to another provider. With a single profile in the store a
+			// first-only, a last-only and an every-profile check all behave the same, so the order of the
+			// two rows below is what pins the guard down.
+			it.each([
+				{
+					title: "re-seeds when a later zoo-gateway profile is stale and the first is current",
+					profiles: ["Zoo Gateway", "Other", "Zoo Gateway 2"],
+					staleProfile: "Zoo Gateway 2",
+				},
+				{
+					title: "re-seeds when the first zoo-gateway profile is stale and the last is current",
+					profiles: ["Zoo Gateway", "Other", "Zoo Gateway 2"],
+					staleProfile: "Zoo Gateway",
+				},
+			])("$title", async ({ profiles, staleProfile }) => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+				const getProfile = vi.fn().mockImplementation(({ name }: { name: string }) =>
+					// Name-keyed so the non-gateway profile reads as up to date: the only way this test
+					// fails on that profile is if the provider filter stops ignoring it.
+					name === staleProfile
+						? {
+								zooSessionToken: "stale-token",
+								zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+							}
+						: {
+								zooSessionToken: "fresh-token",
+								zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+							},
+				)
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue(
+						profiles.map((name) => ({
+							name,
+							apiProvider:
+								name === "Other" ? providerIdentifiers.anthropic : providerIdentifiers.zooGateway,
+						})),
+					),
+					getProfile,
+				}
+
+				await provider["ensureZooGatewayProfileSeeded"]()
+
+				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
+				expect(getProfile.mock.calls.map(([arg]) => arg.name)).not.toContain("Other")
+			})
+
+			it("re-seeds when a zoo-gateway profile carries no token at all", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
+					// An imported or half-written profile: the base URL is right, the token is absent.
+					getProfile: vi
+						.fn()
+						.mockResolvedValue({ zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1" }),
+				}
+
+				await provider["ensureZooGatewayProfileSeeded"]()
+
+				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
+			})
 		})
 	})
 })
