@@ -6759,6 +6759,145 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	// The two deletions an unpinned view can meet, measured separately rather than averaged.
+	// This one removes a profile the shared selection does not name, so nothing this view
+	// resolves through disappears; the deletion still hands the view the selection through
+	// activation, and the durable record gains a pin the view never authored.
+	it("anchors a view with no pin of its own on the shared selection when an unrelated profile is deleted", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const oldProfile: ProviderSettingsEntry = {
+			name: "old-profile",
+			id: "old-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const keeperProfile: ProviderSettingsEntry = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+		await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "keeper-shared",
+		})
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const keeperSettings = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const activateProfile = vi.fn().mockResolvedValue(keeperSettings)
+		// @ts-ignore - Replace the manager with a structural double for this deletion.
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			activateProfile,
+			listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+			setModeConfig: vi.fn(),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+			getProfile: vi
+				.fn()
+				.mockImplementation(async ({ name }: { name: string }) =>
+					name === "keeper-profile"
+						? keeperSettings
+						: { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter },
+				),
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+				currentApiConfigName: "keeper-profile",
+				modeApiConfigs: {},
+			}),
+		}
+
+		await provider.deleteProviderProfile(oldProfile)
+
+		const served = await provider.getState({ includeTaskHistory: false })
+
+		// Measured on the current head: the deletion still takes the activation path here, so the
+		// view comes back anchored to the selection it was following. What it serves is unchanged -
+		// the shared store already held that profile's settings - but the pin is new. The case
+		// below isolates the deletion the activation path is actually for.
+		expect(activateProfile).toHaveBeenCalledWith({ name: "keeper-profile" })
+		expect(provider.pinnedProfileName).toBe("keeper-profile")
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+		expect(served.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+		expect(served.currentApiConfigName).toBe("keeper-profile")
+		await provider.dispose()
+	})
+
+	// The matching leg for the same unpinned view: when the deleted profile is the shared
+	// selection this view resolves through, the replacement must be activated for it - the
+	// shared store still carries the deleted profile's settings until this path replaces
+	// them. Measured identical before and after the tightened condition below.
+	it("activates the replacement for a view with no pin when the deleted profile is the shared selection", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const oldProfile: ProviderSettingsEntry = {
+			name: "old-profile",
+			id: "old-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const keeperProfile: ProviderSettingsEntry = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+		await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "old-shared",
+		})
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const keeperSettings = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const activateProfile = vi.fn().mockResolvedValue(keeperSettings)
+		// @ts-ignore - Replace the manager with a structural double for this deletion.
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			activateProfile,
+			listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+			setModeConfig: vi.fn(),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+			getProfile: vi
+				.fn()
+				.mockImplementation(async ({ name }: { name: string }) =>
+					name === "keeper-profile"
+						? keeperSettings
+						: { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter },
+				),
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+				currentApiConfigName: "keeper-profile",
+				modeApiConfigs: {},
+			}),
+		}
+
+		await provider.deleteProviderProfile(oldProfile)
+
+		const served = await provider.getState({ includeTaskHistory: false })
+
+		expect(activateProfile).toHaveBeenCalledWith({ name: "keeper-profile" })
+		expect(provider.pinnedProfileName).toBe("keeper-profile")
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+		expect(served.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+		await provider.dispose()
+	})
+
 	describe("local state isolation", () => {
 		it("should isolate mode state between instances", async () => {
 			const provider1 = new ClineProvider(

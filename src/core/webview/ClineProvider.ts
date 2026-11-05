@@ -3670,11 +3670,21 @@ export class ClineProvider
 			// do not rehydrate a missing profile name after a reload.
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
-			const viewPinsDeletedProfile =
+			// Whether this deletion has to re-anchor this view onto the replacement. The second leg
+			// is a view whose own pin names the deleted profile. The first leg is narrower than it
+			// reads: a view with no pin of its own does not resolve to the deleted profile, it
+			// follows the shared selection, and the deletion hands that selection to it through
+			// activation regardless of which profile was removed - the same hand-off the manager
+			// gate and the current task handler depend on. Measured both deletions: with the shared
+			// selection pointing at a survivor, deleting an unrelated profile still activates the
+			// selection for this view and leaves it pinned to it; deleting the profile the selection
+			// names activates the replacement. Either way what the view serves afterwards is the
+			// profile the shared store holds.
+			const viewFollowsDeletedProfile =
 				this.viewLocalState.currentApiConfigName === undefined ||
 				this.viewLocalState.currentApiConfigName === profileToDelete.name
 
-			if (viewPinsDeletedProfile) {
+			if (viewFollowsDeletedProfile) {
 				// Apply the replacement through the activation path so this view's
 				// viewLocalState.apiConfiguration and the current task's api handler are
 				// refreshed; a name-only update would leave the deleted profile's settings
