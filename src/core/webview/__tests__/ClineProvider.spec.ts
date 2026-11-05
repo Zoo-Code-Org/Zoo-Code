@@ -6800,6 +6800,25 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	const seedPreLaunchEntry = async (provider: ClineProvider) => {
+		// A pre-launch selection under the instance's temporary id, authored by this instance.
+		await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
+		return provider.viewId
+	}
+
+	// Moves the provider's view-state generation while its own storage write is in flight,
+	// which is what a dispose or a re-registration during the write does. The double delegates
+	// to the real setter so the write still lands: replacing it outright would hide the move.
+	const moveGenerationDuringViewStatesWrite = (provider: ClineProvider) => {
+		const original = provider.contextProxy.setValue.bind(provider.contextProxy)
+		vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (...args: unknown[]) => {
+			await (original as (...a: unknown[]) => Promise<void>)(...args)
+			if (args[0] === "viewStates") {
+				provider["viewStateGeneration"]++
+			}
+		})
+	}
 	it("keeps a pre-launch selection when registration re-keys it onto an existing stable entry", async () => {
 		const provider = new ClineProvider(
 			mockContext,
@@ -6821,6 +6840,80 @@ describe("ClineProvider", () => {
 		expect(mockContext.globalState.get("viewStates")).toMatchObject({
 			"stable-view": { mode: "architect", claimToken: "host-token" },
 		})
+
+		await provider.dispose()
+	})
+
+	it("puts a re-key back under the temporary id when the view died before the entry reached a renderer", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const temporaryId = await seedPreLaunchEntry(provider)
+		moveGenerationDuringViewStatesWrite(provider)
+
+		await provider["rekeyPersistedViewStateEntry"]("stable-view")
+
+		// The move committed before the generation check ran. Leaving it applied binds the entry
+		// to a view id no renderer will ever present, and clears nothing: a later launch reads
+		// the temporary id as unauthored and the selection is stranded under the dead claim.
+		const states = mockContext.globalState.get<Record<string, { mode?: string }>>("viewStates") ?? {}
+		expect(states[temporaryId]?.mode).toBe("architect")
+		expect(states["stable-view"]).toBeUndefined()
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
+
+		await provider.dispose()
+	})
+
+	it("clears authorship when the dead view had already merged the pre-launch entry", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const temporaryId = await seedPreLaunchEntry(provider)
+		const seeded = provider.contextProxy.getValue("viewStates") ?? {}
+		await provider.contextProxy.setValue("viewStates", {
+			...seeded,
+			"stable-view": { claimToken: "host-token", updatedAt: 2 },
+		})
+		moveGenerationDuringViewStatesWrite(provider)
+
+		await provider["rekeyPersistedViewStateEntry"]("stable-view")
+
+		// A merged entry cannot be pulled back out whole, so the temporary name is gone either
+		// way; authorship must not survive it, or every later launch keeps treating this view as
+		// the author of an entry that no longer exists under the temporary id.
+		const states =
+			mockContext.globalState.get<Record<string, { mode?: string; claimToken?: string }>>("viewStates") ?? {}
+		expect(states["stable-view"]).toMatchObject({ mode: "architect", claimToken: "host-token" })
+		expect(states[temporaryId]).toBeUndefined()
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(false)
+
+		await provider.dispose()
+	})
+
+	it("keeps the re-key applied and clears authorship while the view generation is live", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const temporaryId = await seedPreLaunchEntry(provider)
+
+		await provider["rekeyPersistedViewStateEntry"]("stable-view")
+
+		const states = mockContext.globalState.get<Record<string, { mode?: string }>>("viewStates") ?? {}
+		expect(states["stable-view"]?.mode).toBe("architect")
+		expect(states[temporaryId]).toBeUndefined()
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(false)
 
 		await provider.dispose()
 	})

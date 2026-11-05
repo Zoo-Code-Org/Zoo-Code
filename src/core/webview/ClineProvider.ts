@@ -1105,8 +1105,26 @@ export class ClineProvider
 			await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(states))
 
 			if (!provider.isViewStateGenerationLive(scheduledGeneration)) {
-				// The move landed but the view is gone: keep the authorship flag as dispose
-				// left it rather than mutating a disposed provider.
+				// The move committed while the view it was written for went away. Leaving it applied
+				// binds the entry to a claim no renderer will ever present: the selection is stranded
+				// under a dead view id and the temporary name is already deleted. Put the entry back
+				// under the name its author can still find it by, and keep the authorship flag so the
+				// next launch re-keys it. The restore is best effort - if that write fails too the
+				// entry stays under the stable id rather than disappearing.
+				if (existingStableEntry) {
+					// Merged into a stable entry it cannot be pulled back out whole, so the temporary
+					// name is gone either way; authorship must not survive it, or every later launch
+					// keeps treating this view as the author of an entry that no longer exists.
+					provider.wroteUnderTemporaryViewStateId = false
+					return
+				}
+				const after = provider.getPersistedViewStates({ fresh: true })
+				const moved = after[nextViewStateId]
+				if (moved) {
+					delete after[nextViewStateId]
+					after[previousViewStateId] = moved
+					await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(after))
+				}
 				return
 			}
 
