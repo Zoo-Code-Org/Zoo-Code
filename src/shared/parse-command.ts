@@ -417,6 +417,12 @@ function scanShellSyntax(text: string): ScanOutcome {
 	// ends the expansion at such a closer but not the surrounding word. A `#`
 	// directly there is word content, never a comment start.
 	let expansionCloseEnd = -1
+	// Index just past the most recent frame close inside an open frame, or -1.
+	// A `#` directly there continues the word like the host-level rule above.
+	// A group-paren closer is a word boundary — bash comments `$( (x)# )` — so
+	// only frame-kind pops set this index.
+	// Stryker disable next-line UnaryOperator: the guard only consults this sentinel at a frame-comment position, and the scan index is never 1 inside a frame (frame content starts at least two past the opener), so no reachable input distinguishes `+1` from `-1`.
+	let frameCloseEnd = -1
 	// Index just past the most recent `\c` escape pair that the scan emitted
 	// at host level, or -1. To the shell, the escaped character is an ordinary
 	// word character. The word continues past the pair. A `#` directly at this
@@ -1320,6 +1326,13 @@ function scanShellSyntax(text: string): ScanOutcome {
 		const frames: RegionFrame[] = []
 		let localParamOpen = 0
 		let dqOpen = false
+		// Index just past the most recent non-group frame close in this walk,
+		// or -1. The shell ends an expansion at its closer but not the
+		// surrounding word, so a `#` directly there continues the word instead
+		// of starting a comment. A group-paren closer is a word boundary, so
+		// the group path never sets this index.
+		// Stryker disable next-line UnaryOperator: every walk starts at or past index 2 and frame content starts later still, so the sentinel `+1` can never equal the scan index at a frame-comment position, and no reachable input distinguishes it from `-1`.
+		let frameCloseEnd = -1
 		let i = start
 		while (i < end) {
 			const char = text[i]
@@ -1340,10 +1353,13 @@ function scanShellSyntax(text: string): ScanOutcome {
 				// substitution frames take the comment. The word-boundary set
 				// is the default $IFS blanks plus the metacharacters that end
 				// a word. A missed comment lets its `)` slice the payload, so
-				// the boundary must be exact.
+				// the boundary must be exact. Directly at `frameCloseEnd` the
+				// word also continues: a closer that popped a nested frame ends
+				// the expansion, not the word.
 				if (
 					char === "#" &&
 					(top.kind === "command-substitution" || top.kind === "process-substitution") &&
+					i !== frameCloseEnd &&
 					WORD_BOUNDARY_BEFORE.test(text[i - 1])
 				) {
 					// Clamp at the region end. A comment that runs past it
@@ -1362,6 +1378,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 						continue
 					}
 					const closed = frames.pop() as RegionFrame
+					frameCloseEnd = i + 1
 					if (QUOTE_FRAME_KINDS.includes(closed.kind)) {
 						// Quote regions are opaque. Nothing inside them is
 						// extracted. The enclosing frame resumes after the
@@ -1510,6 +1527,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 						if (arithError) {
 							return arithError
 						}
+						frameCloseEnd = arith.end
 						i = arith.end
 						continue
 					}
@@ -1701,16 +1719,23 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// inert here, exactly as in the `$((` loop below.
 			let depth = 1 // the opening bracket
 			let j = i + 2
-			// Set once the scan passes a region that never closes. The shell
-			// reads every later byte inside that region, so no later byte can
-			// open one: plain counting finishes the scan instead of re-walking
-			// the tail at each byte. An expression closed through a masked tail
-			// still holds the unclosed opener in its interior, so the interior
-			// walk fails it closed.
+			// Set once the scan passes an unclosed frame-kind region (`$(`,
+			// `${`, backtick). The shell reads every later byte inside that
+			// region, so no later byte can open one: plain counting finishes
+			// the scan instead of re-walking the tail at each byte. An
+			// expression closed through such a masked tail still holds that
+			// opener in its interior, so the interior walk fails it closed.
+			// An unclosed quote is invisible to that walk, which reads a
+			// top-level quote as literal text, so it ends the expression
+			// unclosed at the opener instead — bash refuses that input too.
 			let maskedTail = false
 			while (j < text.length) {
 				const jumped = maskedTail ? null : skipInertRegion(j, true)
 				if (jumped === INERT_UNCLOSED) {
+					if (openQuote(j) !== null) {
+						// Stryker disable next-line ObjectLiteral: the callers only test `closed`'s falsiness on this path and fail closed immediately, never reading `end`, so an empty object emits the same error and host bytes.
+						return { end: text.length, closed: false }
+					}
 					maskedTail = true
 					j++
 					continue
@@ -1734,13 +1759,19 @@ function scanShellSyntax(text: string): ScanOutcome {
 		// $(( … )) balances plain parens. An unbalanced scan runs to end of input.
 		let depth = 2 // the two opening parens
 		let j = i + 3
-		// The `$[…]` loop's masked-tail rule applies here too: past an
-		// unclosed region the shell opens nothing else, so plain counting
-		// keeps the scan linear without changing what the depth sees.
+		// The `$[…]` loop's masked-tail rule applies here too, unclosed-quote
+		// split included: past an unclosed frame-kind region the shell opens
+		// nothing else, so plain counting keeps the scan linear without
+		// changing what the depth sees, while an unclosed quote ends the
+		// expression because the interior walk reads it as literal text.
 		let maskedTail = false
 		while (j < text.length && depth > 0) {
 			const jumped = maskedTail ? null : skipInertRegion(j)
 			if (jumped === INERT_UNCLOSED) {
+				if (openQuote(j) !== null) {
+					// Stryker disable next-line ObjectLiteral: the callers only test `closed`'s falsiness on this path and fail closed immediately, never reading `end`, so an empty object emits the same error and host bytes.
+					return { end: text.length, closed: false }
+				}
 				maskedTail = true
 				j++
 				continue
@@ -1862,6 +1893,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 					// when the enclosing payload is re-scanned. Slice its inner
 					// text only where a consumer exists. Otherwise deep nesting
 					// would cost O(n²).
+					frameCloseEnd = closeEnd
 					const paramAncestor = innermostParam(stack, paramFramesOpen)
 					if (closed.kind === "parameter-expansion") {
 						paramAncestor?.payloads?.push(...(closed.payloads ?? []))
@@ -1890,10 +1922,13 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// `${x#pat}` are operator syntax. The word-boundary set is the
 			// body walk's rule: the default $IFS blanks plus the
 			// metacharacters that end a word, so a `#` glued to a word stays
-			// word text.
+			// word text. Directly at `frameCloseEnd` the word continues as
+			// well: a closer that popped a nested frame ends the expansion,
+			// not the word.
 			if (
 				char === "#" &&
 				(top.kind === "command-substitution" || top.kind === "process-substitution") &&
+				i !== frameCloseEnd &&
 				WORD_BOUNDARY_BEFORE.test(text[i - 1])
 			) {
 				i = endOfLine(i)
@@ -1956,6 +1991,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 						// substitutions to the innermost expansion ancestor, like
 						// a nested close does.
 						innermostParam(stack, paramFramesOpen)?.payloads?.push(...arithPayloads)
+						frameCloseEnd = arith.end
 						i = arith.end
 						continue
 					}

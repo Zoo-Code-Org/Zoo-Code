@@ -727,6 +727,21 @@ describe("parseCommand", () => {
 			expect(structuralError("echo $(( `x")?.quoteType).toBe("arithmetic")
 			expect(structuralError("echo $[1 ${")?.quoteType).toBe("arithmetic")
 			expect(structuralError("echo $(( $(f 'x) ))")?.quoteType).toBe("command-substitution")
+			// The interior walk can only report a frame-kind opener that never
+			// closes; it reads a top-level quote inside the expression as
+			// literal text, so the closer scan itself must fail an unclosed
+			// quote closed. bash refuses each of these inputs too.
+			expect(structuralError("echo $(( 'x ))")?.quoteType).toBe("arithmetic")
+			expect(structuralError('echo $(( "x ))')?.quoteType).toBe("arithmetic")
+			expect(structuralError("echo $[1 'x ]")?.quoteType).toBe("arithmetic")
+			// An unclosed frame region stays on the masked path: plain counting
+			// closes the expression and the interior walk names the frame, so
+			// the error kind is the opener's, never "arithmetic". bash refuses
+			// each of these inputs too.
+			expect(structuralError("echo $[ $(f ]")?.quoteType).toBe("command-substitution")
+			expect(structuralError("echo $[ ${f ]")?.quoteType).toBe("parameter-expansion")
+			expect(structuralError("echo $[ `f ]")?.quoteType).toBe("backtick")
+			expect(structuralError("echo $(( ${f ))")?.quoteType).toBe("parameter-expansion")
 			const closed = parseCommand("echo $(( 1 + $(printf 2) ))")
 			expect(closed.parseError).toBeNull()
 			expect(closed.commands).toEqual(["echo $(( 1 + $(printf 2) ))", "printf 2"])
@@ -1187,6 +1202,28 @@ describe("parseCommand", () => {
 			expect(observed).toEqual(rows.map(({ name, input: _input, ...expected }) => ({ name, ...expected })))
 		})
 
+		it("keeps a # after a nested substitution's closer word-internal inside a frame", () => {
+			// A closer that pops a nested frame inside a frame ends the
+			// expansion, not the surrounding word: bash prints `a#b` for this
+			// input, so the frame-comment rule must skip a `#` directly after
+			// such a closer. Only a group-paren closer stays a word boundary
+			// (the table above pins the group row).
+			const { commands, parseError } = parseCommand("echo $(echo $(echo a)#b)")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo", "echo", "echo a", "#b"])
+		})
+
+		it("keeps a # after a nested substitution's closer word-internal in a heredoc body", () => {
+			// The body walk's frame-comment rule carries the same closer
+			// tracker: inside a body substitution the `#` after a nested
+			// frame's closer continues the word, and bash expands the body's
+			// substitution to `a#b` instead of losing the frame closer to a
+			// comment.
+			const { commands, parseError } = parseCommand("cat <<E\n$(echo $(echo a)#b)\nE\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["cat <<E\n$(echo $(echo a)#b)\nE", "echo", "echo a", "#b"])
+		})
+
 		it("does not treat exotic JS-\\s bytes as shell word separators", () => {
 			// bash word-splits on the default $IFS blanks (space, tab, newline)
 			// only. JS `\s` is wider — VT, FF, NBSP, U+3000, U+2001, U+2028 —
@@ -1290,6 +1327,9 @@ describe("parseCommand", () => {
 			// substitution — so none may surface as a segment either.
 			const unterminated = parseCommand("cat <<E $'a\\' $(zap x)\nbody\nE\n")
 			expect(unterminated.parseError).toBeNull()
+			// The full array pins what the parse does return: the payload never
+			// surfaces, and the unterminated word's bytes ride the host verbatim.
+			expect(unterminated.commands).toEqual(["cat <<E\nbody\nE $a\\ $ ( zap x )"])
 			expect(unterminated.commands).not.toContain("zap x")
 			// The chained-opener collector reads the same remainder bytes: an
 			// ANSI-C word must not shift its quote parity into a hidden `<<`
@@ -1318,7 +1358,6 @@ describe("parseCommand", () => {
 			// host text.
 			const { commands, parseError } = parseCommand("cat <<E $'a \\' # b' $(echo M30 >&2)\nbody\nE\n")
 			expect(parseError).toBeNull()
-			expect(commands).toContain("echo M30 >&2")
 			expect(commands).toEqual(["cat <<E\nbody\nE a ' # b $ ( echo M30 >& 2 )", "echo M30 >&2"])
 		})
 
@@ -1342,7 +1381,7 @@ describe("parseCommand", () => {
 			// segment.
 			const clean = parseCommand("cat <<'E' $'\\'' $(echo M22 >&2)\nbody\nE\n")
 			expect(clean.parseError).toBeNull()
-			expect(clean.commands).toContain("echo M22 >&2")
+			expect(clean.commands).toEqual(["cat <<'E'\nbody\nE ' $ ( echo M22 >& 2 )", "echo M22 >&2"])
 		})
 
 		it("keeps an escaped double quote from closing a double-quoted opener region", () => {
