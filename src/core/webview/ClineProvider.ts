@@ -3779,21 +3779,31 @@ export class ClineProvider
 			// settings into their overlays first.
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
 
-			try {
-				await Promise.all([
-					this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
-					// Route through setValue so the in-memory viewLocalState buffer tracks the
-					// activated profile: a plain ContextProxy write would leave a stale loaded
-					// currentApiConfigName shadowing the new value in getValues().
-					this.setValue("currentApiConfigName", name),
-					this.contextProxy.setProviderSettings(providerSettings),
-					// setProviderSettings writes the shared store directly, bypassing the
-					// view-local mutation path: clear this view's buffered apiConfiguration
-					// overlay (if any) so a stale loaded profile cannot keep shadowing the
-					// new settings in getState().
-					this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
-				])
-			} catch (error) {
+			// The overlay this view holds before the shared write below. The failure path restores it when
+			// the pin never took the activated name; the success path overwrites it either way.
+			const previousViewApiConfiguration = this.viewLocalState.apiConfiguration
+
+			// `allSettled` rather than `all` so the failure path below cannot observe the pin mid-race:
+			// a rejection must not return while another leg is still in flight, because the decision about
+			// this view's overlay depends on whether the pin write landed.
+			const sharedWriteResults = await Promise.allSettled([
+				this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
+				// Route through setValue so the in-memory viewLocalState buffer tracks the
+				// activated profile: a plain ContextProxy write would leave a stale loaded
+				// currentApiConfigName shadowing the new value in getValues().
+				this.setValue("currentApiConfigName", name),
+				this.contextProxy.setProviderSettings(providerSettings),
+				// setProviderSettings writes the shared store directly, bypassing the
+				// view-local mutation path: clear this view's buffered apiConfiguration
+				// overlay (if any) so a stale loaded profile cannot keep shadowing the
+				// new settings in getState().
+				this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
+			])
+			const failedSharedWrite = sharedWriteResults.find(
+				(result): result is PromiseRejectedResult => result.status === "rejected",
+			)
+
+			if (failedSharedWrite) {
 				// The manager has already written the activated profile, so the caller keeps the
 				// switch and delivers its pending message now. The task must run the activated
 				// profile's settings: without this rebuild the handler still belongs to the profile
@@ -3802,7 +3812,19 @@ export class ClineProvider
 					forceRebuild: true,
 					expectedCurrentTaskId: options?.expectedCurrentTaskId,
 				})
-				throw error
+
+				// The legs above are not atomic with each other, so which half of the shared write landed
+				// is not knowable here. Put the overlay in the state that agrees with the pin this view
+				// actually holds now that every leg has settled: the activated settings when the pin took
+				// the new name (the same invariant refreshViewLocalStateForUpdatedProfile enforces on the
+				// success path, and the configuration the rebuild above handed the task), and otherwise the
+				// overlay this view held before the switch - pinning the activated settings under a name
+				// write that never landed would create the same mismatch in the other direction.
+				await this._saveViewLocalStateFromMutation({
+					apiConfiguration: this.pinnedProfileName === name ? providerSettings : previousViewApiConfiguration,
+				})
+
+				throw failedSharedWrite.reason
 			}
 
 			// Other live views may have buffered this profile's settings earlier;

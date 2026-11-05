@@ -1077,6 +1077,17 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(saveViewStateSpy).not.toHaveBeenCalledWith("mode", modeBeforeSwitch)
 			// Listeners must learn the committed mode before the error is rethrown.
 			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
+
+			// getState() must not pair the profile the activation committed with the settings the failed
+			// shared write left behind: the pin took the new name, so this view overlay has to carry the
+			// activated profile settings - the same invariant the success path enforces through
+			// refreshViewLocalStateForUpdatedProfile, and the configuration the rebuild above handed
+			// the task.
+			const stateAfterFailure = await provider.getState()
+			expect(stateAfterFailure.currentApiConfigName).toBe("ask-profile")
+			expect(stateAfterFailure.apiConfiguration).toMatchObject({
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
 		})
 
 		test("rebuilds the task handler on a failed shared write when provider and model are unchanged", async () => {
@@ -1126,6 +1137,76 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect((mockTask as { apiConfiguration?: ProviderSettings }).apiConfiguration?.openRouterApiKey).toBe(
 				"activated-key",
 			)
+
+			// Same rule for the credentials case: the handler runs the activated profile key, so the
+			// state the webview reads under the committed pin must report it too.
+			const stateAfterFailure = await provider.getState()
+			expect(stateAfterFailure.currentApiConfigName).toBe("ask-profile")
+			expect(stateAfterFailure.apiConfiguration).toMatchObject({
+				openRouterApiKey: "activated-key",
+				rateLimitSeconds: 7,
+			})
+		})
+
+		// Mirror case for the same failure path: the leg that rejects is the pin write itself, not
+		// the provider-settings write. The activation still stands for the task, but this view never
+		// took the new name, so its overlay must go back to what it held before the switch -
+		// pinning the activated settings under a name that never landed would create the same
+		// mismatch in the other direction.
+		test("restores the previous overlay when the pin write fails after activation", async () => {
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+					openRouterApiKey: "task-key",
+				},
+			})
+			await provider.addClineToStack(mockTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
+			const activatedProfile = {
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "activated-key",
+				rateLimitSeconds: 7,
+			}
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(activatedProfile)
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue(activatedProfile)
+			// The pin and overlay this view held before the switch.
+			const profileNameBeforeSwitch = (await provider.getState()).currentApiConfigName
+			const pinBeforeSwitch = provider.pinnedProfileName
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "overlay-before",
+			})
+			const contextProxySetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation((key, value) =>
+				key === "currentApiConfigName"
+					? Promise.reject(new Error("pin write failed"))
+					: contextProxySetValue(key, value),
+			)
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockResolvedValue(undefined)
+
+			await expect(provider.handleModeSwitch("ask" as Mode, undefined)).rejects.toThrow("pin write failed")
+
+			// The task still runs the activated profile: the keep-the-switch rebuild is not gated on the
+			// pin write.
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterApiKey: "activated-key" }),
+			)
+			// And this view still reports its own profile with its own settings: the overlay the failure
+			// path cleared is back, not the activated profile settings, and not the shared store copy
+			// that the successful provider-settings write left behind.
+			expect(provider.pinnedProfileName).toBe(pinBeforeSwitch)
+			const stateAfterFailure = await provider.getState()
+			expect(stateAfterFailure.currentApiConfigName).toBe(profileNameBeforeSwitch)
+			expect(stateAfterFailure.apiConfiguration).toMatchObject({ openRouterApiKey: "overlay-before" })
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
