@@ -37,6 +37,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -742,8 +743,18 @@ export const webviewMessageHandler = async (
 			}
 			break
 
-		case "updateSettings":
-			if (message.updatedSettings) {
+		case "updateSettings": {
+			// The settings are written one at a time, in the order sent, and not as a transaction. If a write fails, the
+			// ones before it stay stored and the ones after it are not written. The display settings only change how
+			// times are shown, so a partial save is harmless, and saving again completes it. Either way the webview is
+			// refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`): the
+			// settings page keeps the user's edits as unsaved after a failure. The error is then thrown, as it always was.
+			let failed = false
+			let failure: unknown
+
+			try {
+				if (!message.updatedSettings) break
+
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
@@ -763,6 +774,12 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// An invalid display value is ignored, before anything is done for it.
+					if (isInvalidDisplayValue(key, value)) {
+						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {
@@ -874,11 +891,33 @@ export const webviewMessageHandler = async (
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
-
-				await provider.postStateToWebview()
+			} catch (error) {
+				failed = true
+				failure = error
 			}
 
+			// A failed refresh must neither undo a stored save nor keep the webview from getting the result.
+			try {
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			if (message.requestId) {
+				await provider.postMessageToWebview({
+					type: "settingsSaveResult",
+					requestId: message.requestId,
+					success: !failed,
+					...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+				})
+			}
+
+			if (failed) throw failure
+
 			break
+		}
 
 		case "terminalOperation":
 			if (message.terminalOperation) {
