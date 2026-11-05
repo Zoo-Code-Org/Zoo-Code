@@ -87,32 +87,6 @@ export class ContextProxy {
 	private stateCache: GlobalState
 	private secretCache: SecretState
 
-	// Per-key write tokens: a failed durable write rolls its cache value back only if it
-	// is still the current write for that key. The rollback target is always the durable
-	// record (see below), so the guard exists for one interleaving: a newer write that
-	// has already moved the cache but whose success is not confirmed yet, whose failure
-	// would otherwise be clobbered by the older write's rollback before the newer
-	// write's success record lands.
-	private stateWriteTokens = new Map<GlobalStateKey, symbol>()
-	private secretWriteTokens = new Map<SecretStateKey, symbol>()
-
-	// Tracks the last value confirmed to be in durable storage per key (seeded by
-	// initialize, refreshed by each confirmed write and refresh load, cleared by
-	// resetAllState), so a failed write rolls the cache back to the durable value
-	// instead of the cache value at call time — a superseded in-flight write may have
-	// already overwritten that value, and restoring it would leave the cache ahead of
-	// storage when the superseding write also fails.
-	private durableState = new Map<GlobalStateKey, unknown>()
-	private durableSecrets = new Map<SecretStateKey, unknown>()
-	// Write-completion generations, one per persistence store. A write issued before
-	// resetAllState (or refreshSecrets) may still be in flight when that reset/refresh
-	// re-seeds the durable records from storage: its value is then obsolete, and
-	// re-recording it would leave a later failed write rolling the cache back to a value
-	// storage no longer holds. Each store compares only its own generation, so a secret
-	// refresh cannot invalidate an in-flight global-state completion (or vice versa).
-	// resetAllState advances both; refreshSecrets advances only the secret generation.
-	private stateGeneration = 0
-	private secretGeneration = 0
 	private _isInitialized = false
 
 	constructor(context: vscode.ExtensionContext) {
@@ -131,8 +105,6 @@ export class ContextProxy {
 			try {
 				// Revert to original assignment
 				this.stateCache[key] = this.originalContext.globalState.get(key)
-				// This load is a confirmed storage read: seed the rollback record.
-				this.durableState.set(key, this.stateCache[key])
 			} catch (error) {
 				logger.error(`Error loading global ${key}: ${error instanceof Error ? error.message : String(error)}`)
 			}
@@ -142,8 +114,6 @@ export class ContextProxy {
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
 					this.secretCache[key] = await this.originalContext.secrets.get(key)
-					// This load is a confirmed storage read: seed the rollback record.
-					this.durableSecrets.set(key, this.secretCache[key])
 				} catch (error) {
 					logger.error(
 						`Error loading secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -153,8 +123,6 @@ export class ContextProxy {
 			...GLOBAL_SECRET_KEYS.map(async (key) => {
 				try {
 					this.secretCache[key] = await this.originalContext.secrets.get(key)
-					// This load is a confirmed storage read: seed the rollback record.
-					this.durableSecrets.set(key, this.secretCache[key])
 				} catch (error) {
 					logger.error(
 						`Error loading global secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
@@ -180,7 +148,6 @@ export class ContextProxy {
 				if (this.secretCache[key] === undefined) {
 					await this.originalContext.secrets.store(key, legacyValue)
 					this.secretCache[key] = legacyValue
-					this.durableSecrets.set(key, legacyValue)
 				}
 				// Erase the plaintext only after the secret write succeeded (or was
 				// unnecessary): a failed store leaves the value for a retry instead of
@@ -577,15 +544,7 @@ export class ContextProxy {
 	 * This is useful when you need to ensure the cache has the latest values
 	 */
 	async refreshSecrets(): Promise<void> {
-		// Invalidate secret writes issued before this refresh: once the re-seed below lands,
-		// their completions hold obsolete values that must not re-record over the freshly
-		// loaded durable records. Global-state writes are untouched by a secrets refresh.
-		this.secretGeneration += 1
-		// The refresh re-syncs the whole secret cache from storage and re-seeds the
-		// durable records with the loaded values, so a later rollback of a pending
-		// pre-refresh write restores the freshly loaded value (the in-write token
-		// guard still protects the interleaving where a newer write has moved the
-		// cache but its success is not confirmed yet).
+		// The refresh re-syncs the whole secret cache from storage.
 		const promises = [
 			...SECRET_STATE_KEYS.map(async (key) => {
 				try {
@@ -803,23 +762,9 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
-		// Invalidate writes issued before this reset: once the durable maps below
-		// are cleared and re-seeded by the re-initialization, their completions hold
-		// obsolete values that must not re-record over the re-seeded records.
-		this.stateGeneration += 1
-		this.secretGeneration += 1
-		// Clear in-memory caches. The write tokens are left in place: the durable
-		// records below carry the rollback protection (see the in-write token guard,
-		// which still covers the interleaving where a newer write has moved the cache
-		// but its success is not confirmed yet).
+		// Clear in-memory caches.
 		this.stateCache = {}
 		this.secretCache = {}
-		// The durable records are rebuilt by the initialize() at the end of this reset
-		// (the storage delete above is awaited first), so they are cleared now: a write
-		// failing while the re-initialization has not re-seeded them must roll back to
-		// nothing, not to the pre-reset durable value storage no longer holds.
-		this.durableState.clear()
-		this.durableSecrets.clear()
 
 		await Promise.all([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
