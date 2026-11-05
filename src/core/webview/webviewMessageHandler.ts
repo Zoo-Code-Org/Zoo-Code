@@ -782,6 +782,18 @@ export const webviewMessageHandler = async (
 						continue
 					}
 
+					// The registered viewStates map is host-owned. ClineProvider.setValues drops a caller-supplied
+					// map because the provider rewrites that map from a full read of it; this loop writes through
+					// ContextProxy directly, so the same key has to be dropped here too - a webview-supplied map
+					// would replace every view's durable selection, not just this view's, and an unset would erase
+					// the map. The key is dropped before any side effect is run for it.
+					if (key === "viewStates") {
+						provider.log(
+							"[updateSettings] Ignored a webview-supplied viewStates map; the registered map is written by the extension host.",
+						)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {

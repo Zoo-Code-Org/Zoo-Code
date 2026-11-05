@@ -2116,6 +2116,28 @@ it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loo
 	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 })
 
+// The registered viewStates map is host-owned: ClineProvider.setValues drops a caller-supplied map
+// because the provider rewrites that map from a full read of it. This loop writes through ContextProxy
+// directly, so the same key has to be dropped here too - a webview-supplied map would replace every
+// view's durable selection, not just this view's, and an unset would erase the map.
+it("ignores a webview-supplied viewStates map in the generic updateSettings loop", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: {
+			viewStates: { "crafted-view": { mode: "ask" } },
+			alwaysDenyUnapprovedCommands: true,
+		},
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	expect(mockClineProvider.log).toHaveBeenCalledWith(
+		expect.stringContaining("Ignored a webview-supplied viewStates map"),
+	)
+})
+
 // Both allowlists are normalized by the same branch, so both are held to the
 // same contract.
 describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {

@@ -5553,6 +5553,19 @@ export class ClineProvider
 			),
 		}
 
+		if ("viewStates" in sanitizedValues) {
+			// The registered viewStates map is host-owned: this provider rewrites it from a full read of
+			// the map (savePersistedViewState, clearPersistedViewState, prunePersistedViewStates), so a map
+			// handed to a settings write by a caller - the webview's newTask configuration, or the extension
+			// API's - would replace every other view's durable selection in one write, and an explicit unset
+			// would erase the map outright. Entries arriving this way are validated nowhere, so the key is
+			// dropped rather than sanitised; the rest of the settings object is the caller's to set.
+			this.log(
+				"[setValues] Ignored a caller-supplied viewStates map; the registered map is written by the extension host.",
+			)
+			delete sanitizedValues.viewStates
+		}
+
 		if (sanitizedValues.mode !== undefined) {
 			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
 			// a new Task would read it from getState() and persist it into task history.

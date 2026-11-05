@@ -9019,6 +9019,30 @@ describe("ClineProvider", () => {
 
 			expect(setValues).toHaveBeenCalledWith({ mode: "code" })
 		})
+
+		it("drops a caller-supplied viewStates map so another view's selection survives the write", async () => {
+			// The registered viewStates map is host-owned: this provider rewrites it from a full read of the
+			// map (savePersistedViewState, clearPersistedViewState, prunePersistedViewStates), so a map that a
+			// caller hands to a settings write - the webview's newTask configuration, or the extension API's -
+			// would replace every view's durable selection in one write, and an unset would erase it outright.
+			// The key is dropped; the rest of the settings object is the caller's to set.
+			const log = vi.spyOn(provider, "log").mockImplementation(() => {})
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-editor-view": { mode: "code", updatedAt: 2 },
+			})
+
+			await provider.setValues(
+				hand({ viewStates: { "crafted-view": { mode: "ask", updatedAt: 3 } }, customInstructions: "keep me" }),
+			)
+
+			expect(mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates")).toEqual({
+				"stable-editor-view": { mode: "code", updatedAt: 2 },
+			})
+			expect(mockContext.globalState.get("customInstructions")).toBe("keep me")
+			expect(log).toHaveBeenCalledWith(
+				expect.stringContaining("[setValues] Ignored a caller-supplied viewStates map"),
+			)
+		})
 	})
 
 	test("getState returns the saved destructive command guard setting", async () => {
