@@ -459,9 +459,14 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 				// when nothing remains. The identity guard above keeps a late
 				// disposal of an already-replaced panel from clobbering the
 				// replacement's ref.
+				const live = [...liveTabPanels]
 				const remaining =
-					[...liveTabPanels].find((panel) => panel.active) ??
-					[...liveTabPanels].find((panel) => panel.visible)
+					live.find((panel) => panel.active) ??
+					live.find((panel) => panel.visible) ??
+					// A tab open behind another editor in its group is neither active nor visible,
+					// and it is still a live tab: keep the ref on it so the tab-scoped commands and
+					// focusInput still resolve an instance. Only an empty set clears the ref.
+					live[0]
 				setPanel(remaining, "tab")
 			}
 		},

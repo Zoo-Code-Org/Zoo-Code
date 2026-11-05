@@ -1109,6 +1109,52 @@ describe("openClineInNewTab", () => {
 		expect(getPanel()).toBeUndefined()
 	})
 
+	it("keeps a hidden live tab as the tracked ref when the tracked panel closes", async () => {
+		// A Zoo Code tab that sits open behind another editor in its group is neither active nor
+		// visible. It is still a live tab, so the tracked ref must keep resolving the tab-scoped
+		// commands and focusInput at it - clearing the reference is for when nothing remains.
+		const panelA = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-A",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelA)
+		await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+
+		const panelB = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-B",
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelB)
+		await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		Object.assign(panelB, { active: true, visible: true })
+		;(panelB.onDidChangeViewState as Mock).mock.calls[0]![0]!({ webviewPanel: panelB })
+		expect(getPanel()).toBe(panelB)
+
+		// Closing the tracked panel leaves only the hidden tab: neither flag is set on it.
+		const disposeB = (panelB.onDidDispose as Mock).mock.calls[0]![0] as () => void
+		disposeB()
+		expect(panelA.active).toBeUndefined()
+		expect(panelA.visible).toBeUndefined()
+		expect(getPanel()).toBe(panelA)
+
+		// Closing that tab too leaves nothing live, and only then is the ref cleared.
+		const disposeA = (panelA.onDidDispose as Mock).mock.calls[0]![0] as () => void
+		disposeA()
+		expect(getPanel()).toBeUndefined()
+	})
+
 	it("prefers the active panel over a merely visible one when re-pointing the tracked tab ref", async () => {
 		// Panel A is created and tracked first and stays merely visible...
 		const panelA = Object.assign({} as vscode.WebviewPanel, {
