@@ -1661,8 +1661,8 @@ export const webviewMessageHandler = async (
 				const { getProviderQuotas, loadProfilesWithActive } =
 					await import("../../services/language-models/providerQuotas")
 				// The organisation allow list applies here as it does to a request: a profile it refuses is not read for its
-				// credentials, and no quota is fetched with them.
-				const { organizationAllowList } = await provider.getState()
+				// credentials, and no quota is fetched with them. Only the allow list is wanted: the task history is not.
+				const { organizationAllowList } = await provider.getState({ includeTaskHistory: false })
 				const { profiles, activeProfileId } = await loadProfilesWithActive(
 					provider.providerSettingsManager,
 					controller.signal,

@@ -152,6 +152,12 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 			)
 		})
 
+		it("reads the allow list without the task history, which it does not use", async () => {
+			const provider = await request(onlyOpenRouter, "work", providers)
+
+			expect(provider.getState).toHaveBeenCalledExactlyOnceWith({ includeTaskHistory: false })
+		})
+
 		it("queries every profile when the list allows all", async () => {
 			await request(ALLOW_ALL, "personal", providers)
 
