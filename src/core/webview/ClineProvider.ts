@@ -164,6 +164,11 @@ import { PendingEditOperationStore, type PendingEditOperationInput } from "./Pen
 
 type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
 type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
+/**
+ * The subset of view-local values that has a durable per-view record. `saveViewState`
+ * and the mutation path handle exactly these keys, so the generic stays narrow enough
+ * for the compiler to reject e.g. `writeDelayMs`.
+ */
 type PersistedViewStateValues = Pick<ViewLocalStateValues, "mode" | "currentApiConfigName" | "apiConfiguration">
 
 /**
@@ -434,7 +439,7 @@ export class ClineProvider
 	public readonly viewId: string
 
 	/** Stable id for persisted per-view state keys, bound by the host-minted claim. */
-	private viewStateId: string = ""
+	private viewStateId: string
 
 	/**
 	 * Whether this instance wrote an entry under its own session-local temporary id.
@@ -474,15 +479,16 @@ export class ClineProvider
 		mdmService?: MdmService,
 	) {
 		super()
+		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
+		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
+		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
+		this.viewStateId = this.viewId
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
 			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
 			(message) => this.log(message),
 		)
 
-		// Derive the per-instance view id and bind the persisted view-state key to it.
-		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
-		this.viewStateId = this.viewId
 		ClineProvider.activeInstances.add(this)
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "success", type: "created" })
 
@@ -509,6 +515,8 @@ export class ClineProvider
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
 		})
+
+		void this.loadViewState()
 
 		// Initialize MCP Hub through the singleton manager
 		McpServerManager.getInstance(this.context, this)
@@ -2874,9 +2882,18 @@ export class ClineProvider
 
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-				this.updateGlobalState("currentApiConfigName", name),
+				// Shared write: adds/updates the profile list entry and the current-profile name.
+				this.setValue("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
+				// setProviderSettings bypasses the buffer path; the mutation below refreshes this view.
+				// One mutation carries both the name and the settings: pinnedProfileName reads the buffer,
+				// so a buffer that keeps the previous name while holding the new settings pins a profile
+				// this view no longer runs under.
+				this._saveViewLocalStateFromMutation({
+					currentApiConfigName: name,
+					apiConfiguration: providerSettings,
+				}),
 			])
 			const failedActivation = activationResults.find(
 				(result): result is PromiseRejectedResult => result.status === "rejected",
@@ -2987,6 +3004,7 @@ export class ClineProvider
 			await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
 
 			// Refresh other views pinned to this profile so their overlays cannot go stale.
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2996,12 +3014,52 @@ export class ClineProvider
 			await this.persistStickyProviderProfileToCurrentTask(name)
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+
+			// A non-activating save still changes the profile's settings: refresh the views
+			// that buffered a copy, or their getState() keeps the pre-save values.
+			if (this.pinnedProfileName === name) {
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				// Only rebuild a task that actually runs under the saved profile.
+				if (this.getCurrentTask()?.taskApiConfigName === name) {
+					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+				}
+			}
+			// A non-activating save changes the profile's settings too: refresh every sibling
+			// that buffered a copy (pinned siblings included), or their getState() keeps the pre-save
+			// values. This head had no sibling refresh at all before this change.
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
 		}
 
 		if (signal.aborted) return id
 
 		await this.postStateToWebview()
 		return id
+	}
+	/**
+	 * Refresh the buffered overlay of every live sibling pinned to a saved profile and rebuild
+	 * any task that follows it. The handler rebuild is independent of the pin: a task restored
+	 * from history can follow profile A while its view pins profile B.
+	 */
+	private async refreshSiblingsAfterProfileSave(name: string, providerSettings: ProviderSettings): Promise<void> {
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance === this || instance._disposed || instance.pinnedProfileName !== name) {
+				continue
+			}
+			// Direct private access: compile-time safe across sibling instances.
+			await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+		}
+
+		const {
+			name: _recordName,
+			id: _recordId,
+			...taskSettings
+		} = providerSettings as ProviderSettings & { name?: string; id?: string }
+		for (const instance of ClineProvider.getAllInstances()) {
+			if (instance._disposed || instance.getCurrentTask()?.taskApiConfigName !== name) {
+				continue
+			}
+			instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
+		}
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {

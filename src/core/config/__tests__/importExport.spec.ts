@@ -370,8 +370,7 @@ describe("importExport", () => {
 			})
 
 			expect(result.success).toBe(true)
-			// Per-view selection state is machine-local: importing settings must not
-			// apply another machine's view pins, while other settings round-trip.
+			// Importing must not apply another machine's view pins.
 			expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
 			expect(result).not.toHaveProperty("globalSettings.viewStates")
 		})

@@ -150,15 +150,84 @@ describe("ContextProxy", () => {
 					rejectPending = reject
 				}),
 			)
-
 			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
 			await proxy.resetAllState()
+			// The Memento answers the read-back with the pre-reset value: only ending write ownership
+			// during the reset keeps the cache cleared. With the mocked store this is the difference
+			// between the guarantee holding and the rejected write repopulating the cache.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "anthropic" : undefined))
 			rejectPending(new Error("disk full"))
-
 			await expect(pending).rejects.toThrow("disk full")
-			// The reset cleared the cache: restoring the pre-reset value would resurrect state
-			// that storage no longer holds.
 			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+		it("does not restore a pre-reset secret when a pending storeSecret settles after the reset", async () => {
+			const durable = new Map<string, string | undefined>()
+			let settle: () => void = () => {}
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				durable.delete(key)
+			})
+			mockSecrets.store.mockImplementationOnce(
+				(key: string, value: string) =>
+					new Promise<undefined>((resolve) => {
+						settle = () => {
+							durable.set(key, value)
+							resolve(undefined)
+						}
+					}),
+			)
+
+			const pending = proxy.storeSecret("apiKey", "pre-reset-secret")
+			setTimeout(settle, 0)
+			await proxy.resetAllState()
+			await pending
+			expect.soft([
+				await mockSecrets.get("apiKey"),
+				proxy.getSecret("apiKey"),
+				mockSecrets.delete.mock.calls.length,
+			])
+
+			// The pending store is held open on a double that only puts the value into storage
+			// when it settles, so the ordering is observable: the reset must wait for the write to
+			// settle and then delete the keys, so neither the cache nor the durable copy keeps the
+			// value that was in flight when the reset started.
+			expect(await mockSecrets.get("apiKey")).toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+		})
+
+		it("adopts a secret write issued after a reset that waited for a pending write", async () => {
+			const durable = new Map<string, string | undefined>()
+			let settle: () => void = () => {}
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				durable.delete(key)
+			})
+			mockSecrets.store.mockImplementationOnce(
+				(key: string, value: string) =>
+					new Promise<undefined>((resolve) => {
+						settle = () => {
+							durable.set(key, value)
+							resolve(undefined)
+						}
+					}),
+			)
+
+			const pending = proxy.storeSecret("apiKey", "pre-reset-secret")
+			const reset = proxy.resetAllState()
+			setTimeout(settle, 0)
+			await pending
+			await reset
+
+			// The reset released only its own claims, so the machinery stays usable afterwards:
+			// a write issued once the reset has settled is adopted into the cache and reaches storage.
+			// Back the post-reset write with the durable double as well, so the assertion below reads
+			// storage rather than only the cache.
+			mockSecrets.store.mockImplementationOnce(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			await proxy.storeSecret("apiKey", "newer-secret")
+			expect(proxy.getSecret("apiKey")).toBe("newer-secret")
+			expect(await mockSecrets.get("apiKey")).toBe("newer-secret")
 		})
 
 		it("should bypass cache for pass-through state keys", async () => {
