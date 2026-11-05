@@ -4758,7 +4758,12 @@ export class ClineProvider
 
 		await this.contextProxy.resetAllState()
 
-		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
+		// Clear the view-local buffer of EVERY live view, not only this one. getState() reads the
+		// view-local buffer before the shared store, so a sibling view would otherwise keep serving
+		// its pre-reset mode while the shared state says the reset happened.
+		for (const instance of ClineProvider.getAllInstances()) {
+			instance._clearViewLocalState()
+		}
 		this._clearViewLocalState()
 
 		// Clear this view's persisted entry too, so the reset selections are not
