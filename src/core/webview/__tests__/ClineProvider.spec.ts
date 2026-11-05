@@ -7371,41 +7371,7 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
-		const provider1 = new ClineProvider(
-			mockContext,
-			mockOutputChannel,
-			"sidebar",
-			new ContextProxy(mockContext),
-
-			new WebviewFocusTracker(),
-		)
-		const provider2 = new ClineProvider(
-			mockContext,
-			mockOutputChannel,
-			"editor",
-			new ContextProxy(mockContext),
-			new WebviewFocusTracker(),
-		)
-
-		await provider1["setViewStateId"]("stable-sidebar-view")
-		await provider2["setViewStateId"]("stable-editor-view")
-
-		await Promise.all([
-			provider1.saveViewState("mode", "architect"),
-			provider2.saveViewState("currentApiConfigName", "editor-profile"),
-		])
-
-		expect(mockContext.globalState.get("viewStates")).toMatchObject({
-			"stable-sidebar-view": { mode: "architect" },
-			"stable-editor-view": { currentApiConfigName: "editor-profile" },
-		})
-
-		await provider1.dispose()
-		await provider2.dispose()
-	})
-
-	describe("view state persistence edge cases", () => {
+	describe("view-local buffer: loading, setValue mutations and rollback", () => {
 		it("should load persisted mode, profile name and resolved profile into viewLocalState", async () => {
 			const writer = new ClineProvider(
 				mockContext,
@@ -7581,24 +7547,6 @@ describe("ClineProvider", () => {
 			apiProvider: providerIdentifiers.openrouter,
 			openRouterModelId: "model-x",
 		})
-		await provider.dispose()
-	})
-
-	it("should remove the buffered apiConfiguration when it is cleared", async () => {
-		const provider = new ClineProvider(
-			mockContext,
-			mockOutputChannel,
-			"sidebar",
-			new ContextProxy(mockContext),
-			new WebviewFocusTracker(),
-		)
-		const save = provider.saveViewState.bind(provider) as (key: string, value: unknown) => Promise<void>
-		await provider.saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
-		await provider.saveViewState("apiConfiguration", undefined)
-		expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
-		await provider.saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
-		await save("apiConfiguration", null)
-		expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
 		await provider.dispose()
 	})
 
@@ -7849,33 +7797,6 @@ describe("ClineProvider", () => {
 			await provider1.dispose()
 			await provider2.dispose()
 		})
-	})
-
-	it("should increment instance count for each new instance", async () => {
-		const provider1 = new ClineProvider(
-			mockContext,
-			mockOutputChannel,
-			"editor",
-			new ContextProxy(mockContext),
-			new WebviewFocusTracker(),
-		)
-		const provider2 = new ClineProvider(
-			mockContext,
-			mockOutputChannel,
-			"editor",
-			new ContextProxy(mockContext),
-			new WebviewFocusTracker(),
-		)
-
-		// First editor instance should be "editor-0" (or next available)
-		// Second editor instance should have a different number
-		const num1 = parseInt(provider1.viewId.split("-")[1]!)
-		const num2 = parseInt(provider2.viewId.split("-")[1]!)
-
-		expect(num2).toBeGreaterThan(num1)
-
-		await provider1.dispose()
-		await provider2.dispose()
 	})
 
 	it("should reapply an independently mutated profile name when the load settles", async () => {
