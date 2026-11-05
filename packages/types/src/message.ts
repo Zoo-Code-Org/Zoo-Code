@@ -139,7 +139,7 @@ export function isNonBlockingAsk(ask: ClineAsk): ask is NonBlockingAsk {
  * - `condense_context`: Context condensation/summarization has started
  * - `condense_context_error`: Error occurred during context condensation
  * - `codebase_search_result`: Results from searching the codebase
- * - `too_many_tools_warning`: Warning that too many MCP tools are enabled, which may confuse the LLM
+ * - `too_many_tools_warning`: Legacy warning retained for history rendering; no longer emitted by Task.
  * - `ignored_disabled_tools_warning`: Warning that a `disabledTools` entry names a protocol tool, which user settings cannot disable
  */
 export const clineSays = [

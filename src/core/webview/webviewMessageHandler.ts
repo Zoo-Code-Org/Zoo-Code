@@ -31,6 +31,7 @@ import {
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
 	type MentionSegment,
+	globalSettingsSchema,
 } from "@roo-code/types"
 import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
@@ -887,6 +888,17 @@ export const webviewMessageHandler = async (
 						}
 					} else if (key === "execaShellPath") {
 						Terminal.setExecaShellPath(value as string | undefined)
+					} else if (key === "mcp.dynamicLoad.threshold" || key === "mcp.dynamicLoad.initialK") {
+						const parsed = globalSettingsSchema.shape[key].safeParse(value)
+						if (!parsed.success) {
+							console.warn(
+								"[settings] Ignoring invalid MCP dynamic-load setting:",
+								key,
+								parsed.error.message,
+							)
+							continue
+						}
+						newValue = parsed.data
 					} else if (key === "mcpEnabled") {
 						newValue = value ?? true
 						const mcpHub = provider.getMcpHub()
