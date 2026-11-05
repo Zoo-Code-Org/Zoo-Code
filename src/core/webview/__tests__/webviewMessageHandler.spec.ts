@@ -1907,6 +1907,26 @@ describe("webviewMessageHandler - deleteApiConfiguration", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
+	it("deletes a profile the manager no longer stores but the cached list still shows", async () => {
+		const staleEntry = { name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter }
+		// The manager record is already gone (cloud sync, or a delete through another
+		// ProviderSettingsManager instance) while the cached list the dropdown reads still
+		// names the profile. Before the fallback the lookup came back empty, the handler
+		// showed the delete error and returned, so the entry stayed listed forever.
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([])
+		mockClineProvider.contextProxy.getValue = vi
+			.fn()
+			.mockImplementation((key: string) => (key === "listApiConfigMeta" ? [staleEntry] : undefined))
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "ghost-profile" })
+
+		// deleteProviderProfile is the path that treats the missing record as an idempotent
+		// success and prunes the stale entry, which is what the user needs here.
+		expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith(staleEntry)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith(t("common:errors.delete_api_config"))
+	})
+
 	it("reports the failure when the routed deletion rejects", async () => {
 		const profileToDelete = { name: "only-profile", id: "only-id", apiProvider: providerIdentifiers.zooGateway }
 		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([profileToDelete])

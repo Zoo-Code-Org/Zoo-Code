@@ -2815,9 +2815,17 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const profileToDelete = (await provider.providerSettingsManager.listConfig()).find(
-					(profile) => profile.name === oldName,
-				)
+				const managerProfiles = await provider.providerSettingsManager.listConfig()
+				// The dropdown the user deleted from is fed by the cached listApiConfigMeta entry,
+				// not by the manager: after a cloud sync or a delete through another
+				// ProviderSettingsManager instance the record can already be gone while the stale
+				// entry is still listed. Refusing there would show an error for an entry the user
+				// can still select, and deleteProviderProfile - which treats a missing record as an
+				// idempotent success and prunes the stale entry - would never run. Fall back to the
+				// cached entry so the deletion the user just confirmed reaches that path.
+				const profileToDelete =
+					managerProfiles.find((profile) => profile.name === oldName) ??
+					(getGlobalState("listApiConfigMeta") ?? []).find((profile) => profile.name === oldName)
 
 				if (!profileToDelete) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))

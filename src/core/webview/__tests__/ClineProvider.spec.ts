@@ -3706,8 +3706,10 @@ describe("ClineProvider", () => {
 			)
 
 			// Each instance should have a unique viewId
-			expect(provider1.viewId).toBeDefined()
-			expect(provider2.viewId).toBeDefined()
+			// A view id is its view type plus the slot number the constructor handed out, so
+			// name the shape rather than only asserting that something is there.
+			expect(provider1.viewId).toMatch(/^sidebar-\d+$/)
+			expect(provider2.viewId).toMatch(/^editor-\d+$/)
 			expect(provider1.viewId).not.toBe(provider2.viewId)
 
 			await provider1.dispose()

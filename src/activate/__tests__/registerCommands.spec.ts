@@ -125,6 +125,9 @@ describe("getVisibleProviderOrLog", () => {
 	let mockOutputChannel: vscode.OutputChannel
 
 	beforeEach(() => {
+		// Same reason as in the openClineInNewTab block: getVisibleProviderOrLog iterates
+		// the automocked getAllInstances, which is undefined until something installs a list.
+		;(ClineProvider.getAllInstances as Mock).mockReturnValue([])
 		mockOutputChannel = {
 			appendLine: vi.fn(),
 			append: vi.fn(),
@@ -941,6 +944,10 @@ describe("openClineInNewTab", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// The survivor rule and panel disposal iterate getAllInstances; the automock
+		// returns undefined until a mockImplementation installs a list, so seed the empty
+		// list before the first test body runs rather than only resetting it afterwards.
+		;(ClineProvider.getAllInstances as Mock).mockReturnValue([])
 
 		mockOutputChannel = {
 			appendLine: vi.fn(),
