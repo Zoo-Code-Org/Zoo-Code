@@ -171,7 +171,9 @@ export class McpHub {
 	public onServerListChanged(listener: () => void): { dispose(): void } {
 		const safeListener = () => {
 			try {
-				listener()
+				void Promise.resolve(listener()).catch((error: unknown) => {
+					console.error("[McpHub] Server-list change listener failed:", error)
+				})
 			} catch (error) {
 				console.error("[McpHub] Server-list change listener failed:", error)
 			}

@@ -114,24 +114,30 @@ describe("ToolRouter with McpHub", () => {
 		expect(changed).toHaveBeenCalledTimes(1)
 	})
 
-	it("isolates throwing listeners during notifications and disposal", async () => {
-		const failure = new Error("listener failed")
-		const log = vi.spyOn(console, "error").mockImplementation(() => {})
-		hub.onServerListChanged(() => {
-			throw failure
-		})
-		const changed = vi.fn()
-		hub.onServerListChanged(changed)
-		const server = addServer()
-		post.mockClear()
-		await expect(hub["notifyWebviewOfServerChanges"]()).resolves.toBeUndefined()
-		expect(post).toHaveBeenCalledWith({ type: "mcpServers", mcpServers: [server] })
-		expect(changed).toHaveBeenCalledTimes(1)
-		expect(log).toHaveBeenCalledWith("[McpHub] Server-list change listener failed:", failure)
-		await expect(hub.dispose()).resolves.toBeUndefined()
-		expect(changed).toHaveBeenCalledTimes(2)
-		expect(hub["serverListEvents"].listenerCount("changed")).toBe(0)
-	})
+	it.each(["synchronous", "asynchronous"] as const)(
+		"isolates %s listener failures during notifications and disposal",
+		async (mode) => {
+			const failure = new Error("listener failed")
+			const log = vi.spyOn(console, "error").mockImplementation(() => {})
+			hub.onServerListChanged(() => {
+				if (mode === "asynchronous") {
+					return Promise.reject(failure)
+				}
+				throw failure
+			})
+			const changed = vi.fn()
+			hub.onServerListChanged(changed)
+			const server = addServer()
+			post.mockClear()
+			await expect(hub["notifyWebviewOfServerChanges"]()).resolves.toBeUndefined()
+			expect(post).toHaveBeenCalledWith({ type: "mcpServers", mcpServers: [server] })
+			expect(changed).toHaveBeenCalledTimes(1)
+			expect(log).toHaveBeenCalledWith("[McpHub] Server-list change listener failed:", failure)
+			await expect(hub.dispose()).resolves.toBeUndefined()
+			expect(changed).toHaveBeenCalledTimes(2)
+			expect(hub["serverListEvents"].listenerCount("changed")).toBe(0)
+		},
+	)
 
 	it("fires the event before the settings read can fail", async () => {
 		await fs.writeFile(path.join(directory, GlobalFileNames.mcpSettings), "{ not json")

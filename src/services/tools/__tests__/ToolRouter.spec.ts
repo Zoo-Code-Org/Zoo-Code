@@ -41,6 +41,21 @@ describe("ToolRouter", () => {
 		expect(firstIndex[0].description).toBe("search tickets")
 	})
 
+	it.each(["attachInitial", "search"] as const)(
+		"%s skips blank queries before indexing or ranking",
+		async (method) => {
+			const router = ToolRouter.getInstance()
+			expect(await router[method]("tickets", tools, 5)).toEqual(["mcp--github--issues"])
+			const index = router["indexedTools"]
+			const rank = vi.spyOn(Bm25Ranker.prototype, "rank")
+			for (const query of ["", "   ", "\t\n"]) {
+				expect(await router[method](query, [tools[1]], 5)).toEqual([])
+				expect(router["indexedTools"]).toBe(index)
+			}
+			expect(rank).not.toHaveBeenCalled()
+		},
+	)
+
 	it.each(["attachInitial", "search"] as const)("%s qualifies duplicate tool names by server", async (method) => {
 		expect(
 			await ToolRouter.getInstance()[method](
