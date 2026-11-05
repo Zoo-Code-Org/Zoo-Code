@@ -425,6 +425,11 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/__tests__/AppearanceToolRows.visual.fixture")
 		return <AppearanceToolRowsStory />
 	},
+	"unsaved-changes-dialog": async ({ saveOutcomeUnknown }) => {
+		const { UnsavedChangesDialogStory } =
+			await import("@/components/settings/__tests__/UnsavedChangesDialog.visual.fixture")
+		return <UnsavedChangesDialogStory saveOutcomeUnknown={saveOutcomeUnknown === true} />
+	},
 	"appearance-preview": async () => {
 		const { AppearancePreviewStory } =
 			await import("@/components/settings/__tests__/AppearancePreview.visual.fixture")
