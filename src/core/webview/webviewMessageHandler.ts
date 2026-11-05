@@ -819,7 +819,6 @@ export const webviewMessageHandler = async (
 						continue
 					}
 
-
 					// viewStates is server-owned per-view persistence (identity pins and
 					// loaded-profile overlays). The settings UI never puts it into
 					// updatedSettings, so a crafted renderer payload must not be able to
