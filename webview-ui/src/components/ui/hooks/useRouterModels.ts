@@ -16,7 +16,15 @@ type UseRouterModelsOptions = {
 
 export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
+		// Correlate the response by a unique request ID instead of the provider
+		// alone: a remount can issue a replacement request for the same provider
+		// while a stale response to an aborted request is still in flight, and
+		// provider-only matching would let that stale response resolve the new
+		// query. The extension host echoes the ID in the routerModels response.
+		const requestId = crypto.randomUUID()
+
 		const cleanup = () => {
+			clearTimeout(timeout)
 			signal?.removeEventListener("abort", onAbort)
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
@@ -24,7 +32,6 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		}
 
 		const onAbort = () => {
-			clearTimeout(timeout)
 			cleanup()
 			reject(new DOMException("Router models request aborted", "AbortError"))
 		}
@@ -38,15 +45,13 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			const message: ExtensionMessage = event.data
 
 			if (message.type === RouterModelsMessageType.routerModels) {
-				const msgProvider = message?.values?.provider as string | undefined
+				const msgRequestId = message?.values?.requestId as string | undefined
 
-				// Verify response matches request
-				if (provider !== msgProvider) {
-					// Not our response; ignore and wait for the matching one
+				// Verify the response belongs to this exact request.
+				if (msgRequestId !== requestId) {
 					return
 				}
 
-				clearTimeout(timeout)
 				cleanup()
 
 				if (message.routerModels) {
@@ -57,6 +62,10 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			}
 		}
 
+		// React Query cancels the queryFn when the consuming component unmounts or
+		// the query is removed. Honour that signal so the window listener and the
+		// timeout do not outlive the request (and a stale response can never
+		// resolve a disposed query).
 		if (signal?.aborted) {
 			onAbort()
 			return
@@ -64,11 +73,10 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 
 		signal?.addEventListener("abort", onAbort, { once: true })
 		window.addEventListener("message", handler)
-		if (provider) {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels, values: { provider } })
-		} else {
-			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
-		}
+		vscode.postMessage({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId, ...(provider ? { provider } : {}) },
+		})
 	})
 
 export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {

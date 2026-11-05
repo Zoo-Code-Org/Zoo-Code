@@ -1206,6 +1206,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				moonshot: {},
+				mimo: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
@@ -1481,6 +1482,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				moonshot: {},
+				mimo: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
@@ -1548,6 +1550,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				moonshot: {},
+				mimo: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
@@ -1972,6 +1975,72 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+	})
+})
+
+describe("webviewMessageHandler - updateSettings mimoBaseUrl persistence gate", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	// Simulates a crafted webview message carrying a value outside the schema's
+	// literal union (the updateSettings boundary is validated at runtime, not by
+	// the message type).
+	type WebviewMessageArg = Parameters<typeof webviewMessageHandler>[1]
+	const updateSettingsMessageWithBaseUrl = (mimoBaseUrl: string): WebviewMessageArg =>
+		({
+			type: "updateSettings",
+			updatedSettings: { mimoBaseUrl },
+		}) as WebviewMessageArg
+
+	it("persists an allowlisted Xiaomi endpoint", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1" },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(
+			"mimoBaseUrl",
+			"https://token-plan-ams.xiaomimimo.com/v1",
+		)
+	})
+
+	it("canonicalizes a trailing slash onto the allowlisted form", async () => {
+		await webviewMessageHandler(
+			mockClineProvider,
+			updateSettingsMessageWithBaseUrl("https://token-plan-ams.xiaomimimo.com/v1/"),
+		)
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(
+			"mimoBaseUrl",
+			"https://token-plan-ams.xiaomimimo.com/v1",
+		)
+	})
+
+	it("drops an off-list value with a warning and never persists it", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, updateSettingsMessageWithBaseUrl("https://attacker.example/v1"))
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(warnSpy).toHaveBeenCalledOnce()
+
+		warnSpy.mockRestore()
+	})
+
+	it("treats an empty string as unset and persists undefined", async () => {
+		await webviewMessageHandler(mockClineProvider, updateSettingsMessageWithBaseUrl(""))
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("mimoBaseUrl", undefined)
+	})
+
+	it("persists an explicit unset", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mimoBaseUrl: undefined },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("mimoBaseUrl", undefined)
 	})
 })
 

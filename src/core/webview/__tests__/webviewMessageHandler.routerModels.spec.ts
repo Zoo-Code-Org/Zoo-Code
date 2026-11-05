@@ -64,24 +64,44 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 
 // Real handlers eagerly fetch models in their constructors, so use lightweight doubles.
 // One double per provider lets tests assert each call receives its own provider's handler.
-const { handlersByProvider } = vi.hoisted(() => ({
+//
+// The MiMo double enforces MimoHandler's real constructor contract: it throws unless the
+// base URL it is handed passes the same allowlist the real handler applies. A non-throwing
+// double would mask the mixed-state bug where the guard validated the resolved base URL but
+// the handler was built from the raw stored config.
+const { handlersByProvider, MIMO_HANDLER_REJECTION } = vi.hoisted(() => ({
 	handlersByProvider: new Map<string | undefined, { providerName: string | undefined }>(),
+	MIMO_HANDLER_REJECTION:
+		"MIMO/MimoHandler/001: MiMo chat completion rejected: base URL is not an allowed Xiaomi MiMo endpoint.",
 }))
 
-vi.mock("../../../api", () => ({
-	buildApiHandler: vi.fn((configuration: { apiProvider?: string }) => {
-		const providerName = configuration.apiProvider
-		let handler = handlersByProvider.get(providerName)
-		if (!handler) {
-			handler = {
-				providerName,
-				getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
-			} as { providerName: string | undefined }
-			handlersByProvider.set(providerName, handler)
-		}
-		return handler
-	}),
-}))
+vi.mock("../../../api", async () => {
+	const { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL, stripTrailingSlashes } =
+		await import("../../../api/providers/fetchers/mimo")
+
+	return {
+		buildApiHandler: vi.fn((configuration: { apiProvider?: string; mimoBaseUrl?: string }) => {
+			const providerName = configuration.apiProvider
+
+			if (providerName === providerIdentifiers.mimo) {
+				const mimoBaseUrl = configuration.mimoBaseUrl || MIMO_DEFAULT_BASE_URL
+				if (!ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))) {
+					throw new Error(MIMO_HANDLER_REJECTION)
+				}
+			}
+
+			let handler = handlersByProvider.get(providerName)
+			if (!handler) {
+				handler = {
+					providerName,
+					getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+				} as { providerName: string | undefined }
+				handlersByProvider.set(providerName, handler)
+			}
+			return handler
+		}),
+	}
+})
 
 const handlerForProvider = (providerName: string) => {
 	const handler = handlersByProvider.get(providerName)
@@ -174,8 +194,10 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels).toHaveProperty(providerIdentifiers.requesty)
 		expect(routerModels).toHaveProperty(providerIdentifiers.deepseek)
 		expect(routerModels).toHaveProperty(providerIdentifiers.moonshot)
+		expect(routerModels).toHaveProperty(providerIdentifiers.mimo)
 		expect(routerModels.deepseek).toEqual({})
 		expect(routerModels.moonshot).toEqual({})
+		expect(routerModels.mimo).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.deepseek }),
 			expect.anything(),
@@ -184,6 +206,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			expect.objectContaining({ provider: providerIdentifiers.moonshot }),
 			expect.anything(),
 		)
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.mimo }))
 	})
 
 	it("fetches DeepSeek models when stored DeepSeek credentials exist", async () => {
@@ -752,6 +775,568 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "stored-moonshot-key",
 			baseUrl: undefined,
 		})
+	})
+
+	it("fetches MiMo models when stored MiMo credentials exist", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options) => {
+			if (options?.provider === providerIdentifiers.mimo) {
+				return { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+			}
+
+			switch (options?.provider) {
+				case providerIdentifiers.openrouter:
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case providerIdentifiers.requesty:
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.vercelAiGateway:
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.litellm:
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.mimo,
+				apiKey: "stored-mimo-key",
+				baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+			handlerForProvider(providerIdentifiers.mimo),
+		)
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	it("fetches only MiMo for a single-provider request with stored credentials", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options?: { provider?: string }) => {
+			if (options?.provider === providerIdentifiers.mimo) {
+				return { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+			}
+			return {}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.mimo },
+		})
+
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls).toHaveLength(1)
+		// The single-provider filter must not dispatch fetches for other providers.
+		expect(getModelsMock).toHaveBeenCalledTimes(1)
+		expect(mimoCalls[0][0]).toEqual({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		// Filtered responses carry only the requested provider's entry.
+		expect(Object.keys(response[0].routerModels)).toEqual([providerIdentifiers.mimo])
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	it("echoes the request ID in the routerModels response when one was provided", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+			},
+		})
+
+		getModelsMock.mockResolvedValue({})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.mimo, requestId: "req-123" },
+		})
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].values).toEqual({
+			requestId: "req-123",
+			provider: providerIdentifiers.mimo,
+		})
+	})
+
+	it("flushes MiMo cache when explicit credentials are provided via message values", async () => {
+		getModelsMock.mockResolvedValue({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: {
+				mimoApiKey: "new-mimo-key",
+				mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+			},
+		})
+
+		const mimoOptions = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "new-mimo-key",
+			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+		}
+		expect(flushModelsMock).toHaveBeenCalledWith(mimoOptions, handlerForProvider(providerIdentifiers.mimo), true)
+		expect(getModelsMock).toHaveBeenCalledWith(mimoOptions, handlerForProvider(providerIdentifiers.mimo))
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	it("does not flush MiMo cache when using stored credentials", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options) => {
+			if (options?.provider === providerIdentifiers.mimo) {
+				return { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+			}
+
+			switch (options?.provider) {
+				case providerIdentifiers.openrouter:
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case providerIdentifiers.requesty:
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.vercelAiGateway:
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case providerIdentifiers.litellm:
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+		})
+
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls.length).toBe(1)
+		expect(mimoCalls[0][0]).toEqual({
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: undefined,
+		})
+	})
+
+	describe("flushRouterModels", () => {
+		// flushRouterModels builds its handler eagerly from stored config and has no
+		// surrounding catch, so an off-list stored mimoBaseUrl made MimoHandler's
+		// constructor throw and escape webviewMessageHandler entirely. The mock
+		// buildApiHandler above enforces the real constructor contract, so these
+		// tests fail if the guard is ever removed.
+		it("skips the flush for an off-list stored MiMo base URL instead of letting the constructor throw", async () => {
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: {
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://attacker.example/v1",
+				},
+			})
+
+			await expect(
+				webviewMessageHandler(mockProvider, {
+					type: RouterModelsMessageType.flushRouterModels,
+					text: providerIdentifiers.mimo,
+				}),
+			).resolves.toBeUndefined()
+
+			expect(flushModelsMock).not.toHaveBeenCalled()
+			expect(handlersByProvider.has(providerIdentifiers.mimo)).toBe(false)
+		})
+
+		it("flushes MiMo from a stored allowlisted base URL", async () => {
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: {
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+				},
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.flushRouterModels,
+				text: providerIdentifiers.mimo,
+			})
+
+			expect(flushModelsMock).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.mimo },
+				handlerForProvider(providerIdentifiers.mimo),
+				true,
+			)
+		})
+
+		it("flushes MiMo from the default cluster when no stored base URL is set", async () => {
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: { mimoApiKey: "stored-mimo-key" },
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.flushRouterModels,
+				text: providerIdentifiers.mimo,
+			})
+
+			expect(flushModelsMock).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.mimo },
+				handlerForProvider(providerIdentifiers.mimo),
+				true,
+			)
+		})
+
+		it("still flushes other providers when the stored MiMo base URL is off-list", async () => {
+			// The guard is MiMo-specific: an off-list MiMo value must not disable the
+			// generic flush for every other router.
+			mockProvider.getState.mockResolvedValue({
+				apiConfiguration: {
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://attacker.example/v1",
+				},
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.flushRouterModels,
+				text: providerIdentifiers.openrouter,
+			})
+
+			expect(flushModelsMock).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.openrouter },
+				handlerForProvider(providerIdentifiers.openrouter),
+				true,
+			)
+		})
+	})
+
+	it("rejects an unsaved MiMo base URL outside the Xiaomi allowlist without dispatching a fetch", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: {
+				mimoBaseUrl: "https://attacker.example",
+			},
+		})
+
+		// The off-list unsaved URL must never reach modelCache: no fetch and no
+		// cache flush for MiMo is dispatched.
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls.length).toBe(0)
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeDefined()
+		if (!errorCall) throw new Error("Expected MiMo failure response")
+		expect(errorCall[0].success).toBe(false)
+		expect(errorCall[0].error).toBe(
+			"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint.",
+		)
+
+		// Aggregation for the remaining providers still posts, with MiMo empty.
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.openrouter).toEqual({
+			"openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false },
+		})
+		expect(response[0].routerModels.mimo).toEqual({})
+	})
+
+	// Regression: flushModels() gained an eagerly-built handler argument, so an
+	// off-list STORED mimoBaseUrl made MimoHandler's constructor throw from inside
+	// this case. That throw escaped requestRouterModels entirely, so the webview got
+	// neither the MiMo failure response nor the aggregate routerModels response, and
+	// the Refresh button stuck at Loading indefinitely (Mimo.tsx clears that state
+	// only on a routerModels response; the 10s timeout lives in fetchRouterModels,
+	// which this button does not use). A stored value can be off-list because
+	// ContextProxy.getProviderSettings() fails open on a schema rejection.
+	it("rejects an off-list STORED MiMo base URL without letting the handler constructor throw", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://attacker.example/v1",
+			},
+		})
+
+		// Mirrors Mimo.tsx handleRefreshModels: provider + key, no refresh flag.
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider: providerIdentifiers.mimo, mimoApiKey: "stored-mimo-key" },
+			}),
+		).resolves.toBeUndefined()
+
+		// The off-list stored URL must never reach modelCache: no flush (which would
+		// build the throwing handler) and no fetch.
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+		const mimoCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoCalls.length).toBe(0)
+
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeDefined()
+		if (!errorCall) throw new Error("Expected MiMo failure response")
+		expect(errorCall[0].success).toBe(false)
+		expect(errorCall[0].error).toBe(
+			"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint.",
+		)
+
+		// The aggregate response still reaches the webview, so the refresh resolves.
+		// A filtered response only carries entries for dispatched candidates, so the
+		// skipped provider is absent rather than empty; the webview then falls back
+		// to the static catalog instead of hanging.
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toBeUndefined()
+	})
+
+	// Regression (mixed state): a VALID unsaved base URL alongside an INVALID stored
+	// one. The allowlist guard runs on the resolved value, so it accepts the request,
+	// but handlerFor() spreads the raw stored config -- so the handler was built from
+	// the off-list stored URL and MimoHandler's constructor threw, escaping the case.
+	// The mock above enforces the real constructor contract, so this fails if the
+	// handler is ever built from anything but the guard-validated resolved value.
+	it("builds the MiMo handler from the resolved base URL when the stored one is off-list", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://attacker.example/v1",
+			},
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.mimo
+				? { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+				: {},
+		)
+
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.mimo,
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+				},
+			}),
+		).resolves.toBeUndefined()
+
+		// The accepted unsaved URL is the one that reaches the cache and the fetch.
+		const mimoOptions = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+		}
+		expect(flushModelsMock).toHaveBeenCalledWith(mimoOptions, handlerForProvider(providerIdentifiers.mimo), true)
+		expect(getModelsMock).toHaveBeenCalledWith(mimoOptions, handlerForProvider(providerIdentifiers.mimo))
+
+		// No failure notification: the guard accepted the request and the handler built.
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeUndefined()
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	// Regression (mixed state + refresh): the same valid-unsaved / off-list-stored
+	// pair, but through the filtered-flush path. With `refresh: true` and a provider
+	// filter, the handler flushes the cache before the aggregate fetch, and that
+	// flush builds its handler eagerly at the call site. The existing mixed-state
+	// test above only reaches the fetch path, so it would still pass if the flush
+	// site kept spreading the raw stored config.
+	it("flushes the MiMo cache from the resolved base URL when refresh is set and the stored one is off-list", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://attacker.example/v1",
+			},
+		})
+		getModelsMock.mockImplementation(async (options: { provider?: string }) =>
+			options?.provider === providerIdentifiers.mimo
+				? { "mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false } }
+				: {},
+		)
+
+		await expect(
+			webviewMessageHandler(mockProvider, {
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.mimo,
+					mimoApiKey: "stored-mimo-key",
+					mimoBaseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+					refresh: true,
+				},
+			}),
+		).resolves.toBeUndefined()
+
+		// Two flushes: the unsaved-values flush in the MiMo block and the filtered
+		// flush at the shared refresh site. Both must receive the guard-validated
+		// resolved URL and the MiMo handler built from it; spreading the raw stored
+		// config at the shared site throws MIMO_HANDLER_REJECTION out of the whole
+		// requestRouterModels case.
+		const mimoOptions = {
+			provider: providerIdentifiers.mimo,
+			apiKey: "stored-mimo-key",
+			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
+		}
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls).toHaveLength(2)
+		for (const [options, handler, refresh] of mimoFlushCalls) {
+			expect(options).toEqual(mimoOptions)
+			expect(handler).toBe(handlerForProvider(providerIdentifiers.mimo))
+			expect(refresh).toBe(true)
+		}
+
+		// The fetches use the same resolved options and handler.
+		const mimoFetchCalls = getModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFetchCalls).toHaveLength(1)
+		expect(mimoFetchCalls[0][0]).toEqual(mimoOptions)
+		expect(mimoFetchCalls[0][1]).toBe(handlerForProvider(providerIdentifiers.mimo))
+
+		// The request completed: no failure response, and the aggregate response
+		// carries the refreshed catalog instead of hanging the Refresh button.
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) =>
+				call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse &&
+				call[0]?.values?.provider === providerIdentifiers.mimo,
+		)
+		expect(errorCall).toBeUndefined()
+
+		const response = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
+		)
+		expect(response).toBeDefined()
+		if (!response) throw new Error("Expected routerModels response")
+		expect(response[0].routerModels.mimo).toEqual({
+			"mimo-v2.6-pro": { contextWindow: 1_048_576, supportsPromptCache: false },
+		})
+	})
+
+	it("treats an unsaved empty mimoBaseUrl as unset and keeps using the stored cluster", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+				mimoBaseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { mimoBaseUrl: "" },
+		})
+
+		// Empty means unset: the stored China cluster must keep applying instead
+		// of being silently rerouted to the default Singapore endpoint.
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.mimo,
+				apiKey: "stored-mimo-key",
+				baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+			},
+			handlerForProvider(providerIdentifiers.mimo),
+		)
+
+		// No rejection is posted and no refresh is flushed for the empty value.
+		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
+			(call) => call[0]?.type === RouterModelsMessageType.singleRouterModelFetchResponse,
+		)
+		expect(errorCall).toBeUndefined()
+		const mimoFlushCalls = flushModelsMock.mock.calls.filter((c) => c[0]?.provider === providerIdentifiers.mimo)
+		expect(mimoFlushCalls.length).toBe(0)
+	})
+
+	it("falls back to an undefined base URL when an empty unsaved value has no stored cluster", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				mimoApiKey: "stored-mimo-key",
+			},
+		})
+
+		await webviewMessageHandler(mockProvider, {
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { mimoBaseUrl: "" },
+		})
+
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.mimo,
+				apiKey: "stored-mimo-key",
+				baseUrl: undefined,
+			},
+			handlerForProvider(providerIdentifiers.mimo),
+		)
 	})
 
 	it("posts a Moonshot provider error and keeps an empty aggregate entry when fetch fails", async () => {

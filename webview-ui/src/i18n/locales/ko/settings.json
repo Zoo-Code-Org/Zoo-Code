@@ -460,7 +460,8 @@
 			"label": "모델 새로고침",
 			"loading": "모델 목록 새로고침 중...",
 			"success": "모델 목록이 성공적으로 새로고침되었습니다!",
-			"error": "모델 목록 새로고침에 실패했습니다. 다시 시도해 주세요."
+			"error": "모델 목록 새로고침에 실패했습니다. 다시 시도해 주세요.",
+			"missingConfig": "Enter an API key first, then refresh the models list."
 		},
 		"getRequestyApiKey": "Requesty API 키 받기",
 		"getRequestyBaseUrl": "기본 URL",

@@ -76,11 +76,12 @@ describe("ContextProxy", () => {
 
 	describe("constructor", () => {
 		it("should initialize state cache with all global state keys", () => {
-			// +3 for the migration checks:
+			// +4 for the migration checks:
 			// 1. openRouterImageGenerationSettings
 			// 2. customCondensingPrompt
 			// 3. customSupportPrompts (for migrateOldDefaultCondensingPrompt)
-			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 3)
+			// 4. mimoApiKey (for migratePlaintextMimoApiKey)
+			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 4)
 			for (const key of GLOBAL_STATE_KEYS) {
 				expect(mockGlobalState.get).toHaveBeenCalledWith(key)
 			}
@@ -88,6 +89,7 @@ describe("ContextProxy", () => {
 			expect(mockGlobalState.get).toHaveBeenCalledWith("openRouterImageGenerationSettings")
 			expect(mockGlobalState.get).toHaveBeenCalledWith("customCondensingPrompt")
 			expect(mockGlobalState.get).toHaveBeenCalledWith("customSupportPrompts")
+			expect(mockGlobalState.get).toHaveBeenCalledWith("mimoApiKey")
 		})
 
 		it("should initialize secret cache with all secret keys", () => {
@@ -110,8 +112,8 @@ describe("ContextProxy", () => {
 			const result = proxy.getGlobalState("apiProvider")
 			expect(result).toBe("deepseek")
 
-			// Original context should be called once during updateGlobalState (+3 for migration checks)
-			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 3) // From initialization + migration checks
+			// Original context should be called once during updateGlobalState (+4 for migration checks)
+			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 4) // From initialization + migration checks
 		})
 
 		it("should handle default values correctly", async () => {
@@ -245,6 +247,19 @@ describe("ContextProxy", () => {
 			// Should have stored the value in secret cache
 			const storedValue = proxy.getSecret("openAiApiKey")
 			expect(storedValue).toBe("test-api-key")
+		})
+
+		it("routes mimoApiKey to SecretStorage and resolves it through getValues/getProviderSettings", async () => {
+			const storeSecretSpy = vi.spyOn(proxy, "storeSecret")
+			const updateGlobalStateSpy = vi.spyOn(proxy, "updateGlobalState")
+
+			await proxy.setValue("mimoApiKey", "mimo-test-key")
+
+			expect(storeSecretSpy).toHaveBeenCalledWith("mimoApiKey", "mimo-test-key")
+			expect(updateGlobalStateSpy).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			expect(proxy.getSecret("mimoApiKey")).toBe("mimo-test-key")
+			expect(proxy.getValues()["mimoApiKey"]).toBe("mimo-test-key")
+			expect(proxy.getProviderSettings().mimoApiKey).toBe("mimo-test-key")
 		})
 
 		it("should route global state keys to updateGlobalState", async () => {
@@ -441,9 +456,38 @@ describe("ContextProxy", () => {
 				expect(mockGlobalState.update).toHaveBeenCalledWith(key, undefined)
 			}
 
-			// Total calls should include initial setup + reset operations
-			const expectedUpdateCalls = 2 + GLOBAL_STATE_KEYS.length
+			// Total calls should include initial setup + reset operations, plus the
+			// plaintext mimoApiKey purge (the key is a SECRET_STATE_KEY, so it is not
+			// covered by the GLOBAL_STATE_KEYS sweep).
+			const expectedUpdateCalls = 3 + GLOBAL_STATE_KEYS.length
 			expect(mockGlobalState.update).toHaveBeenCalledTimes(expectedUpdateCalls)
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+		})
+
+		it("does not resurrect a surviving plaintext mimoApiKey into SecretStorage", async () => {
+			// Builds before the key joined SECRET_STATE_KEYS could leave a plaintext
+			// mimoApiKey in globalState. Because the key is a secret-state key it is
+			// absent from GLOBAL_STATE_KEYS, so the reset sweep never touched the
+			// plaintext copy; the initialize() that reset runs afterwards then found
+			// it and migrated it into SecretStorage. Reset therefore resurrected the
+			// credential it is supposed to clear.
+			clearAllMocks()
+
+			let plaintextKey: string | undefined = "surviving-plaintext-mimo-key"
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? plaintextKey : undefined))
+			mockGlobalState.update.mockImplementation((key: string, value: unknown) => {
+				if (key === "mimoApiKey" && value === undefined) {
+					plaintextKey = undefined
+				}
+				return Promise.resolve()
+			})
+			mockSecrets.get.mockResolvedValue(undefined)
+
+			const resetProxy = new ContextProxy(mockContext)
+			await resetProxy.resetAllState()
+
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			expect(resetProxy.getSecret("mimoApiKey")).toBeUndefined()
 		})
 
 		it("should delete all secrets", async () => {
@@ -555,6 +599,83 @@ describe("ContextProxy", () => {
 			const updateCalls = mockGlobalState.update.mock.calls
 			const apiProviderUpdateCalls = updateCalls.filter((call: unknown[]) => call[0] === "apiProvider")
 			expect(apiProviderUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("mimoApiKey plaintext migration", () => {
+		const plaintextKey = "plaintext-mimo-key"
+
+		const setupContext = ({ secretValue }: { secretValue: string | undefined }) => {
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? plaintextKey : undefined))
+			mockSecrets.get.mockImplementation((key: string) =>
+				Promise.resolve(key === "mimoApiKey" ? secretValue : "test-secret"),
+			)
+			return mockContext
+		}
+
+		it("moves a plaintext globalState key into SecretStorage and clears the plaintext copy", async () => {
+			clearAllMocks()
+			setupContext({ secretValue: undefined })
+
+			const migratedProxy = new ContextProxy(mockContext)
+			await migratedProxy.initialize()
+
+			expect(mockSecrets.store).toHaveBeenCalledWith("mimoApiKey", plaintextKey)
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+			expect(migratedProxy.getSecret("mimoApiKey")).toBe(plaintextKey)
+			// Both the flat values view and the parsed provider settings must resolve
+			// the key from SecretStorage after the migration.
+			expect(migratedProxy.getValues()["mimoApiKey"]).toBe(plaintextKey)
+			expect(migratedProxy.getProviderSettings().mimoApiKey).toBe(plaintextKey)
+		})
+
+		it("keeps an existing SecretStorage value and only clears the plaintext copy", async () => {
+			clearAllMocks()
+			setupContext({ secretValue: "already-secret-value" })
+
+			const migratedProxy = new ContextProxy(mockContext)
+			await migratedProxy.initialize()
+
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+			expect(migratedProxy.getSecret("mimoApiKey")).toBe("already-secret-value")
+		})
+
+		it("trusts a fresh SecretStorage read over the stale snapshot before deciding to store", async () => {
+			// Simulates a secret written after the initialize() snapshot (or a transient
+			// secrets.get failure during the load): the snapshot sees no secret, the
+			// migration's fresh read sees one. The newer secret must win and the cache
+			// must be repaired with it.
+			clearAllMocks()
+			let mimoGetCount = 0
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? plaintextKey : undefined))
+			mockSecrets.get.mockImplementation((key: string) => {
+				if (key !== "mimoApiKey") {
+					return Promise.resolve("test-secret")
+				}
+				mimoGetCount += 1
+				return Promise.resolve(mimoGetCount === 1 ? undefined : "freshly-written-secret")
+			})
+
+			const migratedProxy = new ContextProxy(mockContext)
+			await migratedProxy.initialize()
+
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+			expect(migratedProxy.getSecret("mimoApiKey")).toBe("freshly-written-secret")
+			expect(migratedProxy.getValues()["mimoApiKey"]).toBe("freshly-written-secret")
+		})
+
+		it("does nothing when no plaintext key exists", async () => {
+			clearAllMocks()
+			mockGlobalState.get.mockImplementation(() => undefined)
+			mockSecrets.get.mockResolvedValue("test-secret")
+
+			const freshProxy = new ContextProxy(mockContext)
+			await freshProxy.initialize()
+
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+			expect(mockGlobalState.update).not.toHaveBeenCalledWith("mimoApiKey", undefined)
 		})
 	})
 
