@@ -432,6 +432,38 @@ describe("appearanceSettingWrites", () => {
 				await undoSettingWrite(proxy, first)
 			})
 
+			it("still puts back a write that had started and fails after its provider was disposed", async () => {
+				let failStore: () => void = () => {}
+				const proxy = {
+					getValue: (key: string) => stored.get(key),
+					setValue: vi.fn(async (key: string, value: unknown) => {
+						if (value !== 120) {
+							stored.set(key, value) // the rollback
+							return
+						}
+						stored.set(key, value) // stored, and then it fails
+						await new Promise<void>(
+							(_resolve, reject) => (failStore = () => reject(new Error("failed after storing"))),
+						)
+					}),
+				} as unknown as ContextProxy
+				const write = beginSettingWrite("interfaceFontScale", 100, 120)
+				const saving = expect(performSettingWrite(proxy, write, sidebar)).rejects.toThrow(
+					"failed after storing",
+				)
+				await vi.advanceTimersByTimeAsync(1_000) // the store has started and is waiting
+
+				disposeSettingWrites(sidebar)
+				failStore()
+				await saving
+				const settled = vi.fn()
+				await undoSettingWrite(proxy, write, { owner: sidebar, onDeferredSettled: settled })
+
+				expect(stored.get("interfaceFontScale")).toBe(100) // put back, not refused with the disposed provider
+				expect(settled).not.toHaveBeenCalled() // and nothing is called back into the disposed provider
+				expect(settingWriteBookkeepingSize().queuedKeys).toBe(0)
+			})
+
 			it("does not let the rollback of a write that was dropped before its store started undo another provider's write of the same value", async () => {
 				const { proxy, landLate } = deferredProxy()
 				const fromSidebar = beginSettingWrite("interfaceFontScale", 100, 120) // its store is the one that runs

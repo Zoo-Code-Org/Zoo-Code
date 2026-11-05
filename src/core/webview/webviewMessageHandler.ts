@@ -986,22 +986,26 @@ export const webviewMessageHandler = async (
 			}
 
 			// The outcome is decided above. A failed refresh must neither undo a stored save nor keep the webview
-			// from receiving the result: it waits for it to re-enable Save.
-			try {
-				await provider.postStateToWebview()
-			} catch (error) {
-				provider.log(
-					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
+			// from receiving the result: it waits for it to re-enable Save. A provider that was disposed while the writes
+			// were in flight (the view was closed) has no webview to tell: what is stored has been put right above, and
+			// the state is not even built for it.
+			if (!provider.isDisposed) {
+				try {
+					await provider.postStateToWebview()
+				} catch (error) {
+					provider.log(
+						`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				}
 
-			if (message.requestId) {
-				await provider.postMessageToWebview({
-					type: "settingsSaveResult",
-					requestId: message.requestId,
-					success: failure === undefined,
-					...(failure === undefined ? {} : { error: failure }),
-				})
+				if (message.requestId && !provider.isDisposed) {
+					await provider.postMessageToWebview({
+						type: "settingsSaveResult",
+						requestId: message.requestId,
+						success: failure === undefined,
+						...(failure === undefined ? {} : { error: failure }),
+					})
+				}
 			}
 
 			if (unhandledFailure !== undefined) throw unhandledFailure

@@ -3763,6 +3763,15 @@ describe("ClineProvider", () => {
 		expect(mockPostMessage).not.toHaveBeenCalled()
 	})
 
+	test("isDisposed tells whether dispose has run", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		expect(provider.isDisposed).toBe(false)
+
+		await provider.dispose()
+
+		expect(provider.isDisposed).toBe(true)
+	})
+
 	test("dispose is idempotent — second call is a no-op", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 

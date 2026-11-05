@@ -321,7 +321,10 @@ export const undoSettingWrite = async (
 		return
 	}
 
-	await queuedSettingWrite(owner, key, restore)
+	// This write may have stored its value (it started, and then failed), so it has to be put back even if its provider
+	// was disposed meanwhile: a disposed owner is refused, so the rollback runs under the ContextProxy, which is shared
+	// and never disposed. The provider is still detached: nothing is called back into it.
+	await queuedSettingWrite(disposedOwners.has(owner) ? contextProxy : owner, key, restore)
 }
 
 /**

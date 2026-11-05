@@ -277,6 +277,11 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+
+	/** True once `dispose` has run: nothing is to be posted to its webview any more. */
+	public get isDisposed() {
+		return this._disposed
+	}
 	private lastWebviewHeartbeatAt = 0
 	// Bumped on every heartbeat or grace reset, including events in the same
 	// millisecond; pending recovery must yield to either sign of renewed grace.

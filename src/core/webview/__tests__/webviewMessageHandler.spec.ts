@@ -1893,6 +1893,75 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 		vi.mocked(mockClineProvider.postStateToWebview).mockResolvedValue(undefined as never)
 	})
 
+	describe("when the provider is disposed while the writes are in flight", () => {
+		/** The view is closed while a write is being made: the provider reports it from then on. */
+		const disposeNow = () =>
+			Object.defineProperty(mockClineProvider, "isDisposed", { value: true, configurable: true })
+		afterEach(() => {
+			Reflect.deleteProperty(mockClineProvider, "isDisposed")
+		})
+
+		const postedResults = () =>
+			vi
+				.mocked(mockClineProvider.postMessageToWebview)
+				.mock.calls.map(([message]) => message)
+				.filter((message) => message.type === "settingsSaveResult")
+
+		it("puts a failed save back all the same, and builds and posts nothing for the closed view", async () => {
+			failWriteOf("terminalFontSize", 14, () => void disposeNow())
+
+			await save({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+			expect(stored).toMatchObject({ interfaceFontScale: 100, terminalFontSize: 12 }) // the storage is right
+			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+			expect(postedResults()).toEqual([])
+		})
+
+		it("builds and posts nothing for the closed view after a save that worked", async () => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				async (key: string, value: unknown) => {
+					stored[key] = value
+					disposeNow()
+				},
+			)
+
+			await save({ interfaceFontScale: 120 })
+
+			expect(stored.interfaceFontScale).toBe(120)
+			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+			expect(postedResults()).toEqual([])
+		})
+
+		it("does not answer when the view is closed during the refresh of the state", async () => {
+			vi.mocked(mockClineProvider.postStateToWebview).mockImplementation(async () => void disposeNow())
+
+			await save({ interfaceFontScale: 120 })
+
+			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+			expect(postedResults()).toEqual([])
+		})
+
+		it("still rethrows an error of another setting, which has no webview to wait for it", async () => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key: string) => {
+				if (key === "soundEnabled") {
+					disposeNow()
+					throw new Error("storage unavailable")
+				}
+			})
+
+			await expect(save({ soundEnabled: true })).rejects.toThrow("storage unavailable")
+
+			expect(postedResults()).toEqual([])
+		})
+
+		it("answers as before while the provider is alive", async () => {
+			await save({ interfaceFontScale: 120 })
+
+			expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+			expect(postedResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+		})
+	})
+
 	it("stores every setting and confirms the save by request id", async () => {
 		await save({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
 
