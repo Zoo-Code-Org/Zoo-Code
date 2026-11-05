@@ -72,6 +72,15 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	viewStates: true,
 })
 
+/**
+ * Global settings the API round trip may not carry in either direction. Per-view selections
+ * are minted and held by the extension host - they name a view, not a user - so a caller that
+ * could write them could pin another view's identity. The export schema above omits the key;
+ * the API surface consults this list on both of its settings writes.
+ */
+const NON_PORTABLE_SETTINGS_KEYS: readonly string[] = ["viewStates"]
+
+export const isNonPortableSettingsKey = (key: string): boolean => NON_PORTABLE_SETTINGS_KEYS.includes(key)
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 

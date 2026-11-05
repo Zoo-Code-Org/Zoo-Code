@@ -32,6 +32,7 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { isNonPortableSettingsKey } from "../core/config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { Terminal } from "../integrations/terminal/Terminal"
@@ -657,7 +658,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		} catch {
 			recordExisted = true
 		}
-		const previousValues = this.getConfiguration()
+		// The getter's map carries viewStates: a snapshot of every view's selection as of now. The
+		// rollback below replays this map through setValues, which would pin every other view back
+		// to where this call found them, so the host-owned key is dropped from the snapshot. Same
+		// list the export schema and the import path use (NON_PORTABLE_SETTINGS_KEYS).
+		const previousValues: RooCodeSettings = Object.fromEntries(
+			Object.entries(this.getConfiguration()).filter(([key]) => !isNonPortableSettingsKey(key)),
+		)
 		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
 		// getConfiguration() folds this view's overlay into the merged copy, so its mode and profile
 		// pin are this view's values rather than the shared ones. Snapshot the shared pair here:
@@ -687,7 +694,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// untouched and no rollback is needed.
 		await manager.saveConfig(savedProfileName, values)
 		try {
-			await this.sidebarProvider.setValues(values, { savedProfileName })
+			await this.sidebarProvider.setValues(
+				// The caller's payload is another snapshot of machine-local state: writing it forward
+				// would pin views this call does not own. See the snapshot comment above.
+				Object.fromEntries(Object.entries(values).filter(([key]) => !isNonPortableSettingsKey(key))),
+				{ savedProfileName },
+			)
 			if (values.modeApiConfigs) {
 				await Promise.all(
 					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>

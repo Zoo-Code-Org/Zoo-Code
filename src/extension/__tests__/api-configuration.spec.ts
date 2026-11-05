@@ -372,6 +372,71 @@ describe("API - configuration", () => {
 		expect(setModeConfig).toHaveBeenLastCalledWith("code", undefined)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
+
+	it("keeps host-owned viewStates out of both the settings write and the rollback replay", async () => {
+		// Same rollback scenario as the mode-mapping test above, but the caller payload and
+		// the pre-call snapshot each carry a viewStates map: the forward write would pin other
+		// views where this caller found them, and the replay would roll them back to where this
+		// call found them. Both are machine-local host state, excluded by
+		// NON_PORTABLE_SETTINGS_KEYS - the same list the export and import paths use, and the
+		// list #2226 filters the read side with. getValues() itself keeps the key: the host's
+		// own consumers still need it.
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({
+				currentApiConfigName: "old-profile",
+				viewStates: { "sidebar-1": { currentApiConfigName: "snapshot-pin", updatedAt: 1 } },
+			}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: sharedSetValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings,
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				modeApiConfigs: { code: "new-code-config" },
+				viewStates: { "sidebar-9": { currentApiConfigName: "payload-pin", updatedAt: 2 } },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		// Two settings writes happen in this call: the forward payload, then the rollback
+		// replay of the pre-call snapshot. The shared-pair restore writes the shared store
+		// directly (sharedSetValues), so it is not counted here.
+		const written = setValues.mock.calls.map((call: unknown[]) => call[0] as Record<string, unknown>)
+		expect(written).toHaveLength(2)
+		expect(written[0]).toEqual(expect.objectContaining({ currentApiConfigName: "pinned" }))
+		expect(written[1]).toEqual(expect.objectContaining({ currentApiConfigName: "old-profile" }))
+		written.forEach((values: Record<string, unknown>) => {
+			expect(values).not.toHaveProperty("viewStates")
+			expect(JSON.stringify(values)).not.toContain("payload-pin")
+			expect(JSON.stringify(values)).not.toContain("snapshot-pin")
+		})
+	})
 	it("replays the restored overlay after the configuration restore for the active profile", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
