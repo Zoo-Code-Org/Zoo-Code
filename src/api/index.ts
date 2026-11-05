@@ -121,7 +121,7 @@ export interface ApiHandlerCreateMessageMetadata {
 	 */
 	abortSignal?: AbortSignal
 	/**
-	 * Per-request thinking effort override (DTE series 2/5).
+	 * Per-request thinking effort override, carried in request metadata.
 	 * When defined, takes precedence over the settings-derived `reasoningEffort`
 	 * wherever the effective effort is resolved (see `resolveEffectiveReasoningEffort`).
 	 * Task-scoped and transient: it applies to this request only (the next request

@@ -2,7 +2,7 @@
 
 import { ADAPTIVE_OUTPUT_CONFIG_EFFORTS, resolveEffectiveReasoningEffort } from "../reasoning"
 
-describe("DTE series 2/5 — resolveEffectiveReasoningEffort", () => {
+describe("resolveEffectiveReasoningEffort per-request precedence", () => {
 	const settingsEffort = "high"
 	const modelDefault = "medium"
 
