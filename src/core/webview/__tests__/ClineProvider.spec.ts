@@ -5434,6 +5434,10 @@ describe("ClineProvider", () => {
 		})
 
 		it("keeps the mutation queue owned by a mode switch past its timeout", async () => {
+			// The fake timers, the provider, the gate and the prototype spy are declared
+			// before the try below so its finally block can name them: a failed assertion
+			// must not leave the gate unresolved, the spy installed, or the timers faked
+			// for every later test in this file.
 			vi.useFakeTimers()
 			const provider = new ClineProvider(
 				mockContext,
@@ -5452,30 +5456,32 @@ describe("ClineProvider", () => {
 				handleModeSwitchUnlocked: (...args: unknown[]) => Promise<void>
 			}
 			const switchSpy = vi.spyOn(proto, "handleModeSwitchUnlocked").mockReturnValue(gate)
+			try {
+				vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+				// The caller-side timeout rejection is expected: runToCompletion only
+				// keeps the QUEUE waiting for the run, it does not silence the caller.
+				const switchSettled = provider.handleModeSwitch("programmer").catch(() => undefined)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
 
-			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
-			// The caller-side timeout rejection is expected: runToCompletion only
-			// keeps the QUEUE waiting for the run, it does not silence the caller.
-			const switchSettled = provider.handleModeSwitch("programmer").catch(() => undefined)
-			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
+				// The queue tail is still the mode switch: a later mutation must
+				// not start while the switch's writes are still in flight.
+				let secondStarted = false
+				void provider["enqueueProviderProfileMutation"](async () => {
+					secondStarted = true
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(secondStarted).toBe(false)
 
-			// The queue tail is still the mode switch: a later mutation must
-			// not start while the switch's writes are still in flight.
-			let secondStarted = false
-			void provider["enqueueProviderProfileMutation"](async () => {
-				secondStarted = true
-			})
-			await vi.advanceTimersByTimeAsync(0)
-			expect(secondStarted).toBe(false)
-
-			release()
-			await switchSettled
-			await vi.advanceTimersByTimeAsync(0)
-			expect(secondStarted).toBe(true)
-
-			switchSpy.mockRestore()
-			vi.useRealTimers()
-			await provider.dispose()
+				release()
+				await switchSettled
+				await vi.advanceTimersByTimeAsync(0)
+				expect(secondStarted).toBe(true)
+			} finally {
+				release()
+				switchSpy.mockRestore()
+				vi.useRealTimers()
+				await provider.dispose()
+			}
 		})
 
 		it("leaves a sibling view's newer shared write alone when rolling back a failed write", async () => {

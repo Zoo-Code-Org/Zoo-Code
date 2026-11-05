@@ -2750,6 +2750,23 @@ describe("webviewMessageHandler - downloadErrorDiagnostics", () => {
 })
 
 describe("zooCodeSignOut", () => {
+	// The suite reassigns three members of the module-level fixture in every one of
+	// its tests. vi.clearAllMocks() resets call history only - it never restores a
+	// property assignment - so without this snapshot the sign-out doubles leak into
+	// every later suite in the file (mockClineProvider.contextProxy alone is read 28
+	// times by the eight describes that follow). Same capture-and-restore pattern the
+	// launch and rename suites already use.
+	const signOutDouble = mockClineProvider as unknown as MutableSignOutProvider
+	const originalSignOutMembers = {
+		contextProxy: signOutDouble.contextProxy,
+		providerSettingsManager: signOutDouble.providerSettingsManager,
+		upsertProviderProfile: signOutDouble.upsertProviderProfile,
+	}
+
+	afterEach(() => {
+		Object.assign(signOutDouble, originalSignOutMembers)
+	})
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
