@@ -39,8 +39,17 @@ const PALETTE = [
 	"var(--vscode-charts-red)",
 ]
 
-const WEEKDAY_FMT = new Intl.DateTimeFormat(undefined, { weekday: "narrow" })
-const DAY_FMT = new Intl.DateTimeFormat(undefined, { day: "numeric" })
+/**
+ * The locale for the dates of the chart: the application language, else the browser's. A tag the platform does not
+ * know falls back by itself; one that is not a language tag at all would throw, and is left out here.
+ */
+const dateLocale = (language: string | undefined): string | undefined => {
+	try {
+		return language ? Intl.getCanonicalLocales(language)[0] : undefined
+	} catch {
+		return undefined
+	}
+}
 
 /**
  * Usage tab.
@@ -53,9 +62,26 @@ const DAY_FMT = new Intl.DateTimeFormat(undefined, { day: "numeric" })
  * when a range has tokens but no cost the history switches to tokens and the
  * cost stat is hidden rather than shown as a misleading "$0.00".
  */
-export const UsageSettings = ({ className, ...props }: HTMLAttributes<HTMLDivElement>) => {
-	const { t } = useAppTranslation()
+interface UsageSettingsProps extends HTMLAttributes<HTMLDivElement> {
+	/** Whether the provider limits may be requested: false while Settings only mounts the tab to index it. */
+	providerLimitsEnabled?: boolean
+}
+
+export const UsageSettings = ({ className, providerLimitsEnabled = true, ...props }: UsageSettingsProps) => {
+	const { t, i18n } = useAppTranslation()
 	const { taskHistory, cwd } = useExtensionState()
+
+	// The dates of the chart follow the language of the application, not the one of the browser.
+	// (`i18n` is always there in the application; a test that replaces the translation context may leave it out.)
+	const locale = dateLocale(i18n?.language)
+	const dateFormats = useMemo(
+		() => ({
+			weekday: new Intl.DateTimeFormat(locale, { weekday: "narrow" }),
+			day: new Intl.DateTimeFormat(locale, { day: "numeric" }),
+			full: new Intl.DateTimeFormat(locale),
+		}),
+		[locale],
+	)
 
 	const [range, setRange] = useState<UsageRange>("7d")
 	const [scope, setScope] = useState<"workspace" | "all">("workspace")
@@ -116,7 +142,7 @@ export const UsageSettings = ({ className, ...props }: HTMLAttributes<HTMLDivEle
 
 			<Section>
 				<div className="flex flex-col gap-5">
-					<ProviderLimits />
+					<ProviderLimits enabled={providerLimitsEnabled} />
 
 					<section className="flex flex-col gap-3">
 						<div className="flex items-center justify-between gap-2">
@@ -272,7 +298,7 @@ export const UsageSettings = ({ className, ...props }: HTMLAttributes<HTMLDivEle
 																	? `${Math.max(6, (v / maxDaily) * 100)}%`
 																	: "2px",
 														}}
-														title={`${new Date(d.day).toLocaleDateString()} · ${fmt(d.cost, d.tokens)}`}
+														title={`${dateFormats.full.format(d.day)} · ${fmt(d.cost, d.tokens)}`}
 													/>
 												)
 											})}
@@ -282,8 +308,8 @@ export const UsageSettings = ({ className, ...props }: HTMLAttributes<HTMLDivEle
 												{summary.daily.map((d) => (
 													<span key={d.day} className="flex-1 text-center">
 														{summary.daily.length <= 7
-															? WEEKDAY_FMT.format(d.day)
-															: DAY_FMT.format(d.day)}
+															? dateFormats.weekday.format(d.day)
+															: dateFormats.day.format(d.day)}
 													</span>
 												))}
 											</div>

@@ -1158,7 +1158,7 @@
 			"refresh": "Actualiser",
 			"updated": "Mis à jour {{time}}",
 			"loading": "Vérification des fournisseurs connectés…",
-			"resets": "Réinitialisation {{date}}",
+			"resets": "Réinitialisation le {{date}}",
 			"signedOut": "Non connecté",
 			"noCopilot": "Aucun quota Copilot",
 			"noKey": "Clé API manquante ou invalide",
@@ -1169,8 +1169,8 @@
 				"daily": "Quotidien",
 				"monthly": "Mensuel",
 				"unlimited": "Illimité",
-				"hours": "{{n}} heures",
-				"days": "{{n}} jours"
+				"hours": "{{n}} h",
+				"days": "{{n}} j"
 			}
 		},
 		"byModel": "Par modèle",

@@ -1140,7 +1140,7 @@
 			"tokens": "tokeny",
 			"tasks": "zadania",
 			"cacheHit": "{{percent}}% z pamięci podręcznej",
-			"inOut": "{{input}} wejście · {{output}} wyjście",
+			"inOut": "Wejście: {{input}} · wyjście: {{output}}",
 			"models": "modele"
 		},
 		"dailyCost": "Koszt dzienny",
@@ -1158,7 +1158,7 @@
 			"refresh": "Odśwież",
 			"updated": "Zaktualizowano {{time}}",
 			"loading": "Sprawdzanie połączonych dostawców…",
-			"resets": "Reset {{date}}",
+			"resets": "Reset: {{date}}",
 			"signedOut": "Nie zalogowano",
 			"noCopilot": "Brak limitu Copilot",
 			"noKey": "Brak klucza API lub jest nieprawidłowy",
@@ -1170,7 +1170,7 @@
 				"monthly": "Miesięcznie",
 				"unlimited": "Bez limitu",
 				"hours": "{{n}} godz.",
-				"days": "{{n}} dni"
+				"days": "{{n}} dn."
 			}
 		},
 		"byModel": "Według modelu",

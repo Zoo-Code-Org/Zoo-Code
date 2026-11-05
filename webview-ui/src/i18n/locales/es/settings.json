@@ -1162,15 +1162,15 @@
 			"signedOut": "Sesión no iniciada",
 			"noCopilot": "Sin cuota de Copilot",
 			"noKey": "Falta la clave de API o no es válida",
-			"unsupported": "URL base personalizada: no comprobado",
+			"unsupported": "URL base personalizada: no comprobada",
 			"error": "No se pudo cargar",
 			"window": {
 				"weekly": "Semanal",
 				"daily": "Diario",
 				"monthly": "Mensual",
 				"unlimited": "Ilimitado",
-				"hours": "{{n}} horas",
-				"days": "{{n}} días"
+				"hours": "{{n}} h",
+				"days": "{{n}} d"
 			}
 		},
 		"byModel": "Por modelo",

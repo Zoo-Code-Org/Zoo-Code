@@ -1169,8 +1169,8 @@
 				"daily": "Diário",
 				"monthly": "Mensal",
 				"unlimited": "Ilimitado",
-				"hours": "{{n}} horas",
-				"days": "{{n}} dias"
+				"hours": "{{n}} h",
+				"days": "{{n}} d"
 			}
 		},
 		"byModel": "Por modelo",

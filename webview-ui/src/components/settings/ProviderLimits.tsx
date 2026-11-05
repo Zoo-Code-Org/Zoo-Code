@@ -23,9 +23,10 @@ const barColor = (pct: number) =>
  * "Provider limits": live credits/balances for every connected provider that
  * exposes a usage API (GitHub Copilot, OpenRouter, DeepSeek, Moonshot, Kimi Code,
  * z.ai, MiniMax, NanoGPT, OpenCode Go), one
- * compact row each. Fetched by the extension host; keys never reach the webview.
+ * compact row each. Fetched by the extension host; keys never reach the webview. While `enabled` is false nothing is
+ * requested.
  */
-export const ProviderLimits = () => {
+export const ProviderLimits = ({ enabled = true }: { enabled?: boolean }) => {
 	const { t } = useAppTranslation()
 	const [quotas, setQuotas] = useState<ProviderQuota[] | undefined>()
 	const [loading, setLoading] = useState(true)
@@ -64,6 +65,10 @@ export const ProviderLimits = () => {
 	)
 
 	useEffect(() => {
+		// Nothing is asked of the host until the section is really shown: Settings mounts every tab for a moment to
+		// build its search index, and that must not call the providers with the stored credentials.
+		if (!enabled) return
+
 		const onMessage = (event: MessageEvent) => {
 			if (event.data?.type !== VsCodeLmModelsMessageType.providerQuotas) return
 			if (event.data.requestId !== latestRequestId.current) return
@@ -88,7 +93,7 @@ export const ProviderLimits = () => {
 			// Tell the host nobody is waiting any more so it can stop the profile load and any fetches.
 			cancelLatest()
 		}
-	}, [request, cancelLatest])
+	}, [enabled, request, cancelLatest])
 
 	// Nothing connected that has a usage API: hide the section entirely. A failed load is different: keep
 	// the section so the user can press Refresh to try again.

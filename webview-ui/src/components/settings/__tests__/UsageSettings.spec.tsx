@@ -11,6 +11,29 @@ vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: post } }))
 const state = vi.hoisted(() => ({ taskHistory: [] as HistoryItem[], cwd: "/ws/a" }))
 vi.mock("@/context/ExtensionStateContext", () => ({ useExtensionState: () => state }))
 
+// Radix Select does not open in jsdom; a native <select> exercises the same handler.
+vi.mock("@src/components/ui", () => ({
+	Select: ({
+		value,
+		onValueChange,
+		children,
+	}: {
+		value: string
+		onValueChange: (v: string) => void
+		children: React.ReactNode
+	}) => (
+		<select data-testid="scope-select" value={value} onChange={(e) => onValueChange(e.target.value)}>
+			{children}
+		</select>
+	),
+	SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+	SelectValue: () => null,
+	SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+	SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) => (
+		<option value={value}>{children}</option>
+	),
+}))
+
 // The provider-limits section talks to the extension host; it has its own spec.
 vi.mock("../ProviderLimits", () => ({ ProviderLimits: () => <div data-testid="provider-limits-stub" /> }))
 
@@ -199,9 +222,16 @@ describe("UsageSettings", () => {
 	})
 
 	describe("filters", () => {
-		it("defaults to this workspace and can widen to all", () => {
+		it("defaults to this workspace, widens to all workspaces and narrows again", () => {
 			state.taskHistory = [priced(1), priced(2, { workspace: "/ws/other" })]
 			render(<UsageSettings />)
+			expect(screen.getByTestId("usage-stats").textContent).toContain("$1.00")
+			expect(screen.getByTestId("usage-stats").textContent).not.toContain("$3.00")
+
+			fireEvent.change(screen.getByTestId("scope-select"), { target: { value: "all" } })
+			expect(screen.getByTestId("usage-stats").textContent).toContain("$3.00")
+
+			fireEvent.change(screen.getByTestId("scope-select"), { target: { value: "workspace" } })
 			expect(screen.getByTestId("usage-stats").textContent).toContain("$1.00")
 			expect(screen.getByTestId("usage-stats").textContent).not.toContain("$3.00")
 		})
@@ -273,19 +303,47 @@ describe("UsageSettings", () => {
 		})
 
 		it("asks the host to save a CSV of the filtered range, and does not download it itself", () => {
-			state.taskHistory = [priced(1)]
+			const daysAgo = (days: number) => {
+				const day = new Date()
+				day.setDate(day.getDate() - days)
+				return day.getTime()
+			}
+			state.taskHistory = [
+				priced(1, { task: "Included task" }),
+				priced(2, { task: "Old task", ts: daysAgo(20) }), // outside 7 days, inside 30
+				priced(4, { task: "Other workspace task", workspace: "/ws/other" }),
+			]
 			const createObjectURL = vi.fn(() => "blob:x")
 			Object.assign(URL, { createObjectURL })
 			const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+			const exported = () =>
+				post.mock.calls.map((c) => c[0]).filter((m) => m.type === "exportUsageCsv") as Array<{
+					text: string
+					values: { range: string }
+				}>
 
 			render(<UsageSettings />)
-			fireEvent.click(screen.getByTestId("usage-export-csv"))
 
-			expect(post).toHaveBeenCalledWith({
-				type: "exportUsageCsv",
-				text: expect.stringContaining("\n"),
-				values: { range: "7d" },
-			})
+			// This workspace, 7 days: only the task that is in both.
+			fireEvent.click(screen.getByTestId("usage-export-csv"))
+			expect(exported().at(-1)?.values).toEqual({ range: "7d" })
+			expect(exported().at(-1)?.text).toContain("Included task")
+			expect(exported().at(-1)?.text).not.toContain("Old task")
+			expect(exported().at(-1)?.text).not.toContain("Other workspace task")
+
+			// The wider range brings in the old task, and the wider scope the other workspace's: the export follows.
+			fireEvent.click(screen.getByTestId("usage-range-30d"))
+			fireEvent.click(screen.getByTestId("usage-export-csv"))
+			expect(exported().at(-1)?.values).toEqual({ range: "30d" })
+			expect(exported().at(-1)?.text).toContain("Old task")
+			expect(exported().at(-1)?.text).not.toContain("Other workspace task")
+
+			fireEvent.change(screen.getByTestId("scope-select"), { target: { value: "all" } })
+			fireEvent.click(screen.getByTestId("usage-export-csv"))
+			expect(exported().at(-1)?.text).toContain("Included task")
+			expect(exported().at(-1)?.text).toContain("Old task")
+			expect(exported().at(-1)?.text).toContain("Other workspace task")
+
 			expect(createObjectURL).not.toHaveBeenCalled()
 			expect(click).not.toHaveBeenCalled()
 			click.mockRestore()

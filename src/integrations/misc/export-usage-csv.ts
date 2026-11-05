@@ -6,9 +6,10 @@ const USAGE_RANGES: readonly string[] = ["today", "7d", "30d", "all"]
 
 /**
  * What starts a cell that a spreadsheet may evaluate: = + - @, a tab or a carriage return, and the same after
- * invisible characters that an application may skip (a byte order mark, zero-width characters).
+ * invisible characters that an application may skip: control characters such as NUL (a line feed is text, not
+ * skipped) and format characters such as a byte order mark or the zero-width ones.
  */
-const FORMULA_START = /^[\uFEFF\u200B-\u200D\u2060]*[=+\-@\t\r]/
+const FORMULA_START = /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u
 
 /** The most text the host writes for an export: ten years of daily tasks is far below it, a runaway message is not. */
 const MAX_USAGE_CSV_LENGTH = 20_000_000

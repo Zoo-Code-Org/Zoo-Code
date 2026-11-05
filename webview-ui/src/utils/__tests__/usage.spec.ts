@@ -623,6 +623,35 @@ describe("a time that Date cannot represent", () => {
 	})
 })
 
+describe("in a time zone where the day of a change of daylight saving time begins at 01:00", () => {
+	let originalTz: string | undefined
+	beforeEach(() => {
+		originalTz = process.env.TZ
+		process.env.TZ = "America/Santiago" // on Sunday 6 September 2026 the clocks go from 00:00 to 01:00
+	})
+	afterEach(() => {
+		if (originalTz === undefined) delete process.env.TZ
+		else process.env.TZ = originalTz
+	})
+
+	it("starts the range at the start of its first day, not at 01:00, and gives every day a bar of its own", () => {
+		const now = new Date(2026, 8, 6, 12, 0, 0).getTime() // the day that starts at 01:00
+		const history = [
+			item({ task: "just after midnight", ts: new Date(2026, 8, 0, 0, 30).getTime(), totalCost: 3 }), // 31 August 00:30
+			item({ task: "today", ts: now, totalCost: 1 }),
+		]
+
+		const summary = summarizeUsage(history, { range: "7d", now })
+
+		expect(summary.taskCount).toBe(2) // the task at 00:30 on the first day is in the range
+		expect(summary.totalCost).toBe(4)
+		expect(summary.daily).toHaveLength(7)
+		expect(summary.daily[0]).toMatchObject({ cost: 3 }) // and in the bar of that day
+		expect(summary.daily[6]).toMatchObject({ cost: 1 })
+		expect(usageToCsv(history, { range: "7d", now }).split("\n")).toHaveLength(3)
+	})
+})
+
 describe("a task dated after today", () => {
 	const DAY = 24 * 3600 * 1000
 	const history = () => [

@@ -21,19 +21,20 @@ describe("summarizeUsageByModel", () => {
 				tokensOut: 100,
 				cost: 0,
 			}),
-			req({
-				apiProvider: providerIdentifiers.githubCopilot,
-				modelId: "claude-opus-5.5",
-				tokensIn: 500,
-				tokensOut: 50,
-				cost: 0,
-			}),
+			// Another model between the two requests of the first: they are grouped, not only merged when adjacent.
 			req({
 				apiProvider: providerIdentifiers.gemini,
 				modelId: "gemini-3.1-pro-preview",
 				tokensIn: 200,
 				tokensOut: 20,
 				cost: 0.4,
+			}),
+			req({
+				apiProvider: providerIdentifiers.githubCopilot,
+				modelId: "claude-opus-5.5",
+				tokensIn: 500,
+				tokensOut: 50,
+				cost: 0,
 			}),
 		])
 
@@ -113,10 +114,7 @@ describe("summarizeUsageByModel", () => {
 })
 
 describe("summarizeUsageByModel with stored text that is not a request object", () => {
-	const msg = (text: string) =>
-		({ ts: 1, type: "say", say: "api_req_started", text }) as unknown as Parameters<
-			typeof summarizeUsageByModel
-		>[0][number]
+	const msg = (text: string): ClineMessage => ({ ts: 1, type: "say", say: "api_req_started", text })
 
 	it.each(["null", "42", '"text"', "true", "[]"])("skips %s and keeps reading the other messages", (text) => {
 		const summary = summarizeUsageByModel([

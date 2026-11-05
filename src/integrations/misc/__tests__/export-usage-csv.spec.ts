@@ -134,6 +134,11 @@ describe("neutralizeCsvFormulas", () => {
 		// Invisible characters in front of the sign do not hide it.
 		["\uFEFF=1+1", "'\uFEFF=1+1", "'\uFEFF=1+1"],
 		["\u200B@x", "'\u200B@x", "'\u200B@x"],
+		// ... nor do control characters such as NUL, or other format characters (a soft hyphen, a bidirectional mark).
+		["\u0000=1+1", "'\u0000=1+1", "'\u0000=1+1"],
+		["\u0001\u0000@x", "'\u0001\u0000@x", "'\u0001\u0000@x"],
+		["\u00AD-2", "'\u00AD-2", "'\u00AD-2"],
+		["\u200E+1", "'\u200E+1", "'\u200E+1"],
 	])("prefixes the formula-leading cell %j, quoted or not", (cell, unquotedOut, quotedInnerOut) => {
 		// The cell as the webview would write it, in quotes ...
 		expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(`a,"${quotedInnerOut.replace(/^"|"$/g, "")}",b`)
@@ -141,14 +146,23 @@ describe("neutralizeCsvFormulas", () => {
 		expect(neutralizeCsvFormulas(`a,${cell},b`)).toBe(`a,${unquotedOut},b`)
 	})
 
-	it.each([["=1"], ["x=1"], ["a+b"], [" =1"], ["'=1"], ["1-2"], ["\uFEFFtext"]])(
-		"leaves the cell %j alone",
-		(cell) => {
-			expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(
-				/^[\uFEFF\u200B-\u200D\u2060]*[=+\-@\t\r]/.test(cell) ? `a,"'${cell}",b` : `a,"${cell}",b`,
-			)
-		},
-	)
+	it.each([
+		["x=1"],
+		["a+b"],
+		[" =1"],
+		["'=1"],
+		["1-2"],
+		["\uFEFFtext"],
+		["\u0000text"], // invisible characters alone do not make a formula
+		["\n=1"], // a line feed is text: it is not skipped like a control character
+		["\u0000\n=1"],
+	])("leaves the cell %j alone", (cell) => {
+		expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(`a,"${cell}",b`)
+	})
+
+	it.each([["=1"], ["\u0000=1"], ["\uFEFF@x"]])("prefixes %j inside quotes, as the webview writes it", (cell) => {
+		expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(`a,"'${cell}",b`)
+	})
 
 	it("neutralises every row and every column, not only the first row or the task text", () => {
 		const out = neutralizeCsvFormulas('h1,h2\n1,"=HYPERLINK(""http://x"")"\n"@a",2\n=3,4')
@@ -188,6 +202,16 @@ describe("neutralizeCsvFormulas", () => {
 		await exportUsageCsv('h\n"\uFEFF=1+1"', "all")
 
 		expect(writeFile).toHaveBeenCalledWith(expect.anything(), Buffer.from('h\n"\'\uFEFF=1+1"', "utf-8"))
+	})
+
+	it("writes a cell that starts with a NUL byte and a sign as inert text, byte for byte", async () => {
+		showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out.csv" } as vscode.Uri)
+		writeFile.mockResolvedValue(undefined)
+
+		await exportUsageCsv('h\n"\u0000=1+1"\n\u0000@x', "all")
+
+		const [, bytes] = writeFile.mock.calls[0]
+		expect(Buffer.from(bytes).toString("utf-8")).toBe("h\n\"'\u0000=1+1\"\n'\u0000@x")
 	})
 
 	it("writes nothing for malformed CSV", async () => {

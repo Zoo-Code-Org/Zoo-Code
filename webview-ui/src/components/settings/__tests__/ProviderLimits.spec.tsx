@@ -53,6 +53,34 @@ describe("ProviderLimits", () => {
 		})
 	})
 
+	describe("while it is not enabled", () => {
+		const requests = () => post.mock.calls.map((c) => c[0]).filter((m) => m.type === "requestProviderQuotas")
+
+		it("asks the host nothing, whatever happens, and has nothing to cancel", () => {
+			const { unmount } = render(<ProviderLimits enabled={false} />)
+
+			act(() => {
+				window.dispatchEvent(new Event("focus"))
+			})
+			unmount()
+
+			expect(post).not.toHaveBeenCalled()
+		})
+
+		it("asks once when it becomes enabled, and cancels that request when it is disabled again", () => {
+			const { rerender } = render(<ProviderLimits enabled={false} />)
+			expect(requests()).toHaveLength(0)
+
+			rerender(<ProviderLimits enabled />)
+			expect(requests()).toHaveLength(1)
+			const id = requests()[0].requestId
+
+			rerender(<ProviderLimits enabled={false} />)
+			expect(post).toHaveBeenCalledWith({ type: "cancelProviderQuotas", requestId: id })
+			expect(requests()).toHaveLength(1)
+		})
+	})
+
 	describe("when the webview regains focus", () => {
 		const requests = () => post.mock.calls.map((c) => c[0]).filter((m) => m.type === "requestProviderQuotas")
 

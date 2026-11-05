@@ -3665,8 +3665,14 @@ describe("Cline", () => {
 				})
 				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
 
-				await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }]).catch(() => {})
-				return JSON.parse(payloads[0] ?? "{}")
+				// Only the stop that the test asks for is expected: any other failure is a failure of the test.
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }]).catch((error: unknown) => {
+					if (!(error instanceof Error) || error.message !== "stop after the request message is written")
+						throw error
+				})
+				// A request that wrote no message has no payload: that must fail the test, not read as "nothing set".
+				if (payloads.length === 0) throw new Error("The request wrote no api_req_started message")
+				return JSON.parse(payloads[0])
 			}
 
 			it("records the provider and model that serve the request", async () => {

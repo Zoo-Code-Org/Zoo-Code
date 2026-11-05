@@ -1158,7 +1158,7 @@
 			"refresh": "Vernieuwen",
 			"updated": "Bijgewerkt {{time}}",
 			"loading": "Verbonden providers controleren…",
-			"resets": "Reset {{date}}",
+			"resets": "Reset op {{date}}",
 			"signedOut": "Niet aangemeld",
 			"noCopilot": "Geen Copilot-quotum",
 			"noKey": "API-sleutel ontbreekt of is ongeldig",
@@ -1170,7 +1170,7 @@
 				"monthly": "Maandelijks",
 				"unlimited": "Onbeperkt",
 				"hours": "{{n}} uur",
-				"days": "{{n}} dagen"
+				"days": "{{n}} d"
 			}
 		},
 		"byModel": "Per model",

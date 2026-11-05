@@ -132,12 +132,14 @@ function startOfLocalDay(ts: number): number {
 	return d.getTime()
 }
 
-/** Local midnight `days` calendar days before `ts` (not `days * 24h`, which is off by an hour across a DST change). */
+/**
+ * The start of the local day `days` calendar days before `ts` (not `days * 24h`, which is off by an hour across a DST
+ * change). It is built from the calendar fields, so that the day has its own start: where a day begins at 01:00
+ * because midnight does not exist on it, an earlier day is not moved to 01:00 too.
+ */
 function startOfLocalDayMinus(ts: number, days: number): number {
 	const d = new Date(ts)
-	d.setHours(0, 0, 0, 0)
-	d.setDate(d.getDate() - days)
-	return d.getTime()
+	return new Date(d.getFullYear(), d.getMonth(), d.getDate() - days).getTime()
 }
 
 /** Inclusive lower bound for a range, or `undefined` for "all". */

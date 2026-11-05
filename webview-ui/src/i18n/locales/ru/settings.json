@@ -1140,7 +1140,7 @@
 			"tokens": "токены",
 			"tasks": "задачи",
 			"cacheHit": "{{percent}}% из кэша",
-			"inOut": "{{input}} вход · {{output}} выход",
+			"inOut": "Вход: {{input}} · выход: {{output}}",
 			"models": "модели"
 		},
 		"dailyCost": "Стоимость по дням",
@@ -1158,7 +1158,7 @@
 			"refresh": "Обновить",
 			"updated": "Обновлено {{time}}",
 			"loading": "Проверка подключённых провайдеров…",
-			"resets": "Сброс {{date}}",
+			"resets": "Сброс: {{date}}",
 			"signedOut": "Вход не выполнен",
 			"noCopilot": "Нет квоты Copilot",
 			"noKey": "Ключ API отсутствует или недействителен",

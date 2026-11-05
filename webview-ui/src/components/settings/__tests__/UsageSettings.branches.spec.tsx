@@ -11,6 +11,12 @@ vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: post } }))
 const state = vi.hoisted(() => ({ taskHistory: [] as HistoryItem[], cwd: "/ws/a" }))
 vi.mock("@/context/ExtensionStateContext", () => ({ useExtensionState: () => state }))
 
+// The language of the application, as the translation context reports it; keys come back as they are.
+const translation = vi.hoisted(() => ({ language: undefined as string | undefined }))
+vi.mock("@/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({ t: (key: string) => key, i18n: { language: translation.language } }),
+}))
+
 vi.mock("../ProviderLimits", () => ({ ProviderLimits: () => <div data-testid="provider-limits-stub" /> }))
 
 // Radix Select does not open in jsdom; a native <select> exercises the same handler.
@@ -94,6 +100,7 @@ const withUsage = (overrides: Partial<HistoryItem> & { cost?: number; cacheReads
 
 describe("UsageSettings – branches", () => {
 	beforeEach(() => {
+		translation.language = undefined
 		// Only the date is frozen: the view reads "now" from it, the timers stay real.
 		vi.useFakeTimers({ toFake: ["Date"] })
 		vi.setSystemTime(NOW)
@@ -138,6 +145,49 @@ describe("UsageSettings – branches", () => {
 		const monthChart = screen.getByTestId("usage-daily-chart")
 		expect(monthChart.children).toHaveLength(30)
 		expect(monthChart.nextElementSibling).toBeNull() // too many bars to label
+	})
+
+	describe("the language of the dates", () => {
+		const weekdayLabels = (locale?: string) => lastDays(7, new Intl.DateTimeFormat(locale, { weekday: "narrow" }))
+		const lastBarTitle = () => {
+			const chart = screen.getByTestId("usage-daily-chart")
+			return chart.children[chart.children.length - 1].getAttribute("title")
+		}
+
+		it("formats the labels and the tooltips of the chart in the language of the application, not the browser's", () => {
+			state.taskHistory = [withUsage()]
+			translation.language = "de"
+			render(<UsageSettings />)
+
+			expect(weekdayLabels("de")).not.toEqual(weekdayLabels()) // the two differ, so this tells them apart
+			expect(labelsUnder(screen.getByTestId("usage-daily-chart"))).toEqual(weekdayLabels("de"))
+			expect(lastBarTitle()).toMatch(new RegExp(`^${new Intl.DateTimeFormat("de").format(NOW)} · `))
+		})
+
+		it("follows a change of the language", () => {
+			state.taskHistory = [withUsage()]
+			translation.language = "de"
+			const { rerender } = render(<UsageSettings />)
+			expect(labelsUnder(screen.getByTestId("usage-daily-chart"))).toEqual(weekdayLabels("de"))
+
+			translation.language = "ja"
+			rerender(<UsageSettings />)
+
+			expect(labelsUnder(screen.getByTestId("usage-daily-chart"))).toEqual(weekdayLabels("ja"))
+			expect(lastBarTitle()).toMatch(new RegExp(`^${new Intl.DateTimeFormat("ja").format(NOW)} · `))
+		})
+
+		it.each([["cimode"], ["en_US"], [""], [undefined]])(
+			"falls back to the browser's formats for the language %j, which the platform cannot use",
+			(language) => {
+				state.taskHistory = [withUsage()]
+				translation.language = language
+				render(<UsageSettings />)
+
+				expect(labelsUnder(screen.getByTestId("usage-daily-chart"))).toEqual(weekdayLabels())
+				expect(lastBarTitle()).toMatch(new RegExp(`^${new Intl.DateTimeFormat().format(NOW)} · `))
+			},
+		)
 	})
 
 	it("shows an unpriced top task by tokens and a priced one by cost when metrics are mixed", () => {

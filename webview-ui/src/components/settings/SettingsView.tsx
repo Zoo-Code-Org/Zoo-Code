@@ -979,7 +979,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						)}
 
 						{/* Usage Section */}
-						{renderTab === "usage" && <UsageSettings />}
+						{renderTab === "usage" && <UsageSettings providerLimitsEnabled={isIndexingComplete} />}
 
 						{/* About Section */}
 						{renderTab === "about" && (

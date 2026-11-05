@@ -1139,7 +1139,7 @@
 			"cost": "비용",
 			"tokens": "토큰",
 			"tasks": "작업",
-			"cacheHit": "{{percent}}% 캐시에서",
+			"cacheHit": "캐시 적중률 {{percent}}%",
 			"inOut": "입력 {{input}} · 출력 {{output}}",
 			"models": "모델"
 		},

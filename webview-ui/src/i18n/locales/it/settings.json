@@ -1127,7 +1127,7 @@
 			"today": "Oggi",
 			"7d": "7 giorni",
 			"30d": "30 giorni",
-			"all": "Sempre"
+			"all": "Tutto il periodo"
 		},
 		"scope": {
 			"label": "Mostra",
@@ -1169,8 +1169,8 @@
 				"daily": "Giornaliero",
 				"monthly": "Mensile",
 				"unlimited": "Illimitato",
-				"hours": "{{n}} ore",
-				"days": "{{n}} giorni"
+				"hours": "{{n}} h",
+				"days": "{{n}} g"
 			}
 		},
 		"byModel": "Per modello",

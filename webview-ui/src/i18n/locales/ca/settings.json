@@ -1169,8 +1169,8 @@
 				"daily": "Diari",
 				"monthly": "Mensual",
 				"unlimited": "Il·limitat",
-				"hours": "{{n}} hores",
-				"days": "{{n}} dies"
+				"hours": "{{n}} h",
+				"days": "{{n}} d"
 			}
 		},
 		"byModel": "Per model",
