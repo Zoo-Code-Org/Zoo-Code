@@ -5745,6 +5745,104 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("lets an activation that starts mid-deletion run after the deletion settles", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const otherProfile: ProviderSettingsEntry = {
+				name: "other-profile",
+				id: "other-id",
+				apiProvider: providerIdentifiers.openai,
+			}
+			const doomedSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "doomed-key" }
+			const keeperSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }
+			const otherSettings = { apiProvider: providerIdentifiers.openai, apiKey: "other-key" }
+			// The deletion is parked inside its manager delete so the activation below starts while the
+			// deletion still has writes outstanding.
+			let releaseDelete: (() => void) | undefined
+			const deleteGate = new Promise<void>((resolve) => {
+				releaseDelete = resolve
+			})
+			const deleteConfig = vi.fn(() => deleteGate.then(() => undefined))
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig,
+				getProfile: vi
+					.fn()
+					.mockImplementation(({ name }: { name: string }) =>
+						Promise.resolve(
+							name === "doomed-profile"
+								? { name: "doomed-profile", id: "doomed-id", ...doomedSettings }
+								: name === "keeper-profile"
+									? { name: "keeper-profile", id: "keeper-id", ...keeperSettings }
+									: { name: "other-profile", id: "other-id", ...otherSettings },
+						),
+					),
+				activateProfile: vi
+					.fn()
+					.mockImplementation(({ name }: { name: string }) =>
+						Promise.resolve(
+							name === "keeper-profile"
+								? { name: "keeper-profile", id: "keeper-id", ...keeperSettings }
+								: { name: "other-profile", id: "other-id", ...otherSettings },
+						),
+					),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile, otherProfile]),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile, otherProfile])
+			await provider.setValue("currentApiConfigName", "doomed-profile")
+
+			const deletion = provider.deleteProviderProfile(doomedProfile)
+			// Wait until the deletion is parked on the gated delete: the activation then starts with the
+			// deletion half-applied.
+			for (let attempt = 0; attempt < 40 && deleteConfig.mock.calls.length === 0; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			expect(deleteConfig).toHaveBeenCalledTimes(1)
+
+			const activation = provider.activateProviderProfile({ name: "other-profile" })
+			releaseDelete?.()
+
+			await Promise.all([deletion, activation])
+
+			// The deletion owned the mutation queue, so the activation ran after every deletion write and
+			// the later selection is the one that survives. Unqueued, the deletion resumes when the gate
+			// opens, activates the survivor it chose at entry, and overwrites the profile the user had
+			// just activated: the shared selection, this view's pin and the settings buffer all move
+			// back onto a profile nobody picked.
+			expect(provider.getValue("currentApiConfigName")).toBe("other-profile")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("other-profile")
+			// The activation clears this view's buffered apiConfiguration so the profile record, not a
+			// stale overlay, backs the new selection. Queued, that clear is the deletion's overlay write
+			// followed by the activation"s; unqueued the deletion writes the doomed profile's settings
+			// back over it afterwards and this view keeps serving a deleted profile.
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted?.currentApiConfigName).toBe("other-profile")
+			expect((provider.getValue("listApiConfigMeta") ?? []).map(({ name }) => name)).toEqual([
+				"keeper-profile",
+				"other-profile",
+			])
+			await provider.dispose()
+		})
+
 		it("throws a distinct error when the replacement activation fails after the deletion commits", async () => {
 			const provider = new ClineProvider(
 				mockContext,

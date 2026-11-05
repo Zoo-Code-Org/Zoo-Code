@@ -3558,6 +3558,16 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
+		// The same queue that serialises activation, mode switch, save and rename. This deletion
+		// snapshots every store it rewrites and compensates them as a group, so a mutation that
+		// interleaves with it gets undone by the other's rollback: an activation that started
+		// mid-deletion would have its selection rolled back to the profile being removed, and a
+		// deletion that started mid-activation would compensate a pin for the profile the user had
+		// just left. Nothing below enqueues again, so holding the queue here cannot deadlock.
+		return this.enqueueProviderProfileMutation(() => this.deleteProviderProfileUnlocked(profileToDelete))
+	}
+
+	private async deleteProviderProfileUnlocked(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
