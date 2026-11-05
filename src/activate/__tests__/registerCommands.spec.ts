@@ -670,6 +670,47 @@ describe("registerCommands handlers", () => {
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 	})
 
+	it("plusButtonClicked skips the sidebar focus and the view wait when the view is already launched", async () => {
+		// The "view/title" menu path invokes this command after resolveWebviewView has handed the
+		// provider its view, so the focus-and-wait branch must not run: re-focusing the pane and awaiting a
+		// resolution that already happened is work the menu click never asked for. The gate test above
+		// covers the opposite branch, where the view is not launched yet.
+		const launchedProvider = Object.assign({} as ClineProvider, {
+			isViewLaunched: true,
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			whenViewResolved: vi.fn().mockResolvedValue(undefined),
+		})
+		const commandHandlers: Record<string, (...args: unknown[]) => unknown> = {}
+		;(vscode.commands.registerCommand as Mock).mockImplementation(
+			(id: string, cb: (...args: unknown[]) => unknown) => {
+				commandHandlers[id] = cb
+				return { dispose: vi.fn() }
+			},
+		)
+		registerCommands({ context: mockContext, outputChannel: mockOutputChannel, provider: launchedProvider })
+
+		await commandHandlers["zoo-code.plusButtonClicked"]()
+
+		// The guard is the whole behaviour under test: without it the handler focuses the pane and waits on
+		// a resolution that has already landed, and every action still posts - so the assertions below
+		// are what pin the branch, not the posting.
+		expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+			expect.stringContaining("SidebarProvider.focus"),
+		)
+		expect(launchedProvider.whenViewResolved).not.toHaveBeenCalled()
+		// Both actions must still post, in the same order as the un-launched branch.
+		expect(launchedProvider.postMessageToWebview).toHaveBeenNthCalledWith(1, {
+			type: "action",
+			action: "chatButtonClicked",
+		})
+		expect(launchedProvider.postMessageToWebview).toHaveBeenNthCalledWith(2, {
+			type: "action",
+			action: "focusInput",
+		})
+	})
+
 	it("plusButtonClickedInTab evicts and posts on the tab instance for the tracked tab panel", async () => {
 		const mockTabProvider = {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
