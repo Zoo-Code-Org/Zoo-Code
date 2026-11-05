@@ -38,6 +38,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
 import { isInvalidDisplayValue } from "../config/displaySettings"
+import { isNonPortableSettingsKey } from "../config/ContextProxy"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -933,6 +934,13 @@ export const webviewMessageHandler = async (
 
 					// Route through provider.setValue so view-local buffer/pin sync stays
 					// consistent with the other mutation paths.
+					// The payload comes from the renderer, and viewStates is every view persisted mode
+					// and profile pin in one map: written here it would replace all of them and bypass the
+					// ownership checks in setViewStateId, so this path refuses it the way the import path
+					// and both API writes do.
+					if (isNonPortableSettingsKey(key)) {
+						continue
+					}
 					await provider.setValue(key as keyof RooCodeSettings, newValue)
 				}
 			} catch (error) {

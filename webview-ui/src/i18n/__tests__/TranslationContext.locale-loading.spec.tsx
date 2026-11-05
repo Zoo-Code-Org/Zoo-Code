@@ -1,11 +1,24 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 
-import i18next, { loadLanguage } from "../setup"
+import i18next, * as i18nSetup from "../setup"
 import TranslationProvider, { useAppTranslation } from "../TranslationContext"
 
 // The provider reads the active language from extension state. Tests drive it
 // through a mutable holder so a rerender can simulate a settings change.
+// The provider must start its own locale load. A test that called loadLanguage itself would
+// supply the bundle even to a provider that deferred the load or skipped it and switched
+// language later, which is the hole these cases must not paper over. The wrapper records
+// every call the provider makes and hands back the real promise, so awaiting it is awaiting
+// the memoized in-flight load the provider is waiting on.
+const realLoadLanguage = i18nSetup.loadLanguage
+const providerLoads: { calls: Array<{ language: string; promise: Promise<void> }> } = { calls: [] }
+const awaitProviderLoad = async (language: string) => {
+	const started = providerLoads.calls.filter((call) => call.language === language)
+	expect(started.length).toBeGreaterThan(0)
+	await Promise.all(started.map((call) => call.promise))
+}
+
 const extensionState: { language: string } = { language: "en" }
 
 vi.mock("@/context/ExtensionStateContext", () => ({
@@ -38,6 +51,16 @@ describe("TranslationProvider locale loading", () => {
 		// i18next is a module-level singleton, so a language left active by an
 		// earlier test would mask the fallback path this suite is checking.
 		await i18next.changeLanguage("en")
+		providerLoads.calls = []
+		vi.spyOn(i18nSetup, "loadLanguage").mockImplementation((language: string) => {
+			const promise = realLoadLanguage(language)
+			providerLoads.calls.push({ language, promise })
+			return promise
+		})
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
 	})
 
 	it("renders translated strings for a non-English initial language", async () => {
@@ -54,7 +77,7 @@ describe("TranslationProvider locale loading", () => {
 		// itself waits on - the idiom the unmount case at the end of this file uses - takes
 		// the clock out of the assertion. What `waitFor` has left to catch is the render
 		// that `languageChanged` triggers, which settles in the same task.
-		await loadLanguage("ko")
+		await awaitProviderLoad("ko")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("문제가 발생했습니다")
@@ -77,7 +100,7 @@ describe("TranslationProvider locale loading", () => {
 		})
 
 		// Await the fetch instead of racing a fixed window (note in the first case).
-		await loadLanguage("ja")
+		await awaitProviderLoad("ja")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("問題が発生しました")
@@ -97,7 +120,7 @@ describe("TranslationProvider locale loading", () => {
 		const { rerender } = renderProbe("de")
 
 		// German is loaded on demand as well: await it rather than time it.
-		await loadLanguage("de")
+		await awaitProviderLoad("de")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
@@ -121,7 +144,7 @@ describe("TranslationProvider locale loading", () => {
 		const { rerender } = renderProbe("de")
 
 		// The cold locale is awaited here too (see the note in the first case).
-		await loadLanguage("de")
+		await awaitProviderLoad("de")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Etwas ist schiefgelaufen")
@@ -143,7 +166,7 @@ describe("TranslationProvider locale loading", () => {
 
 		// Awaiting the fetch through the promise the provider waits on keeps the assertion
 		// above a statement about ordering rather than about the clock.
-		await loadLanguage("fr")
+		await awaitProviderLoad("fr")
 
 		await waitFor(() => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Une erreur s'est produite")
@@ -163,7 +186,7 @@ describe("TranslationProvider locale loading", () => {
 		// locale here waits for the exact resolution the guard is deciding on.
 		// The provider attached its `.then` first, so its callback has already run
 		// by the time this returns: the switch was suppressed, not left pending.
-		await loadLanguage("vi")
+		await awaitProviderLoad("vi")
 
 		expect(i18next.hasResourceBundle("vi", "common")).toBe(true)
 		expect(changeLanguage).not.toHaveBeenCalledWith("vi")
