@@ -2273,6 +2273,18 @@ describe("webviewMessageHandler - profile deletion routes through the provider m
 	type DeletionProviderFixture = { providerSettingsManager: Partial<Writable<ProviderSettingsManager>> }
 	const writable = mockClineProvider as DeletionProviderFixture
 
+	// This suite reassigns both providerSettingsManager and deleteProviderProfile, the way
+	// the rename and launch suites do for their own members, so it has to put them back:
+	// otherwise the doomed-profile list below leaks into any later test that reads either
+	// member without setting its own value.
+	const originalProviderSettingsManager = writable.providerSettingsManager
+	const originalDeleteProviderProfile = mockClineProvider.deleteProviderProfile
+
+	afterEach(() => {
+		writable.providerSettingsManager = originalProviderSettingsManager
+		mockClineProvider.deleteProviderProfile = originalDeleteProviderProfile
+	})
+
 	it("deletes through ClineProvider so the queue, compensation and sibling re-pin still run", async () => {
 		writable.providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([

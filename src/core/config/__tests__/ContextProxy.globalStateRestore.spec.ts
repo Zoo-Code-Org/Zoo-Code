@@ -22,7 +22,7 @@ vi.mock("vscode", () => ({
 describe("ContextProxy globalState cache restore", () => {
 	const KEY = "currentApiConfigName"
 
-	const setup = (persisted: string) => {
+	const setup = (persisted: string, failOnValues: readonly string[] = []) => {
 		const store = new Map<string, unknown>([[KEY, persisted]])
 		let storageWorks = true
 
@@ -40,6 +40,9 @@ describe("ContextProxy globalState cache restore", () => {
 			},
 			setKeysForSync(_keys: readonly string[]): void {},
 			async update(key: string, value: unknown): Promise<void> {
+				if (failOnValues.includes(value as string)) {
+					throw new Error("storage unavailable")
+				}
 				if (!storageWorks) {
 					throw new Error("storage unavailable")
 				}
@@ -110,6 +113,20 @@ describe("ContextProxy globalState cache restore", () => {
 		},
 	)
 
+	it("keeps the value an older write confirmed when a newer write rejects", async () => {
+		// rt4474947849: write A starts, write B starts, A resolves, B rejects. Storage ends
+		// holding A's value, so after B's rejection the cache has to report the same thing
+		// rather than the value it held before A was confirmed.
+		const { proxy, store } = setup("X", ["b"])
+		const writeA = proxy.updateGlobalState(KEY, "a")
+		const writeB = proxy.updateGlobalState(KEY, "b")
+
+		await expect(Promise.resolve(writeA)).resolves.toBeUndefined()
+		await expect(Promise.resolve(writeB)).rejects.toThrow("storage unavailable")
+
+		expect(proxy.getGlobalState(KEY)).toBe("a")
+		expect(store.get(KEY)).toBe("a")
+	})
 	it("restores the value storage last confirmed rather than the value before the failed write", async () => {
 		const { proxy, store, setStorageWorks } = setup("X")
 		await proxy.initialize()
