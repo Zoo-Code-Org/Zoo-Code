@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
@@ -278,26 +278,49 @@ describe("UsageSettings – branches", () => {
 		expect(screen.getByTestId("usage-top-tasks").textContent).toContain("bare")
 	})
 
-	it("treats a task with no cost as zero when ranking by tokens", () => {
-		state.taskHistory = [
+	it("treats a task with no cost as zero when ranking by tokens, and lists the tasks from the largest down", () => {
+		const unpriced = (title: string, tokensIn: number, tokensOut: number) =>
 			task({
-				task: "tokens only",
+				task: title,
 				totalCost: undefined as never,
+				tokensIn,
+				tokensOut,
 				usageByModel: [
 					{
 						apiProvider: providerIdentifiers.githubCopilot,
 						modelId: "gpt-5",
 						requests: 1,
-						tokensIn: 100,
-						tokensOut: 10,
+						tokensIn,
+						tokensOut,
 						cost: 0,
 					},
 				],
-			}),
+			})
+		// Not in the order of their sizes, so that only the ranking can put them in order.
+		state.taskHistory = [
+			unpriced("medium task", 1000, 100),
+			unpriced("small task", 100, 10),
+			unpriced("large task", 5000, 500),
 		]
+
 		render(<UsageSettings />)
-		expect(screen.getByTestId("usage-top-tasks").textContent).toContain("tokens only")
+
+		const rows = within(screen.getByTestId("usage-top-tasks")).getAllByRole("button")
+		expect(rows).toHaveLength(3)
+		expect(rows.map((row) => /(large|medium|small) task/.exec(row.textContent ?? "")?.[1])).toEqual([
+			"large",
+			"medium",
+			"small",
+		])
+		// Each is shown by its tokens (input and output together): there is no price to show.
+		expect(rows.map((row) => /gpt-5(5\.5|1\.1|110)/.exec(row.textContent ?? "")?.[1])).toEqual([
+			"5.5",
+			"1.1",
+			"110",
+		])
+		expect(screen.getByTestId("usage-top-tasks").textContent).not.toContain("$")
 	})
+
 	it("shows the cost for a priced task whose token counters are missing", () => {
 		state.taskHistory = [
 			task({
