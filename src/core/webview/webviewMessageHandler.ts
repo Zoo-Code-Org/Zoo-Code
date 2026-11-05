@@ -2869,7 +2869,26 @@ export const webviewMessageHandler = async (
 				// the per-view mutation path mirrors the shared write: a view that pinned the
 				// deleted mode would otherwise keep it in its own buffer (getState() and any new
 				// task created there) while the shared store says default.
-				await provider.setValue("mode", defaultModeSlug)
+				try {
+					await provider.setValue("mode", defaultModeSlug)
+				} catch (error) {
+					// provider.setValue rolled the shared store back to the value it captured before
+					// the write, and here that value is the slug deleteCustomMode just removed: a failed
+					// per-view write leaves the shared mode naming a mode that no longer exists. Rethrow
+					// from here and the post and the sibling fan-out below are both skipped, so the web
+					// keeps showing a deleted mode. Put the shared store back on a slug that does exist
+					// - the shared layer only, because the per-view record is what failed - and continue.
+					provider.log(
+						`[deleteCustomMode] Failed to write the default mode after deleting ${message.slug}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+					try {
+						await provider.contextProxy.setValue("mode", defaultModeSlug)
+					} catch (compensationError) {
+						provider.log(
+							`[deleteCustomMode] Compensation to the default mode ${defaultModeSlug} failed too: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`,
+						)
+					}
+				}
 				await provider.postStateToWebview()
 
 				// Sibling views are not covered by the write above: a view that pinned the deleted

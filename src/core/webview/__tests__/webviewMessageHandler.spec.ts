@@ -1795,6 +1795,32 @@ describe("webviewMessageHandler - deleteCustomMode", () => {
 		).toBeGreaterThan(vi.mocked(mockClineProvider.setValue).mock.invocationCallOrder[0])
 	})
 
+	it("keeps the shared mode on a slug that exists when the per-view write fails", async () => {
+		const slug = "test-failed-view-write-mode"
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([
+			{ name: "Test Failed View Write Mode", slug, roleDefinition: "Test Role", groups: [] } as ModeConfig,
+		])
+		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false)
+		vi.mocked(mockClineProvider.customModesManager.deleteCustomMode).mockResolvedValue(undefined)
+		// The provider write rolls the shared store back to what it captured before the write -
+		// here the slug that was just deleted - and rethrows. The handler has to log, put the
+		// shared mode back on a slug that exists, and still run the post and the fan-out below.
+		// Once: the shared rejection must not leak into the tests that follow, which reuse this double.
+		vi.mocked(mockClineProvider.setValue).mockRejectedValueOnce(new Error("per-view write failed"))
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteCustomMode", slug })
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to write the default mode after deleting"),
+		)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("mode", defaultModeSlug)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+		expect(mockClineProvider.clearViewLocalModeForDeletedSlug).toHaveBeenCalledWith(slug)
+		expect(
+			vi.mocked(mockClineProvider.clearViewLocalModeForDeletedSlug).mock.invocationCallOrder[0],
+		).toBeGreaterThan(vi.mocked(mockClineProvider.setValue).mock.invocationCallOrder[0])
+	})
+
 	it("should delete a global mode and its rules folder", async () => {
 		const slug = "test-global-mode"
 		const homeDir = os.homedir()
