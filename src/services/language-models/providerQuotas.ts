@@ -436,8 +436,9 @@ const KEYED_PROVIDERS: KeyedProvider[] = [
 		// Only API-key profiles are queried; OAuth sign-ins have no key to send.
 		providerId: providerIdentifiers.kimiCode,
 		credentials: (s) => ({
-			// An OAuth sign-in has no API key to send, even if an old key is still in the profile.
-			apiKey: s.kimiCodeAuthMethod === "oauth" ? undefined : s.kimiCodeApiKey,
+			// An OAuth sign-in has no API key to send, even if an old key is still in the profile. A profile with no
+			// recorded method is an OAuth one, as everywhere else (the requests, the validation, the sign-in check).
+			apiKey: (s.kimiCodeAuthMethod ?? "oauth") === "api-key" ? s.kimiCodeApiKey : undefined,
 			urls: ["https://api.kimi.com/coding/v1/usages"],
 		}),
 		parse: parseKimiCodeUsage,

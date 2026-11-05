@@ -126,6 +126,85 @@ describe("summarizeUsageByModel with stored text that is not a request object", 
 	})
 })
 
+describe("summarizeUsageByModel with corrupted numbers", () => {
+	const raw = (fields: string): ClineMessage => ({ ts: 1, type: "say", say: "api_req_started", text: `{${fields}}` })
+	const head = '"apiProvider":"p","modelId":"m"'
+
+	// JSON has no NaN or Infinity: JSON.stringify writes NaN as null, and a number too big for a double is read back
+	// as Infinity (1e999).
+	it.each([
+		["a number too big to be finite (Infinity)", "1e999"],
+		["a number too small to be finite (-Infinity)", "-1e999"],
+		["NaN, written as null", "null"],
+		["a string", '"100"'],
+		["a boolean", "true"],
+		["an object", "{}"],
+		["an array", "[5]"],
+	])("counts the request and reads %s as 0 in a token field, keeping the numeric ones", (_name, value) => {
+		const summary = summarizeUsageByModel([raw(`${head},"tokensIn":${value},"tokensOut":7,"cost":0.5`)])
+
+		expect(summary).toEqual([{ apiProvider: "p", modelId: "m", requests: 1, tokensIn: 0, tokensOut: 7, cost: 0.5 }])
+	})
+
+	it.each([
+		["Infinity", "1e999"],
+		["-Infinity", "-1e999"],
+		["NaN, written as null", "null"],
+		["a string", '"0.5"'],
+	])("reads %s as 0 in the cost, and keeps the tokens", (_name, value) => {
+		const summary = summarizeUsageByModel([raw(`${head},"tokensIn":3,"tokensOut":4,"cost":${value}`)])
+
+		expect(summary).toEqual([{ apiProvider: "p", modelId: "m", requests: 1, tokensIn: 3, tokensOut: 4, cost: 0 }])
+	})
+
+	it("does not let a corrupted request spoil the sums of the others of the same model", () => {
+		const summary = summarizeUsageByModel([
+			raw(`${head},"tokensIn":100,"tokensOut":10,"cost":1`),
+			raw(`${head},"tokensIn":1e999,"tokensOut":-1e999,"cost":null`),
+			raw(`${head},"tokensIn":200,"tokensOut":20,"cost":2`),
+		])
+
+		expect(summary).toEqual([
+			{ apiProvider: "p", modelId: "m", requests: 3, tokensIn: 300, tokensOut: 30, cost: 3 },
+		])
+		expect(Object.values(summary[0]).every((value) => typeof value !== "number" || Number.isFinite(value))).toBe(
+			true,
+		)
+	})
+
+	it.each([
+		["both token fields are not numbers", '"tokensIn":"1","tokensOut":null,"cost":5'],
+		["both token fields are missing", '"cost":5'],
+	])("does not count a request whose %s: it has not finished", (_name, fields) => {
+		expect(summarizeUsageByModel([raw(`${head},${fields}`)])).toEqual([])
+	})
+
+	it.each([
+		["Infinity", "1e999"],
+		["-Infinity", "-1e999"],
+		["NaN, written as null", "null"],
+		["a string", '"5"'],
+	])("leaves a cache counter that is %s out, so the sums stay finite", (_name, value) => {
+		const summary = summarizeUsageByModel([
+			raw(`${head},"tokensIn":1,"tokensOut":1,"cost":0,"cacheReads":${value},"cacheWrites":${value}`),
+			raw(`${head},"tokensIn":1,"tokensOut":1,"cost":0,"cacheReads":30,"cacheWrites":4`),
+		])
+
+		expect(summary).toEqual([
+			{
+				apiProvider: "p",
+				modelId: "m",
+				requests: 2,
+				tokensIn: 2,
+				tokensOut: 2,
+				cost: 0,
+				cacheReads: 30,
+				cacheWrites: 4,
+			},
+		])
+	})
+})
+
 describe("resolveRecordedModelId", () => {
 	it("keeps a model that was recorded when the request started", () => {
 		expect(resolveRecordedModelId("gpt-5", "gpt-5-mini")).toBe("gpt-5")

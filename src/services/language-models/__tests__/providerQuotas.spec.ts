@@ -574,13 +574,35 @@ describe("Kimi Code authentication", () => {
 		expect((fetchSpy.mock.calls[0][1]?.headers as Record<string, string>).Authorization).toBe("Bearer real-key")
 	})
 
-	it("treats a profile with no recorded method as an API-key profile", async () => {
+	it("treats a profile with no recorded method as an OAuth profile, as the requests do, and does not query its key", async () => {
 		const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ usage: { limit: 100, used: 10 } })))
-		await getProviderQuotas(
+
+		const [q] = await getProviderQuotas(
 			[{ apiProvider: providerIdentifiers.kimiCode, kimiCodeApiKey: "k" } as never],
 			{},
 			fetchSpy,
 		)
+
+		expect(q).toMatchObject({ ok: false, reason: "noKey" })
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
+	it("queries a profile that names the API-key method, and no other", async () => {
+		const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ usage: { limit: 100, used: 10 } })))
+		resetProviderQuotaCache()
+
+		await getProviderQuotas(
+			[
+				{
+					apiProvider: providerIdentifiers.kimiCode,
+					kimiCodeAuthMethod: "api-key",
+					kimiCodeApiKey: "k",
+				} as never,
+			],
+			{},
+			fetchSpy,
+		)
+
 		expect(fetchSpy).toHaveBeenCalledTimes(1)
 	})
 })
@@ -677,7 +699,11 @@ describe("getProviderQuotas – coding-plan providers", () => {
 		await getProviderQuotas(
 			[
 				{ apiProvider: providerIdentifiers.nanogpt, nanoGptApiKey: "k" } as never,
-				{ apiProvider: providerIdentifiers.kimiCode, kimiCodeApiKey: "k" } as never,
+				{
+					apiProvider: providerIdentifiers.kimiCode,
+					kimiCodeAuthMethod: "api-key",
+					kimiCodeApiKey: "k",
+				} as never,
 				{ apiProvider: providerIdentifiers.opencodeGo, opencodeGoApiKey: "k" } as never,
 			],
 			{},

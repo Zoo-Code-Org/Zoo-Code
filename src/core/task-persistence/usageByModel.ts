@@ -46,8 +46,13 @@ export function summarizeUsageByModel(messages: ClineMessage[]): UsageByModelEnt
 		entry.tokensIn += num(parsed.tokensIn)
 		entry.tokensOut += num(parsed.tokensOut)
 		entry.cost += num(parsed.cost)
-		if (typeof parsed.cacheReads === "number") entry.cacheReads = (entry.cacheReads ?? 0) + parsed.cacheReads
-		if (typeof parsed.cacheWrites === "number") entry.cacheWrites = (entry.cacheWrites ?? 0) + parsed.cacheWrites
+		// A counter that is not a finite number (a corrupted file) is not a report of the cache: it is left out.
+		if (typeof parsed.cacheReads === "number" && Number.isFinite(parsed.cacheReads)) {
+			entry.cacheReads = (entry.cacheReads ?? 0) + parsed.cacheReads
+		}
+		if (typeof parsed.cacheWrites === "number" && Number.isFinite(parsed.cacheWrites)) {
+			entry.cacheWrites = (entry.cacheWrites ?? 0) + parsed.cacheWrites
+		}
 	}
 
 	return [...byKey.values()]
