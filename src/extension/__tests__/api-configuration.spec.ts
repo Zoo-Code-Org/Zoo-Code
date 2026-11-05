@@ -100,6 +100,42 @@ describe("API - configuration", () => {
 		)
 	})
 
+	// An explicit unset is the same hazard as a crafted map, because ContextProxy reads an undefined value as a
+	// delete (the repo relies on update(key, undefined) at ContextProxy.ts:173, :280-282, :305 and :346), and
+	// withoutInvalidDisplaySettings cannot catch it either - it filters by Object.entries, so a key holding
+	// undefined survives it. toHaveBeenCalledWith compares the way toEqual does and ignores undefined-valued
+	// keys, so the loose assertions alone could not tell a dropped key from a forwarded undefined; the strict
+	// assertions on the captured arguments are what carry the teeth here.
+	it("drops an explicitly unset viewStates value before either write", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("default-id")
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const log = vi.fn()
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log,
+			contextProxy: { setValues },
+			providerSettingsManager: { saveConfig, setModeConfig: vi.fn().mockResolvedValue(undefined) },
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await api.setConfiguration({ viewStates: undefined, soundEnabled: true } as unknown as RooCodeSettings)
+
+		const [valuesArgument] = setValues.mock.calls[0] as [RooCodeSettings]
+		const [savedName, savedArgument] = saveConfig.mock.calls[0] as [string, RooCodeSettings]
+		expect(savedName).toBe("default")
+		expect(valuesArgument).toStrictEqual({ soundEnabled: true })
+		expect(savedArgument).toStrictEqual({ soundEnabled: true })
+		expect(setValues).toHaveBeenCalledWith({ soundEnabled: true })
+		expect(saveConfig).toHaveBeenCalledWith("default", { soundEnabled: true })
+		expect(log).toHaveBeenCalledWith(
+			"[setConfiguration] Ignored a caller-supplied viewStates map; the registered map is written by the extension host.",
+		)
+	})
+
 	describe("the display settings", () => {
 		const setup = () => {
 			const setValues = vi.fn().mockResolvedValue(undefined)
