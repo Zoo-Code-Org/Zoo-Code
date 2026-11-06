@@ -102,6 +102,7 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import { collectStream } from "../../../test-utils/stream"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 /** The stable typings this extension builds against predate image parts, so reach them by name. */
 const dataPart = () =>
@@ -753,7 +754,7 @@ describe("GitHubCopilotHandler", () => {
 					() => (settled = true),
 					() => (settled = true),
 				)
-				await new Promise((resolve) => setTimeout(resolve, 0))
+				await flushMacrotasks()
 				expect(settled).toBe(false)
 				expect(source.cancel).not.toHaveBeenCalled()
 
