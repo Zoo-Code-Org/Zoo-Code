@@ -176,8 +176,10 @@ describe("neutralizeCsvFormulas", () => {
 				const char = line[i]
 				if (inQuotes) {
 					if (char !== '"') field += char
-					else if (line[i + 1] === '"') ((field += '"'), i++)
-					else inQuotes = false
+					else if (line[i + 1] === '"') {
+						field += '"'
+						i++
+					} else inQuotes = false
 				} else if (char === '"' && atStart) {
 					inQuotes = true
 					atStart = false
