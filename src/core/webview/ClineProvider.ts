@@ -1669,10 +1669,6 @@ export class ClineProvider
 
 			// Process the pending edit after a short delay to ensure the task is fully initialized
 			setTimeout(async () => {
-				// What the task held before the edit truncated it, and whether the truncation reached the disk: a write
-				// that failed leaves the disk as it was, and the task must be left the same.
-				const messagesBeforeEdit = task.clineMessages
-				let messagesPersisted = false
 				try {
 					// Find the message index in the restored state
 					const { messageIndex, apiConversationHistoryIndex } = (() => {
@@ -1686,7 +1682,6 @@ export class ClineProvider
 					if (messageIndex !== -1) {
 						// Remove the target message and all subsequent messages
 						await task.overwriteClineMessages(task.clineMessages.slice(0, messageIndex))
-						messagesPersisted = true
 
 						if (apiConversationHistoryIndex !== -1) {
 							await task.overwriteApiConversationHistory(
@@ -1705,15 +1700,6 @@ export class ClineProvider
 					this.log(`[createTaskWithHistoryItem] Error processing pending edit: ${error}`)
 					// The pending edit was taken out of the store when this began, so it is handed back to the user, not
 					// lost: the failure is reported and the edited message is put back in the chat box to be sent again.
-					// The messages that were cut in memory are put back too when the write of the cut failed, so the
-					// task is what the disk says it is.
-					if (!messagesPersisted) {
-						try {
-							await task.overwriteClineMessages(messagesBeforeEdit, false)
-						} catch {
-							// Nothing is written by this call; there is nothing more to do for the task.
-						}
-					}
 					void vscode.window.showErrorMessage(
 						t("common:errors.checkpoint_restore_failed", {
 							error: error instanceof Error ? error.message : String(error),

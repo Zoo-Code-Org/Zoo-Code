@@ -164,6 +164,85 @@ describe("neutralizeCsvFormulas", () => {
 		expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(`a,"'${cell}",b`)
 	})
 
+	// A spreadsheet that does not split on commas: it reads the file with its own list separator, and recognises a quote only
+	// at the start of a field. This reads a row that way.
+	const fieldsSplitOn = (delimiter: string, csv: string) => {
+		const fields: string[] = []
+		for (const line of csv.split("\n")) {
+			let field = ""
+			let inQuotes = false
+			let atStart = true
+			for (let i = 0; i < line.length; i++) {
+				const char = line[i]
+				if (inQuotes) {
+					if (char !== '"') field += char
+					else if (line[i + 1] === '"') ((field += '"'), i++)
+					else inQuotes = false
+				} else if (char === '"' && atStart) {
+					inQuotes = true
+					atStart = false
+				} else if (char === delimiter) {
+					fields.push(field)
+					field = ""
+					atStart = true
+				} else {
+					field += char
+					atStart = false
+				}
+			}
+			fields.push(field)
+		}
+		return fields
+	}
+	const startsAFormula = (field: string) => /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u.test(field)
+
+	describe("for a spreadsheet that splits on a semicolon or a tab", () => {
+		it.each([
+			["a formula after a semicolon in a cell", 'task,"x;=HYPERLINK(""http://e"",""go"")",1'],
+			["a formula after a semicolon in a cell that is not quoted", "task,x;=1+1,1"],
+			["a formula after a semicolon in a cell, with the quote in the middle of the field", 'a,"b;=1+1",c'],
+			["a sign after a semicolon", "task,x;-2+3,1"],
+			["an at sign after a semicolon", "task,x;@SUM(1),1"],
+			["a formula after a tab in a cell", "task,x\t=1+1,1"],
+			["a formula after several separators", "task,x;;\t=1+1,1"],
+			["a formula after a semicolon and an invisible character", "task,x;\u0000=1+1,1"],
+			["a cell that is a semicolon and a formula", "task,;=1+1,1"],
+		])("leaves no field that is a formula, whatever the separator: %s", (_name, csv) => {
+			const safe = neutralizeCsvFormulas(csv)!
+
+			for (const delimiter of [",", ";", "\t"]) {
+				for (const field of fieldsSplitOn(delimiter, safe)) {
+					expect(
+						startsAFormula(field),
+						`${JSON.stringify(field)} split on ${JSON.stringify(delimiter)}`,
+					).toBe(false)
+				}
+			}
+		})
+
+		it("shows that the same text is a formula for a semicolon import when it is left as it was written", () => {
+			const written = "task,x;=1+1,1"
+
+			expect(fieldsSplitOn(";", written).some(startsAFormula)).toBe(true)
+		})
+
+		it("changes nothing for a semicolon or a tab that is not followed by a formula start", () => {
+			const csv = 'task,"a; b;c\td",1'
+
+			expect(neutralizeCsvFormulas(csv)).toBe(csv)
+		})
+
+		it("writes the text that follows a semicolon as inert text from exportUsageCsv, whatever the webview sent", async () => {
+			const saveUri = { fsPath: "/tmp/chosen.csv" } as vscode.Uri
+			showSaveDialog.mockResolvedValue(saveUri)
+
+			await exportUsageCsv("date,task\n2026-06-01,\"x;=cmd|' /c calc'!A0\"", "all")
+
+			const written = writeFile.mock.calls[0][1].toString()
+			expect(fieldsSplitOn(";", written).some(startsAFormula)).toBe(false)
+		})
+	})
+
 	it("neutralises every row and every column, not only the first row or the task text", () => {
 		const out = neutralizeCsvFormulas('h1,h2\n1,"=HYPERLINK(""http://x"")"\n"@a",2\n=3,4')
 

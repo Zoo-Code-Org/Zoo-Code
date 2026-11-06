@@ -11,12 +11,20 @@ const USAGE_RANGES: readonly string[] = ["today", "7d", "30d", "all"]
  */
 const FORMULA_START = /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u
 
+/**
+ * A spreadsheet may split a row on a semicolon (the list separator of many locales) or a tab as well as on a comma, and
+ * it recognises a quote only at the start of a field: so the text after a semicolon or a tab inside a cell can start a
+ * field of its own, whatever quotes surround the cell. A formula start there is broken as well.
+ */
+const FORMULA_AFTER_FIELD_SEPARATOR = /([;\t])(?=(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r])/gu
+
 /** The most text the host writes for an export: ten years of daily tasks is far below it, a runaway message is not. */
 const MAX_USAGE_CSV_LENGTH = 20_000_000
 
 /**
  * Makes every cell of a CSV inert for a spreadsheet: a cell that starts with = + - @ (or a tab or carriage return) is
- * evaluated as a formula by a spreadsheet, so it gets a leading apostrophe. The text is parsed and written again, so
+ * evaluated as a formula by a spreadsheet, so it gets a leading apostrophe, and so does the text that follows a
+ * semicolon or a tab inside a cell (where a spreadsheet that splits on those starts a new field). The text is parsed and written again, so
  * a cell is judged by its value, however it was quoted. Returns `undefined` for text that is not well-formed CSV
  * (a quote that is never closed). Text that is already inert comes back unchanged.
  */
@@ -72,7 +80,8 @@ export function neutralizeCsvFormulas(csv: string): string | undefined {
 		.map((cells) =>
 			cells
 				.map((cell) => {
-					const safe = FORMULA_START.test(cell.value) ? `'${cell.value}` : cell.value
+					const started = FORMULA_START.test(cell.value) ? `'${cell.value}` : cell.value
+					const safe = started.replace(FORMULA_AFTER_FIELD_SEPARATOR, "$1'")
 					return cell.quoted || /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 				})
 				.join(","),

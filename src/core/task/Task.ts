@@ -1733,13 +1733,30 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Also resets cloud sync tracking to avoid re-syncing previously synced messages.
 	 */
 	public async overwriteClineMessages(newMessages: ClineMessage[], persist = true) {
+		const replaced = this.clineMessages
 		this.hydrateClineMessages(newMessages)
+		const replacement = new Set(this.clineMessages)
 		if (persist) {
 			// A failed write is reported to the caller: the delete, edit and checkpoint flows go on to save the
 			// messages again, and carrying on after a lost write would leave the history entry (and its usage
 			// breakdown) describing messages that are no longer the ones on disk.
-			if (!(await this.saveClineMessages(false))) throw new Error("Failed to save the messages")
+			if (!(await this.saveClineMessages(false))) {
+				// The rewind flows cut the API history only after this, so a rejection leaves it as it was: the messages
+				// are put back, with what came in while the write was on its way, and the two stay consistent.
+				this.restoreReplacedMessages(replaced, replacement)
+				throw new Error("Failed to save the messages")
+			}
 		}
+	}
+
+	/**
+	 * Undoes a replacement whose write was lost: the messages that were replaced come back, and so does every message
+	 * that was added to the task after the replacement (an update made to a message that both share is in the message
+	 * itself), so nothing that happened while the write was on its way is dropped.
+	 */
+	private restoreReplacedMessages(replaced: ClineMessage[], replacement: ReadonlySet<ClineMessage>) {
+		const addedSince = this.clineMessages.filter((message) => !replacement.has(message))
+		this.hydrateClineMessages([...replaced, ...addedSince])
 	}
 
 	private hydrateClineMessages(messages: ClineMessage[]) {

@@ -440,16 +440,16 @@ describe("checkpointRestoreHandler", () => {
 				"common:errors.checkpoint_restore_failed: Disk full",
 			)
 
-		it("reports a message write that failed, hands the edit back, and leaves the task as the disk has it", async () => {
-			const messagesBefore = fixture.task.clineMessages
+		it("reports a message write that failed, and hands the edit back", async () => {
 			fixture.taskDouble.overwriteClineMessages.mockRejectedValueOnce(fixture.failure)
 
 			await stageAndRehydrate()
 
 			reported()
 			handedBack()
-			// The cut was not stored, so it is undone in memory (and not written again).
-			expect(fixture.taskDouble.overwriteClineMessages).toHaveBeenLastCalledWith(messagesBefore, false)
+			// Undoing the cut in memory is the task's own business (`overwriteClineMessages` does it when its write is lost):
+			// the provider does not write, or replace, the messages again.
+			expect(fixture.taskDouble.overwriteClineMessages).toHaveBeenCalledTimes(1)
 			expect(fixture.taskDouble.overwriteApiConversationHistory).not.toHaveBeenCalled()
 			expect(fixture.taskDouble.handleWebviewAskResponse).not.toHaveBeenCalled()
 			expect(fixture.store.get(`task-${fixture.task.taskId}`)).toBeUndefined() // and it is not applied by a later start
@@ -462,7 +462,6 @@ describe("checkpointRestoreHandler", () => {
 
 			reported()
 			handedBack()
-			// The messages were cut on the disk already: they are not put back in memory.
 			expect(fixture.taskDouble.overwriteClineMessages).toHaveBeenCalledTimes(1)
 			expect(fixture.taskDouble.handleWebviewAskResponse).not.toHaveBeenCalled()
 		})
@@ -473,6 +472,17 @@ describe("checkpointRestoreHandler", () => {
 			await stageAndRehydrate()
 
 			reported()
+			handedBack()
+		})
+
+		it("reports a failure that is not an Error as the text it is", async () => {
+			fixture.taskDouble.overwriteClineMessages.mockRejectedValueOnce("the disk is full")
+
+			await stageAndRehydrate()
+
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"common:errors.checkpoint_restore_failed: the disk is full",
+			)
 			handedBack()
 		})
 
