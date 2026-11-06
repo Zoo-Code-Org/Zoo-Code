@@ -480,23 +480,6 @@ export const undoSettingWrite = async (
 	}
 }
 
-/**
- * Writes settings from a generic writer (an import, the public API, the configuration of a new task). The appearance
- * values go through the same per-key write chain as saves, so a save that fails and rolls back does not undo a value
- * written here meanwhile, even when it is the same value. The write is not rolled back as a whole: a write that
- * succeeded is final. A write that failed is undone, not finished, so it leaves the chain the way a failed save does
- * and an earlier save that is still pending keeps its own rollback. An invalid appearance value rejects the write
- * before any value is stored.
- */
-export async function setValuesThroughWriteChain(
-	contextProxy: ContextProxy,
-	settings: RooCodeSettings,
-	options: SettingWriteOptions = {},
-) {
-	const { failure } = await writeValuesThroughWriteChain(contextProxy, settings, options)
-	if (failure) throw failure.reason
-}
-
 /** What a failed write of the settings that are not appearance values says about them. */
 const reportOthers = (reason: unknown): { stored: string[]; notStored: string[] } =>
 	reason instanceof SettingsWriteError
@@ -543,9 +526,13 @@ export interface WriteValuesReport {
 }
 
 /**
- * `setValuesThroughWriteChain`, for a caller that tells its user what was stored: it reports the failure instead of
- * throwing it, together with the settings that were stored and those that were not. An invalid appearance value still
- * throws, as nothing was started then.
+ * Writes settings from a generic writer (an import, the public API, the configuration of a new task) and reports what
+ * was stored. The appearance values go through the same per-key write chain as saves, so a save that fails and rolls
+ * back does not undo a value written here meanwhile, even when it is the same value. The write is not rolled back as a
+ * whole: a write that succeeded is final. A write that failed is undone, not finished, so it leaves the chain the way
+ * a failed save does and an earlier save that is still pending keeps its own rollback. The failure is reported, not
+ * thrown, together with the settings that were stored and those that were not (see `describeFailedWrite` for the
+ * error). An invalid appearance value still throws, before any value is stored.
  */
 export async function writeValuesThroughWriteChain(
 	contextProxy: ContextProxy,

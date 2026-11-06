@@ -23,11 +23,16 @@ import {
 	beginSettingWrite,
 	disposeSettingWrites,
 	performSettingWrite,
-	setValuesThroughWriteChain,
 	writeValuesThroughWriteChain,
 	settingWriteBookkeepingSize,
 	undoSettingWrite,
 } from "../appearanceSettingWrites"
+
+/** A write that throws the failure, as the report gives it: what the tests of the write chain read. */
+const setValuesThroughWriteChain = async (...args: Parameters<typeof writeValuesThroughWriteChain>) => {
+	const { failure } = await writeValuesThroughWriteChain(...args)
+	if (failure) throw failure.reason
+}
 import { CustomModesManager } from "../CustomModesManager"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 

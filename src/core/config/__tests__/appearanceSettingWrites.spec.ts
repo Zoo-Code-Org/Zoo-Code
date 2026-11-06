@@ -9,13 +9,19 @@ import {
 	disposeSettingWrites,
 	PartialSettingsWriteError,
 	performSettingWrite,
-	setValuesThroughWriteChain,
+	writeValuesThroughWriteChain,
 	settingWriteBookkeepingSize,
 	settingWritesAttachedToALine,
 	settingWritesWaitingToStart,
 	undoSettingWrite,
 } from "../appearanceSettingWrites"
 import { SettingsWriteError, type ContextProxy } from "../ContextProxy"
+
+/** A write that throws the failure, as the report gives it: what the tests of the write chain read. */
+const setValuesThroughWriteChain = async (...args: Parameters<typeof writeValuesThroughWriteChain>) => {
+	const { failure } = await writeValuesThroughWriteChain(...args)
+	if (failure) throw failure.reason
+}
 
 describe("appearanceSettingWrites", () => {
 	let stored: Map<string, unknown>
