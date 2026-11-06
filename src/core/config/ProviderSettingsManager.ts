@@ -417,6 +417,27 @@ export class ProviderSettingsManager {
 	}
 
 	/**
+	 * Every profile with its name, read in one locked load (a `getProfile` per profile would load and parse all of them
+	 * again for each, one lock turn after the other). A profile without an id is left out: it cannot be asked for by id.
+	 * With `signal`, a call that is aborted by the time its turn comes reads nothing from storage (see `listConfig`).
+	 */
+	public async getAllProfiles(options?: {
+		signal?: AbortSignal
+	}): Promise<Array<ProviderSettingsWithId & { id: string; name: string }>> {
+		try {
+			return await this.lock(async () => {
+				options?.signal?.throwIfAborted()
+				const providerProfiles = await this.load()
+				return Object.entries(providerProfiles.apiConfigs).flatMap(([name, apiConfig]) =>
+					apiConfig.id ? [{ ...apiConfig, id: apiConfig.id, name }] : [],
+				)
+			})
+		} catch (error) {
+			throw new Error(`Failed to get profiles: ${error instanceof Error ? error.message : error}`)
+		}
+	}
+
+	/**
 	 * Save a config with the given name.
 	 * Preserves the ID from the input 'config' object if it exists,
 	 * otherwise generates a new one (for creation scenarios).

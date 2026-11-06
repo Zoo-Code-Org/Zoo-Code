@@ -638,6 +638,37 @@ describe("ProviderSettingsManager", () => {
 			load.mockRestore()
 		})
 
+		it("reads every profile in one locked load, with its name and id", async () => {
+			mockSecrets.get.mockClear()
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					...stored,
+					apiConfigs: { ...stored.apiConfigs, "no id": { apiProvider: providerIdentifiers.anthropic } },
+				}),
+			)
+			const load = vi.spyOn(providerSettingsManager as unknown as { load(): Promise<unknown> }, "load")
+
+			const all = await providerSettingsManager.getAllProfiles()
+
+			expect(load).toHaveBeenCalledTimes(1) // not one load, and one lock turn, per profile
+			expect(all).toEqual([
+				{ name: "default", id: "default-id" },
+				{ name: "other", id: "other-id" },
+			]) // a profile without an id cannot be asked for by id, so it is left out
+			load.mockRestore()
+		})
+
+		it("reads no profiles from storage when the signal is already aborted", async () => {
+			mockSecrets.get.mockClear()
+			mockSecrets.get.mockResolvedValue(JSON.stringify(stored))
+
+			await expect(providerSettingsManager.getAllProfiles({ signal: aborted() })).rejects.toThrow(
+				"Failed to get profiles",
+			)
+
+			expect(mockSecrets.get).not.toHaveBeenCalled()
+		})
+
 		it("reads as before when the signal is not aborted", async () => {
 			mockSecrets.get.mockResolvedValue(JSON.stringify(stored))
 			const controller = new AbortController()

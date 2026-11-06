@@ -1586,6 +1586,87 @@ describe("loadProfiles", () => {
 		})
 	})
 
+	describe("with a source that reads every profile at once", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		const bulk = (rows: Array<{ id: string; name?: string; apiProvider?: string }>) => ({
+			listConfig: vi.fn(async () => []),
+			getProfile: vi.fn(),
+			getAllProfiles: vi.fn(async () => rows as never),
+		})
+
+		it("reads once, not once per profile, and does not list or read the profiles one by one", async () => {
+			const source = bulk([
+				{ id: "a", name: "work", apiProvider: "x" },
+				{ id: "b", name: "personal", apiProvider: "y" },
+				{ id: "c", name: "spare", apiProvider: "z" },
+			])
+			const controller = new AbortController()
+
+			const result = await loadProfilesWithActive(source, controller.signal, "personal")
+
+			expect(source.getAllProfiles).toHaveBeenCalledExactlyOnceWith({ signal: controller.signal })
+			expect(source.listConfig).not.toHaveBeenCalled()
+			expect(source.getProfile).not.toHaveBeenCalled()
+			expect(result.profiles.map((profile) => profile.apiProvider)).toEqual(["y", "x", "z"]) // the active first
+			expect(result.activeProfileId).toBe("b")
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("applies the allow list: a refused profile is left out and is not the active one", async () => {
+			const source = bulk([
+				{ id: "a", name: "work", apiProvider: "openrouter" },
+				{ id: "b", name: "personal", apiProvider: "deepseek" },
+			])
+
+			const result = await loadProfilesWithActive(
+				source,
+				undefined,
+				"personal",
+				(profile) => profile.apiProvider !== "deepseek",
+			)
+
+			expect(result.profiles.map((profile) => profile.apiProvider)).toEqual(["openrouter"])
+			expect(result.activeProfileId).toBeUndefined()
+		})
+
+		it("fails when the one read fails, and when it takes too long", async () => {
+			const failing = bulk([])
+			failing.getAllProfiles.mockRejectedValue(new Error("secret storage unavailable"))
+			await expect(loadProfilesWithActive(failing)).rejects.toThrow("secret storage unavailable")
+
+			const hanging = bulk([])
+			hanging.getAllProfiles.mockImplementation(() => new Promise<never>(() => {}))
+			const loading = loadProfilesWithActive(hanging)
+			const failed = expect(loading).rejects.toThrow("Reading the saved profiles timed out")
+			await vi.advanceTimersByTimeAsync(10_000)
+			await failed
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("stops waiting as soon as the request is cancelled, and starts nothing for one that was", async () => {
+			const controller = new AbortController()
+			const hanging = bulk([])
+			hanging.getAllProfiles.mockImplementation(() => new Promise<never>(() => {}))
+			const loading = loadProfilesWithActive(hanging, controller.signal)
+			const rejected = expect(loading).rejects.toMatchObject({ name: "AbortError" })
+			controller.abort()
+			await rejected
+			expect(vi.getTimerCount()).toBe(0)
+
+			const cancelled = bulk([{ id: "a", name: "work" }])
+			await expect(loadProfilesWithActive(cancelled, controller.signal)).rejects.toMatchObject({
+				name: "AbortError",
+			})
+			expect(cancelled.getAllProfiles).not.toHaveBeenCalled()
+		})
+
+		it("returns an empty list when there are no saved profiles", async () => {
+			expect(await loadProfilesWithActive(bulk([]))).toEqual({ profiles: [], activeProfileId: undefined })
+		})
+	})
+
 	it("returns an empty list when there are no saved profiles", async () => {
 		const source = { listConfig: vi.fn(async () => []), getProfile: vi.fn() }
 		expect(await loadProfiles(source)).toEqual([])
