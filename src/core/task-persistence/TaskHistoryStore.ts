@@ -9,6 +9,7 @@ import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -76,6 +77,34 @@ export interface TaskHistoryStoreOptions {
 	 * globalState during the transition period.
 	 */
 	onWrite?: (items: HistoryItem[]) => Promise<void>
+}
+
+/**
+ * A deletion that did not happen.
+ *
+ * The item is kept in the cache, the mtime map and the persisted state, so the store still
+ * agrees with the disk and the next reconciliation does not resurrect a task the caller was
+ * told was gone. The caller learns the delete failed instead of seeing a success that the
+ * on-disk state contradicts.
+ */
+export class TaskHistoryDeleteError extends Error {
+	constructor(
+		readonly taskIds: string[],
+		readonly reason: string,
+		cause?: unknown,
+	) {
+		super(
+			`Task history for ${taskIds.join(", ")} could not be deleted (${reason}); the affected items were kept.`,
+			{ cause },
+		)
+		this.name = "TaskHistoryDeleteError"
+	}
+}
+
+function errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? String((error as { code?: unknown }).code)
+		: undefined
 }
 
 export class TaskHistoryStore {
@@ -263,27 +292,24 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Delete a single task's history item.
+	 * Delete one task’s history item.
 	 *
-	 * Deletion is best-effort: the unlink runs under the same per-file
-	 * advisory lock as `safeWriteJson`, so a locked read-modify-write (for
-	 * example the settlement in `clearPendingActionIfMatching`) cannot
-	 * interleave with it. A lock or unlink failure is swallowed because the
-	 * file may already be deleted; the in-memory eviction and the write
-	 * through still complete.
+	 * The unlink runs under the same per-file advisory lock as `safeWriteJson`, so a locked
+	 * read-modify-write (for example the settlement in `clearPendingActionIfMatching`) cannot
+	 * interleave with it. Eviction and the write-through happen only once the file is actually
+	 * gone - unlinked, or reported absent by the unlink itself. A lock-key resolution failure, a
+	 * lock that could not be taken, or any other unlink failure leaves the item in place and is
+	 * reported as a TaskHistoryDeleteError: a store that dropped the item while the file survived
+	 * would report a deletion that the next reconciliation immediately contradicts.
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
+			const outcome = await this.removeTaskFile(taskId)
+			if (!outcome.deleted) {
+				throw new TaskHistoryDeleteError([taskId], outcome.reason ?? "unknown error", outcome.cause)
+			}
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
-
-			// Remove per-task file (best-effort)
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
-			} catch {
-				// File may already be deleted
-			}
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -293,35 +319,154 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Delete multiple tasks' history items in a batch.
+	 * Delete multiple tasks’ history items in a batch.
 	 *
-	 * Every item follows the `delete` semantics and is attempted even when an
-	 * earlier unlink fails. The single write-through runs once after the
-	 * whole batch.
+	 * Every item follows the `delete` semantics and is attempted even when an earlier one fails.
+	 * The single write-through runs once, after the batch, and only if at least one item was
+	 * actually removed. Failed ids are reported together in one TaskHistoryDeleteError and stay
+	 * in the store.
 	 */
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
+			const failures: { taskId: string; reason: string; cause?: unknown }[] = []
+			let deletedAny = false
 			for (const taskId of taskIds) {
+				const outcome = await this.removeTaskFile(taskId)
+				if (!outcome.deleted) {
+					failures.push({ taskId, reason: outcome.reason ?? "unknown error", cause: outcome.cause })
+					continue
+				}
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
-
-				// Remove per-task file (best-effort)
-				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
-				} catch {
-					// File may already be deleted
-				}
+				deletedAny = true
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
-			if (this.onWrite) {
+			if (this.onWrite && deletedAny) {
 				await this.onWrite(this.getAll())
+			}
+
+			if (failures.length > 0) {
+				throw new TaskHistoryDeleteError(
+					failures.map((f) => f.taskId),
+					failures.map((f) => f.taskId + ": " + f.reason).join("; "),
+					failures[0].cause,
+				)
 			}
 		})
 	}
 
+	/**
+	 * Remove the per-task file under the shared lock and report whether the file is gone.
+	 *
+	 * Only the unlink's own ENOENT counts as gone: the file was there to delete and is not there
+	 * now. Every other failure means the file may still exist and the item must stay in the store
+	 * - a lock-key that cannot be resolved, a lock that could not be taken (proper-lockfile
+	 * reports ENOENT for a missing key), a lock timeout, or any non-ENOENT unlink error. Those
+	 * three stages reach the caller with a reason naming the stage, because "ENOENT" on its own
+	 * does not say which of them happened, and a store that evicts an item whose file survived
+	 * reports a deletion the next reconciliation contradicts. The one stage where an ENOENT may
+	 * still close the deletion is a lock that could not be taken at all: there the verdict comes
+	 * from an lstat of the named path, not from the lock's errno, so a file that reports itself
+	 * absent is a completed deletion while a file that reports itself present is not.
+	 */
+	private async removeTaskFile(taskId: string): Promise<{ deleted: boolean; reason?: string; cause?: unknown }> {
+		const filePath = await this.getTaskFilePath(taskId)
+		let lockKey: string
+		try {
+			// Lock the resolved publish target, not the path as spelled: proper-lockfile keys the
+			// lock by the path it is given, so an alias and its referent would take two locks for
+			// one file. The unlink still removes the named path.
+			lockKey = await this.lockKeyFor(filePath)
+		} catch (resolutionError: unknown) {
+			// The key could not be computed, so the lock was never attempted and the unlink never
+			// ran. A dangling alias whose referent sits under a missing parent fails here with
+			// ENOENT while the alias itself is still on disk: that is not evidence of a deletion.
+			return {
+				deleted: false,
+				reason: `lock key could not be resolved (${errorCode(resolutionError) ?? "unknown error"})`,
+				cause: resolutionError,
+			}
+		}
+
+		// The unlink's outcome is captured inside the locked operation rather than inferred from
+		// what withFileLock throws: that helper rethrows the operation's error unchanged, so a
+		// lock failure and an unlink failure arrive at the same place and cannot be told apart by
+		// their error code alone.
+		let unlinkOutcome: { outcome: "removed" | "absent" | "failed"; error?: unknown } | undefined
+		try {
+			await withFileLock(lockKey, async () => {
+				try {
+					await fs.unlink(filePath)
+					unlinkOutcome = { outcome: "removed" }
+				} catch (unlinkError: unknown) {
+					unlinkOutcome = {
+						outcome: errorCode(unlinkError) === "ENOENT" ? "absent" : "failed",
+						error: unlinkError,
+					}
+				}
+			})
+		} catch (lockError: unknown) {
+			// The lock stage failed, so the unlink never ran. Its ENOENT cannot settle anything on
+			// its own: proper-lockfile creates <key>.lock with mkdir, which reports ENOENT both when
+			// the directory that would hold the file is gone (nothing to delete) and when the key is
+			// an alias whose referent is missing (the named file may still be right there). Ask the
+			// named path itself rather than reading the lock's errno as a report about the file.
+			return await this._verdictAfterLockFailure(filePath, lockError)
+		}
+
+		if (unlinkOutcome === undefined) {
+			// The lock was taken and released without the unlink running. Nothing was observed,
+			// so nothing may be reported as deleted.
+			return { deleted: false, reason: "the unlink did not run", cause: undefined }
+		}
+		if (unlinkOutcome.outcome === "removed" || unlinkOutcome.outcome === "absent") {
+			return { deleted: true }
+		}
+		return {
+			deleted: false,
+			reason: errorCode(unlinkOutcome.error) ?? "unknown error",
+			cause: unlinkOutcome.error,
+		}
+	}
+
+	/**
+	 * What to report when the lock could not be taken at all. The file counts as gone only when
+	 * the named path says so directly: lstat does not follow a symlink, so a dangling alias still
+	 * reports itself present and the item stays in the store. Any other answer keeps the item and
+	 * reports the lock failure, which is the only thing actually known.
+	 */
+	private async _verdictAfterLockFailure(
+		filePath: string,
+		lockError: unknown,
+	): Promise<{ deleted: boolean; reason?: string; cause?: unknown }> {
+		const lockReason = `the per-file lock could not be taken (${errorCode(lockError) ?? "unknown error"})`
+		try {
+			await fs.lstat(filePath)
+		} catch (statError: unknown) {
+			if (errorCode(statError) === "ENOENT") {
+				// The named path is absent: there was nothing to delete, whatever the lock did.
+				return { deleted: true }
+			}
+			return {
+				deleted: false,
+				reason: `${lockReason}; the file could not be checked (${errorCode(statError) ?? "unknown error"})`,
+				cause: statError,
+			}
+		}
+		return { deleted: false, reason: lockReason, cause: lockError }
+	}
+
 	// ────────────────────────────── Reconciliation ──────────────────────────────
+
+	/**
+	 * The lock key a writer would use for a task file. resolvePublishTarget refuses
+	 * a dangling link, so the delete paths and the liveness probe walk the chain
+	 * themselves to find the lock held at the referent.
+	 */
+	private async lockKeyFor(taskFilePath: string): Promise<string> {
+		return resolveLockKey(taskFilePath)
+	}
 
 	/**
 	 * Scan task directories and fix any drift between disk and cache.
@@ -375,7 +520,9 @@ export class TaskHistoryStore {
 					// held for the entire write, so its presence means a
 					// write is in progress — keep the task live.
 					try {
-						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
+						// Probe the same key the writer locks: safeWriteJson locks the resolved
+						// publish target, so an alias and its referent share one lock file.
+						const lockPath = (await this.lockKeyFor(await this.getTaskFilePath(taskId))) + ".lock"
 						const lockStat = await fs.stat(lockPath)
 						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
 							liveIds.add(taskId)
