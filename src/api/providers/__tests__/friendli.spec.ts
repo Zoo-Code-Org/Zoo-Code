@@ -14,6 +14,9 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
 const mockCreate = vi.fn()
+const { mockGetModels } = vi.hoisted(() => ({ mockGetModels: vi.fn(async () => ({})) }))
+
+vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -80,8 +83,13 @@ describe("FriendliHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: friendliApiKey }))
 	})
 
-	it("should throw error when API key is not provided", () => {
-		expect(() => new FriendliHandler({})).toThrow("API key is required")
+	it("should use fetched model info, keeping a model id missing from the static list", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
+
+		await vi.waitFor(() => expect(handlerWithModel.getModel().info).toEqual(info))
+		expect(handlerWithModel.getModel().id).toBe("vendor/new-model")
 	})
 
 	it("should return default model when no model is specified", () => {

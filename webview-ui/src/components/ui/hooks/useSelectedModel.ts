@@ -513,7 +513,7 @@ function getSelectedModel({
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = friendliModels[id as keyof typeof friendliModels]
+			const info = routerModels.friendli?.[id] ?? friendliModels[id as keyof typeof friendliModels]
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {

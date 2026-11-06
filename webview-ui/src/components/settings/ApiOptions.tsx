@@ -773,11 +773,17 @@ const ApiOptions = ({
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
 								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
-								models={getStaticModelsForProvider(
-									activeSelectedProvider,
-									t("settings:labels.useCustomArn"),
-									apiConfiguration,
-								)}
+								models={
+									activeSelectedProvider === providerIdentifiers.friendli &&
+									routerModels?.friendli &&
+									Object.keys(routerModels.friendli).length > 0
+										? routerModels.friendli
+										: getStaticModelsForProvider(
+												activeSelectedProvider,
+												t("settings:labels.useCustomArn"),
+												apiConfiguration,
+											)
+								}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
 								serviceUrl={getProviderServiceConfig(activeSelectedProvider).serviceUrl}
