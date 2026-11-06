@@ -3,7 +3,9 @@ import * as path from "path"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import * as pathUtils from "../../../utils/path"
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
@@ -14,6 +16,7 @@ import { ServerConfigSchema, McpHub } from "../McpHub"
 import { McpOAuthClientProvider } from "../McpOAuthClientProvider"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 import { t } from "../../../i18n"
+import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 type McpHubPrivate = {
 	watchMcpSettingsFile: () => Promise<void>
@@ -830,6 +833,9 @@ describe("McpHub", () => {
 			// Verify watcher was created
 			expect(chokidar.watch).toHaveBeenCalledWith(["/path/to/watch"], expect.any(Object))
 
+			// The project config write needs a resolvable workspace root to stay confined.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+
 			// Now disable the server
 			await mcpHub.toggleServerDisabled("watcher-test-server", true)
 
@@ -1206,6 +1212,144 @@ describe("McpHub", () => {
 	})
 
 	describe("toggleToolAlwaysAllow", () => {
+		// A fully typed double: the SDK constructors are mocked at the top of the file, so
+		// no cast is needed to build a connected connection here.
+		const projectConnection = (source: "global" | "project" = "project"): ConnectedMcpConnection => ({
+			type: "connected",
+			server: {
+				name: "test-server",
+				config: JSON.stringify({ type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] }),
+				status: "connected",
+				source,
+				errorHistory: [],
+			},
+			client: new Client({ name: "test-client", version: "1.0.0" }),
+			transport: new StdioClientTransport({ command: "node", args: ["test.js"] }),
+		})
+
+		it("confines a project-scoped allowlist write to the workspace root", async () => {
+			// A repository can ship .roo/mcp.json as a symlink to a file outside the workspace.
+			// safeWriteJson resolves the publish target before staging, so without confinement an
+			// allowlist edit would replace that outside file. The workspace root has to be handed
+			// over as confineTo so the write fails closed instead.
+			// cwd is a read-only getter on ClineProvider, so the test installs the value.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: {
+						"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+					},
+				}),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			await mcpHub.toggleToolAlwaysAllow("test-server", "project", "new-tool", true)
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+
+		it("fails closed for a project write when no workspace root is available", async () => {
+			// Neither the provider cwd nor the VS Code workspace supplies a root: an empty
+			// confinement root would let the write proceed unbounded, so it must be refused.
+			Object.defineProperty(mockProvider, "cwd", { value: undefined, configurable: true })
+			const workspaceSpy = vi.spyOn(pathUtils, "getWorkspacePath").mockReturnValue("")
+			// The project config path still resolves, so the write reaches the confinement guard
+			// rather than failing earlier while resolving the path.
+			const projectPathSpy = vi
+				.spyOn(
+					mcpHub as unknown as { getProjectMcpPath: () => Promise<string | undefined> },
+					"getProjectMcpPath",
+				)
+				.mockResolvedValue("/mock/workspace/.roo/mcp.json")
+			mcpHub.connections = [projectConnection()]
+
+			await expect(mcpHub.toggleToolAlwaysAllow("test-server", "project", "new-tool", true)).rejects.toThrow(
+				"Cannot write project MCP settings without a workspace root",
+			)
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeUndefined()
+			projectPathSpy.mockRestore()
+			workspaceSpy.mockRestore()
+		})
+
+		it("leaves a global-scoped allowlist write unconstrained", async () => {
+			// Global settings live in the user's own settings directory, which is not under the
+			// workspace; confining them would break every global edit.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			mcpHub.connections = [projectConnection("global")]
+
+			await mcpHub.toggleToolAlwaysAllow("test-server", "global", "another-tool", true)
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp"))
+			expect(write).toBeDefined()
+			// undefined confineTo is the unconstrained case: safeWriteJson only checks the path
+			// when a confinement root is supplied.
+			expect(write![2]?.confineTo).toBeUndefined()
+		})
+
+		it("confines a project-scoped timeout update to the workspace", async () => {
+			// updateServerTimeout writes the project settings file; the confinement root has to
+			// travel with the write or a planted link would be replaced outside the workspace.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 1000 } },
+				}),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			await mcpHub.updateServerTimeout("test-server", 120)
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+
+		it("confines a project-scoped server deletion to the workspace", async () => {
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } },
+				}),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			await mcpHub.deleteServer("test-server")
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+		it("confines a project write through the workspace-path fallback when the provider has no cwd", async () => {
+			// confineForMcpWrite prefers the provider's cwd and falls back to getWorkspacePath()
+			// when the provider is gone or carries no cwd. The fallback root still has to reach
+			// safeWriteJson as confineTo - otherwise the symlink case this confinement exists for
+			// goes unconfined exactly when the provider reference is empty.
+			Object.defineProperty(mockProvider, "cwd", { value: undefined, configurable: true })
+			const workspacePathSpy = vi.spyOn(pathUtils, "getWorkspacePath").mockReturnValue("/fallback/workspace")
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: {
+						"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+					},
+				}),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			try {
+				await mcpHub.toggleToolAlwaysAllow("test-server", "project", "fallback-tool", true)
+			} finally {
+				// The spy is on a shared module namespace: leaving it installed would pin every
+				// later test in this file to a workspace that does not exist.
+				workspacePathSpy.mockRestore()
+			}
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/fallback/workspace" }))
+		})
 		it("should add tool to always allow list when enabling", async () => {
 			const mockConfig = {
 				mcpServers: {
