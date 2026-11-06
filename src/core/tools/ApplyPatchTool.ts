@@ -6,11 +6,14 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
+import type { FileObservation } from "../task/observationRegistry"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { versionTokenOfStat } from "../../utils/versionToken"
+import { canonicalizeForApproval, GuardRejectedError, errorCode } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -56,6 +59,25 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const { patch } = params
 		const { handleError, pushToolResult } = callbacks
 
+		// Every observation this call creates is tracked here by path -> the exact entry the
+		// registry stored. A hunk read is the tool read, not a model read: an exit that does
+		// not publish must withdraw what this call recorded, otherwise a later edit,
+		// search_replace, edit_file or apply_diff finds the leftover partial entry, the
+		// compare-and-swap matches, and the file publishes without the model ever reading it.
+		// Withdrawal is keyed to the stored entry, so an entry a publish re-earned or one a
+		// concurrent read replaced is never discarded here. Declared outside the try because
+		// the finally exit needs it. ApplyDiffTool enforces the same contract for its single
+		// read with forgetPartialObservationIfCurrent; apply_patch reads several files per
+		// call, so this side keeps one entry per path.
+		const toolObservations = new Map<string, FileObservation>()
+		const forgetToolObservationsIfCurrent = (): void => {
+			for (const [observedPath, entry] of toolObservations) {
+				if (task.observationRegistry.get(observedPath) === entry) {
+					task.observationRegistry.forget(observedPath)
+				}
+			}
+			toolObservations.clear()
+		}
 		try {
 			// Validate required parameters
 			if (!patch) {
@@ -85,10 +107,42 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each hunk
+			// Process each hunk. The read doubles as the S2 observation for the
+			// guarded publish (ReadFileTool contract: stat before and after the
+			// read, observe only when the on-disk version is unchanged between the
+			// two stats). Without it, the in-place modify publish is an unobserved
+			// write and the composed chat-diff default rejects it ("File already
+			// exists ... and was not read before this write") even though this tool
+			// just read the exact content the patch was applied to.
 			const readFile = async (filePath: string): Promise<string> => {
 				const absolutePath = path.resolve(task.cwd, filePath)
-				return await fs.readFile(absolutePath, "utf8")
+				const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const content: string = await fs.readFile(absolutePath, "utf8")
+				const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				if (preReadStats && postReadStats) {
+					const preReadToken = versionTokenOfStat(preReadStats)
+					if (preReadToken === versionTokenOfStat(postReadStats)) {
+						// The tool's own hunk read, not a model read. When the model already observed the
+						// file, keep the completeness it earned and only on the version it was earned on; a
+						// partial view stays partial. With no prior observation the model has seen only the
+						// patch's hunks, so this read stays incomplete: it must not become authority for a
+						// later full-file replacement.
+						const prior = task.observationRegistry.get(absolutePath)
+						// With no prior observation there is nothing to carry, and the read stays
+						// incomplete. Carry completeness only when a prior observation exists and still
+						// describes the version that was read.
+						const complete =
+							prior === undefined ? false : prior.complete === true && prior.version === preReadToken
+						task.observationRegistry.observe(absolutePath, preReadToken, complete)
+						// Keep the stored entry so a non-publishing exit can withdraw exactly this
+						// observation later.
+						const storedObservation = task.observationRegistry.get(absolutePath)
+						if (storedObservation) {
+							toolObservations.set(absolutePath, storedObservation)
+						}
+					}
+				}
+				return content
 			}
 
 			let changes: ApplyPatchFileChange[]
@@ -120,13 +174,36 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						toolObservations,
+					)
 				} else if (change.type === "delete") {
 					// Delete file
-					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleDeleteFile(
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						toolObservations,
+					)
 				} else if (change.type === "update") {
 					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						toolObservations,
+					)
 				}
 			}
 
@@ -134,6 +211,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
+		} finally {
+			// Every exit that did not publish passes through here: processAllHunks throwing (the
+			// files read before the failure stay observed), a refused approval, a rooignore or
+			// outside-workspace refusal, and the outer catch. Paths that published were removed
+			// from the tracker at the publish site, so this withdraws only what no publish earned.
+			forgetToolObservationsIfCurrent()
 		}
 	}
 
@@ -144,6 +227,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		toolObservations: Map<string, FileObservation>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -160,6 +244,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		const newContent = change.newContent || ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+		// Captured before the approval is asked: guardedWrite binds the publish to this
+		// identity, so a name repointed between the approval and the publish is refused
+		// instead of publishing to whatever the name points at by then.
+		const approvedCanonicalTarget = isOutsideWorkspace
+			? await canonicalizeForApproval(absolutePath, relPath)
+			: undefined
 
 		// Initialize diff view for new file
 		task.diffViewProvider.editType = "create"
@@ -214,13 +304,38 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Save the changes
 		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			// Guarded publish: the patch supplies the complete new content, so create-guard
+			// semantics apply (an unobserved existing target is rejected, not overwritten).
+			await task.diffViewProvider.saveDirectly(
+				relPath,
+				newContent,
+				true,
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+				// Seventh parameter is completeOverride (this call claims no completeness of its
+				// own); the eighth is the approval flag for a target outside every workspace root.
+				undefined,
+				isOutsideWorkspace,
+				approvedCanonicalTarget,
+			)
 		} else {
-			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			// The add path publishes a whole new file, so create-guard semantics
+			// apply here as well.
+			await task.diffViewProvider.saveChanges(
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+				isOutsideWorkspace,
+				approvedCanonicalTarget,
+			)
 		}
 
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+		// This call published the path, so the observation it carries is earned: the sweep in
+		// the finally block leaves it alone.
+		toolObservations.delete(absolutePath)
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
@@ -235,6 +350,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		toolObservations: Map<string, FileObservation>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -281,6 +397,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			return
 		}
 
+		// The delete consumed the observation: the version the hunk read recorded is no longer
+		// reachable at this path, so there is nothing here for the sweep to withdraw.
+		toolObservations.delete(absolutePath)
+
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
 		task.processQueuedMessages()
@@ -293,6 +413,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		toolObservations: Map<string, FileObservation>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -310,6 +431,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const originalContent = change.originalContent || ""
 		const newContent = change.newContent || ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+		// Captured before the approval is asked: guardedWrite binds the publish to this
+		// identity, so a name repointed between the approval and the publish is refused
+		// instead of publishing to whatever the name points at by then.
+		const approvedCanonicalTarget = isOutsideWorkspace
+			? await canonicalizeForApproval(absolutePath, relPath)
+			: undefined
 
 		// Initialize diff view
 		task.diffViewProvider.editType = "modify"
@@ -396,6 +523,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Check if destination path is outside workspace
 			const isMoveOutsideWorkspace = isPathOutsideWorkspace(moveAbsolutePath)
+			// A destination outside every workspace root is refused right here, so the publish at the
+			// end of this branch is always an inside-workspace one: it needs neither the approval flag
+			// nor a canonical identity. Capturing the identity here instead - as this did - ran
+			// canonicalizeForApproval for a destination that was about to be refused, so a destination
+			// whose name could not be resolved surfaced an exception where the user should get the tool
+			// error below.
 			if (isMoveOutsideWorkspace) {
 				task.consecutiveMistakeCount++
 				task.recordToolError("apply_patch")
@@ -408,12 +541,69 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
+				// The destination content is the source file plus one targeted hunk, so it can
+				// only be as complete as the view the model had of the source. Carry that
+				// completeness to the destination BEFORE the guarded publish: the guard decides
+				// completeness at publish time, so a partial view must already be recorded when
+				// the per-path chain runs. Downgrading only after saveDirectly leaves a window
+				// in which a concurrent writer sees the destination as complete for content the
+				// model never fully read.
+				const sourceObs = task.observationRegistry.get(absolutePath)
+				const sourceComplete = sourceObs !== undefined && sourceObs.complete === true
+				if (!sourceComplete) {
+					// Only carry completeness the model already had for the destination. An
+					// unobserved destination stays unobserved so the guard's "read before a
+					// full-file write" rule still applies; recording a partial observation here
+					// would hand the model authority to edit a file it never read.
+					const destObs = task.observationRegistry.get(moveAbsolutePath)
+					if (destObs !== undefined) {
+						let destAbsent = false
+						try {
+							await fs.access(moveAbsolutePath)
+						} catch (error: unknown) {
+							// Only an access error that means "not there" is an absence verdict. An
+							// ELOOP or EACCES is a real I/O failure: reading it as absent would mark
+							// the destination partial and let the publish run against a path the tool
+							// never actually observed.
+							if (errorCode(error) !== "ENOENT") throw error
+							destAbsent = true
+						}
+						if (!destAbsent) {
+							// Replacing an existing destination with content built from a partial
+							// source view must be re-authorized by reading the source in full. Reject
+							// before any state changes and name the source: a remediation that names
+							// only the destination sends the model to re-read the wrong file, and a
+							// downgrade that survives a rejected publish loses a full destination read.
+							throw new GuardRejectedError(
+								`Cannot move a partially read file onto ${change.movePath}: re-read the whole source (${change.path}) first, then retry.`,
+								change.movePath,
+							)
+						}
+						// The destination was read and then deleted: the create guard permits the
+						// publish, and the content is still only as complete as the view the model
+						// had of the source, so carry the source's completeness instead of the
+						// destination's stale one.
+						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
+						// Tracked like a hunk read: if the move does not publish, this partial entry must
+						// not survive as authority for a destination the model never read.
+						const storedDestObservation = task.observationRegistry.get(moveAbsolutePath)
+						if (storedDestObservation) {
+							toolObservations.set(moveAbsolutePath, storedDestObservation)
+						}
+					}
+				}
 				await task.diffViewProvider.saveDirectly(
 					change.movePath,
 					newContent,
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"create",
+					sourceComplete,
+					// Guaranteed by the refusal above: this destination is inside a workspace root,
+					// so the guard's own containment check is what applies and no approval is claimed.
+					false,
+					undefined,
 				)
 			} else {
 				// Write to new path and delete old file
@@ -422,23 +612,62 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
 			}
 
-			// Delete the original file
+			// Delete the original file. A failure here is logged and tolerated: the destination
+			// has already published, but the source is still sitting on disk with the bytes it
+			// had before the move, so nothing was published at that path.
+			let sourceRemoved = true
 			try {
 				await fs.unlink(absolutePath)
 			} catch (error) {
+				sourceRemoved = false
 				console.error(`Failed to delete original file after move: ${error}`)
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
+			// The destination published through the save above, so its entry leaves the sweep.
+			// The source only counts as published once its own unlink succeeded: otherwise the
+			// partial observation this call recorded for it is withdrawn in the finally block,
+			// instead of authorizing a later edit on a file the model never read in full.
+			toolObservations.delete(moveAbsolutePath)
+			if (sourceRemoved) {
+				toolObservations.delete(absolutePath)
+			}
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Guarded publish: an update hunk is a targeted change, so it is guarded
+				// as an edit -- a partial observation authorizes it and stays partial. A
+				// stale observed version is still rejected with the re-read hint.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			} else {
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				// The diff-view save is the same targeted hunk as the guarded save above:
+				// it must select the same edit guard, otherwise a partial read is
+				// rejected and the approved patch is thrown away.
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+			// The publish owns this path now, so the sweep in the finally block leaves its
+			// observation alone.
+			toolObservations.delete(absolutePath)
 		}
 
 		task.didEditFile = true

@@ -4,6 +4,12 @@ import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
+import {
+	resolveLockKey,
+	resolvePublishTarget,
+	safeWriteText,
+	type SafeWriteTextOptions,
+} from "../services/file-safety/safeWriteText"
 
 /**
  * Options for safeWriteJson function
@@ -26,13 +32,153 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * Restrict the write to a directory. The publish target is resolved through
+	 * symlinks before this check runs, so a caller that picked the path from a
+	 * known scope (a workspace, a project settings directory) can refuse a write
+	 * that a planted symlink would land somewhere else. The check runs before the
+	 * advisory lock is taken and before anything is staged.
+	 */
+	confineTo?: string
+}
+
+/**
+ * Thrown when a write declared with `confineTo` resolves outside that directory.
+ */
+export class ConfinedPathEscapeError extends Error {
+	constructor(
+		readonly requestedPath: string,
+		readonly resolvedPath: string,
+		readonly confineTo: string,
+	) {
+		super(
+			`Refusing to write ${resolvedPath}: it resolves outside the confined directory ${confineTo} (requested ${requestedPath}).`,
+		)
+		this.name = "ConfinedPathEscapeError"
+	}
+}
+
+/**
+ * Thrown when the advisory lock this write holds no longer names the path it is about to
+ * publish. The lock key is resolved before the lock is taken and the publish target is
+ * resolved under it, so an alias repointed in between would otherwise let this writer commit
+ * onto a file whose lock belongs to another writer. Nothing is staged when this rejects.
+ */
+class LockKeyDriftError extends Error {
+	constructor(requestedPath: string, lockKey: string, publishTarget: string) {
+		super(
+			`Refusing to publish ${publishTarget}: the advisory lock was taken for ${lockKey}, which is no longer the file this write resolves to (requested ${requestedPath}). Retry the write.`,
+		)
+		this.name = "LockKeyDriftError"
+	}
+}
+
+/**
+ * Thrown when the directory this write was approved to stage into no longer names that
+ * directory. The publish target and the staging location are resolved under the lock, but
+ * a resolved path is a pathname, not a bound identity: if the target's parent is replaced
+ * with a link pointing elsewhere before the staged file is written, the staged JSON is
+ * created outside the directory this write was approved for, and the staging checks inside
+ * safeWriteText - which run after that write - could reject the publish without undoing
+ * the file. Rejecting here leaves nothing on disk.
+ */
+class StagingDirectoryDriftError extends Error {
+	constructor(requestedPath: string, approvedDirectory: string, actualDirectory: string) {
+		super(
+			`Refusing to stage ${requestedPath}: the directory this write was approved for (${approvedDirectory}) now resolves to ${actualDirectory}. Retry the write.`,
+		)
+		this.name = "StagingDirectoryDriftError"
+	}
+}
+
+/**
+ * Whether two paths name the same directory. `realpath` reports the on-disk spelling,
+ * which can differ in case on Windows, so the identity being compared here is the
+ * directory, not the spelling of it.
+ */
+function _sameDirectory(approved: string, actual: string): boolean {
+	return process.platform === "win32" ? approved.toLowerCase() === actual.toLowerCase() : approved === actual
+}
+
+/**
+ * Canonicalize a directory a write is confined to or approved to stage into. The publish
+ * resolved through symlinks, so the scope has to be resolved the same way or a
+ * scope path that itself runs through a symlink (macOS /var -> /private/var is the
+ * common case) would compare lexically against a resolved target and reject every
+ * legitimate in-scope write. When the scope does not exist yet, the nearest
+ * existing ancestor is resolved and the remainder re-appended.
+ */
+async function _resolveScopeRoot(confineTo: string): Promise<string> {
+	const lexical = path.resolve(confineTo)
+	try {
+		return await fs.realpath(lexical)
+	} catch (error: unknown) {
+		// Only a missing path means "walk up and re-join". EACCES or ELOOP means the
+		// scope cannot be canonicalized at all, and continuing would build a partly
+		// lexical root that can disagree with the canonical target - the failure has to
+		// surface rather than decide the scope from a guess.
+		if (_scopeErrorCode(error) !== "ENOENT") {
+			throw error
+		}
+		const missing: string[] = []
+		let ancestor = lexical
+		while (true) {
+			const parent = path.dirname(ancestor)
+			if (parent === ancestor) {
+				return lexical
+			}
+			missing.push(path.basename(ancestor))
+			ancestor = parent
+			try {
+				const real = await fs.realpath(ancestor)
+				return path.join(real, ...missing.reverse())
+			} catch (innerError: unknown) {
+				if (_scopeErrorCode(innerError) !== "ENOENT") {
+					throw innerError
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Whether `candidate` sits outside `scopeRoot`. The scope root itself counts as
+ * outside: a file write cannot land on the directory that declares the scope.
+ */
+function _escapesScope(scopeRoot: string, candidate: string): boolean {
+	const relative = path.relative(scopeRoot, candidate)
+	return relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
+}
+
+function _scopeErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? (error as { code?: string }).code
+		: undefined
+}
+
+/**
+ * Canonicalize the staging directory this write was approved to stage into, or report that the
+ * probe could not answer. Returning undefined instead of throwing is the point: the drift check
+ * can only read meaning out of a resolution that succeeded, and every failure this probe can
+ * produce - ENOENT while the directory exists because a component is mid-replacement or because
+ * the caller's fs double reports the path as missing, EACCES, EPERM, ELOOP - is equally consistent
+ * with the approved directory being exactly where it was approved. A probe that cannot answer is
+ * not an answer.
+ */
+async function _probeApprovedStagingDirectory(directory: string): Promise<string | undefined> {
+	try {
+		return await _resolveScopeRoot(directory)
+	} catch {
+		return undefined
+	}
 }
 
 /**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
- * - Writes to a temporary file first.
+ * - Writes to a temporary file first via JsonStreamStringify streaming.
  * - If the target file exists, it's backed up before being replaced.
  * - Attempts to roll back and clean up in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
@@ -51,38 +197,101 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	const dirPath = path.dirname(absoluteFilePath)
 
 	// Ensure directory structure exists with improved reliability
-	try {
-		// Create directory with recursive option
-		await fs.mkdir(dirPath, { recursive: true })
+	// Declared outside the protected block so the catch and finally can still name
+	// the target when the resolution itself rejects.
+	let resolvedTargetPath: string | undefined
 
-		// Verify directory exists after creation attempt
+	// Confinement is checked before ANY filesystem side effect. mkdir -p through a
+	// planted symlinked ancestor (projectDir/.roo -> /elsewhere) would create
+	// directories outside the declared scope, and an unwritable referent would surface
+	// the mkdir error instead of the ConfinedPathEscapeError the caller is entitled to.
+	// _resolveScopeRoot resolves a not-yet-existing path through its nearest existing
+	// ancestor, so this works for the target's missing parents too.
+	if (options?.confineTo) {
+		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		const requested = await _resolveScopeRoot(absoluteFilePath)
+		if (_escapesScope(scopeRoot, requested)) {
+			throw new ConfinedPathEscapeError(absoluteFilePath, requested, scopeRoot)
+		}
+	}
+
+	try {
+		await fs.mkdir(dirPath, { recursive: true })
 		await fs.access(dirPath)
 	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
 
-	// Acquire the lock before any file operations. `acquireFileLock` owns the
-	// shared advisory lock protocol, so callers that lock the same path with
-	// it (for example task-history deletion) serialize with this write.
-	// If lock acquisition fails, it throws immediately. The releaseLock
-	// remains a no-op, so the finally block in the main file operations
-	// try-catch-finally won't try to release an unacquired lock if this
-	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	// Lock key: the symlink referent when the path is an existing symlink, so a
+	// symlink alias and its referent share one lock. The key must stay computable while
+	// a peer writer is mid-commit - the commit rename briefly leaves the path without
+	// the referent it had when the walk started - so the walk tolerates a dangling link
+	// instead of rejecting it here. (The backup itself is a copy: the target is never
+	// renamed away, so a dangling link here means a peer's commit or an external
+	// unlink, not a backup rename.)
+	const lockKey = await resolveLockKey(absoluteFilePath)
 
-	// Variables to hold the actual paths of temp files if they are created.
+	// Confinement is checked here as well as under the lock. The lock file lives NEXT
+	// TO the key, so a planted symlink that points outside the declared scope would
+	// first make this write create "<referent>.lock" outside that scope - a side effect
+	// the caller declared it would not have - and if that directory is not writable the
+	// caller would get a lock-acquisition error instead of the ConfinedPathEscapeError
+	// it is entitled to. The key is the symlink referent, so this check sees the same
+	// destination the lock would be taken on. The under-lock check stays: it covers the
+	// target re-resolved after a peer commits.
+	if (options?.confineTo) {
+		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (_escapesScope(scopeRoot, await _resolveScopeRoot(lockKey))) {
+			throw new ConfinedPathEscapeError(absoluteFilePath, lockKey, scopeRoot)
+		}
+	}
+
+	// Acquire the lock before any file operations. If acquisition fails it throws
+	// immediately, and releaseLock stays a no-op so the finally block does not try
+	// to release an unacquired lock.
+	releaseLock = await acquireFileLock(lockKey)
+
+	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
-	let actualTempBackupFilePath: string | null = null
 
 	try {
+		// Resolve the publish target under the lock: the peer has committed by now, so
+		// the strict dangling-link rejection still applies to a real dangling link. It
+		// must stay inside the protected block, otherwise a rejection here leaves the
+		// advisory lock held until the stale timeout for every other writer.
+		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+
+		// The lock above was chosen from the path as it looked before the lock was taken, and the
+		// publish target is resolved under the lock - after a peer committed, and after the alias
+		// itself may have been repointed. If the two no longer name the same file, this writer is
+		// holding the lock of a path it is not about to publish while some other writer can hold
+		// the lock of the one it is about to publish, which is two commits onto one file each
+		// believing it owned it. Nothing has been staged or merged yet, so rejecting here leaves
+		// every file untouched and the caller can retry against the key it resolves to now.
+		if ((await resolveLockKey(resolvedTargetPath)) !== lockKey) {
+			throw new LockKeyDriftError(absoluteFilePath, lockKey, resolvedTargetPath)
+		}
+
+		// Confinement, if the caller declared a scope. Both sides are canonicalized the
+		// same way: the publish target is resolved through symlinks, and a target that
+		// does not exist yet still carries the alias components of the path it was
+		// given. This runs before the merge read and before anything is staged, so a
+		// rejected write leaves nothing behind.
+		if (options?.confineTo) {
+			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+			if (_escapesScope(scopeRoot, await _resolveScopeRoot(resolvedTargetPath))) {
+				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
+			}
+		}
+
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally
 		// so a throwing merge still releases the lock.
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -93,115 +302,118 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file.
+		// Step 1: Write data to a new temporary file via JSON streaming.
+		// Stage it beside the *resolved* target (the symlink referent when the path is
+		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
+		// onto that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
-			path.dirname(absoluteFilePath),
-			`.${path.basename(absoluteFilePath)}.new_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+			path.dirname(resolvedTargetPath),
+			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
+
+		// The staging location was chosen from the parent directory resolved under the lock. Re-verify
+		// that directory against itself before writing anything into it: a resolved pathname is not an
+		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
+		// put the staged file outside the directory this write was approved for. safeWriteText would
+		// then reject the publish, but the stray file would already exist. Both sides of this comparison
+		// are canonicalized with the same directory walk the confinement check above uses, because for a
+		// target that does not exist yet resolvePublishTarget returns the path it was given: comparing
+		// that lexical spelling against fs.realpath of the same directory rejects an ordinary write
+		// whenever the two spellings differ. On a Windows runner the temp root arrives spelled with its
+		// 8.3 short name (C:\Users\RUNNER~1\AppData\Local\Temp) and realpath reports the long name for
+		// that very same directory, so every write into a directory that did not exist yet rejected
+		// here. The two walks run against the same frozen approval one after the other, and both sides
+		// are compared as canonical directories rather than as the text of a path, so a parent that
+		// really was replaced by a link still lands on a different canonical directory and still
+		// rejects.
+		//
+		// What this guard may act on is one thing only: a re-resolution that succeeds and lands on a
+		// different directory. A probe that cannot answer is not an answer. A probe that fails - ENOENT
+		// because a component is mid-replacement or is simply not there yet, EACCES, EPERM or ELOOP
+		// because the filesystem refused to say - carries no information about replacement whatsoever,
+		// and a failing probe is a normal condition of this write path rather than an attack: the task
+		// persistence suite runs this write against an fs/promises double whose stat rejects with
+		// ENOENT for every path, and its task directory was created moments earlier with the real fs.
+		// Reading that as drift rejected an ordinary write, which is the shape upstream's newer
+		// Task.spec hit on a Windows temp path. So a probe that cannot answer proceeds. A directory that
+		// really was deleted in the meantime then fails at the staging write itself: still fail-closed,
+		// still nothing created outside the directory the write was approved for, and the error names
+		// the failed write instead of claiming to be evidence of replacement. The confinement checks
+		// above decide the opposite way on purpose - there the guard has to prove the write is inside
+		// the scope, and a probe that cannot answer cannot prove anything.
+		const approvedStagingDirectory = path.dirname(actualTempNewFilePath)
+		const approvedCanonical = await _probeApprovedStagingDirectory(approvedStagingDirectory)
+		const currentStagingDirectory =
+			approvedCanonical === undefined ? undefined : await _probeApprovedStagingDirectory(approvedCanonical)
+		if (
+			approvedCanonical !== undefined &&
+			currentStagingDirectory !== undefined &&
+			!_sameDirectory(approvedCanonical, currentStagingDirectory)
+		) {
+			throw new StagingDirectoryDriftError(
+				resolvedTargetPath ?? absoluteFilePath,
+				approvedCanonical,
+				currentStagingDirectory,
+			)
+		}
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Check if the target file exists. If so, rename it to a backup path.
-		try {
-			// Check for target file existence
-			await fs.access(absoluteFilePath)
-			// Target exists, create a backup path and rename.
-			actualTempBackupFilePath = path.join(
-				path.dirname(absoluteFilePath),
-				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-			)
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: unknown) {
-			if (
-				typeof accessError !== "object" ||
-				accessError === null ||
-				!("code" in accessError) ||
-				accessError.code !== "ENOENT"
-			) {
-				// An error other than "file not found" occurred during access check.
-				throw accessError
-			}
-			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
+		// Step 2: Delegate backup + commit to safeWriteText with the pre-written
+		// temp path. backup:true makes safeWriteText COPY the target to a backup
+		// before the commit rename; the target itself never moves, so there is no
+		// rollback to undo. On win32 the DACL is dumped before that backup copy and
+		// restored onto the directory after the commit rename.
+		const textOptions: SafeWriteTextOptions = {
+			tempPath: actualTempNewFilePath,
+			backup: true,
 		}
 
-		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step.
-		await fs.rename(actualTempNewFilePath, absoluteFilePath)
+		await safeWriteText(resolvedTargetPath, "", textOptions)
 
-		// If we reach here, the new file is successfully in place.
-		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
-		// Mark as "used" or "committed"
+		// If we reach here, the new file is successfully in place and any
+		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null
-
-		// Step 4: If a backup was created, attempt to delete it.
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-				// Mark backup as handled
-				actualTempBackupFilePath = null
-			} catch (unlinkBackupError) {
-				// Log this error, but do not re-throw. The main operation was successful.
-				// actualTempBackupFilePath remains set, indicating an orphaned backup.
-				console.error(
-					`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
-					unlinkBackupError,
-				)
-			}
-		}
 	} catch (originalError) {
-		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
+		console.error(
+			`Operation failed for ${resolvedTargetPath ?? absoluteFilePath}: [Original Error Caught]`,
+			originalError,
+		)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
-		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
 
-		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
-			try {
-				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-				// Mark as handled, prevent later unlink of this path
-				actualTempBackupFilePath = null
-			} catch (rollbackError) {
-				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
-				console.error(
-					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
-					rollbackError,
-				)
-			}
-		}
-
-		// Cleanup the .new file if it exists
+		// A pre-commit failure leaves the target untouched, and safeWriteText has
+		// already removed its own backup copy and temp file (a POST-commit failure
+		// keeps the backup on purpose and reports its path on the error). Clean up
+		// the .new file if it still exists - safety net in case its cleanup missed it.
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
-					cleanupError,
-				)
+			} catch (cleanupError: unknown) {
+				// The expected case: safeWriteText already removed its own temp file, so a
+				// missing file here is not a cleanup failure worth logging. Returning would
+				// also swallow the original error the caller needs.
+				const isAbsent =
+					typeof cleanupError === "object" &&
+					cleanupError !== null &&
+					"code" in cleanupError &&
+					cleanupError.code === "ENOENT"
+				if (!isAbsent) {
+					console.error(
+						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+						cleanupError,
+					)
+				}
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
-		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
 		try {
-			// releaseLock will be the actual unlock function if lock was acquired,
-			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
-			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+			console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
 		}
 	}
 }
