@@ -1616,18 +1616,18 @@ describe("loadProfiles", () => {
 
 		it("applies the allow list: a refused profile is left out and is not the active one", async () => {
 			const source = bulk([
-				{ id: "a", name: "work", apiProvider: "openrouter" },
-				{ id: "b", name: "personal", apiProvider: "deepseek" },
+				{ id: "a", name: "work", apiProvider: providerIdentifiers.openrouter },
+				{ id: "b", name: "personal", apiProvider: providerIdentifiers.deepseek },
 			])
 
 			const result = await loadProfilesWithActive(
 				source,
 				undefined,
 				"personal",
-				(profile) => profile.apiProvider !== "deepseek",
+				(profile) => profile.apiProvider !== providerIdentifiers.deepseek,
 			)
 
-			expect(result.profiles.map((profile) => profile.apiProvider)).toEqual(["openrouter"])
+			expect(result.profiles.map((profile) => profile.apiProvider)).toEqual([providerIdentifiers.openrouter])
 			expect(result.activeProfileId).toBeUndefined()
 		})
 
