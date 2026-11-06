@@ -161,6 +161,9 @@ const taskMetadataQueues = createTaskSaveQueues()
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+// Streamed deltas arrive far faster than the webview can usefully re-render a growing message
+// (tables and code fences reflow on nearly every update), so partial updates post at most this often.
+const PARTIAL_MESSAGE_UPDATE_INTERVAL_MS = 120
 // Upper bound on awaiting lazily loaded model metadata. Some model-catalog
 // fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
 // hung endpoint must not stall streaming, condense, or context-window
@@ -1761,6 +1764,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates a Cline message in the webview and emits an event.
 	 * Non-partial messages are synced to cloud telemetry if not already synced.
 	 */
+	private lastPartialMessagePostTs = 0
+	private pendingPartialMessageTimer: ReturnType<typeof setTimeout> | undefined
+	private pendingPartialMessage: ClineMessage | undefined
+
+	/**
+	 * Posts a streaming (partial) message update, at most once per
+	 * `PARTIAL_MESSAGE_UPDATE_INTERVAL_MS`. The message object is always kept current by the
+	 * caller; a trailing post makes sure the latest text is delivered once the burst ends.
+	 */
+	private postPartialMessageUpdate(message: ClineMessage, source: "ask" | "say"): void {
+		const post = (target: ClineMessage) => {
+			this.lastPartialMessagePostTs = Date.now()
+			// Fire-and-forget: the `RooCodeEventName.Message` emit can synchronously throw via a
+			// consumer-attached listener. Surface that as a log, not an unhandled rejection.
+			this.updateClineMessage(target).catch((error) => {
+				console.error(`[Task#${source}] updateClineMessage failed:`, error)
+			})
+		}
+
+		// A queued update for a different message (e.g. reasoning followed by text) must not be
+		// overwritten by this one, so deliver it now.
+		const queued = this.pendingPartialMessage
+		if (queued && queued.ts !== message.ts) {
+			this.cancelPendingPartialMessageUpdate()
+			post(queued)
+		}
+
+		// Clamp: a backward wall-clock step makes the difference negative, which would schedule
+		// the trailing post later than the interval.
+		const elapsed = Math.max(0, Date.now() - this.lastPartialMessagePostTs)
+		if (elapsed >= PARTIAL_MESSAGE_UPDATE_INTERVAL_MS) {
+			this.cancelPendingPartialMessageUpdate()
+			post(message)
+			return
+		}
+
+		this.pendingPartialMessage = message
+		if (this.pendingPartialMessageTimer) {
+			return
+		}
+
+		this.pendingPartialMessageTimer = setTimeout(() => {
+			const pending = this.pendingPartialMessage
+			this.pendingPartialMessageTimer = undefined
+			this.pendingPartialMessage = undefined
+
+			if (pending?.partial && !this.abort && !this.abandoned) {
+				post(pending)
+			}
+		}, PARTIAL_MESSAGE_UPDATE_INTERVAL_MS - elapsed)
+	}
+
+	/** Drops a queued trailing partial post, e.g. because the message was finalized or the task is ending. */
+	private cancelPendingPartialMessageUpdate(): void {
+		if (this.pendingPartialMessageTimer) {
+			clearTimeout(this.pendingPartialMessageTimer)
+		}
+		this.pendingPartialMessageTimer = undefined
+		this.pendingPartialMessage = undefined
+	}
+
 	private async updateClineMessage(message: ClineMessage) {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
@@ -1991,13 +2055,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// data or one whole message at a time so ignore partial for
 					// saves, and only post parts of partial message instead of
 					// whole array in new listener.
-					// Fire-and-forget: the webview post is internally guarded, but
-					// the `RooCodeEventName.Message` emit can synchronously throw
-					// if any consumer-attached listener does, which would surface
-					// here as an unhandled rejection. Log it instead.
-					this.updateClineMessage(lastMessage).catch((error) => {
-						console.error("[Task#ask] updateClineMessage failed:", error)
-					})
+					this.postPartialMessageUpdate(lastMessage, "ask")
 					// console.log("Task#ask: current ask promise was ignored (#1)")
 					throw new AskIgnoredError("updating existing partial")
 				} else {
@@ -2038,9 +2096,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						lastMessage.isAnswered = true
 						lastMessage.autoApprovalDecision = autoApprovalDecision
 					}
+					this.cancelPendingPartialMessageUpdate()
 					await this.saveClineMessages()
-					// Fire-and-forget: see updateClineMessage call above for the
-					// rationale on the .catch arm.
+					// Fire-and-forget: see postPartialMessageUpdate for the rationale on the .catch arm.
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#ask] updateClineMessage failed:", error)
 					})
@@ -2829,13 +2887,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.images = images
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
-					// Fire-and-forget: webview post is internally guarded, but the
-					// `RooCodeEventName.Message` emit can synchronously throw via a
-					// consumer-attached listener. Surface that as a log, not an
-					// unhandled rejection.
-					this.updateClineMessage(lastMessage).catch((error) => {
-						console.error("[Task#say] updateClineMessage failed:", error)
-					})
+					this.postPartialMessageUpdate(lastMessage, "say")
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -2871,6 +2923,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
+					this.cancelPendingPartialMessageUpdate()
 					await this.saveClineMessages()
 
 					// More performant than an entire `postStateToWebview`.
@@ -3673,6 +3726,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+		this.cancelPendingPartialMessageUpdate()
 
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases

@@ -91,6 +91,24 @@ function createAction(actionId: string, message: string) {
 }
 
 describe("TaskHistoryStore real cross-host locking", () => {
+	it("preserves a recovered record instead of overwriting it during legacy migration", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-migrate-"))
+		const store = new TaskHistoryStore(storagePath)
+		try {
+			const legacy = item("migrated")
+			const committed = { ...legacy, task: "committed newer task", totalCost: 7 }
+			const taskDir = path.join(storagePath, "tasks", legacy.id)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, ".history_item.json.bak_1.tmp"), JSON.stringify(committed))
+			await store.migrateFromGlobalState([legacy])
+			expect(store.get(legacy.id)).toEqual(committed)
+			expect(JSON.parse(await fs.readFile(path.join(taskDir, "history_item.json"), "utf8"))).toEqual(committed)
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves independent stale-cache deltas through the real per-file lock", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-real-lock-"))
 		const storeA = new TaskHistoryStore(storagePath)
