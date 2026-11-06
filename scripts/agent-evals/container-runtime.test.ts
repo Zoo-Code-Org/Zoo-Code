@@ -106,6 +106,31 @@ const recordingCli = (
 }
 
 describe("container grading runtime", () => {
+	it("uses the fully qualified grader image for non-interactive lookup and pull", () => {
+		assert.equal(GRADER_IMAGE, "docker.io/library/node:22-bookworm")
+	})
+
+	it("makes the output directory writable before the container writes its result", async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "container-output-mode-"))
+		try {
+			const outDir = path.join(scratch, "grading-out")
+			await fs.mkdir(outDir, { mode: 0o700 })
+			const cli = recordingCli({
+				run: async (args) => {
+					const output = outDirFromArgs(args)
+					assert.equal((await fs.stat(output)).mode & 0o777, 0o777)
+					await fs.writeFile(path.join(output, "result.json"), driverCompletedJson())
+					return 0
+				},
+			})
+			const runtime = createContainerGradingRuntime({ cli })
+			const verdict = await runtime.run({ ...makeJob(), gradingDir: path.join(scratch, "grading-copy") })
+			assert.equal(verdict.kind, "passed")
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true })
+		}
+	})
+
 	it("builds a locked-down, network-less invocation", () => {
 		const args = buildContainerArgs(makeJob(), "/tmp/evals/grading-out")
 		const flagValue = (flag: string): string | undefined => {
