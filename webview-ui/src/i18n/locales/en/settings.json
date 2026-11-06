@@ -787,6 +787,10 @@
 		"autoCondenseContext": {
 			"name": "Automatically trigger intelligent context condensing"
 		},
+		"disableAutoContextManagement": {
+			"name": "Disable automatic context compaction and truncation",
+			"description": "When enabled, Zoo Code will not automatically condense or truncate task context, including after a context-window error. You are responsible for avoiding context-window limits. Manual context condensation remains available."
+		},
 		"openTabs": {
 			"label": "Open tabs context limit",
 			"description": "Maximum number of VSCode open tabs to include in context. Higher values provide more context but increase token usage."

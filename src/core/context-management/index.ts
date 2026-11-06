@@ -168,6 +168,7 @@ export type WillManageContextOptions = {
 	maxTokens?: number | null
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
+	disableAutoContextManagement?: boolean
 	profileThresholds: Record<string, number>
 	currentProfileId: string
 	lastMessageTokens: number
@@ -193,11 +194,16 @@ export function willManageContext({
 	maxTokens,
 	autoCondenseContext,
 	autoCondenseContextPercent,
+	disableAutoContextManagement,
 	profileThresholds,
 	currentProfileId,
 	lastMessageTokens,
 	useAvailableInputForContextPercent,
 }: WillManageContextOptions): boolean {
+	if (disableAutoContextManagement) {
+		return false
+	}
+
 	if (!autoCondenseContext) {
 		// When auto-condense is disabled, only truncation can occur
 		// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
@@ -251,6 +257,7 @@ export type ContextManagementOptions = {
 	apiHandler: ApiHandler
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
+	disableAutoContextManagement?: boolean
 	systemPrompt: string
 	taskId: string
 	customCondensingPrompt?: string
@@ -294,6 +301,7 @@ export async function manageContext({
 	apiHandler,
 	autoCondenseContext,
 	autoCondenseContextPercent,
+	disableAutoContextManagement,
 	systemPrompt,
 	taskId,
 	customCondensingPrompt,
@@ -322,6 +330,10 @@ export async function manageContext({
 
 	// Calculate total effective tokens (totalTokens never includes the last message)
 	const prevContextTokens = totalTokens + lastMessageTokens
+
+	if (disableAutoContextManagement) {
+		return { messages, summary: "", cost: 0, prevContextTokens }
+	}
 
 	// Calculate available tokens for conversation history
 	// Truncate if we're within TOKEN_BUFFER_PERCENTAGE of the context window

@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Intelligente Kontextkomprimierung automatisch auslösen"
 		},
+		"disableAutoContextManagement": {
+			"name": "Automatische Kontextkomprimierung und -kürzung deaktivieren",
+			"description": "Wenn diese Option aktiviert ist, komprimiert oder kürzt Zoo Code den Aufgabenkontext nicht automatisch, auch nicht nach einem Kontextfensterfehler. Sie sind dafür verantwortlich, die Kontextfenstergrenzen einzuhalten. Die manuelle Kontextkomprimierung bleibt verfügbar."
+		},
 		"openTabs": {
 			"label": "Geöffnete Tabs Kontextlimit",
 			"description": "Maximale Anzahl von geöffneten VSCode-Tabs, die im Kontext enthalten sein sollen. Höhere Werte bieten mehr Kontext, erhöhen aber den Token-Verbrauch."

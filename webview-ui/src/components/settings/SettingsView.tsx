@@ -188,6 +188,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		allowedWriteFiles,
 		autoCondenseContext,
 		autoCondenseContextPercent,
+		disableAutoContextManagement,
 		enableCheckpoints,
 		checkpointTimeout,
 		experiments,
@@ -438,6 +439,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					allowedMaxCost: allowedMaxCost ?? null,
 					autoCondenseContext,
 					autoCondenseContextPercent,
+					disableAutoContextManagement,
 					soundEnabled: soundEnabled ?? true,
 					soundVolume: soundVolume ?? 0.5,
 					ttsEnabled,
@@ -931,6 +933,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<ContextManagementSettings
 								autoCondenseContext={autoCondenseContext}
 								autoCondenseContextPercent={autoCondenseContextPercent}
+								disableAutoContextManagement={disableAutoContextManagement}
 								listApiConfigMeta={listApiConfigMeta ?? []}
 								maxOpenTabsContext={maxOpenTabsContext}
 								maxWorkspaceFiles={maxWorkspaceFiles ?? 200}

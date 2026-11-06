@@ -412,6 +412,7 @@ export type ExtensionState = Pick<
 
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
+	disableAutoContextManagement: boolean
 	marketplaceItems?: MarketplaceItem[]
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	marketplaceInstalledMetadata?: { project: Record<string, any>; global: Record<string, any> }

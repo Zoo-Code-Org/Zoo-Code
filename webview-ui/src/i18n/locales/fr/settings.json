@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Déclencher automatiquement la condensation intelligente du contexte"
 		},
+		"disableAutoContextManagement": {
+			"name": "Désactiver la compaction et la troncature automatiques du contexte",
+			"description": "Lorsque cette option est activée, Zoo Code ne condensera ni ne tronquera automatiquement le contexte de la tâche, même après une erreur de fenêtre de contexte. Il vous appartient de ne pas dépasser les limites de la fenêtre de contexte. La condensation manuelle du contexte reste disponible."
+		},
 		"openTabs": {
 			"label": "Limite de contexte des onglets ouverts",
 			"description": "Nombre maximum d'onglets VSCode ouverts à inclure dans le contexte. Des valeurs plus élevées fournissent plus de contexte mais augmentent l'utilisation de token."
