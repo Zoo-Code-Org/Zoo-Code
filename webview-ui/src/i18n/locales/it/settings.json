@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Attiva automaticamente la condensazione intelligente del contesto"
 		},
+		"disableAutoContextManagement": {
+			"name": "Disattiva la compattazione e il troncamento automatici del contesto",
+			"description": "Se attivata, Zoo Code non condenserà né troncherà automaticamente il contesto dell'attività, nemmeno dopo un errore della finestra di contesto. È tua responsabilità evitare di superare i limiti della finestra di contesto. La condensazione manuale del contesto rimane disponibile."
+		},
 		"openTabs": {
 			"label": "Limite contesto schede aperte",
 			"description": "Numero massimo di schede VSCode aperte da includere nel contesto. Valori più alti forniscono più contesto ma aumentano l'utilizzo di token."

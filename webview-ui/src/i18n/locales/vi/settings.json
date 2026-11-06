@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Tự động kích hoạt nén ngữ cảnh thông minh"
 		},
+		"disableAutoContextManagement": {
+			"name": "Tắt tự động nén và cắt ngắn ngữ cảnh",
+			"description": "Khi được bật, Zoo Code sẽ không tự động nén hoặc cắt ngắn ngữ cảnh tác vụ, kể cả sau khi xảy ra lỗi cửa sổ ngữ cảnh. Bạn chịu trách nhiệm tránh vượt quá giới hạn cửa sổ ngữ cảnh. Tính năng nén ngữ cảnh thủ công vẫn khả dụng."
+		},
 		"openTabs": {
 			"label": "Giới hạn ngữ cảnh tab đang mở",
 			"description": "Số lượng tab VSCode đang mở tối đa để đưa vào ngữ cảnh. Giá trị cao hơn cung cấp nhiều ngữ cảnh hơn nhưng tăng sử dụng token."

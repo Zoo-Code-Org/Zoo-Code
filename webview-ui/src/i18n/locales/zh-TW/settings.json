@@ -741,6 +741,10 @@
 		"autoCondenseContext": {
 			"name": "自動觸發智慧上下文壓縮"
 		},
+		"disableAutoContextManagement": {
+			"name": "停用自動上下文壓縮與截斷",
+			"description": "啟用後，即使發生上下文視窗錯誤，Zoo Code 也不會自動壓縮或截斷工作上下文。您需要自行避免超出上下文視窗限制。仍可手動壓縮上下文。"
+		},
 		"openTabs": {
 			"label": "開啟分頁的上下文限制",
 			"description": "上下文中最多包含多少個 VS Code 開啟的分頁。數值越高提供的上下文越多，但 Token 用量也會增加。"

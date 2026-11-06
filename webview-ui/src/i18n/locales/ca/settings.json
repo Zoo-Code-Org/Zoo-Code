@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Activar automàticament la condensació intel·ligent de context"
 		},
+		"disableAutoContextManagement": {
+			"name": "Desactiva la compactació i el truncament automàtics del context",
+			"description": "Quan està activat, Zoo Code no condensarà ni truncarà automàticament el context de la tasca, ni tan sols després d'un error de finestra de context. Ets responsable d'evitar els límits de la finestra de context. La condensació manual del context continua disponible."
+		},
 		"openTabs": {
 			"label": "Límit de context de pestanyes obertes",
 			"description": "Nombre màxim de pestanyes obertes de VSCode a incloure al context. Valors més alts proporcionen més context però augmenten l'ús de token."

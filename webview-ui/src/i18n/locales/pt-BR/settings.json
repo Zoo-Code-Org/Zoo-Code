@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Acionar automaticamente a condensação inteligente de contexto"
 		},
+		"disableAutoContextManagement": {
+			"name": "Desativar a compactação e o truncamento automáticos do contexto",
+			"description": "Quando ativado, o Zoo Code não condensará nem truncará automaticamente o contexto da tarefa, inclusive após um erro de janela de contexto. Você é responsável por evitar os limites da janela de contexto. A condensação manual do contexto continua disponível."
+		},
 		"openTabs": {
 			"label": "Limite de contexto de abas abertas",
 			"description": "Número máximo de abas abertas do VSCode a incluir no contexto. Valores mais altos fornecem mais contexto, mas aumentam o uso de token."

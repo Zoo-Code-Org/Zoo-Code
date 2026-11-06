@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Automatycznie wyzwalaj inteligentną kondensację kontekstu"
 		},
+		"disableAutoContextManagement": {
+			"name": "Wyłącz automatyczne kompresowanie i skracanie kontekstu",
+			"description": "Po włączeniu Zoo Code nie będzie automatycznie kompresować ani skracać kontekstu zadania, również po błędzie okna kontekstu. Odpowiadasz za nieprzekraczanie limitów okna kontekstu. Ręczne kompresowanie kontekstu pozostanie dostępne."
+		},
 		"openTabs": {
 			"label": "Limit kontekstu otwartych kart",
 			"description": "Maksymalna liczba otwartych kart VSCode do uwzględnienia w kontekście. Wyższe wartości zapewniają więcej kontekstu, ale zwiększają zużycie token."

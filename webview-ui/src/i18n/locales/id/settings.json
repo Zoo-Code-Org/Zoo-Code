@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Secara otomatis memicu kondensasi konteks cerdas"
 		},
+		"disableAutoContextManagement": {
+			"name": "Nonaktifkan pemadatan dan pemangkasan konteks otomatis",
+			"description": "Jika diaktifkan, Zoo Code tidak akan memadatkan atau memangkas konteks tugas secara otomatis, termasuk setelah terjadi kesalahan batas konteks. Anda bertanggung jawab untuk menghindari batas konteks. Pemadatan konteks secara manual tetap tersedia."
+		},
 		"diagnostics": {
 			"includeMessages": {
 				"label": "Secara otomatis sertakan diagnostik dalam konteks",
