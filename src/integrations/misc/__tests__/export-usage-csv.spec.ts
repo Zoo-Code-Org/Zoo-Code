@@ -154,8 +154,8 @@ describe("neutralizeCsvFormulas", () => {
 		["1-2"],
 		["\uFEFFtext"],
 		["\u0000text"], // invisible characters alone do not make a formula
-		["\n=1"], // a line feed is text: it is not skipped like a control character
-		["\u0000\n=1"],
+		["line\ntext"], // a line break inside a cell is text, as long as what follows it is not a formula
+		["\nnot a formula"],
 	])("leaves the cell %j alone", (cell) => {
 		expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(`a,"${cell}",b`)
 	})
@@ -197,6 +197,72 @@ describe("neutralizeCsvFormulas", () => {
 		return fields
 	}
 	const startsAFormula = (field: string) => /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u.test(field)
+
+	describe("for a line break inside a cell", () => {
+		it.each([
+			["the crafted message", 'date,task\n2026,"note\n=1+1\nend"'],
+			["after a carriage return", 'date,task\n2026,"note\r=1+1\rend"'],
+			["after a Windows line ending", 'date,task\n2026,"note\r\n@SUM(1)\r\nend"'],
+			["after several line breaks and an invisible character", 'date,task\n2026,"a\n\n\u0000-2+3\nend"'],
+			["in a cell that is not quoted by the webview but is multiline once written", 'date,task\n2026,"x\n+1"'],
+		])("is inert in every line, for comma, semicolon and tab imports: %s", (_name, csv) => {
+			const safe = neutralizeCsvFormulas(csv)!
+
+			// An application that ends a row at every line break whatever quotes are open reads each line as a row.
+			for (const delimiter of [",", ";", "\t"]) {
+				for (const field of fieldsSplitOn(delimiter, safe.replace(/\r(?!\n)/g, "\n").replace(/\r\n/g, "\n"))) {
+					expect(
+						startsAFormula(field),
+						`${JSON.stringify(field)} split on ${JSON.stringify(delimiter)}`,
+					).toBe(false)
+				}
+			}
+		})
+
+		it("shows that the crafted message was a formula on its second line when it was written as it came", () => {
+			const written = 'date,task\n2026,"note\n=1+1\nend"'
+
+			expect(fieldsSplitOn(",", written).some(startsAFormula)).toBe(true) // a line that starts with =
+		})
+
+		it("writes the crafted message as inert text from exportUsageCsv", async () => {
+			const saveUri = { fsPath: "/tmp/chosen.csv" } as vscode.Uri
+			showSaveDialog.mockResolvedValue(saveUri)
+
+			await exportUsageCsv('date,task\n2026,"note\n=1+1\nend"', "all")
+
+			const written = writeFile.mock.calls[0][1].toString()
+			for (const delimiter of [",", ";", "\t"]) {
+				expect(fieldsSplitOn(delimiter, written).some(startsAFormula)).toBe(false)
+			}
+		})
+	})
+
+	describe("on text that is built to be slow", () => {
+		const secondsFor = (csv: string) => {
+			const started = performance.now()
+			neutralizeCsvFormulas(csv)
+			return (performance.now() - started) / 1000
+		}
+
+		it.each([
+			["a long run of tabs in a cell", `a,"${"\t".repeat(200_000)}",b`],
+			["a long run of tabs and semicolons", `a,"${";\t".repeat(100_000)}x",b`],
+			["a long run of line breaks", `a,"${"\n".repeat(200_000)}",b`],
+			["a long run of invisible characters between separators", `a,"${";\u0000".repeat(100_000)}x",b`],
+			["a long run of tabs followed by a formula", `a,"${"\t".repeat(200_000)}=1",b`],
+		])("takes a pass over the text, not a pass for every separator: %s", (_name, csv) => {
+			expect(secondsFor(csv)).toBeLessThan(2) // quadratic scanning of 200 000 separators takes minutes
+		})
+
+		it("still breaks every formula start in such a run", () => {
+			const safe = neutralizeCsvFormulas(`a,"${"\t".repeat(1000)}=1",b`)!
+
+			for (const delimiter of [",", ";", "\t"]) {
+				expect(fieldsSplitOn(delimiter, safe).some(startsAFormula)).toBe(false)
+			}
+		})
+	})
 
 	describe("for a spreadsheet that splits on a semicolon or a tab", () => {
 		it.each([
@@ -253,7 +319,8 @@ describe("neutralizeCsvFormulas", () => {
 
 	it("keeps commas, doubled quotes and newlines inside a quoted cell, and judges the cell by its value", () => {
 		expect(neutralizeCsvFormulas('"a,b","say ""hi""\nthen go"')).toBe('"a,b","say ""hi""\nthen go"')
-		expect(neutralizeCsvFormulas('"x\n=1+1"')).toBe('"x\n=1+1"') // a formula only starts a cell
+		// A line break inside a cell can end a row for an application that ignores the quotes: what follows it is a start too.
+		expect(neutralizeCsvFormulas('"x\n=1+1"')).toBe('"x\n\'=1+1"')
 	})
 
 	it("reads a Windows line ending as one row end", () => {

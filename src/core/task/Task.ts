@@ -1740,10 +1740,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// A failed write is reported to the caller: the delete, edit and checkpoint flows go on to save the
 			// messages again, and carrying on after a lost write would leave the history entry (and its usage
 			// breakdown) describing messages that are no longer the ones on disk.
-			if (!(await this.saveClineMessages(false))) {
-				// The rewind flows cut the API history only after this, so a rejection leaves it as it was: the messages
-				// are put back, with what came in while the write was on its way, and the two stay consistent.
-				this.restoreReplacedMessages(replaced, replacement)
+			// The rewind flows cut the API history only after this, so a rejection leaves it as it was: the messages are put
+			// back, with what came in while the write was on its way, and the two stay consistent. They are put back by the
+			// write itself, before the next save in the line starts: one behind this would otherwise copy the cut messages,
+			// and a message that was never on the disk would be lost to it.
+			if (!(await this.saveClineMessages(false, () => this.restoreReplacedMessages(replaced, replacement)))) {
 				throw new Error("Failed to save the messages")
 			}
 		}
@@ -1874,7 +1875,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
 	 * to replace the stored messages outright.
 	 */
-	private async saveClineMessages(merge = true): Promise<boolean> {
+	private async saveClineMessages(merge = true, onWriteLost?: () => void): Promise<boolean> {
 		// Two queues per task, shared by every instance of the task. The message writes go one at a time, and a write
 		// never waits for the metadata of the save before it: the messages are what must reach the disk, so a slow
 		// history write cannot delay them. The metadata stage (the history entry, derived from the messages that save
@@ -1882,7 +1883,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// were asked for: callers that do not wait for a save (the fire-and-forget ones) would otherwise let an older
 		// save's metadata land after a newer save's and replace it, an explicit clear of the usage breakdown included.
 		// A save that fails does not hold up the next one.
-		const result = await enqueueTaskSave(messageWriteQueues, this.taskId, () => this.writeClineMessages(merge))
+		const result = await enqueueTaskSave(messageWriteQueues, this.taskId, () =>
+			this.writeClineMessages(merge, onWriteLost),
+		)
 		if (!result.saved) return false
 
 		await enqueueTaskSave(taskMetadataQueues, this.taskId, () => this.writeTaskMetadata(result.persistedMessages))
@@ -1892,6 +1895,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** The message write: `saved` is whether it reached the disk, and `persistedMessages` what was actually stored. */
 	private async writeClineMessages(
 		merge: boolean,
+		onWriteLost?: () => void,
 	): Promise<{ saved: false } | { saved: true; persistedMessages: ClineMessage[] | undefined }> {
 		// What was actually persisted: with `merge`, newer messages another host wrote are folded in. The metadata
 		// (including the usage breakdown) is computed from it, so a stale local snapshot cannot clear usage that
@@ -1906,6 +1910,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return { saved: true, persistedMessages }
 		} catch (error) {
 			console.error("Failed to save Roo messages:", error)
+			// Still inside the queued work: what the save asked to put right is put right before the next save in the line
+			// takes its copy of the messages.
+			onWriteLost?.()
 			return { saved: false }
 		}
 	}

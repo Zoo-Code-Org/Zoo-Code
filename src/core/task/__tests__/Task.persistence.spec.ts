@@ -1057,6 +1057,32 @@ describe("Task persistence", () => {
 					consoleError.mockRestore()
 				})
 
+				it("restores the messages before the save queued behind the lost write starts, so it does not write the cut ones", async () => {
+					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+					const failTheWrite = slowFailingWrite()
+					mockSaveTaskMessages.mockResolvedValue([])
+					const task = newTask()
+					task.clineMessages.push(text("on the disk", 1), text("not on the disk yet", 2)) // the second was never saved
+
+					const overwriting = task.overwriteClineMessages([task.clineMessages[0]]) // a rewind cuts it
+					const failed = expect(overwriting).rejects.toThrow("Failed to save the messages")
+					await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+					const queued = getTaskPersistenceAccess(task).saveClineMessages() // an ordinary save, behind the lost write
+					failTheWrite()
+					await failed
+					await queued
+
+					const [, queuedWrite] = mockSaveTaskMessages.mock.calls
+					// Nothing on the disk has that message: the write behind the lost one must not be the last to have a say
+					// with the messages cut.
+					expect((queuedWrite[0].messages as ClineMessage[]).map((message) => message.text)).toEqual([
+						"on the disk",
+						"not on the disk yet",
+					])
+					expect(texts(task)).toEqual(["on the disk", "not on the disk yet"])
+					consoleError.mockRestore()
+				})
+
 				it("keeps an update made to a message while the write was on its way", async () => {
 					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 					const failTheWrite = slowFailingWrite()

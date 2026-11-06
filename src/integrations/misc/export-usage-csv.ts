@@ -5,18 +5,23 @@ import * as vscode from "vscode"
 const USAGE_RANGES: readonly string[] = ["today", "7d", "30d", "all"]
 
 /**
- * What starts a cell that a spreadsheet may evaluate: = + - @, a tab or a carriage return, and the same after
- * invisible characters that an application may skip: control characters such as NUL (a line feed is text, not
- * skipped) and format characters such as a byte order mark or the zero-width ones.
+ * The characters that an application may skip before it reads a formula: control characters such as NUL and format
+ * characters such as a byte order mark or the zero-width ones. A tab, a carriage return and a line feed are not among
+ * them: the first two start a formula themselves, and the line feed ends a line. Keeping them out also keeps the scans
+ * below from overlapping, so they cost a pass over the text, not a pass for every separator.
  */
-const FORMULA_START = /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u
+const SKIPPED = String.raw`(?![\t\r\n])[\p{Cc}\p{Cf}]`
+
+/** What starts a cell that a spreadsheet may evaluate: = + - @, a tab or a carriage return, after the characters it skips. */
+const FORMULA_START = new RegExp(`^(?:${SKIPPED})*[=+\\-@\\t\\r]`, "u")
 
 /**
- * A spreadsheet may split a row on a semicolon (the list separator of many locales) or a tab as well as on a comma, and
- * it recognises a quote only at the start of a field: so the text after a semicolon or a tab inside a cell can start a
- * field of its own, whatever quotes surround the cell. A formula start there is broken as well.
+ * A spreadsheet may split a row on a semicolon (the list separator of many locales) or a tab as well as on a comma, may
+ * end a row at every line break whatever quotes are open, and recognises a quote only at the start of a field: so the
+ * text after a semicolon, a tab or a line break inside a cell can start a field or a row of its own, whatever quotes
+ * surround the cell. A formula start there is broken as well.
  */
-const FORMULA_AFTER_FIELD_SEPARATOR = /([;\t])(?=(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r])/gu
+const FORMULA_AFTER_SEPARATOR = new RegExp(`([;\\t\\r\\n])(?=(?:${SKIPPED})*[=+\\-@\\t\\r])`, "gu")
 
 /** The most text the host writes for an export: ten years of daily tasks is far below it, a runaway message is not. */
 const MAX_USAGE_CSV_LENGTH = 20_000_000
@@ -24,7 +29,7 @@ const MAX_USAGE_CSV_LENGTH = 20_000_000
 /**
  * Makes every cell of a CSV inert for a spreadsheet: a cell that starts with = + - @ (or a tab or carriage return) is
  * evaluated as a formula by a spreadsheet, so it gets a leading apostrophe, and so does the text that follows a
- * semicolon or a tab inside a cell (where a spreadsheet that splits on those starts a new field). The text is parsed and written again, so
+ * semicolon, a tab or a line break inside a cell (where a spreadsheet that splits on those starts a new field or row). The text is parsed and written again, so
  * a cell is judged by its value, however it was quoted. Returns `undefined` for text that is not well-formed CSV
  * (a quote that is never closed). Text that is already inert comes back unchanged.
  */
@@ -81,7 +86,7 @@ export function neutralizeCsvFormulas(csv: string): string | undefined {
 			cells
 				.map((cell) => {
 					const started = FORMULA_START.test(cell.value) ? `'${cell.value}` : cell.value
-					const safe = started.replace(FORMULA_AFTER_FIELD_SEPARATOR, "$1'")
+					const safe = started.replace(FORMULA_AFTER_SEPARATOR, "$1'")
 					return cell.quoted || /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 				})
 				.join(","),

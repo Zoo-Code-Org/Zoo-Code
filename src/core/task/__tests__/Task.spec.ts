@@ -590,6 +590,8 @@ describe("Cline", () => {
 		it("prices a request with the protocol it started with when the profile is switched while its usage is drained", async () => {
 			const task = await createTaskWithManualRetries()
 			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+			// The spy is shared with the tests before this one: their calls (this token count included) are not this test's.
+			captureLlmCompletion.mockClear()
 
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task, "attemptApiRequest")
