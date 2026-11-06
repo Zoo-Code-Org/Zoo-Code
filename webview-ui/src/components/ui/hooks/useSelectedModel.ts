@@ -133,12 +133,15 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	// before the selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
-				? !routerModels.isLoading
-				: routerModels.data &&
-					routerModels.data[dynamicProvider] !== undefined &&
-					typeof routerModels.data[dynamicProvider] === "object" &&
-					!routerModels.isLoading
+			? dynamicProvider === providerIdentifiers.friendli
+				? true // static friendliModels cover the window before /v1/models data arrives
+				: dynamicProvider === providerIdentifiers.litellm ||
+					  dynamicProvider === providerIdentifiers.ioIntelligence
+					? !routerModels.isLoading
+					: routerModels.data &&
+						routerModels.data[dynamicProvider] !== undefined &&
+						typeof routerModels.data[dynamicProvider] === "object" &&
+						!routerModels.isLoading
 			: true
 
 	const isReady =

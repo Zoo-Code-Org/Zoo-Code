@@ -22,6 +22,7 @@ import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { getFriendliModels } from "./fetchers/friendli"
+import type { ApiStream } from "../transform/stream"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -66,6 +67,7 @@ type FriendliChatCompletionNonStreamingParams = Omit<
  */
 export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelId> {
 	private models: ModelRecord = {}
+	private modelsLoad?: Promise<void>
 
 	constructor(options: ApiHandlerOptions) {
 		super({
@@ -77,10 +79,22 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			providerModels: friendliModels,
 			defaultTemperature: 0.6,
 		})
+	}
 
-		getModels({ provider: providerIdentifiers.friendli }, this)
-			.then((models) => (this.models = models))
+	private loadModels(): Promise<void> {
+		this.modelsLoad ??= getModels({ provider: providerIdentifiers.friendli }, this)
+			.then((models) => void (this.models = models))
 			.catch(() => {}) // static friendliModels remain the fallback
+		return this.modelsLoad
+	}
+
+	override async *createMessage(
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): ApiStream {
+		await this.loadModels()
+		yield* super.createMessage(systemPrompt, messages, metadata)
 	}
 
 	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
@@ -197,6 +211,7 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	}
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		await this.loadModels()
 		const { id: modelId } = this.getModel()
 		const friendliExtra = this.buildFriendliReasoningParams()
 

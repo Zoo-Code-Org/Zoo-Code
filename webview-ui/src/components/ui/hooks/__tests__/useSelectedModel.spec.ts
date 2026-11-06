@@ -1893,6 +1893,16 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
 
+		it("should use static model info before router models load", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+			const apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.friendli }
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
 		it("should prefer fetched router model info", () => {
 			const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: { "vendor/new-model": info } }))

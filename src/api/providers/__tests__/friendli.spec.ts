@@ -3,7 +3,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { friendliDefaultModelId, friendliModels } from "@roo-code/types"
+import { friendliDefaultModelId, friendliModels, openAiModelInfoSaneDefaults } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
@@ -87,13 +87,51 @@ describe("FriendliHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: friendliApiKey }))
 	})
 
-	it("should use fetched model info, keeping a model id missing from the static list", async () => {
+	it("should construct without an API key and without fetching the catalog", () => {
+		expect(() => new FriendliHandler({})).not.toThrow()
+		expect(mockGetModels).not.toHaveBeenCalled()
+	})
+
+	it("should load the catalog once before building requests for fetched-only models", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
+
+		await handlerWithModel.completePrompt("a")
+		await handlerWithModel.completePrompt("b")
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(handlerWithModel.getModel()).toEqual(expect.objectContaining({ id: "vendor/new-model", info }))
+	})
+
+	it("should wait for the catalog before streaming", async () => {
 		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
 		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
 		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
 
-		await vi.waitFor(() => expect(handlerWithModel.getModel().info).toEqual(info))
-		expect(handlerWithModel.getModel().id).toBe("vendor/new-model")
+		await handlerWithModel.createMessage("system", []).next()
+
+		expect(mockCreate.mock.calls[0][0]).toEqual(expect.objectContaining({ max_tokens: 8192 }))
+	})
+
+	it("should fall back to static models when the catalog is empty", async () => {
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		await handler.completePrompt("a")
+
+		expect(handler.getModel().info).toEqual(friendliModels[friendliDefaultModelId])
+	})
+
+	it("should keep an unknown model id with default metadata when the catalog fails", async () => {
+		mockGetModels.mockRejectedValueOnce(new Error("Network error"))
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/unknown", friendliApiKey: "test-key" })
+
+		await handlerWithModel.completePrompt("a")
+
+		expect(handlerWithModel.getModel()).toEqual(
+			expect.objectContaining({ id: "vendor/unknown", info: openAiModelInfoSaneDefaults }),
+		)
 	})
 
 	it("fetchModels should load the public /v1/models catalog", async () => {

@@ -34,8 +34,10 @@ describe("getFriendliModels", () => {
 			},
 		})
 
-		const models = await getFriendliModels()
+		const signal = new AbortController().signal
+		const models = await getFriendliModels({ signal })
 
+		expect(axios.get).toHaveBeenCalledWith("https://api.friendli.ai/serverless/v1/models", { signal })
 		expect(Object.keys(models)).toEqual(["zai-org/GLM-5.3", "google/gemma-4-31B-it"])
 		expect(models["zai-org/GLM-5.3"]).toEqual({
 			maxTokens: 131_072,
