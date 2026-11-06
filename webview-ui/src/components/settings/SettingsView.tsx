@@ -138,8 +138,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, settingsImportRefreshedAt, mode } =
-		extensionState
+	const {
+		currentApiConfigName,
+		listApiConfigMeta,
+		uriScheme,
+		settingsImportedAt,
+		settingsImportRefreshedAt,
+		settingsImportStoredKeys,
+		mode,
+	} = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	// Whether the form has unsaved changes, and how many changes the user has made in all. The count only goes up: a
@@ -331,6 +338,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledImportRefreshAt.current = settingsImportRefreshedAt
 		const stored: Record<string, unknown> = {}
+		// The settings the import says it stored are taken whatever they were before: the live state may have been stale
+		// (a save that was stored while its state refresh failed), so a value that looks unchanged may still differ from the
+		// form, and what a save stored is no longer what is stored.
+		for (const key of settingsImportStoredKeys ?? []) {
+			stored[key] = extensionState[key as keyof typeof extensionState]
+			delete appearanceSaved.current[key]
+		}
 		for (const [key, value] of Object.entries(extensionState)) {
 			// Compared by value: the host builds new arrays and objects for every state it posts.
 			if (
@@ -341,7 +355,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 		}
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...stored }))
-	}, [settingsImportRefreshedAt, extensionState])
+	}, [settingsImportRefreshedAt, settingsImportStoredKeys, extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {

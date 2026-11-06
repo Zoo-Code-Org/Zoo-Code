@@ -442,6 +442,45 @@ describe("appearanceSettingWrites", () => {
 				expect(stored.get("interfaceFontScale")).toBe(100)
 			})
 
+			it("refuses repeated attempts at the key while a rollback stalls, also after its provider was disposed, and frees it afterwards", async () => {
+				const sidebar = {}
+				const { proxy, release, first, secondUndone } = await bothStoredThenFail()
+				const firstUndone = undoSettingWrite(proxy, first, { owner: sidebar }) // queued behind the rollback that stalls
+				firstUndone.catch(() => undefined)
+				// A write that comes while the rollback is on its way is queued behind it, in order: the rollbacks have not
+				// stalled yet. Once they have waited the usual time without finishing, they hold the key.
+				await vi.advanceTimersByTimeAsync(15_000)
+				await expect(firstUndone).rejects.toThrow("did not finish")
+				await expect(secondUndone).rejects.toThrow("did not finish")
+				const before = settingWriteBookkeepingSize()
+				const waitingBefore = settingWritesWaitingToStart()
+
+				const attempt = async (value: number, owner: object) => {
+					const retry = beginSettingWrite("interfaceFontScale", 100, value)
+					await expect(performSettingWrite(proxy, retry, owner)).rejects.toThrow(
+						"An earlier write of interfaceFontScale has not finished yet",
+					)
+					await undoSettingWrite(proxy, retry, { owner }) // never issued: nothing to put back
+				}
+				for (const value of [160, 170, 180, 190]) await attempt(value, sidebar)
+				disposeSettingWrites(sidebar) // the view is closed while the rollbacks stall
+				for (const value of [200, 210]) await attempt(value, {})
+
+				// Nothing queued behind the stalled rollback, however many attempts were made.
+				expect(settingWriteBookkeepingSize()).toEqual(before)
+				expect(settingWritesWaitingToStart()).toBe(waitingBefore)
+
+				release() // the stalled rollback settles, and the one behind it runs
+				await vi.advanceTimersByTimeAsync(0)
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				const later = beginSettingWrite("interfaceFontScale", 100, 170)
+				await performSettingWrite(proxy, later)
+				expect(stored.get("interfaceFontScale")).toBe(170)
+				finishSettingWrites([later])
+				await vi.advanceTimersByTimeAsync(0)
+			})
+
 			it("is run once the rollback ahead of it settles even when its caller has not given up yet, and leaves no bookkeeping", async () => {
 				const { proxy, release, first, secondUndone } = await bothStoredThenFail()
 				const firstUndone = undoSettingWrite(proxy, first)

@@ -493,6 +493,7 @@ describe("importExport", () => {
 				expect(result).toEqual({
 					success: false,
 					settingsMayHaveChanged: true,
+					storedSettings: ["mode", "terminalFontSize"],
 					error: "secret storage unavailable (not stored: autoApprovalEnabled, interfaceFontScale; stored: mode, terminalFontSize)",
 				})
 			})
@@ -507,6 +508,7 @@ describe("importExport", () => {
 				expect(result).toEqual({
 					success: false,
 					settingsMayHaveChanged: true,
+					storedSettings: ["mode"],
 					error: "failed after storing (not stored: interfaceFontScale; stored: mode)",
 				})
 			})
@@ -521,6 +523,7 @@ describe("importExport", () => {
 				expect(result).toEqual({
 					success: false,
 					settingsMayHaveChanged: true,
+					storedSettings: ["mode"],
 					error: "secret storage unavailable (not stored: autoApprovalEnabled; stored: mode)",
 				})
 			})
@@ -533,6 +536,7 @@ describe("importExport", () => {
 				expect(result).toEqual({
 					success: false,
 					settingsMayHaveChanged: true,
+					storedSettings: ["interfaceFontScale"],
 					error: "other settings failed (not stored: the other settings; stored: interfaceFontScale)",
 				})
 				expect(stored.get("interfaceFontScale")).toBe(120)
@@ -572,7 +576,11 @@ describe("importExport", () => {
 			describe("an import that failed part of the way, through importSettingsWithFeedback", () => {
 				const importFailing = async (
 					postStateToWebview: () => Promise<void>,
-					provider: { postStateToWebview: () => Promise<void>; settingsImportRefreshedAt?: number } = {
+					provider: {
+						postStateToWebview: () => Promise<void>
+						settingsImportRefreshedAt?: number
+						settingsImportStoredKeys?: string[]
+					} = {
 						postStateToWebview,
 					},
 				) => {
@@ -694,20 +702,26 @@ describe("importExport", () => {
 					)
 				})
 
-				it("marks the refresh for the settings form while it is posted, and only then", async () => {
-					const seen: Array<number | undefined> = []
+				it("marks the refresh for the settings form while it is posted, with the settings that were stored, and only then", async () => {
+					const seen: Array<{ at?: number; keys?: string[] }> = []
 					const provider = {
 						settingsImportRefreshedAt: undefined as number | undefined,
+						settingsImportStoredKeys: undefined as string[] | undefined,
 						postStateToWebview: vi.fn(async () => {
-							seen.push(provider.settingsImportRefreshedAt)
+							seen.push({
+								at: provider.settingsImportRefreshedAt,
+								keys: provider.settingsImportStoredKeys,
+							})
 						}),
 					}
 
 					const showErrorMessage = await importFailing(provider.postStateToWebview, provider)
 
 					expect(seen).toHaveLength(1)
-					expect(seen[0]).toBeGreaterThan(0) // the form is told to take what the import stored
-					expect(provider.settingsImportRefreshedAt).toBeUndefined() // and it is not there on any later state
+					expect(seen[0].at).toBeGreaterThan(0) // the form is told to take what the import stored
+					expect(seen[0].keys).toEqual(["interfaceFontScale"]) // and which settings those are
+					expect(provider.settingsImportRefreshedAt).toBeUndefined() // none of it is on any later state
+					expect(provider.settingsImportStoredKeys).toBeUndefined()
 					showErrorMessage.mockRestore()
 				})
 
@@ -831,6 +845,7 @@ describe("importExport", () => {
 				expect(result).toEqual({
 					success: false,
 					settingsMayHaveChanged: true,
+					storedSettings: ["terminalFontSize"],
 					error: "failed after storing (not stored: interfaceFontScale; stored: terminalFontSize)",
 				})
 				expect(stored.get("interfaceFontScale")).toBe(100)

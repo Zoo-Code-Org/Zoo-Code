@@ -1,7 +1,9 @@
+import { useState, type ComponentProps } from "react"
 import { render, fireEvent, waitFor } from "@testing-library/react"
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { UISettings } from "../UISettings"
 import { telemetryClient } from "@/utils/TelemetryClient"
+import { APPEARANCE_SETTINGS, applyAppearanceVariables, type AppearanceKey } from "@/utils/appearance"
 
 vi.mock("@/utils/TelemetryClient", () => ({
 	telemetryClient: { capture: vi.fn() },
@@ -260,6 +262,79 @@ describe("UISettings", () => {
 			const preview = getByTestId("appearance-preview")
 			expect(preview.style.getPropertyValue("--zoo-ui-scale")).toBe("1.5")
 			expect(preview.style.getPropertyValue("--zoo-spacing-scale")).toBe("0.5")
+		})
+	})
+
+	// The form keeps the values that are being edited, and the preview shows them before Save. This is the form's side of
+	// it: a state that follows the steppers the way SettingsView's does, over a page that already has saved values.
+	describe("the live preview while the appearance values are edited", () => {
+		type Props = ComponentProps<typeof UISettings>
+		const Form = ({ initial = {} }: { initial?: Partial<Record<AppearanceKey, number>> }) => {
+			const [values, setValues] = useState<Partial<Record<AppearanceKey, number | undefined>>>(initial)
+			const setCachedStateField = ((field: string, value: unknown) =>
+				setValues((previous) => ({
+					...previous,
+					[field]: value as number | undefined,
+				}))) as Props["setCachedStateField"]
+			return (
+				<UISettings
+					reasoningBlockCollapsed={false}
+					enterBehavior="send"
+					{...values}
+					setCachedStateField={setCachedStateField}
+				/>
+			)
+		}
+		const previewVar = (container: HTMLElement, key: AppearanceKey) =>
+			(container.querySelector('[data-testid="appearance-preview"]') as HTMLElement).style.getPropertyValue(
+				APPEARANCE_SETTINGS[key].cssVar,
+			)
+		const clearRoot = () => applyAppearanceVariables(document.documentElement, {})
+		afterEach(clearRoot)
+
+		it("shows each edit at once, before anything is saved", () => {
+			const { container, getByTestId } = render(<Form />)
+			expect(previewVar(container, "interfaceFontScale")).toBe("initial") // unset: the default
+
+			fireEvent.click(getByTestId("appearance-interfaceFontScale-increment"))
+			const once = previewVar(container, "interfaceFontScale")
+			fireEvent.click(getByTestId("appearance-interfaceFontScale-increment"))
+
+			expect(once).toBe(APPEARANCE_SETTINGS.interfaceFontScale.toCss(105))
+			expect(previewVar(container, "interfaceFontScale")).toBe(APPEARANCE_SETTINGS.interfaceFontScale.toCss(110))
+			// Each value is its own: the others stay unset.
+			expect(previewVar(container, "terminalFontSize")).toBe("initial")
+		})
+
+		it("shows a reset as the default, not as the value that is saved on the page", () => {
+			applyAppearanceVariables(document.documentElement, { interfaceFontScale: 150, terminalFontSize: 20 }) // saved
+			const { container, getByTestId } = render(
+				<Form initial={{ interfaceFontScale: 150, terminalFontSize: 20 }} />,
+			)
+			expect(previewVar(container, "interfaceFontScale")).toBe("1.5")
+
+			fireEvent.click(getByTestId("appearance-interfaceFontScale-reset"))
+
+			// The saved value is still on the page until Save, and the preview does not inherit it.
+			expect(document.documentElement.style.getPropertyValue("--zoo-ui-scale")).toBe("1.5")
+			expect(previewVar(container, "interfaceFontScale")).toBe("initial")
+			expect(previewVar(container, "terminalFontSize")).toBe("20px") // the value that was not reset is as it was
+		})
+
+		it("follows an edit and then a reset of the same value", () => {
+			applyAppearanceVariables(document.documentElement, { spacingScale: 80 })
+			const { container, getByTestId } = render(<Form initial={{ spacingScale: 80 }} />)
+
+			fireEvent.click(getByTestId("appearance-spacingScale-increment"))
+			expect(previewVar(container, "spacingScale")).toBe(APPEARANCE_SETTINGS.spacingScale.toCss(85))
+			fireEvent.click(getByTestId("appearance-spacingScale-reset"))
+
+			expect(previewVar(container, "spacingScale")).toBe("initial")
+			// Editing again after the reset starts from the default, not from the saved 80.
+			fireEvent.click(getByTestId("appearance-spacingScale-increment"))
+			expect(previewVar(container, "spacingScale")).toBe(
+				APPEARANCE_SETTINGS.spacingScale.toCss(APPEARANCE_SETTINGS.spacingScale.fallback + 5),
+			)
 		})
 	})
 })

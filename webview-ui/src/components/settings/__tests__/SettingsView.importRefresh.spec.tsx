@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
 
+import { vscode } from "@src/utils/vscode"
+
 import SettingsView from "../SettingsView"
+import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 vi.mock("@/utils/TelemetryClient", () => ({ telemetryClient: { capture: vi.fn() } }))
@@ -67,6 +70,53 @@ describe("SettingsView – the form after an import that failed part of the way"
 
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
 		expect(input("spacingScale").value).toBe(edited)
+	})
+
+	it("takes a setting that the import says it stored even when the live value looks unchanged", async () => {
+		renderUiTab()
+		await screen.findByTestId("appearance-terminalFontSize-input")
+		hostPosts({ terminalFontSize: 14 }) // the live value; the form does not follow it by itself
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 13, an edit
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(vi.mocked(vscode.postMessage)), { success: true }) // stored, and no state followed
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		expect(input("terminalFontSize").value).toBe("13")
+
+		// A failed import stored 14 again; the live value is 14 as it was, so nothing changed with the state.
+		hostPosts({
+			terminalFontSize: 14,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
+
+		await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+
+		// What a save stored is no longer what is stored: 13 is an edit again, and the next save sends it.
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-decrement"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		vi.mocked(vscode.postMessage).mockClear()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const save = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0] as { type: string; updatedSettings?: Record<string, unknown> })
+			.find((message) => message.type === "updateSettings")
+		expect(save?.updatedSettings?.terminalFontSize).toBe(13)
+	})
+
+	it("leaves that value as the form has it when the import does not say it stored it", async () => {
+		renderUiTab()
+		await screen.findByTestId("appearance-terminalFontSize-input")
+		hostPosts({ terminalFontSize: 14 })
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastSaveRequestId(vi.mocked(vscode.postMessage)), { success: true })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		hostPosts({ terminalFontSize: 14, settingsImportRefreshedAt: 1_000, settingsImportStoredKeys: ["mode"] })
+
+		expect(input("terminalFontSize").value).toBe("13")
 	})
 
 	it("acts on each refresh once: the same mark on a later state changes nothing", async () => {

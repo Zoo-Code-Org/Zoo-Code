@@ -442,6 +442,7 @@ export class ClineProvider
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public settingsImportRefreshedAt?: number
+	public settingsImportStoredKeys?: string[]
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
@@ -3467,6 +3468,7 @@ export class ClineProvider
 			maxTotalImageSize: maxTotalImageSize ?? 20,
 			settingsImportedAt: this.settingsImportedAt,
 			settingsImportRefreshedAt: this.settingsImportRefreshedAt,
+			settingsImportStoredKeys: this.settingsImportStoredKeys,
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,
@@ -3823,14 +3825,23 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await setValuesThroughWriteChain(
-			this.contextProxy,
-			withoutInvalidDisplaySettings(values, (key) => this.log(`[setValues] Ignored an invalid value for ${key}`)),
-			{
-				owner: this,
-				onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
-			},
-		)
+		try {
+			await setValuesThroughWriteChain(
+				this.contextProxy,
+				withoutInvalidDisplaySettings(values, (key) =>
+					this.log(`[setValues] Ignored an invalid value for ${key}`),
+				),
+				{
+					owner: this,
+					onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
+				},
+			)
+		} catch (error) {
+			// The values that were stored before another write failed are final: the webview is shown what is stored. A
+			// refresh that fails does not hide the error.
+			await this.postStateToWebview().catch(() => undefined)
+			throw error
+		}
 	}
 
 	// dev

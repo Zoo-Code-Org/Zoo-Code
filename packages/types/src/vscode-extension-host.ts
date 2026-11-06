@@ -407,6 +407,8 @@ export type ExtensionState = Pick<
 	 * stored (the values that changed with this state), and keeps the edits that were made to the others.
 	 */
 	settingsImportRefreshedAt?: number
+	/** With `settingsImportRefreshedAt`: the settings that the failed import stored, which the form takes whatever they were before. */
+	settingsImportStoredKeys?: string[]
 	historyPreviewCollapsed?: boolean
 
 	cloudUserInfo: CloudUserInfo | null

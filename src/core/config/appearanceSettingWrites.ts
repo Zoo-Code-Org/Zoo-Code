@@ -127,8 +127,10 @@ type WriteKind =
 	 */
 	| "deferredRollback"
 	/**
-	 * A rollback of a write that failed, behind whatever is outstanding for the key: kept like a deferred one (no
-	 * timeout, not refused, not dropped), but it does not take the key, so a write that comes meanwhile queues behind it.
+	 * The rollback of a write that failed, behind whatever is outstanding for the key: kept like a deferred one (no
+	 * timeout, not refused, not dropped). A write that comes while it is on its way is queued behind it, in order; once
+	 * it has been waited for the usual time without finishing it is stalled, and takes the key like a store that timed
+	 * out does, so every later write is refused at once and none piles up behind it.
 	 */
 	| "keptRollback"
 
@@ -157,12 +159,14 @@ const queuedSettingWrite = (
 	settingWriteQueues.set(key, tail)
 	// The key is free for the next write once this one's store has settled (or it was dropped before it started).
 	let takesKey = false
+	let stalledTimer: ReturnType<typeof setTimeout> | undefined
 	const takeKey = () => {
 		if (takesKey) return
 		takesKey = true
 		staleKeys.set(key, (staleKeys.get(key) ?? 0) + 1)
 	}
 	const release = () => {
+		clearTimeout(stalledTimer)
 		if (takesKey) {
 			takesKey = false
 			const left = (staleKeys.get(key) ?? 1) - 1
@@ -173,6 +177,8 @@ const queuedSettingWrite = (
 		resolveTail()
 	}
 	if (kind === "deferredRollback") takeKey()
+	// A rollback that has not finished after the usual wait has stalled: it holds the key from then until it is over.
+	if (kind === "keptRollback") stalledTimer = setTimeout(takeKey, SETTING_WRITE_TIMEOUT_MS)
 
 	const waiting = waitingByOwner.get(owner) ?? new Set<() => void>()
 	if (!behindStale) waitingByOwner.set(owner, waiting)
@@ -417,6 +423,33 @@ const reportOthers = (reason: unknown): { stored: string[]; notStored: string[] 
 	reason instanceof SettingsWriteError
 		? { stored: [...reason.committed], notStored: [...reason.failed] }
 		: { stored: [], notStored: ["the other settings"] }
+
+/** A write that was not all stored: which settings were stored (they are final) and which were not. */
+export class PartialSettingsWriteError extends Error {
+	constructor(
+		readonly stored: string[],
+		readonly notStored: string[],
+		override readonly cause: unknown,
+	) {
+		const reason = cause instanceof Error ? cause.message : String(cause)
+		super(
+			`${reason} (not stored: ${notStored.join(", ")}; stored: ${stored.length > 0 ? stored.join(", ") : "none"})`,
+		)
+		this.name = "PartialSettingsWriteError"
+	}
+}
+
+/**
+ * The error for a report with a failure. A write that failed on its own, with nothing else stored, is reported as it
+ * was. When it was only partly done, or several failed, the error names the settings that were stored and those that
+ * were not: the ones that were stored are final, so what is stored is not what the caller asked for.
+ */
+export function describeFailedWrite({ failure, stored, notStored }: WriteValuesReport): unknown {
+	if (notStored.length <= 1 && stored.length === 0) return failure?.reason
+	// A store that says which settings failed has said it in its message: the cause is what is left to tell.
+	const cause = failure?.reason instanceof SettingsWriteError ? failure.reason.cause : failure?.reason
+	return new PartialSettingsWriteError(stored, notStored, cause)
+}
 
 /** What a write through the chain did: the first failure, and which settings were stored and which were not. */
 export interface WriteValuesReport {

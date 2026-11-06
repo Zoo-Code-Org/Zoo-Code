@@ -4,6 +4,7 @@ import type * as vscode from "vscode"
 import type { RooCodeSettings } from "@roo-code/types"
 
 import { API } from "../api"
+import { SettingsWriteError } from "../../core/config/ContextProxy"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
@@ -117,7 +118,9 @@ describe("API - configuration", () => {
 
 	it("shows what is stored when a timed-out write has been rolled back", async () => {
 		const chain = await import("../../core/config/appearanceSettingWrites")
-		const spy = vi.spyOn(chain, "setValuesThroughWriteChain").mockResolvedValue(undefined)
+		const spy = vi
+			.spyOn(chain, "writeValuesThroughWriteChain")
+			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [] })
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider = {
 			context: {},
@@ -186,13 +189,43 @@ describe("API - configuration", () => {
 			}
 		}
 
-		it("shows the webview what is stored, and rejects with the original error", async () => {
+		it("shows the webview what is stored, and rejects with an error that names what was stored and what was not", async () => {
 			const { api, provider, failure, postStateToWebview } = setup()
 
-			await expect(api.setConfiguration({ terminalFontSize: 14, soundEnabled: true })).rejects.toBe(failure)
+			await expect(api.setConfiguration({ terminalFontSize: 14, soundEnabled: true })).rejects.toMatchObject({
+				name: "PartialSettingsWriteError",
+				message: "storage unavailable (not stored: the other settings; stored: terminalFontSize)",
+				stored: ["terminalFontSize"],
+				notStored: ["the other settings"],
+				cause: failure, // the failure itself is kept
+			})
 
 			expect(postStateToWebview).toHaveBeenCalledTimes(1)
 			expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled() // nothing after the settings
+		})
+
+		it("names the other settings that were stored and those that were not, when the store says which", async () => {
+			const { api, provider } = setup()
+			const cause = new Error("secret storage unavailable")
+			vi.mocked(provider.contextProxy.setValues).mockRejectedValue(
+				new SettingsWriteError(["mode"], ["soundEnabled"], cause),
+			)
+
+			await expect(api.setConfiguration({ mode: "code", soundEnabled: true })).rejects.toMatchObject({
+				name: "PartialSettingsWriteError",
+				message: "secret storage unavailable (not stored: soundEnabled; stored: mode)",
+				stored: ["mode"],
+				notStored: ["soundEnabled"],
+				cause,
+			})
+		})
+
+		it("rejects with the original error when a write failed on its own and nothing else was stored", async () => {
+			const { api, provider } = setup()
+			const failure = new SettingsWriteError([], ["soundEnabled"], new Error("secret storage unavailable"))
+			vi.mocked(provider.contextProxy.setValues).mockRejectedValue(failure)
+
+			await expect(api.setConfiguration({ soundEnabled: true })).rejects.toBe(failure)
 		})
 
 		it("does not let a failed refresh hide the original error", async () => {

@@ -17,9 +17,9 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
-import { ContextProxy, SettingsWriteError } from "./ContextProxy"
+import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
-import { writeValuesThroughWriteChain, type WriteValuesReport } from "./appearanceSettingWrites"
+import { describeFailedWrite, PartialSettingsWriteError, writeValuesThroughWriteChain } from "./appearanceSettingWrites"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { t } from "../../i18n"
@@ -45,6 +45,7 @@ type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
 		settingsImportRefreshedAt?: number
+		settingsImportStoredKeys?: string[]
 		postStateToWebview: () => Promise<void>
 	}
 }
@@ -79,22 +80,6 @@ function sanitizeProviderConfig(configName: string, apiConfig: unknown): { confi
 	}
 
 	return { config: apiConfig }
-}
-
-/**
- * The error of an import whose settings were not all stored. A write that failed on its own, with nothing else stored,
- * is reported as it was. When it was only partly done, or several failed, the user is told which settings were stored
- * and which were not: the ones that were stored are final, so what is stored is not what the file asked for.
- */
-function describeFailedWrite({ failure, stored, notStored }: WriteValuesReport): unknown {
-	if (notStored.length <= 1 && stored.length === 0) return failure?.reason
-	// A store that says which settings failed has said it in its message: the cause is what is left to tell.
-	const cause = failure?.reason instanceof SettingsWriteError ? failure.reason.cause : failure?.reason
-	const reason = cause instanceof Error ? cause.message : String(cause)
-	const storedText = stored.length > 0 ? stored.join(", ") : "none"
-	return new Error(`${reason} (not stored: ${notStored.join(", ")}; stored: ${storedText})`, {
-		cause: failure?.reason,
-	})
 }
 
 const globalSettingsShape = globalSettingsSchema.shape as Record<keyof GlobalSettings, z.ZodTypeAny>
@@ -294,8 +279,16 @@ export async function importSettingsFromPath(
 		}
 
 		// Only said when it is so: a failure before the import changed anything is the plain failure it always was.
+		// The settings that were stored are named too, so the form can take them.
 		return settingsMayHaveChanged
-			? { success: false as const, error, settingsMayHaveChanged: true as const }
+			? {
+					success: false as const,
+					error,
+					settingsMayHaveChanged: true as const,
+					...(e instanceof PartialSettingsWriteError && e.stored.length > 0
+						? { storedSettings: e.stored }
+						: {}),
+				}
 			: { success: false as const, error }
 	}
 }
@@ -472,12 +465,15 @@ export const importSettingsWithFeedback = async (
 		// settings as they were: nothing is refreshed, so an edit that is newer than the live state is not replaced.
 		if ("settingsMayHaveChanged" in result && result.settingsMayHaveChanged) {
 			provider.settingsImportRefreshedAt = Date.now()
+			const storedSettings = "storedSettings" in result ? result.storedSettings : undefined
+			provider.settingsImportStoredKeys = Array.isArray(storedSettings) ? storedSettings : []
 			try {
 				await provider.postStateToWebview()
 			} catch {
 				// Nobody is waiting for the refresh.
 			} finally {
 				provider.settingsImportRefreshedAt = undefined
+				provider.settingsImportStoredKeys = undefined
 			}
 		}
 		await vscode.window.showErrorMessage(t("common:errors.settings_import_failed", { error: result.error }))

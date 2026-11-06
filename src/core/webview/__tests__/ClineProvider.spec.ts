@@ -3456,6 +3456,45 @@ describe("ClineProvider", () => {
 		spy.mockRestore()
 	})
 
+	describe("setValues when a write fails", () => {
+		const failWith = async (failure: Error) => {
+			const chain = await import("../../config/appearanceSettingWrites")
+			return vi.spyOn(chain, "setValuesThroughWriteChain").mockRejectedValue(failure)
+		}
+
+		test("shows the webview what is stored, and passes the error on", async () => {
+			const failure = new Error("other settings failed")
+			const spy = await failWith(failure)
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(provider.setValues({ terminalFontSize: 14, mode: "code" })).rejects.toBe(failure)
+
+			expect(post).toHaveBeenCalledTimes(1)
+			spy.mockRestore()
+		})
+
+		test("does not let a refresh that fails hide the error", async () => {
+			const failure = new Error("other settings failed")
+			const spy = await failWith(failure)
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
+
+			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
+
+			spy.mockRestore()
+		})
+
+		test("refreshes nothing when every write was stored", async () => {
+			const chain = await import("../../config/appearanceSettingWrites")
+			const spy = vi.spyOn(chain, "setValuesThroughWriteChain").mockResolvedValue(undefined)
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.setValues({ mode: "code" })
+
+			expect(post).not.toHaveBeenCalled()
+			spy.mockRestore()
+		})
+	})
+
 	test("disposing the provider drops its appearance writes that have not started", async () => {
 		const chain = await import("../../config/appearanceSettingWrites")
 		const spy = vi.spyOn(chain, "disposeSettingWrites")
@@ -4112,6 +4151,18 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.settingsImportRefreshedAt).toBe(markedAt)
+	})
+
+	test.each([
+		["names the settings that a failed import stored", ["terminalFontSize", "mode"]],
+		["leaves them out of every other state", undefined],
+	])("%s", async (_name, keys) => {
+		await provider.resolveWebviewView(mockWebviewView)
+		provider.settingsImportStoredKeys = keys
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.settingsImportStoredKeys).toEqual(keys)
 	})
 
 	test("isDisposed tells whether dispose has run", async () => {
