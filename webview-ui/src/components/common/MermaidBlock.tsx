@@ -97,7 +97,7 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
 						style={{
 							borderBottom: isErrorExpanded ? "1px solid var(--vscode-editorGroup-border)" : "none",
 							fontWeight: "normal",
-							fontSize: "var(--vscode-font-size)",
+							fontSize: "calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))",
 							color: "var(--vscode-editor-foreground)",
 							display: "flex",
 							alignItems: "center",

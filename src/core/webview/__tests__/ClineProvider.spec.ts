@@ -4201,6 +4201,18 @@ describe("ClineProvider", () => {
 		expect(state.settingsImportStoredKeys).toEqual(keys)
 	})
 
+	test.each([
+		["marks a refresh that follows a late rollback", true],
+		["leaves the mark out of every other state", undefined],
+	])("%s", async (_name, late) => {
+		await provider.resolveWebviewView(mockWebviewView)
+		provider.settingsImportRefreshIsLate = late
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.settingsImportRefreshIsLate).toBe(late)
+	})
+
 	test("isDisposed tells whether dispose has run", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		expect(provider.isDisposed).toBe(false)
@@ -4805,6 +4817,54 @@ describe("ClineProvider", () => {
 			await save({ interfaceFontScale: 999 })
 
 			expect((await provider.getState()).interfaceFontScale).toBeUndefined()
+		})
+
+		describe("in the configuration of a task that is started", () => {
+			const start = (configuration: Record<string, unknown>) =>
+				provider.createTask("do it", undefined, undefined, { startTask: false }, configuration)
+
+			test("valid values are stored, and the task is created", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(Task).mockClear()
+
+				await start(values)
+
+				for (const key of keys) expect(mockContext.globalState.update).toHaveBeenCalledWith(key, values[key])
+				expect(await provider.getState()).toMatchObject(values)
+				expect(Task).toHaveBeenCalledOnce()
+			})
+
+			test.each(keys)(
+				"an invalid %s rejects the start before anything is stored or a task is created",
+				async (key) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					vi.mocked(Task).mockClear()
+					vi.mocked(mockContext.globalState.update).mockClear()
+
+					// Valid values of the others, and a valid ordinary setting, are not stored either.
+					await expect(start({ ...values, mode: "architect", [key]: 9999 })).rejects.toThrow(
+						`Invalid value for ${key}`,
+					)
+
+					const stored = vi.mocked(mockContext.globalState.update).mock.calls.map(([name]) => name)
+					for (const name of [...keys, "mode"]) expect(stored).not.toContain(name)
+					expect(Task).not.toHaveBeenCalled()
+					expect((await provider.getState())[key]).toBeUndefined()
+				},
+			)
+
+			test.each([
+				["a string", "big"],
+				["a float", 1.5],
+				["NaN", Number.NaN],
+			])("%s is not an appearance value, and rejects the start", async (_name, value) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(Task).mockClear()
+
+				await expect(start({ terminalFontSize: value })).rejects.toThrow("Invalid value for terminalFontSize")
+
+				expect(Task).not.toHaveBeenCalled()
+			})
 		})
 	})
 

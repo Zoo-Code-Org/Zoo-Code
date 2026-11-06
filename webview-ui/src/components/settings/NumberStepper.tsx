@@ -9,8 +9,10 @@ interface NumberStepperProps {
 	description: string
 	resetLabel: string
 	setting: AppearanceSetting
-	/** Undefined = unset (shows `setting.fallback`, reset disabled). */
+	/** Undefined = unset (shows `defaultValue`, else `setting.fallback`; reset disabled). */
 	value?: number
+	/** What the UI renders while the setting is unset: what the box shows and the first step starts from. */
+	defaultValue?: number
 	onChange: (value: number | undefined) => void
 	testId: string
 }
@@ -26,11 +28,12 @@ export const NumberStepper = ({
 	resetLabel,
 	setting,
 	value,
+	defaultValue,
 	onChange,
 	testId,
 }: NumberStepperProps) => {
 	const { min, max, step, fallback, unit } = setting
-	const current = value ?? fallback
+	const current = value ?? defaultValue ?? fallback
 	const [draft, setDraft] = useState(String(current))
 	// Whether the user typed in the box. Leaving or confirming an untouched box must not turn what it shows (the
 	// fallback, while nothing is set) into a stored value.
@@ -62,9 +65,9 @@ export const NumberStepper = ({
 		}
 		const clamped = Math.min(max, Math.max(min, Math.round(next)))
 		setDraft(String(clamped))
-		// Always the number the user chose. `fallback` is only what the box shows while nothing is set; for
-		// the font sizes the real default is VS Code's own size, so a typed 12 must stay 12. Only Reset
-		// clears the override.
+		// Always the number the user chose. The default is only what the box shows while nothing is set; for
+		// the font sizes the real default is VS Code's own size, so a typed value that equals it must stay. Only
+		// Reset clears the override.
 		onChange(clamped)
 	}
 

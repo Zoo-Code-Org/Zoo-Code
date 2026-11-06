@@ -44,6 +44,7 @@ import {
 	isAppearanceSetting,
 	performSettingWrite,
 	undoSettingWrite,
+	withinSettingWriteTime,
 	type SettingWrite,
 } from "../config/appearanceSettingWrites"
 import { isInvalidDisplayValue } from "../config/displaySettings"
@@ -943,7 +944,10 @@ export const webviewMessageHandler = async (
 						continue
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					const store = provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					// With appearance writes in flight, a store that never settles must not keep their records for good: the
+					// save fails after the usual time, and they are put back below. (The store goes on; it cannot be cancelled.)
+					await (written.length > 0 ? withinSettingWriteTime(store, key) : store)
 				}
 
 				finishSettingWrites(written)

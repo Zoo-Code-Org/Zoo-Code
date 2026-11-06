@@ -188,6 +188,26 @@ describe("UISettings", () => {
 			expect(inputs).toEqual(["100", "12", "13", "100"])
 		})
 
+		it("shows, for the unset sizes, what the UI renders, and the first click steps from it", () => {
+			const root = document.documentElement
+			root.style.setProperty("--vscode-font-size", "14px")
+			root.style.setProperty("--vscode-editor-font-size", "16px")
+			try {
+				const { getByTestId } = render(<UISettings {...defaultProps} chatFontSize={20} />)
+
+				// The terminal follows the editor size of VS Code; the editor is 0.95 of the chat text.
+				expect((getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("16")
+				expect((getByTestId("appearance-editorFontSize-input") as HTMLInputElement).value).toBe("19")
+				fireEvent.click(getByTestId("appearance-terminalFontSize-increment"))
+				expect(defaultProps.setCachedStateField).toHaveBeenLastCalledWith("terminalFontSize", 17)
+				fireEvent.click(getByTestId("appearance-editorFontSize-increment"))
+				expect(defaultProps.setCachedStateField).toHaveBeenLastCalledWith("editorFontSize", 20)
+			} finally {
+				root.style.removeProperty("--vscode-font-size")
+				root.style.removeProperty("--vscode-editor-font-size")
+			}
+		})
+
 		it("shows the saved values", () => {
 			const { getByTestId } = render(
 				<UISettings

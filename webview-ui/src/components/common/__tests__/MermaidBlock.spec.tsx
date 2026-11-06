@@ -64,6 +64,15 @@ describe("MermaidBlock", () => {
 		)
 	})
 
+	it("sizes the error label with the interface scale, like the rest of the text", async () => {
+		mermaidMocks.parse.mockRejectedValue(new Error("Parse error"))
+		const { findByText } = render(<MermaidBlock code="graph TD; A-->" />)
+
+		const label = (await findByText("common:mermaid.render_error", {}, { timeout: 1_500 })).parentElement!
+			.parentElement!
+		expect(label.style.fontSize).toBe("calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))")
+	})
+
 	it("does not replace the current theme with a stale render", async () => {
 		let resolveFirstRender!: (value: { svg: string }) => void
 		mermaidMocks.renderDiagram

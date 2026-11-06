@@ -2493,6 +2493,101 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 		})
 	})
 
+	describe("when a later setting of the save never finishes being stored", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => {
+			vi.useRealTimers()
+			Reflect.deleteProperty(mockClineProvider, "isDisposed")
+		})
+
+		/** The store of `key` never settles, as a hung `globalState.update` would not. */
+		const hangOn = (key: string) => {
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				(k: string, v: unknown): Promise<void> =>
+					k === key ? new Promise<void>(() => {}) : (real(k as never, v as never) as Promise<void>),
+			)
+		}
+		const resultsOf = () =>
+			vi
+				.mocked(mockClineProvider.postMessageToWebview)
+				.mock.calls.map(([message]) => message)
+				.filter((message) => message.type === "settingsSaveResult")
+
+		it("fails the save after the usual time, puts the appearance values back, and keeps nothing about them", async () => {
+			hangOn("timeFormat")
+
+			const saving = save({ interfaceFontScale: 120, terminalFontSize: 14, timeFormat: "24h" })
+			const failed = expect(saving).rejects.toThrow("did not finish in 15 seconds") // a store that is not an appearance value fails as it always did
+			await vi.advanceTimersByTimeAsync(0)
+			expect(stored).toMatchObject({ interfaceFontScale: 120, terminalFontSize: 14 }) // written, and kept while waiting
+			await vi.advanceTimersByTimeAsync(15_000)
+			await failed
+
+			expect(stored).toMatchObject({ interfaceFontScale: 100, terminalFontSize: 12 })
+			expect(resultsOf()).toEqual([
+				expect.objectContaining({
+					success: false,
+					error: expect.stringContaining("did not finish in 15 seconds"),
+				}),
+			])
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("keeps nothing for repeated saves that time out", async () => {
+			hangOn("timeFormat")
+
+			for (const value of [110, 120, 130, 140, 150]) {
+				const saving = save({ interfaceFontScale: value, timeFormat: "24h" }, `save-${value}`)
+				const failed = expect(saving).rejects.toThrow("did not finish in 15 seconds")
+				await vi.advanceTimersByTimeAsync(15_000)
+				await failed
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			}
+
+			expect(stored.interfaceFontScale).toBe(100)
+			expect(resultsOf()).toHaveLength(5)
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("keeps nothing, and posts nothing, when the provider is disposed while the save waits", async () => {
+			hangOn("timeFormat")
+
+			const saving = save({ interfaceFontScale: 120, timeFormat: "24h" })
+			const failed = expect(saving).rejects.toThrow("did not finish in 15 seconds")
+			await vi.advanceTimersByTimeAsync(0)
+			Object.defineProperty(mockClineProvider, "isDisposed", { value: true, configurable: true })
+			vi.mocked(mockClineProvider.postStateToWebview).mockClear()
+			await vi.advanceTimersByTimeAsync(15_000)
+			await failed
+
+			expect(stored.interfaceFontScale).toBe(100) // the value is put back for the storage
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			expect(resultsOf()).toEqual([])
+			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+		})
+
+		it("does not bound a save with no appearance value: it waits for its store as it always did", async () => {
+			hangOn("timeFormat")
+
+			let finished = false
+			void save({ soundEnabled: true, timeFormat: "24h" }).then(() => (finished = true))
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(finished).toBe(false)
+			expect(vi.getTimerCount()).toBe(0) // and no timer is left running for it
+		})
+
+		it("does not time out a save whose stores finish in time", async () => {
+			await save({ interfaceFontScale: 120, timeFormat: "24h" })
+
+			expect(stored).toMatchObject({ interfaceFontScale: 120, timeFormat: "24h" })
+			expect(resultsOf()).toEqual([expect.objectContaining({ success: true })])
+			expect(vi.getTimerCount()).toBe(0)
+		})
+	})
+
 	it("keeps going and still reports the failure when a restore itself fails", async () => {
 		const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
 		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key: string, value: unknown) => {

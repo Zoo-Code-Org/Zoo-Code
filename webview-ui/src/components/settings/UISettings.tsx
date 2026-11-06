@@ -14,7 +14,7 @@ import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
 import { Slider, Button } from "../ui"
 import { ExtensionStateContextType } from "@/context/ExtensionStateContext"
-import { APPEARANCE_SETTINGS, type AppearanceKey } from "@/utils/appearance"
+import { APPEARANCE_SETTINGS, renderedAppearanceDefault, type AppearanceKey } from "@/utils/appearance"
 import { NumberStepper } from "./NumberStepper"
 import { AppearancePreview } from "./AppearancePreview"
 
@@ -59,6 +59,16 @@ export const UISettings = ({
 		terminalFontSize,
 		editorFontSize,
 		spacingScale,
+	}
+
+	// What the UI renders for a font size that is not set: VS Code's own sizes, with the unsaved chat size and scale.
+	const vscodeSize = (name: string) =>
+		parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || undefined
+	const defaultsContext = {
+		vscodeFontSize: vscodeSize("--vscode-font-size"),
+		vscodeEditorFontSize: vscodeSize("--vscode-editor-font-size"),
+		chatFontSize,
+		interfaceFontScale,
 	}
 
 	// Detect platform for dynamic modifier key display
@@ -193,6 +203,7 @@ export const UISettings = ({
 								resetLabel={t("settings:ui.appearance.reset")}
 								setting={APPEARANCE_SETTINGS[key]}
 								value={appearance[key]}
+								defaultValue={renderedAppearanceDefault(key, defaultsContext)}
 								onChange={(value) => {
 									setCachedStateField(key, value)
 									telemetryClient.capture("ui_settings_appearance_changed", {

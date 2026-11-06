@@ -10,6 +10,7 @@ import {
 	PartialSettingsWriteError,
 	performSettingWrite,
 	writeValuesThroughWriteChain,
+	withinSettingWriteTime,
 	settingWriteBookkeepingSize,
 	settingWritesAttachedToALine,
 	settingWritesWaitingToStart,
@@ -1406,6 +1407,40 @@ describe("appearanceSettingWrites", () => {
 				expect(stored.get("interfaceFontScale")).toBe(100)
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
+		})
+	})
+
+	describe("withinSettingWriteTime", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		it("gives the result of a store that finishes in time, and leaves no timer", async () => {
+			const store = new Promise<string>((resolve) => setTimeout(() => resolve("stored"), 5_000))
+
+			const waiting = withinSettingWriteTime(store, "mode")
+			await vi.advanceTimersByTimeAsync(5_000)
+
+			await expect(waiting).resolves.toBe("stored")
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("gives the failure of a store that fails in time, and leaves no timer", async () => {
+			const waiting = withinSettingWriteTime(Promise.reject(new Error("storage unavailable")), "mode")
+
+			await expect(waiting).rejects.toThrow("storage unavailable")
+			expect(vi.getTimerCount()).toBe(0)
+		})
+
+		it("rejects with the key and the time when the store does not settle, and leaves no timer", async () => {
+			const waiting = withinSettingWriteTime(new Promise<void>(() => {}), "timeFormat")
+			const rejected = expect(waiting).rejects.toThrow("Writing timeFormat did not finish in 15 seconds")
+
+			await vi.advanceTimersByTimeAsync(14_999)
+			expect(vi.getTimerCount()).toBe(1) // still waiting
+			await vi.advanceTimersByTimeAsync(1)
+
+			await rejected
+			expect(vi.getTimerCount()).toBe(0)
 		})
 	})
 })

@@ -444,6 +444,7 @@ export class ClineProvider
 	public settingsImportedAt?: number
 	public settingsImportRefreshedAt?: number
 	public settingsImportStoredKeys?: string[]
+	public settingsImportRefreshIsLate?: boolean
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
@@ -3470,6 +3471,7 @@ export class ClineProvider
 			settingsImportedAt: this.settingsImportedAt,
 			settingsImportRefreshedAt: this.settingsImportRefreshedAt,
 			settingsImportStoredKeys: this.settingsImportStoredKeys,
+			settingsImportRefreshIsLate: this.settingsImportRefreshIsLate,
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,

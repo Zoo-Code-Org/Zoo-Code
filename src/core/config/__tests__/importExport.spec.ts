@@ -341,11 +341,21 @@ describe("importExport", () => {
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
 
+			type ImportMarks = {
+				postStateToWebview: () => Promise<void>
+				settingsImportRefreshedAt?: number
+				settingsImportStoredKeys?: string[]
+			}
+
 			describe("when a write of the import times out and is rolled back after the import was answered", () => {
 				beforeEach(() => vi.useFakeTimers())
 				afterEach(() => vi.useRealTimers())
 
-				const importWithFeedback = async (postStateToWebview: () => Promise<void>, viaDialog = false) => {
+				const importWithFeedback = async (
+					postStateToWebview: () => Promise<void>,
+					viaDialog = false,
+					provider: ImportMarks = { postStateToWebview },
+				) => {
 					;(fs.access as Mock).mockResolvedValue(undefined)
 					;(fs.readFile as Mock).mockResolvedValue(
 						JSON.stringify({
@@ -373,7 +383,6 @@ describe("importExport", () => {
 					const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
 
 					;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
-					const provider = { postStateToWebview }
 					const done = importSettingsWithFeedback(
 						{
 							providerSettingsManager: mockProviderSettingsManager,
@@ -430,6 +439,58 @@ describe("importExport", () => {
 						showErrorMessage.mockRestore()
 					},
 				)
+
+				it("marks the refresh after the rollback for the settings form too, with the uncertain settings, as another refresh", async () => {
+					const seen: Array<{ at?: number; keys?: string[] }> = []
+					const provider: ImportMarks = {
+						postStateToWebview: vi.fn(async () => {
+							seen.push({
+								at: provider.settingsImportRefreshedAt,
+								keys: provider.settingsImportStoredKeys,
+							})
+						}),
+					}
+					const { release, showErrorMessage } = await importWithFeedback(
+						provider.postStateToWebview,
+						false,
+						provider,
+					)
+					expect(seen).toHaveLength(1) // the answer of the import: the form takes the value that failed to be stored
+					expect(seen[0].keys).toEqual(["interfaceFontScale"])
+
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(seen).toHaveLength(2) // the rollback is over: the form takes the value that is really stored
+					expect(seen[1].keys).toEqual(["interfaceFontScale"])
+					expect(seen[1].at).toBeGreaterThan(seen[0].at!) // not the refresh that the form handled already
+					expect(provider.settingsImportRefreshedAt).toBeUndefined() // on no later state
+					expect(provider.settingsImportStoredKeys).toBeUndefined()
+					expect(stored.get("interfaceFontScale")).toBe(100)
+					showErrorMessage.mockRestore()
+				})
+
+				it("gives two refreshes in the same millisecond different marks", async () => {
+					vi.setSystemTime(1_000_000)
+					const seen: number[] = []
+					const provider: ImportMarks = {
+						postStateToWebview: vi.fn(async () => {
+							seen.push(provider.settingsImportRefreshedAt!)
+						}),
+					}
+					const { release, showErrorMessage } = await importWithFeedback(
+						provider.postStateToWebview,
+						false,
+						provider,
+					)
+					vi.setSystemTime(Date.now() - 15_000) // as if the clock had not moved since the answer
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(seen).toHaveLength(2)
+					expect(new Set(seen).size).toBe(2)
+					showErrorMessage.mockRestore()
+				})
 
 				it("keeps the answer of the import when that refresh fails", async () => {
 					const unhandled: unknown[] = []

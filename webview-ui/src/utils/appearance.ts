@@ -11,7 +11,7 @@ export interface AppearanceSetting {
 	min: number
 	max: number
 	step: number
-	/** Value shown in the stepper when the setting is unset. */
+	/** Value shown in the stepper when the setting is unset and the rendered default cannot be known. */
 	fallback: number
 	unit: "%" | "px"
 	cssVar: string
@@ -69,6 +69,43 @@ export function clampAppearance(key: AppearanceKey, value: number | null | undef
 	if (typeof value !== "number" || !Number.isFinite(value)) return undefined
 	const { min, max } = APPEARANCE_SETTINGS[key]
 	return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+/** What the unset defaults of the font sizes follow: VS Code's sizes, and the chat text that the editor size is relative to. */
+export interface AppearanceDefaultsContext {
+	/** `--vscode-font-size`, in px. */
+	vscodeFontSize?: number
+	/** `--vscode-editor-font-size`, in px: the terminal follows it while no terminal size is set. */
+	vscodeEditorFontSize?: number
+	/** The chat font size setting, in px. */
+	chatFontSize?: number
+	/** The interface scale setting, in %. */
+	interfaceFontScale?: number
+}
+
+/** The factor of the chat text that code blocks use while no editor font size is set (`CodeBlock`, `AppearancePreview`). */
+const EDITOR_DEFAULT_EM = 0.95
+
+/**
+ * The size, in the unit of the setting, that the UI renders while the setting is unset: what the stepper shows and
+ * steps from, so that the first click moves from the text on screen and not from a fixed number. Falls back to
+ * `fallback` when what it follows is not known. Always inside the allowed range.
+ */
+export function renderedAppearanceDefault(key: AppearanceKey, context: AppearanceDefaultsContext = {}): number {
+	const { fallback } = APPEARANCE_SETTINGS[key]
+	const known = (value: number | undefined): value is number =>
+		typeof value === "number" && Number.isFinite(value) && value > 0
+	let rendered = fallback
+	if (key === "terminalFontSize" && known(context.vscodeEditorFontSize)) {
+		rendered = context.vscodeEditorFontSize
+	} else if (key === "editorFontSize") {
+		const chat = isChatFontSize(context.chatFontSize) ? context.chatFontSize : context.vscodeFontSize
+		if (known(chat)) {
+			const scale = known(context.interfaceFontScale) ? context.interfaceFontScale / 100 : 1
+			rendered = chat * scale * EDITOR_DEFAULT_EM
+		}
+	}
+	return clampAppearance(key, rendered) ?? fallback
 }
 
 /** Present on <html> while the user has set an editor font size. */

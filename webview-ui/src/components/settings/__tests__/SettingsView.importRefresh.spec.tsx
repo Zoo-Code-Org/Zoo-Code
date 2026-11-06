@@ -141,4 +141,86 @@ describe("SettingsView – the form after an import that failed part of the way"
 
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("20"))
 	})
+
+	describe("after the rollback of a write of the import that timed out (a late refresh)", () => {
+		// The import was answered with the value that failed to be stored (16, which the host had cached): the form took it.
+		// The rollback then put the stored value (14) back, and the host posts a state for it.
+		const answeredWithFailedValue = async () => {
+			renderUiTab()
+			await screen.findByTestId("appearance-terminalFontSize-input")
+			hostPosts({ terminalFontSize: 14 })
+			hostPosts({
+				terminalFontSize: 16,
+				settingsImportRefreshedAt: 1_000,
+				settingsImportStoredKeys: ["terminalFontSize"],
+			})
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
+		}
+		const lateRefresh = (state: Record<string, unknown> = {}) =>
+			hostPosts({
+				terminalFontSize: 14,
+				settingsImportRefreshedAt: 2_000,
+				settingsImportStoredKeys: ["terminalFontSize"],
+				settingsImportRefreshIsLate: true,
+				...state,
+			})
+
+		it("takes the value that is really stored, instead of the one that failed", async () => {
+			await answeredWithFailedValue()
+
+			lateRefresh()
+
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+		})
+
+		it("keeps an edit that was made to that setting since, and does not store the stale value", async () => {
+			await answeredWithFailedValue()
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 17: the user's own edit
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			lateRefresh()
+
+			expect(input("terminalFontSize").value).toBe("17")
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+		})
+
+		it("keeps an edit that was made to another setting since, and takes a changed one that was not edited", async () => {
+			await answeredWithFailedValue()
+			fireEvent.click(screen.getByTestId("appearance-spacingScale-increment"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			const edited = input("spacingScale").value
+
+			lateRefresh({ spacingScale: 100 }) // the live state of the other setting changed too
+
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+			expect(input("spacingScale").value).toBe(edited)
+		})
+
+		it("lets the next save send an edit made after the rollback, and not the failed value", async () => {
+			await answeredWithFailedValue()
+			lateRefresh()
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-decrement")) // 13
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			vi.mocked(vscode.postMessage).mockClear()
+
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			const save = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.map((call) => call[0] as { type: string; updatedSettings?: Record<string, unknown> })
+				.find((message) => message.type === "updateSettings")
+			expect(save?.updatedSettings?.terminalFontSize).toBe(13)
+		})
+
+		it("is not what an ordinary refresh does: the same edit is replaced by the stored value there", async () => {
+			await answeredWithFailedValue()
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 17
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			lateRefresh({ settingsImportRefreshIsLate: undefined })
+
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+		})
+	})
 })

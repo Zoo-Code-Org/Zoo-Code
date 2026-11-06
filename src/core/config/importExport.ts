@@ -46,7 +46,48 @@ type ImportWithProviderOptions = ImportOptions & {
 		settingsImportedAt?: number
 		settingsImportRefreshedAt?: number
 		settingsImportStoredKeys?: string[]
+		settingsImportRefreshIsLate?: boolean
 		postStateToWebview: () => Promise<void>
+	}
+}
+
+/** An import that failed after it had started to change settings. */
+type PartialImportFailure = {
+	success: false
+	error: string
+	settingsMayHaveChanged: true
+	/** The settings the import stored, and those it may have stored (a rollback that did not work). */
+	storedSettings?: string[]
+}
+
+const isPartialImportFailure = (result: object): result is PartialImportFailure =>
+	"settingsMayHaveChanged" in result && result.settingsMayHaveChanged === true
+
+let lastRefreshStamp = 0
+
+/**
+ * Shows the webview what is stored, and tells the settings form to take it for `storedSettings`, and for whatever else
+ * changed with the state, keeping every other value, with the edits made to it (unlike after an import that succeeded,
+ * which replaces the form). The mark is on this one state only. A `late` refresh follows a rollback that finished after
+ * the import was answered: the form then keeps an edit that was made since. A refresh that fails does not matter to anybody.
+ */
+async function refreshWebviewAfterPartialImport(
+	provider: ImportWithProviderOptions["provider"],
+	storedSettings: string[],
+	late = false,
+) {
+	// Distinct from the stamp of an earlier refresh, so the form never takes two of them for one.
+	provider.settingsImportRefreshedAt = lastRefreshStamp = Math.max(Date.now(), lastRefreshStamp + 1)
+	provider.settingsImportStoredKeys = storedSettings
+	provider.settingsImportRefreshIsLate = late || undefined
+	try {
+		await provider.postStateToWebview()
+	} catch {
+		// Nobody is waiting for the refresh.
+	} finally {
+		provider.settingsImportRefreshedAt = undefined
+		provider.settingsImportStoredKeys = undefined
+		provider.settingsImportRefreshIsLate = undefined
 	}
 }
 
@@ -281,16 +322,16 @@ export async function importSettingsFromPath(
 		// Only said when it is so: a failure before the import changed anything is the plain failure it always was.
 		// The settings that were stored are named too, so the form can take them.
 		return settingsMayHaveChanged
-			? {
-					success: false as const,
+			? ({
+					success: false,
 					error,
-					settingsMayHaveChanged: true as const,
+					settingsMayHaveChanged: true,
 					// The settings the import stored, and those it may have stored (a rollback that did not work): the form
 					// takes what is really there for all of them.
 					...(e instanceof PartialSettingsWriteError && e.stored.length + e.uncertain.length > 0
 						? { storedSettings: [...e.stored, ...e.uncertain] }
 						: {}),
-				}
+				} satisfies PartialImportFailure)
 			: { success: false as const, error }
 	}
 }
@@ -407,8 +448,11 @@ export const importSettingsWithFeedback = async (
 	let result
 
 	// A write of the import that timed out may still land and be rolled back after the import has been answered: the
-	// webview is shown what is stored then. A refresh that fails does not matter to anybody.
-	const onDeferredSettled = () => void provider.postStateToWebview().catch(() => undefined)
+	// webview is shown what is stored then, and the settings form takes it for the settings that import left uncertain
+	// (it took the value that failed to be stored when the import was answered, and a later save would store it again),
+	// unless the user has edited that setting since.
+	let uncertainSettings: string[] = []
+	const onDeferredSettled = () => void refreshWebviewAfterPartialImport(provider, uncertainSettings, true)
 
 	if (filePath) {
 		// Validate file path and check if file exists
@@ -465,18 +509,9 @@ export const importSettingsWithFeedback = async (
 		// the other settings (unlike after an import that succeeded). A refresh that fails does not hide the answer.
 		// A failure before the import changed anything (a file that cannot be read, a file that is not valid) leaves the
 		// settings as they were: nothing is refreshed, so an edit that is newer than the live state is not replaced.
-		if ("settingsMayHaveChanged" in result && result.settingsMayHaveChanged) {
-			provider.settingsImportRefreshedAt = Date.now()
-			const storedSettings = "storedSettings" in result ? result.storedSettings : undefined
-			provider.settingsImportStoredKeys = Array.isArray(storedSettings) ? storedSettings : []
-			try {
-				await provider.postStateToWebview()
-			} catch {
-				// Nobody is waiting for the refresh.
-			} finally {
-				provider.settingsImportRefreshedAt = undefined
-				provider.settingsImportStoredKeys = undefined
-			}
+		if (isPartialImportFailure(result)) {
+			uncertainSettings = result.storedSettings ?? []
+			await refreshWebviewAfterPartialImport(provider, uncertainSettings)
 		}
 		await vscode.window.showErrorMessage(t("common:errors.settings_import_failed", { error: result.error }))
 	}

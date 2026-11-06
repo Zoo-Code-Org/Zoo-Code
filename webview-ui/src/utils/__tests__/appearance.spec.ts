@@ -1,6 +1,6 @@
 import { globalSettingsSchema } from "@roo-code/types"
 
-import { applyAppearanceVariables, clampAppearance, isChatFontSize } from "../appearance"
+import { applyAppearanceVariables, clampAppearance, isChatFontSize, renderedAppearanceDefault } from "../appearance"
 
 describe("clampAppearance", () => {
 	it("passes through in-range integers", () => {
@@ -112,5 +112,48 @@ describe("isChatFontSize", () => {
 		]) {
 			expect(isChatFontSize(value)).toBe(typeof value === "number" && schema.safeParse(value).success)
 		}
+	})
+})
+
+describe("renderedAppearanceDefault", () => {
+	it("follows the editor font size of VS Code for the terminal, which the terminal uses while no size is set", () => {
+		expect(renderedAppearanceDefault("terminalFontSize", { vscodeEditorFontSize: 14 })).toBe(14)
+		expect(renderedAppearanceDefault("terminalFontSize", { vscodeEditorFontSize: 13.6 })).toBe(14)
+	})
+
+	it.each([
+		[
+			"the chat text, with the interface scale",
+			{ chatFontSize: 20, interfaceFontScale: 100, vscodeFontSize: 13 },
+			19,
+		],
+		["VS Code's text when no chat size is set", { vscodeFontSize: 14 }, 13],
+		["the scaled chat text", { chatFontSize: 20, interfaceFontScale: 150 }, 29],
+		["a chat size the host would not accept is not used", { chatFontSize: 99, vscodeFontSize: 14 }, 13],
+	])("gives the editor the 0.95 of %s", (_name, context, expected) => {
+		expect(renderedAppearanceDefault("editorFontSize", context)).toBe(expected)
+	})
+
+	it("stays inside the range of the setting", () => {
+		expect(renderedAppearanceDefault("terminalFontSize", { vscodeEditorFontSize: 200 })).toBe(32)
+		expect(renderedAppearanceDefault("terminalFontSize", { vscodeEditorFontSize: 2 })).toBe(8)
+		expect(renderedAppearanceDefault("editorFontSize", { vscodeFontSize: 100, interfaceFontScale: 200 })).toBe(32)
+	})
+
+	it.each([
+		["terminalFontSize", 12],
+		["editorFontSize", 13],
+		["interfaceFontScale", 100],
+		["spacingScale", 100],
+	] as const)("falls back to the fixed value of %s when what it follows is not known", (key, fallback) => {
+		expect(renderedAppearanceDefault(key)).toBe(fallback)
+		expect(renderedAppearanceDefault(key, { vscodeFontSize: NaN, vscodeEditorFontSize: 0 })).toBe(fallback)
+	})
+
+	it("leaves the scales alone: they do not follow a font size", () => {
+		expect(renderedAppearanceDefault("interfaceFontScale", { vscodeFontSize: 20, vscodeEditorFontSize: 20 })).toBe(
+			100,
+		)
+		expect(renderedAppearanceDefault("spacingScale", { vscodeFontSize: 20, interfaceFontScale: 150 })).toBe(100)
 	})
 })

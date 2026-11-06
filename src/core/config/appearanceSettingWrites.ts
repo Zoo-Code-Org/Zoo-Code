@@ -345,6 +345,27 @@ const unlinkSettingWrite = (write: SettingWrite) => {
 }
 
 /**
+ * Waits for the store of a setting that is not an appearance value, for as long as a write of an appearance value is
+ * waited for: a store that does not settle must not hold up a save that has appearance writes in flight, whose records
+ * (and the chance to put them back) are kept until the save is over. Rejects when the time is up; the store itself
+ * cannot be cancelled and goes on, and the caller treats the save as failed. The timer is released whichever way it ends.
+ */
+export const withinSettingWriteTime = async <T>(store: PromiseLike<T>, key: string): Promise<T> => {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timedOut = new Promise<never>((_resolve, reject) => {
+		timer = setTimeout(
+			() => reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`)),
+			SETTING_WRITE_TIMEOUT_MS,
+		)
+	})
+	try {
+		return await Promise.race([store, timedOut])
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
+/**
  * The save that made these writes succeeded. Nothing is kept about them once they are over. The value is committed,
  * so it is what a later write that has not started yet replaces, and the writes on either side of it no longer hand
  * values to each other: an earlier write that fails now has nothing left to put back behind it.

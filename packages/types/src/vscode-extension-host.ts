@@ -409,6 +409,11 @@ export type ExtensionState = Pick<
 	settingsImportRefreshedAt?: number
 	/** With `settingsImportRefreshedAt`: the settings that the failed import stored, which the form takes whatever they were before. */
 	settingsImportStoredKeys?: string[]
+	/**
+	 * With `settingsImportRefreshedAt`: this refresh follows a rollback that finished after the import was answered, so
+	 * the form takes the final value of each stored setting unless the user has edited it since the last state.
+	 */
+	settingsImportRefreshIsLate?: boolean
 	historyPreviewCollapsed?: boolean
 
 	cloudUserInfo: CloudUserInfo | null

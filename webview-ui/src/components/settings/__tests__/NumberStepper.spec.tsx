@@ -30,6 +30,45 @@ describe("NumberStepper", () => {
 		expect(screen.getByTestId("t-reset").className).toContain("invisible")
 	})
 
+	describe("with the default the UI renders while the setting is unset", () => {
+		it("shows it, and the first step moves from it, in both directions", () => {
+			const { onChange, input } = setup({ defaultValue: 14 })
+			expect(input.value).toBe("14")
+
+			fireEvent.click(screen.getByTestId("t-increment"))
+			expect(onChange).toHaveBeenLastCalledWith(15) // not 13: the text on screen was 14
+
+			fireEvent.click(screen.getByTestId("t-decrement"))
+			expect(onChange).toHaveBeenLastCalledWith(13)
+		})
+
+		it("steps from it with the arrow keys too", () => {
+			const { onChange, input } = setup({ defaultValue: 19 })
+			fireEvent.keyDown(input, { key: "ArrowUp" })
+			expect(onChange).toHaveBeenLastCalledWith(20)
+		})
+
+		it("keeps the unset state: reset stays hidden, and nothing is stored by leaving the box", () => {
+			const { onChange, input } = setup({ defaultValue: 14 })
+			expect(screen.getByTestId("t-reset").className).toContain("invisible")
+			fireEvent.focus(input)
+			fireEvent.blur(input)
+			expect(onChange).not.toHaveBeenCalled()
+		})
+
+		it("is not used when a value is set, and Reset still clears the override", () => {
+			const { onChange, input } = setup({ value: 20, defaultValue: 14 })
+			expect(input.value).toBe("20")
+			fireEvent.click(screen.getByTestId("t-reset"))
+			expect(onChange).toHaveBeenLastCalledWith(undefined)
+		})
+
+		it("keeps the range: the buttons stop at the limits from a default at the limit", () => {
+			setup({ defaultValue: 32 })
+			expect((screen.getByTestId("t-increment") as HTMLButtonElement).disabled).toBe(true)
+		})
+	})
+
 	it("shows the stored value and an active reset", () => {
 		const { input } = setup({ value: 16 })
 		expect(input.value).toBe("16")

@@ -145,6 +145,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		settingsImportedAt,
 		settingsImportRefreshedAt,
 		settingsImportStoredKeys,
+		settingsImportRefreshIsLate,
 		mode,
 	} = extensionState
 
@@ -338,10 +339,17 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledImportRefreshAt.current = settingsImportRefreshedAt
 		const stored: Record<string, unknown> = {}
+		// A late refresh (a rollback that finished after the import was answered) corrects the value the form took then:
+		// a setting that the form no longer shows as the live state did before it was edited since, and its edit stays.
+		const editedSince = (key: string) =>
+			settingsImportRefreshIsLate === true &&
+			JSON.stringify(latestCachedState.current[key as keyof typeof before]) !==
+				JSON.stringify(before[key as keyof typeof before])
 		// The settings the import says it stored are taken whatever they were before: the live state may have been stale
 		// (a save that was stored while its state refresh failed), so a value that looks unchanged may still differ from the
 		// form, and what a save stored is no longer what is stored.
 		for (const key of settingsImportStoredKeys ?? []) {
+			if (editedSince(key)) continue
 			stored[key] = extensionState[key as keyof typeof extensionState]
 			delete appearanceSaved.current[key]
 		}
@@ -349,13 +357,20 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// Compared by value: the host builds new arrays and objects for every state it posts.
 			if (
 				key !== "settingsImportRefreshedAt" &&
+				!editedSince(key) &&
 				JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(value)
 			) {
 				stored[key] = value
 			}
 		}
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...stored }))
-	}, [settingsImportRefreshedAt, settingsImportStoredKeys, extensionState])
+	}, [
+		settingsImportRefreshedAt,
+		settingsImportStoredKeys,
+		settingsImportRefreshIsLate,
+		extensionState,
+		latestCachedState,
+	])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
