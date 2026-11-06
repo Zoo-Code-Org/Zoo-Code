@@ -54,6 +54,13 @@ describe("getFriendliModels", () => {
 		expect(models["google/gemma-4-31B-it"].supportsPromptCache).toBe(false)
 	})
 
+	it("returns an empty record on an invalid response", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(axios.get).mockResolvedValueOnce({ data: { invalid: true } })
+
+		expect(await getFriendliModels()).toEqual({})
+	})
+
 	it("returns an empty record on request failure", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {})
 		vi.mocked(axios.get).mockRejectedValueOnce(new Error("Network error"))

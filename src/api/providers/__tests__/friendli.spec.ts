@@ -14,9 +14,13 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
 const mockCreate = vi.fn()
-const { mockGetModels } = vi.hoisted(() => ({ mockGetModels: vi.fn(async () => ({})) }))
+const { mockGetModels, mockGetFriendliModels } = vi.hoisted(() => ({
+	mockGetModels: vi.fn(async () => ({})),
+	mockGetFriendliModels: vi.fn(),
+}))
 
 vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
+vi.mock("../fetchers/friendli", () => ({ getFriendliModels: mockGetFriendliModels }))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -90,6 +94,15 @@ describe("FriendliHandler", () => {
 
 		await vi.waitFor(() => expect(handlerWithModel.getModel().info).toEqual(info))
 		expect(handlerWithModel.getModel().id).toBe("vendor/new-model")
+	})
+
+	it("fetchModels should load the public /v1/models catalog", async () => {
+		const fetched = { "vendor/new-model": { contextWindow: 100_000, supportsPromptCache: false } }
+		mockGetFriendliModels.mockResolvedValueOnce(fetched)
+		const signal = new AbortController().signal
+
+		expect(await handler.fetchModels({ provider: providerIdentifiers.friendli }, signal)).toBe(fetched)
+		expect(mockGetFriendliModels).toHaveBeenCalledWith({ signal })
 	})
 
 	it("should return default model when no model is specified", () => {
