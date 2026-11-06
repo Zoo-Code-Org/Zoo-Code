@@ -11,9 +11,33 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { versionTokenOfStat } from "../../utils/versionToken"
+import { GuardRejectedError, errorCode } from "./guardedWrite"
+import { withFileLock } from "../../utils/fileLock"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
+/**
+ * A move published its destination but could not remove the source: the content
+ * now exists at BOTH paths. Reporting that as a plain success lets the model
+ * keep working from a file that exists twice, so the half-applied move is
+ * reported as its own failure class.
+ */
+export class PartialMoveError extends Error {
+	readonly sourcePath: string
+	readonly movePath: string
+	constructor(sourcePath: string, movePath: string, cause: unknown) {
+		super(
+			`Move to ${movePath} is half-applied: the destination was published but the source ${sourcePath} could not be removed (${String(cause)}).`,
+			{ cause },
+		)
+		this.name = "PartialMoveError"
+		this.sourcePath = sourcePath
+		this.movePath = movePath
+	}
+}
+
 import type { ApplyPatchFileChange } from "./apply-patch"
 
 interface ApplyPatchParams {
@@ -85,10 +109,35 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each hunk
+			// Process each hunk. The read doubles as the S2 observation for the
+			// guarded publish (ReadFileTool contract: stat before and after the
+			// read, observe only when the on-disk version is unchanged between the
+			// two stats). Without it, the in-place modify publish is an unobserved
+			// write and the composed chat-diff default rejects it ("File already
+			// exists ... and was not read before this write") even though this tool
+			// just read the exact content the patch was applied to.
 			const readFile = async (filePath: string): Promise<string> => {
 				const absolutePath = path.resolve(task.cwd, filePath)
-				return await fs.readFile(absolutePath, "utf8")
+				const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const content: string = await fs.readFile(absolutePath, "utf8")
+				const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				if (preReadStats && postReadStats) {
+					const preReadToken = versionTokenOfStat(preReadStats)
+					if (preReadToken === versionTokenOfStat(postReadStats)) {
+						// The tool's own hunk read, not a model read. When the model already observed the
+						// file, keep the completeness it earned and only on the version it was earned on; a
+						// partial view stays partial. With no prior observation this read returned the whole
+						// content, so the observation is complete.
+						const prior = task.observationRegistry.get(absolutePath)
+						// Nothing to carry when the model never observed the file: this read returned the
+						// whole content, so it is a complete observation. Carry only when a prior observation
+						// exists and still describes the version that was read.
+						const complete =
+							prior === undefined ? false : prior.complete === true && prior.version === preReadToken
+						task.observationRegistry.observe(absolutePath, preReadToken, complete)
+					}
+				}
+				return content
 			}
 
 			let changes: ApplyPatchFileChange[]
@@ -214,9 +263,20 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Save the changes
 		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			// Guarded publish: the patch supplies the complete new content, so create-guard
+			// semantics apply (an unobserved existing target is rejected, not overwritten).
+			await task.diffViewProvider.saveDirectly(
+				relPath,
+				newContent,
+				true,
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+			)
 		} else {
-			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			// The add path publishes a whole new file, so create-guard semantics
+			// apply here as well.
+			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "create")
 		}
 
 		// Track file edit operation
@@ -408,12 +468,65 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
+				// The destination content is the source file plus one targeted hunk, so it can
+				// only be as complete as the view the model had of the source. Carry that
+				// completeness to the destination BEFORE the guarded publish: the guard decides
+				// completeness at publish time, so a partial view must already be recorded when
+				// the per-path chain runs. Downgrading only after saveDirectly leaves a window
+				// in which a concurrent writer sees the destination as complete for content the
+				// model never fully read.
+				const sourceObs = task.observationRegistry.get(absolutePath)
+				const sourceComplete = sourceObs !== undefined && sourceObs.complete === true
+				if (!sourceComplete) {
+					// Only carry completeness the model already had for the destination. An
+					// unobserved destination stays unobserved so the guard's "read before a
+					// full-file write" rule still applies; recording a partial observation here
+					// would hand the model authority to edit a file it never read.
+					const destObs = task.observationRegistry.get(moveAbsolutePath)
+					if (destObs !== undefined) {
+						let destAbsent = false
+						try {
+							await fs.access(moveAbsolutePath)
+						} catch (error: unknown) {
+							// Only an access error that means "not there" is an absence verdict. An
+							// ELOOP or EACCES is a real I/O failure: reading it as absent would mark
+							// the destination partial and let the publish run against a path the tool
+							// never actually observed.
+							if (errorCode(error) !== "ENOENT") throw error
+							destAbsent = true
+						}
+						if (!destAbsent) {
+							// Replacing an existing destination with content built from a partial
+							// source view must be re-authorized by reading the source in full. Reject
+							// before any state changes and name the source: a remediation that names
+							// only the destination sends the model to re-read the wrong file, and a
+							// downgrade that survives a rejected publish loses a full destination read.
+							throw new GuardRejectedError(
+								`Cannot move a partially read file onto ${change.movePath}: re-read the whole source (${change.path}) first, then retry.`,
+								change.movePath,
+							)
+						}
+						// The destination was read and then deleted: the create guard permits the
+						// publish, and the content is still only as complete as the view the model
+						// had of the source, so carry the source's completeness instead of the
+						// destination's stale one.
+						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
+					}
+				}
+				// A PostCommitDurabilityError from this save means the commit rename
+				// landed but the destination's directory entry is not known to be
+				// durable: after a crash the destination may not survive. The source
+				// is deliberately NOT unlinked here - removing it could leave NEITHER
+				// path available - and the error propagates, so the model learns the
+				// move did not complete while both paths still hold the content.
 				await task.diffViewProvider.saveDirectly(
 					change.movePath,
 					newContent,
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"create",
+					sourceComplete,
 				)
 			} else {
 				// Write to new path and delete old file
@@ -422,20 +535,80 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
 			}
 
-			// Delete the original file
-			try {
-				await fs.unlink(absolutePath)
-			} catch (error) {
-				console.error(`Failed to delete original file after move: ${error}`)
-			}
+			// Delete the original file. A failure here leaves the content at BOTH
+			// paths - a half-applied move - which is not a success the model may
+			// keep working from: report it as its own failure class instead of
+			// logging it and continuing, so edit tracking and the tool result do
+			// not claim a completed move.
+			//
+			// The deletion is serialized under the source path's canonical advisory
+			// lock - the same key the guarded publish takes - and the source's
+			// version token is re-checked under that lock against the observation
+			// the move was built from. A source that vanished or changed after the
+			// destination landed, or that has no usable observation at all, is kept
+			// and the move is reported half-applied: the destination holds content
+			// that no longer matches the whole source, and unlinking a path this
+			// move no longer understands would destroy the only copy of a peer's
+			// change. The destination lock is released by the publish before this
+			// point, so the two locks are never held together; a change that
+			// combines them must acquire in the shared sorted-key order that
+			// safeWriteJson's dual-link path uses.
+			const sourceObservation = task.observationRegistry.get(absolutePath)
+			// Narrowed copies for the lock callback: the deletion runs after an
+			// await, where TypeScript no longer tracks the movePath narrowing.
+			const sourceRelPath = change.path
+			const destRelPath = change.movePath
+			// The lock key is the symlink referent (see resolveLockKey), so it is used only
+			// to acquire the lock: stat/unlink act on the source path this move names.
+			// Deleting the referent would destroy a file the user never asked to move.
+			await withFileLock(await resolveLockKey(absolutePath), async () => {
+				let sourceToken: string
+				try {
+					sourceToken = versionTokenOfStat(await fs.stat(absolutePath, { bigint: true }))
+				} catch (error: unknown) {
+					// The source vanished after the destination was published: whatever
+					// removed it owns that removal, and this move must not report a
+					// success it can no longer verify.
+					throw new PartialMoveError(sourceRelPath, destRelPath, error)
+				}
+				if (sourceObservation === undefined || sourceObservation.version !== sourceToken) {
+					throw new PartialMoveError(
+						sourceRelPath,
+						destRelPath,
+						new Error(
+							sourceObservation === undefined
+								? "the source has no observation to authorize its deletion; it was kept"
+								: "the source changed after the move was built; it was kept",
+						),
+					)
+				}
+				try {
+					await fs.unlink(absolutePath)
+				} catch (error: unknown) {
+					throw new PartialMoveError(sourceRelPath, destRelPath, error)
+				}
+			})
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Guarded publish: an update hunk is a targeted change, so it is guarded
+				// as an edit -- a partial observation authorizes it and stays partial. A
+				// stale observed version is still rejected with the re-read hint.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+				)
 			} else {
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				// The diff-view save is the same targeted hunk as the guarded save above:
+				// it must select the same edit guard, otherwise a partial read is
+				// rejected and the approved patch is thrown away.
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
 			}
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
