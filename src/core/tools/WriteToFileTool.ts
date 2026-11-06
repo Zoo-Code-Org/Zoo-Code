@@ -132,7 +132,20 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// A write over an existing file replaces the content it previewed in full; a
+				// write to an absent path creates it.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					fileExists ? "update" : "create",
+					// The published bytes come from the model, not from the read this tool did before
+					// approval, so this caller has no authority over the basis: a stale, partial, or absent
+					// model observation must reach the guard unchanged, as it does on the diff-view path.
+					false,
+				)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)

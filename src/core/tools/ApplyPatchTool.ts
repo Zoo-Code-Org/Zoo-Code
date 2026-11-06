@@ -214,7 +214,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Save the changes
 		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			// An Add change brings the target into being, so it publishes under create semantics.
+			await task.diffViewProvider.saveDirectly(
+				relPath,
+				newContent,
+				true,
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+				// The patch was applied to the bytes this tool just read, so it may re-observe what
+				// that read proves about the current version.
+				true,
+			)
 		} else {
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 		}
@@ -408,12 +419,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
+				// The destination is a new path: create semantics refuse to overwrite whatever is
+				// already standing there instead of moving bytes over it.
 				await task.diffViewProvider.saveDirectly(
 					change.movePath,
 					newContent,
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"create",
+					// The patch was applied to the bytes this tool just read, so it may re-observe what
+					// that read proves about the current version.
+					true,
 				)
 			} else {
 				// Write to new path and delete old file
@@ -433,7 +450,19 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// The hunks were applied to a base this tool read, so this is a full-file
+				// replacement of an existing target.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"update",
+					// The patch was applied to the bytes this tool just read, so it may re-observe what
+					// that read proves about the current version.
+					true,
+				)
 			} else {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
