@@ -115,6 +115,17 @@ describe("FriendliHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).toEqual(expect.objectContaining({ max_tokens: 8192 }))
 	})
 
+	it("should not start a chat request when cancelled during catalog loading", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+		const controller = new AbortController()
+		const pending = handler.createMessage("system", [], { taskId: "t", abortSignal: controller.signal }).next()
+
+		controller.abort()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
 	it("should fall back to static models when the catalog is empty", async () => {
 		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 		await handler.completePrompt("a")

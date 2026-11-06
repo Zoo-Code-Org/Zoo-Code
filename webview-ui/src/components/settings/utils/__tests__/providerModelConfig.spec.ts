@@ -222,6 +222,11 @@ describe("providerModelConfig", () => {
 				fetched,
 			)
 			expect(getStaticModelsForProvider(providerIdentifiers.friendli)).toBe(friendliModels)
+			expect(
+				getStaticModelsForProvider(providerIdentifiers.friendli, undefined, undefined, {
+					friendli: {},
+				} as unknown as RouterModels),
+			).toBe(friendliModels)
 		})
 
 		it("returns empty object for providers without static models", () => {

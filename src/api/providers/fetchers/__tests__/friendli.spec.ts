@@ -56,6 +56,14 @@ describe("getFriendliModels", () => {
 		expect(models["google/gemma-4-31B-it"].supportsPromptCache).toBe(false)
 	})
 
+	it("rethrows cancellation instead of returning an empty record", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		vi.mocked(axios.get).mockRejectedValueOnce(new Error("canceled"))
+
+		await expect(getFriendliModels({ signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" })
+	})
+
 	it("returns an empty record on an invalid response", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {})
 		vi.mocked(axios.get).mockResolvedValueOnce({ data: { invalid: true } })

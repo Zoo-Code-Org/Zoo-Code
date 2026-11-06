@@ -18,7 +18,7 @@ import { getModelParams } from "../transform/model-params"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
-import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
+import { hasUsableTimeout, settleOnAbort, toSdkTimeoutMs } from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { getFriendliModels } from "./fetchers/friendli"
@@ -93,7 +93,7 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		await this.loadModels()
+		await settleOnAbort(this.loadModels(), metadata?.abortSignal, this.providerName)
 		yield* super.createMessage(systemPrompt, messages, metadata)
 	}
 
@@ -211,7 +211,7 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	}
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		await this.loadModels()
+		await settleOnAbort(this.loadModels(), options?.abortSignal, this.providerName)
 		const { id: modelId } = this.getModel()
 		const friendliExtra = this.buildFriendliReasoningParams()
 
