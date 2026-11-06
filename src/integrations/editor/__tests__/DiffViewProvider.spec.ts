@@ -319,24 +319,27 @@ describe("DiffViewProvider", () => {
 			)
 		})
 
-		it("should handle showTextDocument failure", async () => {
-			// Mock showTextDocument to fail
-			vi.mocked(vscode.window.showTextDocument).mockRejectedValue(new Error("Cannot open file"))
+		it.each([new Error("Cannot open file"), "Cannot open file"])(
+			"should handle showTextDocument failure: %s",
+			async (reason) => {
+				// Mock showTextDocument to fail
+				vi.mocked(vscode.window.showTextDocument).mockRejectedValue(reason)
 
-			// Mock workspace.onDidOpenTextDocument
-			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
+				// Mock workspace.onDidOpenTextDocument
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
 
-			// Mock window.onDidChangeVisibleTextEditors
-			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				// Mock window.onDidChangeVisibleTextEditors
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
 
-			// Set up for file
-			diffViewProvider.editType = "modify"
+				// Set up for file
+				diffViewProvider.editType = "modify"
 
-			// Try to open and expect rejection
-			await expect(diffViewProvider.open("test.md")).rejects.toThrow(
-				"Failed to execute diff command for /mock/cwd/test.md: Cannot open file",
-			)
-		})
+				// Try to open and expect rejection
+				await expect(diffViewProvider.open("test.md")).rejects.toThrow(
+					"Failed to execute diff command for /mock/cwd/test.md: Cannot open file",
+				)
+			},
+		)
 
 		it("records the pin state of an already-open pinned tab", async () => {
 			const mockEditor = makeTextEditor({
@@ -1522,9 +1525,6 @@ describe("DiffViewProvider", () => {
 				)
 			}
 			const activeDiffEditor = diffViewProvider["activeDiffEditor"]
-			if (!activeDiffEditor) {
-				throw new Error("activeDiffEditor was not set")
-			}
 			if (!activeDiffEditor) {
 				throw new Error("activeDiffEditor was not set")
 			}

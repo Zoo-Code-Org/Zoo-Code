@@ -360,7 +360,7 @@ function runBenchmark() {
 		runPerformanceTest("applyRunLengthEncoding", applyRunLengthEncoding, testData, iterations)
 
 		console.log("\n--- Function 3: truncateOutput ---")
-		runPerformanceTest("truncateOutput", truncateOutput, testData, iterations)
+		runPerformanceTest("truncateOutput", truncateOutput, testData, iterations, lineLimit)
 
 		// Run baseline test to measure variance between identical runs
 		runBaselineTest(testData, Math.max(5, Math.floor(iterations / 4)))
