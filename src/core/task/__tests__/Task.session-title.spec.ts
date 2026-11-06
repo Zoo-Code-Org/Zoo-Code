@@ -173,6 +173,27 @@ describe("Task#startTask session title trigger", () => {
 		expect(resolved).toBe(true)
 	})
 
+	it("does not wait for a pending title before starting the task loop", async () => {
+		const provider = createMockProvider()
+		const task = createTestTask(provider)
+		stubStartup(task)
+
+		let releaseTitle: () => void = () => {}
+		vi.mocked(generateSessionTitle).mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseTitle = resolve
+				}),
+		)
+
+		// startTask resolving while the title promise is still pending proves it is not awaited.
+		await getStartTaskAccess(task).startTask("slow title message")
+
+		expect(getStartTaskAccess(task).initiateTaskLoop).toHaveBeenCalled()
+		expect(lastTitleCall()?.userMessage).toBe("slow title message")
+		releaseTitle()
+	})
+
 	it.each([
 		["Production", 1, true],
 		["Development", 2, true],

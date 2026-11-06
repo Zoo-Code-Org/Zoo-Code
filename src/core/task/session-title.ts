@@ -15,18 +15,6 @@ Output only the title.
 
 `
 
-/**
- * Thrown inside `atomicReadAndUpdate` when the item already carries a title,
- * so the auto-title path can detect the conflict without performing a
- * pointless disk write of an unchanged record.
- */
-export class SessionTitleConflictError extends Error {
-	constructor(taskId: string) {
-		super(`[session-title] task ${taskId} already has a title; keeping it`)
-		this.name = "SessionTitleConflictError"
-	}
-}
-
 /** Outcome of `ClineProvider.applySessionTitle`. */
 export type SessionTitleApplyResult = "applied" | "conflict"
 
@@ -63,16 +51,10 @@ export function extractLlmTitle(raw: string): string | undefined {
 	return title.length > 0 ? title : undefined
 }
 
-/** First non-empty line of the sanitized message, capped at 42 characters. */
+/** Start of the sanitized message with whitespace collapsed, capped at 42 characters. */
 export function fallbackTitle(sanitized: string): string | undefined {
-	const firstLine = sanitized
-		.split("\n")
-		.find((line) => line.trim().length > 0)
-		?.trim()
-	if (!firstLine) {
-		return undefined
-	}
-	return firstLine.length > FALLBACK_TITLE_MAX_CHARS ? firstLine.slice(0, FALLBACK_TITLE_MAX_CHARS) : firstLine
+	const collapsed = sanitized.replace(/\s+/g, " ").trim()
+	return collapsed ? collapsed.slice(0, FALLBACK_TITLE_MAX_CHARS).trim() : undefined
 }
 
 type CompletePromptFn = typeof singleCompletionHandler

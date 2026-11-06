@@ -73,6 +73,35 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
 	})
 
+	describe("setTitleIfUnset", () => {
+		it("keeps a manual title that another instance wrote after this cache was loaded", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-task", task: "Original prompt" }))
+			await storeB.reconcile()
+			expect(storeB.get("title-task")?.title).toBeUndefined()
+
+			// Instance A still caches no title when B renames the task on disk.
+			await storeB.atomicReadAndUpdate("title-task", (item) => ({ ...item, title: "Manual title" }))
+			expect(storeA.get("title-task")?.title).toBeUndefined()
+
+			await expect(storeA.setTitleIfUnset("title-task", "Auto title")).resolves.toBe("conflict")
+
+			expect(storeA.get("title-task")?.title).toBe("Manual title")
+			await storeB.reconcile()
+			expect(storeB.get("title-task")?.title).toBe("Manual title")
+		})
+
+		it("applies the title when no instance has set one", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-free", task: "Original prompt" }))
+
+			await expect(storeA.setTitleIfUnset("title-free", "Auto title")).resolves.toBe("applied")
+
+			expect(storeA.get("title-free")).toMatchObject({ title: "Auto title", task: "Original prompt" })
+		})
+	})
+
 	it("two instances can write different tasks without conflict", async () => {
 		await storeA.initialize()
 		await storeB.initialize()

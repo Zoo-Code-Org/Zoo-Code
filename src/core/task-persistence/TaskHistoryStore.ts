@@ -997,6 +997,51 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
 
 	/**
+	 * Set `title` only while the item has none, checking the title on disk inside the
+	 * per-file lock. The cache can be stale when another store (for example a second
+	 * provider on the same storage path) saved a manual title, and a delta merge would
+	 * otherwise overwrite it.
+	 *
+	 * @returns "conflict" when a title already exists (the cache is refreshed from disk).
+	 * @throws If the task ID is not present in the cache.
+	 */
+	public setTitleIfUnset(taskId: string, title: string): Promise<"applied" | "conflict"> {
+		return this.withLock(async () => {
+			const current = this.cache.get(taskId)
+			if (!current) {
+				throw new Error(`[TaskHistoryStore] setTitleIfUnset: task ${taskId} not found in cache`)
+			}
+			if (current.title) {
+				return "conflict"
+			}
+
+			const filePath = await this.getTaskFilePath(taskId)
+			let written: HistoryItem = { ...current, title }
+			let conflict = false
+			await safeWriteJson(filePath, written, {
+				merge: (existing, incoming) => {
+					if (existing && typeof existing === "object" && (existing as HistoryItem).title) {
+						conflict = true
+						written = existing as HistoryItem
+						return existing
+					}
+					written = mergeHistoryDelta(existing, incoming as HistoryItem, { title })
+					return written
+				},
+			})
+
+			this.cache.set(taskId, written)
+			if (conflict) {
+				return "conflict"
+			}
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return "applied"
+		})
+	}
+
+	/**
 	 * Read a HistoryItem from the in-memory cache and write back an updated version,
 	 * all within a single lock acquisition so no concurrent writer can interleave
 	 * between the read and the write.

@@ -100,8 +100,11 @@ describe("extractLlmTitle", () => {
 })
 
 describe("fallbackTitle", () => {
-	it("uses the first non-empty line", () => {
-		expect(fallbackTitle("\n\nsecond\nthird")).toBe("second")
+	it.each([
+		["\n\nsecond\nthird", "second third"],
+		["Fix\nlogin   bug", "Fix login bug"],
+	])("collapses whitespace in %j", (input, expected) => {
+		expect(fallbackTitle(input)).toBe(expected)
 	})
 
 	it("caps the fallback at the character limit", () => {
@@ -143,7 +146,7 @@ describe("generateSessionTitle", () => {
 		expect(applied).toEqual([{ taskId: "task-1", title: "Fix Login Bug" }])
 	})
 
-	it("falls back to the first message line when the LLM fails", async () => {
+	it("falls back to the start of the message when the LLM fails", async () => {
 		const recorder = createCompletePromptRecorder(async () => {
 			throw new Error("api down")
 		})
@@ -163,8 +166,32 @@ describe("generateSessionTitle", () => {
 			completePrompt: recorder.fn,
 		})
 
-		expect(applied).toEqual([{ taskId: "task-2", title: "first line of the request" }])
+		expect(applied).toEqual([{ taskId: "task-2", title: "first line of the request second line" }])
 	})
+
+	it.each([[""], ["   "], ['""'], ["Title:"]])(
+		"falls back to the message start when the LLM returns the unusable response %j",
+		async (response) => {
+			const recorder = createCompletePromptRecorder(async () => response)
+			const applied: ApplyTitleCall[] = []
+			const provider = createTitleProvider({
+				applySessionTitle: async (taskId, title) => {
+					applied.push({ taskId, title })
+					return "applied"
+				},
+			})
+
+			await generateSessionTitle({
+				provider,
+				taskId: "task-unusable",
+				userMessage: "Short first line\nwith more text after it that goes on and on",
+				apiConfiguration: testApiConfiguration,
+				completePrompt: recorder.fn,
+			})
+
+			expect(applied).toEqual([{ taskId: "task-unusable", title: "Short first line with more text after it t" }])
+		},
+	)
 
 	it("falls back when the LLM times out", async () => {
 		vi.useFakeTimers()
