@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { providerIdentifiers, type ProviderQuota } from "@roo-code/types"
 
+import i18next from "i18next"
+
 import { ProviderLimits } from "../ProviderLimits"
 
 const post = vi.hoisted(() => vi.fn())
@@ -250,6 +252,35 @@ describe("ProviderLimits", () => {
 			`settings:usage.limits.updated ${new Date(fetchedAt).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" })}`,
 		)
 	})
+
+	it.each([["not a tag"], ["en_US"], [""]])(
+		"still renders the reset date and the updated time when the language is %j, which is not a language tag",
+		(language) => {
+			const previous = i18next.language
+			Object.defineProperty(i18next, "language", { value: language, configurable: true })
+			try {
+				render(<ProviderLimits />)
+				const resetAt = new Date(2026, 10, 1, 12, 0).getTime()
+				const fetchedAt = new Date(2026, 10, 1, 14, 41).getTime()
+				respond([
+					{
+						providerId: providerIdentifiers.openrouter,
+						ok: true,
+						fetchedAt,
+						windows: [{ id: "key_limit", valueLabel: "x", usedPercent: 10, resetAt }],
+					},
+				])
+
+				const row = screen.getByTestId(`provider-limit-${providerIdentifiers.openrouter}`)
+				expect(row.textContent).toContain("settings:usage.limits.resets")
+				expect(screen.getByTestId("provider-limits-refresh").textContent).toContain(
+					"settings:usage.limits.updated",
+				)
+			} finally {
+				Object.defineProperty(i18next, "language", { value: previous, configurable: true })
+			}
+		},
+	)
 
 	it.each(["noKey", "noCopilot", "signedOut", "unsupported", "error"] as const)(
 		"shows the quiet status text for %s",

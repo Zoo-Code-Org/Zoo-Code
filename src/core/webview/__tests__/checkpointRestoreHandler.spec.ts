@@ -3,6 +3,7 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { Task } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
+import { ConversationRewindError } from "../../checkpoints/ConversationRewindError"
 import { handleCheckpointRestoreOperation, type CheckpointRestoreConfig } from "../checkpointRestoreHandler"
 import { PendingEditOperationStore } from "../PendingEditOperationStore"
 import { saveTaskMessages } from "../../task-persistence"
@@ -345,6 +346,40 @@ describe("checkpointRestoreHandler", () => {
 		expect(saveTaskMessages).not.toHaveBeenCalled()
 	})
 
+	describe("when the files were restored but the conversation could not be rewound", () => {
+		const rewindFailure = () => new ConversationRewindError(new Error("Failed to save the messages"))
+
+		it("keeps the pending edit for the task that is started again, and offers no restart", async () => {
+			fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(rewindFailure())
+
+			await expect(
+				handleCheckpointRestoreOperation({
+					...fixture.config,
+					operation: "edit",
+					editData: { editedContent: "Edited prompt", apiConversationHistoryIndex: 0 },
+				}),
+			).rejects.toBeInstanceOf(ConversationRewindError)
+
+			expect(fixture.store.get(`task-${fixture.task.taskId}`)?.editedContent).toBe("Edited prompt")
+			expect(fixture.providerDouble.clearPendingEditOperation).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+				"common:errors.checkpoint_restore_failed: Failed to save the messages",
+			)
+		})
+
+		it("does not offer to restart a deleted task, which was started again by the restore", async () => {
+			fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(rewindFailure())
+
+			await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toBeInstanceOf(
+				ConversationRewindError,
+			)
+
+			expect(showWarningMessage).not.toHaveBeenCalled()
+			expect(fixture.providerDouble.restartTaskIfCurrent).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce()
+		})
+	})
+
 	it("a failed older edit keeps a newer edit staged during its restore", async () => {
 		const operationId = `task-${fixture.task.taskId}`
 		fixture.taskDouble.checkpointRestore.mockImplementationOnce(async () => {
@@ -455,25 +490,9 @@ describe("checkpointRestoreHandler", () => {
 			expect(fixture.store.get(`task-${fixture.task.taskId}`)).toBeUndefined() // and it is not applied by a later start
 		})
 
-		it("reports an API history write that failed after the messages were stored, and hands the edit back", async () => {
-			fixture.taskDouble.overwriteApiConversationHistory.mockRejectedValueOnce(fixture.failure)
-
-			await stageAndRehydrate()
-
-			reported()
-			handedBack()
-			expect(fixture.taskDouble.overwriteClineMessages).toHaveBeenCalledTimes(1)
-			expect(fixture.taskDouble.handleWebviewAskResponse).not.toHaveBeenCalled()
-		})
-
-		it("reports an edit that could not be sent, and hands it back", async () => {
-			fixture.taskDouble.handleWebviewAskResponse.mockRejectedValueOnce(fixture.failure)
-
-			await stageAndRehydrate()
-
-			reported()
-			handedBack()
-		})
+		// Not covered here: a failed API-history write and a failed send. `Task.overwriteApiConversationHistory` keeps the
+		// cut history in memory and does not reject when its write fails (tested in `Task.persistence.spec`), and
+		// `Task.handleWebviewAskResponse` returns nothing to reject: neither can reach this path.
 
 		it("reports a failure that is not an Error as the text it is", async () => {
 			fixture.taskDouble.overwriteClineMessages.mockRejectedValueOnce("the disk is full")

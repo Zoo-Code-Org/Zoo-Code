@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { checkpointSave, checkpointRestore, checkpointDiff, getCheckpointService } from "../index"
+import { ConversationRewindError } from "../ConversationRewindError"
 import { MessageManager } from "../../message-manager"
 import { RepoPerTaskCheckpointService } from "../../../services/checkpoints"
 import * as vscode from "vscode"
@@ -255,6 +256,41 @@ describe("Checkpoint functionality", () => {
 				{ ts: 2, say: "assistant", text: "Message 2" },
 			])
 			expect(mockProvider.cancelTask).toHaveBeenCalled()
+		})
+
+		it.each(["delete", "edit"] as const)(
+			"starts the task again, and reports the failure, when the files were restored but the messages could not be saved (%s)",
+			async (operation) => {
+				const failure = new Error("Failed to save the messages")
+				mockTask.overwriteClineMessages.mockRejectedValueOnce(failure)
+
+				const restoring = checkpointRestore(mockTask, {
+					ts: 2,
+					commitHash: RESTORE_HASH,
+					mode: "restore",
+					operation,
+				})
+
+				await expect(restoring).rejects.toBeInstanceOf(ConversationRewindError)
+				await expect(restoring).rejects.toMatchObject({
+					message: "Failed to save the messages",
+					cause: failure,
+				})
+				expect(mockCheckpointService.restoreCheckpoint).toHaveBeenCalledWith(RESTORE_HASH) // the files are back
+				// The messages were left as they were, so the history is not cut, and the task is started again (once).
+				expect(mockTask.overwriteApiConversationHistory).not.toHaveBeenCalled()
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+			},
+		)
+
+		it("does not start the task again when the files could not be restored", async () => {
+			mockCheckpointService.restoreCheckpoint.mockRejectedValueOnce(new Error("no such commit"))
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "edit" }),
+			).rejects.toThrow("no such commit")
+
+			expect(mockProvider.cancelTask).not.toHaveBeenCalled()
 		})
 
 		it("should handle preview mode without modifying messages", async () => {

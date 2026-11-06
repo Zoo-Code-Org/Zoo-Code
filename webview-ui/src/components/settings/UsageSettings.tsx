@@ -22,6 +22,7 @@ import {
 	usageToCsv,
 } from "@src/utils/usage"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
+import { dateLocale } from "@src/utils/dateLocale"
 
 import { SectionHeader } from "./SectionHeader"
 import { Section } from "./Section"
@@ -38,18 +39,6 @@ const PALETTE = [
 	"var(--vscode-charts-yellow)",
 	"var(--vscode-charts-red)",
 ]
-
-/**
- * The locale for the dates of the chart: the application language, else the browser's. A tag the platform does not
- * know falls back by itself; one that is not a language tag at all would throw, and is left out here.
- */
-const dateLocale = (language: string | undefined): string | undefined => {
-	try {
-		return language ? Intl.getCanonicalLocales(language)[0] : undefined
-	} catch {
-		return undefined
-	}
-}
 
 /**
  * Usage tab.

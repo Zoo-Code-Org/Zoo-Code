@@ -2,6 +2,10 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
+import { resolveDefaultSaveUri, saveLastExportPath, type ExportContext } from "../../utils/export"
+
+const LAST_EXPORT_PATH_KEY = "lastUsageExportPath"
+
 const USAGE_RANGES: readonly string[] = ["today", "7d", "30d", "all"]
 
 /**
@@ -97,9 +101,13 @@ export function neutralizeCsvFormulas(csv: string): string | undefined {
 /**
  * Saves the Usage tab's CSV where the user chooses. A webview cannot reliably download a file, so, like every other
  * export, the webview sends the text and the host writes it. The file name is built here from a known range, never
- * from the message. Resolves to the saved file, or `undefined` if the user cancelled, there was nothing to save, or the dialog or the write failed (the user is told).
+ * from the message. The dialog opens in the folder of the last export (Downloads for the first). Resolves to the saved file, or `undefined` if the user cancelled, there was nothing to save, or the dialog or the write failed (the user is told).
  */
-export async function exportUsageCsv(csv: unknown, range: unknown): Promise<vscode.Uri | undefined> {
+export async function exportUsageCsv(
+	csv: unknown,
+	range: unknown,
+	context: ExportContext,
+): Promise<vscode.Uri | undefined> {
 	if (typeof csv !== "string" || csv.length === 0 || csv.length > MAX_USAGE_CSV_LENGTH) return undefined
 	// The text comes from a webview: whatever it holds, no cell of the saved file is a formula.
 	const safeCsv = neutralizeCsvFormulas(csv)
@@ -108,12 +116,17 @@ export async function exportUsageCsv(csv: unknown, range: unknown): Promise<vsco
 	const name = `zoo-usage-${typeof range === "string" && USAGE_RANGES.includes(range) ? range : "all"}.csv`
 	try {
 		const saveUri = await vscode.window.showSaveDialog({
-			defaultUri: vscode.Uri.file(path.join(os.homedir(), "Downloads", name)),
+			defaultUri: resolveDefaultSaveUri(context, LAST_EXPORT_PATH_KEY, name, {
+				useWorkspace: false,
+				fallbackDir: path.join(os.homedir(), "Downloads"),
+			}),
 			filters: { CSV: ["csv"] },
 		})
 		if (!saveUri) return undefined
 
 		await vscode.workspace.fs.writeFile(saveUri, Buffer.from(safeCsv, "utf-8"))
+		// The file is written: failing to remember where is not a failed export.
+		await saveLastExportPath(context, LAST_EXPORT_PATH_KEY, saveUri).catch(() => undefined)
 		return saveUri
 	} catch (error) {
 		vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error))

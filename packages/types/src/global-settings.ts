@@ -309,6 +309,7 @@ export const globalSettingsSchema = z.object({
 	lastSettingsExportPath: z.string().optional(),
 	lastTaskExportPath: z.string().optional(),
 	lastImageSavePath: z.string().optional(),
+	lastUsageExportPath: z.string().optional(),
 
 	/**
 	 * Path to worktree to auto-open after switching workspaces.

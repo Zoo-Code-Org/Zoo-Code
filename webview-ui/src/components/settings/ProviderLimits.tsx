@@ -7,6 +7,7 @@ import { useAppTranslation } from "@/i18n/TranslationContext"
 import { cn } from "@src/lib/utils"
 import { vscode } from "@src/utils/vscode"
 import i18next from "i18next"
+import { dateLocale } from "@src/utils/dateLocale"
 import { providerLabel } from "@src/utils/providerLabel"
 
 // Module-level, so a component that is unmounted and mounted again never reuses an id that an older,
@@ -117,7 +118,7 @@ export const ProviderLimits = ({ enabled = true }: { enabled?: boolean }) => {
 					{fetchedAt ? (
 						<span>
 							{t("settings:usage.limits.updated", {
-								time: new Date(fetchedAt).toLocaleTimeString(i18next.language || "en", {
+								time: new Date(fetchedAt).toLocaleTimeString(dateLocale(i18next.language) ?? "en", {
 									hour: "numeric",
 									minute: "2-digit",
 								}),
@@ -147,7 +148,9 @@ export const ProviderLimits = ({ enabled = true }: { enabled?: boolean }) => {
 						quota={q}
 						name={providerLabel(q.providerId)}
 						formatReset={(ts) =>
-							new Date(ts).toLocaleDateString(i18next.language || "en", { dateStyle: "medium" })
+							new Date(ts).toLocaleDateString(dateLocale(i18next.language) ?? "en", {
+								dateStyle: "medium",
+							})
 						}
 					/>
 				))}

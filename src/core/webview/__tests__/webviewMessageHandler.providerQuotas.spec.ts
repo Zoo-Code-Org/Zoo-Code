@@ -180,6 +180,126 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 		})
 	})
 
+	// The manager reads every profile in one locked read; the doubles above are sources without it.
+	describe("with a source that reads every profile at once", () => {
+		const rows = (providerForId: Record<string, string>) =>
+			Object.entries(providerForId).map(([id, apiProvider]) => ({
+				id,
+				name: id === "a" ? "work" : "personal",
+				apiProvider,
+				apiKey: `key-${id}`,
+			}))
+		const bulkProvider = (getAllProfiles: () => Promise<unknown>, overrides: Record<string, unknown> = {}) => {
+			const manager = {
+				getAllProfiles: vi.fn(getAllProfiles),
+				listConfig: vi.fn(),
+				getProfile: vi.fn(),
+			}
+			return {
+				manager,
+				provider: makeProvider({ providerSettingsManager: manager, ...overrides }),
+			}
+		}
+		const queried = () => quotas.getProviderQuotas.mock.calls[0][0].map((p: { id: string }) => p.id) as string[]
+
+		it("reads once, puts the active profile first and names it", async () => {
+			const { provider, manager } = bulkProvider(
+				async () => rows({ a: providerIdentifiers.openrouter, b: providerIdentifiers.openrouter }),
+				{ contextProxy: { getValue: vi.fn(() => "personal") } },
+			)
+
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+
+			expect(manager.getAllProfiles).toHaveBeenCalledTimes(1)
+			expect(manager.listConfig).not.toHaveBeenCalled()
+			expect(manager.getProfile).not.toHaveBeenCalled()
+			expect(queried()).toEqual(["b", "a"])
+			expect(quotas.getProviderQuotas.mock.calls[0][1].activeProfileId).toBe("b")
+		})
+
+		it("keeps a profile the allow list refuses out of the request, and does not name it as the active one", async () => {
+			const onlyOpenRouter: OrganizationAllowList = {
+				allowAll: false,
+				providers: { [providerIdentifiers.openrouter]: { allowAll: true } },
+			}
+			const { provider } = bulkProvider(
+				async () => rows({ a: providerIdentifiers.openrouter, b: providerIdentifiers.anthropic }),
+				{
+					getState: vi.fn(async () => ({ organizationAllowList: onlyOpenRouter })),
+					contextProxy: { getValue: vi.fn(() => "personal") },
+				},
+			)
+
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+
+			expect(queried()).toEqual(["a"])
+			expect(JSON.stringify(quotas.getProviderQuotas.mock.calls)).not.toContain("key-b")
+			expect(quotas.getProviderQuotas.mock.calls[0][1].activeProfileId).toBeUndefined()
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ providerQuotasFailed: false }),
+			)
+		})
+
+		it("answers with a failure, and logs it, when the read fails", async () => {
+			const { provider } = bulkProvider(async () => {
+				throw new Error("secret storage unavailable")
+			})
+
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas", requestId: "bulk-1" })
+
+			expect(quotas.getProviderQuotas).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "providerQuotas",
+				providerQuotas: [],
+				providerQuotasFailed: true,
+				requestId: "bulk-1",
+			})
+			expect(provider.log).toHaveBeenCalledWith(expect.stringContaining("secret storage unavailable"))
+		})
+
+		it("answers with an empty list when there are no profiles", async () => {
+			quotas.getProviderQuotas.mockResolvedValue([])
+			const { provider } = bulkProvider(async () => [])
+
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ providerQuotas: [], providerQuotasFailed: false }),
+			)
+		})
+
+		it("is released by a cancel without waiting for a read that never settles, and posts nothing", async () => {
+			const { provider, manager } = bulkProvider(() => new Promise(() => {}))
+
+			const running = webviewMessageHandler(provider, { type: "requestProviderQuotas", requestId: "bulk-2" })
+			await vi.waitFor(() => expect(manager.getAllProfiles).toHaveBeenCalled())
+			await webviewMessageHandler(provider, { type: "cancelProviderQuotas", requestId: "bulk-2" })
+
+			await running
+			expect(quotas.getProviderQuotas).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+			expect(provider.log).not.toHaveBeenCalled()
+		})
+
+		it("starts no read for a request that was cancelled while the allow list was read", async () => {
+			const { provider, manager } = bulkProvider(async () => rows({ a: providerIdentifiers.openrouter }))
+			// The cancel arrives while the allow list is read, before any profile read is started.
+			let releaseState: () => void = () => {}
+			provider.getState = vi.fn(
+				() => new Promise((resolve) => (releaseState = () => resolve({ organizationAllowList: ALLOW_ALL }))),
+			) as never
+
+			const running = webviewMessageHandler(provider, { type: "requestProviderQuotas", requestId: "bulk-3" })
+			await vi.waitFor(() => expect(provider.getState).toHaveBeenCalled())
+			await webviewMessageHandler(provider, { type: "cancelProviderQuotas", requestId: "bulk-3" })
+			releaseState()
+			await running
+
+			expect(manager.getAllProfiles).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		})
+	})
+
 	it("reports a failure, not an empty list, when no saved profile can be read", async () => {
 		const provider = makeProvider({
 			providerSettingsManager: {

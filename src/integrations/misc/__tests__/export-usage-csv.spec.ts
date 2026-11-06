@@ -1,3 +1,5 @@
+import * as os from "os"
+import * as path from "path"
 import * as vscode from "vscode"
 
 import { exportUsageCsv, neutralizeCsvFormulas } from "../export-usage-csv"
@@ -12,17 +14,68 @@ const showSaveDialog = vi.mocked(vscode.window.showSaveDialog)
 const writeFile = vi.mocked(vscode.workspace.fs.writeFile)
 const showErrorMessage = vi.mocked(vscode.window.showErrorMessage)
 
+const stored = new Map<string, unknown>()
+const context = {
+	getValue: vi.fn((key: string) => stored.get(key)),
+	setValue: vi.fn(async (key: string, value: unknown) => void stored.set(key, value)),
+}
+
 describe("exportUsageCsv", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		stored.clear()
 		writeFile.mockResolvedValue(undefined)
+	})
+
+	describe("the folder of the dialog", () => {
+		it("opens in Downloads at first, and remembers the folder the file was saved in", async () => {
+			showSaveDialog.mockResolvedValue({ fsPath: "/work/reports/chosen.csv" } as vscode.Uri)
+
+			await exportUsageCsv("a", "30d", context)
+
+			expect(showSaveDialog.mock.calls[0][0]!.defaultUri?.fsPath).toBe(
+				path.join(os.homedir(), "Downloads", "zoo-usage-30d.csv"),
+			)
+			expect(stored.get("lastUsageExportPath")).toBe("/work/reports/chosen.csv")
+		})
+
+		it("opens in the folder of the last export, with the name of this range", async () => {
+			stored.set("lastUsageExportPath", "/work/reports/chosen.csv")
+			showSaveDialog.mockResolvedValue(undefined)
+
+			await exportUsageCsv("a", "7d", context)
+
+			expect(showSaveDialog.mock.calls[0][0]!.defaultUri?.fsPath).toBe(
+				path.join("/work/reports", "zoo-usage-7d.csv"),
+			)
+		})
+
+		it("remembers nothing when the user cancels, or when nothing was written", async () => {
+			showSaveDialog.mockResolvedValue(undefined)
+			await exportUsageCsv("a", "all", context)
+
+			showSaveDialog.mockResolvedValue({ fsPath: "/x/y.csv" } as vscode.Uri)
+			writeFile.mockRejectedValue(new Error("disk full"))
+			await exportUsageCsv("a", "all", context)
+
+			expect(context.setValue).not.toHaveBeenCalled()
+		})
+
+		it("still reports the saved file when the folder cannot be remembered", async () => {
+			const saveUri = { fsPath: "/x/y.csv" } as vscode.Uri
+			showSaveDialog.mockResolvedValue(saveUri)
+			context.setValue.mockRejectedValueOnce(new Error("state unavailable"))
+
+			expect(await exportUsageCsv("a", "all", context)).toBe(saveUri)
+			expect(showErrorMessage).not.toHaveBeenCalled()
+		})
 	})
 
 	it("writes the CSV to the file the user chose", async () => {
 		const saveUri = { fsPath: "/tmp/chosen.csv" } as vscode.Uri
 		showSaveDialog.mockResolvedValue(saveUri)
 
-		const saved = await exportUsageCsv("date,cost\n2026-06-01,1.2", "7d")
+		const saved = await exportUsageCsv("date,cost\n2026-06-01,1.2", "7d", context)
 
 		expect(saved).toBe(saveUri)
 		expect(writeFile).toHaveBeenCalledWith(saveUri, Buffer.from("date,cost\n2026-06-01,1.2", "utf-8"))
@@ -37,7 +90,7 @@ describe("exportUsageCsv", () => {
 	])("suggests %s as %s, in CSV files", async (range, fileName) => {
 		showSaveDialog.mockResolvedValue(undefined)
 
-		await exportUsageCsv("a", range)
+		await exportUsageCsv("a", range, context)
 
 		const options = showSaveDialog.mock.calls[0][0]!
 		expect(options.defaultUri?.fsPath.endsWith(fileName)).toBe(true)
@@ -49,7 +102,7 @@ describe("exportUsageCsv", () => {
 		async (range) => {
 			showSaveDialog.mockResolvedValue(undefined)
 
-			await exportUsageCsv("a", range)
+			await exportUsageCsv("a", range, context)
 
 			expect(showSaveDialog.mock.calls[0][0]!.defaultUri?.fsPath.endsWith("zoo-usage-all.csv")).toBe(true)
 		},
@@ -58,12 +111,12 @@ describe("exportUsageCsv", () => {
 	it("writes nothing if the user cancels the dialog", async () => {
 		showSaveDialog.mockResolvedValue(undefined)
 
-		expect(await exportUsageCsv("a", "all")).toBeUndefined()
+		expect(await exportUsageCsv("a", "all", context)).toBeUndefined()
 		expect(writeFile).not.toHaveBeenCalled()
 	})
 
 	it.each([[undefined], [null], [""], [42], [{}]])("does nothing for the text %j", async (csv) => {
-		expect(await exportUsageCsv(csv, "all")).toBeUndefined()
+		expect(await exportUsageCsv(csv, "all", context)).toBeUndefined()
 		expect(showSaveDialog).not.toHaveBeenCalled()
 		expect(writeFile).not.toHaveBeenCalled()
 	})
@@ -71,7 +124,7 @@ describe("exportUsageCsv", () => {
 	it("tells the user when the save dialog itself fails, and writes nothing", async () => {
 		showSaveDialog.mockRejectedValue(new Error("dialog unavailable"))
 
-		expect(await exportUsageCsv("a", "all")).toBeUndefined()
+		expect(await exportUsageCsv("a", "all", context)).toBeUndefined()
 		expect(showErrorMessage).toHaveBeenCalledWith("dialog unavailable")
 		expect(writeFile).not.toHaveBeenCalled()
 	})
@@ -80,11 +133,11 @@ describe("exportUsageCsv", () => {
 		const saveUri = { fsPath: "/tmp/big.csv" } as vscode.Uri
 		showSaveDialog.mockResolvedValue(saveUri)
 
-		expect(await exportUsageCsv("a".repeat(20_000_001), "all")).toBeUndefined()
+		expect(await exportUsageCsv("a".repeat(20_000_001), "all", context)).toBeUndefined()
 		expect(showSaveDialog).not.toHaveBeenCalled()
 		expect(writeFile).not.toHaveBeenCalled()
 
-		expect(await exportUsageCsv("a".repeat(20_000_000), "all")).toBe(saveUri)
+		expect(await exportUsageCsv("a".repeat(20_000_000), "all", context)).toBe(saveUri)
 		expect(writeFile).toHaveBeenCalledTimes(1)
 		const [target, bytes] = writeFile.mock.calls[0]
 		expect(target).toBe(saveUri)
@@ -95,7 +148,7 @@ describe("exportUsageCsv", () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/ro/file.csv" } as vscode.Uri)
 		writeFile.mockRejectedValue("disk full")
 
-		expect(await exportUsageCsv("a", "all")).toBeUndefined()
+		expect(await exportUsageCsv("a", "all", context)).toBeUndefined()
 		expect(showErrorMessage).toHaveBeenCalledWith("disk full")
 	})
 
@@ -103,7 +156,7 @@ describe("exportUsageCsv", () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/ro/file.csv" } as vscode.Uri)
 		writeFile.mockRejectedValue(new Error("EACCES: permission denied"))
 
-		expect(await exportUsageCsv("a", "all")).toBeUndefined()
+		expect(await exportUsageCsv("a", "all", context)).toBeUndefined()
 		expect(showErrorMessage).toHaveBeenCalledWith("EACCES: permission denied")
 	})
 })
@@ -229,7 +282,7 @@ describe("neutralizeCsvFormulas", () => {
 			const saveUri = { fsPath: "/tmp/chosen.csv" } as vscode.Uri
 			showSaveDialog.mockResolvedValue(saveUri)
 
-			await exportUsageCsv('date,task\n2026,"note\n=1+1\nend"', "all")
+			await exportUsageCsv('date,task\n2026,"note\n=1+1\nend"', "all", context)
 
 			const written = writeFile.mock.calls[0][1].toString()
 			for (const delimiter of [",", ";", "\t"]) {
@@ -304,7 +357,7 @@ describe("neutralizeCsvFormulas", () => {
 			const saveUri = { fsPath: "/tmp/chosen.csv" } as vscode.Uri
 			showSaveDialog.mockResolvedValue(saveUri)
 
-			await exportUsageCsv("date,task\n2026-06-01,\"x;=cmd|' /c calc'!A0\"", "all")
+			await exportUsageCsv("date,task\n2026-06-01,\"x;=cmd|' /c calc'!A0\"", "all", context)
 
 			const written = writeFile.mock.calls[0][1].toString()
 			expect(fieldsSplitOn(";", written).some(startsAFormula)).toBe(false)
@@ -335,7 +388,7 @@ describe("neutralizeCsvFormulas", () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out.csv" } as vscode.Uri)
 		writeFile.mockResolvedValue(undefined)
 
-		await exportUsageCsv("date,task\n2026-06-01,\"=cmd|' /C calc'!A0\"\n+1,@x", "all")
+		await exportUsageCsv("date,task\n2026-06-01,\"=cmd|' /C calc'!A0\"\n+1,@x", "all", context)
 
 		expect(writeFile).toHaveBeenCalledWith(
 			expect.anything(),
@@ -347,7 +400,7 @@ describe("neutralizeCsvFormulas", () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out.csv" } as vscode.Uri)
 		writeFile.mockResolvedValue(undefined)
 
-		await exportUsageCsv('h\n"\uFEFF=1+1"', "all")
+		await exportUsageCsv('h\n"\uFEFF=1+1"', "all", context)
 
 		expect(writeFile).toHaveBeenCalledWith(expect.anything(), Buffer.from('h\n"\'\uFEFF=1+1"', "utf-8"))
 	})
@@ -356,7 +409,7 @@ describe("neutralizeCsvFormulas", () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out.csv" } as vscode.Uri)
 		writeFile.mockResolvedValue(undefined)
 
-		await exportUsageCsv('h\n"\u0000=1+1"\n\u0000@x', "all")
+		await exportUsageCsv('h\n"\u0000=1+1"\n\u0000@x', "all", context)
 
 		const [, bytes] = writeFile.mock.calls[0]
 		expect(Buffer.from(bytes).toString("utf-8")).toBe("h\n\"'\u0000=1+1\"\n'\u0000@x")
@@ -366,7 +419,7 @@ describe("neutralizeCsvFormulas", () => {
 		showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out.csv" } as vscode.Uri)
 		writeFile.mockClear()
 
-		expect(await exportUsageCsv('a,"open', "all")).toBeUndefined()
+		expect(await exportUsageCsv('a,"open', "all", context)).toBeUndefined()
 		expect(showSaveDialog).not.toHaveBeenCalled()
 		expect(writeFile).not.toHaveBeenCalled()
 	})

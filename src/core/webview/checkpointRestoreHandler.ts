@@ -1,4 +1,5 @@
 import { Task } from "../task/Task"
+import { ConversationRewindError } from "../checkpoints/ConversationRewindError"
 import { ClineProvider } from "./ClineProvider"
 import { saveTaskMessages } from "../task-persistence"
 import * as vscode from "vscode"
@@ -85,7 +86,10 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// For edit operations, the task cancellation in checkpointRestore
 		// will trigger reinitialization, which will process pendingEditAfterRestore
 	} catch (error) {
-		if (operation === "edit" && !checkpointRestored && pendingEditOwner) {
+		// The files were restored and the task is started again (see `ConversationRewindError`): the starting task
+		// takes the pending edit, and hands it back to the user if it cannot apply it, and there is nothing to restart.
+		const taskRestarted = error instanceof ConversationRewindError
+		if (operation === "edit" && !checkpointRestored && pendingEditOwner && !taskRestarted) {
 			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
 		}
 		console.error(`Error in checkpoint restore (${operation}):`, error)
@@ -94,7 +98,7 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 				error: error instanceof Error ? error.message : String(error),
 			}),
 		)
-		if (operation === "delete" && !checkpointRestored && currentCline.abort) {
+		if (operation === "delete" && !checkpointRestored && !taskRestarted && currentCline.abort) {
 			try {
 				const restart = t("common:checkpoints.restart")
 				const response = await vscode.window.showWarningMessage(

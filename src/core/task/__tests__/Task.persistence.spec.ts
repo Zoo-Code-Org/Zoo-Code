@@ -354,6 +354,38 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).not.toHaveBeenCalled()
 		})
 
+		it("keeps the cut API history in memory, without rejecting, when its write fails, and the next save writes it", async () => {
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.overwriteApiConversationHistory(
+				[
+					{ role: "user", content: "first", ts: 1 },
+					{ role: "user", content: "second", ts: 2 },
+				],
+				false,
+			)
+			mockSaveApiMessages.mockClear()
+			mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+
+			// The failure is the task's own to retry: a caller (the edit after a checkpoint restore) is not told of it.
+			await expect(
+				task.overwriteApiConversationHistory([task.apiConversationHistory[0]]),
+			).resolves.toBeUndefined()
+			expect(task.apiConversationHistory.map((message) => message.content)).toEqual(["first"])
+
+			mockSaveApiMessages.mockClear()
+			expect(await task.retrySaveApiConversationHistory()).toBe(true)
+			expect(
+				mockSaveApiMessages.mock.calls[0][0].messages.map((message: { content: unknown }) => message.content),
+			).toEqual(["first"])
+			consoleError.mockRestore()
+		})
+
 		it("returns false on failure", async () => {
 			vi.useFakeTimers()
 

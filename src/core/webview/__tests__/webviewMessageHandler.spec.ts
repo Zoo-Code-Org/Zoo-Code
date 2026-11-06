@@ -3063,20 +3063,24 @@ describe("exportUsageCsv", () => {
 		vi.mocked(exportUsageCsv).mockReset()
 	})
 
-	it("hands the CSV text and the range to the host export", async () => {
+	it("hands the CSV text, the range and the settings store (for the folder of the last export) to the host export", async () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "exportUsageCsv",
 			text: "date,cost\n2026-06-01,1.2",
 			values: { range: "30d" },
 		})
 
-		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith("date,cost\n2026-06-01,1.2", "30d")
+		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith(
+			"date,cost\n2026-06-01,1.2",
+			"30d",
+			mockClineProvider.contextProxy,
+		)
 	})
 
 	it("passes nothing for the range when the message has no values", async () => {
 		await webviewMessageHandler(mockClineProvider, { type: "exportUsageCsv", text: "a" })
 
-		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith("a", undefined)
+		expect(exportUsageCsv).toHaveBeenCalledExactlyOnceWith("a", undefined, mockClineProvider.contextProxy)
 	})
 })
 
