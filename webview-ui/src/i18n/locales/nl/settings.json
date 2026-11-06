@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Automatisch intelligente contextcompressie activeren"
 		},
+		"disableAutoContextManagement": {
+			"name": "Automatische contextcompressie en -inkorting uitschakelen",
+			"description": "Wanneer ingeschakeld, comprimeert of kort Zoo Code de taakcontext niet automatisch in, ook niet na een fout met het contextvenster. U bent zelf verantwoordelijk voor het vermijden van de limieten van het contextvenster. Handmatige contextcompressie blijft beschikbaar."
+		},
 		"openTabs": {
 			"label": "Limiet geopende tabbladen in context",
 			"description": "Maximaal aantal geopende VSCode-tabbladen dat in de context wordt opgenomen. Hogere waarden geven meer context maar verhogen het tokengebruik."

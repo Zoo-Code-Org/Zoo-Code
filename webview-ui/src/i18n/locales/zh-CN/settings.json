@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "自动触发智能上下文压缩"
 		},
+		"disableAutoContextManagement": {
+			"name": "禁用自动上下文压缩和截断",
+			"description": "启用后，即使发生上下文窗口错误，Zoo Code 也不会自动压缩或截断任务上下文。您需要自行避免超出上下文窗口限制。仍可手动压缩上下文。"
+		},
 		"openTabs": {
 			"label": "标签页数量限制",
 			"description": "允许纳入上下文的最大标签页数（数值越大消耗token越多）"

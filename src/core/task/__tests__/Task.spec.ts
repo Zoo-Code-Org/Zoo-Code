@@ -2537,6 +2537,15 @@ describe("Cline", () => {
 			const getSystemPromptSpy = vi
 				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
 				.mockResolvedValue("mock system prompt")
+			const condenseId = "context-window-condense-id"
+			vi.mocked(summarizeConversation).mockResolvedValueOnce({
+				messages: task.apiConversationHistory,
+				summary: "summary",
+				cost: 0,
+				newContextTokens: 1,
+				condenseId,
+			})
+			const saySpy = vi.spyOn(task, "say")
 
 			await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
 
@@ -2545,6 +2554,46 @@ describe("Cline", () => {
 			// the model info; the second argument must be the snapshot threaded
 			// into the handler, not a fresh re-read.
 			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo)
+			expect(saySpy).toHaveBeenCalledWith(
+				"condense_context",
+				undefined,
+				undefined,
+				false,
+				undefined,
+				undefined,
+				{ isNonInteractive: true },
+				expect.objectContaining({ condenseId }),
+			)
+		})
+
+		it("does not automatically condense after a context-window error when disabled", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ disableAutoContextManagement: true }),
+			)
+
+			const originalHistory: ApiMessage[] = [
+				{ role: "user", content: [{ type: "text", text: "Keep this context intact" }], ts: 1 },
+			]
+			task.apiConversationHistory = originalHistory
+			const getSystemPromptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockResolvedValue("mock system prompt")
+
+			await getTaskTestAccess(task).handleContextWindowExceededError({
+				contextWindow: 1,
+				maxTokens: 1,
+				supportsPromptCache: false,
+			})
+
+			expect(task.apiConversationHistory).toBe(originalHistory)
+			expect(getSystemPromptSpy).not.toHaveBeenCalled()
 		})
 
 		describe("emergency condense reporting (#1769)", () => {

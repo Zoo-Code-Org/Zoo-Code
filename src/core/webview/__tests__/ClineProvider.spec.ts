@@ -3199,6 +3199,7 @@ describe("ClineProvider", () => {
 			organizationAllowList: ORGANIZATION_ALLOW_ALL,
 			autoCondenseContext: true,
 			autoCondenseContextPercent: 100,
+			disableAutoContextManagement: false,
 			cloudIsAuthenticated: false,
 			sharingEnabled: false,
 			publicSharingEnabled: false,
@@ -4471,12 +4472,38 @@ describe("ClineProvider", () => {
 		expect(state.autoCondenseContext).toBe(true)
 	})
 
+	test("disableAutoContextManagement defaults to false", async () => {
+		const state = await provider.getState()
+		expect(state.disableAutoContextManagement).toBe(false)
+	})
+
+	test("getStateToPostToWebview returns saved disableAutoContextManagement", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("disableAutoContextManagement", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.disableAutoContextManagement).toBe(true)
+	})
+
+	test("getStateToPostToWebview returns the saved automatic context management opt-out", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("disableAutoContextManagement", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.disableAutoContextManagement).toBe(true)
+	})
+
 	test("handles autoCondenseContext message", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 		await messageHandler({ type: "updateSettings", updatedSettings: { autoCondenseContext: false } })
 		expect(updateGlobalStateSpy).toHaveBeenCalledWith("autoCondenseContext", false)
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("autoCondenseContext", false)
+		await messageHandler({ type: "updateSettings", updatedSettings: { disableAutoContextManagement: true } })
+		expect(updateGlobalStateSpy).toHaveBeenCalledWith("disableAutoContextManagement", true)
+		expect(mockContext.globalState.update).toHaveBeenCalledWith("disableAutoContextManagement", true)
 		expect(mockPostMessage).toHaveBeenCalled()
 	})
 

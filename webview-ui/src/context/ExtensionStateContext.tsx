@@ -149,6 +149,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setAutoCondenseContext: (value: boolean) => void
 	autoCondenseContextPercent: number
 	setAutoCondenseContextPercent: (value: number) => void
+	disableAutoContextManagement: boolean
 	routerModels?: RouterModels
 	includeDiagnosticMessages?: boolean
 	setIncludeDiagnosticMessages: (value: boolean) => void
@@ -302,6 +303,7 @@ export const createInitialExtensionState = (): ExtensionState => ({
 	organizationSettingsVersion: -1,
 	autoCondenseContext: true,
 	autoCondenseContextPercent: 100,
+	disableAutoContextManagement: false,
 	profileThresholds: {},
 	codebaseIndexConfig: {
 		codebaseIndexEnabled: true,

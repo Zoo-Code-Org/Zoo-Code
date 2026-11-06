@@ -15,6 +15,7 @@ on:
             - "webview-ui/src/components/chat/Announcement.tsx"
             - "releases/**"
             - ".github/workflows/release-validation.yml"
+            - ".github/workflows/release-vsix.yml"
 
 # Cancel superseded runs when a pull request is updated. Non-PR events keep
 # unique groups, so manual runs are never cancelled.

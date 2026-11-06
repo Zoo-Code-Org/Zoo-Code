@@ -38,7 +38,7 @@ mode: code
 
 6. Write the release notes directly into `CHANGELOG.md` on the release branch.
 
-    - Use the heading format `## [version]` (with square brackets) — e.g. `## [3.58.1]`. The publish workflow at `.github/workflows/marketplace-publish.yml` extracts release notes by matching this exact pattern; headings without brackets will be missed and the GitHub release will fall back to a generic message.
+    - Use the heading format `## [version]` (with square brackets) — e.g. `## [3.58.1]`. The release workflow at `.github/workflows/release-vsix.yml` extracts release notes by matching this exact pattern; headings without brackets will be missed and the GitHub release will fall back to a generic message.
     - Always include contributor attribution and the PR number: use `(PR #<prNumber> by @username)`.
     - For PRs that close issues, include both issue and PR authors: `- Fix: Description (#123 by @reporter, PR #456 by @contributor)`.
     - For PRs without linked issues, include the PR number and author: `- Add support for feature (PR #456 by @contributor)`.
@@ -84,7 +84,7 @@ mode: code
 
 11. Once the release PR is open and passing checks, get it approved by a reviewer before proceeding.
 
-    - Do not create the tag until the PR has at least one approval — the publish workflow enforces this automatically and will fail if no approved PR is found for the tagged commit.
+    - Do not create the tag until the PR has at least one approval — the release workflow enforces this automatically and will fail if no approved PR is found for the tagged commit.
 
 12. After the PR is approved, create the release tag on the release branch tip and push it:
 
@@ -94,27 +94,27 @@ mode: code
     ```
 
     - Tag the branch tip as-is. Do not rebase or merge additional commits into the release branch before tagging — doing so changes the commit SHA and may pull in unreviewed changes that weren't part of the approval.
-    - The publish workflow validates that the tag version matches `src/package.json`.
+    - The release workflow validates that the tag version matches `src/package.json`.
 
-13. The tag push triggers the stable publish workflow.
+13. The tag push triggers the stable VSIX release workflow.
 
-    - The workflow first checks that the tagged commit belongs to an approved PR. If the PR is not yet approved this step fails — approve the PR first, then retrigger by recreating and pushing the tag: `git tag -d v[version] && git push origin :refs/tags/v[version] && git tag v[version] && git push origin v[version]`.
-    - Once the approval check passes, the `marketplace-production` environment gate fires and notifies the configured approvers.
-    - A human approver must then approve the deployment before the extension is published to VS Code Marketplace and Open VSX.
+    - The workflow checks that the tagged commit belongs to an approved PR, validates the tag against `src/package.json`, builds the VSIX, and creates the GitHub Release with the VSIX attached.
+    - If the PR is not yet approved, the workflow fails — approve the PR first, then retrigger by recreating and pushing the tag: `git tag -d v[version] && git push origin :refs/tags/v[version] && git tag v[version] && git push origin v[version]`.
+    - This workflow only builds and attaches the VSIX; it does not publish to the VS Code Marketplace or Open VSX.
 
-14. After a successful deployment, add the release PR to the merge queue.
+14. After the GitHub Release has been created with the VSIX attached, add the release PR to the merge queue.
 
     ```bash
     gh pr merge [pr-number] --auto --squash
     ```
 
-    - Do not merge before the deployment succeeds — merging first and then discovering a publish failure leaves `main` ahead of what was actually shipped.
+    - Do not merge before the release workflow succeeds — merging first and then discovering a build failure leaves `main` ahead of the release artifact.
     - The merge queue runs all required checks against the release branch before merging to `main`.
 
 15. As the final stable extension release step, open a separate documentation PR in `Zoo-Code-Org/Zoo-Code-Docs`.
 
-    - Run this step only after the marketplace workflow for the exact stable tag has succeeded, the corresponding GitHub release exists, and step 14 has added the Zoo Code release PR to the merge queue. This step does not apply to nightly, CLI, npm, or types releases.
-    - Retain the exact Zoo Code changelog section, complete merged-PR inventory, release PR URL, tag and GitHub release URL, marketplace workflow URL, successful publication timestamp, and release PR merge-queue state as inputs to the docs work and final report.
+    - Run this step only after the VSIX release workflow for the exact stable tag has succeeded, the corresponding GitHub release with the VSIX exists, and step 14 has added the Zoo Code release PR to the merge queue. This step does not apply to nightly, CLI, npm, or types releases.
+    - Retain the exact Zoo Code changelog section, complete merged-PR inventory, release PR URL, tag and GitHub release URL, VSIX release workflow URL, release creation timestamp, and release PR merge-queue state as inputs to the docs work and final report.
 
     **Preflight and checkout**
 
@@ -160,9 +160,9 @@ mode: code
 
     - Inspect build warnings explicitly. Block the PR on newly introduced broken-link, document, MDX, sidebar, or content warnings. Verify the changed and staged scope contains only intended source files and no generated output.
     - Commit as `docs(release): document v[version]`, push normally (never force-push) to `docs/release-v[version]`, and stop rather than overwrite a remote race.
-    - Open or reuse a PR in `Zoo-Code-Org/Zoo-Code-Docs` with base `main` and title `[Docs] Update documentation for Zoo Code v[version]`. Its body must include the source release and tag, Zoo Code release PR, marketplace workflow and successful publication timestamp, summary, package version synchronization, per-PR impact matrix and exclusions, evergreen changes or no-change rationale, validation results and warning review, and an explicit statement that this is a separate docs PR and will not be auto-merged. Never enable auto-merge for this PR.
+    - Open or reuse a PR in `Zoo-Code-Org/Zoo-Code-Docs` with base `main` and title `[Docs] Update documentation for Zoo Code v[version]`. Its body must include the source release and tag, Zoo Code release PR, VSIX release workflow and release creation timestamp, summary, package version synchronization, per-PR impact matrix and exclusions, evergreen changes or no-change rationale, validation results and warning review, and an explicit statement that this is a separate docs PR and will not be auto-merged. Never enable auto-merge for this PR.
 
     **Reporting and partial failure**
 
     - Docs failure cannot roll back or invalidate the published extension. A failure report must begin: `Zoo Code v[version] is already published and docs PR completion is pending.` Then report the failed checkpoint, checkout path, branch, PR URL/state when present, failure details, and the safe recovery action.
-    - The final release report must include release/tag/workflow URLs and the successful publication timestamp, the Zoo Code release PR merge-queue state, docs PR URL/state, docs branch and commit SHA, package-version synchronization status, release-note/index/sidebar status, evergreen documentation status, validation results and inspected warnings, and confirmation that the separate docs PR was not auto-merged.
+    - The final release report must include release/tag/workflow URLs and the release creation timestamp, the Zoo Code release PR merge-queue state, docs PR URL/state, docs branch and commit SHA, package-version synchronization status, release-note/index/sidebar status, evergreen documentation status, validation results and inspected warnings, and confirmation that the separate docs PR was not auto-merged.

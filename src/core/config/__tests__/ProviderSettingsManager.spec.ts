@@ -1,5 +1,7 @@
 // npx vitest src/core/config/__tests__/ProviderSettingsManager.spec.ts
 
+import * as vscode from "vscode"
+
 import {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	OpenAiCodexServiceTier,
@@ -10,7 +12,7 @@ import {
 } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
-import { makeExtensionContext } from "../../../test-utils/vscode"
+import { makeEventEmitter, makeExtensionContext } from "../../../test-utils/vscode"
 
 import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsManager"
 
@@ -74,8 +76,68 @@ const mockContext = makeExtensionContext({
 	globalState: { ...baseContext.globalState, ...mockGlobalState },
 })
 
+// This test double provides the get, has, inspect, and update methods used by the manager.
+const makeProviderWorkspaceConfiguration = (values: Record<string, unknown> = {}): vscode.WorkspaceConfiguration =>
+	({
+		get: vi.fn(
+			<T>(section: string, defaultValue?: T) =>
+				(section in values ? values[section] : defaultValue) as T | undefined,
+		),
+		has: vi.fn((section: string) => section in values),
+		inspect: vi.fn(),
+		update: vi.fn().mockResolvedValue(undefined),
+	}) as unknown as vscode.WorkspaceConfiguration
+
+const makeCustomStorageContext = ({
+	customStoragePath = "",
+	secrets = new Map<string, string>(),
+	globalState = new Map<string, unknown>(),
+}: {
+	customStoragePath?: string
+	secrets?: Map<string, string>
+	globalState?: Map<string, unknown>
+} = {}) => {
+	const secretStorage: vscode.SecretStorage = {
+		get: vi.fn(async (key: string) => secrets.get(key)),
+		store: vi.fn(async (key: string, value: string) => {
+			secrets.set(key, value)
+		}),
+		delete: vi.fn(async (key: string) => {
+			secrets.delete(key)
+		}),
+		onDidChange: makeEventEmitter<vscode.SecretStorageChangeEvent>().event,
+	}
+	const testGlobalState: vscode.Memento & { setKeysForSync: (keys: readonly string[]) => void } = {
+		get: vi.fn(<T>(key: string) => globalState.get(key) as T | undefined),
+		update: vi.fn(async (key: string, value: unknown) => {
+			globalState.set(key, value)
+		}),
+		keys: vi.fn(() => [...globalState.keys()]),
+		setKeysForSync: vi.fn(),
+	}
+	const context = makeExtensionContext({
+		secrets: secretStorage,
+		globalState: testGlobalState,
+	})
+
+	vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
+		makeProviderWorkspaceConfiguration({ customStoragePath }),
+	)
+
+	return { context, secrets, globalState }
+}
+
+const legacySecretKey = "roo_cline_config_api_config"
+
+const parseStoredProfiles = (value: string | null | undefined): ProviderProfiles | undefined =>
+	value ? (JSON.parse(value) as ProviderProfiles) : undefined
+
 describe("ProviderSettingsManager", () => {
 	let providerSettingsManager: ProviderSettingsManager
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
 
 	beforeEach(() => {
 		clearAllMocks()
@@ -575,6 +637,235 @@ describe("ProviderSettingsManager", () => {
 			await expect(providerSettingsManager.initialize()).rejects.toThrow(
 				"Failed to initialize config: Error: Failed to read provider profiles from secrets: Error: Storage failed",
 			)
+		})
+	})
+
+	describe("custom storage scope", () => {
+		it("uses the legacy global key when no custom storage path is configured", () => {
+			const configSpy = vi
+				.spyOn(vscode.workspace, "getConfiguration")
+				.mockReturnValue(makeProviderWorkspaceConfiguration({ customStoragePath: "" }))
+			const manager = new ProviderSettingsManager(mockContext)
+
+			expect(manager["secretsKey"]).toBe(legacySecretKey)
+			expect(configSpy).toHaveBeenCalledWith("zoo-code")
+		})
+
+		it("uses the legacy global key when customStoragePath is not a string", () => {
+			vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue(
+				makeProviderWorkspaceConfiguration({ customStoragePath: [] }),
+			)
+			const manager = new ProviderSettingsManager(mockContext)
+
+			expect(manager["secretsKey"]).toBe(legacySecretKey)
+		})
+
+		it("uses different secret keys for different custom storage paths", () => {
+			const managerA = new ProviderSettingsManager(mockContext, "C:\\Projects\\A\\.vscode\\zoo-code")
+			const managerB = new ProviderSettingsManager(mockContext, "C:\\Projects\\B\\.vscode\\zoo-code")
+
+			expect(managerA["secretsKey"]).not.toBe(managerB["secretsKey"])
+		})
+
+		it("uses the same secret key for the same normalized custom storage path", () => {
+			const managerA = new ProviderSettingsManager(mockContext, "C:/Projects/A/.vscode/zoo-code")
+			const managerB = new ProviderSettingsManager(mockContext, "c:\\Projects\\A\\.vscode\\zoo-code")
+
+			expect(managerA["secretsKey"]).toBe(managerB["secretsKey"])
+		})
+
+		it("keeps provider configurations isolated across differently scoped managers", async () => {
+			const pathA = "C:/Projects/A/.vscode/zoo-code"
+			const pathB = "C:/Projects/B/.vscode/zoo-code"
+			const { context: contextA } = makeCustomStorageContext({ customStoragePath: pathA })
+			const { context: contextB } = makeCustomStorageContext({ customStoragePath: pathB })
+			const managerA = new ProviderSettingsManager(contextA, pathA)
+			const managerB = new ProviderSettingsManager(contextB, pathB)
+
+			await managerA.saveConfig("profile-a", {
+				id: "profile-a-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet-20241022",
+			})
+			await managerB.saveConfig("profile-b", {
+				id: "profile-b-id",
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4o",
+			})
+
+			await managerA.activateProfile({ name: "profile-a" })
+			await managerB.activateProfile({ name: "profile-b" })
+
+			expect(await managerA.listConfig()).toEqual(
+				expect.arrayContaining([expect.objectContaining({ name: "profile-a" })]),
+			)
+			expect(await managerB.listConfig()).toEqual(
+				expect.arrayContaining([expect.objectContaining({ name: "profile-b" })]),
+			)
+			expect((await managerA.getProfile({ name: "profile-a" })).apiProvider).toBe(providerIdentifiers.anthropic)
+			expect((await managerB.getProfile({ name: "profile-b" })).apiProvider).toBe(providerIdentifiers.openai)
+			expect(await managerA.hasConfig("profile-b")).toBe(false)
+			expect(await managerB.hasConfig("profile-a")).toBe(false)
+		})
+
+		it("migrates the legacy global configuration into the custom storage scope without deleting the legacy entry", async () => {
+			const legacyProfiles: ProviderProfiles = {
+				currentApiConfigName: "legacy-default",
+				apiConfigs: {
+					"legacy-default": {
+						id: "legacy-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet-20241022",
+					},
+				},
+				modeApiConfigs: {},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					toolRepetitionLimitsMigrated: true,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+				},
+			}
+
+			const { context, secrets, globalState } = makeCustomStorageContext({
+				customStoragePath: "C:/Projects/A/.vscode/zoo-code",
+			})
+			secrets.set(legacySecretKey, JSON.stringify(legacyProfiles))
+			const manager = new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")
+
+			await manager.initialize()
+
+			const scopedKey = manager["secretsKey"]
+			expect(secrets.get(scopedKey)).toBeTruthy()
+			expect(parseStoredProfiles(secrets.get(scopedKey))).toMatchObject({
+				currentApiConfigName: "legacy-default",
+			})
+			expect(secrets.get(legacySecretKey)).toBe(JSON.stringify(legacyProfiles))
+			expect(globalState.get(`${scopedKey}:migration-complete`)).toBe(true)
+		})
+
+		it("prefers an existing scoped configuration over the legacy global configuration", async () => {
+			const legacyProfiles: ProviderProfiles = {
+				currentApiConfigName: "legacy",
+				apiConfigs: {
+					legacy: { id: "legacy-id", apiProvider: providerIdentifiers.openai, apiModelId: "gpt-4o" },
+				},
+				modeApiConfigs: {},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					toolRepetitionLimitsMigrated: true,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+				},
+			}
+			const scopedProfiles: ProviderProfiles = {
+				currentApiConfigName: "scoped",
+				apiConfigs: {
+					scoped: {
+						id: "scoped-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet-20241022",
+					},
+				},
+				modeApiConfigs: {},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					toolRepetitionLimitsMigrated: true,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+				},
+			}
+
+			const { context, secrets } = makeCustomStorageContext({
+				customStoragePath: "C:/Projects/A/.vscode/zoo-code",
+			})
+			secrets.set(legacySecretKey, JSON.stringify(legacyProfiles))
+			secrets.set(
+				new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")["secretsKey"],
+				JSON.stringify(scopedProfiles),
+			)
+
+			const manager = new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")
+			await manager.initialize()
+
+			const current = parseStoredProfiles(secrets.get(manager["secretsKey"]))
+			expect(current?.currentApiConfigName).toBe("scoped")
+			expect(parseStoredProfiles(secrets.get(legacySecretKey))?.currentApiConfigName).toBe("legacy")
+		})
+
+		it("keeps the migration marker across resetAllConfigs and does not re-import the legacy configuration", async () => {
+			const legacyProfiles: ProviderProfiles = {
+				currentApiConfigName: "legacy-default",
+				apiConfigs: {
+					"legacy-default": {
+						id: "legacy-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet-20241022",
+					},
+				},
+				modeApiConfigs: {},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					toolRepetitionLimitsMigrated: true,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+				},
+			}
+			const { context, secrets, globalState } = makeCustomStorageContext({
+				customStoragePath: "C:/Projects/A/.vscode/zoo-code",
+			})
+			secrets.set(legacySecretKey, JSON.stringify(legacyProfiles))
+			const manager = new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")
+
+			await manager.initialize()
+			await manager.resetAllConfigs()
+
+			const scopedKey = manager["secretsKey"]
+			expect(secrets.has(scopedKey)).toBe(false)
+			expect(secrets.get(legacySecretKey)).toBe(JSON.stringify(legacyProfiles))
+			expect(globalState.get(`${scopedKey}:migration-complete`)).toBe(true)
+
+			const reloadedManager = new ProviderSettingsManager(context, "C:/Projects/A/.vscode/zoo-code")
+			await reloadedManager.initialize()
+			expect(secrets.get(scopedKey)).toBeUndefined()
+			expect(parseStoredProfiles(secrets.get(legacySecretKey))?.currentApiConfigName).toBe("legacy-default")
+		})
+
+		it("does not delete or affect another manager's scoped configuration when resetting a different scope", async () => {
+			const pathA = "C:/Projects/A/.vscode/zoo-code"
+			const pathB = "C:/Projects/B/.vscode/zoo-code"
+			const { context: contextA, secrets: secretsA } = makeCustomStorageContext({ customStoragePath: pathA })
+			const { context: contextB } = makeCustomStorageContext({ customStoragePath: pathB })
+			const managerA = new ProviderSettingsManager(contextA, pathA)
+			const managerB = new ProviderSettingsManager(contextB, pathB)
+
+			await managerA.saveConfig("profile-a", {
+				id: "a",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet-20241022",
+			})
+			await managerB.saveConfig("profile-b", {
+				id: "b",
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4o",
+			})
+
+			await managerA.resetAllConfigs()
+
+			expect(secretsA.get(managerA["secretsKey"])).toBeUndefined()
+			expect(await managerB.hasConfig("profile-b")).toBe(true)
 		})
 	})
 

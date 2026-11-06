@@ -28,6 +28,7 @@ import { SearchableSetting } from "./SearchableSetting"
 type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
+	disableAutoContextManagement: boolean
 	listApiConfigMeta: any[]
 	maxOpenTabsContext: number
 	maxWorkspaceFiles: number
@@ -48,6 +49,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	setCachedStateField: SetCachedStateField<
 		| "autoCondenseContext"
 		| "autoCondenseContextPercent"
+		| "disableAutoContextManagement"
 		| "maxOpenTabsContext"
 		| "maxWorkspaceFiles"
 		| "showRooIgnoredFiles"
@@ -68,6 +70,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 export const ContextManagementSettings = ({
 	autoCondenseContext,
 	autoCondenseContextPercent,
+	disableAutoContextManagement,
 	listApiConfigMeta,
 	maxOpenTabsContext,
 	maxWorkspaceFiles,
@@ -510,6 +513,22 @@ export const ContextManagementSettings = ({
 						data-testid="auto-condense-context-checkbox">
 						<span className="font-medium">{t("settings:contextManagement.autoCondenseContext.name")}</span>
 					</VSCodeCheckbox>
+				</SearchableSetting>
+				<SearchableSetting
+					settingId="context-disable-auto-management"
+					section="contextManagement"
+					label={t("settings:contextManagement.disableAutoContextManagement.name")}>
+					<VSCodeCheckbox
+						checked={disableAutoContextManagement}
+						onChange={(e: any) => setCachedStateField("disableAutoContextManagement", e.target.checked)}
+						data-testid="disable-auto-context-management-checkbox">
+						<span className="font-medium">
+							{t("settings:contextManagement.disableAutoContextManagement.name")}
+						</span>
+					</VSCodeCheckbox>
+					<div className="text-sm text-vscode-descriptionForeground mt-1">
+						{t("settings:contextManagement.disableAutoContextManagement.description")}
+					</div>
 				</SearchableSetting>
 				{autoCondenseContext && (
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">

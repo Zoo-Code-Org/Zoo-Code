@@ -714,6 +714,10 @@
 		"autoCondenseContext": {
 			"name": "Akıllı bağlam sıkıştırmayı otomatik olarak tetikle"
 		},
+		"disableAutoContextManagement": {
+			"name": "Otomatik bağlam sıkıştırmayı ve kısaltmayı devre dışı bırak",
+			"description": "Etkinleştirildiğinde Zoo Code, bağlam penceresi hatasından sonra bile görev bağlamını otomatik olarak sıkıştırmaz veya kısaltmaz. Bağlam penceresi sınırlarını aşmaktan kaçınmak sizin sorumluluğunuzdadır. Bağlamı elle sıkıştırma seçeneği kullanılabilir olmaya devam eder."
+		},
 		"openTabs": {
 			"label": "Açık sekmeler bağlam sınırı",
 			"description": "Bağlama dahil edilecek maksimum VSCode açık sekme sayısı. Daha yüksek değerler daha fazla bağlam sağlar ancak token kullanımını artırır."

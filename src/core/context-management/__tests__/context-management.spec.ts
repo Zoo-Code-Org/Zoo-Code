@@ -267,6 +267,46 @@ describe("Context Management", () => {
 	 * Tests for the manageContext function
 	 */
 	describe("manageContext", () => {
+		it("does not condense or truncate when automatic context management is disabled", async () => {
+			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
+			const messages: ApiMessage[] = [
+				{ role: "user", content: [{ type: "text", text: "Large context" }] },
+				{ role: "user", content: [{ type: "text", text: "Latest message" }] },
+			]
+
+			const result = await manageContext({
+				messages,
+				totalTokens: 200_000,
+				contextWindow: 100_000,
+				maxTokens: 10_000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				disableAutoContextManagement: true,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.messages).toBe(messages)
+			expect(result.truncationId).toBeUndefined()
+			expect(result.summary).toBe("")
+			expect(summarizeSpy).not.toHaveBeenCalled()
+			expect(
+				willManageContext({
+					totalTokens: 200_000,
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+					autoCondenseContext: true,
+					autoCondenseContextPercent: 70,
+					disableAutoContextManagement: true,
+					profileThresholds: {},
+					currentProfileId: "default",
+					lastMessageTokens: 1,
+				}),
+			).toBe(false)
+		})
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
 			contextWindow,
 			supportsPromptCache: true,

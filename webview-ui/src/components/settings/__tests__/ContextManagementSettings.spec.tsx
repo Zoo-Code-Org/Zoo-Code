@@ -97,6 +97,7 @@ describe("ContextManagementSettings", () => {
 	const defaultProps = {
 		autoCondenseContext: false,
 		autoCondenseContextPercent: 80,
+		disableAutoContextManagement: false,
 		listApiConfigMeta: [],
 		maxOpenTabsContext: 20,
 		maxWorkspaceFiles: 200,
@@ -112,6 +113,15 @@ describe("ContextManagementSettings", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	it("updates the automatic context management opt-out from the cached setting", () => {
+		const setCachedStateField = vi.fn()
+		render(<ContextManagementSettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+		fireEvent.click(screen.getByTestId("disable-auto-context-management-checkbox").querySelector("input")!)
+
+		expect(setCachedStateField).toHaveBeenCalledWith("disableAutoContextManagement", true)
 	})
 
 	it("renders diagnostic settings", () => {
