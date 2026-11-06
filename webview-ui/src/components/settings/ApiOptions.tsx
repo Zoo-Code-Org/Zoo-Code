@@ -308,11 +308,12 @@ const ApiOptions = ({
 
 		const apiValidationResult = validateApiConfigurationExcludingModelErrors(
 			apiConfiguration,
+			t,
 			routerModels,
 			organizationAllowList,
 		)
 		setErrorMessage(apiValidationResult)
-	}, [apiConfiguration, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
+	}, [apiConfiguration, t, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
 
 	const onProviderChange = useCallback(
 		(value: ProviderName) => {
@@ -378,8 +379,8 @@ const ApiOptions = ({
 	)
 
 	const modelValidationError = useMemo(() => {
-		return getModelValidationError(apiConfiguration, routerModels, organizationAllowList)
-	}, [apiConfiguration, routerModels, organizationAllowList])
+		return getModelValidationError(apiConfiguration, t, routerModels, organizationAllowList)
+	}, [apiConfiguration, t, routerModels, organizationAllowList])
 
 	const docs = useMemo(() => {
 		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)

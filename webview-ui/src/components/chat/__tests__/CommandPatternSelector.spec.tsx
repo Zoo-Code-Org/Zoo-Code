@@ -5,10 +5,13 @@ import { CommandPatternSelector } from "../CommandPatternSelector"
 import { TooltipProvider } from "../../../components/ui/tooltip"
 
 // Mock react-i18next
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key,
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: any) => <span>{i18nKey || children}</span>,
 }))
 

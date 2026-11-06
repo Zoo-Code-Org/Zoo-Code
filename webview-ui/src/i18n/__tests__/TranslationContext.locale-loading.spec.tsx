@@ -13,12 +13,12 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 
 const Probe = () => {
-	const { t, i18n } = useAppTranslation()
+	const { t, language } = useAppTranslation()
 
 	return (
 		<div>
 			<span data-testid="error-title">{t("common:errorBoundary.title")}</span>
-			<span data-testid="active-language">{i18n.language}</span>
+			<span data-testid="active-language">{language}</span>
 		</div>
 	)
 }
@@ -127,6 +127,25 @@ describe("TranslationProvider locale loading", () => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Une erreur s'est produite")
 		})
 		expect(screen.getByTestId("active-language")).toHaveTextContent("fr")
+	})
+
+	it("lets a newer request win over an earlier one that is still loading", async () => {
+		const { rerender } = renderProbe("pt-BR")
+
+		// Portuguese is still in flight when English is requested; its late resolution must not switch back.
+		extensionState.language = "en"
+		await act(async () => {
+			rerender(
+				<TranslationProvider>
+					<Probe />
+				</TranslationProvider>,
+			)
+		})
+		await loadLanguage("pt-BR")
+
+		expect(i18next.language).toBe("en")
+		expect(screen.getByTestId("active-language")).toHaveTextContent("en")
+		expect(screen.getByTestId("error-title")).toHaveTextContent("Something went wrong")
 	})
 
 	it("skips the language switch when the provider unmounts before the fetch resolves", async () => {

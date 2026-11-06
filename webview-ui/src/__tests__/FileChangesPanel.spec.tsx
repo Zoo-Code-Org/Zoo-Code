@@ -14,8 +14,8 @@ vi.mock("@src/utils/vscode", () => ({
 }))
 
 // Mock i18n to return readable header with count
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string, opts?: { count?: number }) => {
 			if (key === "chat:fileChangesInConversation.header" && opts?.count != null) {
 				return `${opts.count} file(s) changed in this conversation`

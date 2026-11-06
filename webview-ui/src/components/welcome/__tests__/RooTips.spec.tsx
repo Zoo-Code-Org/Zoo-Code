@@ -3,10 +3,13 @@ import { render, screen } from "@/utils/test-utils"
 
 import RooTips from "../RooTips"
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key, // Simple mock that returns the key
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({
 		children,
 		components,

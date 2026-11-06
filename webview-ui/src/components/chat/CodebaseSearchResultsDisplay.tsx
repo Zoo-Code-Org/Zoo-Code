@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import CodebaseSearchResult from "./CodebaseSearchResult"
 import { Trans } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 interface CodebaseSearchResultsDisplayProps {
 	results: Array<{
@@ -13,6 +14,7 @@ interface CodebaseSearchResultsDisplayProps {
 }
 
 const CodebaseSearchResultsDisplay: React.FC<CodebaseSearchResultsDisplayProps> = ({ results }) => {
+	const { t } = useAppTranslation()
 	const [codebaseSearchResultsExpanded, setCodebaseSearchResultsExpanded] = useState(false)
 
 	return (
@@ -22,6 +24,7 @@ const CodebaseSearchResultsDisplay: React.FC<CodebaseSearchResultsDisplayProps> 
 				className="cursor-pointer flex items-center justify-between px-2 py-2 border bg-[var(--vscode-editor-background)] border-[var(--vscode-editorGroup-border)]">
 				<span>
 					<Trans
+						t={t}
 						i18nKey="chat:codebaseSearch.didSearch"
 						count={results.length}
 						values={{ count: results.length }}
