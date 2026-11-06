@@ -76,6 +76,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
+import { cancelSessionTitle, type SessionTitleApplyResult } from "../task/session-title"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
 import {
@@ -2809,6 +2810,7 @@ export class ClineProvider
 	 * clears it so the history falls back to the original prompt.
 	 */
 	async renameTaskWithId(id: string, title: string | undefined) {
+		cancelSessionTitle(id)
 		if (!this.taskHistoryStore.get(id)) {
 			this.log(`[renameTaskWithId] task ${id} not found in history`)
 			return
@@ -2831,6 +2833,38 @@ export class ClineProvider
 		}
 	}
 
+	/*
+	 * Applies an auto-generated session title, but only while the item still
+	 * carries its default name. The title check runs inside the store's
+	 * lock and re-reads the title on disk, so a manual rename that lands while a title is
+	 * generating always wins and is never overwritten. Returns "conflict"
+	 * when nothing was applied (an existing title won, or the title was
+	 * blank); throws on transient write failures so the caller can retry.
+	 */
+	async applySessionTitle(id: string, title: string): Promise<SessionTitleApplyResult> {
+		const trimmed = title.trim()
+		if (!trimmed) {
+			return "conflict"
+		}
+
+		const result = await this.taskHistoryStore.setTitleIfUnset(id, trimmed)
+		if (result === "conflict") {
+			return "conflict"
+		}
+
+		this.recentTasksCache = undefined
+
+		if (this.isViewLaunched) {
+			const updatedItem = this.taskHistoryStore.get(id)
+			// Stryker disable next-line ConditionalExpression: equivalent mutant, setTitleIfUnset guarantees the item is in the cache
+			if (updatedItem) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+			}
+		}
+
+		return "applied"
+	}
+
 	/* Condenses a task's message history to use fewer tokens. */
 	async condenseTaskContext(taskId: string) {
 		const task = this.taskRegistry.getById(taskId)
@@ -2844,6 +2878,7 @@ export class ClineProvider
 	// this function deletes a task from task history, and deletes its checkpoints and delete the task folder
 	// If the task has subtasks (childIds), they will also be deleted recursively
 	async deleteTaskWithId(id: string, cascadeSubtasks: boolean = true) {
+		cancelSessionTitle(id)
 		try {
 			await this.getTaskWithId(id)
 
@@ -3637,9 +3672,10 @@ export class ClineProvider
 	 * Updates a task in the task history and optionally broadcasts the updated history to the webview.
 	 * Now delegates to TaskHistoryStore for per-task file persistence.
 	 *
-	 * This writer never owns the `title` field: `title` is written only by the rename path
-	 * (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`). Callers here build items
-	 * from snapshots read before taking the store lock, so any title they carry can be stale.
+	 * This writer never owns the `title` field: `title` is written only by the title-owning paths
+	 * (`renameTaskWithId` via `atomicReadAndUpdate` and `applySessionTitle` via `setTitleIfUnset`).
+	 * Callers here build items from snapshots read before taking the store lock, so any title they
+	 * carry can be stale.
 	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
