@@ -5536,7 +5536,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
-		const { profileThresholds = {} } = state ?? {}
+		const { profileThresholds = {}, disableAutoContextManagement = false } = state ?? {}
+		if (disableAutoContextManagement) {
+			return
+		}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
@@ -5706,6 +5709,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			autoApprovalEnabled,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
+			disableAutoContextManagement = false,
 			profileThresholds = {},
 		} = state ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
@@ -5804,6 +5808,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				maxTokens,
 				autoCondenseContext,
 				autoCondenseContextPercent,
+				disableAutoContextManagement,
 				profileThresholds,
 				currentProfileId,
 				lastMessageTokens,
@@ -5824,7 +5829,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			let contextMgmtTools: import("openai").default.Chat.ChatCompletionTool[] = []
 			{
 				const provider = this.providerRef.deref()
-				if (provider) {
+				if (provider && !disableAutoContextManagement) {
 					const toolsResult = await buildNativeToolsArrayWithRestrictions({
 						provider,
 						cwd: this.cwd,
@@ -5880,6 +5885,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					apiHandler: this.api,
 					autoCondenseContext,
 					autoCondenseContextPercent,
+					disableAutoContextManagement,
 					systemPrompt,
 					taskId: this.taskId,
 					customCondensingPrompt,
@@ -6049,7 +6055,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			// If it's a context window error and we haven't exceeded max retries for this error type
-			if (isContextWindowExceededError && retryAttempt < MAX_CONTEXT_WINDOW_RETRIES) {
+			if (
+				isContextWindowExceededError &&
+				!disableAutoContextManagement &&
+				retryAttempt < MAX_CONTEXT_WINDOW_RETRIES
+			) {
 				console.warn(
 					`[Task#${this.taskId}] Context window exceeded for model ${this.api.getModel().id}. ` +
 						`Retry attempt ${retryAttempt + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +

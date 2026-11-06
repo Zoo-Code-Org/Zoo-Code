@@ -1,5 +1,6 @@
 import { MessageManager } from "./index"
 import * as condenseModule from "../condense"
+import type { ApiMessage } from "../task-persistence/apiMessages"
 
 describe("MessageManager", () => {
 	let mockTask: any
@@ -247,6 +248,42 @@ describe("MessageManager", () => {
 				expect(apiCall.some((m) => m.isSummary && m.condenseId === condenseId)).toBe(summarySurvives)
 			},
 		)
+
+		it("should restore full context when rewinding before a compaction whose summary predates the checkpoint", async () => {
+			const condenseId = "summary-before-checkpoint"
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "Task" },
+				{ ts: 200, say: "checkpoint_saved", text: "checkpoint-hash" },
+				{ ts: 300, say: "condense_context", contextCondense: { condenseId, summary: "Summary" } },
+				{ ts: 400, say: "user", text: "After compaction" },
+			]
+
+			mockTask.apiConversationHistory = [
+				{
+					ts: 100,
+					role: "user",
+					content: [{ type: "text", text: "Original user context" }],
+					condenseParent: condenseId,
+				},
+				{
+					ts: 150,
+					role: "assistant",
+					content: [{ type: "text", text: "Original assistant context" }],
+					condenseParent: condenseId,
+				},
+				{ ts: 175, role: "user", content: [{ type: "text", text: "Summary" }], isSummary: true, condenseId },
+				{ ts: 250, role: "user", content: [{ type: "text", text: "After compaction" }] },
+			]
+
+			await manager.rewindToTimestamp(200, { includeTargetMessage: true })
+
+			const apiHistory = mockTask.overwriteApiConversationHistory.mock.calls[0][0] as ApiMessage[]
+			expect(apiHistory).toHaveLength(2)
+			expect(apiHistory.some((message) => message.isSummary)).toBe(false)
+			expect(apiHistory[0].content).toEqual([{ type: "text", text: "Original user context" }])
+			expect(apiHistory[1].content).toEqual([{ type: "text", text: "Original assistant context" }])
+		})
 
 		it("should clear orphaned condenseParent tags via cleanup", async () => {
 			const condenseId = "summary-123"

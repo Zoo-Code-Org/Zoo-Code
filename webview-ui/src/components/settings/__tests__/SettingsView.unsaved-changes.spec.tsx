@@ -280,6 +280,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		alwaysAllowWriteProtected: false,
 		autoCondenseContext: false,
 		autoCondenseContextPercent: 50,
+		disableAutoContextManagement: false,
 		enableCheckpoints: false,
 		experiments: {},
 		maxOpenTabsContext: 10,
