@@ -181,6 +181,47 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		expect(getCommandDecision("echo $(cat <<E f#g | rm x\nhi\nE\n)", ["cat", "echo"], ["rm"])).toBe("auto_deny")
 	})
 
+	it("does not let a backslash-newline comment hide a denied payload from the lists", () => {
+		// The shell removes a backslash-newline pair before tokenizing, so the
+		// `#` after it starts the comment bash starts. When the comment line
+		// ends the frame's last command, the frame still closes at its `)` and
+		// the payload on the following line is its own segment: a deny rule on
+		// it decides the command, instead of the payload riding a mask the
+		// lists never see. When the comment swallows the frame closer and the
+		// heredoc opener, the payload re-scan starts at host level, where the
+		// same comment rule fires again and the executed line surfaces as its
+		// own word — the deny rule sees it there too. The even-run shape keeps
+		// the payload inside the open frame and still surfaces it to the
+		// denylist.
+		const denied = getCommandDecisionDetailed("echo $(a \\\n#b\nrm -rf /)", ["echo", "a"], ["rm"])
+		expect(denied.decision).toBe("auto_deny")
+		expect(denied.offendingCommand).toBe("rm -rf /")
+		expect(denied.matchedPattern).toBe("rm")
+
+		expect(getCommandDecision("echo $(a \\\n#b) <<E\nrm -rf /\n)\nE", ["echo"], ["rm"])).toBe("auto_deny")
+		expect(getCommandDecision("echo $(a\\\\\n#b) <<E\nzap x\n)\nE", ["echo"], ["zap"])).toBe("auto_deny")
+	})
+
+	it("does not let a host-level backslash-newline comment hide a denied payload from the lists", () => {
+		// Same hiding class one level up: at host level, each suppressed
+		// comment line made its `"` a live quote opener, and two such lines
+		// kept parity even, so executed lines rode quote-shaped segments the
+		// lists never matched. With the comments firing, the shape that still
+		// carries a live quote at end of input is refused outright — bash
+		// itself aborts on the same unmatched `"`. The quote-free shape keeps
+		// the executed line as its own word, so the deny rule sees it and the
+		// decision is auto_deny, naming the executed command.
+		const twoComment = 'echo a \\\n# "p\nprintf RAN1\n" q\nb \\\n# "r\nprintf RAN2\n" s'
+		expect(getCommandDecisionDetailed(twoComment, ["echo", "a", "q", "b", "s"], ["printf"]).decision).toBe(
+			"malformed_command",
+		)
+
+		const denied = getCommandDecisionDetailed("echo x \\\n# p\nprintf RAN", ["echo"], ["printf"])
+		expect(denied.decision).toBe("auto_deny")
+		expect(denied.offendingCommand).toBe("printf RAN")
+		expect(denied.matchedPattern).toBe("printf")
+	})
+
 	it("does not auto-approve a command hidden behind a |& pipe operator", () => {
 		// bash pipes stdout and stderr of `echo a` into `zap x`: `|&` is a pipe
 		// like `|`, so the right-hand command must match the lists on its own

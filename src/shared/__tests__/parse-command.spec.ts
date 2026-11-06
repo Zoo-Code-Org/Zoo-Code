@@ -1300,6 +1300,287 @@ describe("parseCommand", () => {
 			expect(parseCommand(input).commands).toEqual([input])
 		})
 
+		it("keeps every executed command visible when a continuation comment swallows the frame closer and a quote", () => {
+			// The shell removes a backslash-newline pair before tokenizing, so
+			// the `#` that follows one sits at a real word boundary and starts
+			// the comment bash starts: it runs to end of line, swallowing the
+			// `)` and the opening `'`. The quote never opens. The frame stays
+			// open past the swallowed closer, closes at the next `)` — the one
+			// inside `>&2` — and the payload re-scan surfaces each executed
+			// command as its own segment. The `#` after that closer is a host
+			// comment again, so the trailing `'` never opens either. bash runs
+			// `echo` and `printf MARKER` inside the substitution here; both
+			// surface to the command lists, so no executed byte rides a mask.
+			const input = "echo $(echo \\\n#x ) '\nprintf MARKER >&2) #'"
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError?.quoteType ?? null).toBeNull()
+			expect(commands).toEqual(["echo", "echo ", "printf MARKER >&2"])
+		})
+
+		it("extracts payloads when a continuation comment swallows the heredoc opener", () => {
+			// Same removal rule: the comment at the `#` swallows `) <<E` to end
+			// of line, so no heredoc opens, the body lines stay inside the
+			// substitution, and the shell comments bash comments. The scan
+			// reaches the `)` on its own line, closes the frame, and the
+			// payload re-scan runs the host rules: there the comment fires
+			// again, `zap x` surfaces as its own segment, and the `E` after
+			// the frame closer is an ordinary trailing word. bash runs
+			// `zap x` inside the substitution here, so every executed byte
+			// the shell expands stays visible to the command lists instead
+			// of riding a mask. Where the comment line ends the frame's last
+			// command instead, the frame closes at `)` and the payload after
+			// the comment line is extracted on its own segment; the comment
+			// bytes themselves are shell-discarded, never a segment.
+			const rows = [
+				{
+					input: "echo $(a \\\n#b) <<E\nzap x\n)\nE",
+					commands: ["echo", "a ", "zap x", "E"],
+					error: null,
+				},
+				{
+					input: "echo $(a \\\n#b\nrm -rf /)",
+					commands: ["echo", "a ", "rm -rf /"],
+					error: null,
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("keeps a glued backslash-newline-hash sequence word text inside a frame", () => {
+			// The removal leaves `a` directly before the `#`: mid-word, never a
+			// comment. bash runs the word `a#b` here, so the boundary walk must
+			// land on the `a`, not on the raw newline, and the frame must close
+			// at its `)` like any word-text frame.
+			const rows = [
+				{
+					input: "echo $(a\\\n#b)",
+					commands: ["echo", "a", "#b"],
+					error: null,
+				},
+				{
+					input: "echo $(printf %s a\\\n#b)",
+					commands: ["echo", "printf %s a", "#b"],
+					error: null,
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("tests the frame-comment boundary against the byte the shell sees", () => {
+			// The boundary walk pairs a backslash run off left to right, like
+			// the shell's tokenizer. An even run leaves the newline standing as
+			// a real line break, so a `#` after it is word-initial: the comment
+			// fires, swallows the frame closer and the opener remainder, and
+			// the payload inside the frame is extracted — the same reading as
+			// bash, which runs that payload inside the substitution. An odd run
+			// longer than one pairs down to an escaped backslash before the
+			// `#`; the walk here steps over the whole run, which reads the
+			// still-escaped `#` as word-initial and comments it: the frame
+			// stays open and the input is refused. bash runs the word in that
+			// shape, so the divergence is a refusal of input bash accepts — the
+			// safe direction, never the reverse. The end-of-frame pin walks
+			// over the frame opener to start-of-input, a boundary like any
+			// blank: bash loses the closer to the same comment and rejects the
+			// input with an unexpected-EOF error too. A backslash followed by
+			// CR is an escaped CR, not a continuation: the LF stays a real
+			// break and the comment fires on the raw boundary.
+			const rows = [
+				{
+					// Even run: the newline is a real break; the comment takes
+					// `) <<E` and `zap x` is extracted from inside the frame.
+					input: "echo $(a\\\\\n#b) <<E\nzap x\n)\nE",
+					commands: ["echo", "a\\", "zap x", "E"],
+					error: null,
+				},
+				{
+					// Odd run R=3: bash runs the word `a\#b`; the full-run step
+					// comments and fails closed instead (safe direction).
+					input: "echo $(printf %s a \\\\\\\n#b)",
+					commands: ["echo $(printf %s a \\\\\\\n#b)"],
+					error: "command-substitution",
+				},
+				{
+					// The continuation pair before the `#` is walked over; the
+					// space before the backslash is the boundary the shell sees,
+					// so the comment fires and swallows the frame closer.
+					input: "echo $( \\\n#)",
+					commands: ["echo $( \\\n#)"],
+					error: "command-substitution",
+				},
+				{
+					// Escaped CR: the LF stands, the comment fires, the frame
+					// never closes.
+					input: "echo $(a\\\r\n#b)",
+					commands: ["echo $(a\\\r\n#b)"],
+					error: "command-substitution",
+				},
+				{
+					// An even backslash run directly before the `#` ends in an
+					// escaped backslash: the `#` is mid-word word text and the
+					// frame closes normally.
+					input: "echo $(a \\\\#b)",
+					commands: ["echo", "a \\#b"],
+					error: null,
+				},
+				{
+					// Two stacked single continuations: both pairs are removed,
+					// so the shell sees `a` directly before the `#` — word
+					// text. The frame closes normally; the split segments are
+					// the host tokenizer's own reading of the continuation
+					// bytes, never a comment swallowing.
+					input: "echo $(a\\\n\\\n#b)",
+					commands: ["echo", "a", "", "#b"],
+					error: null,
+				},
+				{
+					// An odd run of one directly before the `#` escapes the
+					// `#` itself: literal word text, frame closes normally.
+					input: "echo $(a \\#b)",
+					commands: ["echo", "a #b"],
+					error: null,
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("walks continuations at the frame-comment boundary inside heredoc bodies", () => {
+			// The body walk carries the same tracker and the same boundary walk
+			// as the main scan, so a continuation comment inside a body frame
+			// reads the same. The swallowed-closer shape keeps every executed
+			// command visible: the body mask holds the raw text, and the
+			// unquoted-delimiter payload re-scan starts at host level, where
+			// the same comment rule fires on the `#` after the removed
+			// continuation pair — the quote on that line dies with the
+			// comment, and each executed command surfaces as its own segment.
+			// The glued shape stays word text with its frame closing normally.
+			const rows = [
+				{
+					input: "cat <<E\necho $(echo \\\n#x ) '\nprintf MARKER >&2) #'\nE",
+					commands: [
+						"cat <<E\necho $(echo \\\n#x ) '\nprintf MARKER >&2) #'\nE",
+						"echo ",
+						"printf MARKER >&2",
+					],
+					error: null,
+				},
+				{
+					input: "cat <<E\necho $(a\\\n#b)\nE",
+					commands: ["cat <<E\necho $(a\\\n#b)\nE", "a", "#b"],
+					error: null,
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("fires a host-level comment reached through a line continuation", () => {
+			// The shell removes a backslash-newline pair before tokenizing, so
+			// a `#` opening the continuation line is word-initial: the comment
+			// fires and every quote on that line dies with it. Recording the
+			// pair as an escape-pair word continuation suppressed both comments
+			// in the two-comment shape below: the `"` on each comment line
+			// opened a live mask, the pair kept quote parity even so the input
+			// parsed, and the executed lines rode the quote-shaped segments
+			// hidden from the command lists. With the comment firing, the one
+			// quote still live at end of input stays unterminated and the
+			// parser refuses the shape — the same reading bash reaches, which
+			// aborts on the same unmatched `"` after the executable printf
+			// lines have already run. The residual quote pairing need not be
+			// byte-exact to bash: the
+			// pinned security property is that an executed line is either a
+			// visible word or the input is refused. The quote-free rows show
+			// the visible-word side: the comment takes the `# p` / backtick
+			// bytes (a comment is not shell syntax, so no payload extracts) and
+			// the executed line surfaces as an ordinary word.
+			const rows = [
+				{
+					input: 'echo a \\\n# "p\nprintf RAN1\n" q\nb \\\n# "r\nprintf RAN2\n" s',
+					commands: ['echo a \\\n# "p\nprintf RAN1\n" q\nb \\\n# "r\nprintf RAN2\n" s'],
+					error: "double",
+				},
+				{
+					input: 'echo a \\\n# "p\nprintf RAN\n" q',
+					commands: ['echo a \\\n# "p\nprintf RAN\n" q'],
+					error: "double",
+				},
+				{
+					input: "echo x \\\n# p\nprintf RAN",
+					commands: ["echo x ", "printf RAN"],
+					error: null,
+				},
+				{
+					input: "echo a \\\n#c `printf RAN4`",
+					commands: ["echo a "],
+					error: null,
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
+		it("keeps host-level continuation word text on the accept path", () => {
+			// The recording guard excludes only the backslash-newline pair, so
+			// the accept paths bash runs must keep parsing as word text. A
+			// glued pair leaves the word bytes directly before the `#`: mid-
+			// word, no comment, and the following line stays its own word. At
+			// start of input the removal puts the `#` at the logical start: a
+			// comment, and nothing after it executes. Stacked pairs both
+			// remove, again gluing the word bytes to the `#`. An ordinary
+			// escape pair still records its end: a `#` after an escaped blank
+			// is word interior, and commenting it would refuse a word bash
+			// runs.
+			const rows = [
+				{
+					input: "printf %s a\\\n#b",
+					commands: ["printf %s a", "#b"],
+					error: null,
+				},
+				{
+					input: "a\\\n#b",
+					commands: ["a", "#b"],
+					error: null,
+				},
+				{
+					input: "\\\n#x",
+					commands: [""],
+					error: null,
+				},
+				{
+					input: "printf %s a\\\n\\\n#b",
+					commands: ["printf %s a", "", "#b"],
+					error: null,
+				},
+				{
+					input: "printf %s a\\ #b",
+					commands: ["printf %s a #b"],
+					error: null,
+				},
+			]
+			const observed = rows.map(({ input }) => {
+				const result = parseCommand(input)
+				return { commands: result.commands, error: result.parseError?.quoteType ?? null }
+			})
+			expect(observed).toEqual(rows.map(({ input: _input, ...expected }) => expected))
+		})
+
 		it("does not treat exotic JS-\\s bytes as shell word separators", () => {
 			// bash word-splits on the default $IFS blanks (space, tab, newline)
 			// only. JS `\s` is wider — VT, FF, NBSP, U+3000, U+2001, U+2028 —

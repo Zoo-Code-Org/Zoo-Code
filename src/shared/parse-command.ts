@@ -269,6 +269,34 @@ const IFS_BLANK = /[ \t\n]/
 const WORD_BOUNDARY_BEFORE = /[ \t\n;&()|<>]/
 
 /**
+ * True when the byte the shell sees before `text[i]` ends a word. A
+ * backslash-newline pair is removed by the shell before tokenizing, so a
+ * word-boundary test must read the shell's logical text, not the raw bytes.
+ * A backslash run of length R ending at a newline pairs off left to right:
+ * an odd R ends in the pairing backslash, so the newline is swallowed as a
+ * continuation and the byte before the run is what precedes the word; an
+ * even R leaves the newline standing as a real line break. Neither walk
+ * carries an index bound: reading before index 0 yields undefined, which is
+ * neither a newline nor a backslash, so the character tests stop both walks
+ * at the start of input, where the word boundary is implicit.
+ */
+function logicalWordBoundaryBefore(text: string, i: number): boolean {
+	let prev = i - 1
+	while (text[prev] === "\n") {
+		let run = 0
+		while (text[prev - run - 1] === "\\") {
+			run++
+		}
+		if (run % 2 === 0) {
+			// Even run (including none): the newline is a real line break.
+			break
+		}
+		prev -= run + 1
+	}
+	return prev < 0 || WORD_BOUNDARY_BEFORE.test(text[prev])
+}
+
+/**
  * Trim only the blanks a shell reader drops at the edges of a word run. JS
  * `trim` also strips the exotic characters bash reads as ordinary word bytes;
  * dropping them would move a following `#` from mid-word to word start, where
@@ -423,17 +451,23 @@ function scanShellSyntax(text: string): ScanOutcome {
 	// only frame-kind pops set this index.
 	// Stryker disable next-line UnaryOperator: the guard only consults this sentinel at a frame-comment position, and the scan index is never 1 inside a frame (frame content starts at least two past the opener), so no reachable input distinguishes `+1` from `-1`.
 	let frameCloseEnd = -1
-	// Index just past the most recent `\c` escape pair consumed inside an open
-	// frame, or -1. To the shell the escaped character is an ordinary word
-	// character, so a `#` directly after the pair continues the word instead of
-	// starting a comment, even when the escaped character is a blank.
+	// Index just past the most recent ordinary `\c` escape pair consumed
+	// inside an open frame, or -1. To the shell the escaped character is an
+	// ordinary word character, so a `#` directly after the pair continues the
+	// word instead of starting a comment, even when the escaped character is a
+	// blank. A backslash-newline pair is excluded: the shell removes that pair
+	// before tokenizing, so it leaves no word content behind, and the frame
+	// comment rule decides a `#` after it against the logical boundary instead.
 	// Stryker disable next-line NumberLiteral,UnaryOperator: the replacements for this -1 sentinel (0, 1, and +1) can never equal the scan index at a frame-comment position — frame content starts at least two past the frame's opener — so no reachable input distinguishes them from `-1`.
 	let frameEscapeEnd = -1
 	// Index just past the most recent `\c` escape pair that the scan emitted
 	// at host level, or -1. To the shell, the escaped character is an ordinary
 	// word character. The word continues past the pair. A `#` directly at this
 	// index is word content, even when the escaped character is whitespace or
-	// a metacharacter in the raw text.
+	// a metacharacter in the raw text. A backslash-newline pair is excluded:
+	// the shell removes that pair before tokenizing, so it leaves no word
+	// content behind, and the comment rule decides a following `#` against the
+	// logical boundary instead.
 	let escapedWordCharEnd = -1
 
 	const mark = (name: string): string => `${NUL}${name}${NUL}`
@@ -1339,10 +1373,13 @@ function scanShellSyntax(text: string): ScanOutcome {
 		// the group path never sets this index.
 		// Stryker disable next-line UnaryOperator: every walk starts at or past index 2 and frame content starts later still, so the sentinel `+1` can never equal the scan index at a frame-comment position, and no reachable input distinguishes it from `-1`.
 		let frameCloseEnd = -1
-		// Index just past the most recent `\c` escape pair consumed inside a
-		// frame, or -1. The escaped character is word content to the shell, so
-		// a `#` directly after the pair continues the word even when the
-		// escaped character is a blank.
+		// Index just past the most recent ordinary `\c` escape pair consumed
+		// inside a frame, or -1. The escaped character is word content to the
+		// shell, so a `#` directly after the pair continues the word even when
+		// the escaped character is a blank. A backslash-newline pair is
+		// excluded: the shell removes it before tokenizing, leaving no word
+		// content, so the frame comment rule decides a `#` after it against the
+		// logical boundary instead.
 		// Stryker disable next-line NumberLiteral,UnaryOperator: the replacements for this -1 sentinel (0, 1, +1) can never equal the scan index at a frame-comment position — frame content starts past index 2 — so no reachable input distinguishes them from `-1`.
 		let frameEscapeEnd = -1
 		let i = start
@@ -1351,7 +1388,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 			const top = frames[frames.length - 1]
 			if (top) {
 				if (top.escaped && char === "\\") {
-					frameEscapeEnd = i + 2
+					// A backslash-newline pair is removed by the shell before
+					// tokenizing, so recording it as a word-continuation end
+					// would exempt a `#` that follows from the comment rule and
+					// hide a comment that swallows the frame closer. Byte
+					// consumption is identical either way.
+					if (text[i + 1] !== "\n") {
+						frameEscapeEnd = i + 2
+					}
 					i += 2
 					continue
 				}
@@ -1371,13 +1415,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 				// the expansion, not the word. Directly at `frameEscapeEnd` it
 				// continues too: the escaped character — a blank included — is
 				// word content, so the raw blank before the `#` is not a real
-				// word boundary.
+				// word boundary. The boundary byte is the one the shell sees,
+				// so backslash-newline continuations are walked over first.
 				if (
 					char === "#" &&
 					(top.kind === "command-substitution" || top.kind === "process-substitution") &&
 					i !== frameCloseEnd &&
 					i !== frameEscapeEnd &&
-					WORD_BOUNDARY_BEFORE.test(text[i - 1])
+					logicalWordBoundaryBefore(text, i)
 				) {
 					// Clamp at the region end. A comment that runs past it
 					// leaves the frame open, and the still-open frame fails
@@ -1862,7 +1907,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 
 		if (top) {
 			if (top.escaped && char === "\\") {
-				frameEscapeEnd = i + 2
+				// A backslash-newline pair is removed by the shell before
+				// tokenizing, so recording it as a word-continuation end would
+				// exempt a `#` that follows from the comment rule and hide a
+				// comment that swallows the frame closer. Byte consumption is
+				// identical either way.
+				if (text[i + 1] !== "\n") {
+					frameEscapeEnd = i + 2
+				}
 				i += 2
 				continue
 			}
@@ -1944,13 +1996,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// well: a closer that popped a nested frame ends the expansion,
 			// not the word. Directly at `frameEscapeEnd` it continues too: the
 			// escaped character — a blank included — is word content, so the
-			// raw blank before the `#` is not a real word boundary.
+			// raw blank before the `#` is not a real word boundary. The
+			// boundary byte is the one the shell sees, so backslash-newline
+			// continuations are walked over before the test.
 			if (
 				char === "#" &&
 				(top.kind === "command-substitution" || top.kind === "process-substitution") &&
 				i !== frameCloseEnd &&
 				i !== frameEscapeEnd &&
-				WORD_BOUNDARY_BEFORE.test(text[i - 1])
+				logicalWordBoundaryBefore(text, i)
 			) {
 				i = endOfLine(i)
 				continue
@@ -2102,9 +2156,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 		// Nothing is open. Scan fully and emit host text.
 		if (char === "\\") {
 			// A backslash escapes the next character. A quote after it is
-			// literal.
+			// literal. A backslash-newline pair is removed by the shell before
+			// tokenizing, so recording it as a word-continuation end would
+			// exempt a `#` that follows from the comment rule and hide a
+			// comment that swallows the rest of the line. Byte consumption is
+			// identical either way.
 			outcome.host += text.slice(i, i + 2)
-			escapedWordCharEnd = i + 2
+			if (text[i + 1] !== "\n") {
+				escapedWordCharEnd = i + 2
+			}
 			i += 2
 			continue
 		}
@@ -2121,13 +2181,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 			i++
 			continue
 		}
-		if (char === "#" && (i === 0 || (IFS_BLANK.test(text[i - 1]) && i !== escapedWordCharEnd))) {
+		if (char === "#" && logicalWordBoundaryBefore(text, i) && i !== escapedWordCharEnd) {
 			// Comment: pass the rest of the line through untouched. Quotes and
 			// delimiters inside a comment are not shell syntax. shell-quote drops
 			// the comment text when it tokenizes. This branch also excludes a `#`
 			// at the end of a `\c` escape pair, even when the escaped character
 			// is whitespace. The escape makes it word content, so that `#`
-			// continues the word and the masking branch below handles it.
+			// continues the word and the masking branch below handles it. The
+			// boundary byte is the one the shell sees, so backslash-newline
+			// continuations are walked over before the test.
 			const end = endOfLine(i)
 			outcome.host += text.slice(i, end)
 			i = end
