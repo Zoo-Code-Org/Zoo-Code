@@ -16,6 +16,26 @@ export const vsCodeLmModelsMessageTypes = [
 	"providerQuotas",
 ] as const
 
+/** The fixed name of a window, so the webview can show it in the user's language. */
+export type ProviderQuotaWindowName = {
+	key: "weekly" | "daily" | "monthly" | "unlimited" | "hours" | "days" | "credits" | "tokens"
+	count?: number
+}
+
+/**
+ * The figure of a window, as data, so the webview writes the words around it in the user's language. The amounts are
+ * already formatted (a currency, a count): they are not translated. `valueLabel` stays as the English fallback.
+ */
+export type ProviderQuotaValue =
+	| { kind: "usedOf"; used: string; limit: string }
+	| { kind: "percentUsed"; percent: number }
+	| { kind: "spentMonth" | "spentTotal" | "left"; amount: string }
+	| { kind: "notReported" }
+	/** `window` is the English name of the window, for one that has no `name`. */
+	| { kind: "creditsOf"; window: string; name?: ProviderQuotaWindowName; used: string; total: string }
+	| { kind: "windowState"; window: string; name?: ProviderQuotaWindowName; state: string }
+	| { kind: "windowDegraded"; window: string; name?: ProviderQuotaWindowName }
+
 /**
  * One limit/balance a provider reports (e.g. Copilot premium credits for the
  * month, an OpenRouter key limit, a DeepSeek prepaid balance).
@@ -29,7 +49,9 @@ export interface ProviderQuotaWindow {
 	 * Set when the label is just the name of a fixed window ("Weekly", "5-hour", "Unlimited"), so the webview can
 	 * show it in the user's language. `valueLabel` stays as the English fallback.
 	 */
-	name?: { key: "weekly" | "daily" | "monthly" | "unlimited" | "hours" | "days"; count?: number }
+	name?: ProviderQuotaWindowName
+	/** Set when the figure has words around it ("$5.00 left", "12 / 20 used"): the webview writes them in the user's language. */
+	value?: ProviderQuotaValue
 	/** 0–100 when the provider reports a bounded allowance. */
 	usedPercent?: number
 	/** Epoch ms. */

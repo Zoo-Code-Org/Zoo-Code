@@ -23,9 +23,11 @@ const FORMULA_START = new RegExp(`^(?:${SKIPPED})*[=+\\-@\\t\\r]`, "u")
  * A spreadsheet may split a row on a semicolon (the list separator of many locales) or a tab as well as on a comma, may
  * end a row at every line break whatever quotes are open, and recognises a quote only at the start of a field: so the
  * text after a semicolon, a tab or a line break inside a cell can start a field or a row of its own, whatever quotes
- * surround the cell. A formula start there is broken as well.
+ * surround the cell. A formula start there is broken as well, also behind quotes: a field of such a spreadsheet that
+ * starts with a quote is a quoted field, and what is in it is evaluated all the same. A quote is not skipped by the other
+ * scan (it is not an invisible character), so the two stay disjoint and linear.
  */
-const FORMULA_AFTER_SEPARATOR = new RegExp(`([;\\t\\r\\n])(?=(?:${SKIPPED})*[=+\\-@\\t\\r])`, "gu")
+const FORMULA_AFTER_SEPARATOR = new RegExp(`([;\\t\\r\\n])(?=(?:${SKIPPED}|")*[=+\\-@\\t\\r])`, "gu")
 
 /** The most text the host writes for an export: ten years of daily tasks is far below it, a runaway message is not. */
 const MAX_USAGE_CSV_LENGTH = 20_000_000

@@ -1170,7 +1170,20 @@
 				"monthly": "Hằng tháng",
 				"unlimited": "Không giới hạn",
 				"hours": "{{n}} giờ",
-				"days": "{{n}} ngày"
+				"days": "{{n}} ngày",
+				"credits": "Tín dụng",
+				"tokens": "Token"
+			},
+			"value": {
+				"usedOf": "Đã dùng {{used}} / {{limit}}",
+				"percentUsed": "Đã dùng {{percent}}%",
+				"spentMonth": "Đã chi {{amount}} trong tháng này",
+				"spentTotal": "Đã chi tổng cộng {{amount}}",
+				"left": "Còn {{amount}}",
+				"notReported": "Chưa báo cáo mức sử dụng",
+				"creditsOf": "{{window}}: {{used}} / {{total}} tín dụng",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (suy giảm)"
 			}
 		},
 		"byModel": "Theo mô hình",

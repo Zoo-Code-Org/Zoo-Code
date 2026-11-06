@@ -1170,7 +1170,20 @@
 				"monthly": "मासिक",
 				"unlimited": "असीमित",
 				"hours": "{{n}} घंटे",
-				"days": "{{n}} दिन"
+				"days": "{{n}} दिन",
+				"credits": "क्रेडिट",
+				"tokens": "टोकन"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} उपयोग हुआ",
+				"percentUsed": "{{percent}}% उपयोग हुआ",
+				"spentMonth": "इस महीने {{amount}} खर्च हुए",
+				"spentTotal": "कुल {{amount}} खर्च हुए",
+				"left": "{{amount}} शेष",
+				"notReported": "उपयोग की जानकारी नहीं मिली",
+				"creditsOf": "{{window}}: {{used}} / {{total}} क्रेडिट",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (सीमित)"
 			}
 		},
 		"byModel": "मॉडल के अनुसार",

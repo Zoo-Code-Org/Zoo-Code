@@ -1170,7 +1170,20 @@
 				"monthly": "Monatlich",
 				"unlimited": "Unbegrenzt",
 				"hours": "{{n}} Std.",
-				"days": "{{n}} T"
+				"days": "{{n}} T",
+				"credits": "Credits",
+				"tokens": "Tokens"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} verbraucht",
+				"percentUsed": "{{percent}} % verbraucht",
+				"spentMonth": "{{amount}} diesen Monat ausgegeben",
+				"spentTotal": "{{amount}} insgesamt ausgegeben",
+				"left": "{{amount}} übrig",
+				"notReported": "Verbrauch nicht gemeldet",
+				"creditsOf": "{{window}}: {{used}} / {{total}} Credits",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (eingeschränkt)"
 			}
 		},
 		"byModel": "Nach Modell",

@@ -1170,7 +1170,20 @@
 				"monthly": "Ежемесячно",
 				"unlimited": "Без ограничений",
 				"hours": "{{n}} ч",
-				"days": "{{n}} дн."
+				"days": "{{n}} дн.",
+				"credits": "Кредиты",
+				"tokens": "Токены"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} использовано",
+				"percentUsed": "{{percent}}% использовано",
+				"spentMonth": "{{amount}} потрачено в этом месяце",
+				"spentTotal": "{{amount}} потрачено всего",
+				"left": "Осталось {{amount}}",
+				"notReported": "Использование не сообщается",
+				"creditsOf": "{{window}}: {{used}} / {{total}} кредитов",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (ограничено)"
 			}
 		},
 		"byModel": "По моделям",

@@ -1170,7 +1170,20 @@
 				"monthly": "Aylık",
 				"unlimited": "Sınırsız",
 				"hours": "{{n}} saat",
-				"days": "{{n}} gün"
+				"days": "{{n}} gün",
+				"credits": "Krediler",
+				"tokens": "Token"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} kullanıldı",
+				"percentUsed": "%{{percent}} kullanıldı",
+				"spentMonth": "Bu ay {{amount}} harcandı",
+				"spentTotal": "Toplam {{amount}} harcandı",
+				"left": "{{amount}} kaldı",
+				"notReported": "Kullanım bildirilmedi",
+				"creditsOf": "{{window}}: {{used}} / {{total}} kredi",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (düşük performans)"
 			}
 		},
 		"byModel": "Modele göre",

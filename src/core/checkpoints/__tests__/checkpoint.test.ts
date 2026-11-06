@@ -283,6 +283,18 @@ describe("Checkpoint functionality", () => {
 			},
 		)
 
+		it.each([
+			["an Error", new Error("disk full"), "disk full"],
+			["a plain value", "disk full", "disk full"],
+		])("says the failure of the rewind as it is, for %s", (_name, cause, message) => {
+			const error = new ConversationRewindError(cause)
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.name).toBe("ConversationRewindError")
+			expect(error.message).toBe(message)
+			expect(error.cause).toBe(cause)
+		})
+
 		it("does not start the task again when the files could not be restored", async () => {
 			mockCheckpointService.restoreCheckpoint.mockRejectedValueOnce(new Error("no such commit"))
 

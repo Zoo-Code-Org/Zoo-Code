@@ -1170,7 +1170,20 @@
 				"monthly": "每月",
 				"unlimited": "无限制",
 				"hours": "{{n}} 小时",
-				"days": "{{n}} 天"
+				"days": "{{n}} 天",
+				"credits": "积分",
+				"tokens": "令牌"
+			},
+			"value": {
+				"usedOf": "已使用 {{used}} / {{limit}}",
+				"percentUsed": "已使用 {{percent}}%",
+				"spentMonth": "本月已花费 {{amount}}",
+				"spentTotal": "累计已花费 {{amount}}",
+				"left": "剩余 {{amount}}",
+				"notReported": "未报告用量",
+				"creditsOf": "{{window}}：{{used}} / {{total}} 积分",
+				"windowState": "{{window}}（{{state}}）",
+				"windowDegraded": "{{window}}（降级）"
 			}
 		},
 		"byModel": "按模型",

@@ -1170,7 +1170,20 @@
 				"monthly": "月間",
 				"unlimited": "無制限",
 				"hours": "{{n}}時間",
-				"days": "{{n}}日"
+				"days": "{{n}}日",
+				"credits": "クレジット",
+				"tokens": "トークン"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} 使用",
+				"percentUsed": "{{percent}}% 使用",
+				"spentMonth": "今月の支出 {{amount}}",
+				"spentTotal": "累計の支出 {{amount}}",
+				"left": "残り {{amount}}",
+				"notReported": "使用量は報告されていません",
+				"creditsOf": "{{window}}: {{used}} / {{total}} クレジット",
+				"windowState": "{{window}}（{{state}}）",
+				"windowDegraded": "{{window}}（低下）"
 			}
 		},
 		"byModel": "モデル別",

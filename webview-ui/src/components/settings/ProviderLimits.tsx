@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
 
-import { VsCodeLmModelsMessageType, type ProviderQuota } from "@roo-code/types"
+import { VsCodeLmModelsMessageType, type ProviderQuota, type ProviderQuotaWindow } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { cn } from "@src/lib/utils"
@@ -159,6 +159,48 @@ export const ProviderLimits = ({ enabled = true }: { enabled?: boolean }) => {
 	)
 }
 
+type Translate = ReturnType<typeof useAppTranslation>["t"]
+
+/**
+ * The figure of a window in the user's language. The host sends the amounts already formatted, and the words around
+ * them as data (`value`, `name`): a window from an older host (or one it has no data for) shows `valueLabel`, which is English.
+ */
+const quotaValueText = (w: ProviderQuotaWindow, t: Translate): string => {
+	const windowName = (name: ProviderQuotaWindow["name"], fallback: string) =>
+		name ? t(`settings:usage.limits.window.${name.key}`, { n: name.count }) : fallback
+	const { value } = w
+	if (value) {
+		switch (value.kind) {
+			case "usedOf":
+				return t("settings:usage.limits.value.usedOf", { used: value.used, limit: value.limit })
+			case "percentUsed":
+				return t("settings:usage.limits.value.percentUsed", { percent: value.percent })
+			case "spentMonth":
+			case "spentTotal":
+			case "left":
+				return t(`settings:usage.limits.value.${value.kind}`, { amount: value.amount })
+			case "notReported":
+				return t("settings:usage.limits.value.notReported")
+			case "creditsOf":
+				return t("settings:usage.limits.value.creditsOf", {
+					window: windowName(value.name, value.window),
+					used: value.used,
+					total: value.total,
+				})
+			case "windowState":
+				return t("settings:usage.limits.value.windowState", {
+					window: windowName(value.name, value.window),
+					state: value.state,
+				})
+			case "windowDegraded":
+				return t("settings:usage.limits.value.windowDegraded", {
+					window: windowName(value.name, value.window),
+				})
+		}
+	}
+	return windowName(w.name, w.valueLabel)
+}
+
 const QuotaRow = ({
 	quota,
 	name,
@@ -192,9 +234,7 @@ const QuotaRow = ({
 
 			{quota.ok &&
 				quota.windows.map((w) => {
-					const windowText = w.name
-						? t(`settings:usage.limits.window.${w.name.key}`, { n: w.name.count })
-						: w.valueLabel
+					const windowText = quotaValueText(w, t)
 
 					return (
 						<div key={w.id} className="mt-1.5 pl-3.5">

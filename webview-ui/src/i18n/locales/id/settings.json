@@ -1170,7 +1170,20 @@
 				"monthly": "Bulanan",
 				"unlimited": "Tanpa batas",
 				"hours": "{{n}} jam",
-				"days": "{{n}} hari"
+				"days": "{{n}} hari",
+				"credits": "Kredit",
+				"tokens": "Token"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} terpakai",
+				"percentUsed": "{{percent}}% terpakai",
+				"spentMonth": "{{amount}} dibelanjakan bulan ini",
+				"spentTotal": "{{amount}} dibelanjakan secara total",
+				"left": "{{amount}} tersisa",
+				"notReported": "Penggunaan tidak dilaporkan",
+				"creditsOf": "{{window}}: {{used}} / {{total}} kredit",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (menurun)"
 			}
 		},
 		"byModel": "Menurut model",

@@ -1170,7 +1170,20 @@
 				"monthly": "Mensual",
 				"unlimited": "Il·limitat",
 				"hours": "{{n}} h",
-				"days": "{{n}} d"
+				"days": "{{n}} d",
+				"credits": "Crèdits",
+				"tokens": "Tokens"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} utilitzats",
+				"percentUsed": "{{percent}}% utilitzat",
+				"spentMonth": "{{amount}} gastats aquest mes",
+				"spentTotal": "{{amount}} gastats en total",
+				"left": "{{amount}} restants",
+				"notReported": "Ús no informat",
+				"creditsOf": "{{window}}: {{used}} / {{total}} crèdits",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (degradat)"
 			}
 		},
 		"byModel": "Per model",

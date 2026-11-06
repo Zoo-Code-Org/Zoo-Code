@@ -251,6 +251,54 @@ describe("neutralizeCsvFormulas", () => {
 	}
 	const startsAFormula = (field: string) => /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u.test(field)
 
+	describe("for a quote after a separator inside a cell", () => {
+		// What is written when a cell has a formula behind quotes: a separator, quotes (doubled in the file), a sign.
+		const formulaBehindQuotes = /[;\t\r\n](?:""|\p{Cc}|\p{Cf})*[=+\-@]/u
+
+		it.each([
+			["a semicolon", 'a,"x;""=1+1;end"', ";"],
+			["a tab", 'a,"x\t""=1+1\tend"', "\t"],
+			["several quotes", 'a,"x;""""""@SUM(1)"', ";"],
+			["quotes and an invisible character", 'a,"x;""\u0000""-2+3"', ";"],
+			["a line break", 'a,"x\n""=1+1"', "\n"],
+		])("breaks the formula start behind the quotes after %s", (_name, csv, delimiter) => {
+			const safe = neutralizeCsvFormulas(csv)!
+
+			expect(safe, JSON.stringify(safe)).not.toMatch(formulaBehindQuotes)
+			expect(fieldsSplitOn(delimiter, safe).some(startsAFormula), JSON.stringify(safe)).toBe(false)
+			expect(safe).toContain(`${delimiter}'`) // the apostrophe is in front of the quotes
+		})
+
+		it("shows that the crafted cell was a formula behind its quote when it was written as it came", () => {
+			const crafted = 'a,"x;""=1+1;end"'
+
+			expect(crafted).toMatch(formulaBehindQuotes)
+			expect(fieldsSplitOn(";", crafted).some(startsAFormula)).toBe(true)
+		})
+
+		it("writes the crafted cell as inert text from exportUsageCsv, for comma, semicolon and tab imports", async () => {
+			showSaveDialog.mockResolvedValue({ fsPath: "/tmp/chosen.csv" } as vscode.Uri)
+
+			await exportUsageCsv('date,task\n2026,"x;""=1+1;end"', "all", context)
+
+			const written = writeFile.mock.calls[0][1].toString()
+			expect(written).not.toMatch(formulaBehindQuotes)
+			for (const delimiter of [",", ";", "\t"]) {
+				expect(fieldsSplitOn(delimiter, written).some(startsAFormula), JSON.stringify(written)).toBe(false)
+			}
+		})
+
+		it("leaves a quote after a separator alone when no formula follows it", () => {
+			expect(neutralizeCsvFormulas('a,"x;""quoted"" text"')).toBe('a,"x;""quoted"" text"')
+		})
+
+		it("still takes a pass over the text for a long run of separators and quotes", () => {
+			const started = performance.now()
+			neutralizeCsvFormulas(`a,"${';""'.repeat(100_000)}x",b`)
+			expect((performance.now() - started) / 1000).toBeLessThan(2)
+		})
+	})
+
 	describe("for a line break inside a cell", () => {
 		it.each([
 			["the crafted message", 'date,task\n2026,"note\n=1+1\nend"'],

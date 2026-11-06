@@ -36,25 +36,30 @@ import {
 describe("parseOpenRouterKey", () => {
 	it("reports a bounded key limit as used / limit with a percent", () => {
 		expect(parseOpenRouterKey({ data: { limit: 50, limit_remaining: 37.6 } })).toEqual([
-			{ id: "key_limit", valueLabel: "$12.40 / $50.00 used", usedPercent: expect.closeTo(24.8, 5) },
+			{
+				id: "key_limit",
+				valueLabel: "$12.40 / $50.00 used",
+				value: { kind: "usedOf", used: "$12.40", limit: "$50.00" },
+				usedPercent: expect.closeTo(24.8, 5),
+			},
 		])
 	})
 
 	it("falls back to monthly spend for unlimited keys", () => {
 		expect(parseOpenRouterKey({ data: { limit: null, usage_monthly: 3.2 } })).toEqual([
-			{ id: "spend", valueLabel: "$3.20 spent this month" },
+			{ id: "spend", valueLabel: "$3.20 spent this month", value: { kind: "spentMonth", amount: "$3.20" } },
 		])
 	})
 
 	it("labels the all-time usage as total spend, never as this month's", () => {
 		expect(parseOpenRouterKey({ data: { limit: null, usage: 42 } })).toEqual([
-			{ id: "spend", valueLabel: "$42.00 spent in total" },
+			{ id: "spend", valueLabel: "$42.00 spent in total", value: { kind: "spentTotal", amount: "$42.00" } },
 		])
 	})
 
 	it("prefers the monthly figure when both are reported", () => {
 		expect(parseOpenRouterKey({ data: { usage: 42, usage_monthly: 3.2 } })).toEqual([
-			{ id: "spend", valueLabel: "$3.20 spent this month" },
+			{ id: "spend", valueLabel: "$3.20 spent this month", value: { kind: "spentMonth", amount: "$3.20" } },
 		])
 	})
 
@@ -73,12 +78,12 @@ describe("parseDeepSeekBalance", () => {
 					{ currency: "USD", total_balance: "4.25" },
 				],
 			}),
-		).toEqual([{ id: "balance", valueLabel: "$4.25 left" }])
+		).toEqual([{ id: "balance", valueLabel: "$4.25 left", value: { kind: "left", amount: "$4.25" } }])
 	})
 
 	it("uses ¥ for a CNY-only balance", () => {
 		expect(parseDeepSeekBalance({ balance_infos: [{ currency: "CNY", total_balance: "8" }] })).toEqual([
-			{ id: "balance", valueLabel: "¥8.00 left" },
+			{ id: "balance", valueLabel: "¥8.00 left", value: { kind: "left", amount: "¥8.00" } },
 		])
 	})
 
@@ -93,7 +98,7 @@ describe("parseDeepSeekBalance – fallbacks", () => {
 		const result = parseDeepSeekBalance({
 			balance_infos: [{ currency: "USD" }, { currency: "CNY" }, { currency: "CNY", total_balance: "5" }],
 		})
-		expect(result).toEqual([{ id: "balance", valueLabel: "¥5.00 left" }])
+		expect(result).toEqual([{ id: "balance", valueLabel: "¥5.00 left", value: { kind: "left", amount: "¥5.00" } }])
 	})
 
 	it("falls back to a zero USD balance, then to the first row", () => {
@@ -104,9 +109,9 @@ describe("parseDeepSeekBalance – fallbacks", () => {
 					{ currency: "USD", total_balance: "0" },
 				],
 			}),
-		).toEqual([{ id: "balance", valueLabel: "$0.00 left" }])
+		).toEqual([{ id: "balance", valueLabel: "$0.00 left", value: { kind: "left", amount: "$0.00" } }])
 		expect(parseDeepSeekBalance({ balance_infos: [{ currency: "EUR", total_balance: "3" }] })).toEqual([
-			{ id: "balance", valueLabel: "$3.00 left" },
+			{ id: "balance", valueLabel: "$3.00 left", value: { kind: "left", amount: "$3.00" } },
 		])
 	})
 })
@@ -114,7 +119,7 @@ describe("parseDeepSeekBalance – fallbacks", () => {
 describe("parseMoonshotBalance", () => {
 	it("reads available_balance", () => {
 		expect(parseMoonshotBalance({ data: { available_balance: 19.5 } })).toEqual([
-			{ id: "balance", valueLabel: "$19.50 left" },
+			{ id: "balance", valueLabel: "$19.50 left", value: { kind: "left", amount: "$19.50" } },
 		])
 	})
 })
@@ -177,7 +182,13 @@ describe("parseZaiQuota", () => {
 			}),
 		).toEqual([
 			{ id: "limit_0", valueLabel: "5-hour", usedPercent: 40, resetAt: 1_800_000_000_000 },
-			{ id: "limit_1", valueLabel: "Weekly: 500 / 2,000 credits", usedPercent: 25, resetAt: undefined },
+			{
+				id: "limit_1",
+				valueLabel: "Weekly: 500 / 2,000 credits",
+				value: { kind: "creditsOf", window: "Weekly", name: { key: "weekly" }, used: "500", total: "2,000" },
+				usedPercent: 25,
+				resetAt: undefined,
+			},
 		])
 	})
 
@@ -269,14 +280,32 @@ describe("parseNanoGptUsage", () => {
 				monthly: { percentUsed: 0.4, resetAt: 1_800_000_000 },
 			}),
 		).toEqual([
-			{ id: "daily", valueLabel: "Daily (grace)", usedPercent: 25, resetAt: undefined },
-			{ id: "monthly", valueLabel: "Monthly (grace)", usedPercent: 40, resetAt: 1_800_000_000_000 },
+			{
+				id: "daily",
+				valueLabel: "Daily (grace)",
+				value: { kind: "windowState", window: "Daily", name: { key: "daily" }, state: "grace" },
+				usedPercent: 25,
+				resetAt: undefined,
+			},
+			{
+				id: "monthly",
+				valueLabel: "Monthly (grace)",
+				value: { kind: "windowState", window: "Monthly", name: { key: "monthly" }, state: "grace" },
+				usedPercent: 40,
+				resetAt: 1_800_000_000_000,
+			},
 		])
 	})
 
 	it("keeps an empty window only when its label carries a state, and a window that has a reset time", () => {
 		expect(parseNanoGptUsage({ state: "grace", monthly: {} })).toEqual([
-			{ id: "monthly", valueLabel: "Monthly (grace)", usedPercent: undefined, resetAt: undefined },
+			{
+				id: "monthly",
+				valueLabel: "Monthly (grace)",
+				value: { kind: "windowState", window: "Monthly", name: { key: "monthly" }, state: "grace" },
+				usedPercent: undefined,
+				resetAt: undefined,
+			},
 		])
 		expect(parseNanoGptUsage({ monthly: { resetAt: 1_800_000_000 } })).toEqual([
 			{ id: "monthly", valueLabel: "Monthly", usedPercent: undefined, resetAt: 1_800_000_000_000 },
@@ -291,6 +320,7 @@ describe("parseNanoGptUsage", () => {
 		const daily = parseNanoGptUsage({ dailyInputTokens: { percentUsed: 0.9, degraded: true } })![0]
 		expect(daily.usedPercent).toBeUndefined()
 		expect(daily.valueLabel).toBe("Daily (degraded)")
+		expect(daily.value).toEqual({ kind: "windowDegraded", window: "Daily", name: { key: "daily" } })
 	})
 
 	it("names the plan state rather than 'degraded' when both apply, and leaves a healthy window's label alone", () => {
@@ -334,7 +364,7 @@ describe("balance parser edge cases", () => {
 					{ currency: "CNY", total_balance: "12" },
 				],
 			}),
-		).toEqual([{ id: "balance", valueLabel: "¥12.00 left" }])
+		).toEqual([{ id: "balance", valueLabel: "¥12.00 left", value: { kind: "left", amount: "¥12.00" } }])
 		expect(
 			parseDeepSeekBalance({
 				balance_infos: [
@@ -342,9 +372,9 @@ describe("balance parser edge cases", () => {
 					{ currency: "USD", total_balance: "0" },
 				],
 			}),
-		).toEqual([{ id: "balance", valueLabel: "$0.00 left" }])
+		).toEqual([{ id: "balance", valueLabel: "$0.00 left", value: { kind: "left", amount: "$0.00" } }])
 		expect(parseDeepSeekBalance({ balance_infos: [{ currency: "EUR", total_balance: "3" }] })).toEqual([
-			{ id: "balance", valueLabel: "$3.00 left" },
+			{ id: "balance", valueLabel: "$3.00 left", value: { kind: "left", amount: "$3.00" } },
 		])
 	})
 
@@ -373,7 +403,13 @@ describe("parser edge cases", () => {
 			}),
 		).toEqual([{ id: "limit_0", valueLabel: "Tokens", usedPercent: 25, resetAt: undefined }])
 		expect(parseZaiQuota({ data: { limits: [{ type: "CREDIT_LIMIT", usage: 0, currentValue: 0 }] } })).toEqual([
-			{ id: "limit_0", valueLabel: "Credits: 0 / 0 credits", usedPercent: undefined, resetAt: undefined },
+			{
+				id: "limit_0",
+				valueLabel: "Credits: 0 / 0 credits",
+				value: { kind: "creditsOf", window: "Credits", name: { key: "credits" }, used: "0", total: "0" },
+				usedPercent: undefined,
+				resetAt: undefined,
+			},
 		])
 	})
 
@@ -465,13 +501,19 @@ describe("getProviderQuotas – Copilot window and misc", () => {
 
 		mocked.mockResolvedValueOnce({ ok: true, quota: { unlimited: false, usedPercent: 41.6, fetchedAt: 1 } })
 		const [pct] = await getProviderQuotas([{ apiProvider: providerIdentifiers.githubCopilot } as never])
-		expect(pct).toMatchObject({ ok: true, windows: [{ valueLabel: "42% used", usedPercent: 41.6 }] })
+		expect(pct).toMatchObject({
+			ok: true,
+			windows: [{ valueLabel: "42% used", value: { kind: "percentUsed", percent: 42 }, usedPercent: 41.6 }],
+		})
 
 		resetProviderQuotaCache()
 		mocked.mockResolvedValueOnce({ ok: true, quota: { unlimited: false, fetchedAt: 1 } })
 		const [none] = await getProviderQuotas([{ apiProvider: providerIdentifiers.githubCopilot } as never])
 		// Unknown usage is reported as unknown (no bar), never as a measured 0%.
-		expect(none).toMatchObject({ ok: true, windows: [{ valueLabel: "Usage not reported" }] })
+		expect(none).toMatchObject({
+			ok: true,
+			windows: [{ valueLabel: "Usage not reported", value: { kind: "notReported" } }],
+		})
 		expect((none as { windows: Array<{ usedPercent?: number }> }).windows[0].usedPercent).toBeUndefined()
 
 		resetProviderQuotaCache()
@@ -734,7 +776,15 @@ describe("getProviderQuotas", () => {
 			providerId: providerIdentifiers.githubCopilot,
 			ok: true,
 			plan: "business",
-			windows: [{ id: "premium", valueLabel: "39,389.3 / 140,000 used", usedPercent: 28.1, resetAt: 1 }],
+			windows: [
+				{
+					id: "premium",
+					valueLabel: "39,389.3 / 140,000 used",
+					value: { kind: "usedOf", used: "39,389.3", limit: "140,000" },
+					usedPercent: 28.1,
+					resetAt: 1,
+				},
+			],
 		})
 	})
 
@@ -842,7 +892,10 @@ describe("getProviderQuotas", () => {
 			"https://openrouter.ai/api/v1/key",
 			expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer sk-test" }) }),
 		)
-		expect(q).toMatchObject({ ok: true, windows: [{ valueLabel: "$5.00 / $10.00 used" }] })
+		expect(q).toMatchObject({
+			ok: true,
+			windows: [{ valueLabel: "$5.00 / $10.00 used", value: { kind: "usedOf", used: "$5.00", limit: "$10.00" } }],
+		})
 	})
 
 	it("maps 401 to noKey", async () => {
@@ -870,7 +923,10 @@ describe("getProviderQuotas", () => {
 			{},
 			fetchSpy,
 		)
-		expect(q).toMatchObject({ ok: true, windows: [{ valueLabel: "$7.50 left" }] })
+		expect(q).toMatchObject({
+			ok: true,
+			windows: [{ valueLabel: "$7.50 left", value: { kind: "left", amount: "$7.50" } }],
+		})
 		expect(String(fetchSpy.mock.calls[0][0])).toContain("api.deepseek.com")
 		// The gateway profile's key is never sent anywhere.
 		expect(JSON.stringify(fetchSpy.mock.calls)).not.toContain("gateway-key")
@@ -1921,6 +1977,9 @@ describe("error handling never leaks credentials", () => {
 		const [q] = await getProviderQuotas([{ apiProvider: providerIdentifiers.githubCopilot } as never], {
 			force: true,
 		})
-		expect(q).toMatchObject({ ok: true, windows: [{ valueLabel: "60% used", usedPercent: 60 }] })
+		expect(q).toMatchObject({
+			ok: true,
+			windows: [{ valueLabel: "60% used", value: { kind: "percentUsed", percent: 60 }, usedPercent: 60 }],
+		})
 	})
 })

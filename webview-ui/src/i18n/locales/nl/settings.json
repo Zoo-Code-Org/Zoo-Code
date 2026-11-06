@@ -1170,7 +1170,20 @@
 				"monthly": "Maandelijks",
 				"unlimited": "Onbeperkt",
 				"hours": "{{n}} uur",
-				"days": "{{n}} d"
+				"days": "{{n}} d",
+				"credits": "Credits",
+				"tokens": "Tokens"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} gebruikt",
+				"percentUsed": "{{percent}}% gebruikt",
+				"spentMonth": "{{amount}} uitgegeven deze maand",
+				"spentTotal": "{{amount}} in totaal uitgegeven",
+				"left": "{{amount}} over",
+				"notReported": "Gebruik niet gemeld",
+				"creditsOf": "{{window}}: {{used}} / {{total}} credits",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (verminderd)"
 			}
 		},
 		"byModel": "Per model",

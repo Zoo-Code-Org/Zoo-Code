@@ -1170,7 +1170,20 @@
 				"monthly": "每月",
 				"unlimited": "無限制",
 				"hours": "{{n}} 小時",
-				"days": "{{n}} 天"
+				"days": "{{n}} 天",
+				"credits": "點數",
+				"tokens": "權杖"
+			},
+			"value": {
+				"usedOf": "已使用 {{used}} / {{limit}}",
+				"percentUsed": "已使用 {{percent}}%",
+				"spentMonth": "本月已花費 {{amount}}",
+				"spentTotal": "累計已花費 {{amount}}",
+				"left": "剩餘 {{amount}}",
+				"notReported": "未回報用量",
+				"creditsOf": "{{window}}：{{used}} / {{total}} 點數",
+				"windowState": "{{window}}（{{state}}）",
+				"windowDegraded": "{{window}}（降級）"
 			}
 		},
 		"byModel": "依模型",

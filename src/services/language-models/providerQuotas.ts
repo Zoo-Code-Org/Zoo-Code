@@ -1,6 +1,7 @@
 import {
 	providerIdentifiers,
 	type ProviderQuota,
+	type ProviderQuotaValue,
 	type ProviderQuotaWindow,
 	type ProviderSettings,
 	type ProviderSettingsWithId,
@@ -46,17 +47,34 @@ export function parseOpenRouterKey(payload: unknown): ProviderQuotaWindow[] | un
 			{
 				id: "key_limit",
 				valueLabel: `${formatMoney(used)} / ${formatMoney(limit)} used`,
+				value: { kind: "usedOf", used: formatMoney(used), limit: formatMoney(limit) },
 				usedPercent: clampPercent((used / limit) * 100),
 			},
 		]
 	}
 
 	const monthly = toNumber(data.usage_monthly)
-	if (monthly !== undefined) return [{ id: "spend", valueLabel: `${formatMoney(monthly)} spent this month` }]
+	if (monthly !== undefined) {
+		return [
+			{
+				id: "spend",
+				valueLabel: `${formatMoney(monthly)} spent this month`,
+				value: { kind: "spentMonth", amount: formatMoney(monthly) },
+			},
+		]
+	}
 
 	// OpenRouter documents `usage` as all-time credit use, so it must not be shown as this month's spend.
 	const total = toNumber(data.usage)
-	return total === undefined ? undefined : [{ id: "spend", valueLabel: `${formatMoney(total)} spent in total` }]
+	return total === undefined
+		? undefined
+		: [
+				{
+					id: "spend",
+					valueLabel: `${formatMoney(total)} spent in total`,
+					value: { kind: "spentTotal", amount: formatMoney(total) },
+				},
+			]
 }
 
 /** DeepSeek `GET /user/balance` → prepaid balance (prefers a positive USD balance). */
@@ -73,13 +91,22 @@ export function parseDeepSeekBalance(payload: unknown): ProviderQuotaWindow[] | 
 
 	const balance = toNumber(pick?.total_balance)
 	if (balance === undefined) return undefined
-	return [{ id: "balance", valueLabel: `${formatMoney(balance, pick?.currency === "CNY" ? "¥" : "$")} left` }]
+	const amount = formatMoney(balance, pick?.currency === "CNY" ? "¥" : "$")
+	return [{ id: "balance", valueLabel: `${amount} left`, value: { kind: "left", amount } }]
 }
 
 /** Moonshot `GET /v1/users/me/balance` → available balance. */
 export function parseMoonshotBalance(payload: unknown): ProviderQuotaWindow[] | undefined {
 	const balance = toNumber(asRecord(asRecord(payload)?.data)?.available_balance)
-	return balance === undefined ? undefined : [{ id: "balance", valueLabel: `${formatMoney(balance)} left` }]
+	return balance === undefined
+		? undefined
+		: [
+				{
+					id: "balance",
+					valueLabel: `${formatMoney(balance)} left`,
+					value: { kind: "left", amount: formatMoney(balance) },
+				},
+			]
 }
 
 /** "5-hour", "Weekly", "3d", … for a rolling window of the given length. */
@@ -96,6 +123,8 @@ const FIXED_WINDOW_NAMES: Record<string, NonNullable<ProviderQuotaWindow["name"]
 	Daily: { key: "daily" },
 	Monthly: { key: "monthly" },
 	Unlimited: { key: "unlimited" },
+	Credits: { key: "credits" },
+	Tokens: { key: "tokens" },
 }
 
 /** The structured name of a window whose label is only its name, so it can be translated. Anything else is left as is. */
@@ -203,6 +232,17 @@ export function parseZaiQuota(payload: unknown): ProviderQuotaWindow[] | undefin
 			valueLabel: creditFigures
 				? `${windowLabel(seconds, "Credits")}: ${formatCredits(consumed)} / ${formatCredits(total)} credits`
 				: windowLabel(seconds, "Tokens"),
+			...(creditFigures
+				? {
+						value: {
+							kind: "creditsOf" as const,
+							window: windowLabel(seconds, "Credits"),
+							name: windowName(windowLabel(seconds, "Credits")),
+							used: formatCredits(consumed),
+							total: formatCredits(total),
+						},
+					}
+				: {}),
 			usedPercent,
 			resetAt,
 		})
@@ -327,6 +367,11 @@ export function parseNanoGptUsage(payload: unknown): ProviderQuotaWindow[] | und
 			id,
 			// A degraded window has no figure to show, so its label says so, as it does for a plan state.
 			valueLabel: state !== "active" ? `${label} (${state})` : q.degraded ? `${label} (degraded)` : label,
+			...(state !== "active"
+				? { value: { kind: "windowState" as const, window: label, name: windowName(label), state } }
+				: q.degraded
+					? { value: { kind: "windowDegraded" as const, window: label, name: windowName(label) } }
+					: {}),
 			usedPercent,
 			resetAt: reset,
 		})
@@ -573,6 +618,17 @@ async function fetchKeyed(
 	}
 }
 
+/** The figure of the Copilot allowance as data: counts, else a percentage, else "not reported". */
+function copilotValue(q: { used?: number; entitlement?: number; usedPercent?: number }): ProviderQuotaValue {
+	if (q.used !== undefined && q.entitlement !== undefined) {
+		return { kind: "usedOf", used: formatCredits(q.used), limit: formatCredits(q.entitlement) }
+	}
+	// Neither counts nor a percentage were reported: that is unknown, not a measured zero.
+	return q.usedPercent !== undefined
+		? { kind: "percentUsed", percent: Math.round(q.usedPercent) }
+		: { kind: "notReported" }
+}
+
 async function fetchCopilot(force: boolean, signal?: AbortSignal): Promise<ProviderQuota> {
 	const result = await getGitHubCopilotQuota({ force, signal })
 	const providerId = providerIdentifiers.githubCopilot
@@ -591,6 +647,7 @@ async function fetchCopilot(force: boolean, signal?: AbortSignal): Promise<Provi
 							? `${Math.round(q.usedPercent)}% used`
 							: // Neither counts nor a percentage were reported: that is unknown, not a measured zero.
 								"Usage not reported",
+				value: copilotValue(q),
 				usedPercent: q.usedPercent,
 				resetAt: q.resetAt,
 			}

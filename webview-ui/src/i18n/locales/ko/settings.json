@@ -1170,7 +1170,20 @@
 				"monthly": "월간",
 				"unlimited": "무제한",
 				"hours": "{{n}}시간",
-				"days": "{{n}}일"
+				"days": "{{n}}일",
+				"credits": "크레딧",
+				"tokens": "토큰"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} 사용",
+				"percentUsed": "{{percent}}% 사용",
+				"spentMonth": "이번 달 {{amount}} 사용",
+				"spentTotal": "총 {{amount}} 사용",
+				"left": "{{amount}} 남음",
+				"notReported": "사용량이 보고되지 않음",
+				"creditsOf": "{{window}}: {{used}} / {{total}} 크레딧",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (저하됨)"
 			}
 		},
 		"byModel": "모델별",
