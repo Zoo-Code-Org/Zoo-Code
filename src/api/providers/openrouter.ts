@@ -45,6 +45,7 @@ import type {
 import { handleOpenAIError } from "./utils/error-handler"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
+import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 
 // Add custom interface for OpenRouter params.
 type OpenRouterChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
@@ -600,7 +601,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
 
 		const completionParams: OpenRouterChatCompletionParams = {
@@ -622,14 +623,21 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		const requestOptions = modelId.startsWith("anthropic/")
-			? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-			: undefined
+		const requestOptions: OpenAI.RequestOptions = {
+			...(modelId.startsWith("anthropic/")
+				? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
+				: {}),
+			...(options?.abortSignal ? { signal: options.abortSignal } : {}),
+			...(hasUsableTimeout(options?.timeoutMs) ? { timeout: toSdkTimeoutMs(options.timeoutMs) } : {}),
+		}
 
 		let response
 
 		try {
-			response = await this.client.chat.completions.create(completionParams, requestOptions)
+			response = await this.client.chat.completions.create(
+				completionParams,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 		} catch (error) {
 			// Try to parse as OpenRouter error structure using Zod
 			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)

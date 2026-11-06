@@ -34,6 +34,7 @@ import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -1643,8 +1644,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Make the non-streaming request
+			const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+			const combinedSignal = requestSignal
+				? AbortSignal.any([this.abortController.signal, requestSignal])
+				: this.abortController.signal
+
 			const response = await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal: combinedSignal,
 			})
 
 			// Extract text from the response

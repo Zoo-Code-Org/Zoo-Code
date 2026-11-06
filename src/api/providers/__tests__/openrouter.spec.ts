@@ -999,6 +999,29 @@ describe("OpenRouterHandler", () => {
 			)
 		})
 
+		it("forwards abort signal and timeout to the SDK request", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockResponse = { choices: [{ message: { content: "test completion" } }] }
+			// AGENTS.md: access private members with bracket notation without as any
+			const createSpy = vi
+				.spyOn(handler["client"].chat.completions, "create")
+				.mockResolvedValue(mockResponse as unknown as OpenAI.Chat.Completions.ChatCompletion)
+
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 15_000,
+			})
+
+			expect(createSpy).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({
+					signal: controller.signal,
+					timeout: 15_000,
+				}),
+			)
+		})
+
 		it("handles API errors and captures telemetry", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockError = {

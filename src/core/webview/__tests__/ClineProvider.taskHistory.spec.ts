@@ -11,6 +11,8 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
+import { generateSessionTitle } from "../../task/session-title"
+import * as sessionTitleModule from "../../task/session-title"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -653,6 +655,35 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(getStored("task-race")).toMatchObject({ title: "Renamed", tokensIn: 500 })
 		})
 
+		it("cancels in-flight session title generation and preserves a manual title clear", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-manual-clear", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			let resolveCompletion!: (title: string) => void
+			const completionPromise = new Promise<string>((resolve) => {
+				resolveCompletion = resolve
+			})
+			const generation = generateSessionTitle({
+				provider,
+				taskId: "task-manual-clear",
+				userMessage: "Original prompt",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+					apiKey: "test-api-key",
+				},
+				completePrompt: async () => completionPromise,
+			})
+
+			await provider.renameTaskWithId("task-manual-clear", "")
+			expect(getStored("task-manual-clear")?.title).toBeUndefined()
+
+			resolveCompletion("Generated Title")
+			await generation
+
+			expect(getStored("task-manual-clear")?.title).toBeUndefined()
+		})
+
 		it("does not write a title through a full-item update", async () => {
 			await provider.updateTaskHistory(
 				createHistoryItem({ id: "task-title-owner", task: "Original prompt", title: "Stale title" }),
@@ -687,6 +718,103 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			expect(getStored("missing-task")).toBeUndefined()
 			expect(logSpy).toHaveBeenCalledWith("[renameTaskWithId] task missing-task not found in history")
+		})
+	})
+
+	describe("applySessionTitle", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("stores a trimmed title and broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-title", task: "Original prompt" }))
+			mockPostMessage.mockClear()
+
+			const result = await provider.applySessionTitle("task-auto-title", "  Auto Title  ")
+
+			expect(result).toBe("applied")
+			expect(getStored("task-auto-title")).toMatchObject({ title: "Auto Title", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-auto-title", title: "Auto Title" })
+		})
+
+		it("returns conflict and keeps the existing title when one is already set", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-conflict", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-auto-conflict", "Manual title")
+
+			const result = await provider.applySessionTitle("task-auto-conflict", "Auto Title")
+
+			expect(result).toBe("conflict")
+			expect(getStored("task-auto-conflict")).toMatchObject({ title: "Manual title" })
+		})
+
+		it.each([
+			["an empty string", ""],
+			["whitespace", "   "],
+		])("returns conflict without writing for %s", async (_label, title) => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-blank", task: "Original prompt" }), {
+				broadcast: false,
+			})
+
+			const result = await provider.applySessionTitle("task-auto-blank", title)
+
+			expect(result).toBe("conflict")
+			expect(getStored("task-auto-blank")?.title).toBeUndefined()
+		})
+
+		it("throws for an unknown task so the caller can give up", async () => {
+			await expect(provider.applySessionTitle("missing-task", "Auto Title")).rejects.toThrow("not found in cache")
+		})
+
+		it("keeps the auto title when the task later saves metadata without one", async () => {
+			const item = createHistoryItem({ id: "task-auto-keep", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+			await provider.applySessionTitle("task-auto-keep", "Auto Title")
+
+			// Mirrors Task.saveClineMessages(), whose taskMetadata() result never carries a title.
+			await provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+
+			expect(getStored("task-auto-keep")).toMatchObject({ title: "Auto Title", tokensIn: 500 })
+		})
+
+		it("keeps a concurrent task save that is queued before the auto title", async () => {
+			const item = createHistoryItem({ id: "task-auto-race", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// Start the save without awaiting it, so the auto title runs while the save is queued.
+			const save = provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+			const autoTitle = provider.applySessionTitle("task-auto-race", "Auto Title")
+			await Promise.all([save, autoTitle])
+
+			expect(getStored("task-auto-race")).toMatchObject({ title: "Auto Title", tokensIn: 500 })
+		})
+
+		it("does not broadcast when the view is not launched", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = false
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-silent", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			mockPostMessage.mockClear()
+
+			const result = await provider.applySessionTitle("task-auto-silent", "Auto Title")
+
+			expect(result).toBe("applied")
+			expect(getStored("task-auto-silent")).toMatchObject({ title: "Auto Title" })
+			expect(findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")).toHaveLength(0)
+		})
+
+		it("cancels pending session title generation when deleting a task", async () => {
+			const cancelSpy = vi.spyOn(sessionTitleModule, "cancelSessionTitle")
+			try {
+				await provider.deleteTaskWithId("task-cancel-on-delete")
+			} catch {
+				// Task doesn't exist on disk, delete will catch/proceed
+			}
+			expect(cancelSpy).toHaveBeenCalledWith("task-cancel-on-delete")
+			cancelSpy.mockRestore()
 		})
 	})
 

@@ -145,6 +145,7 @@ import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { generateSessionTitle, cancelSessionTitle } from "./session-title"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 import {
 	divergenceKey,
@@ -285,6 +286,9 @@ export class PendingActionSettlementError extends Error {
 		this.name = "PendingActionSettlementError"
 	}
 }
+
+// Literal, not the vscode enum: specs that mock "vscode" without ExtensionMode would throw on the read.
+const EXTENSION_MODE_TEST = 3
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
@@ -3110,6 +3114,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			await this.say("text", task, images)
 
+			// Fire-and-forget session title generation: the run must never wait
+			// on it and no title failure may surface in the chat. Only a root
+			// task's first message triggers this — resumes go through
+			// resumeTaskFromHistory, subtask continuations re-enter the task
+			// loop directly, and both must keep their existing names. `say`
+			// above persisted the history item, so the conditional write will
+			// find it.
+			// The extra provider request would break E2E and visual tests that assert
+			// exact request sequences and rendered task names, so Test mode skips it.
+			if (!this.disposalPromise && !this.parentTask && task) {
+				const provider = this.providerRef.deref()
+				if (provider && !provider.disposed && provider.context.extensionMode !== EXTENSION_MODE_TEST) {
+					void generateSessionTitle({
+						provider,
+						taskId: this.taskId,
+						userMessage: task,
+						apiConfiguration: this.apiConfiguration,
+					}).catch((error) => {
+						// generateSessionTitle never rejects by contract; this
+						// arm is defense-in-depth for future regressions.
+						console.error(`[Task#startTask] session title generation failed: ${error}`)
+					})
+				}
+			}
+
 			// Check for too many MCP tools and warn the user
 			const { enabledToolCount, enabledServerCount } = await this.getEnabledMcpToolsCount()
 			if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
@@ -3695,6 +3724,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
 		this.cancelPendingPartialMessageUpdate()
+		cancelSessionTitle(this.taskId)
 
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
@@ -4419,7 +4449,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
+										// Stryker disable next-line ConditionalExpression,EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4855,7 +4885,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+						// Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,

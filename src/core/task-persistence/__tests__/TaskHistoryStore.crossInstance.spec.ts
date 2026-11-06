@@ -73,6 +73,104 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
 	})
 
+	describe("setTitleIfUnset", () => {
+		it("keeps a manual title that another instance wrote after this cache was loaded", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-task", task: "Original prompt" }))
+			await storeB.reconcile()
+			expect(storeB.get("title-task")?.title).toBeUndefined()
+
+			// Instance A still caches no title when B renames the task on disk.
+			await storeB.atomicReadAndUpdate("title-task", (item) => ({ ...item, title: "Manual title" }))
+			expect(storeA.get("title-task")?.title).toBeUndefined()
+
+			await expect(storeA.setTitleIfUnset("title-task", "Auto title")).resolves.toBe("conflict")
+
+			expect(storeA.get("title-task")?.title).toBe("Manual title")
+			await storeB.reconcile()
+			expect(storeB.get("title-task")?.title).toBe("Manual title")
+		})
+
+		it("does not recreate a task that another instance deleted", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-deleted", task: "Original prompt" }))
+			await storeB.reconcile()
+
+			await storeB.delete("title-deleted")
+			expect(storeA.get("title-deleted")).toBeDefined()
+
+			await expect(storeA.setTitleIfUnset("title-deleted", "Auto title")).resolves.toBe("conflict")
+
+			expect(storeA.get("title-deleted")).toBeUndefined()
+			await storeB.reconcile()
+			expect(storeB.get("title-deleted")).toBeUndefined()
+		})
+
+		it("applies the title when no instance has set one", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-free", task: "Original prompt" }))
+
+			await expect(storeA.setTitleIfUnset("title-free", "Auto title")).resolves.toBe("applied")
+
+			expect(storeA.get("title-free")).toMatchObject({ title: "Auto title", task: "Original prompt" })
+		})
+
+		it("persists the title to disk so reloading from storage preserves it", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "persist-check", task: "Original task prompt" }))
+
+			await expect(storeA.setTitleIfUnset("persist-check", "Persisted title")).resolves.toBe("applied")
+
+			// Reload a fresh store instance pointing to the same disk directory
+			const storeReloaded = new TaskHistoryStore(tmpDir)
+			await storeReloaded.initialize()
+
+			const diskItem = storeReloaded.get("persist-check")
+			expect(diskItem).toBeDefined()
+			expect(diskItem?.title).toBe("Persisted title")
+			expect(diskItem?.task).toBe("Original task prompt")
+			storeReloaded.dispose()
+		})
+
+		it("throws when the task is not in the cache", async () => {
+			await storeA.initialize()
+			await expect(storeA.setTitleIfUnset("missing-id", "Auto title")).rejects.toThrow("not found in cache")
+		})
+
+		it("returns conflict immediately when cached item already has a title", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "already-titled", title: "Existing", task: "Prompt" }))
+			await expect(storeA.setTitleIfUnset("already-titled", "New title")).resolves.toBe("conflict")
+		})
+
+		it("notifies onWrite callback when title is successfully applied", async () => {
+			const onWriteSpy = vi.fn().mockResolvedValue(undefined)
+			const storeWithOnWrite = new TaskHistoryStore(tmpDir, { onWrite: onWriteSpy })
+			await storeWithOnWrite.initialize()
+			await storeWithOnWrite.upsert(makeHistoryItem({ id: "title-onwrite", task: "Prompt" }))
+			onWriteSpy.mockClear()
+
+			await expect(storeWithOnWrite.setTitleIfUnset("title-onwrite", "Notified title")).resolves.toBe("applied")
+			expect(onWriteSpy).toHaveBeenCalledWith(
+				expect.arrayContaining([expect.objectContaining({ id: "title-onwrite", title: "Notified title" })]),
+			)
+			storeWithOnWrite.dispose()
+		})
+
+		it("re-throws unexpected errors from safeWriteJson", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-io-err", task: "Prompt" }))
+
+			const { safeWriteJson } = await import("../../../utils/safeWriteJson")
+			const mockedSafeWrite = vi.mocked(safeWriteJson)
+			mockedSafeWrite.mockRejectedValueOnce(new Error("disk IO error"))
+
+			await expect(storeA.setTitleIfUnset("title-io-err", "Auto title")).rejects.toThrow("disk IO error")
+		})
+	})
+
 	it("two instances can write different tasks without conflict", async () => {
 		await storeA.initialize()
 		await storeB.initialize()

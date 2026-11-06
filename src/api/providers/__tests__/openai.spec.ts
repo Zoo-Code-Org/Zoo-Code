@@ -986,6 +986,21 @@ describe("OpenAiHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
 		})
+
+		it("forwards abort signal and timeout to the SDK request", async () => {
+			const controller = new AbortController()
+			await handler.completePrompt("Test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 15_000,
+			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({
+					signal: controller.signal,
+					timeout: 15_000,
+				}),
+			)
+		})
 	})
 
 	describe.each([

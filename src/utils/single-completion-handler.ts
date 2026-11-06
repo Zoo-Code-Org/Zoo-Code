@@ -20,6 +20,16 @@ export async function singleCompletionHandler(
 
 	const handler = buildApiHandler(apiConfiguration)
 
+	let onAbort: (() => void) | undefined
+	if (options?.abortSignal) {
+		onAbort = () => disposeApiHandler(handler)
+		if (options.abortSignal.aborted) {
+			disposeApiHandler(handler)
+		} else {
+			options.abortSignal.addEventListener("abort", onAbort, { once: true })
+		}
+	}
+
 	try {
 		// Check if handler supports single completions
 		if (!("completePrompt" in handler)) {
@@ -28,6 +38,9 @@ export async function singleCompletionHandler(
 
 		return await (handler as SingleCompletionHandler).completePrompt(promptText, options)
 	} finally {
+		if (onAbort && options?.abortSignal) {
+			options.abortSignal.removeEventListener("abort", onAbort)
+		}
 		// Handlers such as VS Code LM / GitHub Copilot hold listeners that must be released.
 		disposeApiHandler(handler)
 	}
