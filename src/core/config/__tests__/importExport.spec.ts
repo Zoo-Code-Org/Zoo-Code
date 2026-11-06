@@ -809,6 +809,7 @@ describe("importExport", () => {
 						failure: { reason: failure },
 						stored: ["interfaceFontScale"],
 						notStored: ["the other settings"],
+						uncertain: [],
 					})
 				})
 
@@ -816,6 +817,7 @@ describe("importExport", () => {
 					expect(await writeValuesThroughWriteChain(proxy(), { interfaceFontScale: 120 })).toEqual({
 						stored: ["interfaceFontScale"],
 						notStored: [],
+						uncertain: [],
 						failure: undefined,
 					})
 
@@ -825,6 +827,7 @@ describe("importExport", () => {
 						failure: { reason: failure },
 						stored: [],
 						notStored: ["the other settings"],
+						uncertain: [],
 					})
 				})
 			})
@@ -842,7 +845,7 @@ describe("importExport", () => {
 			it("puts back only the value whose write failed after storing it, when another appearance write succeeds", async () => {
 				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
 					stored.set(key, value)
-					if (key === "interfaceFontScale") throw new Error("failed after storing")
+					if (key === "interfaceFontScale" && value === 120) throw new Error("failed after storing")
 				}) as unknown as typeof mockContextProxy.setValue)
 
 				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14 })
@@ -884,7 +887,7 @@ describe("importExport", () => {
 				expect(mockContextProxy.setValue).toHaveBeenCalledWith("interfaceFontScale", undefined)
 			})
 
-			it("reports the failure even when putting a value back fails as well", async () => {
+			it("reports a value that could not be put back as uncertain, not as not stored, and names it for the form", async () => {
 				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
 					if (value === 100) throw new Error("restore failed")
@@ -894,7 +897,12 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120 })
 
-				expect(result).toEqual({ success: false, error: "failed after storing", settingsMayHaveChanged: true })
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["interfaceFontScale"], // the form takes what is really there for it
+					error: "failed after storing (not stored: none; stored: none; uncertain, could not be put back: interfaceFontScale)",
+				})
 				expect(consoleError).toHaveBeenCalledTimes(1)
 				expect(consoleError).toHaveBeenCalledWith(
 					'Failed to restore setting "interfaceFontScale" after a failed write:',

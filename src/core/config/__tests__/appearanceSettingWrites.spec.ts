@@ -1173,12 +1173,21 @@ describe("appearanceSettingWrites", () => {
 		const failure = new Error("storage unavailable")
 
 		it("is the failure as it was for a write that failed alone, with nothing else stored", () => {
-			expect(describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: ["a"] })).toBe(failure)
-			expect(describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: [] })).toBe(failure)
+			expect(
+				describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: ["a"], uncertain: [] }),
+			).toBe(failure)
+			expect(
+				describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: [], uncertain: [] }),
+			).toBe(failure)
 		})
 
 		it("names what was stored and what was not otherwise, with the failure as the cause", () => {
-			const error = describeFailedWrite({ failure: { reason: failure }, stored: ["a"], notStored: ["b", "c"] })
+			const error = describeFailedWrite({
+				failure: { reason: failure },
+				stored: ["a"],
+				notStored: ["b", "c"],
+				uncertain: [],
+			})
 
 			expect(error).toBeInstanceOf(PartialSettingsWriteError)
 			expect(error).toMatchObject({
@@ -1190,7 +1199,12 @@ describe("appearanceSettingWrites", () => {
 		})
 
 		it("says that nothing was stored when several failed", () => {
-			const error = describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: ["b", "c"] })
+			const error = describeFailedWrite({
+				failure: { reason: failure },
+				stored: [],
+				notStored: ["b", "c"],
+				uncertain: [],
+			})
 
 			expect(error).toMatchObject({ message: "storage unavailable (not stored: b, c; stored: none)" })
 		})
@@ -1200,6 +1214,7 @@ describe("appearanceSettingWrites", () => {
 				failure: { reason: "the disk is full" },
 				stored: ["a"],
 				notStored: ["b"],
+				uncertain: [],
 			})
 
 			expect(error).toMatchObject({
@@ -1214,9 +1229,183 @@ describe("appearanceSettingWrites", () => {
 				failure: { reason: new SettingsWriteError(["a"], ["b"], cause) },
 				stored: ["a"],
 				notStored: ["b"],
+				uncertain: [],
 			})
 
 			expect(error).toMatchObject({ message: "secret storage unavailable (not stored: b; stored: a)", cause })
+		})
+	})
+
+	describe("writeValuesThroughWriteChain: what is not known, and what does not wait for the other settings", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		/** A store of the appearance values and of the others, each of which can be made to fail or to hang. */
+		const store2 = (behaviour: {
+			failToStore?: number[] // appearance values whose store fails after storing them
+			failToRestore?: number[] // appearance values that cannot be put back
+			hangOn?: number[] // appearance values whose store never settles until `release`
+			othersNeverSettle?: boolean
+		}) => {
+			const releases: Array<() => void> = []
+			const proxy = {
+				getValue: (key: string) => stored.get(key),
+				setValue: vi.fn(async (key: string, value: unknown) => {
+					if (typeof value === "number" && behaviour.failToRestore?.includes(value)) {
+						throw new Error(`cannot put back ${value}`)
+					}
+					if (typeof value === "number" && behaviour.hangOn?.includes(value)) {
+						await new Promise<void>((resolve) => releases.push(resolve))
+					}
+					stored.set(key, value)
+					if (typeof value === "number" && behaviour.failToStore?.includes(value)) {
+						throw new Error(`failed after storing ${value}`)
+					}
+				}),
+				setValues: vi.fn(() => (behaviour.othersNeverSettle ? new Promise<void>(() => {}) : Promise.resolve())),
+			} as unknown as ContextProxy
+			return { proxy, release: () => releases.splice(0).forEach((release) => release()) }
+		}
+		const keysThatFail = ["interfaceFontScale", "terminalFontSize"] as const
+
+		it("reports a value that could not be put back as uncertain, not as not stored", async () => {
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			const { proxy } = store2({ failToStore: [120], failToRestore: [100] })
+
+			const report = await writeValuesThroughWriteChain(proxy, { interfaceFontScale: 120 })
+
+			expect(report).toMatchObject({ stored: [], notStored: [], uncertain: ["interfaceFontScale"] })
+			expect(describeFailedWrite(report)).toMatchObject({
+				name: "PartialSettingsWriteError",
+				message:
+					"failed after storing 120 (not stored: none; stored: none; uncertain, could not be put back: interfaceFontScale)",
+				uncertain: ["interfaceFontScale"],
+			})
+			consoleError.mockRestore()
+		})
+
+		it("reports a value that was put back as not stored, and a single failure with nothing else as it was", async () => {
+			const { proxy } = store2({ failToStore: [120] })
+
+			const report = await writeValuesThroughWriteChain(proxy, { interfaceFontScale: 120 })
+
+			expect(report).toMatchObject({ stored: [], notStored: ["interfaceFontScale"], uncertain: [] })
+			expect(stored.get("interfaceFontScale")).toBe(100)
+			expect(describeFailedWrite(report)).toBe(report.failure?.reason)
+		})
+
+		it("reports a rollback that is still pending as uncertain, and tells the provider when it is over", async () => {
+			const { proxy, release } = store2({ hangOn: [120] })
+			const settled = vi.fn()
+
+			const writing = writeValuesThroughWriteChain(
+				proxy,
+				{ interfaceFontScale: 120 },
+				{ owner: {}, onDeferredSettled: settled },
+			)
+			await vi.advanceTimersByTimeAsync(15_000) // the store has not finished: the write failed, and is rolled back later
+			const report = await writing
+
+			expect(report).toMatchObject({ stored: [], notStored: [], uncertain: ["interfaceFontScale"] })
+			expect(settled).not.toHaveBeenCalled() // the outcome is not final yet
+			release() // the late store lands, and the rollback that waited behind it puts the value back
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(settled).toHaveBeenCalledTimes(1) // consumers are refreshed after the final outcome
+			expect(stored.get("interfaceFontScale")).toBe(100)
+		})
+
+		it("sorts several settings by what is known of each: stored, not stored, uncertain", async () => {
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			// interfaceFontScale: fails and is put back. terminalFontSize: fails and cannot be put back. spacingScale: stored.
+			const { proxy } = store2({ failToStore: [120, 14], failToRestore: [12] })
+			stored.set("terminalFontSize", 12)
+
+			const report = await writeValuesThroughWriteChain(proxy, {
+				interfaceFontScale: 120,
+				terminalFontSize: 14,
+				spacingScale: 90,
+			})
+
+			expect(report).toMatchObject({
+				stored: ["spacingScale"],
+				notStored: ["interfaceFontScale"],
+				uncertain: ["terminalFontSize"],
+			})
+			expect(describeFailedWrite(report)).toMatchObject({
+				message:
+					"failed after storing 120 (not stored: interfaceFontScale; stored: spacingScale; uncertain, could not be put back: terminalFontSize)",
+			})
+			consoleError.mockRestore()
+		})
+
+		it("names an uncertain setting for the refresh with the ones that were stored", () => {
+			expect(
+				describeFailedWrite({
+					failure: { reason: new Error("x") },
+					stored: ["a"],
+					notStored: [],
+					uncertain: ["b"],
+				}),
+			).toMatchObject({ stored: ["a"], uncertain: ["b"] })
+		})
+
+		describe("when the other settings do not settle", () => {
+			it("finishes the appearance writes that were stored at once, so nothing is kept about them", async () => {
+				const { proxy } = store2({ othersNeverSettle: true })
+
+				const writing = writeValuesThroughWriteChain(proxy, { interfaceFontScale: 120, mode: "code" })
+				writing.catch(() => undefined)
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 }) // while the call is waiting
+			})
+
+			it("keeps nothing for repeated mixed writes, also after the provider was disposed", async () => {
+				const { proxy } = store2({ othersNeverSettle: true })
+				const sidebar = {}
+
+				for (const value of [110, 120, 130]) {
+					writeValuesThroughWriteChain(
+						proxy,
+						{ interfaceFontScale: value, terminalFontSize: 14, mode: "code" },
+						{ owner: sidebar },
+					).catch(() => undefined)
+					await vi.advanceTimersByTimeAsync(0)
+				}
+				disposeSettingWrites(sidebar)
+				await vi.advanceTimersByTimeAsync(15_000)
+
+				expect(stored.get("interfaceFontScale")).toBe(130)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				expect(settingWritesWaitingToStart()).toBe(0)
+				expect(settingWritesAttachedToALine()).toBe(0)
+			})
+
+			it("puts a failed appearance write back without waiting for the other settings", async () => {
+				const { proxy } = store2({ othersNeverSettle: true, failToStore: [120] })
+
+				const writing = writeValuesThroughWriteChain(proxy, { interfaceFontScale: 120, mode: "code" })
+				writing.catch(() => undefined)
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(stored.get("interfaceFontScale")).toBe(100) // already put back
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("lets the rollbacks of two keys run without waiting for one another", async () => {
+				const { proxy } = store2({ failToStore: [120, 14] })
+
+				const report = await writeValuesThroughWriteChain(proxy, {
+					interfaceFontScale: 120,
+					terminalFontSize: 14,
+				})
+
+				expect(report.notStored.sort()).toEqual([...keysThatFail].sort())
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
 		})
 	})
 })

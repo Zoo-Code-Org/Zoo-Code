@@ -393,7 +393,13 @@ const callWhenSettled = (owner: Owner, onSettled: (() => void) | undefined) => {
 	}
 }
 
-/** Puts a failed write back, unless another write has superseded it (see `lastWriteOfSetting`). */
+/**
+ * Puts a failed write back, unless another write has superseded it (see `lastWriteOfSetting`). Resolves to `"settled"`
+ * when the value is as it will stay (put back, or never this write's to put back), and to `"pending"` when the rollback
+ * is queued behind a store that has not finished: its outcome is not known yet, and `onDeferredSettled` runs when it
+ * is. Rejects when the rollback failed, or was not over after the usual wait (it goes on, and `onDeferredSettled` runs
+ * when it is): what is stored is then uncertain.
+ */
 export const undoSettingWrite = async (
 	contextProxy: ContextProxy,
 	write: SettingWrite,
@@ -416,7 +422,7 @@ export const undoSettingWrite = async (
 			]
 		}
 		unlinkSettingWrite(write)
-		return
+		return "settled" as const
 	}
 
 	// The write before this one is pending again: it is the latest, and the value now stored is its value.
@@ -428,7 +434,7 @@ export const undoSettingWrite = async (
 	// The values this write may have stored: its own, unless its store was never issued, and the ones it took over.
 	// With none, there is nothing to put back: what is stored belongs to someone else, even when it is the same value.
 	const mayHaveStored = [...(write.skipped ? [] : [write.wrote]), ...(write.alsoWrote ?? [])]
-	if (mayHaveStored.length === 0) return
+	if (mayHaveStored.length === 0) return "settled" as const
 
 	const restore = async () => {
 		if (mayHaveStored.includes(contextProxy.getValue(key as keyof RooCodeSettings))) {
@@ -451,7 +457,7 @@ export const undoSettingWrite = async (
 				console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),
 			)
 			.finally(settled)
-		return
+		return "pending" as const
 	}
 
 	// This write may have stored its value (it started, and then failed), so it has to be put back whatever happens
@@ -478,6 +484,7 @@ export const undoSettingWrite = async (
 	} finally {
 		clearTimeout(timer)
 	}
+	return "settled" as const
 }
 
 /** What a failed write of the settings that are not appearance values says about them. */
@@ -486,31 +493,36 @@ const reportOthers = (reason: unknown): { stored: string[]; notStored: string[] 
 		? { stored: [...reason.committed], notStored: [...reason.failed] }
 		: { stored: [], notStored: ["the other settings"] }
 
-/** A write that was not all stored: which settings were stored (they are final) and which were not. */
+/** A write that was not all stored: which settings were stored (they are final), which were not, and which are not known. */
 export class PartialSettingsWriteError extends Error {
 	constructor(
 		readonly stored: string[],
 		readonly notStored: string[],
+		readonly uncertain: string[],
 		override readonly cause: unknown,
 	) {
 		const reason = cause instanceof Error ? cause.message : String(cause)
-		super(
-			`${reason} (not stored: ${notStored.join(", ")}; stored: ${stored.length > 0 ? stored.join(", ") : "none"})`,
-		)
+		const parts = [
+			`not stored: ${notStored.length > 0 ? notStored.join(", ") : "none"}`,
+			`stored: ${stored.length > 0 ? stored.join(", ") : "none"}`,
+		]
+		if (uncertain.length > 0) parts.push(`uncertain, could not be put back: ${uncertain.join(", ")}`)
+		super(`${reason} (${parts.join("; ")})`)
 		this.name = "PartialSettingsWriteError"
 	}
 }
 
 /**
- * The error for a report with a failure. A write that failed on its own, with nothing else stored, is reported as it
- * was. When it was only partly done, or several failed, the error names the settings that were stored and those that
- * were not: the ones that were stored are final, so what is stored is not what the caller asked for.
+ * The error for a report with a failure. A write that failed on its own, with nothing else stored and nothing uncertain,
+ * is reported as it was. When it was only partly done, or several failed, or a rollback is not known to have worked, the
+ * error names the settings that were stored, those that were not, and those that are uncertain: the ones that were
+ * stored are final, so what is stored is not what the caller asked for.
  */
-export function describeFailedWrite({ failure, stored, notStored }: WriteValuesReport): unknown {
-	if (notStored.length <= 1 && stored.length === 0) return failure?.reason
+export function describeFailedWrite({ failure, stored, notStored, uncertain }: WriteValuesReport): unknown {
+	if (notStored.length <= 1 && stored.length === 0 && uncertain.length === 0) return failure?.reason
 	// A store that says which settings failed has said it in its message: the cause is what is left to tell.
 	const cause = failure?.reason instanceof SettingsWriteError ? failure.reason.cause : failure?.reason
-	return new PartialSettingsWriteError(stored, notStored, cause)
+	return new PartialSettingsWriteError(stored, notStored, uncertain, cause)
 }
 
 /** What a write through the chain did: the first failure, and which settings were stored and which were not. */
@@ -519,10 +531,16 @@ export interface WriteValuesReport {
 	/** The settings that were stored: they are final. */
 	stored: string[]
 	/**
-	 * The settings that were not stored: the appearance settings that failed (and were put back), and the others, by name
+	 * The settings that were not stored: the appearance settings that failed and were put back, and the others, by name
 	 * when the store says which of them failed (`SettingsWriteError`) and as a group when it does not.
 	 */
 	notStored: string[]
+	/**
+	 * The appearance settings whose write failed and whose rollback failed or has not finished: what is stored for them
+	 * is not known (it may still be the value that failed to be stored). `onDeferredSettled` runs when the last rollback
+	 * that was pending is over.
+	 */
+	uncertain: string[]
 }
 
 /**
@@ -544,9 +562,9 @@ export async function writeValuesThroughWriteChain(
 	if (keys.length === 0) {
 		try {
 			await contextProxy.setValues(settings)
-			return { stored: Object.keys(settings), notStored: [] }
+			return { stored: Object.keys(settings), notStored: [], uncertain: [] }
 		} catch (reason) {
-			return { failure: { reason }, ...reportOthers(reason) }
+			return { failure: { reason }, ...reportOthers(reason), uncertain: [] }
 		}
 	}
 
@@ -564,32 +582,49 @@ export async function writeValuesThroughWriteChain(
 		Object.entries(settings).filter(([key]) => !isAppearanceSetting(key)),
 	) as RooCodeSettings
 
-	// Every write is awaited before any is finished or undone, so none is still running when it leaves the chain.
-	const [othersResult, ...writeResults] = await Promise.allSettled([
-		contextProxy.setValues(others),
-		...writes.map((write) => performSettingWrite(contextProxy, write, options.owner)),
+	// Each appearance write is finished, or undone, as soon as its own store has settled: what is kept about it does not
+	// wait for the other settings, whose store may take long, or never settle (the chain of a key is its own). The
+	// rollback of a failed one is awaited here (the outcome is part of the report), and the rollbacks of different keys
+	// do not wait for one another.
+	const appearance = writes.map(async (write) => {
+		try {
+			await performSettingWrite(contextProxy, write, options.owner)
+		} catch (reason) {
+			let outcome: "settled" | "pending" | "failed"
+			try {
+				outcome = await undoSettingWrite(contextProxy, write, options)
+			} catch (restoreError) {
+				console.error(`Failed to restore setting "${write.key}" after a failed write:`, restoreError)
+				outcome = "failed"
+			}
+			return { key: write.key, failure: { reason }, uncertain: outcome !== "settled" }
+		}
+		finishSettingWrites([write])
+		return { key: write.key }
+	})
+	const [othersResult, ...results] = await Promise.all([
+		contextProxy.setValues(others).then(
+			() => ({ ok: true as const }),
+			(reason: unknown) => ({ ok: false as const, reason }),
+		),
+		...appearance,
 	])
 
-	let failure = othersResult.status === "rejected" ? othersResult : undefined
-	const { stored, notStored } =
-		othersResult.status === "rejected"
-			? reportOthers(othersResult.reason)
-			: { stored: Object.keys(others), notStored: [] }
-	for (const [index, write] of writes.entries()) {
-		const result = writeResults[index]
-		if (result.status === "fulfilled") {
-			finishSettingWrites([write])
-			stored.push(write.key)
+	let failure = othersResult.ok ? undefined : { reason: othersResult.reason }
+	const { stored, notStored } = othersResult.ok
+		? { stored: Object.keys(others), notStored: [] as string[] }
+		: reportOthers(othersResult.reason)
+	const uncertain: string[] = []
+	for (const result of results) {
+		if (!("failure" in result)) {
+			stored.push(result.key)
 			continue
 		}
-		failure ??= result
-		notStored.push(write.key)
-		try {
-			await undoSettingWrite(contextProxy, write, options)
-		} catch (restoreError) {
-			console.error(`Failed to restore setting "${write.key}" after a failed write:`, restoreError)
-		}
+		failure ??= result.failure
+		// A rollback that failed, or is not over yet, leaves what is stored unknown: it is not "not stored".
+		if (result.uncertain) uncertain.push(result.key)
+		else notStored.push(result.key)
 	}
 
-	return { failure: failure && { reason: failure.reason }, stored, notStored }
+	return { failure, stored, notStored, uncertain }
 }

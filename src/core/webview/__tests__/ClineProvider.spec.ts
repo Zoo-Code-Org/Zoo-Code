@@ -3446,7 +3446,7 @@ describe("ClineProvider", () => {
 		const chain = await import("../../config/appearanceSettingWrites")
 		const spy = vi
 			.spyOn(chain, "writeValuesThroughWriteChain")
-			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [] })
+			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [], uncertain: [] })
 		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 		await provider.setValues({ terminalFontSize: 14 })
@@ -3473,6 +3473,7 @@ describe("ClineProvider", () => {
 				failure: { reason: failure },
 				stored: ["terminalFontSize"],
 				notStored: ["the other settings"],
+				uncertain: [],
 			})
 			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
@@ -3490,7 +3491,12 @@ describe("ClineProvider", () => {
 
 		test("passes on the failure as it was when a write failed alone and nothing else was stored", async () => {
 			const failure = new Error("other settings failed")
-			const spy = await reporting({ failure: { reason: failure }, stored: [], notStored: ["the other settings"] })
+			const spy = await reporting({
+				failure: { reason: failure },
+				stored: [],
+				notStored: ["the other settings"],
+				uncertain: [],
+			})
 			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
@@ -3501,7 +3507,12 @@ describe("ClineProvider", () => {
 
 		test("does not let a refresh that fails hide the error", async () => {
 			const failure = new Error("other settings failed")
-			const spy = await reporting({ failure: { reason: failure }, stored: [], notStored: ["the other settings"] })
+			const spy = await reporting({
+				failure: { reason: failure },
+				stored: [],
+				notStored: ["the other settings"],
+				uncertain: [],
+			})
 			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
 
 			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
@@ -3510,7 +3521,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("refreshes nothing when every write was stored", async () => {
-			const spy = await reporting({ stored: ["mode"], notStored: [] })
+			const spy = await reporting({ stored: ["mode"], notStored: [], uncertain: [] })
 			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			await provider.setValues({ mode: "code" })

@@ -285,8 +285,10 @@ export async function importSettingsFromPath(
 					success: false as const,
 					error,
 					settingsMayHaveChanged: true as const,
-					...(e instanceof PartialSettingsWriteError && e.stored.length > 0
-						? { storedSettings: e.stored }
+					// The settings the import stored, and those it may have stored (a rollback that did not work): the form
+					// takes what is really there for all of them.
+					...(e instanceof PartialSettingsWriteError && e.stored.length + e.uncertain.length > 0
+						? { storedSettings: [...e.stored, ...e.uncertain] }
 						: {}),
 				}
 			: { success: false as const, error }

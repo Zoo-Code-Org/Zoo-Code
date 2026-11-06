@@ -120,7 +120,7 @@ describe("API - configuration", () => {
 		const chain = await import("../../core/config/appearanceSettingWrites")
 		const spy = vi
 			.spyOn(chain, "writeValuesThroughWriteChain")
-			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [] })
+			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [], uncertain: [] })
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider = {
 			context: {},
