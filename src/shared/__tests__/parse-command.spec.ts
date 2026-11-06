@@ -3690,13 +3690,15 @@ describe("parseCommand", () => {
 		})
 	})
 
-	describe("unclosed quote in a heredoc delimiter fails closed", () => {
+	describe("heredoc delimiters with undeterminable terminators fail closed", () => {
 		// A quote character inside the delimiter word opens a quote region. bash
 		// carries that region across newlines until its closing quote. A word
 		// that still has a region open at end of input is a delimiter that no
 		// body line can ever match. The opener line's tail keeps executing as
 		// ordinary syntax. This is exactly where a mask to end of input would
-		// hand bash's separate commands to the allowlists unaccounted for.
+		// hand bash's separate commands to the allowlists unaccounted for. A
+		// delimiter is equally unresolvable when bash applies a quote removal
+		// the walk does not reproduce (ANSI-C/locale rows below).
 
 		it("fails closed on the CR-delimited unclosed-quote delimiter (the approval-bypass shape)", () => {
 			// bash closes the delimiter's quote on the second line. It then runs
@@ -3744,6 +3746,217 @@ describe("parseCommand", () => {
 			const { commands, parseError } = parseCommand(input)
 			expect(commands).toEqual([input])
 			expect(parseError?.quoteType).toBe("heredoc")
+		})
+
+		// bash applies ANSI-C/locale quote removal to the delimiter word before
+		// matching it against a terminator line. The delimiter walk pairs raw
+		// quote bytes, so it reads `$'EOF'` as the terminator `$EOF` while bash
+		// closes the heredoc at the real `EOF` line — and executes everything
+		// after it. The terminator cannot be determined from the walk, so the
+		// construct fails closed instead of masking bash's live commands.
+		it("fails closed on an ANSI-C quoted delimiter word (bash executes the tail)", () => {
+			// With `cat` allowlisted, masking the body would auto-approve this
+			// input while bash runs the `rm` after the real terminator as its own
+			// command. Refused input returns the raw bytes verbatim as the one
+			// host word, and the decision layer fails closed on the parse error.
+			const input = "cat <<$'EOF'\nbody\nEOF\nrm -rf /tmp/target\n$EOF\n"
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError?.quoteType).toBe("heredoc")
+			expect(commands).toEqual([input])
+		})
+
+		it("fails closed on a locale-quoted delimiter word", () => {
+			// `$"EOF"` is the locale-quoted sibling: bash performs locale quote
+			// removal, so the heredoc closes at the `EOF` line and the `printf`
+			// after it executes. Same undeterminable terminator, same refusal.
+			const input = 'cat <<$"EOF"\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n'
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError?.quoteType).toBe("heredoc")
+			expect(commands).toEqual([input])
+		})
+
+		it("fails closed on concatenated, blank-separated, and substitution-framed ANSI-C delimiters", () => {
+			// The scan flags an unquoted ANSI-C quote start at any position in
+			// the delimiter word, so these shapes all refuse: a concatenation
+			// after the ANSI-C word (`$'EO'F` removes to `EOF`), a blank
+			// between `<<` and the word, and a heredoc opened inside a
+			// substitution frame, whose error propagates the same way an
+			// unclosed quote's does.
+			const concat = parseCommand("cat <<$'EO'F\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n")
+			expect(concat.parseError?.quoteType).toBe("heredoc")
+			expect(concat.commands).toEqual(["cat <<$'EO'F\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n"])
+			const spaced = parseCommand("cat << $'EOF'\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n")
+			expect(spaced.parseError?.quoteType).toBe("heredoc")
+			expect(spaced.commands).toEqual(["cat << $'EOF'\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n"])
+			const framed = parseCommand("echo $(cat <<$'EOF'\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n)\n")
+			expect(framed.parseError?.quoteType).toBe("heredoc")
+			expect(framed.commands).toEqual(["echo $(cat <<$'EOF'\nbody\nEOF\nprintf RAN > ran.marker\n$EOF\n)\n"])
+		})
+
+		it("fails closed on mid-word ANSI-C and locale concatenation delimiters", () => {
+			// bash removes ANSI-C/locale quotes at any unquoted occurrence in
+			// the delimiter word, so each word below closes the heredoc at the
+			// quote-removed text — a line the delimiter walk never derives —
+			// and runs the tail after it as its own command. Refusing keeps the
+			// raw bytes unapprovable.
+			const shape = (input: string) => {
+				const { commands, parseError } = parseCommand(input)
+				expect(parseError?.quoteType).toBe("heredoc")
+				expect(commands).toEqual([input])
+			}
+			// `a$'X'Y` removes to `aXY`; `a$"X"Y` is the locale twin; `'a'$'X'`
+			// concatenates a plain-quoted piece before the ANSI-C piece;
+			// `x$'EOF'` matches its quote-removed `xEOF` line mid-file.
+			shape("cat <<a$'X'Y\nbody\naXY\nprintf RAN > ran.marker\na$XY\n")
+			shape('cat <<a$"X"Y\nbody\naXY\nprintf RAN > ran.marker\na$XY\n')
+			shape("cat <<'a'$'X'\nbody\naX\nprintf RAN > ran.marker\na$X\n")
+			shape("cat <<x$'EOF'\nbody\nxEOF\nprintf RAN > ran.marker\nx$EOF\n")
+		})
+
+		it("fails closed on the tab-form and continuation mid-word ANSI-C delimiters", () => {
+			// The scan covers the delimiter word after the `<<-` strip and the
+			// opener's blank skip, so the tab-indented form refuses like the
+			// plain one. A backslash-newline pair joins the next line into the
+			// word before bash tokenizes it, and the joined word still carries
+			// the unquoted ANSI-C occurrence.
+			const tabForm = parseCommand("cat <<-\tx$'EOF'\nbody\n\txEOF\nprintf RAN > ran.marker\nx$EOF\n")
+			expect(tabForm.parseError?.quoteType).toBe("heredoc")
+			expect(tabForm.commands).toEqual(["cat <<-\tx$'EOF'\nbody\n\txEOF\nprintf RAN > ran.marker\nx$EOF\n"])
+			const joined = parseCommand("cat <<a$'X'\\\nY\nbody\naXY\nprintf RAN > ran.marker\na$XY\n")
+			expect(joined.parseError?.quoteType).toBe("heredoc")
+			expect(joined.commands).toEqual(["cat <<a$'X'\\\nY\nbody\naXY\nprintf RAN > ran.marker\na$XY\n"])
+		})
+
+		it("fails closed when a line continuation joins a delimiter's dollar to a quote byte", () => {
+			// bash removes backslash-newline line continuations before
+			// tokenizing, so the `$` and the quote byte of a `$'`/`$"`
+			// occurrence can sit on separate physical lines. bash joins the
+			// bytes and removes the quotes before matching the delimiter word
+			// against a terminator line, so each word below closes the heredoc
+			// at the joined quote-removed text — a line the terminator search
+			// never derives from the physical lines — and runs the tail after
+			// it as its own command. The `<<-` tab form is scanned after the
+			// strip, and a word whose dollar follows a closed quote region
+			// reaches the scan unquoted.
+			const shape = (input: string) => {
+				const { commands, parseError } = parseCommand(input)
+				expect(parseError?.quoteType).toBe("heredoc")
+				expect(commands).toEqual([input])
+			}
+			shape("cat <<a$\\\n'b'\nbody\nab\nprintf RAN > ran.marker\na$b\n")
+			shape('cat <<a$\\\n"b"\nbody\nab\nprintf RAN > ran.marker\na"b"\n')
+			shape("cat <<'x'$\\\n'b'\nbody\nxb\nprintf RAN > ran.marker\nx$b\n")
+			shape("cat <<-a$\\\n'b'\nbody\n\tab\nprintf RAN > ran.marker\n\ta$b\n")
+		})
+
+		it("fails closed when stacked or escaped-backslash continuations join a delimiter's dollar to a quote byte", () => {
+			// bash removes each backslash-newline pair independently, so a run
+			// of continuations between the `$` and the quote byte still joins
+			// them. An escaped `\\` consumes only its own pair, leaving the
+			// following `$` unquoted, so a continuation after it counts the
+			// same way. Both words below join to carry an ANSI-C occurrence
+			// and close the heredoc at the quote-removed line: refuse.
+			const shape = (input: string) => {
+				const { commands, parseError } = parseCommand(input)
+				expect(parseError?.quoteType).toBe("heredoc")
+				expect(commands).toEqual([input])
+			}
+			shape("cat <<a$\\\n\\\n'b'\nbody\nab\nprintf RAN > ran.marker\na$b\n")
+			shape("cat <<a\\\\$\\\n'b'\nbody\na\\b\nprintf RAN > ran.marker\na\\$b\n")
+		})
+
+		it("keeps a delimiter whose dollar a surviving byte holds from the joined quote parsing", () => {
+			// Continuation removal deletes exactly the two bytes of a
+			// backslash-newline pair. A space after the pair survives, so
+			// bash sees `$` and `'` apart: the delimiter word stays `a$`, the
+			// quote on the joined line belongs to a later word, and the
+			// heredoc closes at the matching `a$` line. The terminator stays
+			// determinable, so the occurrence test must end its continuation
+			// skip at any byte the removal leaves standing — even a plain
+			// newline that no backslash joins.
+			const joined = parseCommand("cat <<a$\\\n 'b'\nbody\na$\nprintf RAN > ran.marker\n")
+			expect(joined.parseError).toBeNull()
+			expect(joined.commands).toEqual(["cat <<a$\\\n\nbody\na$ b", "printf RAN > ran.marker"])
+			const spaced = parseCommand("cat <<a$ \n'b'\nbody\na$\nprintf RAN > ran.marker\n")
+			expect(spaced.parseError).toBeNull()
+			expect(spaced.commands).toEqual(["cat <<a$\n'b'\nbody\na$", "printf RAN > ran.marker"])
+		})
+
+		it("reports a chained malformed delimiter at its own opener", () => {
+			// A chained opener's un-closeable delimiter word fails its own
+			// heredoc: the error names the chained construct's opener position,
+			// not the first heredoc on the line.
+			const { parseError } = parseCommand("cat <<A <<'x\nbody\nA\nprintf RAN > ran.marker\n")
+			expect(parseError?.quoteType).toBe("heredoc")
+			expect(parseError?.openIndex).toBe(8)
+		})
+
+		it("keeps escaped-dollar and in-quote-dollar delimiter words parsing", () => {
+			// Precision controls: bash treats an escaped `\$` as a literal
+			// dollar and a `$` inside a quote region as ordinary word content,
+			// and the walk derives both words exactly, so the terminator stays
+			// determinable and these words keep parsing. An escaped backslash
+			// after an unquoted dollar keeps its own pair, so the following
+			// quote belongs to a later word, not to the dollar: the word stays
+			// `a$\X`, no ANSI-C occurrence exists, and only a continuation pair
+			// -- never a lone `\\` -- may join bytes in the occurrence test.
+			const escaped = parseCommand("cat <<\\$'X'\nbody\n$X")
+			expect(escaped.parseError).toBeNull()
+			expect(escaped.commands).toEqual(["cat <<\\$'X'\nbody\n$X"])
+			const escapedBackslash = parseCommand("cat <<a$\\\\'X'\nbody\na$\\X")
+			expect(escapedBackslash.parseError).toBeNull()
+			expect(escapedBackslash.commands).toEqual(["cat <<a$\\\\'X'\nbody\na$\\X"])
+			const quotedDollar = parseCommand("cat <<'EOF$'\nbody\nEOF$")
+			expect(quotedDollar.parseError).toBeNull()
+			expect(quotedDollar.commands).toEqual(["cat <<'EOF$'\nbody\nEOF$"])
+			const dqDollar = parseCommand(`cat <<a"$'x'"\nbody\na$'x'`)
+			expect(dqDollar.parseError).toBeNull()
+			expect(dqDollar.commands).toEqual([`cat <<a"$'x'"\nbody\na$'x'`])
+		})
+
+		it("refuses mid-word ANSI-C concatenation and leaves ordinary quoting untouched", () => {
+			// The scan fires on any unquoted `$'`/`$"` occurrence in the
+			// delimiter word. Plain quoting constructs, a body merely
+			// containing a `$'EOF'` line, and a bare `$VAR` at word start keep
+			// parsing; the unclosed mixed quote still fails closed through the
+			// open-region rule, not through this scan.
+			const sq = parseCommand("cat <<'EOF'\nbody\nprintf RAN > ran.marker\nEOF")
+			expect(sq.parseError).toBeNull()
+			expect(sq.commands).toEqual(["cat <<'EOF'\nbody\nprintf RAN > ran.marker\nEOF"])
+			const dq = parseCommand('cat <<"EOF"\nbody\nprintf RAN > ran.marker\nEOF')
+			expect(dq.parseError).toBeNull()
+			expect(dq.commands).toEqual(['cat <<"EOF"\nbody\nprintf RAN > ran.marker\nEOF'])
+			const mixed = parseCommand(`cat <<"EOF'\nbody\nEOF`)
+			expect(mixed.parseError?.quoteType).toBe("heredoc")
+			expect(mixed.commands).toEqual([`cat <<"EOF'\nbody\nEOF`])
+			const midWord = parseCommand("cat <<a$'b'\nbody\na$b")
+			expect(midWord.parseError?.quoteType).toBe("heredoc")
+			expect(midWord.commands).toEqual(["cat <<a$'b'\nbody\na$b"])
+			const midWordLocale = parseCommand('cat <<a$"b"\nbody\na$b')
+			expect(midWordLocale.parseError?.quoteType).toBe("heredoc")
+			expect(midWordLocale.commands).toEqual(['cat <<a$"b"\nbody\na$b'])
+			const bodyLine = parseCommand("cat <<EOF\nbody\n$'EOF'\nprintf RAN > ran.marker\nEOF")
+			expect(bodyLine.parseError).toBeNull()
+			expect(bodyLine.commands).toEqual(["cat <<EOF\nbody\n$'EOF'\nprintf RAN > ran.marker\nEOF"])
+			// A `$` without a quote byte after it is a variable expansion, not
+			// the ANSI-C quoting start: the scan must not fire on it.
+			const bareVar = parseCommand("cat <<$EOF\nbody\n$EOF")
+			expect(bareVar.parseError).toBeNull()
+			expect(bareVar.commands).toEqual(["cat <<$EOF\nbody\n$EOF"])
+		})
+
+		it("keeps a chained ANSI-C delimiter refused and a quoted chain's tail visible", () => {
+			// bash strips the ANSI-C quotes from a chained delimiter too, so the
+			// `$'A'` chain must stay refused; the guard now refuses it at the
+			// delimiter itself. The quoted twin is ordinary chained syntax: it
+			// keeps parsing, and the tail after the last terminator reaches its
+			// own segment for the deny surface.
+			const chain = parseCommand("cat <<$'A' <<B\na1\nA\nb1\nB\nprintf RAN > ran.marker")
+			expect(chain.parseError?.quoteType).toBe("heredoc")
+			expect(chain.commands).toEqual(["cat <<$'A' <<B\na1\nA\nb1\nB\nprintf RAN > ran.marker"])
+			const quotedChain = parseCommand("cat <<'A' <<B\na1\nA\nb1\nB\nprintf RAN > ran.marker")
+			expect(quotedChain.parseError).toBeNull()
+			expect(quotedChain.commands).toEqual(["cat <<'A'\na1\nA\nb1\nB << B", "printf RAN > ran.marker"])
 		})
 	})
 

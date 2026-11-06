@@ -588,11 +588,13 @@ function scanShellSyntax(text: string): ScanOutcome {
 		}
 		const { delimiter, endIndex, quoted, wordPresent, malformed } = parseHeredocDelimiter(text, i)
 		if (malformed) {
-			// The delimiter word still has an open quote region at end of
-			// input. bash reads it as a multi-line word that can never match a
-			// body line. The opener line's tail keeps executing as ordinary
-			// syntax. The body and everything after it are unaccountable, so
-			// fail closed.
+			// The walk cannot determine the terminator: the word reached end
+			// of input with a quote region still open, so bash reads a
+			// multi-line word that can never match a body line, or it contains
+			// an unquoted ANSI-C/locale quoting occurrence whose quote removal
+			// the walk does not reproduce, so bash closes the heredoc at a
+			// line this walk never derives. Either way the body and everything
+			// after it are unaccountable, so fail closed.
 			return { error: errorAt("heredoc", start) }
 		}
 		if (!wordPresent && endIndex < text.length && text[endIndex] !== "\n" && text[endIndex] !== "\r") {
@@ -1279,10 +1281,12 @@ function scanShellSyntax(text: string): ScanOutcome {
 				}
 				const chain = parseHeredocDelimiter(text, k)
 				if (chain.malformed) {
-					// The delimiter word still has an open quote region at end
-					// of input. bash reads it as a multi-line word that can
-					// never match a body line. The body is unaccountable, so
-					// fail closed.
+					// The walk cannot determine this chained delimiter's
+					// terminator: an open quote region at end of input, or an
+					// unquoted ANSI-C/locale quoting occurrence whose quote
+					// removal the walk does not reproduce, so bash closes the
+					// heredoc at a line this walk never derives. The body is
+					// unaccountable, so fail closed.
 					return { error: errorAt("heredoc", opener) }
 				}
 				const chainBody = findTerminator(searchStart, chain.delimiter, chain.quoted, chainStrip)
@@ -2459,10 +2463,13 @@ function scanShellSyntax(text: string): ScanOutcome {
  *   not a quoting construct and leaves the body expansion-active.
  * - `wordPresent`: whether any delimiter token appeared at all. A bare `<<`
  *   before end of line has none.
- * - `malformed`: whether the word reached end of input with a quote region
- *   still open. bash then reads the delimiter as a multi-line word that can
- *   never match a body line. The opener line's tail keeps executing as
- *   ordinary syntax. No body can be accounted for.
+ * - `malformed`: whether this walk cannot determine the terminator bash will
+ *   use: the word reached end of input with a quote region still open, or it
+ *   contains an unquoted ANSI-C/locale quoting occurrence whose quote removal
+ *   the walk does not reproduce — adjacency read from the shell's
+ *   continuation-removed view. bash then reads a multi-line word no body line
+ *   can match, or closes the heredoc at a line this walk never derives. No
+ *   body can be accounted for.
  */
 function parseHeredocDelimiter(
 	command: string,
@@ -2479,6 +2486,19 @@ function parseHeredocDelimiter(
 	let quoted = false
 	// The quote region currently open inside the word, if any.
 	let quote: "'" | '"' | null = null
+	// bash removes backslash-newline line continuations before tokenizing, so
+	// a `$'` or `$"` occurrence can form from bytes on separate physical
+	// lines: `a$` plus a continuation plus `'b'` is the word `a$'b'`. bash
+	// applies ANSI-C/locale quote removal to every unquoted such occurrence —
+	// mid-word, at the start, and across any run of continuations joining the
+	// bytes — before matching the delimiter word against a terminator line, so
+	// such a word closes the heredoc at text this walk never derives
+	// (`$'EOF'` terminates at `EOF`, not `$EOF`; the joined `a$\<LF>'b'` at
+	// `ab`). The terminator is undeterminable: fail closed. An escaped `\$` is
+	// a literal dollar, a `$` inside a quote region is ordinary word content,
+	// and any byte that survives the removal (a space) keeps the pair apart
+	// for bash too; the walk reproduces all three exactly.
+	let ansiCPrefix = false
 
 	while (i < command.length) {
 		const char = command[i]
@@ -2531,6 +2551,20 @@ function parseHeredocDelimiter(
 			i++
 			continue
 		}
+		// The unquoted path: the escaped `\$` was consumed as a literal above,
+		// so a `$` still standing here can open the byte pair bash removes
+		// quotes for. bash removes backslash-newline pairs before tokenizing,
+		// so the pair counts even when a run of line continuations separates
+		// the bytes.
+		if (char === "$") {
+			let j = i + 1
+			while (command[j] === "\\" && command[j + 1] === "\n") {
+				j += 2
+			}
+			if (command[j] === "'" || command[j] === '"') {
+				ansiCPrefix = true
+			}
+		}
 		// An unquoted blank, line ending, or shell metacharacter ends the word.
 		// bash tokenizes `cat <<E|grep x` as the delimiter word `E` followed by
 		// a live operator, exactly like `cat <<E | grep x`. The msys read layer
@@ -2558,7 +2592,7 @@ function parseHeredocDelimiter(
 		endIndex: i,
 		quoted,
 		wordPresent: i > start,
-		malformed: quote !== null,
+		malformed: quote !== null || ansiCPrefix,
 	}
 }
 

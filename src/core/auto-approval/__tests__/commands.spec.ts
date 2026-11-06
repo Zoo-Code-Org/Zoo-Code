@@ -543,7 +543,7 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		// model-independent way, so it fails closed. The decision is a
 		// rejection, never the approval an opaque `cat` word would otherwise
 		// earn.
-		expect(getCommandDecision("cat << \r\nEOF\n\r\nrm -rf /\n", ["cat"], [])).not.toBe("auto_approve")
+		expect(getCommandDecision("cat << \r\nEOF\n\r\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 		expect(getCommandDecision("cat << \r\nEOF\n\r\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 	})
 
@@ -551,7 +551,7 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		// This is the same decision-level rejection with the CR directly after
 		// `<<`. One CR byte inside the masked region is enough to fail the
 		// heredoc closed.
-		expect(getCommandDecision("cat <<\r\nEOF\nrm -rf /\n", ["cat"], [])).not.toBe("auto_approve")
+		expect(getCommandDecision("cat <<\r\nEOF\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 		expect(getCommandDecision("cat <<\r\nEOF\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 	})
 
@@ -583,7 +583,7 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		// `; rm -rf /` line onto the opener line as live syntax the remainder
 		// cut never sees. The heredoc fails closed, and the deny payload never
 		// reaches tokenization: an allowlisted `cat` must not carry it.
-		expect(getCommandDecision("cat <<E 'a'\\\n; rm -rf /\nE\n", ["cat"], [])).not.toBe("auto_approve")
+		expect(getCommandDecision("cat <<E 'a'\\\n; rm -rf /\nE\n", ["cat"], [])).toBe("malformed_command")
 		expect(getCommandDecision("cat <<E 'a'\\\n; rm -rf /\nE\n", ["cat"], ["rm"])).toBe("malformed_command")
 	})
 
@@ -595,9 +595,9 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		// tokenizes. `"a"b'` additionally pins the accept side: an open single
 		// quote at the run keeps the guard silent, and a walk that loses that
 		// state rejects this ordinary heredoc instead of approving it.
-		expect(getCommandDecision("cat <<E a\\'\\\n; rm -rf /\nE\n", ["cat"], [])).not.toBe("auto_approve")
+		expect(getCommandDecision("cat <<E a\\'\\\n; rm -rf /\nE\n", ["cat"], [])).toBe("malformed_command")
 		expect(getCommandDecision("cat <<E a\\'\\\n; rm -rf /\nE\n", ["cat"], ["rm"])).toBe("malformed_command")
-		expect(getCommandDecision('cat <<E "a\\"b\'\\\n; rm -rf /\nE\n', ["cat"], [])).not.toBe("auto_approve")
+		expect(getCommandDecision('cat <<E "a\\"b\'\\\n; rm -rf /\nE\n', ["cat"], [])).toBe("malformed_command")
 		expect(getCommandDecision('cat <<E "a\\"b\'\\\n; rm -rf /\nE\n', ["cat"], ["rm"])).toBe("malformed_command")
 		expect(getCommandDecision('cat <<E "a"b\'\\\n; rm -rf /\nE\n', ["cat"], [])).toBe("auto_approve")
 	})
