@@ -23,9 +23,19 @@ export async function createDirectoriesForFile(filePath: string): Promise<string
 	}
 
 	// Create directories from the topmost missing one down to the target directory
-	for (let i = dirsToCreate.length - 1; i >= 0; i--) {
-		await fs.mkdir(dirsToCreate[i])
-		newDirectories.push(dirsToCreate[i])
+	try {
+		for (let i = dirsToCreate.length - 1; i >= 0; i--) {
+			await fs.mkdir(dirsToCreate[i])
+			newDirectories.push(dirsToCreate[i])
+		}
+	} catch (error) {
+		// A later mkdir failure must not leave the directories this call already created
+		// behind: the caller never receives them, so it cannot clean them up. Remove them
+		// deepest-first, best effort, and surface the original failure.
+		for (const directory of [...newDirectories].reverse()) {
+			await fs.rmdir(directory).catch(() => {})
+		}
+		throw error
 	}
 
 	return newDirectories
