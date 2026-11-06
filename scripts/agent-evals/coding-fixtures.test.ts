@@ -65,7 +65,7 @@ describe("coding fixture suite", () => {
 			assert.ok(bundle.grading.resources.memoryMb > 0)
 			assert.ok(bundle.grading.resources.cpus > 0)
 			assert.ok(bundle.grading.resources.pidsLimit > 0)
-			assert.match(bundle.grading.resources.image, /^node:/)
+			assert.equal(bundle.grading.resources.image, "docker.io/library/node:22-bookworm")
 		}
 	})
 

@@ -368,3 +368,105 @@ it("removes a published generation when interrupted during final cleanup", async
 		await fs.rm(dir, { recursive: true, force: true })
 	}
 })
+
+it("invalidates previous reports before a side starts and removes reports on failure", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-stale-"))
+	const out = path.join(dir, "out")
+	const names = ["comparison-report.complete", "comparison-report.json", "comparison-report.md"]
+	try {
+		await fs.mkdir(out)
+		await Promise.all(names.map((name) => fs.writeFile(path.join(out, name), "stale")))
+		await assert.rejects(
+			executeComparisonFlow(
+				flowWiring({
+					flag: createInterruptFlag(),
+					out,
+					scratchDir: path.join(dir, "scratch"),
+					runSide: async () => {
+						assert.deepEqual(await fs.readdir(out), [])
+						await fs.writeFile(path.join(out, names[0]!), "partial")
+						throw new Error("side failed")
+					},
+				}),
+			),
+			/side failed/,
+		)
+		assert.deepEqual(await fs.readdir(out), [])
+	} finally {
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+it(
+	"waits for timeout termination without sending a delayed kill after side cleanup",
+	{ timeout: 10_000 },
+	async (t) => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-timeout-"))
+		const originalKill = process.kill
+		const kills: NodeJS.Signals[] = []
+		t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+			if (signal === "SIGKILL") kills.push(signal)
+			return originalKill(pid, signal)
+		})
+		try {
+			const fixture = path.join(dir, "side.cjs")
+			await fs.writeFile(fixture, "process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000)")
+			const tracked: (number | undefined)[] = []
+			const wiring = sideWiring({
+				flag: createInterruptFlag(),
+				tracked,
+				sideScript: fixture,
+				createSideOutDir: async (out) => {
+					await fs.mkdir(out, { recursive: true })
+				},
+			})
+			await assert.rejects(
+				runCompareSide("baseline", COMMIT, dir, { ...wiring, sideTimeoutMs: 500, killGraceMs: 200 }),
+				/side failed/,
+			)
+			assert.equal(tracked.at(-1), undefined)
+			await new Promise((resolve) => setTimeout(resolve, 300))
+			assert.deepEqual(kills, [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	},
+)
+
+it("attempts every report removal and refuses to start sides when invalidation fails", async (t) => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-cleanup-"))
+	const out = path.join(dir, "out")
+	const remove = fs.rm
+	const removed: string[] = []
+	let started = false
+	t.mock.method(fs, "rm", async (target: Parameters<typeof fs.rm>[0], options: Parameters<typeof fs.rm>[1]) => {
+		if (String(target).startsWith(out + path.sep)) {
+			removed.push(path.basename(String(target)))
+			if (String(target).endsWith("comparison-report.complete")) throw new Error("marker removal refused")
+		}
+		await remove(target, options)
+	})
+	try {
+		await fs.mkdir(out)
+		await fs.writeFile(path.join(out, "comparison-report.complete"), "stale")
+		await assert.rejects(
+			executeComparisonFlow(
+				flowWiring({
+					flag: createInterruptFlag(),
+					out,
+					scratchDir: path.join(dir, "scratch"),
+					runSide: async (side) => {
+						started = true
+						return record(side, COMMIT)
+					},
+				}),
+			),
+			AggregateError,
+		)
+		assert.equal(started, false)
+		for (const name of ["comparison-report.complete", "comparison-report.json", "comparison-report.md"])
+			assert.ok(removed.includes(name))
+	} finally {
+		await remove(dir, { recursive: true, force: true })
+	}
+})

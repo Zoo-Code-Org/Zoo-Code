@@ -5,7 +5,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { createHostRuntime, readWorkspaceFiles } from "./launcher.ts"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
@@ -184,6 +184,58 @@ it("ignores poisoned caller VS Code caches and removes its fresh private cache",
 		await runtime.cleanup()
 		await assert.rejects(fs.access(selectedCache))
 	} finally {
+		await runtime.cleanup()
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+it("keeps provider credentials out of downloader extraction helpers", async () => {
+	const dir = await tempDir("download-env-")
+	const savedPath = process.env.PATH
+	const savedKey = process.env.SOLHEIM_API_KEY
+	try {
+		const helper = path.join(dir, "tar")
+		await fs.writeFile(helper, '#!/bin/sh\nif [ -n "$SOLHEIM_API_KEY" ]; then exit 9; fi\nprintf clean\n', {
+			mode: 0o700,
+		})
+		const downloader = path.join(dir, "download.mjs")
+		await fs.writeFile(
+			downloader,
+			`import { execFileSync } from 'node:child_process';
+const result = execFileSync('tar', [], { encoding: 'utf8' });
+if (result !== 'clean') throw new Error('extraction environment contaminated');
+process.stdout.write(JSON.stringify(process.execPath));`,
+		)
+		process.env.PATH = `${dir}${path.delimiter}${savedPath ?? ""}`
+		process.env.SOLHEIM_API_KEY = "test-provider-secret"
+		const { downloadVSCodeIsolated } = await import("./launcher.ts")
+		assert.equal(
+			await downloadVSCodeIsolated({ version: "1.100.0", cachePath: dir }, pathToFileURL(downloader)),
+			process.execPath,
+		)
+	} finally {
+		if (savedPath === undefined) delete process.env.PATH
+		else process.env.PATH = savedPath
+		if (savedKey === undefined) delete process.env.SOLHEIM_API_KEY
+		else process.env.SOLHEIM_API_KEY = savedKey
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+it("captures workspace files through the host runtime after launch", async () => {
+	const dir = await tempDir("host-workspace-")
+	const runtime = createHostRuntime({
+		root: repoRoot,
+		artifactsDir: dir,
+		downloadVSCode: async () => process.execPath,
+	})
+	let host: Awaited<ReturnType<typeof runtime.launch>> | undefined
+	try {
+		const files = [{ path: "nested/answer.js", content: "export const answer = 42\n" }]
+		host = await runtime.launch(files)
+		assert.deepEqual(await runtime.readFinalWorkspace?.(), { files, truncated: false })
+	} finally {
+		host?.signal("SIGKILL")
 		await runtime.cleanup()
 		await fs.rm(dir, { recursive: true, force: true })
 	}

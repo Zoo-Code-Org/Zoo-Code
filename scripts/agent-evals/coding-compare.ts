@@ -8,7 +8,7 @@ import { buildComparisonReport, renderMarkdownReport, type ComparisonReport, typ
 import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
 import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
-import type { SideProcessGuard } from "./side-process-guard.ts"
+import { createSideProcessGuard, type SideProcessGuard } from "./side-process-guard.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
 
 export { buildComparisonReport, renderMarkdownReport }
@@ -203,31 +203,22 @@ export const runCompareSide = async (
 		)
 		wiring.guard.track(child.pid)
 		let timedOut = false
+		const timeoutGuard = createSideProcessGuard(wiring.killGraceMs)
+		timeoutGuard.track(child.pid)
+		let termination: Promise<unknown> = Promise.resolve()
 		const timer = setTimeout(() => {
 			timedOut = true
-			try {
-				if (child.pid) process.kill(-child.pid, "SIGTERM")
-			} catch {
-				child.kill("SIGTERM")
-			}
-			setTimeout(() => {
-				try {
-					if (child.pid) process.kill(-child.pid, "SIGKILL")
-				} catch {
-					child.kill("SIGKILL")
-				}
-			}, wiring.killGraceMs).unref()
+			termination = timeoutGuard.interrupt()
 		}, wiring.sideTimeoutMs)
-		child.once("error", () => {
+		const finish = (code: number): void => {
 			clearTimeout(timer)
-			wiring.guard.track(undefined)
-			resolve(1)
-		})
-		child.once("exit", (code) => {
-			clearTimeout(timer)
-			wiring.guard.track(undefined)
-			resolve(timedOut ? 1 : (code ?? 1))
-		})
+			void termination.then(() => {
+				wiring.guard.track(undefined)
+				resolve(timedOut ? 1 : code)
+			})
+		}
+		child.once("error", () => finish(1))
+		child.once("exit", (code) => finish(code ?? 1))
 	})
 	if (exit !== 0) throw new Error(`${side} side failed with exit code ${exit}`)
 	const parsed: unknown = JSON.parse(await fs.readFile(path.join(sideOut, sideResultFileName()), "utf8"))
@@ -265,6 +256,7 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 	let completed: ComparisonReport | undefined
 	let failure: unknown
 	try {
+		await removeComparisonReport(wiring.out)
 		const report = buildComparisonReport({
 			baseline: toSideResult(await wiring.runSide("baseline")),
 			candidate: toSideResult(await wiring.runSide("candidate")),
@@ -303,7 +295,14 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		await removeComparisonReport(wiring.out)
 		return { status: "interrupted", signal }
 	}
-	if (failure !== undefined) throw failure
+	if (failure !== undefined) {
+		try {
+			await removeComparisonReport(wiring.out)
+		} catch (cleanupError) {
+			throw new AggregateError([failure, cleanupError], "comparison failed and report cleanup failed")
+		}
+		throw failure
+	}
 	if (completed === undefined) throw new Error("comparison ended without a report or a failure")
 	return { status: "completed", report: completed }
 }
@@ -396,8 +395,13 @@ const COMPARISON_REPORT_COMPLETE = "comparison-report.complete"
 // comparison leaves no report files behind. Consumers must require the
 // completion marker and match its generation against the report files.
 export async function removeComparisonReport(outDir: string): Promise<void> {
-	for (const name of [COMPARISON_REPORT_COMPLETE, COMPARISON_REPORT_JSON, COMPARISON_REPORT_MD])
-		await fs.rm(path.join(outDir, name), { force: true })
+	const results = await Promise.allSettled(
+		[COMPARISON_REPORT_COMPLETE, COMPARISON_REPORT_JSON, COMPARISON_REPORT_MD].map((name) =>
+			fs.rm(path.join(outDir, name), { force: true }),
+		),
+	)
+	const errors = results.filter((result) => result.status === "rejected").map((result) => result.reason)
+	if (errors.length) throw new AggregateError(errors, "comparison report cleanup failed")
 }
 
 export async function publishComparisonReport(

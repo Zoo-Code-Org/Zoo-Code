@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
-import { downloadAndUnzipVSCode } from "@vscode/test-electron"
+import { fileURLToPath } from "node:url"
 import { IpcClient } from "@roo-code/ipc"
 import { IpcMessageType } from "@roo-code/types"
 import { buildChildEnvironment, buildLaunchArgs } from "./isolation.ts"
@@ -14,13 +14,28 @@ import { identityUnavailable, measured, type MeasuredString, type TraceRunIdenti
 
 const execFileAsync = promisify(execFile)
 
+export const downloadVSCodeIsolated = async (
+	options: { version?: string; cachePath?: string },
+	downloader = new URL("./download-vscode.mjs", import.meta.url),
+): Promise<string> => {
+	if (typeof options !== "object" || options === null) throw new Error("download options required")
+	const { stdout } = await execFileAsync(
+		process.execPath,
+		[fileURLToPath(downloader), options.version ?? "stable", options.cachePath ?? ""],
+		{ env: buildWorktreeEnvironment(process.env), timeout: 300_000 },
+	)
+	const executable: unknown = JSON.parse(stdout)
+	if (typeof executable !== "string" || !path.isAbsolute(executable)) throw new Error("invalid VS Code executable")
+	return executable
+}
+
 export interface HostRuntimeOptions {
 	// Repository root of the evaluated extension. Reads of package metadata,
 	// commit identity, and the extension source all stay inside it.
 	root: string
 	artifactsDir: string
 	// Test seam for the download boundary; caches always live in private scratch.
-	downloadVSCode?: typeof downloadAndUnzipVSCode
+	downloadVSCode?: (options: { version: string; cachePath: string }) => Promise<string>
 	now?: () => number
 	pause?: (ms: number) => Promise<void>
 	// Optional --extensionTestsPath module. The module's run() must never
@@ -140,7 +155,7 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 			const pkg = JSON.parse(await fs.readFile(path.join(root, "apps/vscode-e2e/package.json"), "utf8")) as {
 				devDependencies: Record<string, string>
 			}
-			const executable = await (options.downloadVSCode ?? downloadAndUnzipVSCode)({
+			const executable = await (options.downloadVSCode ?? downloadVSCodeIsolated)({
 				version: pkg.devDependencies["@types/vscode"] ?? "1.100.0",
 				cachePath: path.join(temp, "vscode-cache"),
 			})
