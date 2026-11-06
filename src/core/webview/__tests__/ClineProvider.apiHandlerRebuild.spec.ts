@@ -145,6 +145,11 @@ vi.mock("@roo-code/cloud", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
+// A same-name profile save joins the manager's cross-instance critical section, so a
+// double that stubs the manager must still run the callback inline: the real lock does
+// that whenever no other view holds the section.
+const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
+
 describe("ClineProvider - API Handler Rebuild Guard", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
@@ -240,9 +245,16 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new WebviewFocusTracker(),
 		)
 
-		// Mock providerSettingsManager
+		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
+		// the record it wrote: the real manager reads back the stored record, and
+		// persistProviderProfile builds its activation writes from that read-back.
+		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			}),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -259,6 +271,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}),
+			// Mirrors ProviderSettingsManager.hasConfig: the sibling-overlay snapshot asks
+			// before reading a pinned profile so a dangling pin can be left alone.
+			hasConfig: vi.fn().mockResolvedValue(true),
 			getProfile: vi.fn().mockResolvedValue({
 				name: "test-config",
 				id: "test-id",
@@ -851,7 +866,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
+			// The activation now takes a sibling-overlay snapshot before it asks the manager to
+			// write, so flush past that pre-flight await rather than a single microtask: the
+			// assertions below still prove only the first mutation had started.
+			await new Promise((resolve) => setImmediate(resolve))
 			expect(events).toEqual(["first:start"])
 
 			resolveFirst()
