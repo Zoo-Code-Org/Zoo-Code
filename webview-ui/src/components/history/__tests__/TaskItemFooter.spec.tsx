@@ -4,10 +4,13 @@ import { formatDateTime } from "@/utils/format"
 
 import TaskItemFooter from "../TaskItemFooter"
 
+// The language the hook reports; a test can switch it to check the footer formats with it.
+const translation = vi.hoisted(() => ({ language: "en" }))
+
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string) => key,
-		language: "en",
+		language: translation.language,
 	}),
 }))
 
@@ -152,6 +155,10 @@ describe("TaskItemFooter", () => {
 	})
 
 	describe("time display settings", () => {
+		afterEach(() => {
+			translation.language = "en"
+		})
+
 		const renderWith = (state: Record<string, unknown>) =>
 			render(
 				<ExtensionStateContext.Provider value={state as never}>
@@ -207,6 +214,23 @@ describe("TaskItemFooter", () => {
 			renderWith({ showRelativeTimes: false, timeFormat: "24h", dateFormat: "dmy" })
 			expect(formatDateTime).toHaveBeenCalledWith(mockItem.ts, "en", "24h", "dmy")
 			expect(screen.getByText("15/01/2024, 14:30")).toBeInTheDocument()
+		})
+
+		// With automatic formats the locale decides; English would give "Jan 15, 2024, 2:30 PM".
+		describe("in a non-English language with automatic formats", () => {
+			beforeEach(() => {
+				translation.language = "de"
+			})
+
+			it("formats the absolute time in that language", () => {
+				renderWith({ showRelativeTimes: false, timeFormat: "auto", dateFormat: "auto" })
+				expect(screen.getByText("15.01.2024, 14:30")).toBeInTheDocument()
+			})
+
+			it("formats the relative time's tooltip in that language", () => {
+				renderWith({ showRelativeTimes: true, timeFormat: "auto", dateFormat: "auto" })
+				expect(tooltipAround("2 hours ago")).toHaveAttribute("data-content", "15.01.2024, 14:30")
+			})
 		})
 	})
 })
