@@ -4,6 +4,7 @@ import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
+import { recoverInterruptedReplacement } from "./jsonFileRecovery"
 
 /**
  * Stages reported through the optional `trace` callback. They mark the
@@ -51,124 +52,6 @@ function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): stri
 		path.dirname(absoluteFilePath),
 		`.${path.basename(absoluteFilePath)}.${kind}_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
 	)
-}
-
-function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): string {
-	return `.${path.basename(absoluteFilePath)}.${kind}_`
-}
-
-/**
- * Heals the canonical path after an interrupted previous write. Must run
- * under the advisory lock and before any data is read or written: temp and
- * backup files are only ever created while that lock is held, so anything
- * matching their name patterns belongs to a writer that can no longer
- * commit or clean it up (a crashed process, or a stale lock that was
- * stolen).
- *
- * The two-step replacement used by the EPERM fallback (and by versions
- * before the single-rename commit) can be interrupted after the target was
- * renamed to its backup but before the replacement landed. A process exit
- * at that point leaves the canonical path absent, which readers see as a
- * permanent ENOENT that no retry can repair, so the newest backup is
- * restored first. Leftover replacement and backup files are garbage
- * collected afterwards.
- *
- * @returns Whether leftover files were found, and the backup path that was
- * restored, if any.
- */
-async function recoverInterruptedReplacement(
-	absoluteFilePath: string,
-): Promise<{ foundLeftovers: boolean; restoredFrom: string | null }> {
-	const dirPath = path.dirname(absoluteFilePath)
-	const newPrefix = getTempFilePrefix(absoluteFilePath, "new")
-	const backupPrefix = getTempFilePrefix(absoluteFilePath, "bak")
-
-	let entries: string[]
-	try {
-		entries = await fs.readdir(dirPath)
-	} catch {
-		// The directory is unreadable or was removed; the write itself
-		// reports that error below.
-		return { foundLeftovers: false, restoredFrom: null }
-	}
-
-	const orphanedPaths = entries
-		.filter((entry) => entry.endsWith(".tmp") && (entry.startsWith(newPrefix) || entry.startsWith(backupPrefix)))
-		.map((entry) => path.join(dirPath, entry))
-
-	if (orphanedPaths.length === 0) {
-		return { foundLeftovers: false, restoredFrom: null }
-	}
-
-	let restoredFrom: string | null = null
-	let canonicalPathMissing = false
-
-	try {
-		await fs.access(absoluteFilePath)
-	} catch (error: unknown) {
-		if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") {
-			// Unknown canonical state must not authorize deleting committed backups.
-			throw error
-		}
-		canonicalPathMissing = true
-	}
-
-	if (canonicalPathMissing) {
-		// The canonical path is absent. An interrupted two-step replacement
-		// leaves the committed content in the newest backup, so restore it
-		// and keep readers on the last committed state.
-		const backupStats = (
-			await Promise.all(
-				orphanedPaths
-					.filter((orphanPath) => path.basename(orphanPath).startsWith(backupPrefix))
-					.map(async (backupPath) => {
-						try {
-							return { backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs }
-						} catch (error: unknown) {
-							if (
-								typeof error === "object" &&
-								error !== null &&
-								"code" in error &&
-								error.code === "ENOENT"
-							) {
-								return null
-							}
-							// An unreadable backup could be the newest committed state.
-							// Intentionally block writes until it becomes readable or is
-							// explicitly removed, rather than risk losing committed history.
-							throw error
-						}
-					}),
-			)
-		).filter((entry): entry is { backupPath: string; mtimeMs: number } => entry !== null)
-		if (backupStats.length > 0) {
-			backupStats.sort((a, b) => b.mtimeMs - a.mtimeMs)
-			const newestBackupPath = backupStats[0].backupPath
-			try {
-				await fs.rename(newestBackupPath, absoluteFilePath)
-				restoredFrom = newestBackupPath
-			} catch (restoreError) {
-				console.error(
-					`Failed to restore interrupted-write backup ${newestBackupPath} to ${absoluteFilePath}:`,
-					restoreError,
-				)
-				throw restoreError
-			}
-		}
-	}
-
-	for (const orphanPath of orphanedPaths) {
-		if (orphanPath === restoredFrom) {
-			continue
-		}
-		try {
-			await fs.unlink(orphanPath)
-		} catch (cleanupError) {
-			console.error(`Failed to clean up interrupted-write leftover ${orphanPath}:`, cleanupError)
-		}
-	}
-
-	return { foundLeftovers: true, restoredFrom }
 }
 
 /**
@@ -223,7 +106,14 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// Heal any state an interrupted previous write left behind: an absent
 		// canonical path with an orphaned backup, or leftover replacement
 		// files. Runs first so a merge callback reads the restored content.
-		const recovery = await recoverInterruptedReplacement(absoluteFilePath)
+		const recovery = await recoverInterruptedReplacement(absoluteFilePath).catch((error: unknown) => {
+			const code =
+				typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+					? error.code
+					: "unknown"
+			options?.trace?.({ stage: "recover", detail: `failed:${code}` })
+			throw error
+		})
 		if (recovery.foundLeftovers) {
 			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
 		}

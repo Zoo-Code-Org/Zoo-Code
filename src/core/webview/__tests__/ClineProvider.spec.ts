@@ -7946,6 +7946,28 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("retries a transiently missing API history before returning an empty conversation", async () => {
+			const historyItem = {
+				id: "retry-api-history",
+				task: "test task",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			vi.mocked(fsp.readFile)
+				.mockRejectedValueOnce(Object.assign(new Error("Replacement in progress"), { code: "ENOENT" }))
+				.mockResolvedValueOnce(JSON.stringify([{ role: "assistant", content: "committed" }]))
+
+			const result = await provider.getTaskWithId(historyItem.id)
+
+			expect(result.apiConversationHistory).toEqual([{ role: "assistant", content: "committed" }])
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",

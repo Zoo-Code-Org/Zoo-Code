@@ -8,6 +8,11 @@ import * as lockfile from "proper-lockfile"
  */
 export const LOCK_STALE_MS = 31_000
 
+interface FileLockOptions {
+	/** Recovery may wait out a crashed writer's staleness window without stealing a live lock. */
+	waitForStaleLock?: boolean
+}
+
 /**
  * Acquire the advisory lock for one file path using the exact protocol
  * `safeWriteJson` uses, so operations that hold this lock serialize with
@@ -15,20 +20,22 @@ export const LOCK_STALE_MS = 31_000
  * returned function exactly once and must not acquire the same lock again
  * while holding it.
  */
-export async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
+export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
 	const absoluteFilePath = path.resolve(filePath)
 	try {
 		return await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
+			retries: options?.waitForStaleLock
+				? { retries: 35, factor: 1, minTimeout: 1000, maxTimeout: 1000 }
+				: {
+						// Configuration for retrying lock acquisition
+						retries: 5, // Number of retries after the initial attempt
+						factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
+						minTimeout: 100, // Minimum time to wait before the first retry (in ms)
+						maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
+					},
 			onCompromised: (err) => {
 				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
 				throw err
@@ -49,9 +56,10 @@ export async function acquireFileLock(filePath: string): Promise<() => Promise<v
 export async function withFileLock<T>(
 	filePath: string,
 	operation: (absoluteFilePath: string) => Promise<T>,
+	options?: FileLockOptions,
 ): Promise<T> {
 	const absoluteFilePath = path.resolve(filePath)
-	const releaseLock = await acquireFileLock(absoluteFilePath)
+	const releaseLock = await acquireFileLock(absoluteFilePath, options)
 
 	let result: T
 	try {

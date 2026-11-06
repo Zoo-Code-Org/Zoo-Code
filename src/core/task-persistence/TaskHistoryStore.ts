@@ -7,8 +7,10 @@ import deepEqual from "fast-deep-equal"
 import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
+import { LOCK_STALE_MS } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
+import { deleteJsonFile, recoverMissingJsonFile } from "../../utils/jsonFileRecovery"
+import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -280,7 +282,7 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+				await deleteJsonFile(filePath)
 			} catch {
 				// File may already be deleted
 			}
@@ -308,7 +310,7 @@ export class TaskHistoryStore {
 				// Remove per-task file (best-effort)
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+					await deleteJsonFile(filePath)
 				} catch {
 					// File may already be deleted
 				}
@@ -351,7 +353,11 @@ export class TaskHistoryStore {
 			for (const taskId of onDiskIds) {
 				try {
 					const taskFilePath = await this.getTaskFilePath(taskId)
-					const { mtimeMs } = await fs.stat(taskFilePath)
+					const { mtimeMs } = await fs.stat(taskFilePath).catch(async (error: unknown) => {
+						if (getErrorCode(error) !== "ENOENT") throw error
+						await recoverMissingJsonFile(taskFilePath)
+						return fs.stat(taskFilePath)
+					})
 					liveIds.add(taskId)
 					if (
 						!options.forceRefresh &&
@@ -888,7 +894,7 @@ export class TaskHistoryStore {
 		const filePath = await this.getTaskFilePath(taskId)
 
 		try {
-			const raw = await fs.readFile(filePath, "utf8")
+			const raw = await readFileWithMissingRetry(filePath)
 			const item: HistoryItem = JSON.parse(raw)
 			return item.id ? item : null
 		} catch {

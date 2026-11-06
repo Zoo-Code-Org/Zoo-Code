@@ -565,6 +565,37 @@ describe("safeWriteJson", () => {
 	})
 
 	// Interrupted-write recovery tests
+	it.each(["EMFILE", "EIO"])(
+		"should preserve committed history when the recovery scan fails with %s",
+		async (code) => {
+			await fs.unlink(currentTestFilePath)
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_saved.tmp`)
+			const committed = { history: ["saved"] }
+			await fs.writeFile(backupPath, JSON.stringify(committed))
+			const error = Object.assign(new Error("Recovery scan failed"), { code })
+			vi.mocked(fs.readdir).mockRejectedValueOnce(error)
+			const merge = vi.fn((existing: unknown) => existing)
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(merge).not.toHaveBeenCalled()
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: `failed:${code}` })
+			expect(await readFileContent(backupPath)).toEqual(committed)
+			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
+			// Once the fault clears, a later merge still sees the committed state.
+			await safeWriteJson(currentTestFilePath, {}, { merge })
+			expect(merge).toHaveBeenCalledExactlyOnceWith(committed, {})
+			expect(await readFileContent(currentTestFilePath)).toEqual(committed)
+		},
+	)
+
+	test("should allow a write when the recovery directory scan reports ENOENT", async () => {
+		vi.mocked(fs.readdir).mockRejectedValueOnce(Object.assign(new Error("Directory missing"), { code: "ENOENT" }))
+		await safeWriteJson(currentTestFilePath, { saved: true })
+		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
+	})
+
 	test("should restore an orphaned backup when the canonical path is missing after an interrupted write", async () => {
 		const committedData = { message: "Committed before the interruption" }
 
@@ -608,9 +639,11 @@ describe("safeWriteJson", () => {
 			const error = Object.assign(new Error("Canonical access failed"), { code })
 			vi.mocked(fs.access).mockResolvedValueOnce(undefined).mockRejectedValueOnce(error)
 			const merge = vi.fn((existing: unknown) => existing)
+			const trace = vi.fn()
 
-			await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toBe(error)
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
 
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: `failed:${code ?? "unknown"}` })
 			expect(merge).not.toHaveBeenCalled()
 			expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
 			expect(await readFileContent(backupPath)).toEqual({ stale: true })
@@ -656,9 +689,11 @@ describe("safeWriteJson", () => {
 			const error = Object.assign(new Error("Recovery failed"), { code: "EACCES" })
 			vi.mocked(fs[operation]).mockRejectedValueOnce(error)
 			const merge = vi.fn()
+			const trace = vi.fn()
 
-			await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toBe(error)
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
 
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: "failed:EACCES" })
 			expect(merge).not.toHaveBeenCalled()
 			expect(await readFileContent(backupPath)).toEqual(committed)
 			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
@@ -696,6 +731,29 @@ describe("safeWriteJson", () => {
 
 		expect(open).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(".new_"), "r+")
 		expect(await readFileContent(currentTestFilePath)).toEqual({ flushed: true })
+	})
+
+	it.each([false, true])("should close the flush handle before commit when sync fails: %s", async (failSync) => {
+		const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		const steps: string[] = []
+		vi.mocked(fs.open).mockImplementation(async (filePath, flags) => {
+			const handle = await actual.open(filePath, flags)
+			const sync = handle.sync.bind(handle)
+			const close = handle.close.bind(handle)
+			vi.spyOn(handle, "sync").mockImplementation(async () => {
+				steps.push("sync")
+				if (failSync) throw Object.assign(new Error("Flush failed"), { code: "EIO" })
+				await sync()
+			})
+			vi.spyOn(handle, "close").mockImplementation(async () => {
+				steps.push("close")
+				await close()
+			})
+			return handle
+		})
+		await safeWriteJson(currentTestFilePath, { saved: true }, { trace: ({ stage }) => steps.push(stage) })
+		expect(steps).toEqual(["write-start", "sync", "close", "replacement-rename", "write-complete"])
+		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
 	})
 
 	test("should garbage collect orphaned replacement files when the canonical path exists", async () => {
