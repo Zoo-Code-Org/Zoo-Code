@@ -7,6 +7,14 @@ test("finishes theme color transitions before contrast checks read them", async 
 	const action = component.getByRole("button", { name: /provider/i }).first()
 	await expect(action).toBeVisible()
 
+	// Stretch the about 150 ms transition so it cannot end on its own before the assertions read it.
+	// Reading the computed style flushes it, so the theme switch below starts the long transition.
+	const transitionDuration = await action.evaluate((element) => {
+		element.style.transitionDuration = "10s"
+		return getComputedStyle(element).transitionDuration
+	})
+	expect(transitionDuration).toBe("10s")
+
 	// The gallery starts in the dark theme, so this switch starts the Button border-color transition.
 	await applyVisualTheme(
 		page,
