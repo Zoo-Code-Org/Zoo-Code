@@ -5,7 +5,7 @@ export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
 
 export const VALID_TASK_STATUS_TRANSITIONS: Readonly<Record<HistoryItemStatus, readonly HistoryItemStatus[]>> = {
 	active: ["delegated", "completed", "interrupted"],
-	delegated: ["active"],
+	delegated: ["active", "interrupted"],
 	interrupted: ["completed"],
 	completed: [],
 }
@@ -77,6 +77,71 @@ export function interruptDelegatedChild(parent: HistoryItem, child: HistoryItem)
 	}
 	assertValidTransition(child.status, "interrupted")
 	return { ...child, status: "interrupted" }
+}
+
+/** Release an orphaned active child's link without breaking an ancestor's delegation. */
+export function recoverDelegationParent(
+	parent: HistoryItem,
+	ancestor?: HistoryItem,
+): HistoryItem & { status: "active" | "interrupted" } {
+	if (parent.status !== "delegated") {
+		throw new LifecycleTransitionError(`Cannot recover non-delegated parent ${parent.id}`)
+	}
+	const status = ancestor?.status === "delegated" && ancestor.awaitingChildId === parent.id ? "interrupted" : "active"
+	assertValidTransition(parent.status, status)
+	return { ...parent, status, awaitingChildId: undefined, delegatedToId: undefined }
+}
+
+/**
+ * True when a delegated task has no live owner and its awaited chain ends dead.
+ * Startup preserves interrupted descendants so they can still resume and return results.
+ */
+export function isDeadDelegationChain(
+	child: HistoryItem,
+	getTask: (taskId: string) => HistoryItem | undefined,
+	isTaskLive: (taskId: string) => boolean = () => false,
+	options: { preserveInterrupted?: boolean } = {},
+): boolean {
+	if (child.status !== "delegated") return false
+
+	const visited = new Set<string>()
+	let current: HistoryItem | undefined = child
+	while (true) {
+		if (visited.has(current.id) || isTaskLive(current.id)) return false
+		visited.add(current.id)
+		if (current.status === "interrupted") return !options.preserveInterrupted
+		if (current.status === "completed") return true
+		if (current.status !== "delegated") return false
+		if (!current.awaitingChildId) return true
+		const awaitedId: string = current.awaitingChildId
+		current = getTask(awaitedId)
+		// A missing record is not proof of death: the descendant may still run elsewhere.
+		if (!current) return !isTaskLive(awaitedId)
+	}
+}
+
+/**
+ * Recover a delegated child whose own execution chain has died.
+ *
+ * The caller must establish that neither this child nor any descendant in its
+ * active delegation chain has a live runtime owner. The parent deliberately
+ * keeps awaiting the now-interrupted child so existing resume, abandon, and
+ * re-delegation paths retain ownership semantics.
+ */
+export function recoverDeadDelegatedChild(parent: HistoryItem, child: HistoryItem): HistoryItem {
+	if (parent.status !== "delegated" || parent.awaitingChildId !== child.id) {
+		throw new LifecycleTransitionError(`Task ${parent.id} is not delegated to child ${child.id}`)
+	}
+	if (child.status !== "delegated") {
+		throw new LifecycleTransitionError(`Cannot recover child ${child.id} with status ${child.status}`)
+	}
+	assertValidTransition(child.status, "interrupted")
+	return {
+		...child,
+		status: "interrupted",
+		awaitingChildId: undefined,
+		delegatedToId: undefined,
+	}
 }
 
 export function completeDelegatedChild(

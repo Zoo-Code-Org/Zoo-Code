@@ -7,6 +7,7 @@ import { ClineProvider } from "../ClineProvider"
 import { Task } from "../../task/Task"
 import { TaskRegistry } from "../../task/TaskRegistry"
 import { ContextProxy } from "../../config/ContextProxy"
+import { withTaskOwnershipReservation } from "../../task-persistence"
 import type { ProviderSettings, HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -461,6 +462,81 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Verify new task received focus event
 		expect(mockTask2.emit).toHaveBeenCalledWith("taskFocused")
+	})
+
+	it("serializes the in-place rehydration install with dead-delegation recovery", async () => {
+		seedRegistry(provider, mockTask1)
+		let release!: () => void
+		const reservation = withTaskOwnershipReservation(
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
+		await vi.waitFor(() => expect(release).toBeDefined())
+
+		const rehydration = provider.createTaskWithHistoryItem({
+			id: "task-1",
+			number: 1,
+			task: "test task",
+			ts: Date.now(),
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			workspace: "/test/workspace",
+		})
+		try {
+			await vi.waitFor(() => expect(mockTask1.abortTask).toHaveBeenCalled())
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			// The recovery reservation is held: the aborted task must not be replaced yet.
+			expect(provider["taskRegistry"].current).toBe(mockTask1)
+		} finally {
+			release()
+		}
+		await reservation
+		await rehydration
+		expect(provider["taskRegistry"].current).toBe(mockTask2)
+	})
+
+	describe("when a newer task takes ownership during in-place rehydration", () => {
+		const newerTask = { taskId: "task-newer", instanceId: "instance-newer", emit: vi.fn() }
+
+		beforeEach(() => {
+			mockTask2.abortTask = vi.fn().mockResolvedValue(undefined)
+			// A newer top-level task replaces the old task while it is being aborted.
+			mockTask1.abortTask = vi.fn().mockImplementation(async () => {
+				provider["taskRegistry"].replace(mockTask1.taskId, newerTask as unknown as Task)
+			})
+		})
+
+		it("restartTaskIfCurrent reports that the replacement was not installed", async () => {
+			seedRegistry(provider, mockTask1)
+
+			await expect(provider.restartTaskIfCurrent(mockTask1 as unknown as Task)).resolves.toBe(false)
+
+			expect(provider["taskRegistry"].current).toBe(newerTask)
+			expect(mockTask2.abortTask).toHaveBeenCalledWith(true)
+		})
+
+		it("showTaskWithId does not report a successful navigation", async () => {
+			const previousTask = { taskId: "task-0", instanceId: "instance-0", emit: vi.fn() }
+			seedRegistry(provider, previousTask)
+			const getTaskWithId = provider.getTaskWithId
+			// An earlier queued navigation made task-1 current before this one was restored.
+			provider.getTaskWithId = vi.fn().mockImplementation(async (id: string) => {
+				provider["taskRegistry"].replace(previousTask.taskId, mockTask1 as unknown as Task)
+				return getTaskWithId(id)
+			})
+			const postMessageToWebview = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const record = vi.spyOn(provider["diagnosticsRecorder"], "record")
+
+			await provider.showTaskWithId("task-1")
+
+			expect(provider["taskRegistry"].current).toBe(newerTask)
+			expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "action", action: "chatButtonClicked" })
+			expect(record).not.toHaveBeenCalledWith(expect.objectContaining({ type: "show-task", phase: "success" }))
+			expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "show-task", phase: "failure" }))
+		})
 	})
 
 	it("should remove task from stack when creating different task", async () => {
