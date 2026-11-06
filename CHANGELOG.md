@@ -1,10 +1,10 @@
 # Zoo Code Changelog
 
 ## [3.94.1]
-* Workspace provider isolation by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/1
-* Ref #2303: Use bracket access in provider tests by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/2
-* Fix invalid custom storage setting fallback by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/3
-* Workspace provider isolation by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/5
+- Workspace provider isolation by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/1
+- Ref #2303: Use bracket access in provider tests by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/2
+- Fix invalid custom storage setting fallback by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/3
+- Workspace provider isolation by @FullstackSensei in https://github.com/FullstackSensei/Zoo-Code/pull/5
 
 ## [3.94.0]
 
