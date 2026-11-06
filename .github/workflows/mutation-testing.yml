@@ -55,6 +55,14 @@ jobs:
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
                   node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
 
+            - name: Summarize per-file mutation results
+              if: always() && github.event_name == 'pull_request'
+              # The summary logic lives in scripts/mutation-summary.mjs so it is unit-tested;
+              # the script reads counts from the Stryker JSON report (StrykerJS has no Markdown
+              # reporter), rejects report paths that are not repo-relative source names, and
+              # renders at most the 40 worst rows so the step summary stays under its size cap.
+              run: node scripts/mutation-summary.mjs
+
             - name: Upload mutation reports
               id: mutation_report
               if: always() && github.event_name == 'pull_request'
