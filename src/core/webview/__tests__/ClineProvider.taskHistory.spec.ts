@@ -11,6 +11,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
+import { generateSessionTitle } from "../../task/session-title"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -653,6 +654,35 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(getStored("task-race")).toMatchObject({ title: "Renamed", tokensIn: 500 })
 		})
 
+		it("cancels in-flight session title generation and preserves a manual title clear", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-manual-clear", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			let resolveCompletion!: (title: string) => void
+			const completionPromise = new Promise<string>((resolve) => {
+				resolveCompletion = resolve
+			})
+			const generation = generateSessionTitle({
+				provider,
+				taskId: "task-manual-clear",
+				userMessage: "Original prompt",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+					apiKey: "test-api-key",
+				},
+				completePrompt: async () => completionPromise,
+			})
+
+			await provider.renameTaskWithId("task-manual-clear", "")
+			expect(getStored("task-manual-clear")?.title).toBeUndefined()
+
+			resolveCompletion("Generated Title")
+			await generation
+
+			expect(getStored("task-manual-clear")?.title).toBeUndefined()
+		})
+
 		it("does not write a title through a full-item update", async () => {
 			await provider.updateTaskHistory(
 				createHistoryItem({ id: "task-title-owner", task: "Original prompt", title: "Stale title" }),
@@ -761,6 +791,8 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 
 		it("does not broadcast when the view is not launched", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = false
 			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-silent", task: "Original prompt" }), {
 				broadcast: false,
 			})

@@ -9,6 +9,7 @@ import {
 	SESSION_TITLE_TIMEOUT_MS,
 	fallbackTitle,
 	generateSessionTitle,
+	cancelSessionTitle,
 	sanitizeUserMessageForTitle,
 	extractLlmTitle,
 	type SessionTitleApplyResult,
@@ -83,6 +84,10 @@ describe("sanitizeUserMessageForTitle", () => {
 describe("extractLlmTitle", () => {
 	it.each([
 		["Fix login bug in auth flow", "Fix login bug in auth flow"],
+		["Fix Title: parsing in task history", "Fix Title: parsing in task history"],
+		['Fix "quoted" search terms', 'Fix "quoted" search terms'],
+		['"Leading quote only', "Leading quote only"],
+		['Trailing quote only"', "Trailing quote only"],
 		["Title: Fix login bug", "Fix login bug"],
 		["title: lowercase prefix", "lowercase prefix"],
 		['"Quoted title"', "Quoted title"],
@@ -350,6 +355,66 @@ describe("generateSessionTitle", () => {
 
 		expect(applied).toHaveLength(1)
 		expect(applied[0].title).toBe("First Title")
+	})
+
+	it("aborts in-flight generation and does not apply title when cancelled", async () => {
+		let abortSignal: AbortSignal | undefined
+		let resolveCompletion!: (val: string) => void
+		const completionPromise = new Promise<string>((resolve) => {
+			resolveCompletion = resolve
+		})
+		const recorder = createCompletePromptRecorder(async ({ options }) => {
+			abortSignal = options?.abortSignal
+			return completionPromise
+		})
+		const applied: ApplyTitleCall[] = []
+		const provider = createTitleProvider({
+			applySessionTitle: async (taskId, title) => {
+				applied.push({ taskId, title })
+				return "applied"
+			},
+		})
+
+		const generation = generateSessionTitle({
+			provider,
+			taskId: "task-cancel",
+			userMessage: "User prompt to name",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		expect(recorder.calls).toHaveLength(1)
+		expect(abortSignal?.aborted).toBe(false)
+
+		cancelSessionTitle("task-cancel")
+
+		expect(abortSignal?.aborted).toBe(true)
+		resolveCompletion("Generated title")
+		await generation
+
+		expect(applied).toHaveLength(0)
+	})
+
+	it("skips LLM completion and uses fallback title when rateLimitSeconds is set", async () => {
+		const recorder = createCompletePromptRecorder(async () => "LLM Title")
+		const applied: ApplyTitleCall[] = []
+		const provider = createTitleProvider({
+			applySessionTitle: async (taskId, title) => {
+				applied.push({ taskId, title })
+				return "applied"
+			},
+		})
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-ratelimit",
+			userMessage: "Fix urgent production issue in login flow",
+			apiConfiguration: { ...testApiConfiguration, rateLimitSeconds: 5 },
+			completePrompt: recorder.fn,
+		})
+
+		expect(recorder.calls).toHaveLength(0)
+		expect(applied).toEqual([{ taskId: "task-ratelimit", title: "Fix urgent production issue in login flow" }])
 	})
 
 	it("never rejects even when everything fails", async () => {

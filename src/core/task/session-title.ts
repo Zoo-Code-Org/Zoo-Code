@@ -32,6 +32,7 @@ export function sanitizeUserMessageForTitle(raw: string): string {
 			break
 		}
 		result += raw.slice(cursor, start)
+		// Stryker disable next-line ArithmeticOperator: equivalent mutant, </system-reminder> (18 chars) cannot start in the [start-17, start+17] window around <system-reminder> (17 chars)
 		const end = raw.indexOf(close, start + open.length)
 		// An unterminated block would otherwise leak the rest of the message as user text; drop it.
 		if (end === -1) {
@@ -70,8 +71,26 @@ export interface GenerateSessionTitleOptions {
 	completePrompt?: CompletePromptFn
 }
 
-/** One in-flight title generation per session (spec). */
-const inFlightTitleTaskIds = new Set<string>()
+interface InFlightTitleGeneration {
+	controller: AbortController
+	cancelled: boolean
+}
+
+/** In-flight title generation controllers by task ID. */
+const inFlightTitles = new Map<string, InFlightTitleGeneration>()
+
+/**
+ * Cancels any pending or in-flight title generation for a task.
+ * Called when a task is manually renamed, cleared, or deleted so an auto-generated title
+ * never overwrites the user's manual intent.
+ */
+export function cancelSessionTitle(taskId: string): void {
+	const inFlight = inFlightTitles.get(taskId)
+	if (inFlight) {
+		inFlight.cancelled = true
+		inFlight.controller.abort()
+	}
+}
 
 /**
  * Generates and applies a session title from the root user message.
@@ -88,29 +107,49 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 		return
 	}
 
-	if (inFlightTitleTaskIds.has(taskId)) {
+	if (inFlightTitles.has(taskId)) {
 		return
 	}
-	inFlightTitleTaskIds.add(taskId)
+	const inFlight: InFlightTitleGeneration = {
+		controller: new AbortController(),
+		cancelled: false,
+	}
+	inFlightTitles.set(taskId, inFlight)
 
 	try {
 		let title: string | undefined
-		try {
-			title = await completeTitleViaLlm(completePrompt, apiConfiguration, taskId, sanitized)
-		} catch (error) {
-			// LLM failure or timeout falls back to the message's first line.
-			console.error(`[session-title] LLM call failed for task ${taskId}:`, error)
+		const rateLimitSeconds = apiConfiguration.rateLimitSeconds ?? 0
+		if (rateLimitSeconds <= 0 && !inFlight.cancelled) {
+			try {
+				title = await completeTitleViaLlm(
+					completePrompt,
+					apiConfiguration,
+					taskId,
+					sanitized,
+					inFlight.controller,
+				)
+			} catch (error) {
+				// LLM failure, cancellation, or timeout falls back to the message's first line.
+				if (!inFlight.cancelled) {
+					console.error(`[session-title] LLM call failed for task ${taskId}:`, error)
+				}
+			}
 		}
-		title ??= fallbackTitle(sanitized)
-		if (!title) {
+		if (inFlight.cancelled) {
 			return
 		}
-		await applyTitleWithRetry(provider, taskId, title)
+		title ??= fallbackTitle(sanitized)
+		if (!title || inFlight.cancelled) {
+			return
+		}
+		await applyTitleWithRetry(provider, taskId, title, () => inFlight.cancelled)
 	} catch (error) {
 		// Best-effort by design: a failed title must never surface in the chat.
-		console.error(`[session-title] generation failed for task ${taskId}:`, error)
+		if (!inFlight.cancelled) {
+			console.error(`[session-title] generation failed for task ${taskId}:`, error)
+		}
 	} finally {
-		inFlightTitleTaskIds.delete(taskId)
+		inFlightTitles.delete(taskId)
 	}
 }
 
@@ -119,8 +158,8 @@ async function completeTitleViaLlm(
 	apiConfiguration: ProviderSettings,
 	taskId: string,
 	sanitized: string,
+	controller: AbortController,
 ): Promise<string | undefined> {
-	const controller = new AbortController()
 	let timeoutId: ReturnType<typeof setTimeout> | undefined
 	try {
 		// Both options are honored only by some providers, so the race below is
@@ -137,17 +176,37 @@ async function completeTitleViaLlm(
 				reject(new Error(`[session-title] timed out after ${SESSION_TITLE_TIMEOUT_MS}ms`))
 			}, SESSION_TITLE_TIMEOUT_MS)
 		})
-		// Promise.race attaches handlers to both inputs, so the completion
-		// rejecting after the timeout is already considered handled.
-		const raw = await Promise.race([completion, timeout])
+		const abortPromise = new Promise<never>((_, reject) => {
+			if (controller.signal.aborted) {
+				reject(new Error("[session-title] aborted"))
+			} else {
+				controller.signal.addEventListener(
+					"abort",
+					() => {
+						reject(new Error("[session-title] aborted"))
+					},
+					{ once: true },
+				)
+			}
+		})
+		// Promise.race attaches handlers to all inputs, so rejections after completion are considered handled.
+		const raw = await Promise.race([completion, timeout, abortPromise])
 		return extractLlmTitle(raw)
 	} finally {
 		clearTimeout(timeoutId)
 	}
 }
 
-async function applyTitleWithRetry(provider: ClineProvider, taskId: string, title: string): Promise<void> {
+async function applyTitleWithRetry(
+	provider: ClineProvider,
+	taskId: string,
+	title: string,
+	isCancelled: () => boolean,
+): Promise<void> {
 	for (let attempt = 0; ; attempt++) {
+		if (isCancelled()) {
+			return
+		}
 		try {
 			await provider.applySessionTitle(taskId, title)
 			// Both outcomes end the attempt: "applied" is done, and "conflict"
@@ -155,8 +214,13 @@ async function applyTitleWithRetry(provider: ClineProvider, taskId: string, titl
 			// first) — the existing title always wins.
 			return
 		} catch (error) {
-			if (attempt >= TITLE_WRITE_MAX_RETRIES) {
-				console.error(`[session-title] giving up on task ${taskId} after ${attempt + 1} write attempts:`, error)
+			if (isCancelled() || attempt >= TITLE_WRITE_MAX_RETRIES) {
+				if (!isCancelled()) {
+					console.error(
+						`[session-title] giving up on task ${taskId} after ${attempt + 1} write attempts:`,
+						error,
+					)
+				}
 				return
 			}
 		}

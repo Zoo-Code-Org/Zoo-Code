@@ -76,7 +76,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
-import type { SessionTitleApplyResult } from "../task/session-title"
+import { cancelSessionTitle, type SessionTitleApplyResult } from "../task/session-title"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
 import {
@@ -2810,6 +2810,7 @@ export class ClineProvider
 	 * clears it so the history falls back to the original prompt.
 	 */
 	async renameTaskWithId(id: string, title: string | undefined) {
+		cancelSessionTitle(id)
 		if (!this.taskHistoryStore.get(id)) {
 			this.log(`[renameTaskWithId] task ${id} not found in history`)
 			return
@@ -2826,6 +2827,7 @@ export class ClineProvider
 
 		if (this.isViewLaunched) {
 			const updatedItem = this.taskHistoryStore.get(id)
+			// Stryker disable next-line ConditionalExpression: equivalent mutant, setTitleIfUnset guarantees the item is in the cache
 			if (updatedItem) {
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 			}
@@ -2855,6 +2857,7 @@ export class ClineProvider
 
 		if (this.isViewLaunched) {
 			const updatedItem = this.taskHistoryStore.get(id)
+			// Stryker disable next-line ConditionalExpression: equivalent mutant, setTitleIfUnset guarantees the item is in the cache
 			if (updatedItem) {
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 			}
@@ -2876,6 +2879,7 @@ export class ClineProvider
 	// this function deletes a task from task history, and deletes its checkpoints and delete the task folder
 	// If the task has subtasks (childIds), they will also be deleted recursively
 	async deleteTaskWithId(id: string, cascadeSubtasks: boolean = true) {
+		cancelSessionTitle(id)
 		try {
 			await this.getTaskWithId(id)
 
