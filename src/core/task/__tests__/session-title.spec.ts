@@ -107,6 +107,12 @@ describe("fallbackTitle", () => {
 		expect(fallbackTitle(input)).toBe(expected)
 	})
 
+	it("cuts at the character limit before collapsing whitespace", () => {
+		const input = "a".repeat(FALLBACK_TITLE_MAX_CHARS - 2) + " ".repeat(5) + "bcd"
+		expect(fallbackTitle(input)).toBe("a".repeat(FALLBACK_TITLE_MAX_CHARS - 2))
+		expect(fallbackTitle("ab" + " ".repeat(60) + "cd")).toBe("ab")
+	})
+
 	it("caps the fallback at the character limit", () => {
 		const long = "a".repeat(FALLBACK_TITLE_MAX_CHARS + 10)
 		expect(fallbackTitle(long)).toBe("a".repeat(FALLBACK_TITLE_MAX_CHARS))

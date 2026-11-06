@@ -51,10 +51,10 @@ export function extractLlmTitle(raw: string): string | undefined {
 	return title.length > 0 ? title : undefined
 }
 
-/** Start of the sanitized message with whitespace collapsed, capped at 42 characters. */
+/** First 42 characters of the sanitized message, then whitespace collapsed. */
 export function fallbackTitle(sanitized: string): string | undefined {
-	const collapsed = sanitized.replace(/\s+/g, " ").trim()
-	return collapsed ? collapsed.slice(0, FALLBACK_TITLE_MAX_CHARS).trim() : undefined
+	const head = sanitized.trim().slice(0, FALLBACK_TITLE_MAX_CHARS)
+	return head.replace(/\s+/g, " ").trim() || undefined
 }
 
 type CompletePromptFn = typeof singleCompletionHandler

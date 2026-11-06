@@ -173,6 +173,29 @@ describe("Task#startTask session title trigger", () => {
 		expect(resolved).toBe(true)
 	})
 
+	it("starts title generation only after the first message is stored", async () => {
+		const provider = createMockProvider()
+		const task = createTestTask(provider)
+		stubStartup(task)
+
+		let releaseSay: () => void = () => {}
+		vi.spyOn(task, "say").mockImplementation(
+			() =>
+				new Promise<undefined>((resolve) => {
+					releaseSay = () => resolve(undefined)
+				}),
+		)
+
+		const started = getStartTaskAccess(task).startTask("stored first")
+		await Promise.resolve()
+		expect(vi.mocked(generateSessionTitle)).not.toHaveBeenCalled()
+
+		releaseSay()
+		await started
+
+		expect(lastTitleCall()?.userMessage).toBe("stored first")
+	})
+
 	it("does not wait for a pending title before starting the task loop", async () => {
 		const provider = createMockProvider()
 		const task = createTestTask(provider)

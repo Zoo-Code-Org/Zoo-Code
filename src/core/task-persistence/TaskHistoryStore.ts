@@ -26,6 +26,13 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
 }
 
+/** Thrown inside the `setTitleIfUnset` merge callback to abort the write without touching the file. */
+class TitleWriteSkipped extends Error {
+	constructor(readonly reason: "missing" | "titled") {
+		super(`title write skipped: ${reason}`)
+	}
+}
+
 /**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
@@ -1002,7 +1009,7 @@ export class TaskHistoryStore {
 	 * provider on the same storage path) saved a manual title, and a delta merge would
 	 * otherwise overwrite it.
 	 *
-	 * @returns "conflict" when a title already exists (the cache is refreshed from disk).
+	 * @returns "conflict" when a title already exists or the record was deleted on disk (the cache is refreshed).
 	 * @throws If the task ID is not present in the cache.
 	 */
 	public setTitleIfUnset(taskId: string, title: string): Promise<"applied" | "conflict"> {
@@ -1017,23 +1024,37 @@ export class TaskHistoryStore {
 
 			const filePath = await this.getTaskFilePath(taskId)
 			let written: HistoryItem = { ...current, title }
-			let conflict = false
-			await safeWriteJson(filePath, written, {
-				merge: (existing, incoming) => {
-					if (existing && typeof existing === "object" && (existing as HistoryItem).title) {
-						conflict = true
-						written = existing as HistoryItem
-						return existing
+			try {
+				await safeWriteJson(filePath, written, {
+					merge: (existing, incoming) => {
+						// Throwing aborts the write, so a deleted record is never recreated from the cache
+						// and an existing title is never rewritten.
+						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+							throw new TitleWriteSkipped("missing")
+						}
+						if ((existing as HistoryItem).title) {
+							throw new TitleWriteSkipped("titled")
+						}
+						written = mergeHistoryDelta(existing, incoming as HistoryItem, { title })
+						return written
+					},
+				})
+			} catch (error) {
+				if (!(error instanceof TitleWriteSkipped)) {
+					throw error
+				}
+				if (error.reason === "missing") {
+					this.cache.delete(taskId)
+				} else {
+					const diskItem = await this.readTaskFile(taskId)
+					if (diskItem) {
+						this.cache.set(taskId, diskItem)
 					}
-					written = mergeHistoryDelta(existing, incoming as HistoryItem, { title })
-					return written
-				},
-			})
-
-			this.cache.set(taskId, written)
-			if (conflict) {
+				}
 				return "conflict"
 			}
+
+			this.cache.set(taskId, written)
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
 			}

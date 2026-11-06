@@ -92,6 +92,22 @@ describe("TaskHistoryStore cross-instance safety", () => {
 			expect(storeB.get("title-task")?.title).toBe("Manual title")
 		})
 
+		it("does not recreate a task that another instance deleted", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-deleted", task: "Original prompt" }))
+			await storeB.reconcile()
+
+			await storeB.delete("title-deleted")
+			expect(storeA.get("title-deleted")).toBeDefined()
+
+			await expect(storeA.setTitleIfUnset("title-deleted", "Auto title")).resolves.toBe("conflict")
+
+			expect(storeA.get("title-deleted")).toBeUndefined()
+			await storeB.reconcile()
+			expect(storeB.get("title-deleted")).toBeUndefined()
+		})
+
 		it("applies the title when no instance has set one", async () => {
 			await storeA.initialize()
 			await storeA.upsert(makeHistoryItem({ id: "title-free", task: "Original prompt" }))
