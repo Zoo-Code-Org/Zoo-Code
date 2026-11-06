@@ -3,16 +3,19 @@ import type { RooCodeSettings } from "@roo-code/types"
 import {
 	APPEARANCE_SETTING_KEYS,
 	beginSettingWrite,
+	describeFailedWrite,
 	finishSettingWrites,
 	isAppearanceSetting,
 	disposeSettingWrites,
+	PartialSettingsWriteError,
 	performSettingWrite,
 	setValuesThroughWriteChain,
 	settingWriteBookkeepingSize,
+	settingWritesAttachedToALine,
 	settingWritesWaitingToStart,
 	undoSettingWrite,
 } from "../appearanceSettingWrites"
-import type { ContextProxy } from "../ContextProxy"
+import { SettingsWriteError, type ContextProxy } from "../ContextProxy"
 
 describe("appearanceSettingWrites", () => {
 	let stored: Map<string, unknown>
@@ -399,13 +402,13 @@ describe("appearanceSettingWrites", () => {
 			}
 
 			/** Two saves that both stored their value (the first 120, the second 150), and the second one's rollback is slow. */
-			const bothStoredThenFail = async () => {
+			const bothStoredThenFail = async (secondOptions?: Parameters<typeof undoSettingWrite>[2]) => {
 				const { proxy, release } = slowRollbackProxy()
 				const first = beginSettingWrite("interfaceFontScale", 100, 120)
 				await performSettingWrite(proxy, first)
 				const second = beginSettingWrite("interfaceFontScale", 120, 150)
 				await performSettingWrite(proxy, second)
-				const secondUndone = undoSettingWrite(proxy, second)
+				const secondUndone = undoSettingWrite(proxy, second, secondOptions)
 				secondUndone.catch(() => undefined) // what the test expects of it is asserted where it is awaited
 				await vi.advanceTimersByTimeAsync(0) // the rollback of the second save has started, and hangs
 				return { proxy, release, first, secondUndone }
@@ -440,6 +443,172 @@ describe("appearanceSettingWrites", () => {
 				await vi.advanceTimersByTimeAsync(0)
 
 				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("reports a rollback that fails after its caller gave up, and still tells the provider that it is over", async () => {
+				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+				const releases: Array<() => void> = []
+				const proxy = {
+					getValue: (key: string) => stored.get(key),
+					setValue: vi.fn(async (key: string, value: unknown) => {
+						if (value === 120 && stored.get(key) === 150) {
+							await new Promise<void>((resolve) => releases.push(resolve))
+							throw new Error("storage failed") // the slow rollback is the one that fails
+						}
+						stored.set(key, value)
+					}),
+				} as unknown as ContextProxy
+				const first = beginSettingWrite("interfaceFontScale", 100, 120)
+				await performSettingWrite(proxy, first)
+				const second = beginSettingWrite("interfaceFontScale", 120, 150)
+				await performSettingWrite(proxy, second)
+				const settled = vi.fn()
+				const secondUndone = undoSettingWrite(proxy, second, { owner: {}, onDeferredSettled: settled })
+				secondUndone.catch(() => undefined)
+				await vi.advanceTimersByTimeAsync(15_000)
+				await expect(secondUndone).rejects.toThrow("did not finish")
+
+				releases.splice(0).forEach((release) => release())
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(consoleError).toHaveBeenCalledWith(
+					'Failed to restore setting "interfaceFontScale" after its write failed:',
+					expect.objectContaining({ message: "storage failed" }),
+				)
+				expect(settled).toHaveBeenCalledTimes(1)
+				consoleError.mockRestore()
+				await undoSettingWrite(proxy, first) // the other save fails too: nothing is left of the writes
+			})
+
+			describe("the provider is told when a rollback that outlived its caller is over", () => {
+				it("is called once, when the rollback has settled and not before", async () => {
+					const settled = vi.fn()
+					const { release, secondUndone } = await bothStoredThenFail({
+						owner: {},
+						onDeferredSettled: settled,
+					})
+
+					await vi.advanceTimersByTimeAsync(15_000) // the caller gives up
+					await expect(secondUndone).rejects.toThrow("did not finish")
+					expect(settled).not.toHaveBeenCalled()
+					release()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(settled).toHaveBeenCalledTimes(1)
+					expect(stored.get("interfaceFontScale")).toBe(120) // what the rollback of the second save put back
+				})
+
+				it("is not called when the provider was disposed while the rollback was stalled", async () => {
+					const sidebar = {}
+					const settled = vi.fn()
+					const { release, secondUndone } = await bothStoredThenFail({
+						owner: sidebar,
+						onDeferredSettled: settled,
+					})
+
+					await vi.advanceTimersByTimeAsync(15_000)
+					await expect(secondUndone).rejects.toThrow("did not finish")
+					disposeSettingWrites(sidebar)
+					release()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(settled).not.toHaveBeenCalled()
+					expect(stored.get("interfaceFontScale")).toBe(120) // the rollback itself still ran
+				})
+
+				it("is not called for a provider that was disposed before the caller gave up", async () => {
+					const sidebar = {}
+					const settled = vi.fn()
+					const { release, secondUndone } = await bothStoredThenFail({
+						owner: sidebar,
+						onDeferredSettled: settled,
+					})
+					disposeSettingWrites(sidebar)
+
+					await vi.advanceTimersByTimeAsync(15_000)
+					await expect(secondUndone).rejects.toThrow("did not finish")
+					release()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(settled).not.toHaveBeenCalled()
+				})
+
+				it("is not called for a rollback that finished before its caller gave up: the caller has the answer", async () => {
+					const settled = vi.fn()
+					const { release, secondUndone } = await bothStoredThenFail({
+						owner: {},
+						onDeferredSettled: settled,
+					})
+
+					release() // the rollback finishes in time
+					await vi.advanceTimersByTimeAsync(0)
+					await secondUndone
+					await vi.advanceTimersByTimeAsync(15_000)
+
+					expect(settled).not.toHaveBeenCalled()
+				})
+			})
+
+			describe("the writes that wait behind a rollback that stalls do not stay attached to it", () => {
+				const attemptAndWait = (proxy: ContextProxy, value: number, owner: object) => {
+					const retry = beginSettingWrite("interfaceFontScale", 100, value)
+					const result = performSettingWrite(proxy, retry, owner)
+					result.catch(() => undefined)
+					return result
+				}
+
+				it("takes every one of them out of the line when their provider is disposed before the key is marked stalled", async () => {
+					const sidebar = {}
+					const { proxy, release } = await bothStoredThenFail()
+					const attachedBefore = settingWritesAttachedToALine()
+					const waitingBefore = settingWritesWaitingToStart()
+
+					const attempts = [160, 170, 180, 190].map((value) => attemptAndWait(proxy, value, sidebar)) // within the 15 s
+					expect(settingWritesAttachedToALine()).toBe(attachedBefore + 4)
+					disposeSettingWrites(sidebar)
+
+					for (const attempt of attempts) await expect(attempt).rejects.toThrow("was dropped")
+					expect(settingWritesAttachedToALine()).toBe(attachedBefore) // none stays on the rollback that stalls
+					expect(settingWritesWaitingToStart()).toBe(waitingBefore)
+
+					release()
+					await vi.advanceTimersByTimeAsync(0)
+				})
+
+				it("takes every one of them out of the line when they time out, while the rollback is still stalled", async () => {
+					const { proxy, release } = await bothStoredThenFail()
+					const attachedBefore = settingWritesAttachedToALine()
+					const waitingBefore = settingWritesWaitingToStart()
+
+					const attempts = [160, 170, 180].map((value) => attemptAndWait(proxy, value, {}))
+					await vi.advanceTimersByTimeAsync(15_000)
+
+					for (const attempt of attempts) await expect(attempt).rejects.toThrow()
+					expect(settingWritesAttachedToALine()).toBe(attachedBefore)
+					expect(settingWritesWaitingToStart()).toBe(waitingBefore)
+
+					release()
+					await vi.advanceTimersByTimeAsync(0)
+				})
+
+				it("hands a write behind one that gave up to the write before it, so it still goes in order", async () => {
+					const sidebar = {}
+					const { proxy, release } = await bothStoredThenFail()
+					const dropped = attemptAndWait(proxy, 160, sidebar) // queued behind the rollback, and it will be dropped
+					const kept = beginSettingWrite("interfaceFontScale", 100, 170)
+					const keptResult = performSettingWrite(proxy, kept, {}) // queued behind the one that is dropped
+					keptResult.catch(() => undefined)
+
+					disposeSettingWrites(sidebar)
+					await expect(dropped).rejects.toThrow("was dropped")
+					release() // the rollback ahead settles: the write that was behind the dropped one goes next
+					await vi.advanceTimersByTimeAsync(0)
+					await keptResult
+
+					expect(stored.get("interfaceFontScale")).toBe(170)
+					finishSettingWrites([kept])
+					await vi.advanceTimersByTimeAsync(0)
+				})
 			})
 
 			it("refuses repeated attempts at the key while a rollback stalls, also after its provider was disposed, and frees it afterwards", async () => {
@@ -495,6 +664,24 @@ describe("appearanceSettingWrites", () => {
 				expect(stored.get("interfaceFontScale")).toBe(100)
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
+		})
+
+		it("drops a write whose provider is disposed the moment the key was free, and leaves nothing behind", async () => {
+			const { proxy } = deferredProxy()
+			const sidebar = {}
+			const waitingBefore = settingWritesWaitingToStart()
+			const write = beginSettingWrite("interfaceFontScale", 100, 150)
+
+			const dropped = expect(performSettingWrite(proxy, write, sidebar)).rejects.toThrow("was dropped")
+			disposeSettingWrites(sidebar) // before the write that was just queued has been told that the key is free
+			await dropped
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(proxy.setValue).not.toHaveBeenCalled()
+			expect(settingWritesWaitingToStart()).toBe(waitingBefore)
+			expect(settingWritesAttachedToALine()).toBe(0)
+			await undoSettingWrite(proxy, write, { owner: sidebar }) // nothing was issued: nothing to put back
+			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 		})
 
 		it("drops a write whose caller gave up before it started, so it never lands later", async () => {
@@ -973,6 +1160,57 @@ describe("appearanceSettingWrites", () => {
 			await undoSettingWrite(proxy, save)
 
 			expect(stored.get("interfaceFontScale")).toBe(120)
+		})
+	})
+
+	describe("describeFailedWrite", () => {
+		const failure = new Error("storage unavailable")
+
+		it("is the failure as it was for a write that failed alone, with nothing else stored", () => {
+			expect(describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: ["a"] })).toBe(failure)
+			expect(describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: [] })).toBe(failure)
+		})
+
+		it("names what was stored and what was not otherwise, with the failure as the cause", () => {
+			const error = describeFailedWrite({ failure: { reason: failure }, stored: ["a"], notStored: ["b", "c"] })
+
+			expect(error).toBeInstanceOf(PartialSettingsWriteError)
+			expect(error).toMatchObject({
+				message: "storage unavailable (not stored: b, c; stored: a)",
+				stored: ["a"],
+				notStored: ["b", "c"],
+				cause: failure,
+			})
+		})
+
+		it("says that nothing was stored when several failed", () => {
+			const error = describeFailedWrite({ failure: { reason: failure }, stored: [], notStored: ["b", "c"] })
+
+			expect(error).toMatchObject({ message: "storage unavailable (not stored: b, c; stored: none)" })
+		})
+
+		it("tells a failure that is not an Error as the text it is", () => {
+			const error = describeFailedWrite({
+				failure: { reason: "the disk is full" },
+				stored: ["a"],
+				notStored: ["b"],
+			})
+
+			expect(error).toMatchObject({
+				message: "the disk is full (not stored: b; stored: a)",
+				cause: "the disk is full",
+			})
+		})
+
+		it("does not say it twice when the store already named the settings: the cause is what it tells", () => {
+			const cause = new Error("secret storage unavailable")
+			const error = describeFailedWrite({
+				failure: { reason: new SettingsWriteError(["a"], ["b"], cause) },
+				stored: ["a"],
+				notStored: ["b"],
+			})
+
+			expect(error).toMatchObject({ message: "secret storage unavailable (not stored: b; stored: a)", cause })
 		})
 	})
 })

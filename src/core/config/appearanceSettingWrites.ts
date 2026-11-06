@@ -64,7 +64,61 @@ export const beginSettingWrite = (key: AppearanceSettingKey, previous: unknown, 
  * the ones behind it. The entry of a key is released when the last write's store has settled, not when its caller
  * stopped waiting.
  */
-const settingWriteQueues = new Map<AppearanceSettingKey, Promise<void>>()
+const settingWriteQueues = new Map<AppearanceSettingKey, Tail>()
+
+/**
+ * The end of a write in the line of its key: the writes behind it wait for it to finish (`waiters`, in the order they
+ * came). It is a list that can be edited, not a chain of promises: a write that gives up before it started takes itself
+ * out of the line at once and hands the ones behind it to the one before it, so none stays attached to a write that
+ * is stalled.
+ */
+interface Tail {
+	done: boolean
+	waiters: Set<Waiter>
+}
+
+/** A write waiting for the one in front of it: what it does when that one is over, and where it stands when it moves up. */
+interface Waiter {
+	run: () => void
+	/** The write was moved behind another tail (the one it waited for gave up): that is the one it waits for now. */
+	rebase: (tail: Tail) => void
+}
+
+/** Nothing ahead: a write that finds the key free starts on its own. */
+const freeKey: Tail = { done: true, waiters: new Set() }
+
+/** How many writes are attached to a tail that has not finished (the test hook below). */
+let attachedWaiters = 0
+
+const finishTail = (tail: Tail) => {
+	tail.done = true
+	const waiters = [...tail.waiters]
+	attachedWaiters -= waiters.length
+	tail.waiters.clear()
+	// Each one goes on in a task of its own, as when this was a chain of promises.
+	for (const waiter of waiters) void Promise.resolve().then(waiter.run)
+}
+
+const afterTail = (tail: Tail, waiter: Waiter) => {
+	if (tail.done) {
+		void Promise.resolve().then(waiter.run)
+		return
+	}
+	tail.waiters.add(waiter)
+	attachedWaiters++
+}
+
+/** Takes a write out of the line: what waited behind it waits behind the write before it. */
+const leaveLine = (prior: Tail, tail: Tail, waiter: Waiter) => {
+	prior.waiters.delete(waiter)
+	attachedWaiters--
+	for (const behind of tail.waiters) {
+		behind.rebase(prior) // the same writes, waiting for another tail now
+		prior.waiters.add(behind)
+	}
+	tail.waiters.clear()
+	tail.done = true
+}
 
 /**
  * How long a caller waits for a write, counted from when it was queued. It is shorter than the time the webview waits
@@ -81,8 +135,8 @@ const SETTING_WRITE_TIMEOUT_MS = 15_000
  * behind such a store, each hold the key until they are over (a count, because both can be there at once). A write of
  * the key is refused until none is left.
  */
-const staleKeys = new Map<AppearanceSettingKey, number>()
-const isStale = (key: AppearanceSettingKey) => (staleKeys.get(key) ?? 0) > 0
+const staleKeys = new Map<AppearanceSettingKey, { holders: number }>()
+const isStale = (key: AppearanceSettingKey) => staleKeys.has(key)
 
 /**
  * Who issued a write: the provider that handles the request (the sidebar and an editor tab share one ContextProxy but
@@ -148,33 +202,32 @@ const queuedSettingWrite = (
 		return Promise.reject(new Error(`An earlier write of ${key} has not finished yet`))
 	}
 
-	const prior = settingWriteQueues.get(key) ?? Promise.resolve()
+	let prior = settingWriteQueues.get(key) ?? freeKey
 	let gaveUp = false
 	let started = false
 	// Dropped as soon as the write gives up, so a write that waits behind a store does not keep what it captured alive.
 	let work: (() => Promise<unknown>) | undefined = write
 
-	let resolveTail: () => void = () => {}
-	const tail = new Promise<void>((resolve) => (resolveTail = resolve))
+	const tail: Tail = { done: false, waiters: new Set() }
 	settingWriteQueues.set(key, tail)
 	// The key is free for the next write once this one's store has settled (or it was dropped before it started).
-	let takesKey = false
+	// The entry of the key in `staleKeys` while this write holds it (it holds the key at most once).
+	let heldKey: { holders: number } | undefined
 	let stalledTimer: ReturnType<typeof setTimeout> | undefined
 	const takeKey = () => {
-		if (takesKey) return
-		takesKey = true
-		staleKeys.set(key, (staleKeys.get(key) ?? 0) + 1)
+		const entry = staleKeys.get(key) ?? { holders: 0 }
+		entry.holders++
+		staleKeys.set(key, entry)
+		heldKey = entry
 	}
 	const release = () => {
 		clearTimeout(stalledTimer)
-		if (takesKey) {
-			takesKey = false
-			const left = (staleKeys.get(key) ?? 1) - 1
-			if (left > 0) staleKeys.set(key, left)
-			else staleKeys.delete(key)
+		if (heldKey) {
+			if (--heldKey.holders === 0) staleKeys.delete(key)
+			heldKey = undefined
 		}
 		if (settingWriteQueues.get(key) === tail) settingWriteQueues.delete(key)
-		resolveTail()
+		finishTail(tail)
 	}
 	if (kind === "deferredRollback") takeKey()
 	// A rollback that has not finished after the usual wait has stalled: it holds the key from then until it is over.
@@ -190,10 +243,15 @@ const queuedSettingWrite = (
 			gaveUp = true
 			work = undefined
 			leaveWaiting()
-			if (settingWriteQueues.get(key) === tail) settingWriteQueues.set(key, prior)
+			// Behind a write that has not finished, this one leaves the line now (and the writes behind it move up). When
+			// the write before it had finished, this one is about to be told so and releases itself.
+			if (!prior.done) {
+				leaveLine(prior, tail, waiter)
+				if (settingWriteQueues.get(key) === tail) settingWriteQueues.set(key, prior)
+			}
 		}
+		// Only a write that is still waiting can be dropped: one that started, or gave up, has left `waiting` already.
 		const cancel = () => {
-			if (started || gaveUp) return
 			giveUpBeforeStarting()
 			clearTimeout(timer)
 			reject(new Error(`The write of ${key} was dropped: its provider was disposed`))
@@ -217,7 +275,7 @@ const queuedSettingWrite = (
 					reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
 				}, SETTING_WRITE_TIMEOUT_MS)
 
-		void prior.then(() => {
+		const onPriorDone = () => {
 			// Its caller has given up before it started: it is dropped, and the next write may go ahead.
 			leaveWaiting()
 			if (gaveUp || !work) return release()
@@ -236,9 +294,19 @@ const queuedSettingWrite = (
 					if (failure) reject(failure.error)
 					else resolve()
 				})
-		})
+		}
+		const waiter: Waiter = {
+			run: onPriorDone,
+			rebase: (to) => {
+				prior = to
+			},
+		}
+		afterTail(prior, waiter)
 	})
 }
+
+/** @internal test hook: how many writes are attached to a write in front of them, in the line of a key. */
+export const settingWritesAttachedToALine = () => attachedWaiters
 
 /** @internal test hook: how many writes are waiting for their turn to start, in the bookkeeping of their providers. */
 export const settingWritesWaitingToStart = () => waitingWrites
@@ -307,6 +375,24 @@ export interface SettingWriteOptions {
 	onDeferredSettled?: () => void
 }
 
+/**
+ * Lets the provider that issued a rollback know when it is over, while respecting its disposal: the callback is attached to
+ * the owner, so disposing the owner detaches it, and a provider that is already disposed gets none. Returns what to call
+ * when the rollback has settled.
+ */
+const callWhenSettled = (owner: Owner, onSettled: (() => void) | undefined) => {
+	const holder: { callback?: () => void } = { callback: disposedOwners.has(owner) ? undefined : onSettled }
+	const holders = callbacksByOwner.get(owner) ?? new Set<{ callback?: () => void }>()
+	if (holder.callback) {
+		holders.add(holder)
+		callbacksByOwner.set(owner, holders)
+	}
+	return () => {
+		holders.delete(holder)
+		holder.callback?.()
+	}
+}
+
 /** Puts a failed write back, unless another write has superseded it (see `lastWriteOfSetting`). */
 export const undoSettingWrite = async (
 	contextProxy: ContextProxy,
@@ -359,22 +445,12 @@ export const undoSettingWrite = async (
 		// detaches it.
 		// An owner that is already disposed registers no callback at all: nothing may be called back into it, or kept
 		// alive by it, however late the store settles.
-		const holder: { callback?: () => void } = {
-			callback: disposedOwners.has(owner) ? undefined : onDeferredSettled,
-		}
-		const holders = callbacksByOwner.get(owner) ?? new Set<{ callback?: () => void }>()
-		if (holder.callback) {
-			holders.add(holder)
-			callbacksByOwner.set(owner, holders)
-		}
+		const settled = callWhenSettled(owner, onDeferredSettled)
 		void queuedSettingWrite(owner, key, restore, "deferredRollback")
 			.catch((error: unknown) =>
 				console.error(`Failed to restore setting "${key}" after a write that timed out:`, error),
 			)
-			.finally(() => {
-				holders.delete(holder)
-				holder.callback?.()
-			})
+			.finally(settled)
 		return
 	}
 
@@ -382,15 +458,18 @@ export const undoSettingWrite = async (
 	// to its caller or its provider. It is queued behind what is outstanding for the key (another write's rollback, a
 	// store), and kept: it is not refused when the provider was disposed, not dropped when it is disposed while the
 	// rollback waits, and has no timeout of its own, so a slow rollback ahead of it cannot cost it its turn. The caller
-	// stops waiting after the usual time, and the rollback runs when its turn comes. The provider is still detached:
-	// nothing is called back into it.
+	// stops waiting after the usual time, and the rollback runs when its turn comes; the provider is told when it is over
+	// (`onDeferredSettled`), unless it was disposed meanwhile, so it shows what is really stored.
 	const rollback = queuedSettingWrite(owner, key, restore, "keptRollback")
 	let timer: ReturnType<typeof setTimeout> | undefined
 	const gaveUp = new Promise<never>((_resolve, reject) => {
 		timer = setTimeout(() => {
-			void rollback.catch((error: unknown) =>
-				console.error(`Failed to restore setting "${key}" after its write failed:`, error),
-			)
+			const settled = callWhenSettled(owner, onDeferredSettled)
+			void rollback
+				.catch((error: unknown) =>
+					console.error(`Failed to restore setting "${key}" after its write failed:`, error),
+				)
+				.finally(settled)
 			reject(new Error(`Writing ${key} did not finish in ${SETTING_WRITE_TIMEOUT_MS / 1000} seconds`))
 		}, SETTING_WRITE_TIMEOUT_MS)
 	})

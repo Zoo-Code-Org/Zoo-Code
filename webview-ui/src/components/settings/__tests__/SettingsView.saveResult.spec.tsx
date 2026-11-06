@@ -245,6 +245,42 @@ describe("SettingsView – save acknowledgement", () => {
 			expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
 		})
 
+		it("shows a reset that a save stored as unset, not the stale live value", async () => {
+			renderUiTab()
+			await screen.findByTestId("appearance-terminalFontSize-input")
+			liveStateChange({ terminalFontSize: 14 }) // the live value, which the saves below do not reach
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 13
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			fireEvent.click(screen.getByTestId("save-button"))
+			answerSave(lastSaveRequestId(postMessage), { success: true })
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-reset")) // unset, and saved as unset
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			fireEvent.click(screen.getByTestId("save-button"))
+			answerSave(lastSaveRequestId(postMessage), { success: true })
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+			await makeAnOtherEdit()
+
+			await discard()
+
+			expect(terminalFontSize()).toBe("12") // the default: what is stored is unset, whatever the stale live state says
+		})
+
+		it("keeps the edits, and closes the question, when the user cancels instead of discarding", async () => {
+			await savedWithoutAStatePush()
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 14, unsaved
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			fireEvent.click(doneButton())
+			fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.cancelButton"))
+
+			await waitFor(() =>
+				expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument(),
+			)
+			expect(terminalFontSize()).toBe("14")
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+		})
+
 		it("goes back to the live state for a value that no save stored", async () => {
 			renderUiTab()
 			fireEvent.click(await screen.findByTestId("appearance-spacingScale-increment"))

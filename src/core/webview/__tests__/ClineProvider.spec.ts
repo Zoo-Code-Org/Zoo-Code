@@ -3444,7 +3444,9 @@ describe("ClineProvider", () => {
 
 	test("setValues shows what is stored when a timed-out write has been rolled back", async () => {
 		const chain = await import("../../config/appearanceSettingWrites")
-		const spy = vi.spyOn(chain, "setValuesThroughWriteChain").mockResolvedValue(undefined)
+		const spy = vi
+			.spyOn(chain, "writeValuesThroughWriteChain")
+			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [] })
 		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 		await provider.setValues({ terminalFontSize: 14 })
@@ -3457,17 +3459,41 @@ describe("ClineProvider", () => {
 	})
 
 	describe("setValues when a write fails", () => {
-		const failWith = async (failure: Error) => {
+		type Report = Awaited<
+			ReturnType<typeof import("../../config/appearanceSettingWrites").writeValuesThroughWriteChain>
+		>
+		const reporting = async (report: Report) => {
 			const chain = await import("../../config/appearanceSettingWrites")
-			return vi.spyOn(chain, "setValuesThroughWriteChain").mockRejectedValue(failure)
+			return vi.spyOn(chain, "writeValuesThroughWriteChain").mockResolvedValue(report)
 		}
 
-		test("shows the webview what is stored, and passes the error on", async () => {
+		test("shows the webview what is stored, and says what was stored and what was not", async () => {
 			const failure = new Error("other settings failed")
-			const spy = await failWith(failure)
+			const spy = await reporting({
+				failure: { reason: failure },
+				stored: ["terminalFontSize"],
+				notStored: ["the other settings"],
+			})
 			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
-			await expect(provider.setValues({ terminalFontSize: 14, mode: "code" })).rejects.toBe(failure)
+			await expect(provider.setValues({ terminalFontSize: 14, mode: "code" })).rejects.toMatchObject({
+				name: "PartialSettingsWriteError",
+				message: "other settings failed (not stored: the other settings; stored: terminalFontSize)",
+				stored: ["terminalFontSize"],
+				notStored: ["the other settings"],
+				cause: failure,
+			})
+
+			expect(post).toHaveBeenCalledTimes(1)
+			spy.mockRestore()
+		})
+
+		test("passes on the failure as it was when a write failed alone and nothing else was stored", async () => {
+			const failure = new Error("other settings failed")
+			const spy = await reporting({ failure: { reason: failure }, stored: [], notStored: ["the other settings"] })
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
 
 			expect(post).toHaveBeenCalledTimes(1)
 			spy.mockRestore()
@@ -3475,7 +3501,7 @@ describe("ClineProvider", () => {
 
 		test("does not let a refresh that fails hide the error", async () => {
 			const failure = new Error("other settings failed")
-			const spy = await failWith(failure)
+			const spy = await reporting({ failure: { reason: failure }, stored: [], notStored: ["the other settings"] })
 			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
 
 			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
@@ -3484,8 +3510,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("refreshes nothing when every write was stored", async () => {
-			const chain = await import("../../config/appearanceSettingWrites")
-			const spy = vi.spyOn(chain, "setValuesThroughWriteChain").mockResolvedValue(undefined)
+			const spy = await reporting({ stored: ["mode"], notStored: [] })
 			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			await provider.setValues({ mode: "code" })

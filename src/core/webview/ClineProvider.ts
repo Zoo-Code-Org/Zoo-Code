@@ -132,9 +132,10 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 
 import { ContextProxy } from "../config/ContextProxy"
 import {
+	describeFailedWrite,
 	disposeSettingWrites,
 	isAppearanceSetting,
-	setValuesThroughWriteChain,
+	writeValuesThroughWriteChain,
 } from "../config/appearanceSettingWrites"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
@@ -3826,7 +3827,7 @@ export class ClineProvider
 
 	public async setValues(values: RooCodeSettings) {
 		try {
-			await setValuesThroughWriteChain(
+			const written = await writeValuesThroughWriteChain(
 				this.contextProxy,
 				withoutInvalidDisplaySettings(values, (key) =>
 					this.log(`[setValues] Ignored an invalid value for ${key}`),
@@ -3836,6 +3837,9 @@ export class ClineProvider
 					onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
 				},
 			)
+			// A write that was only partly stored is reported with the settings that were stored and those that were not
+			// (the same error as the extension API gives); one that failed alone is reported as it was.
+			if (written.failure) throw describeFailedWrite(written)
 		} catch (error) {
 			// The values that were stored before another write failed are final: the webview is shown what is stored. A
 			// refresh that fails does not hide the error.
