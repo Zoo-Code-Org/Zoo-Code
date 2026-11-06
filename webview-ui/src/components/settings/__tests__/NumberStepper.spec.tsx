@@ -89,6 +89,35 @@ describe("NumberStepper", () => {
 		expect(onChange).toHaveBeenCalledWith(20)
 	})
 
+	describe("while an IME composition is in progress", () => {
+		it.each(["Enter", "ArrowUp", "ArrowDown"])(
+			"ignores %s, which belongs to the composition and not to the box",
+			(key) => {
+				const { onChange, input } = setup({ value: 16 })
+				fireEvent.change(input, { target: { value: "2" } }) // what is left of a composition: only its digits
+
+				fireEvent.keyDown(input, { key, isComposing: true })
+
+				expect(onChange).not.toHaveBeenCalled()
+				expect(input.value).toBe("2") // the box was not reverted or moved either
+			},
+		)
+
+		it.each([
+			["Enter", 20],
+			["ArrowUp", 17],
+		])("handles %s again once the composition is over", (key, expected) => {
+			const { onChange, input } = setup({ value: 16 })
+			if (key === "Enter") fireEvent.change(input, { target: { value: "20" } })
+
+			fireEvent.keyDown(input, { key, isComposing: true })
+			expect(onChange).not.toHaveBeenCalled()
+			fireEvent.keyDown(input, { key, isComposing: false })
+
+			expect(onChange).toHaveBeenCalledExactlyOnceWith(expected)
+		})
+	})
+
 	it("supports arrow keys", () => {
 		const { onChange, input } = setup({ value: 16 })
 		fireEvent.keyDown(input, { key: "ArrowUp" })

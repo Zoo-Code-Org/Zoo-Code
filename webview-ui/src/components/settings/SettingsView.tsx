@@ -761,7 +761,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		(confirm: boolean) => {
 			if (confirm) {
 				// Discard changes: Reset state and flag
-				setCachedState(extensionState) // Revert to original state
+				// Back to what is stored: the live state, with the appearance values that a save stored over it (the host
+				// reports a success even when refreshing the state failed, and the live state is then stale).
+				const stored: Record<string, number | undefined> = {}
+				for (const [key, value] of Object.entries(appearanceSaved.current)) stored[key] = value ?? undefined
+				setCachedState({ ...extensionState, ...stored })
 				editedAppearance.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)

@@ -254,7 +254,11 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(result).toEqual({ success: false, error: "current profile write failed" })
+			expect(result).toEqual({
+				success: false,
+				error: "current profile write failed",
+				settingsMayHaveChanged: true,
+			})
 			expect(mockContextProxy.setProviderSettings).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
 		})
@@ -468,7 +472,7 @@ describe("importExport", () => {
 					stored.set(key, value)
 				}) as unknown as typeof mockContextProxy.setValue)
 				const result = await importWith({ interfaceFontScale: 120 })
-				expect(result).toEqual({ success: false, error: "storage unavailable" })
+				expect(result).toEqual({ success: false, error: "storage unavailable", settingsMayHaveChanged: true })
 
 				await undoSettingWrite(proxy, save) // the save fails afterwards
 
@@ -488,6 +492,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "secret storage unavailable (not stored: autoApprovalEnabled, interfaceFontScale; stored: mode, terminalFontSize)",
 				})
 			})
@@ -501,6 +506,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "failed after storing (not stored: interfaceFontScale; stored: mode)",
 				})
 			})
@@ -514,6 +520,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "secret storage unavailable (not stored: autoApprovalEnabled; stored: mode)",
 				})
 			})
@@ -525,6 +532,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "other settings failed (not stored: the other settings; stored: interfaceFontScale)",
 				})
 				expect(stored.get("interfaceFontScale")).toBe(120)
@@ -540,6 +548,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "storage unavailable (not stored: interfaceFontScale, terminalFontSize; stored: none)",
 				})
 				expect(stored.get("interfaceFontScale")).toBe(100)
@@ -555,6 +564,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "other settings failed (not stored: the other settings, interfaceFontScale; stored: none)",
 				})
 			})
@@ -604,6 +614,84 @@ describe("importExport", () => {
 					expect(postStateToWebview).toHaveBeenCalledOnce()
 					expect(showErrorMessage).toHaveBeenCalledOnce()
 					showErrorMessage.mockRestore()
+				})
+
+				describe("a failure before the import changed anything", () => {
+					const importBeforeAnyChange = async (prepare: () => void, filePath: string | undefined) => {
+						prepare()
+						const seen: Array<number | undefined> = []
+						const provider = {
+							settingsImportRefreshedAt: undefined as number | undefined,
+							postStateToWebview: vi.fn(async () => {
+								seen.push(provider.settingsImportRefreshedAt)
+							}),
+						}
+						const showErrorMessage = vi
+							.spyOn(vscode.window, "showErrorMessage")
+							.mockResolvedValue(undefined)
+
+						await importSettingsWithFeedback(
+							{
+								providerSettingsManager: mockProviderSettingsManager,
+								contextProxy: mockContextProxy,
+								customModesManager: mockCustomModesManager,
+								provider,
+							},
+							filePath,
+						)
+
+						return { provider, seen, showErrorMessage }
+					}
+
+					it.each([
+						[
+							"a file that cannot be reached",
+							() => (fs.access as Mock).mockRejectedValue(new Error("ENOENT")),
+							"/mock/path/settings.json",
+						],
+						[
+							"a file that is not valid",
+							() => {
+								;(fs.access as Mock).mockResolvedValue(undefined)
+								;(fs.readFile as Mock).mockResolvedValue("not json")
+							},
+							"/mock/path/settings.json",
+						],
+						[
+							"a file with no profile that can be imported",
+							() => {
+								;(fs.access as Mock).mockResolvedValue(undefined)
+								;(fs.readFile as Mock).mockResolvedValue(
+									JSON.stringify({
+										providerProfiles: {
+											currentApiConfigName: "bad",
+											apiConfigs: { bad: { apiProvider: providerIdentifiers.openai, id: 42 } }, // not a valid profile
+										},
+										globalSettings: { mode: "code" },
+									}),
+								)
+							},
+							"/mock/path/settings.json",
+						],
+						[
+							"a file dialog that is cancelled",
+							() => (vscode.window.showOpenDialog as Mock).mockResolvedValue(undefined),
+							undefined,
+						],
+					])(
+						"does not refresh, or mark, anything after %s: the settings are as they were",
+						async (_name, prepare, filePath) => {
+							const { provider, seen, showErrorMessage } = await importBeforeAnyChange(
+								prepare as () => void,
+								filePath,
+							)
+
+							expect(provider.postStateToWebview).not.toHaveBeenCalled()
+							expect(seen).toEqual([])
+							expect(provider.settingsImportRefreshedAt).toBeUndefined()
+							showErrorMessage.mockRestore()
+						},
+					)
 				})
 
 				it("marks the refresh for the settings form while it is posted, and only then", async () => {
@@ -742,6 +830,7 @@ describe("importExport", () => {
 
 				expect(result).toEqual({
 					success: false,
+					settingsMayHaveChanged: true,
 					error: "failed after storing (not stored: interfaceFontScale; stored: terminalFontSize)",
 				})
 				expect(stored.get("interfaceFontScale")).toBe(100)
@@ -757,7 +846,7 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120 })
 
-				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(result).toEqual({ success: false, error: "failed after storing", settingsMayHaveChanged: true })
 				expect(stored.get("interfaceFontScale")).toBe(100)
 			})
 
@@ -770,7 +859,7 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120 })
 
-				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(result).toEqual({ success: false, error: "failed after storing", settingsMayHaveChanged: true })
 				expect(stored.get("interfaceFontScale")).toBeUndefined()
 				expect(mockContextProxy.setValue).toHaveBeenCalledWith("interfaceFontScale", undefined)
 			})
@@ -785,7 +874,7 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120 })
 
-				expect(result).toEqual({ success: false, error: "failed after storing" })
+				expect(result).toEqual({ success: false, error: "failed after storing", settingsMayHaveChanged: true })
 				expect(consoleError).toHaveBeenCalledTimes(1)
 				expect(consoleError).toHaveBeenCalledWith(
 					'Failed to restore setting "interfaceFontScale" after a failed write:',
@@ -799,7 +888,7 @@ describe("importExport", () => {
 
 				const result = await importWith({ interfaceFontScale: 120 })
 
-				expect(result).toEqual({ success: false, error: "storage unavailable" })
+				expect(result).toEqual({ success: false, error: "storage unavailable", settingsMayHaveChanged: true })
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
 

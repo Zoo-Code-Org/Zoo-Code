@@ -172,6 +172,9 @@ export async function importSettingsFromPath(
 		globalSettings: z.unknown().optional(),
 	})
 
+	// Whether the import has started to change anything: a failure before that leaves every setting as it was.
+	let settingsMayHaveChanged = false
+
 	try {
 		const previousProviderProfiles = await providerSettingsManager.export()
 
@@ -243,6 +246,7 @@ export async function importSettingsFromPath(
 		const { sanitizedGlobalSettings, warnings: globalSettingsWarnings } = sanitizeGlobalSettings(rawGlobalSettings)
 		warnings.push(...globalSettingsWarnings)
 
+		settingsMayHaveChanged = true
 		await Promise.all(
 			(sanitizedGlobalSettings.customModes ?? []).map((mode) =>
 				customModesManager.updateCustomMode(mode.slug, mode),
@@ -289,7 +293,10 @@ export async function importSettingsFromPath(
 			error = e.message
 		}
 
-		return { success: false, error }
+		// Only said when it is so: a failure before the import changed anything is the plain failure it always was.
+		return settingsMayHaveChanged
+			? { success: false as const, error, settingsMayHaveChanged: true as const }
+			: { success: false as const, error }
 	}
 }
 
@@ -461,13 +468,17 @@ export const importSettingsWithFeedback = async (
 		// An import that failed part of the way may have stored some of its settings: the webview is shown what is
 		// stored, not what it had before, and the settings form takes it without dropping the edits that were made to
 		// the other settings (unlike after an import that succeeded). A refresh that fails does not hide the answer.
-		provider.settingsImportRefreshedAt = Date.now()
-		try {
-			await provider.postStateToWebview()
-		} catch {
-			// Nobody is waiting for the refresh.
-		} finally {
-			provider.settingsImportRefreshedAt = undefined
+		// A failure before the import changed anything (a file that cannot be read, a file that is not valid) leaves the
+		// settings as they were: nothing is refreshed, so an edit that is newer than the live state is not replaced.
+		if ("settingsMayHaveChanged" in result && result.settingsMayHaveChanged) {
+			provider.settingsImportRefreshedAt = Date.now()
+			try {
+				await provider.postStateToWebview()
+			} catch {
+				// Nobody is waiting for the refresh.
+			} finally {
+				provider.settingsImportRefreshedAt = undefined
+			}
 		}
 		await vscode.window.showErrorMessage(t("common:errors.settings_import_failed", { error: result.error }))
 	}

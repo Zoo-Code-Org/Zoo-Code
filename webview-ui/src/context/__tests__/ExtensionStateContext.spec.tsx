@@ -917,6 +917,30 @@ describe("ExtensionStateContext", () => {
 			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
 		})
 
+		it("takes its CSS variables and the editor-font class off the page when it is unmounted", () => {
+			const { unmount } = renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
+			for (const name of APPEARANCE_VARS)
+				expect(document.documentElement.style.getPropertyValue(name)).not.toBe("")
+			expect(document.documentElement.classList.contains("zoo-editor-font-set")).toBe(true)
+
+			unmount()
+
+			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
+			expect(document.documentElement.classList.contains("zoo-editor-font-set")).toBe(false)
+		})
+
+		it("leaves a value that is still set applied while the state changes, and clears the one that was unset", () => {
+			renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+			sendState({ interfaceFontScale: 120, terminalFontSize: null })
+
+			const style = document.documentElement.style
+			expect(style.getPropertyValue("--zoo-ui-scale")).toBe("1.2")
+			expect(style.getPropertyValue("--zoo-terminal-font-size")).toBe("")
+		})
+
 		it("hydrates all four values from the host state and applies their CSS variables", () => {
 			renderAppearance()
 

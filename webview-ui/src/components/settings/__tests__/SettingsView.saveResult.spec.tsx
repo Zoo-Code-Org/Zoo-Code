@@ -207,6 +207,56 @@ describe("SettingsView – save acknowledgement", () => {
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 	})
 
+	describe("discarding after a save that was stored while the live state did not follow", () => {
+		const doneButton = () => screen.getByRole("button", { name: "settings:common.done" })
+		const terminalFontSize = () =>
+			(screen.getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value
+
+		const savedWithoutAStatePush = async () => {
+			renderUiTab()
+			await makeAnEdit() // 13
+			fireEvent.click(screen.getByTestId("save-button"))
+			answerSave(lastSaveRequestId(postMessage), { success: true }) // stored, but no state arrives
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+			await makeAnOtherEdit() // an unsaved edit, so that leaving asks
+		}
+
+		const discard = async () => {
+			fireEvent.click(doneButton())
+			fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+		}
+
+		it("shows the value that was stored, not the stale live one", async () => {
+			await savedWithoutAStatePush()
+
+			await discard()
+
+			expect(terminalFontSize()).toBe("13")
+		})
+
+		it("does not send the stored value again with the next save: it is what is stored", async () => {
+			await savedWithoutAStatePush()
+			await discard()
+			postMessage.mockClear()
+
+			await makeAnOtherEdit()
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			expect(lastUpdatedSettings()).not.toHaveProperty("terminalFontSize")
+		})
+
+		it("goes back to the live state for a value that no save stored", async () => {
+			renderUiTab()
+			fireEvent.click(await screen.findByTestId("appearance-spacingScale-increment"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			const before = (screen.getByTestId("appearance-spacingScale-input") as HTMLInputElement).value
+
+			await discard()
+
+			expect((screen.getByTestId("appearance-spacingScale-input") as HTMLInputElement).value).not.toBe(before)
+		})
+	})
+
 	it("does nothing, and does not fail, when the answer arrives after the view is gone", async () => {
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 		try {

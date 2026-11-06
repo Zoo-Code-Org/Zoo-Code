@@ -686,6 +686,8 @@ export const ExtensionStateContextProvider: React.FC<{
 			editorFontSize: state.editorFontSize,
 			spacingScale: state.spacingScale,
 		})
+		// What this provider put on <html> goes with it, so a root that outlives it (another mount, a test) starts clean.
+		return () => applyAppearanceVariables(document.documentElement, {})
 	}, [state.interfaceFontScale, state.terminalFontSize, state.editorFontSize, state.spacingScale])
 
 	const contextValue: ExtensionStateContextType = {

@@ -99,6 +99,9 @@ export const NumberStepper = ({
 						}}
 						onBlur={commitTyped}
 						onKeyDown={(e) => {
+							// The key that confirms or moves within an IME composition is not the user's command for the box
+							// (the draft has only the digits of what is being composed, so a commit would store a part of it).
+							if (e.nativeEvent.isComposing) return
 							if (e.key === "Enter") commitTyped()
 							if (e.key === "ArrowUp") {
 								e.preventDefault()
