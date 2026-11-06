@@ -173,6 +173,22 @@ describe("Task#startTask session title trigger", () => {
 		expect(resolved).toBe(true)
 	})
 
+	it.each([
+		["Production", 1, true],
+		["Development", 2, true],
+		["Test", 3, false],
+	])("in %s extension mode fires title generation: %s", async (_name, extensionMode, shouldFire) => {
+		const provider = createMockProvider()
+		// The double only carries the context members the trigger reads.
+		Object.assign(provider.context, { extensionMode })
+		const task = createTestTask(provider)
+		stubStartup(task)
+
+		await getStartTaskAccess(task).startTask("mode gated message")
+
+		expect(vi.mocked(generateSessionTitle).mock.calls.length > 0).toBe(shouldFire)
+	})
+
 	it("does not fire for a subtask", async () => {
 		const provider = createMockProvider()
 		const parentTask = createTestTask(provider)

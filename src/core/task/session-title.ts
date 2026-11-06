@@ -32,14 +32,26 @@ export type SessionTitleApplyResult = "applied" | "conflict"
 
 /** Removes system-injected `<system-reminder>` blocks and trims. */
 export function sanitizeUserMessageForTitle(raw: string): string {
-	return (
-		raw
-			.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
-			// An unterminated block (e.g. truncated input) would otherwise leak the
-			// rest of the message as user text; drop everything after its opening.
-			.replace(/<system-reminder>[\s\S]*$/g, "")
-			.trim()
-	)
+	const open = "<system-reminder>"
+	const close = "</system-reminder>"
+	let result = ""
+	let cursor = 0
+	// Linear scan instead of a lazy regex: repeated unterminated openings made the regex quadratic.
+	while (cursor < raw.length) {
+		const start = raw.indexOf(open, cursor)
+		if (start === -1) {
+			result += raw.slice(cursor)
+			break
+		}
+		result += raw.slice(cursor, start)
+		const end = raw.indexOf(close, start + open.length)
+		// An unterminated block would otherwise leak the rest of the message as user text; drop it.
+		if (end === -1) {
+			break
+		}
+		cursor = end + close.length
+	}
+	return result.trim()
 }
 
 /** First line, `Title:` prefix removed, surrounding quotes removed. */

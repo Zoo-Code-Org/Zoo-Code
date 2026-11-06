@@ -65,8 +65,18 @@ describe("sanitizeUserMessageForTitle", () => {
 		["<system-reminder>a</system-reminder>\n<system-reminder>b</system-reminder>real", "real"],
 		["start <system-reminder>unterminated", "start"],
 		["<system-reminder>only system</system-reminder>", ""],
+		["a<system-reminder>x</system-reminder>b<system-reminder>y</system-reminder>c", "abc"],
+		["keep </system-reminder> stray close", "keep </system-reminder> stray close"],
 	])("sanitizes %j", (input, expected) => {
 		expect(sanitizeUserMessageForTitle(input)).toBe(expected)
+	})
+
+	it("handles many unterminated openings in linear time", () => {
+		const input = "<system-reminder>".repeat(50_000)
+		const startedAt = performance.now()
+
+		expect(sanitizeUserMessageForTitle(input)).toBe("")
+		expect(performance.now() - startedAt).toBeLessThan(500)
 	})
 })
 
