@@ -690,6 +690,90 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("applySessionTitle", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("stores a trimmed title and broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-title", task: "Original prompt" }))
+			mockPostMessage.mockClear()
+
+			const result = await provider.applySessionTitle("task-auto-title", "  Auto Title  ")
+
+			expect(result).toBe("applied")
+			expect(getStored("task-auto-title")).toMatchObject({ title: "Auto Title", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-auto-title", title: "Auto Title" })
+		})
+
+		it("returns conflict and keeps the existing title when one is already set", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-conflict", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-auto-conflict", "Manual title")
+
+			const result = await provider.applySessionTitle("task-auto-conflict", "Auto Title")
+
+			expect(result).toBe("conflict")
+			expect(getStored("task-auto-conflict")).toMatchObject({ title: "Manual title" })
+		})
+
+		it.each([
+			["an empty string", ""],
+			["whitespace", "   "],
+		])("returns conflict without writing for %s", async (_label, title) => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-blank", task: "Original prompt" }), {
+				broadcast: false,
+			})
+
+			const result = await provider.applySessionTitle("task-auto-blank", title)
+
+			expect(result).toBe("conflict")
+			expect(getStored("task-auto-blank")?.title).toBeUndefined()
+		})
+
+		it("throws for an unknown task so the caller can give up", async () => {
+			await expect(provider.applySessionTitle("missing-task", "Auto Title")).rejects.toThrow("not found in cache")
+		})
+
+		it("keeps the auto title when the task later saves metadata without one", async () => {
+			const item = createHistoryItem({ id: "task-auto-keep", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+			await provider.applySessionTitle("task-auto-keep", "Auto Title")
+
+			// Mirrors Task.saveClineMessages(), whose taskMetadata() result never carries a title.
+			await provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+
+			expect(getStored("task-auto-keep")).toMatchObject({ title: "Auto Title", tokensIn: 500 })
+		})
+
+		it("keeps a concurrent task save that is queued before the auto title", async () => {
+			const item = createHistoryItem({ id: "task-auto-race", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// Start the save without awaiting it, so the auto title runs while the save is queued.
+			const save = provider.updateTaskHistory({ ...item, tokensIn: 500 }, { broadcast: false })
+			const autoTitle = provider.applySessionTitle("task-auto-race", "Auto Title")
+			await Promise.all([save, autoTitle])
+
+			expect(getStored("task-auto-race")).toMatchObject({ title: "Auto Title", tokensIn: 500 })
+		})
+
+		it("does not broadcast when the view is not launched", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-silent", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			mockPostMessage.mockClear()
+
+			const result = await provider.applySessionTitle("task-auto-silent", "Auto Title")
+
+			expect(result).toBe("applied")
+			expect(getStored("task-auto-silent")).toMatchObject({ title: "Auto Title" })
+			expect(findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")).toHaveLength(0)
+		})
+	})
+
 	describe("broadcastTaskHistoryUpdate", () => {
 		it("sends taskHistoryUpdated message with sorted history", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

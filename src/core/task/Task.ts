@@ -145,6 +145,7 @@ import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { generateSessionTitle } from "./session-title"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 import {
 	divergenceKey,
@@ -3109,6 +3110,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
 
 			await this.say("text", task, images)
+
+			// Fire-and-forget session title generation: the run must never wait
+			// on it and no title failure may surface in the chat. Only a root
+			// task's first message triggers this — resumes go through
+			// resumeTaskFromHistory, subtask continuations re-enter the task
+			// loop directly, and both must keep their existing names. `say`
+			// above persisted the history item, so the conditional write will
+			// find it.
+			if (!this.parentTask && task) {
+				const provider = this.providerRef.deref()
+				if (provider) {
+					void generateSessionTitle({
+						provider,
+						taskId: this.taskId,
+						userMessage: task,
+						apiConfiguration: this.apiConfiguration,
+					}).catch((error) => {
+						// generateSessionTitle never rejects by contract; this
+						// arm is defense-in-depth for future regressions.
+						console.error(`[Task#startTask] session title generation failed: ${error}`)
+					})
+				}
+			}
 
 			// Check for too many MCP tools and warn the user
 			const { enabledToolCount, enabledServerCount } = await this.getEnabledMcpToolsCount()
