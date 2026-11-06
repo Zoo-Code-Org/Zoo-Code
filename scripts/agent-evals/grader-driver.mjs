@@ -136,7 +136,8 @@ try {
 		failedCount += counts.failed
 		cancelledCount += counts.cancelled ?? 0
 		if (counts.failed > 0 && failures.length < 50)
-			for (const name of readFailureNames(outcome.tap)) failures.push({ name, file })
+			for (const name of readFailureNames(outcome.tap).slice(0, 50 - failures.length))
+				failures.push({ name, file })
 	}
 	if (runnerBroke) {
 		writeResult({ kind: "driver-error", message: "testRunnerUnavailable" })
