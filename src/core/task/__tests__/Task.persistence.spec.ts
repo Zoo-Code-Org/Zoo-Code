@@ -1276,6 +1276,74 @@ describe("Task persistence", () => {
 			expect(await second).toBe(true)
 		})
 
+		describe("what each save writes when the messages change while a write waits", () => {
+			const text = (value: string, ts: number): ClineMessage => ({ ts, type: "say", say: "text", text: value })
+			const newTask = () =>
+				new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+			/** Every call of the write, with the messages it was given and how, in the order they were made. */
+			const writes = () =>
+				mockSaveTaskMessages.mock.calls.map(([call]) => ({
+					texts: (call.messages as ClineMessage[]).map((message) => message.text),
+					merge: call.merge,
+				}))
+
+			it("writes the messages as they are when its turn comes, with the flag it was asked with, and the overwrite last", async () => {
+				const release = createDeferred<undefined>()
+				mockSaveTaskMessages.mockImplementationOnce(async () => {
+					await release.promise // the first write is slow to reach the disk
+					return []
+				})
+				const task = newTask()
+				const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+				task.clineMessages.push(text("first", 1))
+
+				const first = save() // blocked on the disk, with the messages it was started with
+				await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+				task.clineMessages.push(text("second", 2))
+				const second = save() // queued behind it, as an ordinary save (merged with what is on the disk)
+				const overwrite = task.overwriteClineMessages([text("replacement", 3)]) // queued behind both, authoritative
+				task.clineMessages.push(text("after the replacement", 4)) // a message that comes in while both wait
+
+				release.resolve(undefined)
+				await Promise.all([first, second, overwrite])
+
+				expect(writes()).toEqual([
+					// Started before any change: it has what the task had then, and is not touched by what came after.
+					{ texts: ["first"], merge: true },
+					// Its turn came after the task was given the replacement, so that is what it writes, still merged.
+					{ texts: ["replacement", "after the replacement"], merge: true },
+					// The authoritative save replaces what is stored, and keeps the message that came in meanwhile.
+					{ texts: ["replacement", "after the replacement"], merge: false },
+				])
+			})
+
+			it("does not give a save started earlier the messages that a later overwrite removed from the task", async () => {
+				const release = createDeferred<undefined>()
+				mockSaveTaskMessages.mockImplementationOnce(async () => {
+					await release.promise
+					return []
+				})
+				const task = newTask()
+				task.clineMessages.push(text("kept", 1), text("removed", 2))
+
+				const first = getTaskPersistenceAccess(task).saveClineMessages()
+				await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+				const overwrite = task.overwriteClineMessages([text("kept", 1)]) // the edit removes the second message
+				release.resolve(undefined)
+				await Promise.all([first, overwrite])
+
+				const [started, authoritative] = writes()
+				expect(started.texts).toEqual(["kept", "removed"]) // what the task had when that write began
+				expect(authoritative).toEqual({ texts: ["kept"], merge: false }) // and the last word is the replacement
+			})
+		})
+
 		it("keeps saves in the order they were asked for", async () => {
 			const order: number[] = []
 			let n = 0

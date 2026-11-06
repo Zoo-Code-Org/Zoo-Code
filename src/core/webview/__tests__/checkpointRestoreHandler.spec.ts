@@ -80,6 +80,7 @@ function createFixture() {
 		taskEventListeners: new Map<Task, Array<() => void>>(),
 		performPreparationTasks: vi.fn<(task: Task) => Promise<void>>(),
 		log: vi.fn<(message: string) => void>(),
+		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined),
 		getCurrentTask: vi.fn<ClineProvider["getCurrentTask"]>(() => task),
 		getTaskWithId: vi.fn<ClineProvider["getTaskWithId"]>().mockResolvedValue({
 			historyItem,
@@ -408,5 +409,92 @@ describe("checkpointRestoreHandler", () => {
 		expect(fixture.taskDouble.overwriteApiConversationHistory).toHaveBeenCalledWith([])
 		expect(fixture.taskDouble.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Accepted edit", [])
 		expect(fixture.store.get(`task-${fixture.task.taskId}`)).toBeUndefined()
+	})
+
+	describe("a pending edit that cannot be applied after the restore", () => {
+		const stageAndRehydrate = async () => {
+			vi.useFakeTimers()
+			await handleCheckpointRestoreOperation({
+				...fixture.config,
+				operation: "edit",
+				editData: {
+					editedContent: "Edited prompt",
+					images: ["data:image/png;base64,AAAA"],
+					apiConversationHistoryIndex: 0,
+				},
+			})
+			await ClineProvider.prototype.createTaskWithHistoryItem.call(fixture.provider, fixture.historyItem, {
+				startTask: false,
+			})
+			await vi.advanceTimersByTimeAsync(100)
+		}
+		const handedBack = () =>
+			expect(fixture.providerDouble.postMessageToWebview).toHaveBeenCalledWith({
+				type: "invoke",
+				invoke: "setChatBoxMessage",
+				text: "Edited prompt",
+				images: ["data:image/png;base64,AAAA"],
+			})
+		const reported = () =>
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"common:errors.checkpoint_restore_failed: Disk full",
+			)
+
+		it("reports a message write that failed, hands the edit back, and leaves the task as the disk has it", async () => {
+			const messagesBefore = fixture.task.clineMessages
+			fixture.taskDouble.overwriteClineMessages.mockRejectedValueOnce(fixture.failure)
+
+			await stageAndRehydrate()
+
+			reported()
+			handedBack()
+			// The cut was not stored, so it is undone in memory (and not written again).
+			expect(fixture.taskDouble.overwriteClineMessages).toHaveBeenLastCalledWith(messagesBefore, false)
+			expect(fixture.taskDouble.overwriteApiConversationHistory).not.toHaveBeenCalled()
+			expect(fixture.taskDouble.handleWebviewAskResponse).not.toHaveBeenCalled()
+			expect(fixture.store.get(`task-${fixture.task.taskId}`)).toBeUndefined() // and it is not applied by a later start
+		})
+
+		it("reports an API history write that failed after the messages were stored, and hands the edit back", async () => {
+			fixture.taskDouble.overwriteApiConversationHistory.mockRejectedValueOnce(fixture.failure)
+
+			await stageAndRehydrate()
+
+			reported()
+			handedBack()
+			// The messages were cut on the disk already: they are not put back in memory.
+			expect(fixture.taskDouble.overwriteClineMessages).toHaveBeenCalledTimes(1)
+			expect(fixture.taskDouble.handleWebviewAskResponse).not.toHaveBeenCalled()
+		})
+
+		it("reports an edit that could not be sent, and hands it back", async () => {
+			fixture.taskDouble.handleWebviewAskResponse.mockRejectedValueOnce(fixture.failure)
+
+			await stageAndRehydrate()
+
+			reported()
+			handedBack()
+		})
+
+		it("still reports it when the chat box cannot be filled", async () => {
+			fixture.taskDouble.overwriteClineMessages.mockRejectedValueOnce(fixture.failure)
+			fixture.providerDouble.postMessageToWebview.mockRejectedValue(new Error("webview gone"))
+
+			await stageAndRehydrate()
+
+			reported()
+		})
+
+		it("says nothing when the edit was applied", async () => {
+			await stageAndRehydrate()
+
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(fixture.providerDouble.postMessageToWebview).not.toHaveBeenCalled()
+			expect(fixture.taskDouble.handleWebviewAskResponse).toHaveBeenCalledWith(
+				"messageResponse",
+				"Edited prompt",
+				["data:image/png;base64,AAAA"],
+			)
+		})
 	})
 })
