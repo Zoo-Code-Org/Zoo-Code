@@ -796,7 +796,7 @@
 		"idleCondensing": {
 			"name": "空閒時壓縮",
 			"description": "當模型完成回應且上下文高於空閒閾值時，在空閒時間結束後壓縮上下文。這可避免昂貴的壓縮發生在進行中的工作期間。在提示區輸入內容會重設計時器。",
-			"thresholdDescription": "當上下文在空閒期間達到此百分比時，啟動空閒壓縮計時器。必須不高於壓縮觸發閾值（{{threshold}}%）。",
+			"thresholdDescription": "當上下文在空閒期間達到此百分比時，啟動空閒壓縮計時器。必須不高於壓縮觸發閾值。",
 			"thresholdProfileDescription": "僅此設定檔的自訂空閒閾值（覆寫全域預設，上限為該設定檔的壓縮閾值）",
 			"idleTime": {
 				"label": "空閒時間",

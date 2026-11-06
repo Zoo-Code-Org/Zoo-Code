@@ -842,7 +842,7 @@
 		"idleCondensing": {
 			"name": "Idle condensing",
 			"description": "When the model has finished responding and the context is above the idle threshold, condense the context after the idle time elapses. This keeps expensive condensing from happening in the middle of active work. Typing in the prompt area resets the timer.",
-			"thresholdDescription": "When the context reaches this percentage while idle, the idle condensing timer runs. Must be at or below the Condensing Trigger Threshold ({{threshold}}%).",
+			"thresholdDescription": "When the context reaches this percentage while idle, the idle condensing timer runs. Must be at or below the Condensing Trigger Threshold.",
 			"thresholdProfileDescription": "Custom idle threshold for this profile only (overrides global default, capped at the profile's condensing threshold)",
 			"idleTime": {
 				"label": "Idle time",

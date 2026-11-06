@@ -759,7 +759,7 @@
 		"idleCondensing": {
 			"name": "Condensació en repòs",
 			"description": "Quan el model ha acabat de respondre i el context està per sobre del llindar de repòs, es condensa el context quan passa el temps de repòs. Això evita que la condensació, costosa, es produeixi enmig de la feina activa. Escriure a l'àrea de prompt reinicia el temporitzador.",
-			"thresholdDescription": "Quan el context arriba a aquest percentatge en repòs, s'activa el temporitzador de condensació en repòs. Ha de ser igual o inferior al llindar d'activació de condensació ({{threshold}}%).",
+			"thresholdDescription": "Quan el context arriba a aquest percentatge en repòs, s'activa el temporitzador de condensació en repòs. Ha de ser igual o inferior al llindar d'activació de condensació.",
 			"thresholdProfileDescription": "Llindar de repòs personalitzat només per a aquest perfil (substitueix el per defecte global, limitat al llindar de condensació del perfil)",
 			"idleTime": {
 				"label": "Temps de repòs",

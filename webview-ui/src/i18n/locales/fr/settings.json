@@ -769,7 +769,7 @@
 		"idleCondensing": {
 			"name": "Condensation en veille",
 			"description": "Lorsque le modèle a fini de répondre et que le contexte dépasse le seuil de veille, le contexte est condensé une fois le temps de veille écoulé. Cela évite que la condensation, coûteuse, se produise en pleine activité. Taper dans la zone de prompt réinitialise le minuteur.",
-			"thresholdDescription": "Lorsque le contexte atteint ce pourcentage en veille, le minuteur de condensation en veille démarre. Doit être inférieur ou égal au seuil de condensation du contexte ({{threshold}}%).",
+			"thresholdDescription": "Lorsque le contexte atteint ce pourcentage en veille, le minuteur de condensation en veille démarre. Doit être inférieur ou égal au seuil de condensation du contexte.",
 			"thresholdProfileDescription": "Seuil de veille personnalisé pour ce profil uniquement (remplace le défaut global, plafonné au seuil de condensation du profil)",
 			"idleTime": {
 				"label": "Temps de veille",

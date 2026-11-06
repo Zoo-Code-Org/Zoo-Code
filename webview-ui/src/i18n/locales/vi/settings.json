@@ -759,7 +759,7 @@
 		"idleCondensing": {
 			"name": "Nén khi nhàn rỗi",
 			"description": "Khi mô hình đã trả lời xong và ngữ cảnh vượt ngưỡng nhàn rỗi, ngữ cảnh sẽ được nén sau khi thời gian nhàn rỗi trôi qua. Điều này giúp việc nén tốn kém không diễn ra giữa lúc đang làm việc. Gõ vào ô prompt sẽ đặt lại bộ đếm.",
-			"thresholdDescription": "Khi ngữ cảnh đạt tỷ lệ phần trăm này trong lúc nhàn rỗi, bộ đếm nén khi nhàn rỗi sẽ chạy. Phải bằng hoặc thấp hơn Ngưỡng kích hoạt nén ({{threshold}}%).",
+			"thresholdDescription": "Khi ngữ cảnh đạt tỷ lệ phần trăm này trong lúc nhàn rỗi, bộ đếm nén khi nhàn rỗi sẽ chạy. Phải bằng hoặc thấp hơn Ngưỡng kích hoạt nén.",
 			"thresholdProfileDescription": "Ngưỡng nhàn rỗi tùy chỉnh chỉ cho hồ sơ này (ghi đè mặc định toàn cục, giới hạn ở ngưỡng nén của hồ sơ)",
 			"idleTime": {
 				"label": "Thời gian nhàn rỗi",

@@ -143,10 +143,39 @@ export const ContextManagementSettings = ({
 		return profileThreshold
 	}
 
+	// Lowering the condensing trigger threshold lowers the current idle thresholds
+	// that inherit from it, so the idle threshold never exceeds the trigger
+	// threshold. The idle slider's max stays at 100%.
+	const clampIdleToTrigger = (newValue: number) => {
+		if (idleCondenseContextPercent > newValue) {
+			setCachedStateField("idleCondenseContextPercent", newValue)
+		}
+		const clampedProfileIdleThresholds = { ...profileIdleThresholds }
+		let changed = false
+		for (const [id, idleValue] of Object.entries(profileIdleThresholds)) {
+			if (idleValue === -1) {
+				continue
+			}
+			const profileTrigger = profileThresholds[id]
+			// Only profile idle overrides that inherit the default trigger threshold follow this change.
+			if (profileTrigger !== undefined && profileTrigger !== -1) {
+				continue
+			}
+			if (idleValue > newValue) {
+				clampedProfileIdleThresholds[id] = newValue
+				changed = true
+			}
+		}
+		if (changed) {
+			setCachedStateField("profileIdleThresholds", clampedProfileIdleThresholds)
+		}
+	}
+
 	// Helper function to handle threshold changes
 	const handleThresholdChange = (value: number) => {
 		if (selectedThresholdProfile === "default") {
 			setCachedStateField("autoCondenseContextPercent", value)
+			clampIdleToTrigger(value)
 		} else {
 			const newThresholds = {
 				...profileThresholds,
@@ -154,11 +183,20 @@ export const ContextManagementSettings = ({
 			}
 
 			setCachedStateField("profileThresholds", newThresholds)
+
+			const profileIdle = profileIdleThresholds[selectedThresholdProfile]
+			if (profileIdle !== undefined && profileIdle !== -1 && profileIdle > value) {
+				setCachedStateField("profileIdleThresholds", {
+					...profileIdleThresholds,
+					[selectedThresholdProfile]: value,
+				})
+			}
 		}
 	}
 
 	// Effective main condense threshold for the profile currently selected in
-	// the idle-threshold UI: the idle threshold may never exceed it.
+	// the idle-threshold UI: the idle threshold value may never exceed it,
+	// though the slider's max stays at 100%.
 	const getMainThresholdForIdleProfile = () => {
 		if (selectedIdleProfile === "default") {
 			return autoCondenseContextPercent
@@ -182,7 +220,7 @@ export const ContextManagementSettings = ({
 		return profileThreshold
 	}
 
-	// Helper function to handle idle threshold changes (clamped to the main threshold)
+	// Helper function to handle idle threshold changes (value clamped to the main threshold)
 	const handleIdleThresholdChange = (value: number) => {
 		const clamped = Math.min(value, getMainThresholdForIdleProfile())
 		if (selectedIdleProfile === "default") {
@@ -229,7 +267,6 @@ export const ContextManagementSettings = ({
 		setCachedStateField("profileIdleCondenseTimes", { ...profileIdleCondenseTimes, [selectedIdleProfile]: -1 })
 	}
 
-	const idleThresholdMax = Math.max(10, Math.min(getMainThresholdForIdleProfile(), 100))
 	return (
 		<div className={cn("flex flex-col gap-2", className)} {...props}>
 			<SectionHeader description={t("settings:contextManagement.description")}>
@@ -734,9 +771,9 @@ export const ContextManagementSettings = ({
 							<div className="flex items-center gap-2">
 								<Slider
 									min={10}
-									max={idleThresholdMax}
+									max={100}
 									step={1}
-									value={[Math.min(getCurrentIdleThresholdValue(), idleThresholdMax)]}
+									value={[getCurrentIdleThresholdValue()]}
 									onValueChange={([value]) => handleIdleThresholdChange(value)}
 									data-testid="idle-condense-threshold-slider"
 								/>
@@ -744,9 +781,7 @@ export const ContextManagementSettings = ({
 							</div>
 							<div className="text-vscode-descriptionForeground text-sm mt-1">
 								{selectedIdleProfile === "default"
-									? t("settings:contextManagement.idleCondensing.thresholdDescription", {
-											threshold: idleCondenseContextPercent,
-										})
+									? t("settings:contextManagement.idleCondensing.thresholdDescription")
 									: t("settings:contextManagement.idleCondensing.thresholdProfileDescription")}
 							</div>
 						</div>

@@ -759,7 +759,7 @@
 		"idleCondensing": {
 			"name": "空闲时压缩",
 			"description": "当模型完成响应且上下文高于空闲阈值时，在空闲时间结束后压缩上下文。这可避免昂贵的压缩发生在进行中的工作期间。在提示区输入内容会重置计时器。",
-			"thresholdDescription": "当上下文在空闲期间达到此百分比时，启动空闲压缩计时器。必须不高于压缩触发阈值（{{threshold}}%）。",
+			"thresholdDescription": "当上下文在空闲期间达到此百分比时，启动空闲压缩计时器。必须不高于压缩触发阈值。",
 			"thresholdProfileDescription": "仅此配置文件的自定义空闲阈值（覆盖全局默认值，上限为该配置文件的压缩阈值）",
 			"idleTime": {
 				"label": "空闲时间",
