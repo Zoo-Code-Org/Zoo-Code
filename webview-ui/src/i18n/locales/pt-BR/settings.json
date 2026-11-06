@@ -756,6 +756,18 @@
 			"profileDescription": "Limite personalizado apenas para este perfil (substitui o padrão global)",
 			"usesGlobal": "(usa global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensação em ociosidade",
+			"description": "Quando o modelo termina de responder e o contexto está acima do limite de ociosidade, o contexto é condensado após o tempo de ociosidade decorrer. Isso evita que a condensação, custosa, aconteça no meio do trabalho ativo. Digitar na área de prompt reinicia o temporizador.",
+			"thresholdDescription": "Quando o contexto atinge essa porcentagem durante a ociosidade, o temporizador de condensação em ociosidade é iniciado. Deve ser igual ou menor que o Limite de Ativação de Condensação ({{threshold}}%).",
+			"thresholdProfileDescription": "Limite de ociosidade personalizado apenas para este perfil (substitui o padrão global, limitado ao limite de condensação do perfil)",
+			"idleTime": {
+				"label": "Tempo de ociosidade",
+				"seconds": "segundos",
+				"description": "Quanto tempo o modelo deve ficar ocioso antes que a condensação seja acionada. Defina como 0 para condensar assim que o modelo ficar ocioso."
+			},
+			"useGlobal": "Usar configurações globais"
+		},
 		"maxImageFileSize": {
 			"label": "Tamanho máximo do arquivo de imagem",
 			"mb": "MB",

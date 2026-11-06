@@ -654,11 +654,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				// Queue message if:
 				// - Task is busy (sendingDisabled)
 				// - API request in progress (isStreaming)
+				// - Context condensation in progress (isCondensing) - the queued
+				//   message drains via processQueuedMessages once it finishes
 				// - Queue has items (preserve message order during drain)
 				// - Command is running (command_output) - user's message should be queued for AI, not sent to terminal
 				if (
 					sendingDisabled ||
 					isStreaming ||
+					isCondensing ||
 					messageQueue.length > 0 ||
 					clineAskRef.current === "command_output"
 				) {
@@ -720,6 +723,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			markFollowUpAsAnswered,
 			sendingDisabled,
 			isStreaming,
+			isCondensing,
 			messageQueue.length,
 			apiConfiguration.apiProvider,
 		], // messagesRef and clineAskRef are stable

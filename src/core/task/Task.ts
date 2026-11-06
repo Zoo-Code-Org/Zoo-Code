@@ -112,7 +112,13 @@ import { type AssistantMessageContent, presentAssistantMessage } from "../assist
 import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
+import {
+	computeContextPercent,
+	computeEffectiveCondenseThreshold,
+	type ContextManagementResult,
+	manageContext,
+	willManageContext,
+} from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -284,6 +290,26 @@ export class PendingActionSettlementError extends Error {
 		super(message, options)
 		this.name = "PendingActionSettlementError"
 	}
+}
+
+/**
+ * Outcome of a condense run, surfaced so callers (e.g. the idle-condense
+ * timer) can re-evaluate context fullness without waiting for the next API
+ * request to refresh `getTokenUsage().contextTokens` (manual condense does
+ * not refresh it).
+ */
+type CondenseContextResult = {
+	condensed: boolean
+	error?: string
+	newContextTokens?: number
+	prevContextTokens: number
+}
+
+/** Snapshot of the idle-condense gate inputs, re-evaluated when the timer fires. */
+type IdleCondenseGate = {
+	idlePercent: number
+	contextPercent: number
+	idleSeconds: number
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -471,6 +497,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private blanketDeniedCommandThisTurn = false
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
+	/** Timer for opportunistic idle condensing; armed only while the task waits on the user. */
+	private idleCondenseTimeoutRef?: NodeJS.Timeout
+	/** True while an idle-triggered condense is running, to prevent overlapping runs/re-arms. */
+	private idleCondenseInFlight = false
+	/**
+	 * True while the most recent task action was a condense of any kind (idle,
+	 * manual, inline auto, or forced overflow). Idle condensing stays suppressed
+	 * until the task takes another action (a new model request or a user prompt).
+	 */
+	private lastActionWasCondense = false
 
 	// Tool Use
 	consecutiveMistakeCount: number = 0
@@ -2202,6 +2238,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							void provider?.postMessageToWebview({ type: "interactionRequired" }).catch((error) => {
 								console.error("[Task#ask] postMessageToWebview interactionRequired failed:", error)
 							})
+							// A followup is the model's question finished and the task
+							// waiting on a new user prompt: eligible for idle condensing.
+							// Other interactive asks (tool/command/etc) are mid-response.
+							if (type === "followup") {
+								void this.maybeStartIdleCondenseTimer()
+							}
 						}
 					}, statusMutationTimeout),
 				)
@@ -2216,6 +2258,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (message) {
 							this.resumableAsk = message
 							this.emit(RooCodeEventName.TaskResumable, this.taskId)
+							void this.maybeStartIdleCondenseTimer()
 						}
 					}, statusMutationTimeout),
 				)
@@ -2230,6 +2273,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (message) {
 							this.idleAsk = message
 							this.emit(RooCodeEventName.TaskIdle, this.taskId)
+							void this.maybeStartIdleCondenseTimer()
 						}
 					}, statusMutationTimeout),
 				)
@@ -2472,6 +2516,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
+		// The user is engaging with the task: stop any pending idle condense, and
+		// let a future idle period condense again even if the last action condensed.
+		this.cancelIdleCondenseTimer()
+		this.lastActionWasCondense = false
 
 		this.askResponse = askResponse
 		this.askResponseText = text
@@ -2528,6 +2576,212 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (this.autoApprovalTimeoutRef) {
 			clearTimeout(this.autoApprovalTimeoutRef)
 			this.autoApprovalTimeoutRef = undefined
+		}
+	}
+
+	/**
+	 * Cancel any pending idle-condense timeout (user sent a prompt, task was
+	 * cancelled, or the task is being disposed).
+	 */
+	public cancelIdleCondenseTimer(): void {
+		if (this.idleCondenseTimeoutRef) {
+			clearTimeout(this.idleCondenseTimeoutRef)
+			this.idleCondenseTimeoutRef = undefined
+		}
+	}
+
+	/**
+	 * Restart the idle-condense countdown. Called when the user types in the
+	 * prompt area. Only acts while a timer is currently armed (i.e. the task is
+	 * waiting on the user with context above the idle threshold); a typing
+	 * signal during active work must not start condensing.
+	 */
+	public resetIdleCondenseTimer(): void {
+		if (!this.idleCondenseTimeoutRef) {
+			return
+		}
+		this.cancelIdleCondenseTimer()
+		void this.maybeStartIdleCondenseTimer()
+	}
+
+	/**
+	 * Resolve the idle wait in seconds for the current model profile, mirroring
+	 * the profileThresholds semantics: -1 inherits the global value, a value
+	 * >= 0 overrides it, anything else falls back to global with a warning.
+	 */
+	private resolveIdleCondenseTimeInSeconds(
+		state: { idleCondenseTimeInSeconds?: number; profileIdleCondenseTimes?: Record<string, number> },
+		currentProfileId: string,
+	): number {
+		const globalSeconds = state.idleCondenseTimeInSeconds ?? 180
+		const profileSeconds = state.profileIdleCondenseTimes?.[currentProfileId]
+		if (profileSeconds === undefined || profileSeconds === -1) {
+			return Math.max(0, globalSeconds)
+		}
+		if (profileSeconds >= 0) {
+			return profileSeconds
+		}
+		console.warn(
+			`Invalid profile idle condense time ${profileSeconds} for profile "${currentProfileId}". Using global default of ${globalSeconds}s`,
+		)
+		return Math.max(0, globalSeconds)
+	}
+
+	/**
+	 * Evaluate the idle-condense gate: enabled + active task + context above the
+	 * effective idle threshold. The idle threshold never exceeds the main
+	 * auto-condense threshold (belt-and-suspenders on top of settings
+	 * validation). Returns undefined when condensing must not be considered.
+	 */
+	private async evaluateIdleCondense(): Promise<IdleCondenseGate | undefined> {
+		// The last action was a condense (idle or otherwise): triggering another
+		// condense while the user is still idle would be redundant. Stay suppressed
+		// until the task takes another action.
+		if (this.lastActionWasCondense) {
+			return undefined
+		}
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return undefined
+		}
+		// Idle condensing only runs for the active task.
+		if (provider.getCurrentTask()?.taskId !== this.taskId) {
+			return undefined
+		}
+
+		const state = await provider.getState()
+		if (!state?.idleCondenseContext) {
+			return undefined
+		}
+
+		const { contextTokens } = this.getTokenUsage()
+		if (!contextTokens || contextTokens <= 0) {
+			return undefined
+		}
+
+		const modelInfo = await this.safeEnsureModelFetched()
+		// Parity with attemptApiRequestWithActiveApi: vscode-lm condenses against
+		// its static-table maxInputTokens via getCondenseContextWindow.
+		const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
+		if (!contextWindow) {
+			return undefined
+		}
+		const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
+		const maxTokens = getModelMaxOutputTokens({
+			modelId: this.api.getModel().id,
+			model: modelInfo,
+			settings: this.apiConfiguration,
+		})
+
+		const currentProfileId = this.getCurrentProfileId(state)
+		const mainPercent = computeEffectiveCondenseThreshold({
+			globalPercent: state?.autoCondenseContextPercent ?? 100,
+			profileThresholds: state?.profileThresholds ?? {},
+			currentProfileId,
+			label: "condense threshold",
+		})
+		const idlePercentSetting = computeEffectiveCondenseThreshold({
+			globalPercent: state?.idleCondenseContextPercent ?? 50,
+			profileThresholds: state?.profileIdleThresholds ?? {},
+			currentProfileId,
+			label: "idle condense threshold",
+		})
+		const idlePercent = Math.min(idlePercentSetting, mainPercent)
+		const contextPercent = computeContextPercent({
+			prevContextTokens: contextTokens,
+			contextWindow,
+			maxTokens,
+			useAvailableInputForContextPercent,
+		})
+		const idleSeconds = this.resolveIdleCondenseTimeInSeconds(state, currentProfileId)
+
+		return { idlePercent, contextPercent, idleSeconds }
+	}
+
+	/**
+	 * Arm the idle-condense timer if the gate allows. No-op when a timer is
+	 * already armed or an idle condense is in flight.
+	 */
+	private async maybeStartIdleCondenseTimer(): Promise<void> {
+		try {
+			if (this.abort || this.abandoned) {
+				return
+			}
+			if (this.idleCondenseTimeoutRef || this.idleCondenseInFlight) {
+				return
+			}
+			const gate = await this.evaluateIdleCondense()
+			if (!gate || gate.contextPercent < gate.idlePercent) {
+				return
+			}
+			// Re-check after the async gate evaluation: a prompt may have landed.
+			if (this.abort || this.abandoned || this.idleCondenseTimeoutRef) {
+				return
+			}
+			this.armIdleCondenseTimeout(gate.idleSeconds)
+		} catch (error) {
+			console.error("[Task#maybeStartIdleCondenseTimer] error:", error)
+		}
+	}
+
+	private armIdleCondenseTimeout(seconds: number): void {
+		this.cancelIdleCondenseTimer()
+		this.idleCondenseTimeoutRef = setTimeout(() => {
+			this.idleCondenseTimeoutRef = undefined
+			void this.onIdleCondenseTimerFired()
+		}, Math.max(0, seconds) * 1000)
+	}
+
+	/**
+	 * The idle wait elapsed: re-check the gate (settings or activity may have
+	 * changed) and condense opportunistically. A successful condense marks the
+	 * condense as the last task action, which keeps idle condensing suppressed
+	 * until the user sends a prompt or the task runs another model request.
+	 */
+	private async onIdleCondenseTimerFired(): Promise<void> {
+		if (this.idleCondenseInFlight) {
+			return
+		}
+		try {
+			if (this.abort || this.abandoned) {
+				return
+			}
+			// Something started (API request, tool, manual condense): the task is no
+			// longer idle. The next idle transition re-arms the timer.
+			if (this.activeApiWork > 0) {
+				return
+			}
+			const gate = await this.evaluateIdleCondense()
+			if (!gate || gate.contextPercent < gate.idlePercent) {
+				return
+			}
+
+			this.idleCondenseInFlight = true
+			let result: CondenseContextResult
+			try {
+				// Give the user the same in-progress cue a manual condense shows:
+				// the "Condensing context..." row with its busy icon. The chat box
+				// keeps the normal press-to-send state, like a manual condense.
+				await this.providerRef
+					.deref()
+					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
+				result = await this.condenseContextWithLease()
+			} finally {
+				this.idleCondenseInFlight = false
+				// Always clear the cue, even when the lease or the condense throws.
+				await this.providerRef
+					.deref()
+					?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
+			}
+
+			if (!result.condensed) {
+				return
+			}
+			// Do not re-arm: the condense is now the last task action
+			// (`condenseContextWithLease` set `lastActionWasCondense`), so another
+			// idle condense must not trigger until the task does something else.
+		} catch (error) {
+			console.error("[Task#onIdleCondenseTimerFired] error:", error)
 		}
 	}
 
@@ -2677,18 +2931,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async condenseContext(): Promise<void> {
+		await this.condenseContextWithLease()
+	}
+
+	private async condenseContextWithLease(): Promise<CondenseContextResult> {
 		const endApiWork = this.beginApiWork()
 		try {
-			await this.condenseContextWithActiveApi()
+			const result = await this.condenseContextWithActiveApi()
+			if (result.condensed) {
+				// Covers the manual condense button and the idle-triggered condense.
+				this.lastActionWasCondense = true
+			}
+			return result
 		} finally {
 			endApiWork()
 		}
 	}
 
-	private async condenseContextWithActiveApi(): Promise<void> {
+	private async condenseContextWithActiveApi(): Promise<CondenseContextResult> {
 		// CRITICAL: Flush any pending tool results before condensing
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
+
+		const { contextTokens: prevContextTokens } = this.getTokenUsage()
 
 		// Capture provider state and one model-info snapshot once and thread them into
 		// getSystemPrompt so the prompt and the condensing tool array below resolve
@@ -2699,7 +2964,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A cancellation landing during the bounded metadata wait must stop
 		// manual condensation before any prompt build or summarization request.
 		if (this.abort || this.abandoned) {
-			return
+			return { condensed: false, prevContextTokens }
 		}
 
 		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
@@ -2707,7 +2972,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A cancellation landing during the prompt build's bounded MCP wait must
 		// stop manual condensation before any summarization request is issued.
 		if (this.abort || this.abandoned) {
-			return
+			return { condensed: false, prevContextTokens }
 		}
 
 		// Get condensing configuration
@@ -2715,8 +2980,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
-
-		const { contextTokens: prevContextTokens } = this.getTokenUsage()
 
 		// Build tools for condensing metadata (same tools used for normal API calls)
 		const provider = this.providerRef.deref()
@@ -2761,7 +3024,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A cancellation landing while the summarization inputs are gathered must
 		// stop manual condensation before any summarization request is issued.
 		if (this.abort || this.abandoned) {
-			return
+			return { condensed: false, prevContextTokens }
 		}
 
 		const {
@@ -2787,7 +3050,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A cancellation landing during the summarization request must stop
 		// manual condensation before it replaces and persists the history.
 		if (this.abort || this.abandoned) {
-			return
+			return { condensed: false, prevContextTokens }
 		}
 		if (error) {
 			await this.say(
@@ -2799,7 +3062,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				undefined /* progressStatus */,
 				{ isNonInteractive: true } /* options */,
 			)
-			return
+			return { condensed: false, error, prevContextTokens }
 		}
 		await this.overwriteApiConversationHistory(messages)
 
@@ -2823,6 +3086,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Process any queued messages after condensing completes
 		this.processQueuedMessages()
+		return { condensed: true, newContextTokens, prevContextTokens }
 	}
 
 	async say(
@@ -3695,6 +3959,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
 		this.cancelPendingPartialMessageUpdate()
+		this.cancelIdleCondenseTimer()
 
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
@@ -3949,6 +4214,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (this.abort) {
 				throw new Error(`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} aborted`)
 			}
+
+			// A new model request is starting, so a condense from earlier is no longer
+			// the last action. An inline condense during this same request sets the
+			// flag again (via reportContextManagementResult), correctly suppressing a
+			// follow-up idle condense when the request that condensed was the last one.
+			this.lastActionWasCondense = false
 
 			if (this.consecutiveMistakeLimit > 0 && this.consecutiveMistakeCount >= this.consecutiveMistakeLimit) {
 				// Track consecutive mistake errors in telemetry via a named event.
@@ -5494,6 +5765,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			await this.say("condense_context_error", result.error)
 		}
 		if (result.summary) {
+			// A real condense ran (inline auto or forced overflow): suppress idle
+			// condensing until the task takes another action.
+			this.lastActionWasCondense = true
 			const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = result
 			const contextCondense: ContextCondense = {
 				summary,

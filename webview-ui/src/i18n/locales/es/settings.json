@@ -766,6 +766,18 @@
 			"profileDescription": "Umbral personalizado solo para este perfil (anula el predeterminado global)",
 			"usesGlobal": "(usa global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensación en reposo",
+			"description": "Cuando el modelo ha terminado de responder y el contexto está por encima del umbral de reposo, se condensa el contexto al transcurrir el tiempo de reposo. Esto evita que la costosa condensación ocurra en medio del trabajo activo. Escribir en el área de prompt reinicia el temporizador.",
+			"thresholdDescription": "Cuando el contexto alcanza este porcentaje durante el reposo, se activa el temporizador de condensación en reposo. Debe ser igual o inferior al umbral de condensación de contexto ({{threshold}}%).",
+			"thresholdProfileDescription": "Umbral de reposo personalizado solo para este perfil (anula el predeterminado global, limitado al umbral de condensación del perfil)",
+			"idleTime": {
+				"label": "Tiempo de reposo",
+				"seconds": "segundos",
+				"description": "Cuánto tiempo debe estar el modelo inactivo antes de que se active la condensación. Establécelo en 0 para condensar en cuanto el modelo quede inactivo."
+			},
+			"useGlobal": "Usar ajustes globales"
+		},
 		"includeCurrentTime": {
 			"label": "Incluir hora actual en el contexto",
 			"description": "Cuando está habilitado, la hora actual y la información de la zona horaria se incluirán en el prompt del sistema. Deshabilítelo si los modelos dejan de funcionar por problemas de tiempo."

@@ -102,8 +102,19 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
+import { MIN_CONDENSE_THRESHOLD, MAX_CONDENSE_THRESHOLD } from "../condense"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
+
+/**
+ * Clamp an idle-condense trigger threshold: within the shared condense
+ * threshold bounds and never above the main auto-condense threshold (the idle
+ * condense is a strictly-earlier trigger of the same condense).
+ */
+function clampIdleCondensePercent(value: number, mainPercent: number): number {
+	const upper = Math.min(mainPercent, MAX_CONDENSE_THRESHOLD)
+	return Math.min(Math.max(value, MIN_CONDENSE_THRESHOLD), upper)
+}
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
@@ -887,6 +898,38 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "idleCondenseContextPercent") {
+						if (typeof value === "number") {
+							const mainPercent =
+								(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
+								(getGlobalState("autoCondenseContextPercent") ?? 100)
+							newValue = clampIdleCondensePercent(value, mainPercent)
+						}
+					} else if (key === "profileIdleThresholds") {
+						if (value && typeof value === "object") {
+							const mainPercent =
+								(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
+								(getGlobalState("autoCondenseContextPercent") ?? 100)
+							newValue = Object.fromEntries(
+								Object.entries(value as Record<string, number>).map(([id, percent]) => [
+									id,
+									percent === -1 ? -1 : clampIdleCondensePercent(percent, mainPercent),
+								]),
+							)
+						}
+					} else if (key === "idleCondenseTimeInSeconds") {
+						if (typeof value === "number") {
+							newValue = Math.max(0, Math.round(value))
+						}
+					} else if (key === "profileIdleCondenseTimes") {
+						if (value && typeof value === "object") {
+							newValue = Object.fromEntries(
+								Object.entries(value as Record<string, number>).map(([id, seconds]) => [
+									id,
+									seconds === -1 ? -1 : Math.max(0, Math.round(seconds)),
+								]),
+							)
+						}
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
@@ -918,6 +961,12 @@ export const webviewMessageHandler = async (
 
 			break
 		}
+
+		case "idleCondenseReset":
+			// The user typed in the prompt area: restart the idle-condense
+			// countdown for the active task (no-op unless a timer is armed).
+			provider.getCurrentTask()?.resetIdleCondenseTimer()
+			break
 
 		case "terminalOperation":
 			if (message.terminalOperation) {
