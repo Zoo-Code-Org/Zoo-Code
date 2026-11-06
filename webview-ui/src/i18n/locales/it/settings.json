@@ -758,7 +758,7 @@
 		},
 		"idleCondensing": {
 			"name": "Condensazione inattiva",
-			"description": "Quando il modello ha finito di rispondere e il contesto è sopra la soglia di inattività, il contesto viene condensato allo scadere del tempo di inattività. Questo evita che la condensazione, costosa, avvenga nel mezzo del lavoro attivo. Digitare nell'area del prompt reimposta il timer.",
+			"description": "Una soglia più bassa per condensare il contesto durante i momenti di inattività, così avrai sempre un contesto pulito quando torni alla tastiera.",
 			"thresholdDescription": "Quando il contesto raggiunge questa percentuale durante l'inattività, il timer di condensazione inattiva parte. Deve essere uguale o inferiore alla soglia di attivazione condensazione.",
 			"thresholdProfileDescription": "Soglia di inattività personalizzata solo per questo profilo (sovrascrive il predefinito globale, limitata alla soglia di condensazione del profilo)",
 			"idleTime": {

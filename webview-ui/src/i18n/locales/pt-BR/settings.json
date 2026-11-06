@@ -1,4 +1,4 @@
-t{
+{
 	"back": "Voltar para a visão de tarefas",
 	"common": {
 		"save": "Salvar",
@@ -758,7 +758,7 @@ t{
 		},
 		"idleCondensing": {
 			"name": "Condensação em ociosidade",
-			"description": "Quando o modelo termina de responder e o contexto está acima do limite de ociosidade, o contexto é condensado após o tempo de ociosidade decorrer. Isso evita que a condensação, custosa, aconteça no meio do trabalho ativo. Digitar na área de prompt reinicia o temporizador.",
+			"description": "Um limite mais baixo para condensar o contexto durante momentos de ociosidade, para que você sempre tenha um contexto limpo ao voltar ao teclado.",
 			"thresholdDescription": "Quando o contexto atinge essa porcentagem durante a ociosidade, o temporizador de condensação em ociosidade é iniciado. Deve ser igual ou menor que o Limite de Ativação de Condensação.",
 			"thresholdProfileDescription": "Limite de ociosidade personalizado apenas para este perfil (substitui o padrão global, limitado ao limite de condensação do perfil)",
 			"idleTime": {

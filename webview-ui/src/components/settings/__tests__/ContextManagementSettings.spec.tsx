@@ -475,6 +475,36 @@ describe("ContextManagementSettings", () => {
 			// When auto condense is false, threshold slider should not be visible
 			expect(screen.queryByTestId("condense-threshold-slider")).not.toBeInTheDocument()
 		})
+
+		it("does not render idle condensing controls when autoCondenseContext is false", () => {
+			render(
+				<ContextManagementSettings
+					{...defaultProps}
+					autoCondenseContext={false}
+					idleCondenseContext={true}
+				/>,
+			)
+
+			// Idle condensing is nested under auto condense: everything idle
+			// should be hidden while auto condense is unchecked.
+			expect(screen.queryByTestId("idle-condense-context-checkbox")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("idle-condense-threshold-slider")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("idle-condense-time-input")).not.toBeInTheDocument()
+		})
+
+		it("renders idle condensing controls when autoCondenseContext is enabled", () => {
+			render(
+				<ContextManagementSettings
+					{...defaultProps}
+					autoCondenseContext={true}
+					idleCondenseContext={true}
+				/>,
+			)
+
+			expect(screen.getByTestId("idle-condense-context-checkbox")).toBeInTheDocument()
+			expect(screen.getByTestId("idle-condense-threshold-slider")).toBeInTheDocument()
+			expect(screen.getByTestId("idle-condense-time-input")).toBeInTheDocument()
+		})
 	})
 
 	describe("Accessibility", () => {

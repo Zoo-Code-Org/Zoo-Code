@@ -17,6 +17,7 @@ type StateStub = Partial<{
 	idleCondenseContext: boolean
 	idleCondenseContextPercent: number
 	idleCondenseTimeInSeconds: number
+	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
 	profileThresholds: Record<string, number>
 	profileIdleThresholds: Record<string, number>
@@ -27,6 +28,7 @@ const baseState = (overrides: StateStub = {}): StateStub => ({
 	idleCondenseContext: true,
 	idleCondenseContextPercent: 50,
 	idleCondenseTimeInSeconds: 30,
+	autoCondenseContext: true,
 	autoCondenseContextPercent: 100,
 	profileThresholds: {},
 	profileIdleThresholds: {},
@@ -158,6 +160,14 @@ describe("Task idle condensing — evaluateIdleCondense", () => {
 
 	test("returns undefined when idle condensing is disabled", async () => {
 		const { task } = buildTask({ state: baseState({ idleCondenseContext: false }) })
+
+		await expect(task["evaluateIdleCondense"]()).resolves.toBeUndefined()
+	})
+
+	test("returns undefined when auto condensing is disabled", async () => {
+		// Idle condensing is a sub-feature of auto condensing: disabling auto
+		// condensing disables idle condensing even when idle is still checked.
+		const { task } = buildTask({ state: baseState({ autoCondenseContext: false }) })
 
 		await expect(task["evaluateIdleCondense"]()).resolves.toBeUndefined()
 	})

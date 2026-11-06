@@ -709,110 +709,118 @@ export const ContextManagementSettings = ({
 									: t("settings:contextManagement.condensingThreshold.profileDescription")}
 							</div>
 						</div>
-					</div>
-				)}
 
-				{/* Idle Condensing */}
-				<SearchableSetting
-					settingId="context-idle-condense"
-					section="contextManagement"
-					label={t("settings:contextManagement.idleCondensing.name")}>
-					<VSCodeCheckbox
-						checked={idleCondenseContext}
-						onChange={(e: any) => setCachedStateField("idleCondenseContext", e.target.checked)}
-						data-testid="idle-condense-context-checkbox">
-						<span className="font-medium">{t("settings:contextManagement.idleCondensing.name")}</span>
-					</VSCodeCheckbox>
-					<div className="text-vscode-descriptionForeground text-sm mt-1">
-						{t("settings:contextManagement.idleCondensing.description")}
-					</div>
-				</SearchableSetting>
-				{idleCondenseContext && (
-					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
-						<div>
-							<Select
-								value={selectedIdleProfile || "default"}
-								onValueChange={(value) => {
-									setSelectedIdleProfile(value)
-								}}
-								data-testid="idle-threshold-profile-select">
-								<SelectTrigger className="w-full">
-									<SelectValue
-										placeholder={
-											t("settings:contextManagement.condensingThreshold.selectProfile") ||
-											"Select profile for threshold"
-										}
-									/>
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="default">
-										{t("settings:contextManagement.condensingThreshold.defaultProfile") ||
-											"Default (applies to all unconfigured profiles)"}
-									</SelectItem>
-									{(listApiConfigMeta || []).map((config) => {
-										const profileIdleThreshold = profileIdleThresholds[config.id]
-										const idleDisplay =
-											profileIdleThreshold !== undefined && profileIdleThreshold !== -1
-												? ` (${profileIdleThreshold}%)`
-												: ""
-										return (
-											<SelectItem key={config.id} value={config.id}>
-												{config.name}
-												{idleDisplay}
-											</SelectItem>
-										)
-									})}
-								</SelectContent>
-							</Select>
-						</div>
-
-						{/* Idle Threshold Slider */}
-						<div>
-							<div className="flex items-center gap-2">
-								<Slider
-									min={10}
-									max={100}
-									step={1}
-									value={[getCurrentIdleThresholdValue()]}
-									onValueChange={([value]) => handleIdleThresholdChange(value)}
-									data-testid="idle-condense-threshold-slider"
-								/>
-								<span className="w-20">{getCurrentIdleThresholdValue()}%</span>
-							</div>
-							<div className="text-vscode-descriptionForeground text-sm mt-1">
-								{selectedIdleProfile === "default"
-									? t("settings:contextManagement.idleCondensing.thresholdDescription")
-									: t("settings:contextManagement.idleCondensing.thresholdProfileDescription")}
-							</div>
-						</div>
-
-						{/* Idle Time Input */}
-						<div>
-							<div className="flex items-center gap-2">
+						{/* Idle Condensing */}
+						<SearchableSetting
+							settingId="context-idle-condense"
+							section="contextManagement"
+							label={t("settings:contextManagement.idleCondensing.name")}>
+							<VSCodeCheckbox
+								checked={idleCondenseContext}
+								onChange={(e: any) => setCachedStateField("idleCondenseContext", e.target.checked)}
+								data-testid="idle-condense-context-checkbox">
 								<span className="font-medium">
-									{t("settings:contextManagement.idleCondensing.idleTime.label")}
+									{t("settings:contextManagement.idleCondensing.name")}
 								</span>
-								<Input
-									type="number"
-									min={0}
-									step={1}
-									value={getCurrentIdleTimeValue()}
-									onChange={(e) => handleIdleTimeChange(parseInt((e.target as HTMLInputElement).value, 10))}
-									className="w-24"
-									data-testid="idle-condense-time-input"
-								/>
-								<span>{t("settings:contextManagement.idleCondensing.idleTime.seconds")}</span>
-							</div>
+							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm mt-1">
-								{t("settings:contextManagement.idleCondensing.idleTime.description")}
+								{t("settings:contextManagement.idleCondensing.description")}
 							</div>
-						</div>
+						</SearchableSetting>
+						{idleCondenseContext && (
+							<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
+								<div>
+									<Select
+										value={selectedIdleProfile || "default"}
+										onValueChange={(value) => {
+											setSelectedIdleProfile(value)
+										}}
+										data-testid="idle-threshold-profile-select">
+										<SelectTrigger className="w-full">
+											<SelectValue
+												placeholder={
+													t("settings:contextManagement.condensingThreshold.selectProfile") ||
+													"Select profile for threshold"
+												}
+											/>
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="default">
+												{t("settings:contextManagement.condensingThreshold.defaultProfile") ||
+													"Default (applies to all unconfigured profiles)"}
+											</SelectItem>
+											{(listApiConfigMeta || []).map((config) => {
+												const profileIdleThreshold = profileIdleThresholds[config.id]
+												const idleDisplay =
+													profileIdleThreshold !== undefined && profileIdleThreshold !== -1
+														? ` (${profileIdleThreshold}%)`
+														: ""
+												return (
+													<SelectItem key={config.id} value={config.id}>
+														{config.name}
+														{idleDisplay}
+													</SelectItem>
+												)
+											})}
+										</SelectContent>
+									</Select>
+								</div>
 
-						{selectedIdleProfile !== "default" && (
-							<div>
-								<Button onClick={handleIdleProfileUseGlobal} data-testid="idle-condense-use-global-button">
-									{t("settings:contextManagement.idleCondensing.useGlobal")}
-								</Button>
+								{/* Idle Threshold Slider */}
+								<div>
+									<div className="flex items-center gap-2">
+										<Slider
+											min={10}
+											max={100}
+											step={1}
+											value={[getCurrentIdleThresholdValue()]}
+											onValueChange={([value]) => handleIdleThresholdChange(value)}
+											data-testid="idle-condense-threshold-slider"
+										/>
+										<span className="w-20">{getCurrentIdleThresholdValue()}%</span>
+									</div>
+									<div className="text-vscode-descriptionForeground text-sm mt-1">
+										{selectedIdleProfile === "default"
+											? t("settings:contextManagement.idleCondensing.thresholdDescription")
+											: t(
+													"settings:contextManagement.idleCondensing.thresholdProfileDescription",
+												)}
+									</div>
+								</div>
+
+								{/* Idle Time Input */}
+								<div>
+									<div className="flex items-center gap-2">
+										<span className="font-medium">
+											{t("settings:contextManagement.idleCondensing.idleTime.label")}
+										</span>
+										<Input
+											type="number"
+											min={0}
+											step={1}
+											value={getCurrentIdleTimeValue()}
+											onChange={(e) =>
+												handleIdleTimeChange(parseInt((e.target as HTMLInputElement).value, 10))
+											}
+											className="w-24"
+											data-testid="idle-condense-time-input"
+										/>
+										<span>{t("settings:contextManagement.idleCondensing.idleTime.seconds")}</span>
+									</div>
+									<div className="text-vscode-descriptionForeground text-sm mt-1">
+										{t("settings:contextManagement.idleCondensing.idleTime.description")}
+									</div>
+								</div>
+
+								{selectedIdleProfile !== "default" && (
+									<div>
+										<Button
+											onClick={handleIdleProfileUseGlobal}
+											data-testid="idle-condense-use-global-button">
+											{t("settings:contextManagement.idleCondensing.useGlobal")}
+										</Button>
+									</div>
+								)}
 							</div>
 						)}
 					</div>

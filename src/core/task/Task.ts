@@ -2650,7 +2650,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		const state = await provider.getState()
-		if (!state?.idleCondenseContext) {
+		// Idle condensing is a sub-feature of auto condensing: disabling auto
+		// condensing disables idle condensing too.
+		if (!state?.idleCondenseContext || !state?.autoCondenseContext) {
 			return undefined
 		}
 

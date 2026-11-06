@@ -768,7 +768,7 @@
 		},
 		"idleCondensing": {
 			"name": "Comprimeren bij inactiviteit",
-			"description": "Wanneer het model klaar is met antwoorden en de context boven de inactiviteitsdrempel is, wordt de context gecomprimeerd nadat de inactiviteitstijd is verstreken. Zo vindt dure compressie niet midden in actief werk plaats. Typen in het promptgebied reset de timer.",
+			"description": "Een lagere drempel om de context tijdens inactieve momenten te comprimeren, zodat je altijd een schone context hebt als je terugkomt naar het toetsenbord.",
 			"thresholdDescription": "Wanneer de context tijdens inactiviteit dit percentage bereikt, start de timer voor inactiviteitscompressie. Moet gelijk zijn aan of lager dan de compressie trigger drempelwaarde.",
 			"thresholdProfileDescription": "Aangepaste inactiviteitsdrempel alleen voor dit profiel (overschrijft globale standaard, beperkt tot de compressiedrempel van het profiel)",
 			"idleTime": {

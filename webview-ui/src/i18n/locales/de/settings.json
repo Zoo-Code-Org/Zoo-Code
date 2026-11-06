@@ -758,7 +758,7 @@
 		},
 		"idleCondensing": {
 			"name": "Komprimierung im Leerlauf",
-			"description": "Wenn das Modell fertig geantwortet hat und der Kontext über dem Leerlauf-Schwellenwert liegt, wird der Kontext komprimiert, nachdem die Leerlaufzeit verstrichen ist. So findet die aufwendige Komprimierung nicht mitten in aktiver Arbeit statt. Wenn du in das Prompt-Feld schreibst, wird der Timer zurückgesetzt.",
+			"description": "Ein niedrigerer Schwellenwert zum Komprimieren des Kontexts im Leerlauf, damit du immer einen sauberen Kontext hast, wenn du zurück an die Tastatur kommst.",
 			"thresholdDescription": "Wenn der Kontext im Leerlauf diesen Prozentsatz erreicht, läuft der Leerlauf-Komprimierungs-Timer. Muss gleich oder niedriger als der Schwellenwert für Kontextkomprimierung sein.",
 			"thresholdProfileDescription": "Benutzerdefinierter Leerlauf-Schwellenwert nur für dieses Profil (überschreibt globalen Standard, begrenzt auf den Komprimierungsschwellenwert des Profils)",
 			"idleTime": {

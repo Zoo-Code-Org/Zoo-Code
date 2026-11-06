@@ -758,7 +758,7 @@
 		},
 		"idleCondensing": {
 			"name": "Kondensacja podczas bezczynności",
-			"description": "Gdy model skończy odpowiadać, a kontekst przekracza próg bezczynności, kontekst zostanie skondensowany po upływie czasu bezczynności. Dzięki temu kosztowna kondensacja nie zachodzi w trakcie aktywnej pracy. Pisanie w polu promptu resetuje timer.",
+			"description": "Niższy próg kondensacji kontekstu w chwilach bezczynności, dzięki czemu zawsze masz czysty kontekst, gdy wracasz do klawiatury.",
 			"thresholdDescription": "Gdy kontekst osiągnie ten procent podczas bezczynności, uruchamia się timer kondensacji. Musi być równy lub niższy niż próg wyzwalania kondensacji.",
 			"thresholdProfileDescription": "Niestandardowy próg bezczynności tylko dla tego profilu (zastępuje domyślny globalny, ograniczony do progu kondensacji profilu)",
 			"idleTime": {
