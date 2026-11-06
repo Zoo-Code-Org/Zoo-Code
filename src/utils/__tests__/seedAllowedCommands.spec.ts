@@ -206,6 +206,25 @@ describe("seedAllowedCommands", () => {
 		expect(globalState.get("allowedCommands")).toEqual(["git"])
 	})
 
+	it("seeds an explicitly empty global value instead of the populated default", async () => {
+		// An explicitly empty global list is a deliberate opt-out: the seed
+		// persists [] so global state counts as seeded, rather than treating
+		// the empty allowlist as unset and re-granting the declared defaults.
+		mockConfiguration({
+			inspect: {
+				key: "allowedCommands",
+				defaultValue: ["git log", "git diff", "git show"],
+				globalValue: [],
+			},
+		})
+		const globalState = mockMemento()
+
+		await seedAllowedCommands(globalState)
+
+		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", [])
+		expect(globalState.get("allowedCommands")).toEqual([])
+	})
+
 	it("does not overwrite global state that is already populated", async () => {
 		mockConfiguration({ inspect: { key: "allowedCommands", globalValue: ["git"] }, effective: ["git"] })
 		const globalState = mockMemento(["npm"])

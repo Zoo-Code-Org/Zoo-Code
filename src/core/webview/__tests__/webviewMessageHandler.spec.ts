@@ -2176,7 +2176,10 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	}
 
 	it("keeps workspace-scoped denied commands out of the global write when saving the merged list", async () => {
-		const { update, inspect } = mockCommandConfiguration({ workspaceValue: ["docker"] })
+		// Gate on: the workspace entry is visible in the dialog, so keeping it
+		// is not a re-add. (With the gate off every submitted workspace entry
+		// is a re-add and is promoted to the global layer instead.)
+		const { update, inspect } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, true)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
@@ -2198,7 +2201,14 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	})
 
 	it("writes the workspace-folder value at the folder target in multi-root workspaces", async () => {
-		const { update } = mockCommandConfiguration({ workspaceValue: ["npm"], workspaceFolderValue: ["docker"] })
+		// Gate on for the same reason as the merged-list split test: the kept
+		// folder entry is visible in the dialog, so it stays at its scope.
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["npm"], workspaceFolderValue: ["docker"] },
+			undefined,
+			undefined,
+			true,
+		)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
@@ -2478,6 +2488,49 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 
 		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
 		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+	})
+
+	it("promotes a gate-hidden workspace entry the dialog re-adds to the global write", async () => {
+		// With the gate off the dialog shows only the global layer, so a
+		// submitted entry the workspace layer already holds hidden is one the
+		// user just added: it must reach the enforced global layer instead of
+		// being treated as existing knowledge, while the re-add below still
+		// keeps it in the workspace file.
+		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, false)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"])
+	})
+
+	it("promotes a shadowed workspace entry the dialog re-adds to the global write", async () => {
+		// The global allow "git" shadows the workspace deny "git push", so the
+		// dialog never displayed the deny entry; a user who re-adds it submits a
+		// list containing it, and the entry must land in the global layer where
+		// the gate makes it effective, while the re-add preserves the workspace
+		// copy.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["git push"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Global)
 	})
 
 	it("re-adds a shadowed workspace allow entry alongside the user's visible deletions", async () => {

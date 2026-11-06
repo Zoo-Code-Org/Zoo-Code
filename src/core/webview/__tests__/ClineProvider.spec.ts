@@ -4147,6 +4147,31 @@ describe("ClineProvider", () => {
 			expect(state.allowedCommands).toEqual([])
 		})
 
+		test("getState returns the raw global command lists when the workspace layer differs", async () => {
+			await provider.contextProxy.setValue("allowedCommands", ["git"])
+			await provider.contextProxy.setValue("deniedCommands", ["curl"])
+			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+			const inspect = vi.fn()
+			inspect.mockImplementation((key: string) => ({
+				key,
+				workspaceValue: key === "allowedCommands" ? ["docker"] : ["pnpm"],
+			}))
+			config.inspect = inspect
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			const state = await provider.getState()
+
+			// The raw global layers are the feed per-folder enforcement
+			// re-composes from, so they must stay distinguishable from the
+			// window-composed pair: with the layers diverging here, a dropped
+			// field or a composed value would silently reroute enforcement to
+			// the first-folder lists.
+			expect(state.globalAllowedCommands).toEqual(["git"])
+			expect(state.globalDeniedCommands).toEqual(["curl"])
+			expect(state.allowedCommands).toEqual(["git", "docker"])
+			expect(state.deniedCommands).toEqual(["curl", "pnpm"])
+		})
+
 		test("getState prefers the workspace-folder value for multi-root workspaces", async () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),

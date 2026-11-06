@@ -857,10 +857,11 @@ export const webviewMessageHandler = async (
 						// needs the opposite key's global layer as input. It comes
 						// from the save-start snapshot, not a fresh read: an
 						// earlier iteration of this loop may already have written
-						// that key. The layer only feeds the additive preservation
-						// below and this key's external-addition classification, and
-						// never this key's split, target, or rollback, which stay on
-						// the per-key configuration snapshot.
+						// that key. The layer only feeds the hidden-entry mechanism
+						// below — additive preservation, external-addition
+						// classification, and the split's promotion filter —
+						// and never this key's target or rollback, which stay
+						// on the per-key configuration snapshot.
 						const otherKey = key === "allowedCommands" ? "deniedCommands" : "allowedCommands"
 						const otherScopes = readCommandListScopes(otherKey, commandListGlobalsAtSaveStart[otherKey])
 						const { hiddenWorkspaceAllow, hiddenWorkspaceDeny } = resolveEffectiveCommandLists(
@@ -899,7 +900,12 @@ export const webviewMessageHandler = async (
 							: []
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
 							[...incoming, ...externallyAdded],
-							currentScopes.workspace,
+							// Hidden entries are not existing knowledge for promotion
+							// purposes: the dialog never displayed them, so an entry the
+							// user just added is new even when the workspace layer
+							// already holds it hidden. The re-add below restores the
+							// hidden entries this reduced layer drops.
+							currentScopes.workspace.filter((entry) => !hiddenWorkspaceEntries.includes(entry)),
 							currentScopes.global,
 						)
 
