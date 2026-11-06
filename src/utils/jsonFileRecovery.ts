@@ -1,6 +1,9 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
+import { getErrorCode } from "./errorCode"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
+
 import { withFileLock } from "./fileLock"
 
 function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): string {
@@ -20,24 +23,52 @@ function isReplacementLeftover(absoluteFilePath: string, entry: string): boolean
  * write. A live writer retains its lock; a crashed writer's lock must age out.
  * The unlocked scan is only a hint: recovery rechecks everything under the lock.
  */
-export async function recoverMissingJsonFile(filePath: string): Promise<boolean> {
+export async function recoverMissingJsonFile(
+	filePath: string,
+	options: { waitForStaleLock?: boolean } = {},
+): Promise<boolean> {
 	const absoluteFilePath = path.resolve(filePath)
 	let entries: string[]
 	try {
 		entries = await fs.readdir(path.dirname(absoluteFilePath))
 	} catch (error: unknown) {
-		if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return false
+		if (getErrorCode(error) === "ENOENT") return false
+		tracePersistenceEvent("json-recovery", {
+			filePath: absoluteFilePath,
+			result: "failed",
+			detail: getErrorCode(error),
+		})
 		throw error
 	}
 	if (!entries.some((entry) => isReplacementLeftover(absoluteFilePath, entry))) return false
-	await withFileLock(
-		absoluteFilePath,
-		async (lockedPath) => {
-			await recoverInterruptedReplacement(lockedPath)
-		},
-		{ waitForStaleLock: true },
-	)
-	return true
+	try {
+		return await withFileLock(
+			absoluteFilePath,
+			async (lockedPath) => {
+				const recovery = await recoverInterruptedReplacement(lockedPath)
+				if (recovery.restoredFrom) {
+					tracePersistenceEvent("json-recovery", { filePath: absoluteFilePath, result: "restored" })
+					return true
+				}
+				// A peer may have committed while this reader waited for the lock.
+				try {
+					await fs.access(lockedPath)
+					return true
+				} catch (error) {
+					if (getErrorCode(error) === "ENOENT") return false
+					throw error
+				}
+			},
+			{ waitForStaleLock: options.waitForStaleLock ?? true, immediate: options.waitForStaleLock === false },
+		)
+	} catch (error) {
+		tracePersistenceEvent("json-recovery", {
+			filePath: absoluteFilePath,
+			result: "failed",
+			detail: getErrorCode(error),
+		})
+		throw error
+	}
 }
 
 /**
@@ -51,7 +82,7 @@ export async function deleteJsonFile(filePath: string): Promise<void> {
 		try {
 			entries = await fs.readdir(path.dirname(absoluteFilePath))
 		} catch (error: unknown) {
-			if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
+			if (getErrorCode(error) === "ENOENT") return
 			throw error
 		}
 		const leftovers = entries.filter((entry) => isReplacementLeftover(absoluteFilePath, entry))
@@ -62,8 +93,7 @@ export async function deleteJsonFile(filePath: string): Promise<void> {
 			try {
 				await fs.unlink(target)
 			} catch (error: unknown) {
-				if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT")
-					throw error
+				if (getErrorCode(error) !== "ENOENT") throw error
 			}
 		}
 	})
@@ -98,7 +128,7 @@ export async function recoverInterruptedReplacement(
 	try {
 		entries = await fs.readdir(dirPath)
 	} catch (error: unknown) {
-		if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+		if (getErrorCode(error) === "ENOENT") {
 			return { foundLeftovers: false, restoredFrom: null }
 		}
 		// A failed scan cannot establish that no committed backups need recovery.
@@ -119,7 +149,7 @@ export async function recoverInterruptedReplacement(
 	try {
 		await fs.access(absoluteFilePath)
 	} catch (error: unknown) {
-		if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ENOENT") {
+		if (getErrorCode(error) !== "ENOENT") {
 			// Unknown canonical state must not authorize deleting committed backups.
 			throw error
 		}
@@ -138,12 +168,7 @@ export async function recoverInterruptedReplacement(
 						try {
 							return { backupPath, mtimeMs: (await fs.stat(backupPath)).mtimeMs }
 						} catch (error: unknown) {
-							if (
-								typeof error === "object" &&
-								error !== null &&
-								"code" in error &&
-								error.code === "ENOENT"
-							) {
+							if (getErrorCode(error) === "ENOENT") {
 								return null
 							}
 							// An unreadable backup could be the newest committed state.

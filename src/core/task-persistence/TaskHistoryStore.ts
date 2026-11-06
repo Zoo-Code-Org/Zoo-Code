@@ -283,7 +283,9 @@ export class TaskHistoryStore {
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
 				await deleteJsonFile(filePath)
-			} catch {
+			} catch (error) {
+				if (getErrorCode(error) !== "ENOENT")
+					console.warn("[TaskHistoryStore] Failed to delete task history:", error)
 				// File may already be deleted
 			}
 
@@ -311,7 +313,9 @@ export class TaskHistoryStore {
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
 					await deleteJsonFile(filePath)
-				} catch {
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT")
+						console.warn("[TaskHistoryStore] Failed to delete task history:", error)
 					// File may already be deleted
 				}
 			}
@@ -355,7 +359,7 @@ export class TaskHistoryStore {
 					const taskFilePath = await this.getTaskFilePath(taskId)
 					const { mtimeMs } = await fs.stat(taskFilePath).catch(async (error: unknown) => {
 						if (getErrorCode(error) !== "ENOENT") throw error
-						await recoverMissingJsonFile(taskFilePath)
+						await recoverMissingJsonFile(taskFilePath, { waitForStaleLock: false })
 						return fs.stat(taskFilePath)
 					})
 					liveIds.add(taskId)
@@ -375,7 +379,12 @@ export class TaskHistoryStore {
 							this.cache.set(taskId, item)
 						}
 					}
-				} catch {
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT") {
+						liveIds.add(taskId)
+						console.warn("[TaskHistoryStore] Failed to reconcile task history:", error)
+						continue
+					}
 					// File may be temporarily absent during a peer's atomic
 					// rename window in safeWriteJson. The advisory lock is
 					// held for the entire write, so its presence means a
@@ -666,7 +675,7 @@ export class TaskHistoryStore {
 		const intentPath = await this.getDelegationRepairIntentPath()
 		let parsed: unknown
 		try {
-			parsed = JSON.parse(await fs.readFile(intentPath, "utf8")) as unknown
+			parsed = JSON.parse(await readFileWithMissingRetry(intentPath)) as unknown
 		} catch (error) {
 			if (this.isFileNotFoundError(error)) {
 				return null
@@ -726,7 +735,7 @@ export class TaskHistoryStore {
 
 	private async removeDelegationRepairIntent(): Promise<void> {
 		try {
-			await fs.unlink(await this.getDelegationRepairIntentPath())
+			await deleteJsonFile(await this.getDelegationRepairIntentPath())
 		} catch (error) {
 			console.warn("[TaskHistoryStore] Failed to remove completed delegation repair intent:", error)
 		}
@@ -834,10 +843,21 @@ export class TaskHistoryStore {
 				try {
 					await fs.access(filePath)
 					// File already exists, skip (don't overwrite existing per-task files)
-				} catch {
-					// File doesn't exist, write it
-					await safeWriteJson(filePath, item)
-					this.cache.set(item.id, item)
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT") throw error
+					// Recovery or a peer may supply a committed record after the access check.
+					let persisted = item
+					await safeWriteJson(filePath, item, {
+						merge: (existing) => {
+							if (existing !== null) {
+								const recovered = historyItemSchema.parse(existing)
+								if (recovered.id !== item.id) throw new Error("Migration task ID mismatch")
+								persisted = recovered
+							}
+							return persisted
+						},
+					})
+					this.cache.set(item.id, persisted)
 				}
 			}
 

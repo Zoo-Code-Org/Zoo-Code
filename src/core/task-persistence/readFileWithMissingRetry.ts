@@ -1,3 +1,6 @@
+import { getErrorCode } from "../../utils/errorCode"
+export { getErrorCode } from "../../utils/errorCode"
+
 import * as fs from "fs/promises"
 import { recoverMissingJsonFile } from "../../utils/jsonFileRecovery"
 
@@ -6,16 +9,10 @@ import { recoverMissingJsonFile } from "../../utils/jsonFileRecovery"
 // new file to target), because a single rename over an open file fails with
 // EPERM on Windows. A reader can see ENOENT between those two renames, so
 // retry once, then recover under the writer's lock if a process crash left
-// recoverable backups. This can wait out the 31-second lock staleness window.
+// recoverable backups. Recovery may retry lock acquisition for up to 35 seconds.
 const READ_RETRY_MIN_MS = 1
 const READ_RETRY_MAX_MS = 10
 const READ_RETRY_RANGE_MS = READ_RETRY_MAX_MS - READ_RETRY_MIN_MS + 1
-
-export function getErrorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-		? error.code
-		: undefined
-}
 
 /**
  * Formats the actionable detail of an underlying error for inclusion in

@@ -1,3 +1,5 @@
+import type { LogFunction } from "../../utils/outputChannelLogger"
+
 /**
  * Structured trace points for task-persistence file writes and shutdown.
  *
@@ -21,6 +23,8 @@ export type PersistenceTraceStage =
 	| "ui-messages-write-complete"
 	| "ui-messages-marker-check"
 	| "shutdown"
+	| "json-recovery"
+	| "json-lock-wait"
 
 export type PersistenceTraceFields = {
 	taskId?: string
@@ -29,7 +33,7 @@ export type PersistenceTraceFields = {
 	detail?: string
 }
 
-type PersistenceTraceSink = (line: string) => void
+type PersistenceTraceSink = LogFunction<[line: string]>
 
 let traceSink: PersistenceTraceSink | undefined
 

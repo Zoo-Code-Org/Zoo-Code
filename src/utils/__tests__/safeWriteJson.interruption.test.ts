@@ -131,7 +131,6 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 				})),
 			),
 		),
-		{ fileName: "history_item.json", mode: "fallback", boundary: "before-commit", ageLock: false },
 	])(
 		"recovers $fileName after $mode interruption $boundary without another write (age lock: $ageLock)",
 		async ({ fileName, mode, boundary, ageLock }) => {

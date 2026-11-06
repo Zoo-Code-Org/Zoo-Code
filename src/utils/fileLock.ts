@@ -1,4 +1,5 @@
 import * as path from "path"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
 
 /**
@@ -8,9 +9,14 @@ import * as lockfile from "proper-lockfile"
  */
 export const LOCK_STALE_MS = 31_000
 
-interface FileLockOptions {
+const RECOVERY_RETRY_MS = 1000
+const RECOVERY_GRACE_MS = 4000
+
+export interface FileLockOptions {
 	/** Recovery may wait out a crashed writer's staleness window without stealing a live lock. */
 	waitForStaleLock?: boolean
+	/** Startup scans defer locked files instead of waiting under the store mutex. */
+	immediate?: boolean
 }
 
 /**
@@ -22,20 +28,28 @@ interface FileLockOptions {
  */
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
 	const absoluteFilePath = path.resolve(filePath)
+	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
-			retries: options?.waitForStaleLock
-				? { retries: 35, factor: 1, minTimeout: 1000, maxTimeout: 1000 }
-				: {
-						// Configuration for retrying lock acquisition
-						retries: 5, // Number of retries after the initial attempt
-						factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-						minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-						maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-					},
+			retries: options?.immediate
+				? 0
+				: options?.waitForStaleLock
+					? {
+							retries: Math.ceil((LOCK_STALE_MS + RECOVERY_GRACE_MS) / RECOVERY_RETRY_MS),
+							factor: 1,
+							minTimeout: RECOVERY_RETRY_MS,
+							maxTimeout: RECOVERY_RETRY_MS,
+						}
+					: {
+							// Configuration for retrying lock acquisition
+							retries: 5, // Number of retries after the initial attempt
+							factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
+							minTimeout: 100, // Minimum time to wait before the first retry (in ms)
+							maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
+						},
 			onCompromised: (err) => {
 				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
 				throw err

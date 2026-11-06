@@ -3,6 +3,7 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import { getErrorCode } from "./errorCode"
 import { acquireFileLock } from "./fileLock"
 import { recoverInterruptedReplacement } from "./jsonFileRecovery"
 
@@ -107,10 +108,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// canonical path with an orphaned backup, or leftover replacement
 		// files. Runs first so a merge callback reads the restored content.
 		const recovery = await recoverInterruptedReplacement(absoluteFilePath).catch((error: unknown) => {
-			const code =
-				typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-					? error.code
-					: "unknown"
+			const code = getErrorCode(error) ?? "unknown"
 			options?.trace?.({ stage: "recover", detail: `failed:${code}` })
 			throw error
 		})
@@ -126,8 +124,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			try {
 				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
 			} catch (error: unknown) {
-				const code =
-					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				const code = getErrorCode(error)
 				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
 					throw error
 				}
@@ -136,7 +133,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		}
 
 		// Step 1: Write data to a new temporary file and flush it to storage,
-		// so the replacement content is durable before it is committed.
+		// making a best-effort flush before committing the replacement.
 		options?.trace?.({ stage: "write-start" })
 		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
 
@@ -151,12 +148,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			options?.trace?.({ stage: "replacement-rename" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 		} catch (renameError: unknown) {
-			if (
-				typeof renameError !== "object" ||
-				renameError === null ||
-				!("code" in renameError) ||
-				renameError.code !== "EPERM"
-			) {
+			if (getErrorCode(renameError) !== "EPERM") {
 				throw renameError
 			}
 

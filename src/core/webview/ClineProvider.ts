@@ -2742,11 +2742,13 @@ export class ClineProvider
 		historyItem: HistoryItem
 		aggregatedCosts: AggregatedCosts
 	}> {
-		const { historyItem } = await this.getTaskWithId(taskId)
+		const historyItem = this.getTaskHistoryItem(taskId)
+		if (!historyItem) throw new Error("Task not found")
 
 		const aggregatedCosts = await aggregateTaskCostsRecursive(taskId, async (id: string) => {
-			const result = await this.getTaskWithId(id)
-			return result.historyItem
+			const item = this.getTaskHistoryItem(id)
+			if (!item) throw new Error("Task not found")
+			return item
 		})
 
 		return { historyItem, aggregatedCosts }
