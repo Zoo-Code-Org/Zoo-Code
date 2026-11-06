@@ -8,6 +8,7 @@ for (const theme of visualThemes) {
 	test(`renders the full welcome screen in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
 		await page.setViewportSize({ width: 480, height: 640 })
 		const component = mountedStory(await mount("welcome"))
+		await page.addStyleTag({ content: "* { transition: none !important; }" })
 		await applyVisualTheme(page, theme)
 
 		const screen = component.locator(".fixed.inset-0")
