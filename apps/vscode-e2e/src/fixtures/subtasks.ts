@@ -13,6 +13,9 @@ const SUBTASK_FAST_PARENT_MARKER = "SUBTASK_PARENT_IMMEDIATE_COMPLETION"
 const SUBTASK_FAST_CHILD_MARKER = "SUBTASK_CHILD_IMMEDIATE_COMPLETION"
 const SUBTASK_APPROVAL_RESTORE_PARENT_MARKER = "SUBTASK_PARENT_APPROVAL_RESTORE"
 const SUBTASK_APPROVAL_RESTORE_CHILD_MARKER = "SUBTASK_CHILD_APPROVAL_RESTORE"
+export const SUBTASK_PENDING_REPLAY_ROOT = "SUBTASK_PENDING_REPLAY_ROOT: Create a child task."
+const SUBTASK_PENDING_REPLAY_CHILD = "SUBTASK_PENDING_REPLAY_CHILD: Create a grandchild task."
+const SUBTASK_PENDING_REPLAY_LEAF = "SUBTASK_PENDING_REPLAY_LEAF: Wait for user instructions."
 const SUBTASK_XPROFILE_PARENT_MARKER = "SUBTASK_PARENT_CROSS_PROFILE"
 const SUBTASK_XPROFILE_SAME_CHILD_MARKER = "SUBTASK_CHILD_SAME_PROFILE"
 const SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER = "SUBTASK_CHILD_DIFFERENT_PROFILE"
@@ -127,6 +130,30 @@ const completionAfterAnswer = (followupId: string, completionId: string) => ({
 })
 
 export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
+	for (const [prompt, childPrompt, id] of [
+		[SUBTASK_PENDING_REPLAY_ROOT, SUBTASK_PENDING_REPLAY_CHILD, "call_pending_replay_root"],
+		[SUBTASK_PENDING_REPLAY_CHILD, SUBTASK_PENDING_REPLAY_LEAF, "call_pending_replay_child"],
+	]) {
+		mock.addFixture({
+			match: { userMessage: prompt, sequenceIndex: 0 },
+			response: {
+				toolCalls: [{ name: "new_task", arguments: JSON.stringify({ mode: "ask", message: childPrompt }), id }],
+			},
+		})
+	}
+	mock.addFixture({
+		match: { userMessage: SUBTASK_PENDING_REPLAY_LEAF },
+		response: {
+			toolCalls: [
+				{
+					name: "ask_followup_question",
+					arguments: JSON.stringify({ question: "What should I do next?", follow_up: [] }),
+					id: "call_pending_replay_wait",
+				},
+			],
+		},
+	})
+
 	mock.addFixture({
 		match: {
 			userMessage: new RegExp(SUBTASK_APPROVAL_RESTORE_PARENT_MARKER),

@@ -27,6 +27,7 @@ import {
 	SUBTASK_INTERRUPT_PARENT_PROMPT,
 	SUBTASK_INTERRUPT_PARENT_RESULT,
 	SUBTASK_PARENT_PROMPT,
+	SUBTASK_PENDING_REPLAY_ROOT,
 	SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT,
 	SUBTASK_XPROFILE_PARENT_PROMPT,
 	SUBTASK_XPROFILE_PARENT_RESULT,
@@ -257,6 +258,62 @@ suite("Roo Code Subtasks", function () {
 			while (api.getCurrentTaskStack().length > 0) {
 				await api.clearCurrentTask()
 			}
+		}
+	})
+
+	test("interrupted child settles pending new_task before resume despite subtask auto-approval", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const delegations: Array<[string, string]> = []
+		const onMessage = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (isCompletedAsk(message)) (asks[taskId] ??= []).push(message)
+		}
+		const onDelegated = (parentId: string, childId: string) => {
+			delegations.push([parentId, childId])
+		}
+		const hasNewTaskAsk = (taskId: string) =>
+			asks[taskId]?.some(
+				(message) => message.ask === "tool" && JSON.parse(message.text ?? "{}").tool === "newTask",
+			) ?? false
+		api.on(RooCodeEventName.Message, onMessage)
+		api.on(RooCodeEventName.TaskDelegated, onDelegated)
+		try {
+			const rootId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					autoApprovalEnabled: true,
+					alwaysAllowSubtasks: false,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_PENDING_REPLAY_ROOT,
+			})
+			await waitFor(() => hasNewTaskAsk(rootId))
+			await api.approveCurrentAsk()
+			await waitFor(() => delegations.length === 1)
+			assert.ok(delegations[0])
+			const childId = delegations[0][1]
+			await waitFor(() => hasNewTaskAsk(childId))
+			await api.clearCurrentTask()
+			const interrupted = await api.getTaskHistoryItem(childId)
+			assert.strictEqual(interrupted?.status, "interrupted")
+			assert.strictEqual(interrupted?.pendingAction?.kind, "create_subtask")
+
+			await api.setConfiguration({ autoApprovalEnabled: true, alwaysAllowSubtasks: true })
+			await api.resumeTask(childId)
+			// A generic resume ask is emitted only after authoritative pending-action settlement.
+			// Waiting for it verifies the recovery path finished without creating another child.
+			await waitFor(() => asks[childId]?.some(({ ask }) => ask === "resume_task") ?? false)
+			const resumed = await api.getTaskHistoryItem(childId)
+			assert.strictEqual(resumed?.status, "interrupted")
+			assert.strictEqual(resumed?.pendingAction, undefined)
+			assert.strictEqual(resumed?.parentTaskId, rootId)
+			assert.deepStrictEqual(resumed?.childIds ?? [], [])
+			assert.strictEqual(api.getCurrentTaskStack().at(-1), childId)
+			assert.strictEqual(delegations.length, 1)
+		} finally {
+			api.off(RooCodeEventName.Message, onMessage)
+			api.off(RooCodeEventName.TaskDelegated, onDelegated)
+			while (api.getCurrentTaskStack().length > 0) await api.clearCurrentTask()
 		}
 	})
 

@@ -4734,11 +4734,20 @@ export class ClineProvider
 				`[delegateParentAndOpenChild] Parent mismatch: expected ${parentTaskId}, current ${parent.taskId}`,
 			)
 		}
+		const assertParentAvailable = () => {
+			if (this._disposed || parent.abort || parent.abandoned || this.getCurrentTask() !== parent) {
+				throw new Error("[delegateParentAndOpenChild] Delegation cancelled before handoff")
+			}
+		}
+		assertParentAvailable()
 
 		// A different provider may have delegated this parent while this call
 		// waited on the shared lock. Refresh before mutating either task stack.
 		await this.taskHistoryStore.invalidate(parentTaskId)
 		const authoritativeParent = this.taskHistoryStore.get(parentTaskId)
+		if (authoritativeParent?.status === "interrupted" && authoritativeParent.parentTaskId) {
+			await this.taskHistoryStore.invalidate(authoritativeParent.parentTaskId)
+		}
 		if (authoritativeParent?.status === "delegated") {
 			const awaitedChildId = authoritativeParent.awaitingChildId
 			if (!awaitedChildId) throw new Error("Cannot re-delegate a parent with no awaited child")
@@ -4828,6 +4837,7 @@ export class ClineProvider
 		// 3) Enforce single-open invariant by closing/disposing the parent first
 		//    This ensures we never have >1 tasks open at any time during delegation.
 		//    Await abort completion to ensure clean disposal and prevent unhandled rejections.
+		assertParentAvailable()
 		try {
 			await this.removeClineFromStack()
 		} catch (error) {
@@ -4837,6 +4847,10 @@ export class ClineProvider
 				}`,
 			)
 			// Non-fatal: proceed with child creation even if parent cleanup had issues
+		}
+		// Parent abort/abandon now belongs to our intentional eviction, not cancellation.
+		if (this._disposed) {
+			throw new Error("[delegateParentAndOpenChild] Provider disposed during handoff")
 		}
 
 		// 4) Bind the child directly to the delegating task's local provider
@@ -4872,7 +4886,11 @@ export class ClineProvider
 		//    synchronously under the store lock) so a concurrent abandon or completion cannot
 		//    slip between the status snapshot and the write. An active child must never be
 		//    silently detached.
+		let delegationCommitted = false
 		try {
+			if (this._disposed || child.abort || child.abandoned) {
+				throw new Error("[delegateParentAndOpenChild] Delegation cancelled during child creation")
+			}
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
 					throw new Error(
@@ -4882,13 +4900,17 @@ export class ClineProvider
 				const awaitedChildStatus = historyItem.awaitingChildId
 					? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
 					: undefined
-				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
+				const owningParent = historyItem.parentTaskId
+					? this.taskHistoryStore.get(historyItem.parentTaskId)
+					: undefined
+				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus, owningParent)
 				return {
 					...delegated,
 					pendingAction:
 						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
 				}
 			})
+			delegationCommitted = true
 			this.recentTasksCache = undefined
 			if (this.isViewLaunched) {
 				const updatedItem = this.taskHistoryStore.get(parentTaskId)
@@ -4896,7 +4918,40 @@ export class ClineProvider
 					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 				}
 			}
+			if (this._disposed || child.abort || child.abandoned) {
+				throw new Error("[delegateParentAndOpenChild] Delegation cancelled before scheduling")
+			}
 		} catch (err) {
+			const cancelled = this._disposed || child.abort || child.abandoned
+			if (cancelled && delegationCommitted) {
+				// The child is never scheduled after cancellation, so it has no API conversation
+				// to resume. Release the parent through the abandon transition and delete the
+				// empty child instead of leaving the parent awaiting a child that cannot reopen.
+				// We already own the parent transition lock, so do not call eviction's
+				// lock-taking interruption helper here.
+				if (this.getCurrentTask()?.taskId === child.taskId) await this.removeClineFromStack()
+				// Drain abort's final save before deleting so it cannot recreate the child record.
+				await ClineProvider.prototype.drainTaskDisposal.call(this, child)
+				try {
+					// Only id and status of the stand-in child are read by the abandon transition.
+					await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (current) =>
+						current.status === "delegated" && current.awaitingChildId === child.taskId
+							? abandonDelegatedChild(current, { ...current, id: child.taskId, status: "interrupted" })
+									.parent
+							: current,
+					)
+					this.recentTasksCache = undefined
+					await this.deleteTaskWithId(child.taskId, false)
+				} catch (cleanupError) {
+					// Never let a cleanup failure replace the cancellation error.
+					this.log(
+						`[delegateParentAndOpenChild] Failed to repair cancelled handoff ${parentTaskId} -> ${child.taskId}: ${
+							(cleanupError as Error)?.message ?? String(cleanupError)
+						}`,
+					)
+				}
+				throw err
+			}
 			this.log(
 				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${
 					(err as Error)?.message ?? String(err)
@@ -4933,6 +4988,7 @@ export class ClineProvider
 				if (this.getCurrentTask()?.taskId === child.taskId) {
 					await this.removeClineFromStack()
 				}
+				if (cancelled) await child.dispose()
 			} catch (cleanupError) {
 				this.log(
 					`[delegateParentAndOpenChild] Failed to close paused child ${child.taskId} during rollback: ${
@@ -4950,12 +5006,69 @@ export class ClineProvider
 				)
 			}
 			try {
-				// A failed settlement write leaves the rejected pending action in
-				// durable storage. Restoring the stored parent would replay it in
-				// this process, so leave the parent unrestored. Restart recovery also
-				// settles interrupted create-subtask actions before allowing replay.
-				if (!settlementFailed) {
+				// Never restore a pending action whose authoritative settlement failed.
+				if (!settlementFailed && !cancelled && !this._disposed) {
 					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					if (pendingActionId && parentHistory.pendingAction?.actionId === pendingActionId) {
+						// Resolve the failed action durably BEFORE restoring the parent. Otherwise
+						// history resume auto-approves the same action and repeats this rollback.
+						// If this write fails, do not schedule a replacement task at all.
+						const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+						const messages = await readApiMessages({ taskId: parentTaskId, globalStoragePath })
+						const hasResult = messages.some(
+							(message) =>
+								message.role === "user" &&
+								Array.isArray(message.content) &&
+								message.content.some(
+									(block) => block.type === "tool_result" && block.tool_use_id === pendingActionId,
+								),
+						)
+						if (!hasResult) {
+							const result: Anthropic.ToolResultBlockParam = {
+								type: "tool_result",
+								tool_use_id: pendingActionId,
+								content: `Subtask creation failed: ${err instanceof Error ? err.message : String(err)}`,
+								is_error: true,
+							}
+							const toolUseIndex = messages.findIndex(
+								(message) =>
+									message.role === "assistant" &&
+									Array.isArray(message.content) &&
+									message.content.some(
+										(block) => block.type === "tool_use" && block.id === pendingActionId,
+									),
+							)
+							// A standalone tool_result with no owning tool_use is invalid API history that
+							// native tool-call providers reject; leave the parent for an explicit retry instead.
+							if (toolUseIndex === -1) {
+								throw new Error(
+									`[delegateParentAndOpenChild] Cannot resolve pending action ${pendingActionId}: no matching tool_use exists`,
+								)
+							}
+							const nextMessage = messages[toolUseIndex + 1]
+							if (nextMessage?.role === "user") {
+								const content =
+									typeof nextMessage.content === "string"
+										? [{ type: "text" as const, text: nextMessage.content }]
+										: [...nextMessage.content]
+								const firstNonTool = content.findIndex((block) => block.type !== "tool_result")
+								content.splice(firstNonTool === -1 ? content.length : firstNonTool, 0, result)
+								messages[toolUseIndex + 1] = { ...nextMessage, content }
+							} else {
+								messages.splice(toolUseIndex + 1, 0, {
+									role: "user",
+									ts: Date.now(),
+									content: [result],
+								})
+							}
+							await saveApiMessages({
+								taskId: parentTaskId,
+								globalStoragePath,
+								merge: true,
+								messages,
+							})
+						}
+					}
 					await this.createTaskWithHistoryItem(parentHistory)
 				}
 			} catch (rollbackError) {
@@ -4963,6 +5076,9 @@ export class ClineProvider
 					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
 						(rollbackError as Error)?.message ?? String(rollbackError)
 					}`,
+				)
+				void vscode.window.showErrorMessage(
+					"Subtask creation failed and the parent could not be restored safely. Reopen the task to retry.",
 				)
 			}
 			throw err

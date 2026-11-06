@@ -36,8 +36,20 @@ interface WitnessContext {
 const MAX_DEPTH = 12
 const MAX_STATES = 10_000
 const actionIds = ["action-1", "action-2"] as const
-const expectedActions = ["delegate", "interrupt", "complete", "abandon", "stage", "settle-rejected"] as const
+const expectedActions = [
+	"delegate",
+	"resume-delegate",
+	"interrupt",
+	"complete",
+	"abandon",
+	"stage",
+	"settle-rejected",
+] as const
 const semanticLandmarks = {
+	"detached-task-delegation": (state: ModelState) =>
+		state["child-a"]?.status === "delegated" &&
+		state["child-a"].parentTaskId === undefined &&
+		state["child-a"].awaitingChildId === "child-b",
 	"interrupted-child-redelegation": (state: ModelState) =>
 		state.parent?.status === "delegated" &&
 		state.parent.awaitingChildId === "child-b" &&
@@ -146,14 +158,20 @@ function transitions(state: ModelState): Transition[] {
 
 		const awaitedStatus = parent.awaitingChildId ? state[parent.awaitingChildId as TaskId]?.status : undefined
 		const delegationValid =
-			parent.status === "active" || (parent.status === "delegated" && awaitedStatus === "interrupted")
+			parent.status === "active" ||
+			parent.status === "interrupted" ||
+			(parent.status === "delegated" && awaitedStatus === "interrupted")
 
 		for (const childId of taskIds) {
 			if (childId === parentId || state[childId]) continue
 			if (!delegationValid) continue
-			const delegated = { ...delegateTaskToChild(parent, childId, awaitedStatus), pendingAction: undefined }
+			const owningParent = parent.parentTaskId ? state[parent.parentTaskId as TaskId] : undefined
+			const delegated = {
+				...delegateTaskToChild(parent, childId, awaitedStatus, owningParent),
+				pendingAction: undefined,
+			}
 			result.push({
-				name: `delegate(${parentId}, ${childId})`,
+				name: `${parent.status === "interrupted" ? "resume-delegate" : "delegate"}(${parentId}, ${childId})`,
 				next: replace(state, delegated, task(childId, parentId)),
 				delegation: { parentId },
 			})
@@ -168,7 +186,13 @@ function transitions(state: ModelState): Transition[] {
 			}
 
 			const pending = parent.pendingAction
-			if (!delegationValid && parent.status !== "completed" && pending?.kind === "create_subtask") {
+			// Reload conservatively settles interrupted approvals: persisted actions do not
+			// distinguish an unattempted approval from a rejected attempt whose settlement failed.
+			if (
+				(!delegationValid || parent.status === "interrupted") &&
+				parent.status !== "completed" &&
+				pending?.kind === "create_subtask"
+			) {
 				result.push({
 					name: `settle-rejected(${parentId}, ${actionId})`,
 					next: replace(state, settleRejectedCreateSubtaskAction(parent, actionId)),
@@ -416,8 +440,17 @@ function runRepresentativeScenarios(): void {
 	assert.throws(() => delegateTaskToChild(delegated, "child-b", "active"), /not interrupted/)
 
 	const interruptedA = interruptDelegatedChild(delegated, childA)
+	const resumedA = delegateTaskToChild(interruptedA, "child-b", undefined, delegated)
+	assert.equal(resumedA.status, "delegated")
+	assert.equal(resumedA.parentTaskId, "parent")
+	const nestedReturn = completeDelegatedChild(resumedA, task("child-b", "child-a"), "nested result")
+	assert.equal(completeDelegatedChild(delegated, nestedReturn.parent, "resumed result").child.status, "completed")
+
 	const redelegated = delegateTaskToChild(delegated, "child-b", interruptedA.status)
 	assert.throws(() => completeDelegatedChild(redelegated, interruptedA, "stale"), /not delegated to child/)
+	const detached = delegateTaskToChild(interruptedA, "new-grandchild", undefined, redelegated)
+	assert.equal(detached.parentTaskId, undefined)
+	assert.equal(detached.rootTaskId, undefined)
 
 	const abandoned = abandonDelegatedChild(delegated, interruptedA)
 	assert.throws(() => completeDelegatedChild(abandoned.parent, abandoned.child, "late"), /not delegated to child/)
@@ -437,7 +470,11 @@ function runRepresentativeScenarios(): void {
 		status: "interrupted",
 		pendingAction: createSubtaskAction("action-1"),
 	}
-	assert.throws(() => delegateTaskToChild(rejectedParent, childA.id), /Invalid task status transition/)
+	assert.equal(delegateTaskToChild(rejectedParent, childA.id).status, "delegated")
+	assert.throws(
+		() => delegateTaskToChild({ ...rejectedParent, status: "completed" }, childA.id),
+		/Invalid task status transition/,
+	)
 	const settled = settleRejectedCreateSubtaskAction(rejectedParent, "action-1")
 	assert.equal(settled.status, "interrupted")
 	assert.equal(settled.pendingAction, undefined)
