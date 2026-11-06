@@ -4,6 +4,7 @@ import path from "path"
 import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { getReadablePath } from "../../utils/path"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -227,14 +228,31 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			let currentContentLF: string | null = null
 			let originalEol: LineEnding = "\n"
 			let isNewFile = false
+			// Version token from this tool's own read; observed only at the guarded publish below.
+			let readVersionToken: string | undefined
 
 			// Read file or determine if creating new
 			if (fileExists) {
 				try {
+					// The guarded saveDirectly below authorizes the publish against the version
+					// this read saw, and the focus-disruption path has no diff view that could
+					// observe the file. Same contract as ApplyDiffTool/ApplyPatchTool: stat around
+					// the read and keep the token only when the file did not change underneath it.
+					// The token stays local until the guarded publish consumes it: observing at read
+					// time would leave it in the task-wide registry through every later failure and
+					// rejection, where a later write_to_file could spend it on an unrelated overwrite.
+					const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 					currentContent = await fs.readFile(absolutePath, "utf8")
+					const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 					originalEol = detectLineEnding(currentContent)
 					// Normalize line endings to LF for matching
 					currentContentLF = normalizeToLF(currentContent)
+					if (preReadStats && postReadStats) {
+						const preReadToken = versionTokenOfStat(preReadStats)
+						if (preReadToken === versionTokenOfStat(postReadStats)) {
+							readVersionToken = preReadToken
+						}
+					}
 				} catch (error) {
 					task.consecutiveMistakeCount++
 					task.didToolFailInCurrentTurn = true
@@ -436,13 +454,21 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 
 			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
-				// Direct file write without diff view or opening the file
+				// Direct file write without diff view or opening the file. In-place edits
+				// use edit-guard semantics (a prior read is required); new-file creation
+				// keeps create-guard semantics. The observation is recorded here, at the
+				// guarded publish that consumes it, so a failed match, a rejection, or the
+				// diff-view save never leaves this read's token in the task-wide registry.
+				if (readVersionToken !== undefined) {
+					task.observationRegistry.observe(absolutePath, readVersionToken)
+				}
 				await task.diffViewProvider.saveDirectly(
 					relPath,
 					newContent,
 					isNewFile,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isNewFile ? "create" : "edit",
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
