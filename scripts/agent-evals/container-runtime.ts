@@ -8,7 +8,7 @@ import type { Measured } from "./trace.ts"
 
 // Grader image tag used only for lookup and pull. Containers launch by the
 // resolved immutable identity, which is also recorded in the comparison pins.
-export const GRADER_IMAGE = "node:22-bookworm"
+export const GRADER_IMAGE = "docker.io/library/node:22-bookworm"
 
 export type ContainerExecutable = "docker" | "podman"
 
