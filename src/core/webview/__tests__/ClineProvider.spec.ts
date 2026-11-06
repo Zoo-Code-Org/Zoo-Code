@@ -15,6 +15,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type RooCodeSettings,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -4039,6 +4040,39 @@ describe("ClineProvider", () => {
 		},
 	)
 
+	describe("display settings written through setValues and a task's configuration", () => {
+		const hand = (values: Record<string, unknown>) => values as unknown as RooCodeSettings
+
+		it("stores valid values as they are", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+			await provider.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+
+			expect(setValues).toHaveBeenCalledWith({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+		})
+
+		it("ignores an invalid value, keeps the others, and logs which", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			const log = vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider.setValues(hand({ timeFormat: "13h", dateFormat: "dmy", mode: "code" }))
+
+			expect(setValues).toHaveBeenCalledWith({ dateFormat: "dmy", mode: "code" })
+			expect(log).toHaveBeenCalledWith("[setValues] Ignored an invalid value for timeFormat")
+		})
+
+		it("applies the same check to the configuration of a new task", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider
+				.createTask("hello", undefined, undefined, {}, hand({ showRelativeTimes: "yes", mode: "code" }))
+				.catch(() => undefined) // what happens after the configuration is written is not under test
+
+			expect(setValues).toHaveBeenCalledWith({ mode: "code" })
+		})
+	})
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 
@@ -4149,6 +4183,81 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	describe("date and time display settings", () => {
+		const defaults = { timeFormat: "auto", dateFormat: "auto", showRelativeTimes: true }
+
+		/** Saves through the real `updateSettings` handler, as the settings view does. */
+		const save = async (updatedSettings: Record<string, unknown>) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls[0][0]
+			await messageHandler({ type: "updateSettings", updatedSettings })
+		}
+
+		test.each(Object.entries(defaults))("%s is %j when it was never saved", async (key, expected) => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(await provider.getState()).toMatchObject({ [key]: expected })
+			expect(await provider.getStateToPostToWebview()).toMatchObject({ [key]: expected })
+		})
+
+		test.each([
+			["timeFormat", "12h"],
+			["timeFormat", "24h"],
+			["timeFormat", "auto"],
+			["dateFormat", "mdy"],
+			["dateFormat", "dmy"],
+			["dateFormat", "ymd"],
+			["dateFormat", "auto"],
+			["showRelativeTimes", true],
+			["showRelativeTimes", false],
+		])("a saved %s of %j is stored and returned to the webview", async (key, value) => {
+			mockPostMessage.mockClear()
+			await save({ [key]: value })
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(key, value)
+			expect(await provider.getState()).toMatchObject({ [key]: value })
+			expect(await provider.getStateToPostToWebview()).toMatchObject({ [key]: value })
+			// The open webview is told, so the saved value does not revert on screen.
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state", state: expect.objectContaining({ [key]: value }) }),
+			)
+		})
+
+		test("the state refresh after a save reaches the active webview with the saved time format", async () => {
+			mockPostMessage.mockClear()
+
+			await save({ timeFormat: "24h" })
+
+			const posted: unknown[][] = mockPostMessage.mock.calls
+			const states = posted
+				.map(([message]) => message as { type?: string; state?: { timeFormat?: string } })
+				.filter((message) => message.type === "state")
+			expect(states.length).toBeGreaterThan(0)
+			expect(states.at(-1)?.state?.timeFormat).toBe("24h")
+		})
+
+		test("an explicit false is kept, not replaced by the default of true", async () => {
+			await save({ showRelativeTimes: false })
+
+			expect((await provider.getState()).showRelativeTimes).toBe(false)
+			expect((await provider.getStateToPostToWebview()).showRelativeTimes).toBe(false)
+		})
+
+		test("all three are saved together and returned together", async () => {
+			await save({ timeFormat: "24h", dateFormat: "dmy", showRelativeTimes: false })
+
+			const expected = { timeFormat: "24h", dateFormat: "dmy", showRelativeTimes: false }
+			expect(await provider.getState()).toMatchObject(expected)
+			expect(await provider.getStateToPostToWebview()).toMatchObject(expected)
+		})
+
+		test("saving one setting leaves the others at their defaults", async () => {
+			await save({ timeFormat: "12h" })
+
+			expect(await provider.getStateToPostToWebview()).toMatchObject({ ...defaults, timeFormat: "12h" })
+		})
 	})
 
 	test("getState returns the saved allowed write files", async () => {
@@ -7837,6 +7946,82 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("retries a transiently missing API history before returning an empty conversation", async () => {
+			const historyItem = {
+				id: "retry-api-history",
+				task: "test task",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			let reads = 0
+			vi.mocked(fsp.readFile).mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				if (++reads === 1) throw Object.assign(new Error("Replacement in progress"), { code: "ENOENT" })
+				return JSON.stringify([{ role: "assistant", content: "committed" }])
+			})
+
+			const result = await provider.getTaskWithId(historyItem.id)
+
+			expect(result.apiConversationHistory).toEqual([{ role: "assistant", content: "committed" }])
+		})
+
+		it.each(["ENOENT", "EACCES"])("returns empty history after %s without removing the task", async (code) => {
+			const item = {
+				id: "failed-api-read",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			const read = vi.mocked(fsp.readFile)
+			let reads = 0
+			read.mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				reads++
+				throw Object.assign(new Error("read failed"), { code })
+			})
+			const result = await provider.getTaskWithId(item.id)
+			expect(result.apiConversationHistory).toEqual([])
+			expect(provider.taskHistoryStore.get(item.id)).toEqual(item)
+			expect(reads).toBe(code === "ENOENT" ? 2 : 1)
+		})
+
+		it("aggregates parent and child costs without reading API history", async () => {
+			const parent = {
+				id: "cost-parent",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 2,
+				childIds: ["cost-child"],
+			}
+			provider.taskHistoryStore["cache"].set(parent.id, parent)
+			provider.taskHistoryStore["cache"].set("cost-child", {
+				...parent,
+				id: "cost-child",
+				totalCost: 3,
+				childIds: [],
+			})
+			provider["taskHistoryStoreInitialized"] = true
+			const read = vi.spyOn(provider, "getTaskWithId")
+			const result = await provider.getTaskWithAggregatedCosts(parent.id)
+			expect(result.aggregatedCosts.totalCost).toBe(5)
+			expect(read).not.toHaveBeenCalled()
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",
