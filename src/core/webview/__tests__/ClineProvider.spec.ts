@@ -8881,6 +8881,13 @@ describe("ClineProvider", () => {
 				true,
 			)
 
+			// Activation must have landed before the global-only write below: assert the id the store
+			// returned and the selection the activation installed, so an activation that silently
+			// returned undefined cannot pass on the later shared write alone.
+			expect(vi.mocked(provider.providerSettingsManager.saveConfig)).toHaveResolvedWith("activated-id")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("activated-profile")
+			expect(savedForReadBack2["activated-profile"]).toBeTruthy()
+
 			// Simulate api.setConfiguration (src/extension/api.ts): a global-only
 			// write that does not refresh the view-local buffer.
 			await provider.contextProxy.setValues({

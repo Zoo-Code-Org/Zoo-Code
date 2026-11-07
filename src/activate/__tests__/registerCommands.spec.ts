@@ -1115,7 +1115,11 @@ describe("registerCommands handlers", () => {
 		// Counted rather than absolute: earlier cases in this file also invoke commands, so the
 		// claim under test is that this handler adds no focus call of its own.
 		const executeCommandMock = vscode.commands.executeCommand as Mock
-		const isFocus = (command: unknown) => typeof command === "string" && command.includes("SidebarProvider.focus")
+		// Destructure the invoked command out of the call tuple: filtering the array itself
+		// stringifies every argument, so a matching payload anywhere in the tuple would count
+		// as a focus call.
+		const isFocus = ([command]: unknown[]) =>
+			typeof command === "string" && command.includes("SidebarProvider.focus")
 		const focusCallsBefore = executeCommandMock.mock.calls.filter(isFocus).length
 
 		await commandHandlers["zoo-code.plusButtonClicked"]()
@@ -1600,12 +1604,14 @@ describe("openClineInNewTab", () => {
 			).rejects.toThrow("lock failed")
 
 			// ...both cleanup steps were attempted, and the incomplete result is surfaced
-			// rather than swallowed behind the original error.
+			// rather than swallowed behind the original error. The order of the two labels follows
+			// the order the cleanup runs them in: the panel first (it cannot stall), then the
+			// provider teardown whose rejection used to hold the panel open.
 			const created = vi.mocked(ClineProvider).mock.results[0].value
 			expect(created.dispose).toHaveBeenCalledTimes(1)
 			expect(panel.dispose).toHaveBeenCalledTimes(1)
 			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining("cleanup was incomplete (provider: dispose hung; panel: panel gone)"),
+				expect.stringContaining("cleanup was incomplete (panel: panel gone; provider: dispose hung)"),
 			)
 		} finally {
 			// Restore the saved implementation rather than mockRestore(): this file's beforeEach

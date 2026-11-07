@@ -6114,7 +6114,15 @@ export class ClineProvider
 				continue
 			}
 
-			await instance.postStateToWebview()
+			try {
+				await instance.postStateToWebview()
+			} catch (error) {
+				instance.log(
+					`[clearViewLocalModeForDeletedSlug] Failed to post state after clearing the mode override for '${slug}': ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
 		}
 	}
 

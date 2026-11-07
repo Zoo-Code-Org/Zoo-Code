@@ -106,7 +106,7 @@ function getTabProvider(): ClineProvider | undefined {
  * is left, which is the only state where clearing the ref is right and the sidebar resumes
  * as the surface.
  */
-function pickTabPanelSurvivor(): vscode.WebviewPanel | undefined {
+function pickTabPanelSurvivor(exclude?: vscode.WebviewPanel): vscode.WebviewPanel | undefined {
 	let visiblePanel: vscode.WebviewPanel | undefined
 	let anyPanel: vscode.WebviewPanel | undefined
 	for (const instance of ClineProvider.getAllInstances()) {
@@ -114,6 +114,11 @@ function pickTabPanelSurvivor(): vscode.WebviewPanel | undefined {
 		// resolves instances against the same field (1754-1756).
 		const view = instance["view"]
 		if (!view || !("onDidChangeViewState" in view)) {
+			continue
+		}
+		// A caller that is about to tear this panel down must not be handed the panel it is
+		// already disposing: it is the one candidate that cannot survive that cleanup.
+		if (exclude && view === exclude) {
 			continue
 		}
 		if (view.active) {
@@ -463,23 +468,33 @@ async function disposeFailedTabCreation(
 ): Promise<void> {
 	const describe = (e: unknown) => (e instanceof Error ? e.message : String(e))
 	const cleanupFailures: string[] = []
-	try {
-		await provider.dispose()
-	} catch (cleanupError: unknown) {
-		cleanupFailures.push(`provider: ${describe(cleanupError)}`)
+	// Choose the successor before tearing anything down. The pick must exclude this panel
+	// (its provider is still registered while we are here, so it is the one candidate
+	// that cannot survive), and it must happen before the provider's own teardown: that
+	// teardown awaits task cleanup, and running it first kept a dead panel open in front
+	// of every later UI open for as long as a stalled task refused to finish.
+	const survivor = panel ? pickTabPanelSurvivor(panel) : undefined
+	if (panel && (!tabPanel || tabPanel === panel)) {
+		// Same rule as onDidDispose below: hand the ref to a live tab panel if one
+		// remains, instead of stranding the panels that outlive this failed creation.
+		// An empty tracker counts just as much as a match - this panel's own
+		// view-dispose handler can clear the ref before this cleanup runs, and deciding
+		// from `tabPanel === panel` alone then leaves a live panel untracked, so the next
+		// ordinary open builds a second tab beside it.
+		setPanel(survivor, "tab")
 	}
-
+	// Panel teardown is synchronous, so it runs first and cannot hold up the cleanup.
 	if (panel) {
-		if (tabPanel === panel) {
-			// Same rule as onDidDispose below: hand the ref to a live tab panel if one
-			// remains, instead of stranding the panels that outlive this failed creation.
-			setPanel(pickTabPanelSurvivor(), "tab")
-		}
 		try {
 			panel.dispose()
 		} catch (cleanupError: unknown) {
 			cleanupFailures.push(`panel: ${describe(cleanupError)}`)
 		}
+	}
+	try {
+		await provider.dispose()
+	} catch (cleanupError: unknown) {
+		cleanupFailures.push(`provider: ${describe(cleanupError)}`)
 	}
 
 	if (cleanupFailures.length > 0) {
@@ -505,18 +520,30 @@ const createTabPanelUnlocked = async ({
 	// needs a genuinely new tab (startNewTask closes the editors first) passes
 	// `forceNew` and skips the reveal.
 	if (tabPanel && !forceNew) {
-		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
-		if (existingProvider) {
-			await tabPanel.reveal()
-			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			return existingProvider
+		// An ordinary open must not hand back a provider that an in-flight API creation is
+		// about to roll back: that rollback disposes this very panel and provider through
+		// disposeFailedTabCreation, and the caller would be holding a dead one. Let the
+		// owning creation settle first - the API path always passes forceNew, so it never
+		// waits on its own queue here. Settling can replace or dispose the tracked panel,
+		// so the reuse decision is re-read afterwards.
+		if (apiTabPanelCreation) {
+			await apiTabPanelCreation.catch(() => {})
 		}
-
-		// The tracked panel has no live provider (closed or disposed out from under us).
-		// Drop the stale reference before creating a replacement: an await below that
-		// rejects would otherwise leave tabPanel pointing at the dead panel, and focusInput
-		// would take the tab branch and post nothing even though a sidebar exists.
-		tabPanel = undefined
+		const reusePanel = tabPanel
+		if (reusePanel) {
+			const existingProvider = ClineProvider.getInstanceForView(reusePanel)
+			if (existingProvider) {
+				await reusePanel.reveal()
+				await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+				return existingProvider
+			}
+			// The tracked panel has no live provider (closed or disposed out from under us).
+			// Drop the stale reference before creating a replacement: an await below that
+			// rejects would otherwise leave tabPanel pointing at the dead panel, and
+			// focusInput would take the tab branch and post nothing even though a sidebar
+			// exists.
+			tabPanel = undefined
+		}
 	}
 
 	// (This example uses webviewProvider activation event which is necessary to

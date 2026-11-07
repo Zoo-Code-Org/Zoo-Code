@@ -1181,7 +1181,13 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// Drive the public path the comment above describes instead of asserting only the
 			// mapping: switching to the mode that was pinned to the deleted profile must fall
 			// through to the surviving profile, not re-activate the deleted one.
+			// Start from a different mode and assert the switch landed: the selection
+			// assertions below describe state the deletion already produced, so a
+			// handleModeSwitch that returned before switching would pass them unchanged.
+			await provider.contextProxy.setValue("mode", "code")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
 			await provider.handleModeSwitch("ask")
+			expect(provider.contextProxy.getValue("mode")).toBe("ask")
 			const afterSwitch = provider.contextProxy.getValues()
 			expect(afterSwitch.currentApiConfigName).toBe("default")
 			expect(afterSwitch.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])

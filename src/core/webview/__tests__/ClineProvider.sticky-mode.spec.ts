@@ -699,7 +699,6 @@ describe("ClineProvider - Sticky Mode", () => {
 				{} as Task,
 				{
 					taskId: "test-task-id",
-					taskMode: "architect",
 					_taskMode: "architect",
 					emit: vi.fn(),
 					saveClineMessages: vi.fn(),
@@ -708,6 +707,14 @@ describe("ClineProvider - Sticky Mode", () => {
 					updateApiConfiguration: vi.fn(),
 				} as Partial<Task>,
 			)
+			// On a real Task, taskMode reads the private field the switch writes. Holding it as
+			// a constant here made the rollback assertions compare a value with itself: both
+			// dropping the task leg of the rollback and leaving the internal field on the
+			// forward mode passed unnoticed.
+			Object.defineProperty(mockTask, "taskMode", {
+				get: () => mockTask["_taskMode"],
+				configurable: true,
+			})
 			const historyItem: HistoryItem = {
 				id: "test-task-id",
 				ts: Date.now(),
@@ -754,6 +761,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
 			expect(persisted.mode).toBe("architect")
 			expect(mockTask.taskMode).toBe("architect")
+			// The internal field is what the next switch reads as its starting mode.
+			expect(mockTask["_taskMode"]).toBe("architect")
 			// The compensation covers the shared selection, this view's pin and the task's mode.
 			// The history row is rewritten only by a switch that completes, so the write the
 			// failed switch attempted carries the new mode while the stored row still names the
