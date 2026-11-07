@@ -126,6 +126,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	public clearTaskState(task: Task): void {
+		// Identity-checked, like the teardown release above: the entry is dropped only when the map
+		// still holds THIS task's state object. The key is taskId + instanceId and instanceId is
+		// minted by crypto.randomUUID() in the Task constructor, so a second instance of the same
+		// history item does not inherit it - but this caller disposes the task it is clearing for,
+		// and a clear that matched only the key could still drop an entry a live stream had just
+		// re-created under the same taskId. Checking identity keeps that guarantee independent of
+		// how instanceId is minted.
+		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
+		if (state && state.task !== task) {
+			return
+		}
 		this.resetTaskPartialState(task)
 	}
 

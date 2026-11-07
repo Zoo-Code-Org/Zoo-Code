@@ -169,7 +169,7 @@ describe("DiffViewProvider", () => {
 	const makeDiffTabInput = (originalScheme: string, modifiedFsPath: string): vscode.TabInputTextDiff =>
 		Object.assign(new vscode.TabInputTextDiff(makeUri(modifiedFsPath), makeUri(modifiedFsPath)), {
 			original: { scheme: originalScheme },
-			modified: { fsPath: modifiedFsPath },
+			modified: makeUri(modifiedFsPath),
 		})
 
 	const makeTab = (input: vscode.Tab["input"], label: string, overrides: Partial<vscode.Tab> = {}): vscode.Tab => ({
@@ -1047,7 +1047,10 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["activeDiffEditor"] = {
 				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
 			} as unknown as vscode.TextEditor
-			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			let commitSeenByCleanup: boolean | undefined
+			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
+				commitSeenByCleanup = diffViewProvider["writeCommitted"]
+			})
 			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
 			const onCommit = vi.fn()
 
@@ -1056,6 +1059,11 @@ describe("DiffViewProvider", () => {
 			expect(save).toHaveBeenCalledTimes(1)
 			expect(onCommit).toHaveBeenCalledTimes(1)
 			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			// Ordering, not just presence: a regression that set the flag and fired the callback after
+			// cleanup would still satisfy the three counts above and would leave an approved write
+			// eligible for rollback in the window between the save and the tab close.
+			expect(commitSeenByCleanup).toBe(true)
+			expect(onCommit.mock.invocationCallOrder[0]).toBeLessThan(closeAllDiffViews.mock.invocationCallOrder[0])
 			expect(result.finalContent).toBe("new content")
 		})
 	})
@@ -1755,9 +1763,166 @@ describe("DiffViewProvider", () => {
 			// The restore edit carried the pre-stream content, and the full flow ran exactly once.
 			expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
 			expect(mockWorkspaceEdit.replace.mock.calls[0]?.[2]).toBe("pre-stream content")
+			// The replacement text alone does not say where the text went: a restore aimed at another
+			// document, or at only part of this one, passes on content alone. The uri is the target
+			// the rollback located through textDocuments, and the extent is whatever positionAt
+			// answered with 0 and the full text length - the two offsets the impl hands to Range -
+			// so both halves of the claim are asserted through members the doubles actually carry.
+			expect((mockWorkspaceEdit.replace.mock.calls[0]?.[0] as { fsPath?: string }).fsPath).toBe(mockTargetPath)
+			expect(editor.document.positionAt).toHaveBeenCalledWith(0)
+			expect(editor.document.positionAt).toHaveBeenLastCalledWith(editor.document.getText().length)
 			expect(editor.document.save).toHaveBeenCalledTimes(1)
 			expect(close).toHaveBeenCalledTimes(1)
 			expect(fs.unlink).toHaveBeenCalledTimes(1)
+		})
+
+		it("revertChanges() leaves a retained file and surfaces the occupied directory it cannot remove", async () => {
+			// The geometry the rollback is actually in: a non-empty file inside a directory this edit
+			// created. The retained file must survive, and the directory cannot go - a real rmdir on
+			// a non-empty directory fails with ENOTEMPTY, which removeCreatedDir tolerates only for
+			// ENOENT. Asserting the rejection is what stops the rollback from reporting a completed
+			// cleanup while a directory the user can still see is left behind.
+			const createdDirs = [`${mockCwd}/new-parent`, `${mockCwd}/new-parent/nested`]
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "nested/mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs,
+			})
+			vi.mocked(fs.stat).mockResolvedValueOnce({ size: 12 } as Awaited<ReturnType<typeof fs.stat>>)
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(
+				Object.assign(new Error("ENOTEMPTY: directory not empty, rmdir"), { code: "ENOTEMPTY" }),
+			)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("ENOTEMPTY")
+
+			expect(fs.unlink).not.toHaveBeenCalledWith(`${mockCwd}/nested/mock-target-file.ts`)
+			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			expect(fs.rmdir).toHaveBeenCalledWith(createdDirs[1])
+		})
+
+		it("revertChanges() skips the unlink when stat cannot answer about the placeholder", async () => {
+			// stat is the only evidence the editorless rollback has that the path is still the empty
+			// placeholder this edit created. A stat that cannot answer is read as do-not-delete, and
+			// the directory cleanup this edit owns still runs.
+			const createdDirs = [`${mockCwd}/new-parent`]
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs,
+			})
+			vi.mocked(fs.stat).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(fs.stat).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
+			expect(fs.unlink).not.toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
+			expect(fs.rmdir).toHaveBeenCalledWith(createdDirs[0])
+		})
+
+		it("revertChanges() restores and closes a dirty diff tab before unlinking the created file", async () => {
+			// The shape the text-only filter used to miss: the plain tab is gone and only the
+			// composite diff tab is left, holding the unapproved streamed content. TabInputTextDiff
+			// is not a TabInputText, and closeAllDiffViews() skips dirty tabs, so nothing used to
+			// close it and the unlink ran underneath it.
+			const editor = buildActiveDiffEditor({ isDirty: true })
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			const closeSpy = vi.spyOn(vscode.window.tabGroups, "close").mockResolvedValue(true)
+			const diffTab = {
+				input: makeDiffTabInput(DIFF_VIEW_URI_SCHEME, mockTargetPath),
+				isDirty: true,
+				label: "mock-target-file.ts (Changes)",
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [diffTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+				writeCommitted: false,
+			})
+			try {
+				await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(1)
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			expect(closeSpy).toHaveBeenCalledTimes(1)
+			expect(fs.unlink).toHaveBeenCalledTimes(1)
+			expect(closeSpy.mock.invocationCallOrder[0]).toBeLessThan(
+				(fs.unlink as unknown as Mock).mock.invocationCallOrder[0],
+			)
+		})
+
+		it("revertChanges() keeps the created file when the dirty diff tab refuses to close", async () => {
+			// Fail closed: a refused close means unapproved content is still on screen, so the
+			// unlink must not run. Deleting the file under a tab the user has not dismissed loses
+			// the content this rollback exists to preserve.
+			const editor = buildActiveDiffEditor({ isDirty: true })
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			vi.spyOn(vscode.window.tabGroups, "close").mockResolvedValue(false)
+			const diffTab = {
+				input: makeDiffTabInput(DIFF_VIEW_URI_SCHEME, mockTargetPath),
+				isDirty: true,
+				label: "mock-target-file.ts (Changes)",
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [diffTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+				writeCommitted: false,
+			})
+			let failure: unknown
+			try {
+				await diffViewProvider.revertChanges()
+			} catch (error: unknown) {
+				failure = error
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+			expect(failure).toBeInstanceOf(Error)
+			expect((failure as Error).message).toContain("could not close the restored buffer")
+			expect(fs.unlink).not.toHaveBeenCalledWith(mockTargetPath)
 		})
 
 		it("revertChanges() closes the file tab when the file was not open and untouched", async () => {
@@ -1974,6 +2139,10 @@ describe("DiffViewProvider", () => {
 			// tab decision", not an exact count.
 			expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
 			expect(mockWorkspaceEdit.replace.mock.calls[0]?.[2]).toBe("original")
+			// Same reasoning as the pre-stream restore above: content is not evidence about the target.
+			expect((mockWorkspaceEdit.replace.mock.calls[0]?.[0] as { fsPath?: string }).fsPath).toBe(mockTargetPath)
+			expect(editor.document.positionAt).toHaveBeenCalledWith(0)
+			expect(editor.document.positionAt).toHaveBeenLastCalledWith(editor.document.getText().length)
 			expect(editor.document.save).toHaveBeenCalledTimes(1)
 			expect(closeAllDiffViews.mock.calls.length).toBeGreaterThanOrEqual(1)
 			expect(closeAllDiffViews.mock.invocationCallOrder[0]).toBeLessThan(closeFileTab.mock.invocationCallOrder[0])
