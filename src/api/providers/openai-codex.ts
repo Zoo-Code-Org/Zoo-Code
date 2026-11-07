@@ -272,7 +272,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		} catch (error) {
 			// An abort landing while the lookup is pending must surface as the shared abort
 			// contract, not as an authentication failure.
-			// Stryker disable next-line ConditionalExpression: the false mutant needs an abort inside a microtask window no test can schedule; the non-abort-failure regression kills the true mutant
 			if (isRequestAborted(error, abortSignal)) {
 				throw createAbortError(this.providerName)
 			}
@@ -1456,7 +1455,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				// A buffered chunk can still be pulled in the window between the abort and the
 				// inner generator's own stop, so break here: post-abort output must never be
 				// joined into the completion.
-				// Stryker disable next-line ConditionalExpression: the false mutant needs an abort inside the yield-hop microtask window no test can schedule; the multi-chunk happy paths kill the true mutant
 				if (requestSignal?.aborted) {
 					break
 				}
