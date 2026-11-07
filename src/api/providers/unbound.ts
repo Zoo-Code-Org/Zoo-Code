@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError } from "openai"
 
 import {
 	type ModelInfo,
@@ -29,6 +29,14 @@ import type {
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	resolveModelWithAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 // Unbound usage includes extra fields for Anthropic cache tokens.
@@ -152,6 +160,13 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Establish the cancellation scope around model resolution: a
+		// pre-aborted signal rejects before the lookup starts, and a signal
+		// that fires while model metadata is loading settles on the
+		// standardized AbortError; any other resolution failure propagates
+		// unchanged.
+		const externalAbortSignal = metadata?.abortSignal
+		const resolved = await resolveModelWithAbort(() => this.fetchModel(), externalAbortSignal, "Unbound")
 		const {
 			id: model,
 			info,
@@ -159,7 +174,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			temperature,
 			reasoningEffort: reasoning_effort,
 			reasoning: thinking,
-		} = await this.fetchModel()
+		} = resolved
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -185,51 +200,86 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: metadata?.tool_choice,
 		}
 
-		let stream
+		// Per-request signal bridged from the caller's abort signal via the shared helper
+		// (pre-aborted guard, once-only listener, retained cleanup). The never-aborting
+		// fallback preserves the previous always-signal behaviour when the caller has no
+		// external signal, and dispose() detaches the listener when the request ends.
+		const { signal: bridgedSignal, dispose: detachExternalAbortSignal } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
+
 		try {
-			stream = await this.client.chat.completions.create(completionParams)
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
-		}
-		let lastUsage: any = undefined
-
-		for await (const chunk of stream) {
-			const delta = chunk.choices[0]?.delta
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			let stream
+			try {
+				stream = await this.client.chat.completions.create(completionParams, { signal: requestSignal })
+			} catch (error) {
+				// Preserve abort identity (series standard): a cancelled request
+				// must surface as a DOM-standard AbortError, not a wrapped
+				// completion error.
+				if (isRequestAborted(error, externalAbortSignal)) {
+					throw createAbortError("Unbound")
+				}
+				throw handleOpenAIError(error, this.providerName)
 			}
+			let lastUsage: any = undefined
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+			try {
+				for await (const chunk of stream) {
+					const delta = chunk.choices[0]?.delta
 
-			// Handle native tool calls
-			if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
+
+					if (delta?.content) {
+						yield { type: "text", text: delta.content }
+					}
+
+					// Handle native tool calls
+					if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+						for (const toolCall of delta.tool_calls) {
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
+						}
+					}
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
-			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+				if (lastUsage) {
+					yield this.processUsageMetrics(lastUsage, info)
+				}
+			} catch (error) {
+				// Preserve abort identity (series standard): a cancellation that
+				// surfaces after the stream has started must also normalize to
+				// the standardized AbortError, not the raw SDK rejection.
+				if (isRequestAborted(error, externalAbortSignal)) {
+					throw createAbortError("Unbound")
+				}
+				throw error
 			}
-		}
-
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, info)
+		} finally {
+			detachExternalAbortSignal()
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
-		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Model resolution must honour the caller's cancellation scope the same
+		// way createMessage does: a signal that fires during the lookup settles on
+		// the standardized AbortError instead of waiting for the catalog to finish.
+		const {
+			id: model,
+			maxTokens: max_tokens,
+			temperature,
+		} = await resolveModelWithAbort(() => this.fetchModel(), options?.abortSignal, "Unbound")
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
 
@@ -239,11 +289,34 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			messages: openAiMessages,
 			temperature: temperature,
 		}
+		// Build request options with abortSignal and/or timeout.
+		// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+		// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+		// abort, which would cancel the request right away.
+		const createOptions: OpenAI.RequestOptions = {}
+		if (options?.abortSignal) {
+			createOptions.signal = options.abortSignal
+		}
+		const timeoutMs = options?.timeoutMs
+		if (hasUsableTimeout(timeoutMs)) {
+			createOptions.timeout = toSdkTimeoutMs(timeoutMs)
+		}
 
 		let response: OpenAI.Chat.ChatCompletion
 		try {
-			response = await this.client.chat.completions.create(completionParams)
+			response = await this.client.chat.completions.create(completionParams, createOptions)
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			// SDK request timeouts are not aborts, but the series standard maps
+			// them to the same AbortError identity as caller cancellations.
+			if (isRequestAborted(error, options?.abortSignal) || error instanceof APIConnectionTimeoutError) {
+				throw createAbortError("Unbound")
+			}
 			throw handleOpenAIError(error, this.providerName)
 		}
 		return response.choices[0]?.message.content || ""
