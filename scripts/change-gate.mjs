@@ -62,7 +62,7 @@ function explanationFor(expected, { docsOnly, classificationFailed }) {
 // Compares the needs graph with the outcome implied by the
 // classification. Missing results, failed full validation, and jobs
 // whose skip state contradicts the classification are all violations.
-export function evaluateGate({ needs, watched, eventName, prDraft, classifierReplay }) {
+export function evaluateGate({ needs, watched, eventName, prDraft, classifierReplay, policyChanged = false }) {
 	const violations = []
 	const notes = []
 
@@ -84,6 +84,11 @@ export function evaluateGate({ needs, watched, eventName, prDraft, classifierRep
 	}
 
 	const docsOnly = isDocsOnlySkip(classify, eventName)
+	if (docsOnly && policyChanged) {
+		violations.push(
+			"Validation policy changed or could not be verified against the base; full validation is required.",
+		)
+	}
 
 	if (classifierReplay) {
 		if (classifierReplay.status === 0) {
@@ -231,12 +236,33 @@ export function parseClassifierStdout(stdout) {
 	return match ? { category: match[1], reasonCode: match[2], changedFiles: Number(match[3]) } : undefined
 }
 
-function replayClassification(repoRoot, { baseSha, headSha, eventName, forceFullLabel, forceFullVariable }) {
+// Check git directly, independently of the head classifier's allowlist or replay.
+// Missing history and git errors fail safe by refusing documentation-only skips.
+export function validationPolicyChanged(repoRoot, baseSha, headSha) {
+	if (![baseSha, headSha].every((sha) => /^[0-9a-f]{40}$/i.test(sha ?? ""))) return true
+	const result = spawnSync(
+		"git",
+		[
+			"diff",
+			"--quiet",
+			`${baseSha}...${headSha}`,
+			"--",
+			"scripts/change-classification.mjs",
+			"scripts/change-gate.mjs",
+		],
+		{ cwd: repoRoot },
+	)
+	return Boolean(result.error) || result.status !== 0
+}
+
+export function replayClassification(repoRoot, { baseSha, headSha, eventName, forceFullLabel, forceFullVariable }) {
 	const args = [
 		path.join(repoRoot, "scripts/change-classification.mjs"),
 		"ci",
 		"--event",
 		eventName,
+		"--base",
+		baseSha,
 		"--head",
 		headSha,
 		"--repo-root",
@@ -292,6 +318,7 @@ function main() {
 		watched,
 		eventName,
 		prDraft: process.env.PR_DRAFT === "true",
+		policyChanged: validationPolicyChanged(repoRoot, baseSha, headSha),
 		classifierReplay: { status: classifierReplay.status, classification: classifierReplay.classification },
 	})
 

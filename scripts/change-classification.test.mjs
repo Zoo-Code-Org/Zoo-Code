@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url"
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const classifierPath = path.join(repositoryRoot, "scripts/change-classification.mjs")
 
+import { replayClassification, validationPolicyChanged } from "./change-gate.mjs"
+
 import {
 	allowlistFingerprint,
 	classifyEntries,
@@ -344,6 +346,92 @@ describe("ci command", () => {
 			])
 			assert.equal(result.status, 1)
 			assert.match(result.stderr, /::error/)
+		} finally {
+			fs.rmSync(tempRepo, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("history report files", () => {
+	for (const filename of ["report.md", "report.txt", "report", "report.json"]) {
+		it(`preserves the Markdown report and JSON sidecar for ${filename}`, () => {
+			const tempRepo = createTempRepository()
+			try {
+				const output = path.join(tempRepo, filename)
+				const result = spawnSync(
+					process.execPath,
+					[classifierPath, "history", "--repo-root", tempRepo, "--output", output],
+					{ encoding: "utf8" },
+				)
+				assert.equal(result.status, 0, result.stderr)
+				assert.match(fs.readFileSync(output, "utf8"), /Classified .*first-parent commit/)
+				const jsonPath = filename.endsWith(".md") ? output.replace(/\.md$/, ".json") : `${output}.json`
+				assert.deepEqual(JSON.parse(fs.readFileSync(jsonPath, "utf8")), [])
+			} finally {
+				fs.rmSync(tempRepo, { recursive: true, force: true })
+			}
+		})
+	}
+})
+
+describe("validation policy changes", () => {
+	for (const filePath of ["scripts/change-classification.mjs", "scripts/change-gate.mjs"]) {
+		for (const entry of [
+			{ status: "M", path: filePath },
+			{ status: "R", oldPath: filePath, path: "docs/policy.md" },
+		]) {
+			it(`requires full validation for ${entry.status} ${filePath}`, () => {
+				const result = classifyEntries([entry])
+				assert.equal(result.category, "full")
+				assert.equal(result.reasonCode, "validation-policy-change")
+			})
+		}
+	}
+
+	it("independently detects policy changes even when the classifier reports docs-only", () => {
+		const tempRepo = createTempRepository()
+		try {
+			const baseSha = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+			assert.equal(validationPolicyChanged(tempRepo, baseSha, baseSha), false)
+			fs.mkdirSync(path.join(tempRepo, "scripts"))
+			fs.writeFileSync(
+				path.join(tempRepo, "scripts/change-classification.mjs"),
+				'console.log("Change classification: docs-only (allowlisted-documentation), 1 changed file(s)")',
+			)
+			git(tempRepo, ["add", "."])
+			git(tempRepo, ["commit", "-m", "widen classification"])
+			const headSha = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+			assert.equal(
+				replayClassification(tempRepo, { baseSha, headSha, eventName: "pull_request" }).classification.category,
+				"docs-only",
+			)
+			assert.equal(validationPolicyChanged(tempRepo, baseSha, headSha), true)
+			assert.equal(validationPolicyChanged(tempRepo, "0".repeat(40), headSha), true)
+		} finally {
+			fs.rmSync(tempRepo, { recursive: true, force: true })
+		}
+	})
+
+	it("replays the complete explicit base range rather than just the last commit", () => {
+		const tempRepo = createTempRepository()
+		try {
+			fs.mkdirSync(path.join(tempRepo, "scripts"))
+			fs.copyFileSync(classifierPath, path.join(tempRepo, "scripts/change-classification.mjs"))
+			git(tempRepo, ["add", "."])
+			git(tempRepo, ["commit", "-m", "install classifier"])
+			const baseSha = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+			fs.writeFileSync(path.join(tempRepo, "src-code.ts"), "export const base = 2\n")
+			git(tempRepo, ["add", "."])
+			git(tempRepo, ["commit", "-m", "code change"])
+			fs.writeFileSync(path.join(tempRepo, "docs/base.md"), "# updated\n")
+			git(tempRepo, ["add", "."])
+			git(tempRepo, ["commit", "-m", "docs change"])
+			const headSha = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+			const replay = replayClassification(tempRepo, { baseSha, headSha, eventName: "pull_request" })
+			assert.equal(replay.status, 0)
+			assert.equal(replay.classification.category, "full")
+			assert.equal(replay.classification.changedFiles, 2)
+			assert.equal(validationPolicyChanged(tempRepo, baseSha, headSha), false)
 		} finally {
 			fs.rmSync(tempRepo, { recursive: true, force: true })
 		}

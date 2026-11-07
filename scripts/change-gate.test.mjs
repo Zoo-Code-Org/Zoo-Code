@@ -95,6 +95,34 @@ describe("gate evaluation", () => {
 		assert.ok(evaluation.rows.find((row) => row.name === "expensive").explanation.includes("Documentation-only"))
 	})
 
+	it("rejects a docs-only result when validation policy changed despite a matching replay", () => {
+		const evaluation = evaluateGate({
+			needs: needsFor(
+				{ cheap: "success", expensive: "skipped" },
+				{ result: "success", outputs: { category: "docs-only", "reason-code": "allowlisted-documentation" } },
+			),
+			watched,
+			eventName: "pull_request",
+			policyChanged: true,
+			classifierReplay: {
+				status: 0,
+				classification: { category: "docs-only", reasonCode: "allowlisted-documentation" },
+			},
+		})
+		assert.equal(evaluation.ok, false)
+		assert.ok(evaluation.violations.some((violation) => violation.includes("Validation policy changed")))
+	})
+
+	it("accepts policy changes when full validation ran", () => {
+		const evaluation = evaluateGate({
+			needs: needsFor({ cheap: "success", expensive: "success" }),
+			watched,
+			eventName: "pull_request",
+			policyChanged: true,
+		})
+		assert.equal(evaluation.ok, true)
+	})
+
 	it("rejects a gated job that ran despite a docs-only classification", () => {
 		const evaluation = evaluateGate({
 			needs: needsFor(
@@ -373,6 +401,16 @@ describe("change-based validation workflow wiring", () => {
 				assert.match(workflow, /^    pull_request:/m)
 				assert.doesNotMatch(workflow, /^        paths(?:-ignore)?:/m)
 				if (expectation.hasMergeGroup) assert.match(workflow, /^    merge_group:/m)
+			})
+
+			it("uses unique check names for classification and the gate", () => {
+				for (const jobId of ["classify", "validation-gate"]) {
+					assert.ok(
+						jobBlock(workflow, jobId).includes(
+							`name: ${jobId} (${expectation.file.replace(/\.yml$/, "")})`,
+						),
+					)
+				}
 			})
 
 			it("runs a classify job with full history and override wiring", () => {

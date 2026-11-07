@@ -20,6 +20,7 @@ permissions:
 
 jobs:
     classify:
+        name: classify (visual-regression)
         # Classifies the pull request change range before any validation
         # runs. Only an explicit documentation-only allowlist match can
         # skip expensive jobs, and only for pull_request events; a failed
@@ -168,6 +169,7 @@ jobs:
                   if-no-files-found: ignore
 
     validation-gate:
+        name: validation-gate (visual-regression)
         # Always-running required gate for change-based validation. It
         # rejects a missing or failed classification, validation jobs that
         # did not run when full validation was required, jobs that ran when

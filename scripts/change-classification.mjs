@@ -52,6 +52,9 @@ const NEVER_SKIP_SEGMENTS = [
 	"testdata",
 ]
 
+// Policy paths stay protected even if the documentation allowlist expands.
+const VALIDATION_POLICY_PATHS = new Set(["scripts/change-classification.mjs", "scripts/change-gate.mjs"])
+
 // Statuses understood from `git diff --name-status`. Any other letter
 // (including C for copies and X for unknown) is unrecognized and fails
 // safe to full validation.
@@ -63,6 +66,7 @@ export const OUTPUT_REASONS = {
 	"non-pr-event": "Only pull_request events may skip; merge queue, push, and scheduled runs keep full validation.",
 	"empty-change-range": "The change range contained no files; an empty enumeration is treated as uncertain.",
 	"unrecognized-status": "The diff contained a change status the classifier does not understand.",
+	"validation-policy-change": "The classifier or validation gate changed; full validation is required.",
 	"non-documentation-path": "The change range contained paths outside the documentation-only allowlist.",
 	"protected-path-segment":
 		"An allowlisted path contained a protected segment (fixtures, tests, generated, examples).",
@@ -147,6 +151,20 @@ export function classifyEntries(entries) {
 			changedFiles: entries.length,
 			docsFiles: [],
 			otherFiles: entries.map(({ path: filePath }) => filePath),
+		}
+	}
+
+	// Policy changes cannot grant themselves a skip by widening the allowlist.
+	const policyPaths = entries
+		.flatMap((entry) => [entry.path, entry.oldPath])
+		.filter((filePath) => VALIDATION_POLICY_PATHS.has(filePath))
+	if (policyPaths.length > 0) {
+		return {
+			category: "full",
+			reasonCode: "validation-policy-change",
+			changedFiles: entries.length,
+			docsFiles: [],
+			offendingPaths: policyPaths,
 		}
 	}
 
@@ -391,7 +409,10 @@ function main() {
 		if (output) {
 			fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true })
 			fs.writeFileSync(path.resolve(output), formatHistory(rows))
-			fs.writeFileSync(path.resolve(output).replace(/\.md$/, ".json"), JSON.stringify(rows, null, 2))
+			const jsonPath = /\.md$/.test(output)
+				? path.resolve(output).replace(/\.md$/, ".json")
+				: `${path.resolve(output)}.json`
+			fs.writeFileSync(jsonPath, JSON.stringify(rows, null, 2))
 			console.log(`History classification written to ${output}`)
 		} else {
 			process.stdout.write(formatHistory(rows))

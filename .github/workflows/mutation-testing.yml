@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
     classify:
+        name: classify (mutation-testing)
         # Classifies the pull request change range before any validation
         # runs. Only an explicit documentation-only allowlist match can
         # skip expensive jobs, and only for pull_request events; a failed
@@ -111,6 +112,7 @@ jobs:
                   } >> "$GITHUB_STEP_SUMMARY" || echo "::warning title=Mutation test advisory::Could not write the job summary"
 
     validation-gate:
+        name: validation-gate (mutation-testing)
         # Always-running required gate for change-based validation. It
         # rejects a missing or failed classification, validation jobs that
         # did not run when full validation was required, jobs that ran when

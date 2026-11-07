@@ -18,6 +18,7 @@ permissions:
 
 jobs:
     classify:
+        name: classify (e2e)
         # Classifies the pull request change range before any validation
         # runs. Only an explicit documentation-only allowlist match can
         # skip expensive jobs, and only for pull_request events; a failed
@@ -227,6 +228,7 @@ jobs:
                   key: ${{ steps.e2e-marker.outputs.cache-primary-key }}
 
     validation-gate:
+        name: validation-gate (e2e)
         # Always-running required gate for change-based validation. It
         # rejects a missing or failed classification, validation jobs that
         # did not run when full validation was required, jobs that ran when

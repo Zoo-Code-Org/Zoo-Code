@@ -23,7 +23,9 @@ their `needs` graph:
   classification, a missing classification, or any non-`pull_request` event
   (merge queue, pushes, scheduled runs).
 
-Each workflow also runs a `validation-gate` job that always executes. The gate
+Each workflow also runs a `validation-gate` job that always executes.
+The classify and gate checks have unique display names, such as
+`classify (code-qa)` and `validation-gate (code-qa)`, for branch rulesets. The gate
 replays the classifier against the same commit range and rejects the run when:
 
 - the classification is missing, malformed, or non-terminal,
@@ -68,8 +70,9 @@ The allowlist is deliberately narrow:
   rejected even under an allowlisted prefix.
 - The `format-check` job always runs because `pnpm format:check` validates
   every Markdown file; documentation changes keep their own check.
-- The `knip`, `dependency-review`, and `invisible-chars` jobs always run. Knip
-  is deliberately unconditional because a repository invariant test requires
+- The `knip` and `invisible-chars` jobs always run. `dependency-review` is
+  never gated by classification but stays pull-request-only. Knip is
+  deliberately unconditional because a repository invariant test requires
   the knip job to run without conditions or allowed failure.
 
 ## Fail-safe behavior
@@ -89,17 +92,30 @@ the full merge-base range with rename detection, so it cannot silently
 truncate on whitespace or large diffs. Rename entries classify the old and the
 new path.
 
+Changes to `scripts/change-classification.mjs` or `scripts/change-gate.mjs`
+always select full validation, independently of the documentation allowlist.
+The gate also checks these paths directly with git against the base range
+before accepting a documentation-only result. An allowlist expansion cannot
+classify its own policy change as documentation-only. The fingerprint remains
+an observability value rather than a trust boundary.
+
 ## Override and rollback
 
 Full validation can be forced at three levels:
 
 1. **Per pull request:** add the `ci:full-validation` label. The classify job
    reports `full` with reason `override-label`.
-2. **Repository-wide, immediate:** set the repository variable
+2. **Repository-wide:** set the repository variable
    `ZOO_CODE_REQUIRE_FULL_VALIDATION` to `true`. No code change is needed;
    every classification reports `full` with reason `override-variable`.
 3. **Permanent:** revert the pull request that introduced this change. All
    workflows then run exactly as before.
+
+Labels and repository variables do not start workflow runs. Both overrides take
+effect on the next run, such as after a push or a ready-for-review event. After
+setting an override, start a new run to apply it to an existing pull request.
+For a label override, push an update so the event payload includes the label;
+re-running an old run retains its original event payload.
 
 The gate applies the same override rules when it replays the classifier, so an
 overridden run still validates coherence.
