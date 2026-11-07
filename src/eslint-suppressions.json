@@ -536,7 +536,7 @@
 	},
 	"core/config/__tests__/ContextProxy.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"core/config/__tests__/CustomModesManager.exportImportSlugChange.spec.ts": {

@@ -1260,7 +1260,7 @@ Output only the summary of the conversation so far, without any additional comme
 			// Should NOT have called update for customSupportPrompts (custom prompt should be preserved)
 			const updateCalls = mockGlobalState.update.mock.calls
 			const customSupportPromptsUpdateCalls = updateCalls.filter(
-				(call: any[]) => call[0] === "customSupportPrompts",
+				(call: unknown[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
@@ -1276,7 +1276,7 @@ Output only the summary of the conversation so far, without any additional comme
 			// Should not have called update for customSupportPrompts
 			const updateCalls = mockGlobalState.update.mock.calls
 			const customSupportPromptsUpdateCalls = updateCalls.filter(
-				(call: any[]) => call[0] === "customSupportPrompts",
+				(call: unknown[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
@@ -1338,6 +1338,11 @@ Output only the summary of the conversation so far, without any additional comme
 			})
 			const reset = proxy.resetAllState()
 			setTimeout(() => landStraggler?.(), 20)
+			// Probe the guard after the first delete's rejection handler has had its turn, not before it: a
+			// guard that comes down on the failure while a delete is still outstanding has to be caught here,
+			// not only by the straggler assertion further down. The 0 ms tick lands before the 20 ms one, so
+			// the pending delete is still pending when the probe runs.
+			await new Promise((resolveTick) => setTimeout(resolveTick, 0))
 			// While the pass is still settling the guard is up, so a save here is refused rather than
 			// accepted and erased later. That refusal is the observable the fix bought.
 			await expect(proxy.storeSecret("apiKey", "mid-settling-save")).rejects.toThrow(
