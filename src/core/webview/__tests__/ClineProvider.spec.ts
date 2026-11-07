@@ -4178,12 +4178,16 @@ describe("ClineProvider", () => {
 	})
 
 	describe("the refresh that follows an import that failed part of the way", () => {
-		const postedState = () => {
-			const message = mockPostMessage.mock.calls
-				.map(([m]) => m)
-				.filter((m) => m.type === "state")
-				.at(-1)
-			return message.state
+		type PostedState = NonNullable<ExtensionMessage["state"]>
+		/** The states that were posted to the webview, in order. */
+		const postedStates = (): PostedState[] =>
+			(mockPostMessage.mock.calls as Array<[ExtensionMessage]>).flatMap(([message]) =>
+				message.type === "state" && message.state ? [message.state] : [],
+			)
+		const postedState = (): PostedState => {
+			const state = postedStates().at(-1)
+			if (!state) throw new Error("No state was posted")
+			return state
 		}
 
 		test("marks the state that is posted with it, with what the import stored", async () => {
@@ -4230,9 +4234,8 @@ describe("ClineProvider", () => {
 				provider.postStateToWebview({ at: 2, storedKeys: ["terminalFontSize"], late: true }),
 			])
 
-			const states = mockPostMessage.mock.calls.map(([m]) => m).filter((m) => m.type === "state")
-			const marked = states.filter((m) => m.state.settingsImportRefreshedAt !== undefined)
-			expect(marked.map((m) => [m.state.settingsImportRefreshedAt, m.state.settingsImportStoredKeys])).toEqual(
+			const marked = postedStates().filter((state) => state.settingsImportRefreshedAt !== undefined)
+			expect(marked.map((state) => [state.settingsImportRefreshedAt, state.settingsImportStoredKeys])).toEqual(
 				expect.arrayContaining([
 					[1, ["mode"]],
 					[2, ["terminalFontSize"]],
