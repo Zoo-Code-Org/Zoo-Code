@@ -10,6 +10,7 @@ vi.mock("../../../../utils/shell", () => ({
 }))
 
 import { getSystemInfoSection } from "../system-info"
+import { getShell } from "../../../../utils/shell"
 import osName from "os-name"
 
 const mockOsName = osName as unknown as ReturnType<typeof vi.fn>
@@ -100,5 +101,28 @@ describe("getSystemInfoSection", () => {
 		// The false branch must stay empty: any injected filler (e.g. a mutated
 		// sentinel string) breaks this exact join.
 		expect(result).toContain("default directory for all tool operations. When the user initially gives you a task")
+	})
+
+	describe("shell syntax", () => {
+		const cmdPath = "C:\\Windows\\System32\\cmd.exe"
+
+		it("states the dialect for cmd.exe when execute_command is available", () => {
+			vi.mocked(getShell).mockReturnValueOnce(cmdPath)
+
+			const result = getSystemInfoSection(mockCwd, policyFor())
+
+			expect(result).toContain(`Default Shell: ${cmdPath}
+Shell Syntax: Commands run through Windows cmd.exe`)
+		})
+
+		it("omits the dialect without execute_command", () => {
+			vi.mocked(getShell).mockReturnValueOnce(cmdPath)
+
+			expect(getSystemInfoSection(mockCwd, policyFor(false))).not.toContain("Shell Syntax")
+		})
+
+		it("omits the dialect for POSIX shells", () => {
+			expect(getSystemInfoSection(mockCwd, policyFor())).not.toContain("Shell Syntax")
+		})
 	})
 })
