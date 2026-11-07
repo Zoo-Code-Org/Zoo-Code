@@ -1,6 +1,7 @@
 // npx vitest core/webview/__tests__/webviewMessageHandler.spec.ts
 
 import type { Mock } from "vitest"
+import { defaultModeSlug } from "../../../shared/modes"
 
 // Mock dependencies - must come before imports
 vi.mock("../../../api/providers/fetchers/modelCache")
@@ -118,6 +119,10 @@ const mockClineProvider = {
 		extensionPath: "/mock/extension/path",
 		globalStorageUri: { fsPath: "/mock/global/storage" },
 	},
+	// The per-view write path; deleteCustomMode routes its mode reset through it.
+	setValue: vi.fn(),
+	// deleteCustomMode also clears the same slug out of every other live view's per-view state.
+	clearViewLocalModeForDeletedSlug: vi.fn().mockResolvedValue(undefined),
 	contextProxy: {
 		context: {
 			extensionPath: "/mock/extension/path",
@@ -129,6 +134,14 @@ const mockClineProvider = {
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
+	// deleteApiConfiguration is routed through deleteProviderProfile, which needs the
+	// manager only to resolve the entry the caller named.
+	providerSettingsManager: {
+		listConfig: vi.fn(),
+		deleteConfig: vi.fn(),
+	},
+	deleteProviderProfile: vi.fn().mockResolvedValue(undefined),
+	activateProviderProfile: vi.fn().mockResolvedValue(undefined),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
@@ -1684,6 +1697,47 @@ describe("webviewMessageHandler - requestOpenAiCodexRateLimits", () => {
 	})
 })
 
+describe("webviewMessageHandler - deleteApiConfiguration", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([])
+		vi.mocked(mockClineProvider.deleteProviderProfile).mockResolvedValue(undefined)
+	})
+
+	it("routes the deletion through deleteProviderProfile instead of the manager", async () => {
+		const profileToDelete = { name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.openrouter }
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([profileToDelete])
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "old-profile" })
+
+		// ClineProvider.deleteProviderProfile is where the profile list, every live view's pin
+		// and overlay, the closed views' persisted pins, the last-profile guard, and the
+		// compensation for a half-finished deletion live. Deleting the manager record here and
+		// activating a survivor afterwards left every one of those surfaces naming a profile
+		// that no longer exists, and never wrote the survivor's settings to the shared store.
+		expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith(profileToDelete)
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+	})
+
+	it("reports the failure when the routed deletion rejects", async () => {
+		const profileToDelete = { name: "only-profile", id: "only-id", apiProvider: providerIdentifiers.zooGateway }
+		vi.mocked(mockClineProvider.providerSettingsManager.listConfig).mockResolvedValue([profileToDelete])
+		vi.mocked(mockClineProvider.deleteProviderProfile).mockRejectedValue(
+			new Error("You cannot delete the last profile"),
+		)
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "only-profile" })
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("You cannot delete the last profile"),
+		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(t("common:errors.delete_api_config"))
+	})
+})
+
 describe("webviewMessageHandler - deleteCustomMode", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -1714,6 +1768,58 @@ describe("webviewMessageHandler - deleteCustomMode", () => {
 		expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 		expect(mockClineProvider.customModesManager.deleteCustomMode).toHaveBeenCalledWith(slug)
 		expect(fs.rm).toHaveBeenCalledWith(rulesFolderPath, { recursive: true, force: true })
+		// The reset back to the default mode has to go through the provider's per-view write
+		// path. The deprecated ContextProxy helper it replaces skips the view-local buffer, so a
+		// view that pinned the deleted mode keeps it in getState() and in any task it starts.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", defaultModeSlug)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+	})
+
+	it("clears the deleted mode out of every other live view's per-view state", async () => {
+		const slug = "test-sibling-mode"
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([
+			{ name: "Test Sibling Mode", slug, roleDefinition: "Test Role", groups: [] } as ModeConfig,
+		])
+		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false)
+		vi.mocked(mockClineProvider.customModesManager.deleteCustomMode).mockResolvedValue(undefined)
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteCustomMode", slug })
+
+		// The acting view moves to the default through setValue above. That write does not reach
+		// a sibling that pinned the slug: its getState() would keep reporting a deleted mode and a
+		// task created there would store it, so the handler fans the clear out after its own write.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", defaultModeSlug)
+		expect(mockClineProvider.clearViewLocalModeForDeletedSlug).toHaveBeenCalledWith(slug)
+		expect(
+			vi.mocked(mockClineProvider.clearViewLocalModeForDeletedSlug).mock.invocationCallOrder[0],
+		).toBeGreaterThan(vi.mocked(mockClineProvider.setValue).mock.invocationCallOrder[0])
+	})
+
+	it("keeps the shared mode on a slug that exists when the per-view write fails", async () => {
+		const slug = "test-failed-view-write-mode"
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([
+			{ name: "Test Failed View Write Mode", slug, roleDefinition: "Test Role", groups: [] } as ModeConfig,
+		])
+		vi.mocked(fsUtils.fileExistsAtPath).mockResolvedValue(false)
+		vi.mocked(mockClineProvider.customModesManager.deleteCustomMode).mockResolvedValue(undefined)
+		// The provider write rolls the shared store back to what it captured before the write -
+		// here the slug that was just deleted - and rethrows. The handler has to log, put the
+		// shared mode back on a slug that exists, and still run the post and the fan-out below.
+		// Once: the shared rejection must not leak into the tests that follow, which reuse this double.
+		vi.mocked(mockClineProvider.setValue).mockRejectedValueOnce(new Error("per-view write failed"))
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteCustomMode", slug })
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to write the default mode after deleting"),
+		)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("mode", defaultModeSlug)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+		expect(mockClineProvider.clearViewLocalModeForDeletedSlug).toHaveBeenCalledWith(slug)
+		expect(
+			vi.mocked(mockClineProvider.clearViewLocalModeForDeletedSlug).mock.invocationCallOrder[0],
+		).toBeGreaterThan(vi.mocked(mockClineProvider.setValue).mock.invocationCallOrder[0])
 	})
 
 	it("should delete a global mode and its rules folder", async () => {
@@ -2008,6 +2114,51 @@ it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loo
 
 	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", undefined)
 	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+})
+
+// The registered viewStates map is host-owned: ClineProvider.setValues drops a caller-supplied map
+// because the provider rewrites that map from a full read of it. This loop writes through ContextProxy
+// directly, so the same key has to be dropped here too - a webview-supplied map would replace every
+// view's durable selection, not just this view's, and an unset would erase the map.
+it("ignores a webview-supplied viewStates map in the generic updateSettings loop", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: {
+			viewStates: { "crafted-view": { mode: "ask" } },
+			alwaysDenyUnapprovedCommands: true,
+		},
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	expect(mockClineProvider.log).toHaveBeenCalledWith(
+		expect.stringContaining("Ignored a webview-supplied viewStates map"),
+	)
+})
+
+// An unset is the shape that erases the stored map: ContextProxy reads an undefined value as a delete
+// (ContextProxy.ts:464-466 for secrets; globalState.update(key, undefined) deletes, which the repo relies
+// on at :173, :280-282, :305 and :346), and expect.anything() cannot see it because it excludes
+// undefined and null - so the matcher in the case above is not enough on its own, and the call itself
+// has to be pinned here. The asymmetry to copy when extending this family: the provider-side test is
+// erase-safe because it asserts on the stored state, while this double is a bare setValue mock and so
+// must pin the call and its value, exactly as the case above pins the unset shape for another key.
+it("ignores an unset viewStates map in the generic updateSettings loop", async () => {
+	vi.clearAllMocks()
+
+	await webviewMessageHandler(mockClineProvider, {
+		type: "updateSettings",
+		updatedSettings: { viewStates: undefined, alwaysDenyUnapprovedCommands: true },
+	})
+
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", undefined)
+	expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+	expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	expect(mockClineProvider.log).toHaveBeenCalledWith(
+		expect.stringContaining("Ignored a webview-supplied viewStates map"),
+	)
 })
 
 // Both allowlists are normalized by the same branch, so both are held to the
@@ -2567,6 +2718,476 @@ describe("zooCodeSignOut", () => {
 	})
 })
 
+describe("webviewMessageHandler - renameApiConfiguration", () => {
+	// Double assertion: the spec-wide provider double only declares the members
+	// most tests drive; this structural widening keeps these tests free of any.
+	const provider = mockClineProvider as unknown as {
+		providerSettingsManager: {
+			getProfile: ReturnType<typeof vi.fn>
+			saveConfig: ReturnType<typeof vi.fn>
+			deleteConfig: ReturnType<typeof vi.fn>
+			hasConfig: ReturnType<typeof vi.fn>
+		}
+		repointViewLocalStateAfterProfileRename: ReturnType<typeof vi.fn>
+		activateProviderProfile: ReturnType<typeof vi.fn>
+	}
+	// Capture the pre-suite values for the members this suite reassigns:
+	// vi.clearAllMocks() only resets call history - it never restores property
+	// assignments, so without this restore the rename doubles leak into every
+	// later suite in this file.
+	const originalRenameMembers = {
+		providerSettingsManager: provider.providerSettingsManager,
+		repointViewLocalStateAfterProfileRename: provider.repointViewLocalStateAfterProfileRename,
+		activateProviderProfile: provider.activateProviderProfile,
+	}
+
+	afterEach(() => {
+		Object.assign(mockClineProvider, originalRenameMembers)
+	})
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("re-points views pinned to the old name before the old name is deleted", async () => {
+		const order: string[] = []
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async () => {
+				order.push("delete")
+			}),
+		}
+		const repoint = vi.fn(async () => {
+			order.push("repoint")
+		})
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		expect(repoint).toHaveBeenCalledWith("old-profile", "new-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		// The re-point must precede the deletion: a pinned view switches while the
+		// old name still resolves, instead of dangling for a window.
+		expect(order).toEqual(["repoint", "delete"])
+	})
+
+	it("restores the pre-rename profile when the activation after a rename fails", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockRejectedValue(new Error("activation failed"))
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The rename committed (new record stored, old name deleted) and the failed activation's
+		// own rollback already put the shared selection, the shared settings, this view's pin and
+		// this view's overlay back on old-profile. Writing newName to the shared selection there
+		// would pair that name with settings belonging to another profile, so the handler restores
+		// the record the rename deleted, pulls the views back to it with that record, and drops the
+		// record this rename authored. Every pair stays a pair.
+		expect(mockClineProvider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+			"old-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(provider.repointViewLocalStateAfterProfileRename).toHaveBeenLastCalledWith(
+			"new-profile",
+			"old-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		// The rename legitimately deletes old-profile before the activation runs, so the ordering is
+		// the assertion that matters: restoring the record before that delete would let the delete
+		// undo the restore and leave the selection naming a missing profile again.
+		const deleteOldMock = vi.mocked(mockClineProvider.providerSettingsManager.deleteConfig)
+		const saveOldMock = vi.mocked(mockClineProvider.providerSettingsManager.saveConfig)
+		const deleteOldCall = deleteOldMock.mock.calls.findIndex(([name]) => name === "old-profile")
+		const restoreOldCall = saveOldMock.mock.calls.findIndex(([name]) => name === "old-profile")
+		// The two indices come from two different mocks, so they are not comparable: which slot
+		// deleteConfig used says nothing about when saveConfig ran, and the pair below stays
+		// 0-and-1 whichever way the handler orders the two calls. Vitest numbers
+		// mock.invocationCallOrder across every call, and that array is parallel to calls, so the
+		// index picks the call and the value read from it is the order the events really happened
+		// in - the same shape the deleteCustomMode test above uses.
+		expect(saveOldMock.mock.invocationCallOrder[restoreOldCall]).toBeGreaterThan(
+			deleteOldMock.mock.invocationCallOrder[deleteOldCall],
+		)
+		// The fallback must not move the shared selection on its own, and it must not resurrect a
+		// delete of the name it just restored.
+		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("currentApiConfigName", expect.anything())
+	})
+	it("leaves another rename's record alone when its own compensation runs", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			// The store answers newName with a different record than the one this rename
+			// wrote: a rename in another webview (its own ProviderSettingsManager instance)
+			// stored its own profile under the same name first.
+			getProfile: vi.fn(async ({ name }: { name: string }) =>
+				name === "new-profile"
+					? { id: "other-rename-id", apiProvider: providerIdentifiers.anthropic }
+					: { id: "profile-id", apiProvider: providerIdentifiers.anthropic },
+			),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		// Only the forward re-point fails; the compensation's reverse re-point has to succeed
+		// for the guard under test to be reached at all.
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockRejectedValueOnce(new Error("repoint failed"))
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The compensation re-points the views it moved, but it must not delete a record it
+		// never created: the id under newName is not this rename's id.
+		expect(provider.repointViewLocalStateAfterProfileRename).toHaveBeenCalledWith("new-profile", "old-profile", {
+			id: "profile-id",
+			apiProvider: providerIdentifiers.anthropic,
+		})
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Rename compensation skipped for 'new-profile'"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("rolls the new profile back when the re-point fails", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const repoint = vi.fn().mockRejectedValueOnce(new Error("repoint failed"))
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// A failed re-point must abort before deleting the old name: deleting it
+		// while views still pin it would dangle every affected view. The rename's
+		// own durable write is rolled back instead - views back to the old name and
+		// the new record removed - so a failed rename cannot leave a duplicate.
+		expect(repoint).toHaveBeenCalledTimes(2)
+		expect(repoint).toHaveBeenLastCalledWith("new-profile", "old-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("restores the old pin and removes the new profile when the deletion fails", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// A half-finished rename must not leave views pinned to the new name while
+		// both profiles exist: re-point them back and drop the new record.
+		expect(repoint).toHaveBeenCalledWith("new-profile", "old-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("re-points views with the stored record instead of the raw webview payload", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValueOnce({ id: "profile-id" }).mockResolvedValueOnce({
+				id: "profile-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "stored-model",
+			}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// saveConfig normalizes the record; the views and task handlers must receive
+		// that stored copy, not the raw webview payload with its unvalidated fields.
+		expect(repoint).toHaveBeenCalledWith("old-profile", "new-profile", {
+			id: "profile-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "stored-model",
+		})
+	})
+
+	it("rejects a rename onto an existing profile without saving", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(true),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "Foo", newName: "foo" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The webview's name validation treats a case-only difference from the
+		// current profile as the current profile, so a case-only collision would
+		// otherwise overwrite the existing record - and the delete-failure rollback
+		// would then delete a profile the rename never owned.
+		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("removes the new profile when the normalized read-back fails", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({ id: "profile-id", apiProvider: providerIdentifiers.anthropic })
+				.mockRejectedValueOnce(new Error("read failed")),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The save landed but the normalized record is unreadable: the new record
+		// is removed so the failed rename cannot leave both names resolving to the
+		// same id, and no view is re-pointed onto an unverifiable record.
+		expect(repoint).not.toHaveBeenCalled()
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("restores the previously stored settings when the deletion fails", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "old-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "new-model" },
+		})
+
+		// Views rolled back to oldName must serve what oldName actually stores: the
+		// attempted settings were never persisted under the old name.
+		expect(repoint).toHaveBeenLastCalledWith("new-profile", "old-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+			apiModelId: "old-model",
+		})
+	})
+
+	it("logs a failed rename compensation", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		const repoint = vi.fn(async (from: string) => {
+			if (from === "new-profile") {
+				throw new Error("compensation failed")
+			}
+		})
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// When the compensation itself fails both names can remain stored; the log
+		// must record that, not only the original deletion error.
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Rename compensation failed after delete rejection"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("leaves a newer save under the new name alone when the rename compensates", async () => {
+		// saveConfig keeps a profile's id, so a save that another view makes under newName after this
+		// rename wrote it carries the same id and different settings. Compensation that only compared
+		// ids would delete that newer save.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "old-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.openai,
+					apiModelId: "someone-elses-model",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "new-model" },
+		})
+
+		// The deletion that triggered the compensation is still attempted, and the rollback re-point
+		// still runs, but the record another view saved under newName survives the compensation.
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("no longer holds the settings this rename wrote"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("still removes the new profile when the stored settings are the ones the rename wrote", async () => {
+		// The equality check must not become a blanket refusal: on the ordinary compensation path the
+		// stored record is exactly what this rename wrote, so it is still removed.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "old-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				})
+				.mockResolvedValueOnce({
+					id: "profile-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "new-model",
+				}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async (name: string) => {
+				if (name === "old-profile") {
+					throw new Error("delete failed")
+				}
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "new-model" },
+		})
+
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
+			expect.stringContaining("no longer holds the settings this rename wrote"),
+		)
+	})
+})
+
 describe("webviewMessageHandler - kimiCodeSignIn", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -2804,6 +3425,25 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(calls.at(-1)).toEqual([true])
 	})
 
+	// The webviewDidLaunch tests below replace these mockClineProvider members with
+	// per-test doubles. Snapshot the module-level originals at collection time and
+	// restore them in the afterEach below so the launch stubs never leak into other
+	// tests of this file.
+	// Single structural cast: the class types these members as a method / a
+	// readonly property, which cannot be re-assigned to swap in a per-test double.
+	const launchSuiteSnapshot = (() => {
+		const view = mockClineProvider as {
+			getMcpHub: unknown
+			providerSettingsManager: unknown
+			getStateToPostToWebview: unknown
+		}
+		return {
+			getMcpHub: view.getMcpHub,
+			providerSettingsManager: view.providerSettingsManager,
+			getStateToPostToWebview: view.getStateToPostToWebview,
+		}
+	})()
+
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
 	// via an async provider.getStateToPostToWebview().then(...) continuation, outside
 	// telemetrySettingQueue -- so it could resolve after a concurrent "telemetrySetting" message
@@ -2970,6 +3610,17 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+
+	afterEach(() => {
+		const view = mockClineProvider as {
+			getMcpHub: unknown
+			providerSettingsManager: unknown
+			getStateToPostToWebview: unknown
+		}
+		view.getMcpHub = launchSuiteSnapshot.getMcpHub
+		view.providerSettingsManager = launchSuiteSnapshot.providerSettingsManager
+		view.getStateToPostToWebview = launchSuiteSnapshot.getStateToPostToWebview
 	})
 })
 
