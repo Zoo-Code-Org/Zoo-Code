@@ -450,6 +450,32 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
+		it("hands a backup whose failure-path removal could not complete to a later write", async () => {
+			const targetPath = "/tmp/test-dir/verify-fail.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The verifier runs after step 3 has copied the target to the backup, and every unlink
+			// fails, so the intended drop cannot complete. The path must then be owned by a later
+			// write rather than forgotten beside the target with nothing pointing at it.
+			const verify = vi.fn(async () => {
+				throw new Error("Stale version at commit time")
+			})
+			vi.mocked(fs.unlink).mockRejectedValue(new Error("EBUSY"))
+
+			await expect(
+				safeWriteText(targetPath, "data", { backup: true, platform: "linux", preCommitVerify: verify }),
+			).rejects.toThrow("Stale version at commit time")
+
+			// Retried rather than given up after one attempt.
+			expect(_backupUnlinkCalls()).toBe(3)
+			// Owned: once the filesystem lets go, a flush clears exactly that retained path.
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			await expect(flushPendingBackupRemovals()).resolves.toBe(1)
+			// The drop is still the intent, so nothing was committed and the pre-write content is
+			// still at the target path: no rename happened at all.
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("backup:true when target does not exist: no backup created, just commit", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

@@ -56,7 +56,11 @@ export interface SafeWriteTextOptions {
 	/**
 	 * When true, preserve the old-file semantics: copy the target to a backup and
 	 * fsync the copy before the commit, delete the backup after a successful commit,
-	 * and drop the backup on failure. The target is never moved, so a failed write
+	 * and on failure try to remove the backup too - the copy is of content the target
+	 * still holds, so it is clutter rather than the only copy, and it is not what a
+	 * failed write is meant to leave behind. A removal that itself fails hands the path
+	 * to the next write instead of abandoning it, so the clutter does not end up with no
+	 * owner. The target is never moved, so a failed write
 	 * leaves the pre-write content at the target path instead of rolling anything
 	 * back.  When false (default) the atomic rename simply replaces
 	 * the target -- crash-safe window is zero.
@@ -363,7 +367,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 			// -- Step 3a: pre-commit verification -------------------------
 			// Runs before the commit rename so a rejection leaves the target untouched -
-			// no backup is taken and nothing is moved yet.
+			// nothing is moved yet. The backup copy has already been made by step 3 when
+			// backup is on, and the failure path below removes it.
 			if (options?.preCommitVerify) {
 				await options.preCommitVerify(targetPath)
 			}
@@ -423,11 +428,15 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		if (backupPath && releaseBackupOnSuccess) {
 			// Nothing to restore: the backup is a copy, so the target still holds whatever
 			// the commit left there - before the commit that is the pre-write content, and
-			// after it the published content. Either way the copy has served its purpose
-			// and must not be left beside the target where no caller can find it. The old
-			// design renamed the target away and back, which could itself fail and leave
-			// persisted state missing at its expected path.
-			await fs.unlink(backupPath).catch(() => {})
+			// after it the published content. Either way the copy has served its purpose and
+			// the intent is to remove it: the target still holds what the copy holds, so a
+			// leftover is clutter rather than the only copy of anything. What must not happen
+			// is clutter with no owner - one best-effort unlink that fails leaves a backup
+			// beside the target that nothing in this module can ever find again - so the
+			// removal is retried and, if it still fails, the path goes to the pending set for
+			// a later write to finish. The old design renamed the target away and back, which
+			// could itself fail and leave persisted state missing at its expected path.
+			await _removeBackupWithRetry(backupPath)
 			backupPath = null
 		}
 
