@@ -7359,6 +7359,108 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		// Two views that each activate a profile the other pins. The snapshot step runs inside
+		// each view's own mutation queue, so it must not also take the sibling's queue: if
+		// it does, the two waits close an A-B / B-A cycle and both activations only settle once
+		// the mutation timeout fires, as "Refusing to overwrite the shared provider settings".
+		it("snapshots a sibling overlay without waiting on the sibling's mutation queue", async () => {
+			const sharedProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			// Declared before the try so its finally block can name them: a failed assertion must
+			// not leave fake timers or the instance spy behind for the rest of this file.
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const siblingPostSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			const instancesSpy = vi.spyOn(ClineProvider, "getAllInstances").mockReturnValue([provider, sibling])
+			try {
+				// Each view pins a different profile and has no apiConfiguration overlay yet: the
+				// state the snapshot filter selects on both sides.
+				await provider.saveViewState("currentApiConfigName", "profile-a")
+				await sibling.saveViewState("currentApiConfigName", "profile-b")
+				// Both pins read instantly from each view's own manager: the store is not what
+				// stalls here.
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) =>
+					"name" in params && params.name === "profile-b"
+						? {
+								name: "profile-b",
+								id: "id-b",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "b-key",
+							}
+						: {
+								name: "profile-a",
+								id: "id-a",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "a-key",
+							},
+				)
+				vi.spyOn(sibling.providerSettingsManager, "getProfile").mockImplementation(async (params) =>
+					"name" in params && params.name === "profile-a"
+						? {
+								name: "profile-a",
+								id: "id-a",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "a-key",
+							}
+						: {
+								name: "profile-b",
+								id: "id-b",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "b-key",
+							},
+				)
+				vi.useFakeTimers()
+				// The shape of an activation: each snapshot runs inside this view's own queue, and
+				// each is activating a profile the other view pins.
+				const aRun = provider["enqueueProviderProfileMutation"](async () => {
+					await provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"]("profile-a")
+				})
+				const bRun = sibling["enqueueProviderProfileMutation"](async () => {
+					await sibling["snapshotSiblingOverlaysBeforeSharedSettingsWrite"]("profile-b")
+				})
+				// Advance well past the mutation timeout. Two views that each wait on the other never
+				// settle without that clock, so this is what turns the cycle into a visible rejection
+				// instead of two promises that stay open.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
+				vi.useRealTimers()
+				await expect(aRun).resolves.toBeUndefined()
+				// The overlay holds the sibling profile record minus its name: getProfile returns
+				// { name, id, ...settings } and only name is dropped.
+				await expect(bRun).resolves.toBeUndefined()
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					id: "id-b",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "b-key",
+				})
+				expect(provider["viewLocalState"].apiConfiguration).toEqual({
+					id: "id-a",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "a-key",
+				})
+				expect(siblingPostSpy).toHaveBeenCalled()
+				expect(postSpy).toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+				instancesSpy.mockRestore()
+				postSpy.mockRestore()
+				siblingPostSpy.mockRestore()
+				await provider.dispose()
+				await sibling.dispose()
+			}
+		})
+
 		it("re-points persisted pins of closed views onto the renamed profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,

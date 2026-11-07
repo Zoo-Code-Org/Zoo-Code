@@ -3986,23 +3986,41 @@ export class ClineProvider
 					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
 						name: pinName,
 					})
-					// Commit through the sibling's own mutation queue with a pin re-check at
-					// commit time: the sibling may have activated a different profile (or
-					// gained a newer overlay) while this snapshot was in flight, and the
-					// captured settings must never land on top of a newer pin. Direct
-					// private access: compile-time safe across sibling instances.
-					await instance["enqueueProviderProfileMutation"](async () => {
-						if (
-							instance.pinnedProfileName !== pinName ||
-							instance.viewLocalState.apiConfiguration !== undefined
-						) {
-							return
-						}
-						await instance._saveViewLocalStateFromMutation({
-							apiConfiguration: settings as ProviderSettings,
-						})
-						await instance.postStateToWebview()
+					// Commit with a pin re-check at commit time: the sibling may have activated a
+					// different profile (or gained a newer overlay) while this snapshot was in flight,
+					// and the captured settings must never land on top of a newer pin. Direct private
+					// access: compile-time safe across sibling instances.
+					//
+					// The re-check and the write form one synchronous step, and no lock is taken on
+					// the sibling. This callback already runs inside this view's mutation queue, and
+					// the sibling queue is held by the sibling's own activation whenever both views
+					// activate at once, so waiting on it from here closes an A-B / B-A cycle: each
+					// activation holds its own queue and waits for the other, and both callers only
+					// settle once PENDING_OPERATION_TIMEOUT_MS fires. An apiConfiguration-only mutation
+					// is not persisted either (_persistViewLocalStateFromMutation writes mode and
+					// currentApiConfigName only), so the sibling queue was guarding nothing here.
+					if (
+						instance.pinnedProfileName !== pinName ||
+						instance.viewLocalState.apiConfiguration !== undefined
+					) {
+						return
+					}
+					instance._updateViewLocalStateFromMutation({
+						apiConfiguration: settings as ProviderSettings,
 					})
+					// The sibling's UI refresh is deliberately not awaited, and a failing post does
+					// not fail this activation: the safety purpose - pinning the sibling's settings
+					// before the shared write - is already done, and
+					// refreshViewLocalStateForUpdatedProfile treats a sibling post failure the same way.
+					instance
+						.postStateToWebview()
+						.catch((postError) =>
+							this.log(
+								`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] sibling view could not refresh: ${
+									postError instanceof Error ? postError.message : String(postError)
+								}`,
+							),
+						)
 				} catch (error) {
 					// A pin naming a deleted profile is tolerated: the deletion path re-points that
 					// view itself, and one stale view must not block every later activation. Any
