@@ -902,14 +902,16 @@ export const webviewMessageHandler = async (
 						if (typeof value === "number") {
 							const mainPercent =
 								(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
-								(getGlobalState("autoCondenseContextPercent") ?? 100)
+								getGlobalState("autoCondenseContextPercent") ??
+								100
 							newValue = clampIdleCondensePercent(value, mainPercent)
 						}
 					} else if (key === "profileIdleThresholds") {
 						if (value && typeof value === "object") {
 							const mainPercent =
 								(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
-								(getGlobalState("autoCondenseContextPercent") ?? 100)
+								getGlobalState("autoCondenseContextPercent") ??
+								100
 							newValue = Object.fromEntries(
 								Object.entries(value as Record<string, number>).map(([id, percent]) => [
 									id,

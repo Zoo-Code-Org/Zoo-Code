@@ -51,21 +51,19 @@ type CondenseStubResult = {
 	prevContextTokens: number
 }
 
-function buildTask(
-	{
-		state = baseState(),
-		contextTokens = 600,
-		modelInfo = MODEL_INFO,
-		isCurrentTask = true,
-		providerExists = true,
-	}: {
-		state?: StateStub
-		contextTokens?: number
-		modelInfo?: ModelInfo
-		isCurrentTask?: boolean
-		providerExists?: boolean
-	} = {},
-) {
+function buildTask({
+	state = baseState(),
+	contextTokens = 600,
+	modelInfo = MODEL_INFO,
+	isCurrentTask = true,
+	providerExists = true,
+}: {
+	state?: StateStub
+	contextTokens?: number
+	modelInfo?: ModelInfo
+	isCurrentTask?: boolean
+	providerExists?: boolean
+} = {}) {
 	const task = Object.create(Task.prototype) as Task
 
 	// Context window is 1_000, so contextTokens 600 => 60% full.
@@ -198,8 +196,10 @@ describe("Task idle condensing — resolveIdleCondenseTimeInSeconds", () => {
 		warn.mockRestore()
 	})
 
-	const resolve = (state: { idleCondenseTimeInSeconds?: number; profileIdleCondenseTimes?: Record<string, number> }) =>
-		buildTask().task["resolveIdleCondenseTimeInSeconds"](state, "profile-1")
+	const resolve = (state: {
+		idleCondenseTimeInSeconds?: number
+		profileIdleCondenseTimes?: Record<string, number>
+	}) => buildTask().task["resolveIdleCondenseTimeInSeconds"](state, "profile-1")
 
 	test("uses the global value when the profile has no entry", () => {
 		expect(resolve({ idleCondenseTimeInSeconds: 45 })).toBe(45)

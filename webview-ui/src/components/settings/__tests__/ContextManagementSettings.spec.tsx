@@ -478,11 +478,7 @@ describe("ContextManagementSettings", () => {
 
 		it("does not render idle condensing controls when autoCondenseContext is false", () => {
 			render(
-				<ContextManagementSettings
-					{...defaultProps}
-					autoCondenseContext={false}
-					idleCondenseContext={true}
-				/>,
+				<ContextManagementSettings {...defaultProps} autoCondenseContext={false} idleCondenseContext={true} />,
 			)
 
 			// Idle condensing is nested under auto condense: everything idle
@@ -494,11 +490,7 @@ describe("ContextManagementSettings", () => {
 
 		it("renders idle condensing controls when autoCondenseContext is enabled", () => {
 			render(
-				<ContextManagementSettings
-					{...defaultProps}
-					autoCondenseContext={true}
-					idleCondenseContext={true}
-				/>,
+				<ContextManagementSettings {...defaultProps} autoCondenseContext={true} idleCondenseContext={true} />,
 			)
 
 			expect(screen.getByTestId("idle-condense-context-checkbox")).toBeInTheDocument()
@@ -626,12 +618,7 @@ describe("ContextManagementSettings", () => {
 		})
 
 		it("keeps the idle slider max at 100 regardless of the main threshold", () => {
-			render(
-				<ContextManagementSettings
-					{...idleProps}
-					autoCondenseContextPercent={40}
-				/>,
-			)
+			render(<ContextManagementSettings {...idleProps} autoCondenseContextPercent={40} />)
 
 			const slider = screen.getByTestId("idle-condense-threshold-slider")
 			expect(slider).toHaveAttribute("max", "100")

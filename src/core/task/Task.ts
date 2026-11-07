@@ -2728,10 +2728,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private armIdleCondenseTimeout(seconds: number): void {
 		this.cancelIdleCondenseTimer()
-		this.idleCondenseTimeoutRef = setTimeout(() => {
-			this.idleCondenseTimeoutRef = undefined
-			void this.onIdleCondenseTimerFired()
-		}, Math.max(0, seconds) * 1000)
+		this.idleCondenseTimeoutRef = setTimeout(
+			() => {
+				this.idleCondenseTimeoutRef = undefined
+				void this.onIdleCondenseTimerFired()
+			},
+			Math.max(0, seconds) * 1000,
+		)
 	}
 
 	/**
