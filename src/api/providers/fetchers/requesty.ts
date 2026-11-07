@@ -8,8 +8,10 @@ import { toRequestyServiceUrl } from "../../../shared/utils/requesty"
 import { mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
 
 // Bounded wall-clock limit for the models discovery request. Without it a hung connection
-// would keep the request alive indefinitely; 10_000 ms matches the other in-tree axios
-// fetchers (kenari, opencode-go, nanogpt).
+// would keep the request alive indefinitely. The 10_000 ms figure matches the two
+// in-tree fetchers that bound the same call: io-intelligence.ts (axios timeout: 10_000) and
+// kimi-code.ts (KIMI_CODE_MODELS_TIMEOUT_MS = 10_000). kenari, opencode-go and nanogpt do not
+// bound this call at all, so they are not the precedent.// fetchers (kenari, opencode-go, nanogpt).
 const REQUESTY_MODELS_TIMEOUT_MS = 10_000
 
 export async function getRequestyModels(
