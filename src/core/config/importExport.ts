@@ -100,11 +100,10 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
 
-		// Per-view selection state is machine-local: it round-trips through the normal
-		// runtime and pruning paths, but importing it would pin selections from another
-		// machine's views on this one. Consult the shared non-portable list rather than
-		// the key name, so this filter cannot drift from the export schema and the API
-		// writes that consult the same list.
+		// Machine-local state is not portable between settings files: it round-trips through
+		// the normal runtime and pruning paths, but importing it would pin the view selections
+		// of another machine onto this one. The shared filter is the list the API surface consults
+		// too, so a key added there is skipped here without a second edit.
 		if (isNonPortableSettingsKey(key)) {
 			continue
 		}
