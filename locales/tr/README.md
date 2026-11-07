@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.92.0'daki Yenilikler
+## v3.96.0'daki Yenilikler
 
-- ✨ **Daha hızlı model seçimi ve daha güçlü model desteği:** Modelleri sohbet yazma alanından değiştir. Amazon Bedrock'ta Claude Haiku 5.5 kullan, OpenRouter'da Kimi K3'ün daha doğru özelliklerinden yararlan ve Vercel AI Gateway'deki düzeltilmiş Gemini 4 Argon sınırlarını kullan.
-- 🧭 **Daha güvenilir terminal, düzenleme, sohbet ve uzak çalışma akışları:** İstediğinde komut çıktısını varsayılan olarak daralt, düzenleme hatalarını daha net gör, akıl yürütme ve API satırlarını görünür tut ve uzak çalışma alanlarındaki başlangıç ve proxy sorunlarından kaçın.
-- 🔌 **Genişletilmiş MCP marketplace:** Zoo Code'u MCP marketplace üzerinden AnySearch, Mailtea ve Tradehand'e bağla.
+- ✨ **Yeni sohbet ayarları ve tanılama:** Yapılandırılabilir saat ve tarih biçimleriyle mesaj zaman damgalarını göster, Anthropic profilleri için prompt-cache TTL'sini ayarla ve gizliliği koruyan tanılama raporları oluştur.
+- 💸 **Daha doğru sağlayıcı maliyetleri ve önbellekleme:** Anthropic araç sonuçlarını olduğu gibi korur, Anthropic ve MiniMax maliyetlerine kümülatif çıktı token'larını dahil eder, DeepSeek prompt-cache sayaçlarını okur, xAI Responses önbelleğini hedefler ve Mistral önbellek okumalarını 0,1x ile faturalandırır.
+- 🧭 **Daha güvenilir ve hızlı sohbetler:** Yeniden başlatmanın ardından tamamlanan görevleri sürdür, kaydedilen commit eksikse checkpoint'i geri yükle, yanıt vermeyen webview oluşturucusunu otomatik olarak yeniden yükle, akış güncellemelerini kısıtla ve dilleri talep üzerine yükle.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

@@ -15,7 +15,7 @@ export type Divergence = {
 	mismatched: Array<keyof RunStateFields>
 }
 
-export const ROUTED_FIELDS: ReadonlyArray<keyof RunStateFields> = ["abort", "abandoned", "abortReason", "isInitialized"]
+export const ROUTED_FIELDS: ReadonlyArray<keyof RunStateFields> = ["abandoned", "isInitialized"]
 
 export type KnownRace = { id: RaceId; matches: (divergence: Divergence) => boolean }
 

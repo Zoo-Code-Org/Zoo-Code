@@ -1,7 +1,9 @@
 // npx vitest src/components/ui/hooks/__tests__/useSelectedModel.spec.ts
 
 import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClientProvider } from "@tanstack/react-query"
+
+import { createTestQueryClient } from "@/utils/test-utils"
 import { renderHook } from "@testing-library/react"
 import type { Mock } from "vitest"
 
@@ -101,13 +103,7 @@ const createLocalModelsResult = (
 ): ReturnType<typeof useLmStudioModels> => createQueryResult(data, options) as ReturnType<typeof useLmStudioModels>
 
 const createWrapper = () => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: {
-				retry: false,
-			},
-		},
-	})
+	const queryClient = createTestQueryClient()
 	return ({ children }: { children: React.ReactNode }) =>
 		React.createElement(QueryClientProvider, { client: queryClient }, children)
 }
@@ -1787,25 +1783,59 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.supportsImages).toBeUndefined()
 		})
 
-		it.each(["claude-opus-4.8", "claude-opus-5", "gemini-3.6-flash"] as const)(
-			"pins %s to the 197897 input ceiling, not its advertised window",
-			(family) => {
-				const apiConfiguration: ProviderSettings = {
-					apiProvider: providerIdentifiers.vscodeLm,
-					vsCodeLmModelSelector: { vendor: "copilot", family },
-				}
+		it.each([
+			["claude-opus-4.8", 197897],
+			["claude-opus-5.5", 677108],
+			["claude-opus-5", 680456],
+			["gpt-6-astra", 266789],
+			["claude-sonnet-5.5", 680552],
+			["claude-haiku-5.5", 99784],
+			["grok-4.7", 199751],
+			["gemini-4-argon", 953064],
+			["vscModelF", 921736],
+			["oswe-vscode-modelD", 127783],
+			["gpt-6.1-sol", 269903],
+			["gpt-5.6-sol-fast", 269903],
+			["gpt-6.1-terra", 269123],
+			["gpt-6-luna", 269122],
+			["gpt-6-sol", 269122],
+			["claude-fable-5.1", 660686],
+			["claude-fable-5", 658785],
+			["claude-fable-5.5", 660686],
+			["grok-4.5", 199783],
+			["grok-4.6", 199784],
+			["gemini-3.7-flash", 935783],
+			["gemini-3.8-flash", 955113],
+			["gemini-3.6-flash", 935785],
+		] as const)("pins %s to the %s assigned input budget, not its advertised window", (family, expected) => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.vscodeLm,
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
 
-				const wrapper = createWrapper()
-				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-				expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
-				expect(result.current.id).toBe(`copilot/${family}`)
-				expect(result.current.info?.contextWindow).toBe(197897)
-				expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
-				expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
-				expect(result.current.info?.supportsImages).toBeUndefined()
-			},
-		)
+			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
+			expect(result.current.id).toBe(`copilot/${family}`)
+			expect(result.current.info?.contextWindow).toBe(expected)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
+			expect(result.current.info?.supportsImages).toBeUndefined()
+		})
+
+		it.each(["copilot", "some-other-vendor"])("uses the same measured budget for vendor %s", (vendor) => {
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.vscodeLm,
+						vsCodeLmModelSelector: { vendor, family: "gpt-6-astra" },
+					}),
+				{ wrapper: createWrapper() },
+			)
+			expect(result.current.info?.contextWindow).toBe(266789)
+			expect(result.current.id).toBe(`${vendor}/gpt-6-astra`)
+		})
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
@@ -1825,7 +1855,9 @@ describe("useSelectedModel", () => {
 
 	describe("friendli provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {}, friendli: {} }),
+			)
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1859,6 +1891,82 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+
+		it("should use static model info before router models load", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+			const apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.friendli }
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should prefer fetched router model info", () => {
+			const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: { "vendor/new-model": info } }))
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "vendor/new-model",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("vendor/new-model")
+			expect(result.current.info).toEqual(info)
+		})
+
+		it("should use the default model for an empty model ID", () => {
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should use fetched metadata for the default model when the model ID is empty", () => {
+			const info = { maxTokens: 8192, contextWindow: 123_456, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ friendli: { [friendliDefaultModelId]: info } }),
+			)
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toBe(info)
+		})
+
+		it.each(["toString", "constructor", "__proto__", "vendor/unknown"])(
+			"should use sane defaults, not an inherited member, for %s missing from both catalogs",
+			(apiModelId) => {
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe(apiModelId)
+				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+			},
+		)
+
+		it("should resolve a fetched model whose upstream ID is __proto__", () => {
+			const info = { contextWindow: 1000, supportsPromptCache: false }
+			const fetched: Record<string, ModelInfo> = Object.create(null)
+			fetched["__proto__"] = info
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: fetched }))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "__proto__" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info).toBe(info)
 		})
 	})
 
