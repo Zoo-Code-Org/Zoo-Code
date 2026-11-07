@@ -1,21 +1,49 @@
-import { render, screen } from "@/utils/test-utils"
-import { describe, expect, test, vi } from "vitest"
+import { render, screen, fireEvent } from "@/utils/test-utils"
+import { describe, expect, test, vi, beforeEach } from "vitest"
 
 import { AutoApproveDropdown } from "../AutoApproveDropdown"
 
-vi.mock("@/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
+const mocks = vi.hoisted(() => ({
+	postMessage: vi.fn(),
+	setAutoApprovalEnabled: vi.fn(),
+	setAlwaysAllowReadOnly: vi.fn(),
+	setAlwaysAllowWrite: vi.fn(),
+	setAlwaysAllowExecute: vi.fn(),
+	setAlwaysAllowMcp: vi.fn(),
+	setAlwaysAllowModeSwitch: vi.fn(),
+	setAlwaysAllowSubtasks: vi.fn(),
+	setAlwaysAllowWebFetch: vi.fn(),
+	setAlwaysAllowFollowupQuestions: vi.fn(),
+	state: {
+		autoApprovalEnabled: false as boolean | undefined,
+	},
+	toggles: {
+		alwaysAllowReadOnly: false,
+		alwaysAllowWrite: false,
+		alwaysAllowExecute: false,
+		alwaysAllowMcp: false,
+		alwaysAllowModeSwitch: false,
+		alwaysAllowSubtasks: false,
+		alwaysAllowWebFetch: false,
+		alwaysAllowFollowupQuestions: false,
+	} as Record<string, boolean | undefined>,
+	effectiveAutoApprovalEnabled: false,
+}))
+
+vi.mock("@/utils/vscode", () => ({ vscode: { postMessage: mocks.postMessage } }))
 
 vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
-		autoApprovalEnabled: false,
-		setAutoApprovalEnabled: vi.fn(),
-		setAlwaysAllowReadOnly: vi.fn(),
-		setAlwaysAllowWrite: vi.fn(),
-		setAlwaysAllowExecute: vi.fn(),
-		setAlwaysAllowMcp: vi.fn(),
-		setAlwaysAllowModeSwitch: vi.fn(),
-		setAlwaysAllowSubtasks: vi.fn(),
-		setAlwaysAllowFollowupQuestions: vi.fn(),
+		autoApprovalEnabled: mocks.state.autoApprovalEnabled,
+		setAutoApprovalEnabled: mocks.setAutoApprovalEnabled,
+		setAlwaysAllowReadOnly: mocks.setAlwaysAllowReadOnly,
+		setAlwaysAllowWrite: mocks.setAlwaysAllowWrite,
+		setAlwaysAllowExecute: mocks.setAlwaysAllowExecute,
+		setAlwaysAllowMcp: mocks.setAlwaysAllowMcp,
+		setAlwaysAllowModeSwitch: mocks.setAlwaysAllowModeSwitch,
+		setAlwaysAllowSubtasks: mocks.setAlwaysAllowSubtasks,
+		setAlwaysAllowWebFetch: mocks.setAlwaysAllowWebFetch,
+		setAlwaysAllowFollowupQuestions: mocks.setAlwaysAllowFollowupQuestions,
 	}),
 }))
 
@@ -24,19 +52,11 @@ vi.mock("@/i18n/TranslationContext", () => ({
 }))
 
 vi.mock("@/hooks/useAutoApprovalToggles", () => ({
-	useAutoApprovalToggles: () => ({
-		alwaysAllowReadOnly: false,
-		alwaysAllowWrite: false,
-		alwaysAllowExecute: false,
-		alwaysAllowMcp: false,
-		alwaysAllowModeSwitch: false,
-		alwaysAllowSubtasks: false,
-		alwaysAllowFollowupQuestions: false,
-	}),
+	useAutoApprovalToggles: () => mocks.toggles,
 }))
 
 vi.mock("@/hooks/useAutoApprovalState", () => ({
-	useAutoApprovalState: () => ({ effectiveAutoApprovalEnabled: false }),
+	useAutoApprovalState: () => ({ effectiveAutoApprovalEnabled: mocks.effectiveAutoApprovalEnabled }),
 }))
 
 vi.mock("@/components/ui/hooks/useRooPortal", () => ({
@@ -44,6 +64,13 @@ vi.mock("@/components/ui/hooks/useRooPortal", () => ({
 }))
 
 describe("AutoApproveDropdown", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mocks.state.autoApprovalEnabled = false
+		mocks.effectiveAutoApprovalEnabled = false
+		mocks.toggles.alwaysAllowWebFetch = false
+	})
+
 	test("enables the trigger by default", () => {
 		render(<AutoApproveDropdown />)
 
@@ -54,5 +81,25 @@ describe("AutoApproveDropdown", () => {
 		render(<AutoApproveDropdown disabled />)
 
 		expect(screen.getByTestId("auto-approve-dropdown-trigger")).toBeDisabled()
+	})
+
+	test("toggles web fetch auto-approval from the dropdown", () => {
+		mocks.effectiveAutoApprovalEnabled = true
+
+		render(<AutoApproveDropdown />)
+
+		fireEvent.click(screen.getByTestId("auto-approve-dropdown-trigger"))
+
+		const webFetchButton = screen.getByTestId("auto-approve-alwaysAllowWebFetch")
+		expect(webFetchButton).toBeEnabled()
+
+		fireEvent.click(webFetchButton)
+
+		expect(mocks.postMessage).toHaveBeenCalledWith({
+			type: "updateSettings",
+			updatedSettings: { alwaysAllowWebFetch: true },
+		})
+		expect(mocks.setAlwaysAllowWebFetch).toHaveBeenCalledWith(true)
+		expect(mocks.setAlwaysAllowWebFetch).toHaveBeenCalledTimes(1)
 	})
 })

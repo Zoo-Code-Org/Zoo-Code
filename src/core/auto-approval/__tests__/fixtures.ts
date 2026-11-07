@@ -42,6 +42,7 @@ export const baseState: State = {
 	alwaysAllowMcp: false,
 	alwaysAllowModeSwitch: false,
 	alwaysAllowSubtasks: false,
+	alwaysAllowWebFetch: false,
 	alwaysAllowExecute: false,
 	alwaysAllowFollowupQuestions: false,
 	destructiveCommandGuardEnabled: false,

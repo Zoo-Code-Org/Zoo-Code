@@ -297,6 +297,7 @@ export type ExtensionState = Pick<
 	| "alwaysAllowMcp"
 	| "alwaysAllowModeSwitch"
 	| "alwaysAllowSubtasks"
+	| "alwaysAllowWebFetch"
 	| "alwaysAllowFollowupQuestions"
 	| "alwaysAllowExecute"
 	| "destructiveCommandGuardEnabled"
@@ -915,6 +916,8 @@ export interface ClineSayTool {
 		| "runSlashCommand"
 		| "updateTodoList"
 		| "skill"
+		| "fetchWebContent"
+	url?: string
 	path?: string
 	// For readCommandOutput
 	readStart?: number
