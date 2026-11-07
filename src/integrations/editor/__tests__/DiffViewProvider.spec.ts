@@ -326,10 +326,14 @@ describe("DiffViewProvider", () => {
 				vi.mocked(vscode.window.showTextDocument).mockRejectedValue(reason)
 
 				// Mock workspace.onDidOpenTextDocument
-				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
+				const disposeOpenDocument = vi.fn()
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: disposeOpenDocument })
 
 				// Mock window.onDidChangeVisibleTextEditors
-				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				const disposeVisibleEditors = vi.fn()
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({
+					dispose: disposeVisibleEditors,
+				})
 
 				// Set up for file
 				diffViewProvider.editType = "modify"
@@ -338,6 +342,8 @@ describe("DiffViewProvider", () => {
 				await expect(diffViewProvider.open("test.md")).rejects.toThrow(
 					"Failed to execute diff command for /mock/cwd/test.md: Cannot open file",
 				)
+				expect(disposeOpenDocument).toHaveBeenCalledOnce()
+				expect(disposeVisibleEditors).toHaveBeenCalledOnce()
 			},
 		)
 

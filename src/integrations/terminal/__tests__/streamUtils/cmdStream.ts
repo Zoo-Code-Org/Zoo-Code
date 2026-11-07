@@ -1,6 +1,6 @@
 // streamUtils/cmdStream.ts
 import { execSync } from "child_process"
-import { CommandStream } from "./index"
+import type { CommandStream, SyncExecError } from "./index"
 
 /**
  * Creates a stream with real command output using CMD
@@ -24,8 +24,7 @@ export function createCmdCommandStream(command: string): CommandStream {
 		exitCode = 0 // Command succeeded
 	} catch (error) {
 		// Command failed - get output and exit code from error
-		// execSync failures carry stdout plus an ExecException shape (signal/status).
-		const execError = error as import("child_process").ExecException & { status?: number | null; stdout?: string }
+		const execError = error as SyncExecError
 		realOutput = execError.stdout?.toString() || ""
 		exitCode = execError.status ?? 1
 	}

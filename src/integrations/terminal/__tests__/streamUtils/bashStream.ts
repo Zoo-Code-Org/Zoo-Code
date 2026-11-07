@@ -1,13 +1,6 @@
 // streamUtils/bashStream.ts
 import { execSync } from "child_process"
-import { CommandStream } from "./index"
-
-// execSync failures carry stdout plus an ExecException shape (signal/status).
-type SyncExecError = import("child_process").ExecException & {
-	status?: number | null
-	stdout?: string
-	stderr?: string
-}
+import type { CommandStream, SyncExecError } from "./index"
 
 /**
  * Creates a stream with real command output using Bash
@@ -27,7 +20,8 @@ export function createBashCommandStream(command: string): CommandStream {
 		})
 		exitCode = 0 // Command succeeded
 	} catch (error) {
-		const { signal, stdout } = error as SyncExecError
+		const execError = error as SyncExecError
+		const { signal, stdout } = execError
 		// Command failed - get output and exit code from error
 		realOutput = stdout?.toString() || ""
 
@@ -48,7 +42,7 @@ export function createBashCommandStream(command: string): CommandStream {
 				exitCode = 1
 			}
 		} else {
-			exitCode = error.status ?? 1 // Use status if available, default to 1
+			exitCode = execError.status ?? 1 // Use status if available, default to 1
 		}
 	}
 

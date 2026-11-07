@@ -131,7 +131,7 @@ export function mergeJson(
 					copyOfFirst[key] = [...firstValue, ...secondValue]
 				}
 			} else if (typeof secondValue === "object" && typeof firstValue === "object") {
-				// Object; free-form JSON values are plain objects here
+				// typeof also admits null and arrays; merge failures fall back in the catch below.
 				copyOfFirst[key] = mergeJson(firstValue as JsonObject, secondValue as JsonObject, mergeBehavior)
 			} else {
 				// Other (boolean, number, string)

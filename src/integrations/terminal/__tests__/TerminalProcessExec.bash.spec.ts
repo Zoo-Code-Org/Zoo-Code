@@ -2,6 +2,7 @@
 
 import * as vscode from "vscode"
 import { execSync } from "child_process"
+import type { SyncExecError } from "./streamUtils"
 
 import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
@@ -75,7 +76,7 @@ function createRealCommandStream(command: string): { stream: AsyncIterable<strin
 		exitCode = 0 // Command succeeded
 	} catch (error) {
 		// execSync failures carry stdout plus an ExecException shape (signal/status).
-		const execError = error as import("child_process").ExecException & { status?: number | null; stdout?: string }
+		const execError = error as SyncExecError
 		// Command failed - get output and exit code from error
 		realOutput = execError.stdout?.toString() || ""
 
@@ -92,11 +93,11 @@ function createRealCommandStream(command: string): { stream: AsyncIterable<strin
 				exitCode = 128 + signalNum // Signal exit codes are 128 + signal number
 			} else {
 				// Log error and default to 1 if signal not recognized
-				console.log(`[DEBUG] Unrecognized signal '${error.signal}' from command '${command}'`)
+				console.log(`[DEBUG] Unrecognized signal '${execError.signal}' from command '${command}'`)
 				exitCode = 1
 			}
 		} else {
-			exitCode = error.status ?? 1 // Use status if available, default to 1
+			exitCode = execError.status ?? 1 // Use status if available, default to 1
 		}
 	}
 

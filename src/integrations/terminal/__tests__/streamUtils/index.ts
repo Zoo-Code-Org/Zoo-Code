@@ -10,6 +10,13 @@ import {
 	createChunkedMockStream,
 } from "./mockStream"
 
+// execSync failures include output and exit status in addition to ExecException fields.
+export type SyncExecError = import("child_process").ExecException & {
+	status?: number | null
+	stdout?: string
+	stderr?: string
+}
+
 /**
  * Common interface for all command streams
  */
