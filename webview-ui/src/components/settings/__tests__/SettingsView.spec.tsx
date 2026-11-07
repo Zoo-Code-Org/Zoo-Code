@@ -8,6 +8,7 @@ import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
+import { saveAndConfirm } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
@@ -504,6 +505,85 @@ describe("SettingsView - Sound Settings", () => {
 				updatedSettings: expect.objectContaining({ chatFontSize: null }),
 			}),
 		)
+	})
+
+	const appearanceKeys = ["interfaceFontScale", "terminalFontSize", "editorFontSize", "spacingScale"] as const
+	const savedUpdates = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map(
+				([message]) =>
+					message as { type?: string; requestId?: string; updatedSettings?: Record<string, unknown> },
+			)
+			.filter((message) => message.type === "updateSettings")
+
+	it("saves the four appearance values that were changed", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+		activateTab("ui")
+
+		const values = {
+			interfaceFontScale: 120,
+			terminalFontSize: 14,
+			editorFontSize: 15,
+			spacingScale: 80,
+		}
+		for (const [key, value] of Object.entries(values)) {
+			const input = within(getSettingsContent()).getByTestId(`appearance-${key}-input`)
+			fireEvent.change(input, { target: { value: String(value) } })
+			fireEvent.blur(input)
+		}
+		saveAndConfirm(vi.mocked(vscode.postMessage))
+
+		expect(savedUpdates().at(-1)?.updatedSettings).toMatchObject(values)
+	})
+
+	it("persists null for each appearance value that was reset", () => {
+		const values = { interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 }
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, { state: values })
+		const getSettingsContent = () => screen.getByTestId("settings-content")
+
+		for (const key of appearanceKeys) {
+			fireEvent.click(within(getSettingsContent()).getByTestId(`appearance-${key}-reset`))
+		}
+		saveAndConfirm(vi.mocked(vscode.postMessage))
+
+		expect(savedUpdates().at(-1)?.updatedSettings).toMatchObject({
+			interfaceFontScale: null,
+			terminalFontSize: null,
+			editorFontSize: null,
+			spacingScale: null,
+		})
+	})
+
+	it("sends only the appearance values this form changed", () => {
+		const values = { interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 }
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, { state: values })
+		const getSettingsContent = () => screen.getByTestId("settings-content")
+
+		const input = within(getSettingsContent()).getByTestId("appearance-terminalFontSize-input")
+		expect((input as HTMLInputElement).value).toBe("14") // the saved value is what the form starts from
+		fireEvent.change(input, { target: { value: "16" } })
+		fireEvent.blur(input)
+		saveAndConfirm(vi.mocked(vscode.postMessage))
+
+		const sent = savedUpdates().at(-1)?.updatedSettings ?? {}
+		expect(sent.terminalFontSize).toBe(16)
+		for (const key of appearanceKeys.filter((k) => k !== "terminalFontSize")) {
+			expect(sent).not.toHaveProperty(key)
+		}
+	})
+
+	it("sends none of the appearance values, and asks for no acknowledgement, when the save changes none", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="notifications" />, {
+			state: { interfaceFontScale: 120 },
+		})
+		fireEvent.click(within(screen.getByTestId("settings-content")).getByTestId("sound-enabled-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button")) // no acknowledgement is asked for
+
+		const save = savedUpdates().at(-1)
+		expect(save).toBeDefined()
+		for (const key of appearanceKeys) expect(save?.updatedSettings).not.toHaveProperty(key)
+		expect(save?.requestId).toBeUndefined()
 	})
 
 	describe("time and date settings", () => {

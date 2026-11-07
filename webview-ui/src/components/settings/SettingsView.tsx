@@ -6,6 +6,7 @@ import React, {
 	useLayoutEffect,
 	useMemo,
 	useRef,
+	useReducer,
 	useState,
 } from "react"
 import {
@@ -15,7 +16,6 @@ import {
 	Database,
 	SquareTerminal,
 	FlaskConical,
-	TriangleAlert,
 	Globe,
 	Info,
 	MessageSquare,
@@ -43,28 +43,16 @@ import {
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
+import { APPEARANCE_SETTINGS, type AppearanceKey } from "@src/utils/appearance"
+import { useLatestRef } from "@src/hooks/useLatestRef"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ExtensionStateContextType, useExtensionState } from "@src/context/ExtensionStateContext"
-import {
-	AlertDialog,
-	AlertDialogContent,
-	AlertDialogTitle,
-	AlertDialogDescription,
-	AlertDialogCancel,
-	AlertDialogAction,
-	AlertDialogHeader,
-	AlertDialogFooter,
-	Button,
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-	StandardTooltip,
-} from "@src/components/ui"
+import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, StandardTooltip } from "@src/components/ui"
 
 import { Tab, TabContent, TabHeader, TabList, TabTrigger } from "../common/Tab"
 import { SetCachedStateField, SetExperimentEnabled } from "./types"
+import { UnsavedChangesDialog } from "./UnsavedChangesDialog"
 import { SectionHeader } from "./SectionHeader"
 import ApiConfigManager from "./ApiConfigManager"
 import ApiOptions from "./ApiOptions"
@@ -82,19 +70,12 @@ import { SlashCommandsSettings } from "./SlashCommandsSettings"
 import { SkillsSettings } from "./SkillsSettings"
 import { RulesSettings } from "./RulesSettings"
 import { UISettings } from "./UISettings"
+import { nextSaveRequestId } from "./saveRequestId"
 import ModesView from "../modes/ModesView"
 import McpView from "../mcp/McpView"
 import { WorktreesView } from "../worktrees/WorktreesView"
 import { SettingsSearch } from "./SettingsSearch"
 import { useSearchIndexRegistry, SearchIndexProvider } from "./useSettingsSearch"
-import { nextSaveRequestId } from "./saveRequestId"
-
-/**
- * How long the form waits for the host to answer a save that changes a time or date setting. The host always answers
- * (success or failure), but a write that never settles would otherwise leave Save disabled until the webview reloads.
- * After this the save is treated as failed: the edits stay unsaved and Save works again.
- */
-export const SAVE_ANSWER_TIMEOUT_MS = 20_000
 
 export const settingsTabsContainer = "flex flex-1 overflow-hidden [&.narrow_.tab-label]:hidden"
 export const settingsTabList =
@@ -106,6 +87,25 @@ export const settingsTabTriggerActive = "opacity-100 border-vscode-focusBorder b
 export interface SettingsViewRef {
 	checkUnsaveChanges: (then: () => void) => void
 }
+
+/**
+ * How long the form waits for the host to answer a save that changes an appearance value, or a time or date value.
+ * The host always answers (success or failure), but a write that never settles would otherwise leave the form locked
+ * until the webview reloads. After this the outcome of the save is unknown, not failed: the edits stay, Save and Done
+ * work again, and the save is kept (`timedOutSaves`) because the host may still store it. If its answer comes later, a
+ * success is reconciled with the form (the stored values are what it compares with from then on, and the values the
+ * user is not editing take them) and a failure changes nothing. Until then, leaving the page warns that the save may
+ * still complete.
+ */
+export const SAVE_ANSWER_TIMEOUT_MS = 20_000
+
+/**
+ * How long, and how many, saves that were not answered are kept. A host that has not answered after this long is not
+ * going to: the save is forgotten (its late answer is ignored, and the warning that it may still complete goes away).
+ * The oldest is dropped beyond the limit, so a view that stays open cannot collect them without end.
+ */
+export const TIMED_OUT_SAVE_KEEP_MS = 10 * 60_000
+export const MAX_TIMED_OUT_SAVES = 10
 
 export const sectionNames = [
 	"providers",
@@ -138,10 +138,66 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
+	const {
+		currentApiConfigName,
+		listApiConfigMeta,
+		uriScheme,
+		settingsImportedAt,
+		settingsImportRefreshedAt,
+		settingsImportStoredKeys,
+		settingsImportRefreshIsLate,
+		mode,
+	} = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
-	const [isChangeDetected, setChangeDetected] = useState(false)
+	// Whether the form has unsaved changes, and how many changes the user has made in all. The count only goes up: a
+	// save remembers the count it was made at, to tell whether the user edited again while it was in flight, and a
+	// reset of the flag (an import, a profile switch) must not make a later edit look like no edit. (Not the identity
+	// of the state object: an automatic update of the state that is no edit, such as a settings page initialising
+	// itself, replaces that object too.)
+	const [{ count: changeCount, changed: isChangeDetected }, setChangeDetected] = useReducer(
+		(state: { count: number; changed: boolean }, changed: boolean) => ({
+			count: changed ? state.count + 1 : state.count,
+			changed,
+		}),
+		{ count: 0, changed: false },
+	)
+	// The save currently waiting for the host's answer. The "unsaved changes" flag stays on until it succeeds.
+	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
+	const pendingSaveChangeCount = useRef(0)
+	// Appearance values that a successful save stored, until the live state shows them. The host reports a success even
+	// if refreshing the state failed afterwards, and then the live state is stale: comparing with it alone would take
+	// a later reset to the old value for "nothing changed" and not send it.
+	const appearanceSaved = useRef<Record<string, number | null>>({})
+	// Saves that were not answered in time. Their outcome is unknown: the host may still store them.
+	const timedOutSaves = useRef(
+		new Map<
+			string,
+			{
+				sent: Record<string, number | null>
+				changeCount: number
+				expiry: ReturnType<typeof setTimeout>
+			}
+		>(),
+	)
+	// Nothing outlives the view: its timers are cleared, and what it kept is let go.
+	useEffect(() => {
+		const saves = timedOutSaves.current
+		return () => {
+			for (const { expiry } of saves.values()) clearTimeout(expiry)
+			saves.clear()
+		}
+	}, [])
+	const [saveOutcomeUnknown, setSaveOutcomeUnknown] = useState(false)
+	// The appearance values this form has edited. A value that only differs from the live state because the live state
+	// changed (another webview, a reset from the host) is not an edit and is never sent. A ref, not state: it is read
+	// when saving and needs no render of its own.
+	const editedAppearance = useRef(new Set<AppearanceKey>())
+	// What the pending save sent for each appearance value, to tell which edits it has saved when it succeeds.
+	const pendingAppearanceSent = useRef<Record<string, number | null>>({})
+	// A request to leave the form (a tab switch, a command from the host) that came in while a save was pending. It is
+	// asked again, through the same unsaved-changes check, once the save has settled.
+	const heldNavigation = useRef<(() => void) | undefined>(undefined)
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
@@ -160,12 +216,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
-	// The save waiting for the host's answer, and the form state it sent. The "unsaved changes" flag stays on until the
-	// host says it was stored, and then goes off only if the user has not edited anything since.
-	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
-	const sentState = useRef<typeof extensionState | undefined>(undefined)
-	const latestCachedState = useRef(cachedState)
-	latestCachedState.current = cachedState
+	// What the save results are compared with: the latest commit, not the one before it (see `useLatestRef`).
+	const latestCachedState = useLatestRef(cachedState)
+	const latestChangeCount = useLatestRef(changeCount)
 
 	const {
 		alwaysAllowReadOnly,
@@ -228,6 +281,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		openRouterImageGenerationSelectedModel,
 		reasoningBlockCollapsed,
 		chatFontSize,
+		interfaceFontScale,
+		terminalFontSize,
+		editorFontSize,
+		spacingScale,
 		timeFormat,
 		dateFormat,
 		showRelativeTimes,
@@ -252,6 +309,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
+		editedAppearance.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -263,8 +321,56 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledSettingsImportedAt.current = settingsImportedAt
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+		editedAppearance.current.clear()
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
+
+	// An import that failed part of the way stored some of its settings: the form takes the values that changed with the
+	// state that follows it, and keeps every other value as it is, with the edits made to them (unlike after an import
+	// that succeeded, which replaces the form).
+	const handledImportRefreshAt = useRef<number | undefined>(undefined)
+	const liveStateBefore = useRef(extensionState)
+	useEffect(() => {
+		const before = liveStateBefore.current
+		liveStateBefore.current = extensionState
+		if (!settingsImportRefreshedAt || handledImportRefreshAt.current === settingsImportRefreshedAt) {
+			return
+		}
+
+		handledImportRefreshAt.current = settingsImportRefreshedAt
+		const stored: Record<string, unknown> = {}
+		// A late refresh (a rollback that finished after the import was answered) corrects the value the form took then:
+		// a setting that the form no longer shows as the live state did before it was edited since, and its edit stays.
+		const editedSince = (key: string) =>
+			settingsImportRefreshIsLate === true &&
+			JSON.stringify(latestCachedState.current[key as keyof typeof before]) !==
+				JSON.stringify(before[key as keyof typeof before])
+		// The settings the import says it stored are taken whatever they were before: the live state may have been stale
+		// (a save that was stored while its state refresh failed), so a value that looks unchanged may still differ from the
+		// form, and what a save stored is no longer what is stored.
+		for (const key of settingsImportStoredKeys ?? []) {
+			if (editedSince(key)) continue
+			stored[key] = extensionState[key as keyof typeof extensionState]
+			delete appearanceSaved.current[key]
+		}
+		for (const [key, value] of Object.entries(extensionState)) {
+			// Compared by value: the host builds new arrays and objects for every state it posts.
+			if (
+				key !== "settingsImportRefreshedAt" &&
+				!editedSince(key) &&
+				JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(value)
+			) {
+				stored[key] = value
+			}
+		}
+		setCachedState((prevCachedState) => ({ ...prevCachedState, ...stored }))
+	}, [
+		settingsImportRefreshedAt,
+		settingsImportStoredKeys,
+		settingsImportRefreshIsLate,
+		extensionState,
+		latestCachedState,
+	])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
@@ -272,6 +378,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
+			if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
 			setChangeDetected(true)
 			return { ...prevState, [field]: value }
 		})
@@ -397,8 +504,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const isSettingValid = !errorMessage
 
+	// What the form compares an appearance value with: what a save stored, if the live state has not caught up yet.
+	const savedAppearanceValue = (key: AppearanceKey) =>
+		key in appearanceSaved.current ? appearanceSaved.current[key] : extensionState[key]
+
 	// The time and date values are written one at a time on the host, and a write can fail: a save that changes one of
-	// them waits for the host's answer. Every other save behaves as it always did.
+	// them waits for the host's answer too.
 	const displayChanged =
 		(cachedState.timeFormat ?? "auto") !== (extensionState.timeFormat ?? "auto") ||
 		(cachedState.dateFormat ?? "auto") !== (extensionState.dateFormat ?? "auto") ||
@@ -406,12 +517,32 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
-			const saveId = displayChanged ? nextSaveRequestId() : undefined
+			// Only a save that changes an appearance value, or a time or date value, waits for the host's answer: the
+			// appearance values are saved all-or-nothing, and a failed save has to keep the edits. Every other save
+			// behaves as it always did.
+			// Only the appearance values this form changed are sent, and null (not undefined) for a reset so it
+			// survives JSON and clears the stored value. A save that changes none sends none of them, so it neither
+			// waits for the host nor puts an appearance value into the host's all-or-nothing save.
+			// A value whose earlier save was not answered is sent whatever it equals: that save may still store its value.
+			const unresolved = new Set([...timedOutSaves.current.values()].flatMap(({ sent }) => Object.keys(sent)))
+			const changedAppearance: Record<string, number | null> = Object.fromEntries(
+				[...editedAppearance.current]
+					.filter(
+						(key) =>
+							unresolved.has(key) || (cachedState[key] ?? null) !== (savedAppearanceValue(key) ?? null),
+					)
+					.map((key) => [key, cachedState[key] ?? null]),
+			)
+			const appearanceEdited = Object.keys(changedAppearance).length > 0
+			const saveId = appearanceEdited || displayChanged ? nextSaveRequestId() : undefined
 			if (saveId) {
-				sentState.current = cachedState
+				pendingSaveChangeCount.current = changeCount
+				pendingAppearanceSent.current = changedAppearance
+				// This save is the newer word on these values: an earlier save's late answer must not overwrite them.
+				for (const { sent } of timedOutSaves.current.values())
+					for (const key in changedAppearance) delete sent[key]
 				setPendingSaveId(saveId)
 			}
-
 			vscode.postMessage({
 				type: "updateSettings",
 				requestId: saveId,
@@ -473,6 +604,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
+					...changedAppearance,
 					timeFormat: timeFormat ?? "auto",
 					dateFormat: dateFormat ?? "auto",
 					showRelativeTimes: showRelativeTimes ?? true,
@@ -499,37 +631,149 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
-			// With a time or date edit the flag is cleared when the host reports the save (see below). A failed save
-			// leaves the user's edits in place to retry.
-			if (!saveId) setChangeDetected(false)
+			// With an appearance edit, the "unsaved changes" flag is cleared only once the host reports that
+			// `updateSettings` was stored: see the `settingsSaveResult` listener below. A failed save leaves the
+			// user's edits in place to retry. Any other save clears it at once.
+			if (!saveId) {
+				// Nothing was sent, so no appearance edit is left to save (an edit that was undone equals the live value).
+				editedAppearance.current.clear()
+				setChangeDetected(false)
+			}
 		}
 	}
 
 	useEffect(() => {
 		if (!pendingSaveId) return
 
+		// The save is over: stored, failed, or not answered in time.
 		const settle = (success: boolean) => {
+			const editedAt = pendingSaveChangeCount.current
+			const sent = pendingAppearanceSent.current
+			pendingAppearanceSent.current = {}
 			setPendingSaveId(undefined)
+
+			// What was stored is no longer an unsaved edit, unless the user changed that value again meanwhile.
+			if (success) {
+				for (const [key, value] of Object.entries(sent)) {
+					appearanceSaved.current[key] = value
+					if ((latestCachedState.current[key as AppearanceKey] ?? null) === value) {
+						editedAppearance.current.delete(key as AppearanceKey)
+					}
+				}
+			}
+
 			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
-			if (success && latestCachedState.current === sentState.current) setChangeDetected(false)
+			const clean = success && latestChangeCount.current === editedAt
+			if (clean) setChangeDetected(false)
+
+			// A request to leave that came in meanwhile goes through the unsaved-changes check now: it proceeds if
+			// everything was stored, and otherwise (a failed save, or an edit made meanwhile) the user is asked.
+			const held = heldNavigation.current
+			heldNavigation.current = undefined
+			if (held) {
+				if (clean) {
+					held()
+				} else {
+					confirmDialogHandler.current = held
+					setDiscardDialogShow(true)
+				}
+			}
 		}
 
 		const onResult = (event: MessageEvent) => {
 			const message = event.data
 			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
+
 			settle(message.success === true)
 		}
 
 		window.addEventListener("message", onResult)
-		const timer = setTimeout(() => settle(false), SAVE_ANSWER_TIMEOUT_MS)
+		const timer = setTimeout(() => {
+			// No answer is not a failure: the host may still store it. Its answer is waited for further on, and the
+			// user is told if they leave meanwhile.
+			const saves = timedOutSaves.current
+			while (saves.size >= MAX_TIMED_OUT_SAVES) {
+				const [oldest, entry] = saves.entries().next().value!
+				clearTimeout(entry.expiry)
+				saves.delete(oldest)
+			}
+			const saveId = pendingSaveId
+			saves.set(saveId, {
+				sent: { ...pendingAppearanceSent.current },
+				changeCount: pendingSaveChangeCount.current,
+				expiry: setTimeout(() => {
+					saves.delete(saveId)
+					setSaveOutcomeUnknown(saves.size > 0)
+				}, TIMED_OUT_SAVE_KEEP_MS),
+			})
+			setSaveOutcomeUnknown(true)
+			settle(false)
+		}, SAVE_ANSWER_TIMEOUT_MS)
 		return () => {
 			clearTimeout(timer)
 			window.removeEventListener("message", onResult)
 		}
-	}, [pendingSaveId])
+	}, [pendingSaveId, latestCachedState, latestChangeCount])
+
+	// The answer to a save that was given up on. If it stored the values, the form is brought up to date with them: the
+	// values the user is not editing now take the stored value, and every value is compared with it from now on.
+	useEffect(() => {
+		const onLateResult = (event: MessageEvent) => {
+			const message = event.data
+			if (message?.type !== "settingsSaveResult") return
+			const late = timedOutSaves.current.get(message.requestId)
+			if (!late) return
+
+			clearTimeout(late.expiry)
+			timedOutSaves.current.delete(message.requestId)
+			setSaveOutcomeUnknown(timedOutSaves.current.size > 0)
+			if (message.success !== true) return
+
+			const { sent, changeCount: sentAt } = late
+			for (const [key, value] of Object.entries(sent)) {
+				appearanceSaved.current[key] = value
+				// An edit that was kept and now equals what was stored is no longer an unsaved edit.
+				if ((latestCachedState.current[key as AppearanceKey] ?? null) === value) {
+					editedAppearance.current.delete(key as AppearanceKey)
+				}
+			}
+			// Nothing else was changed since that save was sent: there is nothing left unsaved.
+			if (latestChangeCount.current === sentAt) setChangeDetected(false)
+			setCachedState((prev) => {
+				const next = { ...prev }
+				for (const [key, value] of Object.entries(sent)) {
+					if (!editedAppearance.current.has(key as AppearanceKey)) {
+						Object.assign(next, { [key]: value ?? undefined })
+					}
+				}
+				return next
+			})
+		}
+
+		window.addEventListener("message", onLateResult)
+		return () => window.removeEventListener("message", onLateResult)
+	}, [latestCachedState, latestChangeCount])
+
+	// Once the live state shows an appearance value it is the one to compare with again (it may also be newer, if
+	// another webview changed it).
+	const previousLive = useRef<Record<string, number | null | undefined>>({})
+	useEffect(() => {
+		for (const key of Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[]) {
+			if (previousLive.current[key] !== extensionState[key]) delete appearanceSaved.current[key]
+			previousLive.current[key] = extensionState[key]
+		}
+	}, [extensionState])
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
+			// A save waiting for the host's answer keeps going whatever is chosen here, so leaving now (and offering
+			// to discard changes that are being stored) would say something untrue. The request is kept, the latest
+			// one if there are several, and goes through this check again when the save has settled.
+			if (pendingSaveId) {
+				heldNavigation.current = then
+				return
+			}
+
 			if (isChangeDetected) {
 				confirmDialogHandler.current = then
 				setDiscardDialogShow(true)
@@ -537,7 +781,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				then()
 			}
 		},
-		[isChangeDetected],
+		[isChangeDetected, pendingSaveId],
 	)
 
 	useImperativeHandle(ref, () => ({ checkUnsaveChanges }), [checkUnsaveChanges])
@@ -546,7 +790,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		(confirm: boolean) => {
 			if (confirm) {
 				// Discard changes: Reset state and flag
-				setCachedState(extensionState) // Revert to original state
+				// Back to what is stored: the live state, with the appearance values that a save stored over it (the host
+				// reports a success even when refreshing the state failed, and the live state is then stale).
+				const stored: Record<string, number | undefined> = {}
+				for (const [key, value] of Object.entries(appearanceSaved.current)) stored[key] = value ?? undefined
+				setCachedState({ ...extensionState, ...stored })
+				editedAppearance.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
@@ -732,7 +981,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			<TabHeader className="flex justify-between items-center gap-2">
 				<div className="flex items-center gap-2 grow">
 					<StandardTooltip content={t("settings:header.doneButtonTooltip")}>
-						<Button variant="ghost" className="px-1.5 -ml-2" onClick={() => checkUnsaveChanges(onDone)}>
+						<Button
+							variant="ghost"
+							className="px-1.5 -ml-2"
+							disabled={!!pendingSaveId}
+							onClick={() => checkUnsaveChanges(onDone)}>
 							<ArrowLeft />
 							<span className="sr-only">{t("settings:common.done")}</span>
 						</Button>
@@ -1003,6 +1256,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								reasoningBlockCollapsed={reasoningBlockCollapsed ?? true}
 								enterBehavior={enterBehavior ?? "send"}
 								chatFontSize={chatFontSize ?? undefined}
+								interfaceFontScale={interfaceFontScale ?? undefined}
+								terminalFontSize={terminalFontSize ?? undefined}
+								editorFontSize={editorFontSize ?? undefined}
+								spacingScale={spacingScale ?? undefined}
 								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
 								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
 								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}
@@ -1052,27 +1309,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				</TabContent>
 			</div>
 
-			<AlertDialog open={isDiscardDialogShow} onOpenChange={setDiscardDialogShow}>
-				<AlertDialogContent>
-					<AlertDialogHeader>
-						<AlertDialogTitle>
-							<TriangleAlert className="w-5 h-5 text-yellow-500" />
-							{t("settings:unsavedChangesDialog.title")}
-						</AlertDialogTitle>
-						<AlertDialogDescription>
-							{t("settings:unsavedChangesDialog.description")}
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel onClick={() => onConfirmDialogResult(false)}>
-							{t("settings:unsavedChangesDialog.cancelButton")}
-						</AlertDialogCancel>
-						<AlertDialogAction onClick={() => onConfirmDialogResult(true)}>
-							{t("settings:unsavedChangesDialog.discardButton")}
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			<UnsavedChangesDialog
+				open={isDiscardDialogShow}
+				onOpenChange={setDiscardDialogShow}
+				saveOutcomeUnknown={saveOutcomeUnknown}
+				onCancel={() => onConfirmDialogResult(false)}
+				onDiscard={() => onConfirmDialogResult(true)}
+			/>
 		</Tab>
 	)
 })

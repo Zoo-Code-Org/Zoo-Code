@@ -35,6 +35,7 @@ import { CustomSupportPrompts } from "@roo/support-prompt"
 import { experimentDefault } from "@roo/experiments"
 
 import { vscode } from "@src/utils/vscode"
+import { applyAppearanceVariables } from "@src/utils/appearance"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 import { StringCache } from "@src/utils/stringCache"
 import {
@@ -139,6 +140,10 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setHistoryPreviewCollapsed: (value: boolean) => void
 	setReasoningBlockCollapsed: (value: boolean) => void
 	chatFontSize?: number
+	interfaceFontScale?: number
+	terminalFontSize?: number
+	editorFontSize?: number
+	spacingScale?: number
 	timeFormat?: "auto" | "12h" | "24h"
 	dateFormat?: "auto" | "mdy" | "dmy" | "ymd"
 	showRelativeTimes?: boolean
@@ -173,6 +178,17 @@ const messagesAreStale = (incoming: Partial<ExtensionState>, currentSequence: nu
 	incoming.clineMessagesSeq !== undefined &&
 	currentSequence !== undefined &&
 	incoming.clineMessagesSeq <= currentSequence
+
+const APPEARANCE_KEYS = [
+	"chatFontSize",
+	"interfaceFontScale",
+	"terminalFontSize",
+	"editorFontSize",
+	"spacingScale",
+] as const satisfies readonly (keyof ExtensionState)[]
+
+const appearanceIsStale = (incoming: Partial<ExtensionState>, currentSequence: number | undefined): boolean =>
+	incoming.appearanceSeq !== undefined && currentSequence !== undefined && incoming.appearanceSeq <= currentSequence
 
 function internMessages(messages: ClineMessage[], previousMessages: ClineMessage[], cache: StringCache): void {
 	const previousByTimestamp = new Map(previousMessages.map((item) => [item.ts, item]))
@@ -227,6 +243,21 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 		rest.currentTaskId = prevState.currentTaskId
 	} else {
 		rest.currentTaskId = newState.currentTaskId
+	}
+
+	// The appearance values are read from a settings snapshot taken before the push is posted, so a stale
+	// push can carry old font sizes or spacing. Apply them only from a push newer than the last applied one.
+	// A numbered push is a whole snapshot: a value it does not carry is unset (JSON drops an undefined one), so
+	// the previous value is cleared rather than kept.
+	if (appearanceIsStale(newState, prevState.appearanceSeq)) {
+		for (const key of APPEARANCE_KEYS) {
+			;(rest as Record<string, unknown>)[key] = prevState[key]
+		}
+		rest.appearanceSeq = prevState.appearanceSeq
+	} else if (newState.appearanceSeq !== undefined) {
+		for (const key of APPEARANCE_KEYS) {
+			;(rest as Record<string, unknown>)[key] = newState[key]
+		}
 	}
 
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects
@@ -646,11 +677,28 @@ export const ExtensionStateContextProvider: React.FC<{
 		}
 	}, [state.chatFontSize])
 
+	// Appearance scales/sizes. Unset values remove the inline override so the
+	// stylesheet defaults in index.css (100% / VS Code's sizes) apply.
+	useEffect(() => {
+		applyAppearanceVariables(document.documentElement, {
+			interfaceFontScale: state.interfaceFontScale,
+			terminalFontSize: state.terminalFontSize,
+			editorFontSize: state.editorFontSize,
+			spacingScale: state.spacingScale,
+		})
+		// What this provider put on <html> goes with it, so a root that outlives it (another mount, a test) starts clean.
+		return () => applyAppearanceVariables(document.documentElement, {})
+	}, [state.interfaceFontScale, state.terminalFontSize, state.editorFontSize, state.spacingScale])
+
 	const contextValue: ExtensionStateContextType = {
 		...state,
 		// `chatFontSize` is persisted as nullish (null on reset); normalize null to
 		// undefined so it matches the context type and means "use VS Code default".
 		chatFontSize: state.chatFontSize ?? undefined,
+		interfaceFontScale: state.interfaceFontScale ?? undefined,
+		terminalFontSize: state.terminalFontSize ?? undefined,
+		editorFontSize: state.editorFontSize ?? undefined,
+		spacingScale: state.spacingScale ?? undefined,
 		timeFormat: state.timeFormat ?? "auto",
 		dateFormat: state.dateFormat ?? "auto",
 		showRelativeTimes: state.showRelativeTimes ?? true,

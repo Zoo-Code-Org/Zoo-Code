@@ -41,6 +41,9 @@ import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
 import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
+import { CloudService } from "@roo-code/cloud"
+import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
+import { kimiCodeOAuthManager } from "../../../integrations/kimi-code/oauth"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
@@ -321,6 +324,9 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 vi.mock("../../../services/zoo-code-auth", () => ({
 	getZooCodeBaseUrl: vi.fn(() => "https://www.zoocode.dev"),
 	getCachedZooCodeToken: vi.fn(),
+	// Without an implementation they throw when read, as the missing members of the mock did: the state is the default.
+	getCachedZooCodeUserInfo: vi.fn(),
+	isZooCodeAuthenticated: vi.fn(),
 	handleAuthCallback: vi.fn(),
 	setZooCodeUserInfo: vi.fn(),
 	disconnectZooCode: vi.fn(),
@@ -3401,6 +3407,175 @@ describe("ClineProvider", () => {
 		expect(statePostSettled).toBe(true)
 	})
 
+	test("numbers every state push, including those without clineMessages, in the order they start", async () => {
+		const first = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		const second = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		expect(first.appearanceSeq).toBeDefined()
+		expect(second.appearanceSeq).toBe(first.appearanceSeq! + 1)
+
+		const [older, newer] = await Promise.all([
+			provider.getStateToPostToWebview({ includeTaskHistory: false }),
+			provider.getStateToPostToWebview({ includeTaskHistory: false }),
+		])
+		expect(newer.appearanceSeq).toBe(older.appearanceSeq! + 1)
+	})
+
+	test("deleting a provider profile does not write the appearance values back from its snapshot", async () => {
+		vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+			currentApiConfigName: "a",
+			listApiConfigMeta: [
+				{ id: "1", name: "a" },
+				{ id: "2", name: "b" },
+			],
+			terminalFontSize: 14,
+			interfaceFontScale: 120,
+			soundEnabled: true,
+		})
+		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+		await provider.deleteProviderProfile({ id: "1", name: "a" })
+
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({
+			currentApiConfigName: "b",
+			listApiConfigMeta: [{ id: "2", name: "b" }],
+			soundEnabled: true,
+		})
+	})
+
+	test("setValues shows what is stored when a timed-out write has been rolled back", async () => {
+		const chain = await import("../../config/appearanceSettingWrites")
+		const spy = vi
+			.spyOn(chain, "writeValuesThroughWriteChain")
+			.mockResolvedValue({ stored: ["terminalFontSize"], notStored: [], uncertain: [] })
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+		await provider.setValues({ terminalFontSize: 14 })
+		const onDeferredSettled = spy.mock.calls[0][2]?.onDeferredSettled
+		expect(post).not.toHaveBeenCalled()
+		onDeferredSettled?.()
+
+		expect(post).toHaveBeenCalledTimes(1)
+		spy.mockRestore()
+	})
+
+	describe("setValues when a write fails", () => {
+		type Report = Awaited<
+			ReturnType<typeof import("../../config/appearanceSettingWrites").writeValuesThroughWriteChain>
+		>
+		const reporting = async (report: Report) => {
+			const chain = await import("../../config/appearanceSettingWrites")
+			return vi.spyOn(chain, "writeValuesThroughWriteChain").mockResolvedValue(report)
+		}
+
+		test("shows the webview what is stored, and says what was stored and what was not", async () => {
+			const failure = new Error("other settings failed")
+			const spy = await reporting({
+				failure: { reason: failure },
+				stored: ["terminalFontSize"],
+				notStored: ["the other settings"],
+				uncertain: [],
+			})
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(provider.setValues({ terminalFontSize: 14, mode: "code" })).rejects.toMatchObject({
+				name: "PartialSettingsWriteError",
+				message: "other settings failed (not stored: the other settings; stored: terminalFontSize)",
+				stored: ["terminalFontSize"],
+				notStored: ["the other settings"],
+				cause: failure,
+			})
+
+			expect(post).toHaveBeenCalledTimes(1)
+			spy.mockRestore()
+		})
+
+		test("passes on the failure as it was when a write failed alone and nothing else was stored", async () => {
+			const failure = new Error("other settings failed")
+			const spy = await reporting({
+				failure: { reason: failure },
+				stored: [],
+				notStored: ["the other settings"],
+				uncertain: [],
+			})
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
+
+			expect(post).toHaveBeenCalledTimes(1)
+			spy.mockRestore()
+		})
+
+		test("does not let a refresh that fails hide the error", async () => {
+			const failure = new Error("other settings failed")
+			const spy = await reporting({
+				failure: { reason: failure },
+				stored: [],
+				notStored: ["the other settings"],
+				uncertain: [],
+			})
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("webview gone"))
+
+			await expect(provider.setValues({ mode: "code" })).rejects.toBe(failure)
+
+			spy.mockRestore()
+		})
+
+		test("refreshes nothing when every write was stored", async () => {
+			const spy = await reporting({ stored: ["mode"], notStored: [], uncertain: [] })
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.setValues({ mode: "code" })
+
+			expect(post).not.toHaveBeenCalled()
+			spy.mockRestore()
+		})
+	})
+
+	test("disposing the provider drops its appearance writes that have not started", async () => {
+		const chain = await import("../../config/appearanceSettingWrites")
+		const spy = vi.spyOn(chain, "disposeSettingWrites")
+
+		await provider.dispose()
+
+		expect(spy).toHaveBeenCalledExactlyOnceWith(provider)
+		spy.mockRestore()
+	})
+
+	test("setValues, which a new task's configuration goes through, writes an appearance value through the write chain", async () => {
+		const setValue = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
+		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+		await provider.setValues({ terminalFontSize: 14, mode: "code" })
+
+		expect(setValue).toHaveBeenCalledWith("terminalFontSize", 14)
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+	})
+
+	test("numbers a push by when its settings were read, not by when it finishes", async () => {
+		let stored = 1
+		vi.spyOn(provider.contextProxy, "getValues").mockImplementation(() => ({ spacingScale: stored }))
+		let releaseFirst: () => void = () => {}
+		let firstHasRead: () => void = () => {}
+		const hasRead = new Promise<void>((resolve) => (firstHasRead = resolve))
+		vi.spyOn(provider.customModesManager, "getCustomModes")
+			.mockImplementationOnce(() => {
+				firstHasRead() // the settings are read by now, and this push waits
+				return new Promise((resolve) => (releaseFirst = () => resolve([])))
+			})
+			.mockResolvedValue([])
+
+		const older = provider.getStateToPostToWebview({ includeTaskHistory: false }) // reads 1, then waits
+		await hasRead
+		stored = 2
+		const newer = await provider.getStateToPostToWebview({ includeTaskHistory: false }) // reads 2, finishes first
+		releaseFirst()
+		const olderState = await older
+
+		expect(newer.spacingScale).toBe(2)
+		expect(olderState.spacingScale).toBe(1)
+		expect(newer.appearanceSeq).toBeGreaterThan(olderState.appearanceSeq!)
+	})
+
 	test.each([
 		["postStateToWebview", (currentProvider: ClineProvider) => currentProvider.postStateToWebview()],
 		[
@@ -3667,6 +3842,415 @@ describe("ClineProvider", () => {
 		await provider.postMessageToWebview(message)
 
 		expect(mockPostMessage).not.toHaveBeenCalled()
+	})
+
+	test("a disposed provider builds and posts no state, and spends no sequence number", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.dispose()
+		const build = vi.spyOn(provider, "getStateToPostToWebview")
+		const post = vi.spyOn(provider, "postMessageToWebview")
+		const seq = provider["clineMessagesSeq"]
+
+		await provider.postStateToWebview()
+
+		expect(build).not.toHaveBeenCalled()
+		expect(post).not.toHaveBeenCalled()
+		expect(provider["clineMessagesSeq"]).toBe(seq)
+	})
+
+	test("a provider that is disposed while its state is being built posts nothing", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const post = vi.spyOn(provider, "postMessageToWebview")
+		const real = provider.getStateToPostToWebview.bind(provider)
+		vi.spyOn(provider, "getStateToPostToWebview").mockImplementation(async (options) => {
+			const state = await real(options)
+			await provider.dispose() // the view is closed during the build
+			return state
+		})
+		post.mockClear()
+
+		await provider.postStateToWebview()
+
+		expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+	})
+
+	describe("a provider that is disposed at a wait of its state build stops building", () => {
+		type Step = { mockClear: () => unknown } & ((...args: never[]) => unknown)
+
+		// Each case disposes the provider at one wait of the build, and gives the step that comes next, which must not run.
+		type Case = {
+			name: string
+			setup: (current: ClineProvider, undo: Array<() => void>) => Promise<Step>
+		}
+
+		// What a test replaced is put back after it, whether it is a spy or a member the mocked modules do not have.
+		const undo: Array<() => void> = []
+		afterEach(() => {
+			for (const restore of undo.splice(0).reverse()) restore()
+		})
+
+		const track = <Spy extends { mockRestore: () => void }>(replaced: Spy) => {
+			undo.push(() => replaced.mockRestore())
+			return replaced
+		}
+
+		const cloudWith = (organizations: () => Promise<unknown[]>) => {
+			const getOrganizationMemberships = vi.fn(organizations)
+			// The rest of the instance stays what it is (the provider unhooks itself from it when it is disposed).
+			// A partial double of the service: the build reads only the two members that are replaced.
+			const instance = {
+				...CloudService.instance,
+				isCloudAgent: false,
+				getOrganizationMemberships,
+			} as unknown as typeof CloudService.instance
+			track(vi.spyOn(CloudService, "instance", "get").mockReturnValue(instance))
+			return getOrganizationMemberships
+		}
+
+		// The mocked modules have no such members: they are put there for the test, and taken away after it.
+		const withMembers = <Target extends object>(target: Target, members: Record<string, unknown>) => {
+			const record = target as Record<string, unknown>
+			const before = Object.fromEntries(Object.keys(members).map((key) => [key, record[key]]))
+			Object.assign(record, members)
+			undo.push(() => {
+				for (const key of Object.keys(members)) {
+					if (before[key] === undefined) delete record[key]
+					else record[key] = before[key]
+				}
+			})
+		}
+
+		const cases: Case[] = [
+			{
+				name: "the task history is initialised",
+				setup: async (current) => {
+					Object.defineProperty(current.taskHistoryStore, "initialized", {
+						configurable: true,
+						// Read by the build once it has started: the provider is disposed while it waits for it.
+						get: async () => {
+							await current.dispose()
+						},
+					})
+					return track(vi.spyOn(current, "getState"))
+				},
+			},
+			{
+				name: "the settings are read",
+				setup: async (current) => {
+					const realGetState = current.getState.bind(current)
+					track(vi.spyOn(current, "getState")).mockImplementation(async (options) => {
+						const state = await realGetState(options)
+						await current.dispose()
+						return state
+					})
+					return cloudWith(async () => [])
+				},
+			},
+			{
+				name: "the organisations of the user are read",
+				setup: async (current) => {
+					cloudWith(async () => {
+						await current.dispose()
+						return []
+					})
+					// A private method: no typed alternative lets a spy name it.
+					const privateMembers = current as unknown as { mergeAllowedCommands: () => string[] }
+					return track(vi.spyOn(privateMembers, "mergeAllowedCommands"))
+				},
+			},
+			{
+				name: "the Zoo Code sign-in is read",
+				setup: async (current) => {
+					const codexSignIn = vi.fn(async () => false)
+					const zooCodeAuth = await import("../../../services/zoo-code-auth")
+					track(vi.mocked(zooCodeAuth.getCachedZooCodeUserInfo).mockReturnValue({} as never))
+					track(
+						vi.mocked(zooCodeAuth.isZooCodeAuthenticated).mockImplementation(async () => {
+							await current.dispose()
+							return true
+						}),
+					)
+					withMembers(openAiCodexOAuthManager, { isAuthenticated: codexSignIn })
+					return codexSignIn
+				},
+			},
+			{
+				name: "the OpenAI Codex sign-in is read",
+				setup: async (current) => {
+					withMembers(openAiCodexOAuthManager, {
+						isAuthenticated: async () => {
+							await current.dispose()
+							return true
+						},
+					})
+					return track(vi.spyOn(kimiCodeOAuthManager, "isAuthenticated"))
+				},
+			},
+			{
+				name: "the Kimi Code sign-in is read",
+				setup: async (current) => {
+					track(vi.spyOn(kimiCodeOAuthManager, "isAuthenticated")).mockImplementation(async () => {
+						await current.dispose()
+						return true
+					})
+					return track(vi.spyOn(kimiCodeOAuthManager, "getState"))
+				},
+			},
+			{
+				name: "the Kimi Code state is read",
+				setup: async (current) => {
+					track(vi.spyOn(kimiCodeOAuthManager, "getState")).mockImplementation(() => {
+						void current.dispose() // disposed synchronously: the build is over but for its last check
+						return { status: "idle" }
+					})
+					return track(vi.spyOn(current, "postMessageToWebview"))
+				},
+			},
+		]
+
+		const posters: Array<[string, (current: ClineProvider) => Promise<void>]> = [
+			["postStateToWebview", (current) => current.postStateToWebview()],
+			["postStateToWebviewWithoutTaskHistory", (current) => current.postStateToWebviewWithoutTaskHistory()],
+			["postStateToWebviewWithoutClineMessages", (current) => current.postStateToWebviewWithoutClineMessages()],
+		]
+
+		it.each(cases.map((c) => [c.name, c] as const))("when %s, the build is abandoned", async (_name, c) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const nextStep = await c.setup(provider, undo)
+			nextStep.mockClear()
+
+			await expect(provider.getStateToPostToWebview()).rejects.toThrow("disposed")
+
+			expect(provider.isDisposed).toBe(true)
+			expect(nextStep).not.toHaveBeenCalled()
+		})
+
+		it.each(posters)("%s posts no state when the provider is disposed while it is built", async (_name, poster) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const post = vi.spyOn(provider, "postMessageToWebview")
+			const realGetState = provider.getState.bind(provider)
+			track(vi.spyOn(provider, "getState")).mockImplementation(async (options) => {
+				const state = await realGetState(options)
+				await provider.dispose()
+				return state
+			})
+			post.mockClear()
+
+			await poster(provider)
+
+			expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
+		it("does not read the task history, or spend a sequence number, when it is disposed before the build starts", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const seq = provider["appearanceSeq"]
+			const read = vi.fn()
+			Object.defineProperty(provider.taskHistoryStore, "initialized", { configurable: true, get: read })
+			await provider.dispose()
+
+			await expect(provider.getStateToPostToWebview()).rejects.toThrow("disposed")
+
+			expect(read).not.toHaveBeenCalled()
+			expect(provider["appearanceSeq"]).toBe(seq)
+		})
+
+		it.each(posters)("%s posts nothing when the provider is already disposed", async (_name, poster) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.dispose()
+			const build = track(vi.spyOn(provider, "getStateToPostToWebview"))
+			const post = track(vi.spyOn(provider, "postMessageToWebview"))
+
+			await poster(provider)
+
+			expect(build).not.toHaveBeenCalled()
+			expect(post).not.toHaveBeenCalled()
+		})
+
+		it.each(posters)(
+			"%s posts nothing when the provider is disposed after the build has returned",
+			async (_name, poster) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				const realBuild = provider.getStateToPostToWebview.bind(provider)
+				track(vi.spyOn(provider, "getStateToPostToWebview")).mockImplementation(async (options) => {
+					const state = await realBuild(options)
+					await provider.dispose() // the build is done: the last thing left is to post it
+					return state
+				})
+				const post = track(vi.spyOn(provider, "postMessageToWebview"))
+				post.mockClear()
+
+				await poster(provider)
+
+				expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+			},
+		)
+
+		it.each(posters)("%s passes on a failure of the build that is not a disposal", async (_name, poster) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			track(vi.spyOn(provider, "getStateToPostToWebview")).mockRejectedValue(new Error("settings unreadable"))
+			const post = track(vi.spyOn(provider, "postMessageToWebview"))
+			post.mockClear()
+
+			await expect(poster(provider)).rejects.toThrow("settings unreadable")
+
+			expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
+		it("passes on a failure of the build that is not a disposal, for the prompt update too", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			track(vi.spyOn(provider, "getStateToPostToWebview")).mockRejectedValue(new Error("settings unreadable"))
+
+			await expect(provider.buildStateUnlessDisposed()).rejects.toThrow("settings unreadable")
+		})
+
+		it.each([
+			["is not known yet", undefined, false],
+			["is known", true, true],
+		])(
+			"posts the state of the prompt update with a mode selector that %s as it is",
+			async (_name, opened, expected) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				// The type says the mode selector flag is always set; the handler does not rely on it, and this is the case it covers.
+				const builtState = {
+					...(await provider.getStateToPostToWebview()),
+					hasOpenedModeSelector: opened,
+				} as ExtensionState
+				track(vi.spyOn(provider, "buildStateUnlessDisposed")).mockResolvedValue(builtState)
+				const post = track(vi.spyOn(provider, "postMessageToWebview"))
+				post.mockClear()
+
+				await webviewMessageHandler(provider, {
+					type: "updatePrompt",
+					promptMode: "code",
+					customPrompt: { roleDefinition: "a new role" },
+				})
+
+				expect(post).toHaveBeenCalledWith({
+					type: "state",
+					state: expect.objectContaining({
+						hasOpenedModeSelector: expected,
+						customModePrompts: expect.objectContaining({ code: { roleDefinition: "a new role" } }),
+					}),
+				})
+			},
+		)
+
+		it("stores the prompt of a mode, and posts no state, when the provider is disposed while the state is built", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const realGetState = provider.getState.bind(provider)
+			track(vi.spyOn(provider, "getState")).mockImplementation(async (options) => {
+				const state = await realGetState(options)
+				await provider.dispose()
+				return state
+			})
+			const post = track(vi.spyOn(provider, "postMessageToWebview"))
+			post.mockClear()
+
+			await webviewMessageHandler(provider, {
+				type: "updatePrompt",
+				promptMode: "code",
+				customPrompt: { roleDefinition: "a new role" },
+			})
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"customModePrompts",
+				expect.objectContaining({ code: { roleDefinition: "a new role" } }),
+			)
+			expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
+		it("builds nothing for the prompt update of a provider that was disposed meanwhile", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.dispose()
+
+			await expect(provider.buildStateUnlessDisposed()).resolves.toBeUndefined()
+		})
+	})
+
+	test("a live provider still builds and posts its state", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const post = vi.spyOn(provider, "postMessageToWebview")
+		post.mockClear()
+
+		await provider.postStateToWebview()
+
+		expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+	})
+
+	describe("the refresh that follows an import that failed part of the way", () => {
+		type PostedState = NonNullable<ExtensionMessage["state"]>
+		/** The states that were posted to the webview, in order. */
+		const postedStates = (): PostedState[] =>
+			(mockPostMessage.mock.calls as Array<[ExtensionMessage]>).flatMap(([message]) =>
+				message.type === "state" && message.state ? [message.state] : [],
+			)
+		const postedState = (): PostedState => {
+			const state = postedStates().at(-1)
+			if (!state) throw new Error("No state was posted")
+			return state
+		}
+
+		test("marks the state that is posted with it, with what the import stored", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.postStateToWebview({
+				at: 1_700_000_000_000,
+				storedKeys: ["terminalFontSize", "mode"],
+				late: false,
+			})
+
+			expect(postedState()).toMatchObject({
+				settingsImportRefreshedAt: 1_700_000_000_000,
+				settingsImportStoredKeys: ["terminalFontSize", "mode"],
+			})
+			expect(postedState().settingsImportRefreshIsLate).toBeUndefined()
+		})
+
+		test("marks a refresh that follows a late rollback as late", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.postStateToWebview({ at: 1, storedKeys: ["terminalFontSize"], late: true })
+
+			expect(postedState().settingsImportRefreshIsLate).toBe(true)
+		})
+
+		test("leaves the marks out of every other state, also the one that follows a marked one", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.postStateToWebview({ at: 1, storedKeys: ["mode"], late: true })
+
+			await provider.postStateToWebview()
+
+			expect(postedState().settingsImportRefreshedAt).toBeUndefined()
+			expect(postedState().settingsImportStoredKeys).toBeUndefined()
+			expect(postedState().settingsImportRefreshIsLate).toBeUndefined()
+			expect((await provider.getStateToPostToWebview()).settingsImportRefreshedAt).toBeUndefined()
+		})
+
+		test("gives overlapping posts their own marks", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await Promise.all([
+				provider.postStateToWebview({ at: 1, storedKeys: ["mode"], late: false }),
+				provider.postStateToWebview({ at: 2, storedKeys: ["terminalFontSize"], late: true }),
+			])
+
+			const marked = postedStates().filter((state) => state.settingsImportRefreshedAt !== undefined)
+			expect(marked.map((state) => [state.settingsImportRefreshedAt, state.settingsImportStoredKeys])).toEqual(
+				expect.arrayContaining([
+					[1, ["mode"]],
+					[2, ["terminalFontSize"]],
+				]),
+			)
+		})
+	})
+
+	test("isDisposed tells whether dispose has run", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		expect(provider.isDisposed).toBe(false)
+
+		await provider.dispose()
+
+		expect(provider.isDisposed).toBe(true)
 	})
 
 	test("dispose is idempotent — second call is a no-op", async () => {
@@ -4183,6 +4767,136 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	describe("appearance settings", () => {
+		const keys = ["interfaceFontScale", "terminalFontSize", "editorFontSize", "spacingScale"] as const
+		const values = { interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 }
+
+		/** Saves through the real `updateSettings` handler, as the settings view does. */
+		const save = async (updatedSettings: Record<string, unknown>) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls[0][0]
+			await messageHandler({ type: "updateSettings", updatedSettings })
+		}
+
+		test.each(keys)("%s is unset when it was never saved, in both states", async (key) => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect((await provider.getState())[key]).toBeUndefined()
+			expect((await provider.getStateToPostToWebview())[key]).toBeUndefined()
+		})
+
+		test.each(keys)("%s that was stored is returned by both states", async (key) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue(key, values[key])
+
+			expect((await provider.getState())[key]).toBe(values[key])
+			expect((await provider.getStateToPostToWebview())[key]).toBe(values[key])
+		})
+
+		test("all four are returned together, each with its own value", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			for (const key of keys) await provider.contextProxy.setValue(key, values[key])
+
+			expect(await provider.getState()).toMatchObject(values)
+			expect(await provider.getStateToPostToWebview()).toMatchObject(values)
+		})
+
+		test.each(keys)("a reset of %s (null) is kept, not replaced by a default", async (key) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue(key, values[key])
+			await provider.contextProxy.setValue(key, null)
+
+			expect((await provider.getState())[key]).toBeNull()
+			expect((await provider.getStateToPostToWebview())[key]).toBeNull()
+		})
+
+		test("saving through updateSettings stores the values and tells the open webview", async () => {
+			mockPostMessage.mockClear()
+
+			await save(values)
+
+			for (const key of keys) expect(mockContext.globalState.update).toHaveBeenCalledWith(key, values[key])
+			expect(await provider.getStateToPostToWebview()).toMatchObject(values)
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state", state: expect.objectContaining(values) }),
+			)
+		})
+
+		test("saving a reset stores null and tells the open webview", async () => {
+			await save(values)
+			mockPostMessage.mockClear()
+
+			await save({ interfaceFontScale: null, terminalFontSize: null, editorFontSize: null, spacingScale: null })
+
+			expect(await provider.getStateToPostToWebview()).toMatchObject({
+				interfaceFontScale: null,
+				terminalFontSize: null,
+				editorFontSize: null,
+				spacingScale: null,
+			})
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "state",
+					state: expect.objectContaining({ interfaceFontScale: null, spacingScale: null }),
+				}),
+			)
+		})
+
+		test("a value the webview should not be able to store is refused, and nothing changes", async () => {
+			await save({ interfaceFontScale: 999 })
+
+			expect((await provider.getState()).interfaceFontScale).toBeUndefined()
+		})
+
+		describe("in the configuration of a task that is started", () => {
+			const start = (configuration: Record<string, unknown>) =>
+				provider.createTask("do it", undefined, undefined, { startTask: false }, configuration)
+
+			test("valid values are stored, and the task is created", async () => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(Task).mockClear()
+
+				await start(values)
+
+				for (const key of keys) expect(mockContext.globalState.update).toHaveBeenCalledWith(key, values[key])
+				expect(await provider.getState()).toMatchObject(values)
+				expect(Task).toHaveBeenCalledOnce()
+			})
+
+			test.each(keys)(
+				"an invalid %s rejects the start before anything is stored or a task is created",
+				async (key) => {
+					await provider.resolveWebviewView(mockWebviewView)
+					vi.mocked(Task).mockClear()
+					vi.mocked(mockContext.globalState.update).mockClear()
+
+					// Valid values of the others, and a valid ordinary setting, are not stored either.
+					await expect(start({ ...values, mode: "architect", [key]: 9999 })).rejects.toThrow(
+						`Invalid value for ${key}`,
+					)
+
+					const stored = vi.mocked(mockContext.globalState.update).mock.calls.map(([name]) => name)
+					for (const name of [...keys, "mode"]) expect(stored).not.toContain(name)
+					expect(Task).not.toHaveBeenCalled()
+					expect((await provider.getState())[key]).toBeUndefined()
+				},
+			)
+
+			test.each([
+				["a string", "big"],
+				["a float", 1.5],
+				["NaN", Number.NaN],
+			])("%s is not an appearance value, and rejects the start", async (_name, value) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				vi.mocked(Task).mockClear()
+
+				await expect(start({ terminalFontSize: value })).rejects.toThrow("Invalid value for terminalFontSize")
+
+				expect(Task).not.toHaveBeenCalled()
+			})
+		})
 	})
 
 	describe("date and time display settings", () => {

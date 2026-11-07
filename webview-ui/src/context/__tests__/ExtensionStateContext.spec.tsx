@@ -92,6 +92,33 @@ const ChatFontSizeTestComponent = () => {
 	)
 }
 
+const AppearanceTestComponent = () => {
+	const { interfaceFontScale, terminalFontSize, editorFontSize, spacingScale } = useExtensionState()
+
+	return (
+		<div data-testid="appearance">
+			{JSON.stringify({
+				interfaceFontScale: interfaceFontScale ?? null,
+				terminalFontSize: terminalFontSize ?? null,
+				editorFontSize: editorFontSize ?? null,
+				spacingScale: spacingScale ?? null,
+			})}
+		</div>
+	)
+}
+
+const sendState = (state: Partial<ExtensionState>) =>
+	act(() => {
+		window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+	})
+
+const APPEARANCE_VARS = [
+	"--zoo-ui-scale",
+	"--zoo-terminal-font-size",
+	"--zoo-editor-font-size",
+	"--zoo-spacing-scale",
+] as const
+
 const ApiConfigTestComponent = () => {
 	const { apiConfiguration, setApiConfiguration } = useExtensionState()
 
@@ -391,6 +418,74 @@ describe("ExtensionStateContext", () => {
 		)
 		expect(internSpy).not.toHaveBeenCalledWith(payload)
 		expect(cache?.size).toBe(0)
+	})
+
+	it("keeps the appearance values of a newer push when an older push arrives late", () => {
+		const initial = {
+			...createInitialExtensionState(),
+			chatFontSize: 16,
+			interfaceFontScale: 1.2,
+			terminalFontSize: 14,
+			editorFontSize: 15,
+			spacingScale: 1.1,
+			appearanceSeq: 5,
+		}
+		const older = {
+			chatFontSize: 12,
+			interfaceFontScale: 1,
+			terminalFontSize: 10,
+			editorFontSize: 11,
+			spacingScale: 0.9,
+			appearanceSeq: 4,
+			soundEnabled: true,
+		}
+		const merged = mergeExtensionState(initial, older)
+		expect(merged).toMatchObject({
+			chatFontSize: 16,
+			interfaceFontScale: 1.2,
+			terminalFontSize: 14,
+			editorFontSize: 15,
+			spacingScale: 1.1,
+			appearanceSeq: 5,
+		})
+		// Only the appearance values are held back; the rest of the push still applies.
+		expect(merged.soundEnabled).toBe(true)
+
+		const newer = mergeExtensionState(initial, { ...older, appearanceSeq: 6 })
+		expect(newer).toMatchObject({ chatFontSize: 12, interfaceFontScale: 1, spacingScale: 0.9, appearanceSeq: 6 })
+	})
+
+	it("clears an appearance value that a newer numbered push does not carry (it was reset to unset)", () => {
+		const initial = {
+			...createInitialExtensionState(),
+			chatFontSize: 16,
+			terminalFontSize: 14,
+			spacingScale: 1.1,
+			appearanceSeq: 5,
+		}
+		// JSON serialization drops an undefined value, as the extension transport does.
+		const pushed = JSON.parse(JSON.stringify({ chatFontSize: 16, terminalFontSize: undefined, appearanceSeq: 6 }))
+
+		const merged = mergeExtensionState(initial, pushed)
+
+		expect(merged.terminalFontSize).toBeUndefined()
+		expect(merged.spacingScale).toBeUndefined()
+		expect(merged).toMatchObject({ chatFontSize: 16, appearanceSeq: 6 })
+	})
+
+	it("does not clear the appearance values for a push with no sequence number, or a stale one", () => {
+		const initial = { ...createInitialExtensionState(), terminalFontSize: 14, appearanceSeq: 5 }
+
+		expect(mergeExtensionState(initial, { soundEnabled: true }).terminalFontSize).toBe(14)
+		expect(mergeExtensionState(initial, { soundEnabled: true, appearanceSeq: 4 }).terminalFontSize).toBe(14)
+	})
+
+	it("applies the appearance values of a push that has no sequence number", () => {
+		const initial = { ...createInitialExtensionState(), spacingScale: 1.1, appearanceSeq: 5 }
+		expect(mergeExtensionState(initial, { spacingScale: 0.9 }).spacingScale).toBe(0.9)
+		expect(
+			mergeExtensionState(createInitialExtensionState(), { spacingScale: 0.9, appearanceSeq: 1 }),
+		).toMatchObject({ spacingScale: 0.9, appearanceSeq: 1 })
 	})
 
 	it("clears a serialized absent task id and preserves task identity on stale snapshots", () => {
@@ -792,6 +887,103 @@ describe("ExtensionStateContext", () => {
 
 		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(null)
 		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("")
+	})
+
+	describe("appearance settings", () => {
+		const clearVars = () => {
+			for (const name of APPEARANCE_VARS) document.documentElement.style.removeProperty(name)
+			document.documentElement.classList.remove("zoo-editor-font-set")
+		}
+		const appearance = () => JSON.parse(screen.getByTestId("appearance").textContent!)
+		const renderAppearance = () =>
+			render(
+				<ExtensionStateContextProvider>
+					<AppearanceTestComponent />
+				</ExtensionStateContextProvider>,
+			)
+
+		beforeEach(clearVars)
+		afterEach(clearVars)
+
+		it("leaves every value unset and the CSS variables absent before any state arrives", () => {
+			renderAppearance()
+
+			expect(appearance()).toEqual({
+				interfaceFontScale: null,
+				terminalFontSize: null,
+				editorFontSize: null,
+				spacingScale: null,
+			})
+			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
+		})
+
+		it("takes its CSS variables and the editor-font class off the page when it is unmounted", () => {
+			const { unmount } = renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
+			for (const name of APPEARANCE_VARS)
+				expect(document.documentElement.style.getPropertyValue(name)).not.toBe("")
+			expect(document.documentElement.classList.contains("zoo-editor-font-set")).toBe(true)
+
+			unmount()
+
+			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
+			expect(document.documentElement.classList.contains("zoo-editor-font-set")).toBe(false)
+		})
+
+		it("leaves a value that is still set applied while the state changes, and clears the one that was unset", () => {
+			renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+			sendState({ interfaceFontScale: 120, terminalFontSize: null })
+
+			const style = document.documentElement.style
+			expect(style.getPropertyValue("--zoo-ui-scale")).toBe("1.2")
+			expect(style.getPropertyValue("--zoo-terminal-font-size")).toBe("")
+		})
+
+		it("hydrates all four values from the host state and applies their CSS variables", () => {
+			renderAppearance()
+
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
+
+			expect(appearance()).toEqual({
+				interfaceFontScale: 120,
+				terminalFontSize: 14,
+				editorFontSize: 15,
+				spacingScale: 80,
+			})
+			const style = document.documentElement.style
+			expect(style.getPropertyValue("--zoo-ui-scale")).toBe("1.2")
+			expect(style.getPropertyValue("--zoo-terminal-font-size")).toBe("14px")
+			expect(style.getPropertyValue("--zoo-editor-font-size")).toBe("15px")
+			expect(style.getPropertyValue("--zoo-spacing-scale")).toBe("0.8")
+		})
+
+		it("treats a null from the host (a saved reset) as unset and removes the CSS variables", () => {
+			renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14, editorFontSize: 15, spacingScale: 80 })
+
+			sendState({ interfaceFontScale: null, terminalFontSize: null, editorFontSize: null, spacingScale: null })
+
+			expect(appearance()).toEqual({
+				interfaceFontScale: null,
+				terminalFontSize: null,
+				editorFontSize: null,
+				spacingScale: null,
+			})
+			for (const name of APPEARANCE_VARS) expect(document.documentElement.style.getPropertyValue(name)).toBe("")
+		})
+
+		it("updates one value without disturbing the others", () => {
+			renderAppearance()
+			sendState({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+			sendState({ terminalFontSize: 18 })
+
+			expect(appearance()).toMatchObject({ interfaceFontScale: 120, terminalFontSize: 18 })
+			expect(document.documentElement.style.getPropertyValue("--zoo-ui-scale")).toBe("1.2")
+			expect(document.documentElement.style.getPropertyValue("--zoo-terminal-font-size")).toBe("18px")
+		})
 	})
 
 	it("updates allowedCommands through setAllowedCommands", () => {

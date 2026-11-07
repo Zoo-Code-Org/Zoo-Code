@@ -131,8 +131,15 @@ import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
 import { ContextProxy } from "../config/ContextProxy"
+import {
+	describeFailedWrite,
+	disposeSettingWrites,
+	isAppearanceSetting,
+	writeValuesThroughWriteChain,
+} from "../config/appearanceSettingWrites"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import type { SettingsImportRefresh } from "../config/importExport"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
@@ -213,6 +220,14 @@ function scheduleTask(
 // Keys a model-selector patch may touch: model IDs plus settings reset on model change.
 const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
 
+/** Thrown inside a state build when the provider was disposed meanwhile: there is nobody left to show the state to. */
+class StateBuildAbandonedError extends Error {
+	constructor() {
+		super("The provider was disposed while its state was being built")
+		this.name = "StateBuildAbandonedError"
+	}
+}
+
 const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
 
 // These keys can only be cleared. Setting `awsCustomArn` would let a patch invoke a Bedrock
@@ -272,6 +287,11 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+
+	/** True once `dispose` has run: nothing is to be posted to its webview any more. */
+	public get isDisposed() {
+		return this._disposed
+	}
 	private lastWebviewHeartbeatAt = 0
 	// Bumped on every heartbeat or grace reset, including events in the same
 	// millisecond; pending recovery must yield to either sign of renewed grace.
@@ -414,6 +434,12 @@ export class ClineProvider
 	 * Used by the frontend to reject stale state that arrives out-of-order.
 	 */
 	private clineMessagesSeq = 0
+
+	/**
+	 * Sequence number for every state push (including those without clineMessages), used by the
+	 * frontend to ignore the appearance values of a push that arrives after a newer one.
+	 */
+	private appearanceSeq = 0
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
@@ -952,6 +978,8 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		// Appearance writes that have not started are dropped; one whose store has started cannot be cancelled.
+		disposeSettingWrites(this)
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")
@@ -2398,8 +2426,14 @@ export class ClineProvider
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
+		// The appearance values are left out: they are not changed here, and writing them back from this snapshot
+		// would bypass their write chain and could replace a value that a save stored in the meantime.
+		const unchanged = Object.fromEntries(
+			Object.entries(globalSettings).filter(([key]) => !isAppearanceSetting(key)),
+		) as RooCodeSettings
+
 		await this.contextProxy.setValues({
-			...globalSettings,
+			...unchanged,
 			currentApiConfigName: profileToActivate,
 			listApiConfigMeta: entries,
 		})
@@ -2933,10 +2967,29 @@ export class ClineProvider
 		await this.postStateToWebview()
 	}
 
-	async postStateToWebview() {
+	/**
+	 * `importRefresh` marks this one state as the refresh that follows an import that failed part of the way (see
+	 * `SettingsImportRefresh`): it is put on the state that is posted, and on no other.
+	 */
+	async postStateToWebview(importRefresh?: SettingsImportRefresh) {
+		// A disposed provider has no webview to show a state to: it is not built, and no sequence number is spent.
+		if (this._disposed) return
 		const clineMessagesSeq = ++this.clineMessagesSeq
-		const state = await this.getStateToPostToWebview()
+		let state: ExtensionState
+		try {
+			state = await this.getStateToPostToWebview()
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return
+			throw error
+		}
+		// It may have been disposed while the state was being built (the settings and the history are read first).
+		if (this._disposed) return
 		state.clineMessagesSeq = clineMessagesSeq
+		if (importRefresh) {
+			state.settingsImportRefreshedAt = importRefresh.at
+			state.settingsImportStoredKeys = importRefresh.storedKeys
+			state.settingsImportRefreshIsLate = importRefresh.late || undefined
+		}
 		await this.postMessageToWebview({ type: "state", state })
 	}
 
@@ -2949,8 +3002,16 @@ export class ClineProvider
 	 *   `taskHistoryUpdated` / `taskHistoryItemUpdated`.
 	 */
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
+		if (this._disposed) return
 		const clineMessagesSeq = ++this.clineMessagesSeq
-		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		let state: ExtensionState
+		try {
+			state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return
+			throw error
+		}
+		if (this._disposed) return
 		state.clineMessagesSeq = clineMessagesSeq
 		const { taskHistory: _omit, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
@@ -2990,7 +3051,15 @@ export class ClineProvider
 	 *   (cloud auth, org settings, profiles, etc.) without interfering with task message streaming.
 	 */
 	async postStateToWebviewWithoutClineMessages(): Promise<void> {
-		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		if (this._disposed) return
+		let state: ExtensionState
+		try {
+			state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return
+			throw error
+		}
+		if (this._disposed) return
 		const { clineMessages: _omitMessages, taskHistory: _omitHistory, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
 	}
@@ -3096,9 +3165,36 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Builds the state to post, or nothing when the provider was disposed while it was being built: a disposed
+	 * provider has no webview to show it to, so the half-built state is dropped, not posted.
+	 */
+	async buildStateUnlessDisposed(options?: GetStateOptions): Promise<ExtensionState | undefined> {
+		try {
+			return await this.getStateToPostToWebview(options)
+		} catch (error) {
+			if (error instanceof StateBuildAbandonedError) return undefined
+			throw error
+		}
+	}
+
+	private throwIfDisposed() {
+		if (this._disposed) throw new StateBuildAbandonedError()
+	}
+
+	/**
+	 * Throws `StateBuildAbandonedError` when the provider is disposed before or while the state is built; it is checked
+	 * before a sequence number is spent and after every step that waits. The posting methods catch it.
+	 */
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
+		this.throwIfDisposed()
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
+		this.throwIfDisposed()
+
+		// Taken in the same synchronous step as getState() starts, which reads the settings before its first await.
+		// So a higher number always means a newer snapshot, however long the rest of the push takes.
+		const appearanceSeq = ++this.appearanceSeq
 
 		const {
 			apiConfiguration,
@@ -3164,6 +3260,10 @@ export class ClineProvider
 			historyPreviewCollapsed,
 			reasoningBlockCollapsed,
 			chatFontSize,
+			interfaceFontScale,
+			terminalFontSize,
+			editorFontSize,
+			spacingScale,
 			timeFormat,
 			dateFormat,
 			showRelativeTimes,
@@ -3195,6 +3295,7 @@ export class ClineProvider
 			autoCloseZooOpenedFilesAfterUserEdited,
 			autoCloseZooOpenedNewFiles,
 		} = await this.getState({ includeTaskHistory: false })
+		this.throwIfDisposed()
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
 
@@ -3217,6 +3318,7 @@ export class ClineProvider
 		} catch {
 			// Ignore this error.
 		}
+		this.throwIfDisposed()
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
@@ -3264,6 +3366,35 @@ export class ClineProvider
 		} catch {
 			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
 		}
+		this.throwIfDisposed()
+
+		const openAiCodexIsAuthenticated = await (async () => {
+			try {
+				const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
+				return await openAiCodexOAuthManager.isAuthenticated()
+			} catch {
+				return false
+			}
+		})()
+		this.throwIfDisposed()
+		const kimiCodeIsAuthenticated = await (async () => {
+			try {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				return await kimiCodeOAuthManager.isAuthenticated()
+			} catch {
+				return false
+			}
+		})()
+		this.throwIfDisposed()
+		const kimiCodeOAuthState = await (async () => {
+			try {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				return kimiCodeOAuthManager.getState()
+			} catch {
+				return undefined
+			}
+		})()
+		this.throwIfDisposed()
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -3348,6 +3479,11 @@ export class ClineProvider
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,
+			interfaceFontScale,
+			terminalFontSize,
+			editorFontSize,
+			spacingScale,
+			appearanceSeq,
 			timeFormat: timeFormat ?? "auto",
 			dateFormat: dateFormat ?? "auto",
 			showRelativeTimes: showRelativeTimes ?? true,
@@ -3399,30 +3535,9 @@ export class ClineProvider
 			autoCloseZooOpenedFilesAfterUserEdited:
 				autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 			autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			openAiCodexIsAuthenticated: await (async () => {
-				try {
-					const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
-					return await openAiCodexOAuthManager.isAuthenticated()
-				} catch {
-					return false
-				}
-			})(),
-			kimiCodeIsAuthenticated: await (async () => {
-				try {
-					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-					return await kimiCodeOAuthManager.isAuthenticated()
-				} catch {
-					return false
-				}
-			})(),
-			kimiCodeOAuthState: await (async () => {
-				try {
-					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-					return kimiCodeOAuthManager.getState()
-				} catch {
-					return undefined
-				}
-			})(),
+			openAiCodexIsAuthenticated,
+			kimiCodeIsAuthenticated,
+			kimiCodeOAuthState,
 			...zooCodeState,
 			platform: process.platform,
 			arch: process.arch,
@@ -3584,6 +3699,10 @@ export class ClineProvider
 			historyPreviewCollapsed: stateValues.historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
 			chatFontSize: stateValues.chatFontSize,
+			interfaceFontScale: stateValues.interfaceFontScale,
+			terminalFontSize: stateValues.terminalFontSize,
+			editorFontSize: stateValues.editorFontSize,
+			spacingScale: stateValues.spacingScale,
 			timeFormat: stateValues.timeFormat ?? "auto",
 			dateFormat: stateValues.dateFormat ?? "auto",
 			showRelativeTimes: stateValues.showRelativeTimes ?? true,
@@ -3713,9 +3832,26 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await this.contextProxy.setValues(
-			withoutInvalidDisplaySettings(values, (key) => this.log(`[setValues] Ignored an invalid value for ${key}`)),
-		)
+		try {
+			const written = await writeValuesThroughWriteChain(
+				this.contextProxy,
+				withoutInvalidDisplaySettings(values, (key) =>
+					this.log(`[setValues] Ignored an invalid value for ${key}`),
+				),
+				{
+					owner: this,
+					onDeferredSettled: () => void this.postStateToWebview().catch(() => undefined),
+				},
+			)
+			// A write that was only partly stored is reported with the settings that were stored and those that were not
+			// (the same error as the extension API gives); one that failed alone is reported as it was.
+			if (written.failure) throw describeFailedWrite(written)
+		} catch (error) {
+			// The values that were stored before another write failed are final: the webview is shown what is stored. A
+			// refresh that fails does not hide the error.
+			await this.postStateToWebview().catch(() => undefined)
+			throw error
+		}
 	}
 
 	// dev

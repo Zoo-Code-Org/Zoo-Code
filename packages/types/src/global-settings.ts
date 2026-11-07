@@ -281,6 +281,22 @@ export const globalSettingsSchema = z.object({
 	 */
 	chatFontSize: z.number().int().min(8).max(32).nullish(),
 	/**
+	 * Scale (percent) applied to Zoo Code's interface text. `null`/unset = 100.
+	 */
+	interfaceFontScale: z.number().int().min(50).max(200).nullish(),
+	/**
+	 * Font size (px) for command/terminal output shown in chat. `null`/unset inherits.
+	 */
+	terminalFontSize: z.number().int().min(8).max(32).nullish(),
+	/**
+	 * Font size (px) for code blocks and diffs shown in chat. `null`/unset inherits.
+	 */
+	editorFontSize: z.number().int().min(8).max(32).nullish(),
+	/**
+	 * Scale (percent) applied to chat row padding. `null`/unset = 100.
+	 */
+	spacingScale: z.number().int().min(50).max(200).nullish(),
+	/**
 	 * Clock format used when rendering timestamps. "auto" follows the display language's locale.
 	 * @default "auto"
 	 */

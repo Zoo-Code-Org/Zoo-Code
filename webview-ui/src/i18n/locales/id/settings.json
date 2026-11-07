@@ -22,7 +22,8 @@
 		"title": "Perubahan Belum Disimpan",
 		"description": "Apakah kamu ingin membuang perubahan dan melanjutkan?",
 		"cancelButton": "Batal",
-		"discardButton": "Buang perubahan"
+		"discardButton": "Buang perubahan",
+		"saveMayComplete": "Penyimpanan yang belum dijawab mungkin masih selesai setelah Anda keluar."
 	},
 	"sections": {
 		"providers": "Provider",
@@ -1071,6 +1072,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Tutup otomatis file baru yang dibuat",
 			"description": "Saat diaktifkan, tab untuk file yang dibuat Zoo (bukan dimodifikasi) juga ditutup secara otomatis setelah perubahan diterima."
+		},
+		"appearance": {
+			"reset": "Setel ulang ke default",
+			"interfaceFontScale": {
+				"label": "Ukuran font antarmuka",
+				"description": "Menskalakan semua teks Zoo Code. 100% sama dengan VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Ukuran font terminal",
+				"description": "Ukuran font untuk output perintah yang ditampilkan di chat."
+			},
+			"editorFontSize": {
+				"label": "Ukuran font editor",
+				"description": "Ukuran font untuk blok kode dan diff yang ditampilkan di chat."
+			},
+			"spacingScale": {
+				"label": "Kerapatan spasi",
+				"description": "Padding antar pesan chat. Nilai lebih rendah lebih ringkas."
+			},
+			"preview": "Pratinjau",
+			"sample": {
+				"you": "Anda",
+				"zoo": "Zoo",
+				"user": "Tambahkan spinner pemuatan ke tombol Simpan",
+				"assistant": "Selesai. Saya menambahkan spinner yang tampil selama permintaan berlangsung."
+			}
 		}
 	},
 	"skills": {

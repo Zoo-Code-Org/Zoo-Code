@@ -32,6 +32,7 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { describeFailedWrite, writeValuesThroughWriteChain } from "../core/config/appearanceSettingWrites"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages, TaskMessagesReadError } from "../core/task-persistence/taskMessages"
 import { getErrorCode } from "../core/task-persistence/readFileWithMissingRetry"
@@ -642,17 +643,34 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	/**
-	 * Stores the settings, then the API profile and the mode profiles. The settings are written with
-	 * `ContextProxy.setValues`, which is not a transaction (see there): if a setting cannot be stored, this rejects
-	 * with a `SettingsWriteError` that lists the keys that were stored and the keys that were not (the cache of the
-	 * failed keys has been read back from storage), the stored settings stay, and nothing after the settings is
-	 * written. Invalid values of the display settings are dropped and logged first.
+	 * Stores the settings, then the API profile and the mode profiles. The appearance values are written one at a time,
+	 * with a rollback if one fails (see `writeValuesThroughWriteChain`); the other settings are written with
+	 * `ContextProxy.setValues`, which is not a transaction (see there): if the write is not all stored, this rejects with
+	 * an error that lists the settings that were stored and those that were not (a `PartialSettingsWriteError`, with the
+	 * failure as its `cause`; a write that failed alone, with nothing else stored, rejects with that failure as it was),
+	 * the stored settings stay, and nothing after the settings is written. Invalid values of the display settings are
+	 * dropped and logged first.
 	 */
 	public async setConfiguration(allValues: RooCodeSettings) {
 		const values = withoutInvalidDisplaySettings(allValues, (key) =>
 			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
 		)
-		await this.sidebarProvider.contextProxy.setValues(values)
+		try {
+			const written = await writeValuesThroughWriteChain(this.sidebarProvider.contextProxy, values, {
+				owner: this.sidebarProvider,
+				onDeferredSettled: () => void this.sidebarProvider.postStateToWebview().catch(() => undefined),
+			})
+			if (written.failure) throw describeFailedWrite(written)
+		} catch (error) {
+			// The write is not a transaction: some of the settings may be stored, and the ones that failed were read back
+			// into the cache. The webview is shown what is stored, and the error is not hidden by it.
+			try {
+				await this.sidebarProvider.postStateToWebview()
+			} catch {
+				// Not worth hiding the error of the write for.
+			}
+			throw error
+		}
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
 			await Promise.all(

@@ -17,8 +17,23 @@ import {
 	importSettingsWithFeedback,
 	exportSettings,
 } from "../importExport"
+import type { SettingsImportRefresh } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
-import { ContextProxy } from "../ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../ContextProxy"
+import {
+	beginSettingWrite,
+	disposeSettingWrites,
+	performSettingWrite,
+	writeValuesThroughWriteChain,
+	settingWriteBookkeepingSize,
+	undoSettingWrite,
+} from "../appearanceSettingWrites"
+
+/** A write that throws the failure, as the report gives it: what the tests of the write chain read. */
+const setValuesThroughWriteChain = async (...args: Parameters<typeof writeValuesThroughWriteChain>) => {
+	const { failure } = await writeValuesThroughWriteChain(...args)
+	if (failure) throw failure.reason
+}
 import { CustomModesManager } from "../CustomModesManager"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -245,7 +260,11 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(result).toEqual({ success: false, error: "current profile write failed" })
+			expect(result).toEqual({
+				success: false,
+				error: "current profile write failed",
+				settingsMayHaveChanged: true,
+			})
 			expect(mockContextProxy.setProviderSettings).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
 		})
@@ -272,6 +291,717 @@ describe("importExport", () => {
 			expect(fs.readFile).not.toHaveBeenCalled()
 			expect(mockProviderSettingsManager.import).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValues).not.toHaveBeenCalled()
+		})
+
+		describe("appearance settings go through the write chain of the saves", () => {
+			const stored = new Map<string, unknown>()
+
+			const importWith = (globalSettings: Record<string, unknown>) => {
+				;(fs.readFile as Mock).mockResolvedValue(
+					JSON.stringify({
+						providerProfiles: {
+							currentApiConfigName: "test",
+							apiConfigs: {
+								test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+							},
+						},
+						globalSettings,
+					}),
+				)
+				return importSettingsFromPath("/mock/path/settings.json", {
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+				})
+			}
+
+			beforeEach(() => {
+				stored.clear()
+				stored.set("interfaceFontScale", 100)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+				})
+				mockProviderSettingsManager.import.mockResolvedValue(undefined)
+				mockProviderSettingsManager.listConfig.mockResolvedValue([])
+				mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+				mockContextProxy.getValue.mockImplementation(((key: string) =>
+					stored.get(key)) as unknown as typeof mockContextProxy.getValue)
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+				}) as unknown as typeof mockContextProxy.setValue)
+				mockContextProxy.setValues.mockResolvedValue(undefined)
+			})
+
+			it("stores an appearance value as a recorded write, and the rest through setValues", async () => {
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toMatchObject({ success: true })
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			type ImportMarks = {
+				postStateToWebview: (refresh?: SettingsImportRefresh) => Promise<void>
+			}
+
+			describe("when a write of the import times out and is rolled back after the import was answered", () => {
+				beforeEach(() => vi.useFakeTimers())
+				afterEach(() => vi.useRealTimers())
+
+				const importWithFeedback = async (
+					postStateToWebview: () => Promise<void>,
+					viaDialog = false,
+					provider: ImportMarks = { postStateToWebview },
+					waitForAnswer = true,
+				) => {
+					;(fs.access as Mock).mockResolvedValue(undefined)
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "test",
+								apiConfigs: {
+									test: {
+										apiProvider: providerIdentifiers.openai,
+										apiKey: "test-key",
+										id: "test-id",
+									},
+								},
+							},
+							globalSettings: { interfaceFontScale: 120 },
+						}),
+					)
+					// The store of the value starts, and lands only when it is released: after the import timed out.
+					const release = createDeferred<void>()
+					mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+						if (value === 120) {
+							await release.promise
+						}
+						stored.set(key, value)
+					}) as unknown as typeof mockContextProxy.setValue)
+					const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+
+					;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+					const done = importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider,
+						},
+						viaDialog ? undefined : "/mock/path/settings.json",
+					)
+					await vi.advanceTimersByTimeAsync(15_000)
+					// A refresh that is still being posted holds the answer: a test that wants it so does not wait for it.
+					if (waitForAnswer) await done
+					return { release, showErrorMessage, provider, done }
+				}
+
+				it.each([
+					["a file path", false],
+					["the file dialog", true],
+				])(
+					"shows the webview what is stored once the rollback has run, for an import from %s",
+					async (_name, viaDialog) => {
+						const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+						const { release, showErrorMessage } = await importWithFeedback(postStateToWebview, viaDialog)
+						const refreshesWhenAnswered = postStateToWebview.mock.calls.length
+
+						release.resolve() // the late store lands, and its rollback runs behind it
+						await vi.advanceTimersByTimeAsync(0)
+
+						expect(showErrorMessage).toHaveBeenCalled() // the import was answered as failed
+						expect(stored.get("interfaceFontScale")).toBe(100)
+						expect(postStateToWebview.mock.calls.length).toBe(refreshesWhenAnswered + 1)
+						showErrorMessage.mockRestore()
+					},
+				)
+
+				it.each([
+					["a file path", false],
+					["the file dialog", true],
+				])(
+					"does not call back into a provider that was disposed meanwhile, for an import from %s",
+					async (_name, viaDialog) => {
+						const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+						const { release, showErrorMessage, provider } = await importWithFeedback(
+							postStateToWebview,
+							viaDialog,
+						)
+						const refreshesWhenAnswered = postStateToWebview.mock.calls.length
+
+						disposeSettingWrites(provider) // the view is closed before the late store lands
+						release.resolve()
+						await vi.advanceTimersByTimeAsync(0)
+
+						expect(stored.get("interfaceFontScale")).toBe(100) // the value is still put back
+						expect(postStateToWebview.mock.calls.length).toBe(refreshesWhenAnswered)
+						showErrorMessage.mockRestore()
+					},
+				)
+
+				it("marks the refresh after the rollback for the settings form too, with the uncertain settings, as another refresh", async () => {
+					const seen: Array<SettingsImportRefresh | undefined> = []
+					const provider: ImportMarks = {
+						postStateToWebview: vi.fn(async (refresh?: SettingsImportRefresh) => {
+							seen.push(refresh)
+						}),
+					}
+					const { release, showErrorMessage } = await importWithFeedback(
+						provider.postStateToWebview,
+						false,
+						provider,
+					)
+					expect(seen).toHaveLength(1) // the answer of the import: the form takes the value that failed to be stored
+					expect(seen[0]).toMatchObject({ storedKeys: ["interfaceFontScale"], late: false })
+
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(seen).toHaveLength(2) // the rollback is over: the form takes the value that is really stored
+					expect(seen[1]).toMatchObject({ storedKeys: ["interfaceFontScale"], late: true }) // a late refresh
+					expect(seen[1]!.at).toBeGreaterThan(seen[0]!.at) // not the refresh that the form handled already
+					expect(stored.get("interfaceFontScale")).toBe(100)
+					showErrorMessage.mockRestore()
+				})
+
+				it("gives two refreshes in the same millisecond different marks", async () => {
+					vi.setSystemTime(1_000_000)
+					const seen: number[] = []
+					const provider: ImportMarks = {
+						postStateToWebview: vi.fn(async (refresh?: SettingsImportRefresh) => {
+							seen.push(refresh!.at)
+						}),
+					}
+					const { release, showErrorMessage } = await importWithFeedback(
+						provider.postStateToWebview,
+						false,
+						provider,
+					)
+					vi.setSystemTime(Date.now() - 15_000) // as if the clock had not moved since the answer
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+
+					expect(seen).toHaveLength(2)
+					expect(new Set(seen).size).toBe(2)
+					showErrorMessage.mockRestore()
+				})
+
+				it("gives every refresh its own marks when they overlap: a slow post does not clear, or take, the marks of another", async () => {
+					const posts: Array<{ refresh?: SettingsImportRefresh; finish: () => void }> = []
+					const provider: ImportMarks = {
+						postStateToWebview: vi.fn(
+							(refresh?: SettingsImportRefresh) =>
+								new Promise<void>((resolve) => posts.push({ refresh, finish: resolve })),
+						),
+					}
+					const { release, showErrorMessage, done } = await importWithFeedback(
+						provider.postStateToWebview,
+						false,
+						provider,
+						false,
+					)
+
+					// The refresh for the answer is still being posted when the rollback finishes.
+					expect(posts).toHaveLength(1)
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+					expect(posts).toHaveLength(2)
+
+					// Each post carries the marks of its own refresh, whatever order they end in.
+					posts[1].finish()
+					posts[0].finish()
+					await done
+					await vi.advanceTimersByTimeAsync(0)
+					expect(posts[0].refresh).toMatchObject({ storedKeys: ["interfaceFontScale"], late: false })
+					expect(posts[1].refresh).toMatchObject({ storedKeys: ["interfaceFontScale"], late: true })
+					expect(posts[1].refresh!.at).toBeGreaterThan(posts[0].refresh!.at)
+					showErrorMessage.mockRestore()
+				})
+
+				it("keeps the answer of the import when that refresh fails", async () => {
+					const unhandled: unknown[] = []
+					const onUnhandled = (reason: unknown) => unhandled.push(reason)
+					process.on("unhandledRejection", onUnhandled)
+					let failRefresh = false
+					const attempts: boolean[] = []
+					// A plain function: a mock that rejects would be reported by the mock itself.
+					const postStateToWebview = () => {
+						attempts.push(failRefresh)
+						return failRefresh ? Promise.reject(new Error("webview is gone")) : Promise.resolve()
+					}
+					const { release, showErrorMessage } = await importWithFeedback(postStateToWebview)
+
+					failRefresh = true
+					release.resolve()
+					await vi.advanceTimersByTimeAsync(0)
+					await vi.advanceTimersByTimeAsync(0)
+					process.off("unhandledRejection", onUnhandled)
+
+					expect(attempts).toContain(true) // the refresh was tried, and failed
+					expect(unhandled).toEqual([])
+					expect(stored.get("interfaceFontScale")).toBe(100)
+					showErrorMessage.mockRestore()
+				})
+			})
+
+			it("keeps an imported value when a save that wrote the same value fails afterwards", async () => {
+				const save = beginSettingWrite("interfaceFontScale", 100, 120)
+				await performSettingWrite(mockContextProxy as unknown as ContextProxy, save)
+
+				await importWith({ interfaceFontScale: 120 }) // the same value, while the save is pending
+				await undoSettingWrite(mockContextProxy as unknown as ContextProxy, save) // the save fails
+
+				expect(stored.get("interfaceFontScale")).toBe(120)
+			})
+
+			it("undoes a write that failed, so an earlier save still pending keeps its own rollback", async () => {
+				const proxy = mockContextProxy as unknown as ContextProxy
+				const save = beginSettingWrite("interfaceFontScale", 100, 150)
+				await performSettingWrite(proxy, save) // a save has stored 150 and is still pending
+
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					if (value === 120) throw new Error("storage unavailable") // the import's write fails
+					stored.set(key, value)
+				}) as unknown as typeof mockContextProxy.setValue)
+				const result = await importWith({ interfaceFontScale: 120 })
+				expect(result).toEqual({ success: false, error: "storage unavailable", settingsMayHaveChanged: true })
+
+				await undoSettingWrite(proxy, save) // the save fails afterwards
+
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("names the other settings that were stored and those that were not, when the store says which", async () => {
+				mockContextProxy.setValues.mockRejectedValue(
+					new SettingsWriteError(["mode"], ["autoApprovalEnabled"], new Error("secret storage unavailable")),
+				)
+				mockContextProxy.setValue.mockImplementation((async (_key: string, value: unknown) => {
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["mode", "terminalFontSize"],
+					error: "secret storage unavailable (not stored: autoApprovalEnabled, interfaceFontScale; stored: mode, terminalFontSize)",
+				})
+			})
+
+			it("names the other settings that were stored when an appearance value is what failed", async () => {
+				mockContextProxy.setValue.mockImplementation((async (_key: string, value: unknown) => {
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["mode"],
+					error: "failed after storing (not stored: interfaceFontScale; stored: mode)",
+				})
+			})
+
+			it("names the other settings that were stored too when only they fail, with no appearance value", async () => {
+				mockContextProxy.setValues.mockRejectedValue(
+					new SettingsWriteError(["mode"], ["autoApprovalEnabled"], new Error("secret storage unavailable")),
+				)
+
+				const result = await importWith({ mode: "code", autoApprovalEnabled: true })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["mode"],
+					error: "secret storage unavailable (not stored: autoApprovalEnabled; stored: mode)",
+				})
+			})
+
+			it("keeps the appearance values that were stored when the other settings fail to store", async () => {
+				mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["interfaceFontScale"],
+					error: "other settings failed (not stored: the other settings; stored: interfaceFontScale)",
+				})
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("names every setting that was not stored when several fail, and says that nothing else was stored", async () => {
+				mockContextProxy.setValue.mockImplementation((async () => {
+					throw new Error("storage unavailable")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					error: "storage unavailable (not stored: interfaceFontScale, terminalFontSize; stored: none)",
+				})
+				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("names the other settings as not stored too when they fail together with an appearance value", async () => {
+				mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
+				mockContextProxy.setValue.mockImplementation((async (_key: string, value: unknown) => {
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					error: "other settings failed (not stored: the other settings, interfaceFontScale; stored: none)",
+				})
+			})
+
+			describe("an import that failed part of the way, through importSettingsWithFeedback", () => {
+				const importFailing = async (
+					postStateToWebview: () => Promise<void>,
+					provider: { postStateToWebview: (refresh?: SettingsImportRefresh) => Promise<void> } = {
+						postStateToWebview,
+					},
+				) => {
+					;(fs.access as Mock).mockResolvedValue(undefined)
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "test",
+								apiConfigs: {
+									test: {
+										apiProvider: providerIdentifiers.openai,
+										apiKey: "test-key",
+										id: "test-id",
+									},
+								},
+							},
+							globalSettings: { interfaceFontScale: 120, mode: "code" },
+						}),
+					)
+					mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
+					const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider,
+						},
+						"/mock/path/settings.json",
+					)
+					return showErrorMessage
+				}
+
+				it("shows the webview what is stored, and tells the user the import failed", async () => {
+					const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+
+					const showErrorMessage = await importFailing(postStateToWebview)
+
+					expect(postStateToWebview).toHaveBeenCalledOnce()
+					expect(showErrorMessage).toHaveBeenCalledOnce()
+					showErrorMessage.mockRestore()
+				})
+
+				describe("a failure before the import changed anything", () => {
+					const importBeforeAnyChange = async (prepare: () => void, filePath: string | undefined) => {
+						prepare()
+						const seen: Array<SettingsImportRefresh | undefined> = []
+						const provider = {
+							postStateToWebview: vi.fn(async (refresh?: SettingsImportRefresh) => {
+								seen.push(refresh)
+							}),
+						}
+						const showErrorMessage = vi
+							.spyOn(vscode.window, "showErrorMessage")
+							.mockResolvedValue(undefined)
+
+						await importSettingsWithFeedback(
+							{
+								providerSettingsManager: mockProviderSettingsManager,
+								contextProxy: mockContextProxy,
+								customModesManager: mockCustomModesManager,
+								provider,
+							},
+							filePath,
+						)
+
+						return { provider, seen, showErrorMessage }
+					}
+
+					it.each([
+						[
+							"a file that cannot be reached",
+							() => (fs.access as Mock).mockRejectedValue(new Error("ENOENT")),
+							"/mock/path/settings.json",
+						],
+						[
+							"a file that is not valid",
+							() => {
+								;(fs.access as Mock).mockResolvedValue(undefined)
+								;(fs.readFile as Mock).mockResolvedValue("not json")
+							},
+							"/mock/path/settings.json",
+						],
+						[
+							"a file with no profile that can be imported",
+							() => {
+								;(fs.access as Mock).mockResolvedValue(undefined)
+								;(fs.readFile as Mock).mockResolvedValue(
+									JSON.stringify({
+										providerProfiles: {
+											currentApiConfigName: "bad",
+											apiConfigs: { bad: { apiProvider: providerIdentifiers.openai, id: 42 } }, // not a valid profile
+										},
+										globalSettings: { mode: "code" },
+									}),
+								)
+							},
+							"/mock/path/settings.json",
+						],
+						[
+							"a file dialog that is cancelled",
+							() => (vscode.window.showOpenDialog as Mock).mockResolvedValue(undefined),
+							undefined,
+						],
+					])(
+						"does not refresh, or mark, anything after %s: the settings are as they were",
+						async (_name, prepare, filePath) => {
+							const { provider, seen, showErrorMessage } = await importBeforeAnyChange(
+								prepare as () => void,
+								filePath,
+							)
+
+							expect(provider.postStateToWebview).not.toHaveBeenCalled()
+							expect(seen).toEqual([])
+							showErrorMessage.mockRestore()
+						},
+					)
+				})
+
+				it("marks the refresh for the settings form while it is posted, with the settings that were stored, and only then", async () => {
+					const seen: Array<SettingsImportRefresh | undefined> = []
+					const provider = {
+						postStateToWebview: vi.fn(async (refresh?: SettingsImportRefresh) => {
+							seen.push(refresh)
+						}),
+					}
+
+					const showErrorMessage = await importFailing(provider.postStateToWebview, provider)
+
+					expect(seen).toHaveLength(1)
+					expect(seen[0]!.at).toBeGreaterThan(0) // the form is told to take what the import stored
+					expect(seen[0]!.storedKeys).toEqual(["interfaceFontScale"]) // and which settings those are
+					expect(seen[0]!.late).toBe(false)
+					showErrorMessage.mockRestore()
+				})
+
+				it("does not mark the state of an import that succeeded as a refresh: that import replaces the form", async () => {
+					const seen: Array<SettingsImportRefresh | undefined> = []
+					const provider = {
+						settingsImportedAt: undefined as number | undefined,
+						postStateToWebview: vi.fn(async (refresh?: SettingsImportRefresh) => {
+							seen.push(refresh)
+						}),
+					}
+					mockContextProxy.setValues.mockResolvedValue(undefined)
+					;(fs.access as Mock).mockResolvedValue(undefined)
+					;(fs.readFile as Mock).mockResolvedValue(
+						JSON.stringify({
+							providerProfiles: {
+								currentApiConfigName: "test",
+								apiConfigs: {
+									test: {
+										apiProvider: providerIdentifiers.openai,
+										apiKey: "test-key",
+										id: "test-id",
+									},
+								},
+							},
+							globalSettings: { mode: "code" },
+						}),
+					)
+					const showInfoMessage = vi
+						.spyOn(vscode.window, "showInformationMessage")
+						.mockResolvedValue(undefined)
+
+					await importSettingsWithFeedback(
+						{
+							providerSettingsManager: mockProviderSettingsManager,
+							contextProxy: mockContextProxy,
+							customModesManager: mockCustomModesManager,
+							provider,
+						},
+						"/mock/path/settings.json",
+					)
+
+					expect(seen).toEqual([undefined])
+					showInfoMessage.mockRestore()
+				})
+
+				it("still tells the user when that refresh fails", async () => {
+					const postStateToWebview = () => Promise.reject(new Error("webview is gone")) // a plain function: a mock would record it
+					const showErrorMessage = await importFailing(postStateToWebview)
+
+					expect(showErrorMessage).toHaveBeenCalledOnce()
+					showErrorMessage.mockRestore()
+				})
+			})
+
+			describe("the report of a write through the chain", () => {
+				const proxy = () => mockContextProxy as unknown as ContextProxy
+
+				it("rejects with the original error, whatever else was stored, for the callers that do not report", async () => {
+					const failure = new Error("other settings failed")
+					mockContextProxy.setValues.mockRejectedValue(failure)
+
+					await expect(
+						setValuesThroughWriteChain(proxy(), { interfaceFontScale: 120, mode: "code" }),
+					).rejects.toBe(failure)
+					expect(stored.get("interfaceFontScale")).toBe(120)
+				})
+
+				it("names what was stored and what was not, with the first failure", async () => {
+					const failure = new Error("other settings failed")
+					mockContextProxy.setValues.mockRejectedValue(failure)
+
+					const report = await writeValuesThroughWriteChain(proxy(), {
+						interfaceFontScale: 120,
+						mode: "code",
+					})
+
+					expect(report).toEqual({
+						failure: { reason: failure },
+						stored: ["interfaceFontScale"],
+						notStored: ["the other settings"],
+						uncertain: [],
+					})
+				})
+
+				it("reports nothing when everything was stored, and a failure of settings without an appearance value", async () => {
+					expect(await writeValuesThroughWriteChain(proxy(), { interfaceFontScale: 120 })).toEqual({
+						stored: ["interfaceFontScale"],
+						notStored: [],
+						uncertain: [],
+						failure: undefined,
+					})
+
+					const failure = new Error("other settings failed")
+					mockContextProxy.setValues.mockRejectedValue(failure)
+					expect(await writeValuesThroughWriteChain(proxy(), { mode: "code" })).toEqual({
+						failure: { reason: failure },
+						stored: [],
+						notStored: ["the other settings"],
+						uncertain: [],
+					})
+				})
+			})
+
+			it("stores every appearance value of an import that has several", async () => {
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14, spacingScale: 90 })
+
+				expect(result).toMatchObject({ success: true })
+				expect(stored.get("interfaceFontScale")).toBe(120)
+				expect(stored.get("terminalFontSize")).toBe(14)
+				expect(stored.get("spacingScale")).toBe(90)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("puts back only the value whose write failed after storing it, when another appearance write succeeds", async () => {
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (key === "interfaceFontScale" && value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120, terminalFontSize: 14 })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["terminalFontSize"],
+					error: "failed after storing (not stored: interfaceFontScale; stored: terminalFontSize)",
+				})
+				expect(stored.get("interfaceFontScale")).toBe(100)
+				expect(stored.get("terminalFontSize")).toBe(14)
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("puts back a value that was stored before its write failed, and still reports the failure", async () => {
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "failed after storing", settingsMayHaveChanged: true })
+				expect(stored.get("interfaceFontScale")).toBe(100)
+			})
+
+			it("puts back an unset value as unset when the write failed after storing", async () => {
+				stored.delete("interfaceFontScale") // cold start: nothing was ever stored for it
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					stored.set(key, value)
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "failed after storing", settingsMayHaveChanged: true })
+				expect(stored.get("interfaceFontScale")).toBeUndefined()
+				expect(mockContextProxy.setValue).toHaveBeenCalledWith("interfaceFontScale", undefined)
+			})
+
+			it("reports a value that could not be put back as uncertain, not as not stored, and names it for the form", async () => {
+				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+				mockContextProxy.setValue.mockImplementation((async (key: string, value: unknown) => {
+					if (value === 100) throw new Error("restore failed")
+					stored.set(key, value)
+					if (value === 120) throw new Error("failed after storing")
+				}) as unknown as typeof mockContextProxy.setValue)
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({
+					success: false,
+					settingsMayHaveChanged: true,
+					storedSettings: ["interfaceFontScale"], // the form takes what is really there for it
+					error: "failed after storing (not stored: none; stored: none; uncertain, could not be put back: interfaceFontScale)",
+				})
+				expect(consoleError).toHaveBeenCalledTimes(1)
+				expect(consoleError).toHaveBeenCalledWith(
+					'Failed to restore setting "interfaceFontScale" after a failed write:',
+					expect.objectContaining({ message: "restore failed" }),
+				)
+				consoleError.mockRestore()
+			})
+
+			it("leaves nothing in the chain, and reports the failure, when a write fails", async () => {
+				mockContextProxy.setValue.mockRejectedValue(new Error("storage unavailable"))
+
+				const result = await importWith({ interfaceFontScale: 120 })
+
+				expect(result).toEqual({ success: false, error: "storage unavailable", settingsMayHaveChanged: true })
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+			})
+
+			it("writes everything through setValues when the file has no appearance value", async () => {
+				await importWith({ mode: "code" })
+
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+				expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("interfaceFontScale", expect.anything())
+			})
 		})
 
 		it("should import settings successfully from a valid file", async () => {

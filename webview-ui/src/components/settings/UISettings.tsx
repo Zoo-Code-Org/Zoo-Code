@@ -14,15 +14,24 @@ import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
 import { Slider, Button } from "../ui"
 import { ExtensionStateContextType } from "@/context/ExtensionStateContext"
+import { APPEARANCE_SETTINGS, renderedAppearanceDefault, type AppearanceKey } from "@/utils/appearance"
+import { NumberStepper } from "./NumberStepper"
+import { AppearancePreview } from "./AppearancePreview"
 
-export const CHAT_FONT_SIZE_MIN = 8
-export const CHAT_FONT_SIZE_MAX = 32
-export const CHAT_FONT_SIZE_DEFAULT = 13
+const APPEARANCE_KEYS = Object.keys(APPEARANCE_SETTINGS) as AppearanceKey[]
+
+const CHAT_FONT_SIZE_MIN = 8
+const CHAT_FONT_SIZE_MAX = 32
+const CHAT_FONT_SIZE_DEFAULT = 13
 
 interface UISettingsProps extends HTMLAttributes<HTMLDivElement> {
 	reasoningBlockCollapsed: boolean
 	enterBehavior: "send" | "newline"
 	chatFontSize?: number
+	interfaceFontScale?: number
+	terminalFontSize?: number
+	editorFontSize?: number
+	spacingScale?: number
 	autoCloseZooOpenedFiles?: boolean
 	autoCloseZooOpenedFilesAfterUserEdited?: boolean
 	autoCloseZooOpenedNewFiles?: boolean
@@ -33,6 +42,10 @@ export const UISettings = ({
 	reasoningBlockCollapsed,
 	enterBehavior,
 	chatFontSize,
+	interfaceFontScale,
+	terminalFontSize,
+	editorFontSize,
+	spacingScale,
 	autoCloseZooOpenedFiles,
 	autoCloseZooOpenedFilesAfterUserEdited,
 	autoCloseZooOpenedNewFiles,
@@ -40,6 +53,23 @@ export const UISettings = ({
 	...props
 }: UISettingsProps) => {
 	const { t } = useAppTranslation()
+
+	const appearance: Record<AppearanceKey, number | undefined> = {
+		interfaceFontScale,
+		terminalFontSize,
+		editorFontSize,
+		spacingScale,
+	}
+
+	// What the UI renders for a font size that is not set: VS Code's own sizes, with the unsaved chat size and scale.
+	const vscodeSize = (name: string) =>
+		parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || undefined
+	const defaultsContext = {
+		vscodeFontSize: vscodeSize("--vscode-font-size"),
+		vscodeEditorFontSize: vscodeSize("--vscode-editor-font-size"),
+		chatFontSize,
+		interfaceFontScale,
+	}
 
 	// Detect platform for dynamic modifier key display
 	const primaryMod = useMemo(() => {
@@ -159,6 +189,35 @@ export const UISettings = ({
 							</div>
 						</div>
 					</SearchableSetting>
+
+					{/* Appearance sizes: interface %, terminal px, editor px, spacing % */}
+					{APPEARANCE_KEYS.map((key) => (
+						<SearchableSetting
+							key={key}
+							settingId={`ui-${key}`}
+							section="ui"
+							label={t(`settings:ui.appearance.${key}.label`)}>
+							<NumberStepper
+								label={t(`settings:ui.appearance.${key}.label`)}
+								description={t(`settings:ui.appearance.${key}.description`)}
+								resetLabel={t("settings:ui.appearance.reset")}
+								setting={APPEARANCE_SETTINGS[key]}
+								value={appearance[key]}
+								defaultValue={renderedAppearanceDefault(key, defaultsContext)}
+								onChange={(value) => {
+									setCachedStateField(key, value)
+									telemetryClient.capture("ui_settings_appearance_changed", {
+										key,
+										value: value ?? null,
+									})
+								}}
+								testId={`appearance-${key}`}
+							/>
+						</SearchableSetting>
+					))}
+
+					{/* Live preview of the (unsaved) size settings above */}
+					<AppearancePreview values={appearance} chatFontSize={chatFontSize} />
 
 					{/* Auto-close Zoo opened files */}
 					<SearchableSetting

@@ -19,6 +19,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
 import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
+import { describeFailedWrite, PartialSettingsWriteError, writeValuesThroughWriteChain } from "./appearanceSettingWrites"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { t } from "../../i18n"
@@ -27,6 +28,13 @@ export type ImportOptions = {
 	providerSettingsManager: ProviderSettingsManager
 	contextProxy: ContextProxy
 	customModesManager: CustomModesManager
+	/**
+	 * Called when a setting write that timed out has settled and its rollback has run, so the caller can show what is
+	 * really stored (the import has been answered by then).
+	 */
+	onDeferredSettled?: () => void
+	/** Who is importing (the provider): disposing it detaches `onDeferredSettled` and refuses its writes. */
+	owner?: object
 }
 
 type ExportOptions = {
@@ -36,7 +44,54 @@ type ExportOptions = {
 type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
-		postStateToWebview: () => Promise<void>
+		postStateToWebview: (refresh?: SettingsImportRefresh) => Promise<void>
+	}
+}
+
+/**
+ * What a state that follows an import that failed part of the way tells the settings form: it takes what the import
+ * stored (`storedKeys`), and keeps its other edits. It travels with the one state post it belongs to, never on the
+ * provider, so refreshes that overlap cannot clear or mix each other's marks.
+ */
+export type SettingsImportRefresh = {
+	/** Distinct for every refresh: the form acts on each stamp once. */
+	at: number
+	storedKeys: string[]
+	/** The refresh follows a rollback that finished after the import was answered: an edit made since is kept. */
+	late: boolean
+}
+
+/** An import that failed after it had started to change settings. */
+type PartialImportFailure = {
+	success: false
+	error: string
+	settingsMayHaveChanged: true
+	/** The settings the import stored, and those it may have stored (a rollback that did not work). */
+	storedSettings?: string[]
+}
+
+const isPartialImportFailure = (result: object): result is PartialImportFailure =>
+	"settingsMayHaveChanged" in result && result.settingsMayHaveChanged === true
+
+let lastRefreshStamp = 0
+
+/**
+ * Shows the webview what is stored, and tells the settings form to take it for `storedSettings`, and for whatever else
+ * changed with the state, keeping every other value, with the edits made to it (unlike after an import that succeeded,
+ * which replaces the form). The mark is on this one state only. A `late` refresh follows a rollback that finished after
+ * the import was answered: the form then keeps an edit that was made since. A refresh that fails does not matter to anybody.
+ */
+async function refreshWebviewAfterPartialImport(
+	provider: ImportWithProviderOptions["provider"],
+	storedSettings: string[],
+	late = false,
+) {
+	// Distinct from the stamp of an earlier refresh, so the form never takes two of them for one.
+	lastRefreshStamp = Math.max(Date.now(), lastRefreshStamp + 1)
+	try {
+		await provider.postStateToWebview({ at: lastRefreshStamp, storedKeys: storedSettings, late })
+	} catch {
+		// Nobody is waiting for the refresh.
 	}
 }
 
@@ -135,7 +190,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
  */
 export async function importSettingsFromPath(
 	filePath: string,
-	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled, owner }: ImportOptions,
 ) {
 	// Use a lenient schema that accepts any apiConfigs, then validate each individually
 	const lenientProviderProfilesSchema = providerProfilesSchema.extend({
@@ -146,6 +201,9 @@ export async function importSettingsFromPath(
 		providerProfiles: lenientProviderProfilesSchema,
 		globalSettings: z.unknown().optional(),
 	})
+
+	// Whether the import has started to change anything: a failure before that leaves every setting as it was.
+	let settingsMayHaveChanged = false
 
 	try {
 		const previousProviderProfiles = await providerSettingsManager.export()
@@ -218,6 +276,7 @@ export async function importSettingsFromPath(
 		const { sanitizedGlobalSettings, warnings: globalSettingsWarnings } = sanitizeGlobalSettings(rawGlobalSettings)
 		warnings.push(...globalSettingsWarnings)
 
+		settingsMayHaveChanged = true
 		await Promise.all(
 			(sanitizedGlobalSettings.customModes ?? []).map((mode) =>
 				customModesManager.updateCustomMode(mode.slug, mode),
@@ -228,7 +287,11 @@ export async function importSettingsFromPath(
 		// They will be imported automatically with the config - no special handling needed
 
 		await providerSettingsManager.import(providerProfiles)
-		await contextProxy.setValues(sanitizedGlobalSettings)
+		const written = await writeValuesThroughWriteChain(contextProxy, sanitizedGlobalSettings, {
+			onDeferredSettled,
+			owner,
+		})
+		if (written.failure) throw describeFailedWrite(written)
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
@@ -260,7 +323,20 @@ export async function importSettingsFromPath(
 			error = e.message
 		}
 
-		return { success: false, error }
+		// Only said when it is so: a failure before the import changed anything is the plain failure it always was.
+		// The settings that were stored are named too, so the form can take them.
+		return settingsMayHaveChanged
+			? ({
+					success: false,
+					error,
+					settingsMayHaveChanged: true,
+					// The settings the import stored, and those it may have stored (a rollback that did not work): the form
+					// takes what is really there for all of them.
+					...(e instanceof PartialSettingsWriteError && e.stored.length + e.uncertain.length > 0
+						? { storedSettings: [...e.stored, ...e.uncertain] }
+						: {}),
+				} satisfies PartialImportFailure)
+			: { success: false as const, error }
 	}
 }
 
@@ -269,7 +345,13 @@ export async function importSettingsFromPath(
  * @param options - Import options containing managers and proxy
  * @returns Promise resolving to import result
  */
-export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
+export const importSettings = async ({
+	providerSettingsManager,
+	contextProxy,
+	customModesManager,
+	onDeferredSettled,
+	owner,
+}: ImportOptions) => {
 	// Use the last export path as a sensible default, falling back to Downloads
 	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
@@ -290,6 +372,8 @@ export const importSettings = async ({ providerSettingsManager, contextProxy, cu
 		providerSettingsManager,
 		contextProxy,
 		customModesManager,
+		onDeferredSettled,
+		owner,
 	})
 }
 
@@ -302,13 +386,15 @@ export const importSettings = async ({ providerSettingsManager, contextProxy, cu
  * @returns Promise resolving to import result
  */
 export const importSettingsFromFile = async (
-	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onDeferredSettled, owner }: ImportOptions,
 	fileUri: vscode.Uri,
 ) => {
 	return importSettingsFromPath(fileUri.fsPath, {
 		providerSettingsManager,
 		contextProxy,
 		customModesManager,
+		onDeferredSettled,
+		owner,
 	})
 }
 
@@ -365,6 +451,13 @@ export const importSettingsWithFeedback = async (
 ) => {
 	let result
 
+	// A write of the import that timed out may still land and be rolled back after the import has been answered: the
+	// webview is shown what is stored then, and the settings form takes it for the settings that import left uncertain
+	// (it took the value that failed to be stored when the import was answered, and a later save would store it again),
+	// unless the user has edited that setting since.
+	let uncertainSettings: string[] = []
+	const onDeferredSettled = () => void refreshWebviewAfterPartialImport(provider, uncertainSettings, true)
+
 	if (filePath) {
 		// Validate file path and check if file exists
 		try {
@@ -374,6 +467,8 @@ export const importSettingsWithFeedback = async (
 				providerSettingsManager,
 				contextProxy,
 				customModesManager,
+				onDeferredSettled,
+				owner: provider,
 			})
 		} catch (error) {
 			result = {
@@ -382,7 +477,13 @@ export const importSettingsWithFeedback = async (
 			}
 		}
 	} else {
-		result = await importSettings({ providerSettingsManager, contextProxy, customModesManager })
+		result = await importSettings({
+			providerSettingsManager,
+			contextProxy,
+			customModesManager,
+			onDeferredSettled,
+			owner: provider,
+		})
 	}
 
 	if (result.success) {
@@ -407,6 +508,15 @@ export const importSettingsWithFeedback = async (
 			await vscode.window.showInformationMessage(t("common:info.settings_imported"))
 		}
 	} else if (result.error) {
+		// An import that failed part of the way may have stored some of its settings: the webview is shown what is
+		// stored, not what it had before, and the settings form takes it without dropping the edits that were made to
+		// the other settings (unlike after an import that succeeded). A refresh that fails does not hide the answer.
+		// A failure before the import changed anything (a file that cannot be read, a file that is not valid) leaves the
+		// settings as they were: nothing is refreshed, so an edit that is newer than the live state is not replaced.
+		if (isPartialImportFailure(result)) {
+			uncertainSettings = result.storedSettings ?? []
+			await refreshWebviewAfterPartialImport(provider, uncertainSettings)
+		}
 		await vscode.window.showErrorMessage(t("common:errors.settings_import_failed", { error: result.error }))
 	}
 }

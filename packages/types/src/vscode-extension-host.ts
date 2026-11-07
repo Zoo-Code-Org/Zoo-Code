@@ -342,6 +342,10 @@ export type ExtensionState = Pick<
 	| "includeTaskHistoryInEnhance"
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
+	| "interfaceFontScale"
+	| "terminalFontSize"
+	| "editorFontSize"
+	| "spacingScale"
 	| "timeFormat"
 	| "dateFormat"
 	| "showRelativeTimes"
@@ -398,6 +402,18 @@ export type ExtensionState = Pick<
 
 	renderContext: "sidebar" | "editor"
 	settingsImportedAt?: number
+	/**
+	 * Set only on the state that follows an import that failed part of the way: the settings form takes what the import
+	 * stored (the values that changed with this state), and keeps the edits that were made to the others.
+	 */
+	settingsImportRefreshedAt?: number
+	/** With `settingsImportRefreshedAt`: the settings that the failed import stored, which the form takes whatever they were before. */
+	settingsImportStoredKeys?: string[]
+	/**
+	 * With `settingsImportRefreshedAt`: this refresh follows a rollback that finished after the import was answered, so
+	 * the form takes the final value of each stored setting unless the user has edited it since the last state.
+	 */
+	settingsImportRefreshIsLate?: boolean
 	historyPreviewCollapsed?: boolean
 
 	cloudUserInfo: CloudUserInfo | null
@@ -454,6 +470,14 @@ export type ExtensionState = Pick<
 	 * (captured during async getStateToPostToWebview) from overwriting newer messages.
 	 */
 	clineMessagesSeq?: number
+
+	/**
+	 * Monotonically increasing sequence number for every state push, taken together with the host's read
+	 * of its settings. The frontend applies the appearance values (font sizes, spacing) of a push only if its
+	 * seq is greater than the last applied one, so an older push that arrives late cannot restore
+	 * values a newer push has already replaced.
+	 */
+	appearanceSeq?: number
 }
 
 export interface Command {

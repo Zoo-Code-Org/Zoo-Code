@@ -22,7 +22,8 @@
 		"title": "Unsaved Changes",
 		"description": "Do you want to discard changes and continue?",
 		"cancelButton": "Cancel",
-		"discardButton": "Discard changes"
+		"discardButton": "Discard changes",
+		"saveMayComplete": "A save that has not been answered yet may still complete after you leave."
 	},
 	"sections": {
 		"providers": "Providers",
@@ -234,6 +235,32 @@
 		"autoCloseZooOpenedNewFiles": {
 			"label": "Auto-close newly created files",
 			"description": "When enabled, tabs for files that Zoo created (rather than modified) will also be closed automatically after the edit is accepted."
+		},
+		"appearance": {
+			"reset": "Reset to default",
+			"interfaceFontScale": {
+				"label": "Interface font size",
+				"description": "Scales all Zoo Code text. 100% matches VS Code."
+			},
+			"terminalFontSize": {
+				"label": "Terminal font size",
+				"description": "Font size for command output shown in chat."
+			},
+			"editorFontSize": {
+				"label": "Editor font size",
+				"description": "Font size for code blocks and diffs shown in chat."
+			},
+			"spacingScale": {
+				"label": "Spacing density",
+				"description": "Padding between chat messages. Lower is more compact."
+			},
+			"preview": "Preview",
+			"sample": {
+				"you": "You",
+				"zoo": "Zoo",
+				"user": "Add a loading spinner to the Save button",
+				"assistant": "Done. I added a spinner that shows while the request is in flight."
+			}
 		}
 	},
 	"prompts": {

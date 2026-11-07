@@ -415,6 +415,26 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"appearance-consumers": async () => {
+		const { AppearanceConsumersStory } =
+			await import("@/components/settings/__tests__/AppearanceConsumers.visual.fixture")
+		return <AppearanceConsumersStory />
+	},
+	"appearance-tool-rows": async () => {
+		const { AppearanceToolRowsStory } =
+			await import("@/components/settings/__tests__/AppearanceToolRows.visual.fixture")
+		return <AppearanceToolRowsStory />
+	},
+	"unsaved-changes-dialog": async ({ saveOutcomeUnknown }) => {
+		const { UnsavedChangesDialogStory } =
+			await import("@/components/settings/__tests__/UnsavedChangesDialog.visual.fixture")
+		return <UnsavedChangesDialogStory saveOutcomeUnknown={saveOutcomeUnknown === true} />
+	},
+	"appearance-preview": async () => {
+		const { AppearancePreviewStory } =
+			await import("@/components/settings/__tests__/AppearancePreview.visual.fixture")
+		return <AppearancePreviewStory />
+	},
 	"chat-row-timestamps": async () => {
 		const { ChatRowTimestampsStory } = await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
 		return <ChatRowTimestampsStory />
