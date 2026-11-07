@@ -711,6 +711,23 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(getStored("task-stale-write")).toMatchObject({ title: "Renamed", status: "completed" })
 		})
 
+		it("logs and skips the broadcast when the record is gone from disk", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-vanished", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			const logSpy = vi.spyOn(provider, "log")
+			// Another window deletes the record between the cache check and the write.
+			vi.spyOn(provider.taskHistoryStore, "setTitleManually").mockResolvedValueOnce(undefined)
+			mockPostMessage.mockClear()
+
+			await provider.renameTaskWithId("task-vanished", "Renamed")
+
+			expect(logSpy).toHaveBeenCalledWith("[renameTaskWithId] task task-vanished is no longer on disk")
+			expect(findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")).toHaveLength(0)
+		})
+
 		it("does nothing for an unknown task", async () => {
 			const logSpy = vi.spyOn(provider, "log")
 

@@ -131,6 +131,33 @@ describe("KimiCodeHandler", () => {
 		expect(createCompletion).toHaveBeenCalledTimes(2)
 	})
 
+	it("forwards the caller's cancellation and deadline to each completion attempt", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
+		const client = (
+			handler as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }
+		).client
+		const createCompletion = vi
+			.spyOn(client.chat.completions, "create")
+			.mockRejectedValueOnce(unauthorized)
+			.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
+		const { signal } = new AbortController()
+
+		await expect(handler.completePrompt("test", { abortSignal: signal, timeoutMs: 5_000 })).resolves.toBe("retried")
+
+		// The retry after the forced refresh keeps the same options.
+		expect(createCompletion).toHaveBeenNthCalledWith(2, expect.anything(), { signal, timeout: 5_000 })
+	})
+
+	it("does not start preparation when the caller already aborted", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(handler.completePrompt("test", { abortSignal: controller.signal })).rejects.toThrow()
+		expect(mockGetAccessToken).not.toHaveBeenCalled()
+	})
+
 	it("does not retry on 401 when using API key auth", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 401 }))

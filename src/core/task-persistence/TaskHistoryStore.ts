@@ -1090,6 +1090,64 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Apply a user's manual title (or clear it) to the record persisted on disk.
+	 *
+	 * The write runs inside the per-file lock and merges into the disk record, so a
+	 * clear removes a title another instance wrote even when this cache never saw
+	 * it, and a manual title is never reverted by a stale cached snapshot.
+	 *
+	 * @returns The written item, or undefined when the record was deleted or is unusable
+	 * on disk (the stale cache entry is dropped and the disk record is left untouched).
+	 */
+	public setTitleManually(taskId: string, title: string | undefined): Promise<HistoryItem | undefined> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				return undefined
+			}
+
+			// A clear is persisted as an explicit intent, so a later automatic title cannot
+			// mistake "no title" for "never titled".
+			const delta: Partial<HistoryItem> = title ? { title } : { title: undefined, titleCleared: true }
+			const filePath = await this.getTaskFilePath(taskId)
+			let written: HistoryItem = { ...cached, ...delta }
+			try {
+				await safeWriteJson(filePath, written, {
+					merge: (existing, incoming) => {
+						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+							throw new TitleWriteSkipped("missing")
+						}
+						// The manual write targets the record that is actually persisted: a cached
+						// snapshot does not know which of the fields on disk are newer.
+						const parsed = historyItemSchema.safeParse(existing)
+						if (!parsed.success) {
+							throw new TitleWriteSkipped("invalid")
+						}
+						if (parsed.data.id !== taskId) {
+							throw new TitleWriteSkipped("mismatched")
+						}
+						written = mergeHistoryDelta(existing, incoming as HistoryItem, delta)
+						return written
+					},
+				})
+			} catch (error) {
+				if (!(error instanceof TitleWriteSkipped)) {
+					throw error
+				}
+				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
+				return undefined
+			}
+
+			this.cache.set(taskId, written)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return written
+		})
+	}
+
+	/**
 	 * Read a HistoryItem from the in-memory cache and write back an updated version,
 	 * all within a single lock acquisition so no concurrent writer can interleave
 	 * between the read and the write.

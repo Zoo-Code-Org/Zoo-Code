@@ -236,6 +236,126 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		})
 	})
 
+	describe("setTitleManually", () => {
+		it("removes a title another instance wrote even when this cache has none", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-clear", task: "Prompt" }))
+			await storeB.reconcile()
+
+			// Instance B renames the task on disk; instance A's cache still has no title.
+			await storeB.atomicReadAndUpdate("manual-clear", (item) => ({ ...item, title: "Manual title" }))
+			expect(storeA.get("manual-clear")?.title).toBeUndefined()
+
+			// A clear from instance A must remove the disk title, not just the cached one.
+			await expect(storeA.setTitleManually("manual-clear", undefined)).resolves.toMatchObject({
+				id: "manual-clear",
+				titleCleared: true,
+			})
+
+			const filePath = path.join(tmpDir, "tasks", "manual-clear", GlobalFileNames.historyItem)
+			const onDisk = JSON.parse(await fs.readFile(filePath, "utf8"))
+			expect(onDisk.title).toBeUndefined()
+			expect(onDisk.titleCleared).toBe(true)
+		})
+
+		it("keeps a manual title that commits while the automatic title is generating", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-wins", task: "Prompt" }))
+			await storeB.reconcile()
+
+			await storeB.setTitleManually("manual-wins", "Manual title")
+			// The generating host still has the untitled record cached.
+			expect(storeA.get("manual-wins")?.title).toBeUndefined()
+
+			await expect(storeA.setTitleIfUnset("manual-wins", "Auto title")).resolves.toBe("conflict")
+			expect(storeA.get("manual-wins")?.title).toBe("Manual title")
+		})
+
+		it("returns undefined for a task that is not in the cache", async () => {
+			await storeA.initialize()
+			await expect(storeA.setTitleManually("missing-id", "Manual title")).resolves.toBeUndefined()
+		})
+
+		it("drops the cache entry for a malformed disk record without rewriting it", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-malformed", task: "Prompt" }))
+			const filePath = path.join(tmpDir, "tasks", "manual-malformed", GlobalFileNames.historyItem)
+			const malformed = JSON.stringify({ id: 123 })
+			await fs.writeFile(filePath, malformed, "utf8")
+
+			await expect(storeA.setTitleManually("manual-malformed", "Manual title")).resolves.toBeUndefined()
+
+			expect(storeA.get("manual-malformed")).toBeUndefined()
+			expect(await fs.readFile(filePath, "utf8")).toBe(malformed)
+		})
+
+		it("drops the cache entry when the disk record belongs to another task", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-mismatched", task: "Prompt" }))
+			const filePath = path.join(tmpDir, "tasks", "manual-mismatched", GlobalFileNames.historyItem)
+			const otherTask = JSON.stringify(makeHistoryItem({ id: "other-task" }), null, "\t")
+			await fs.writeFile(filePath, otherTask, "utf8")
+
+			await expect(storeA.setTitleManually("manual-mismatched", "Manual title")).resolves.toBeUndefined()
+
+			expect(storeA.get("manual-mismatched")).toBeUndefined()
+			expect(await fs.readFile(filePath, "utf8")).toBe(otherTask)
+		})
+
+		it("re-throws unexpected errors from safeWriteJson", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-io-err", task: "Prompt" }))
+			const { safeWriteJson } = await import("../../../utils/safeWriteJson")
+			vi.mocked(safeWriteJson).mockRejectedValueOnce(new Error("disk IO error"))
+
+			await expect(storeA.setTitleManually("manual-io-err", "Manual title")).rejects.toThrow("disk IO error")
+		})
+
+		it("notifies onWrite when a manual title is applied", async () => {
+			const onWriteSpy = vi.fn().mockResolvedValue(undefined)
+			const storeWithOnWrite = new TaskHistoryStore(tmpDir, { onWrite: onWriteSpy })
+			await storeWithOnWrite.initialize()
+			await storeWithOnWrite.upsert(makeHistoryItem({ id: "manual-onwrite", task: "Prompt" }))
+			onWriteSpy.mockClear()
+
+			await expect(storeWithOnWrite.setTitleManually("manual-onwrite", "Notified title")).resolves.toMatchObject({
+				id: "manual-onwrite",
+				title: "Notified title",
+			})
+			expect(onWriteSpy).toHaveBeenCalledWith(
+				expect.arrayContaining([expect.objectContaining({ id: "manual-onwrite", title: "Notified title" })]),
+			)
+			storeWithOnWrite.dispose()
+		})
+
+		it("writes a title on a record this cache has never seen the latest fields of", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-set", task: "Prompt", tokensIn: 1 }))
+			await storeB.reconcile()
+
+			await storeB.atomicReadAndUpdate("manual-set", (item) => ({ ...item, tokensIn: 99 }))
+			await storeA.setTitleManually("manual-set", "Manual title")
+
+			const filePath = path.join(tmpDir, "tasks", "manual-set", GlobalFileNames.historyItem)
+			const onDisk = JSON.parse(await fs.readFile(filePath, "utf8"))
+			expect(onDisk).toMatchObject({ title: "Manual title", tokensIn: 99 })
+		})
+
+		it("drops the task when another instance deleted it", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "manual-deleted", task: "Prompt" }))
+			await storeB.reconcile()
+			await storeB.delete("manual-deleted")
+
+			await expect(storeA.setTitleManually("manual-deleted", "Manual title")).resolves.toBeUndefined()
+			expect(storeA.get("manual-deleted")).toBeUndefined()
+		})
+	})
+
 	it("two instances can write different tasks without conflict", async () => {
 		await storeA.initialize()
 		await storeB.initialize()

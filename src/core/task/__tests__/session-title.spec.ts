@@ -856,6 +856,71 @@ describe("flushPendingSessionTitle", () => {
 		expect(applySpy).toHaveBeenCalledTimes(1)
 	})
 
+	it("does not restore a pending title when the generation is cancelled before the retry", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		let historyItemPersisted = false
+		const applySpy = vi.fn().mockImplementation(async () => {
+			// The task is deleted or renamed while the write is in flight.
+			cancelSessionTitle("task-not-ready-cancelled")
+			return historyItemPersisted ? "applied" : "not-ready"
+		})
+		const provider = createTitleProvider({ applySessionTitle: applySpy })
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-not-ready-cancelled",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		// The cancelled generation must not queue a title that a later save would apply.
+		historyItemPersisted = true
+		await flushPendingSessionTitle("task-not-ready-cancelled")
+		expect(applySpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("drains a deferred title write before the store is released", async () => {
+		let releaseWrite!: () => void
+		const writeGate = new Promise<void>((resolve) => {
+			releaseWrite = resolve
+		})
+		let historyItemPersisted = false
+		const provider = createTitleProvider({
+			applySessionTitle: async () => {
+				if (!historyItemPersisted) {
+					return "not-ready"
+				}
+				await writeGate
+				return "applied"
+			},
+		})
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-drain-flush",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		historyItemPersisted = true
+		void flushPendingSessionTitle("task-drain-flush")
+
+		let drained = false
+		const drain = drainSessionTitles(provider).then(() => {
+			drained = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 10))
+		// The drain waits for the deferred write instead of releasing the store underneath it.
+		expect(drained).toBe(false)
+
+		releaseWrite()
+		await drain
+		expect(drained).toBe(true)
+	})
+
 	it("does nothing when no title is pending", async () => {
 		await expect(flushPendingSessionTitle("unknown-task")).resolves.toBeUndefined()
 	})

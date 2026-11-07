@@ -2835,23 +2835,18 @@ export class ClineProvider
 			return
 		}
 
-		// Read and write under the store lock so a queued task save or delegation
-		// transition cannot be overwritten by a stale snapshot of the item.
+		// Apply the manual title to the record persisted on disk under the file lock, so a
+		// clear removes a title another window wrote even when this cache has none.
 		const trimmed = title?.trim()
-		await this.taskHistoryStore.atomicReadAndUpdate(id, (historyItem) => ({
-			...historyItem,
-			title: trimmed ? trimmed : undefined,
-			// Persist the clear intent: an empty title is otherwise indistinguishable from a
-			// task that never had one, which lets another host's pending auto title win.
-			titleCleared: trimmed ? undefined : true,
-		}))
+		const updatedItem = await this.taskHistoryStore.setTitleManually(id, trimmed ? trimmed : undefined)
+		if (!updatedItem) {
+			this.log(`[renameTaskWithId] task ${id} is no longer on disk`)
+			return
+		}
 		this.recentTasksCache = undefined
 
 		if (this.isViewLaunched) {
-			const updatedItem = this.taskHistoryStore.get(id)
-			if (updatedItem) {
-				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
-			}
+			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 		}
 	}
 

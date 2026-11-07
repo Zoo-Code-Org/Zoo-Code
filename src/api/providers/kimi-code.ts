@@ -13,7 +13,7 @@ import {
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { kimiCodeOAuthManager } from "../../integrations/kimi-code/oauth"
 
-import type { ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
+import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, ModelCacheScope } from "../index"
 import type { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
@@ -21,6 +21,7 @@ import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { getKimiCodeModels } from "./fetchers/kimi-code"
+import { throwIfAborted } from "./utils/abort-signal"
 
 const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
 const API_KEY_AUTH_METHOD: KimiCodeAuthMethod = "api-key"
@@ -72,8 +73,11 @@ export class KimiCodeHandler extends OpenAiHandler {
 		return token
 	}
 
-	private async prepareRequest(forceRefresh = false): Promise<void> {
+	private async prepareRequest(forceRefresh = false, abortSignal?: AbortSignal): Promise<void> {
+		throwIfAborted(abortSignal)
 		const accessToken = await this.resolveAccessToken(forceRefresh)
+		// Token resolution (including an OAuth refresh) may outlive the caller's cancellation.
+		throwIfAborted(abortSignal)
 		this.client.apiKey = accessToken
 		if (!this.modelDiscoveryAttempted) {
 			this.modelDiscoveryAttempted = true
@@ -107,14 +111,16 @@ export class KimiCodeHandler extends OpenAiHandler {
 		}
 	}
 
-	override async completePrompt(prompt: string): Promise<string> {
-		await this.prepareRequest()
+	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Preparation and both attempts run under the caller's cancellation and deadline, so a
+		// superseded title request stops instead of finishing its token and model work.
+		await this.prepareRequest(false, options?.abortSignal)
 		try {
-			return await super.completePrompt(prompt)
+			return await super.completePrompt(prompt, options)
 		} catch (error) {
 			if (getHttpStatus(error) !== 401 || !this.canRefreshOAuth()) throw error
-			await this.prepareRequest(true)
-			return super.completePrompt(prompt)
+			await this.prepareRequest(true, options?.abortSignal)
+			return super.completePrompt(prompt, options)
 		}
 	}
 

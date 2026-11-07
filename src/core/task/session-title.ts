@@ -100,6 +100,9 @@ const inFlightTitles = new Map<string, InFlightTitle>()
  */
 const pendingTitleWrites = new Map<string, { provider: ClineProvider; title: string }>()
 
+/** In-flight deferred-title writes, so disposal can wait for them to finish. */
+const inFlightFlushes = new Set<{ provider: ClineProvider; settled: Promise<void> }>()
+
 /**
  * Cancels any pending or in-flight title generation for a task.
  * Called when a task is manually renamed, cleared, or deleted so an auto-generated title
@@ -135,10 +138,13 @@ export function cancelSessionTitlesForProvider(provider: ClineProvider): void {
  * not release the history store underneath a title that is still being written.
  */
 export async function drainSessionTitles(provider: ClineProvider): Promise<void> {
-	const settled = Array.from(inFlightTitles.values())
+	const generations = Array.from(inFlightTitles.values())
 		.filter((entry) => entry.provider === provider)
 		.map((entry) => entry.settled)
-	await Promise.allSettled(settled)
+	const flushes = Array.from(inFlightFlushes)
+		.filter((entry) => entry.provider === provider)
+		.map((entry) => entry.settled)
+	await Promise.allSettled([...generations, ...flushes])
 }
 
 /**
@@ -157,6 +163,12 @@ export async function flushPendingSessionTitle(taskId: string): Promise<void> {
 		pendingTitleWrites.delete(taskId)
 		return
 	}
+	let settle!: () => void
+	const settled = new Promise<void>((resolve) => {
+		settle = resolve
+	})
+	const entry = { provider: pending.provider, settled }
+	inFlightFlushes.add(entry)
 	try {
 		const result = await pending.provider.applySessionTitle(taskId, pending.title)
 		if (result === "applied" || result === "conflict") {
@@ -164,6 +176,9 @@ export async function flushPendingSessionTitle(taskId: string): Promise<void> {
 		}
 	} catch {
 		// Keep the title for the next save instead of losing it to a transient write failure.
+	} finally {
+		inFlightFlushes.delete(entry)
+		settle()
 	}
 }
 
@@ -227,7 +242,10 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 			const outcome = await applyTitleWithRetry(provider, taskId, title, () => inFlight.userCancelled)
 			if (outcome === "not-ready") {
 				// The history item is not persisted yet; `Task` retries this write once it is.
-				pendingTitleWrites.set(taskId, { provider, title })
+				// A cancelled generation must not restore the entry `cancelSessionTitle` dropped.
+				if (!inFlight.userCancelled) {
+					pendingTitleWrites.set(taskId, { provider, title })
+				}
 				return
 			}
 			// "applied" means the title is durable, and "conflict" means manual intent owns the
@@ -242,7 +260,7 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 		// Stryker disable next-line ConditionalExpression,LogicalOperator: defense-in-depth, fallback is always truthy for non-empty sanitized messages and distinct from failed title
 		if (fallback && fallback !== title) {
 			const outcome = await applyTitleWithRetry(provider, taskId, fallback, () => inFlight.userCancelled)
-			if (outcome === "not-ready") {
+			if (outcome === "not-ready" && !inFlight.userCancelled) {
 				pendingTitleWrites.set(taskId, { provider, title: fallback })
 			}
 		}
