@@ -65,7 +65,7 @@ type TaskTestAccess = {
 		requestModelInfo: ModelInfo,
 	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
 	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
-	condenseContextWithActiveApi: () => Promise<void>
+	condenseContextWithActiveApi: () => Promise<{ condensed: boolean; prevContextTokens: number }>
 	retiredApis: Set<unknown>
 }
 
@@ -2018,7 +2018,10 @@ describe("Cline", () => {
 			const oldDispose = disposableApi(task)
 			let release!: () => void
 			vi.spyOn(getTaskTestAccess(task), "condenseContextWithActiveApi").mockImplementation(
-				() => new Promise<void>((resolve) => (release = resolve)),
+				() =>
+					new Promise<{ condensed: boolean; prevContextTokens: number }>((resolve) => {
+						release = () => resolve({ condensed: false, prevContextTokens: 0 })
+					}),
 			)
 
 			const condensing = task.condenseContext()
