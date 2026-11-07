@@ -35,6 +35,7 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	rejectOnAbort,
+	resolveModelWithAbort,
 	throwIfAborted,
 	hasUsableTimeout,
 	toSdkTimeoutMs,
@@ -333,9 +334,10 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 
 		let modelData: Awaited<ReturnType<RequestyHandler["fetchModel"]>>
 		try {
-			modelData = requestAbortSignal
-				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
-				: await this.fetchModel()
+			// One cancellation scope for the lookup: the helper owns the already-aborted fast
+			// path, the race against the merged signal and the abort normalization, so this
+			// call site contributes only the provider's own resolution step.
+			modelData = await resolveModelWithAbort(() => this.fetchModel(), requestAbortSignal, this.providerName)
 		} catch (error) {
 			if (isRequestAborted(error, requestAbortSignal)) {
 				throw createAbortError(this.providerName)

@@ -468,7 +468,16 @@ describe("RequestyHandler", () => {
 				asyncStreamFrom([
 					{
 						id: "c1",
-						choices: [{ delta: { tool_calls: [{ index: 0, id: "call_123" }] } }],
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{ index: 2, id: "call_123" },
+										{ index: 0, id: "call_456" },
+									],
+								},
+							},
+						],
 					},
 				]),
 			)
@@ -477,7 +486,10 @@ describe("RequestyHandler", () => {
 			const chunks = await collectStream(
 				handler.createMessage("test system", [{ role: "user", content: "test" }]),
 			)
-			expect(chunks).toEqual([{ type: "tool_call_partial", index: 0, id: "call_123" }])
+			expect(chunks).toEqual([
+				{ type: "tool_call_partial", index: 2, id: "call_123" },
+				{ type: "tool_call_partial", index: 0, id: "call_456" },
+			])
 		})
 
 		it("emits the usage chunk once when a final chunk carries no usage", async () => {

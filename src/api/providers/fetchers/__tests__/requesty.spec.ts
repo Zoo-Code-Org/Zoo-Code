@@ -320,7 +320,11 @@ describe("getRequestyModels", () => {
 			expect(settled).toBe(true)
 			// The fallback is intentional: callers use the cached/default model info.
 			expect(models).toEqual({})
-			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("timed out"))
+			// The dedicated timeout message, not just any log: a generic fetch failure logs
+			// "Error fetching Requesty models: ..." and would also satisfy a loose "timed out"
+			// match, so both halves are asserted.
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("timed out after 10000ms"))
+			expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("Error fetching Requesty models"))
 		} finally {
 			timeoutSpy.mockRestore()
 			errorSpy.mockRestore()
