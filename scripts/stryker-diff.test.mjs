@@ -30,6 +30,14 @@ import {
 	parseNameStatus,
 	parseVitestTestFiles,
 	preferDirectTestFiles,
+	parseStackedMap,
+	readStackedMap,
+	reinstallFailureDetail,
+	summarizeReinstallFailure,
+	dependencyManifestDrift,
+	alignExecutionTree,
+	resolveCiInvocation,
+	resolveStackedUnitBase,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
 	shouldUseVitestRelated,
@@ -64,11 +72,79 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes("PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(!workflow.includes("                  HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
+		assert.ok(workflow.includes("pull-requests: read"))
+		// The event value is the authoritative provenance for the PR comment, so the run block keeps it
+		// when present and derives it from the merge commit only as a fallback for a manual run with no
+		// pull_request payload. Both spellings must stay: the derivation is what identifies the stacked
+		// unit when nothing supplies the head.
+		assert.ok(
+			workflow.includes(
+				'PR_HEAD_SHA="${PR_HEAD_SHA:-$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")}"',
+			),
+		)
+		// The map crosses jobs as a file, never as an argument or an environment string: Linux caps one
+		// argument/env string at 128 KiB (MAX_ARG_STRLEN), and a map past that cap makes the step
+		// unstartable rather than merely large.
+		assert.ok(workflow.includes('--stacked-map-file "${RUNNER_TEMP}/mutation-stacked-map/stacked-map.json"'))
+		// The map must land outside the checkout: a pull request can commit .mutation/stacked-map.json,
+		// and with continue-on-error a missing artifact would leave that committed file in front of the
+		// gate, which then measures against whatever base the pull request chose for itself.
+		assert.ok(workflow.includes("path: ${{ runner.temp }}/mutation-stacked-map"))
+		assert.ok(!workflow.includes("path: .mutation"))
+		assert.ok(!workflow.includes('--stacked-map "$STACKED_MAP"'))
+		assert.ok(workflow.includes("name: mutation-stacked-map"))
+		assert.ok(workflow.includes('--pr-head "$PR_HEAD_SHA"'))
+		// The open pull request map must cover every page, otherwise a parent unit beyond the first
+		// page is missing and the gate charges the whole unmerged chain again.
+		// gh api rejects --slurp together with --jq, so pagination has to keep the per-page filter
+		// and the parser has to accept the resulting stream of page arrays.
+		assert.ok(workflow.includes("gh api --paginate"))
+		assert.ok(!workflow.includes("--slurp"))
+		// The map has to carry the draft flag: the gate refuses a draft head as a stacked base,
+		// because a draft pull request is not gated (see the draft-base case below).
+		assert.ok(
+			workflow.includes(
+				"[.[] | {number: .number, headSha: .head.sha, draft: (.draft == true), baseRef: .base.ref}]",
+			),
+		)
+		// The gate has to know which branch this pull request targets, otherwise it cannot tell whether
+		// the parent it measures against lands on the same branch.
+		assert.ok(workflow.includes("PR_BASE_REF: ${{ github.event.pull_request.base.ref }}"))
+		assert.ok(workflow.includes('--pr-base-ref "$PR_BASE_REF"'))
+		// The fallback has to be a command: these steps run bash with -e, so a bare '[]' is executed
+		// as a program name instead of producing JSON.
+		assert.ok(workflow.includes("printf '[]'"))
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
 		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
-		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
+		// The gate hands its environment to the Vitest discovery subprocesses, so the token has to stay
+		// in a job that never checks out or runs pull-request code; only the filtered map crosses over.
+		const gateJob = workflow.slice(workflow.indexOf("    mutation-diff:"))
+		assert.ok(!gateJob.includes("GH_TOKEN"))
+		// The map arrives from the artifact the map job publishes, into the job that runs the gate.
+		assert.ok(gateJob.includes("uses: actions/download-artifact@"))
+		assert.ok(gateJob.includes("name: mutation-stacked-map"))
+		assert.ok(!workflow.includes("needs.stacked_map.outputs.stacked_map"))
+		const mapJob = workflow.slice(workflow.indexOf("    stacked_map:"), workflow.indexOf("    mutation-diff:"))
+		assert.ok(mapJob.includes("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"))
+		assert.ok(!mapJob.includes("actions/checkout"))
+		assert.ok(!mapJob.includes("setup-node-pnpm"))
+		assert.ok(!mapJob.includes("pnpm test:mutation-ci"))
+		assert.ok(workflow.includes("needs: stacked_map"))
+		// The map is validated before it is written, and the write is a plain file in the job that
+		// uploads it: no step output, no job output, and no argument for the gate to receive.
+		assert.ok(mapJob.includes(`printf '%s\\n' "$STACKED_MAP" > stacked-map.json`))
+		assert.ok(mapJob.includes("path: stacked-map.json"))
+		assert.ok(mapJob.includes("if-no-files-found: error"))
+		assert.ok(!mapJob.includes("GITHUB_OUTPUT"))
+		// Both jobs need actions:write - one to publish the map, one to read it and publish the reports.
+		assert.equal(workflow.match(/actions: write/g)?.length, 2)
+		// A missing map artifact degrades to the event base inside the script, so the download step must
+		// not fail the job. The upload that produces it is tolerant for the same reason: a failed upload
+		// would otherwise fail this job and skip the gate entirely, so the fallback could never run. The
+		// report upload keeps its own tolerance.
+		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 3)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
 		assert.ok(
@@ -179,6 +255,621 @@ describe("pull request revision selection", () => {
 				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
 				["packages/core/src/unrelated.ts"],
 			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("stacked unit base resolution", () => {
+	const createSyntheticStack = () => {
+		const repository = fs.mkdtempSync(path.join(os.tmpdir(), "mutation-stack-"))
+		// Setup can fail halfway (a missing git config, a failed commit), and the callers only get the
+		// repository path back on success, so cleanup has to happen here or the temp directory leaks.
+		try {
+			const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+			const write = (filePath, contents) => {
+				fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+				fs.writeFileSync(path.join(repository, filePath), contents)
+			}
+
+			run("init", "--quiet", "--initial-branch", "main")
+			run("config", "user.email", "gate@example.com")
+			run("config", "user.name", "Gate")
+			run("config", "commit.gpgsign", "false")
+
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "initial")
+			const eventBaseSha = run("rev-parse", "HEAD")
+
+			run("checkout", "--quiet", "-b", "unit-1")
+			write("packages/core/src/unit1.ts", "export const unit1 = () => 1\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 1")
+			const parentSha = run("rev-parse", "HEAD")
+
+			// The stacked unit is one commit on top of the parent unit's head.
+			write("packages/core/src/unit2.ts", "export const unit2 = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 2")
+			const childSha = run("rev-parse", "HEAD")
+
+			return { repository, eventBaseSha, parentSha, childSha, run, write }
+		} catch (error) {
+			fs.rmSync(repository, { recursive: true, force: true })
+			throw error
+		}
+	}
+
+	it("measures a stacked unit against the parent pull request head", () => {
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const resolved = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(resolved.baseSha, parentSha)
+			assert.equal(resolved.stackedOn, 1)
+
+			const manifest = selectFromGit(repository, resolved.baseSha, childSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit2.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("preserves the resolved stacked base when selection runs on the merge commit", () => {
+		const { repository, eventBaseSha, parentSha, childSha, run, write } = createSyntheticStack()
+
+		try {
+			// GitHub runs the gate on its own merge commit: first parent is the base tip, second
+			// parent is the pull request head.
+			run("checkout", "--quiet", "-b", "merge-branch", eventBaseSha)
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "base advance")
+			const advancedBase = run("rev-parse", "HEAD")
+			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
+			const mergeSha = run("rev-parse", "HEAD")
+
+			const resolved = resolveStackedUnitBase(
+				repository,
+				advancedBase,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(resolved.baseSha, parentSha)
+			assert.equal(resolved.stackedOn, 1)
+
+			// Without preserving the resolved base, selection re-derives it from the merge commit and
+			// charges the whole unmerged chain to this unit.
+			const charged = selectFromGit(repository, resolved.baseSha, mergeSha)
+			assert.deepEqual(
+				charged.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
+			)
+
+			// With the base preserved, the unit is measured against its own head: the merge commit also
+			// carries the base advance, which is not this unit's delta.
+			const unit = selectFromGit(repository, resolved.baseSha, childSha, { preserveBase: true })
+			assert.deepEqual(
+				unit.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit2.ts"],
+			)
+
+			// A non-stacked pull request still measures against the merge commit, so the base actually
+			// merged into is used and the base advance is not charged to the pull request.
+			const plain = selectFromGit(repository, advancedBase, mergeSha, { preserveBase: true })
+			assert.deepEqual(
+				plain.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the event base when the parent commit is not another pull request head", () => {
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const resolved = resolveStackedUnitBase(repository, eventBaseSha, childSha, [], "main")
+			assert.equal(resolved.baseSha, eventBaseSha)
+			assert.equal(resolved.stackedOn, null)
+
+			// A multi-commit pull request must not be charged only its last commit.
+			const manifest = selectFromGit(repository, resolved.baseSha, childSha)
+			assert.deepEqual(manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(), [
+				"packages/core/src/unit1.ts",
+				"packages/core/src/unit2.ts",
+			])
+			void parentSha
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the event base when the parent head belongs to a draft pull request", () => {
+		// A draft pull request is not gated, so it cannot be the base a unit is measured against: the
+		// unit would be charged only its own delta while the draft's content lands through it. The
+		// unit keeps the event base instead, so that content is charged where it would land.
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const draft = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: true, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(draft.baseSha, eventBaseSha)
+			assert.equal(draft.stackedOn, null)
+
+			// An entry whose draft flag is missing proves nothing about gating, so it keeps the event
+			// base like a known draft does.
+			const unconfirmed = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, baseRef: "main", draft: undefined }],
+				"main",
+			)
+			assert.equal(unconfirmed.baseSha, eventBaseSha)
+			assert.equal(unconfirmed.stackedOn, null)
+
+			// The same entry, ready for review: the parent was gated, so it is the unit's base again.
+			const ready = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(ready.baseSha, parentSha)
+			assert.equal(ready.stackedOn, 1)
+
+			// The cumulative delta the cap has to see when the parent never gets gated.
+			const manifest = selectFromGit(repository, draft.baseSha, childSha, { preserveBase: true })
+			assert.deepEqual(manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(), [
+				"packages/core/src/unit1.ts",
+				"packages/core/src/unit2.ts",
+			])
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("refuses a stacked parent that targets a different branch than this unit", () => {
+		// A parent whose base is a feature branch was measured against that branch by its own gate.
+		// Measuring this unit against its head would hide the parent's feature-branch delta from the
+		// changed-line cap while merging this unit lands that delta on main, so the unit keeps the
+		// event base and the cap sees the whole chain.
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const featureBranchParent = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "feature/other" }],
+				"main",
+			)
+			assert.equal(featureBranchParent.baseSha, eventBaseSha)
+			assert.equal(featureBranchParent.stackedOn, null)
+
+			// The same parent head, targeting the branch this unit targets, is the unit's real base.
+			const sameBase = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(sameBase.baseSha, parentSha)
+			assert.equal(sameBase.stackedOn, 1)
+
+			// Nothing can be compared when either side is unknown, so both keep the event base.
+			const unknownUnitBase = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				undefined,
+			)
+			assert.equal(unknownUnitBase.stackedOn, null)
+			const unknownParentBase = resolveStackedUnitBase(
+				repository,
+				eventBaseSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false }],
+				"main",
+			)
+			assert.equal(unknownParentBase.stackedOn, null)
+
+			// The cumulative delta the cap has to see when the parent cannot serve as the base.
+			const manifest = selectFromGit(repository, featureBranchParent.baseSha, childSha, { preserveBase: true })
+			assert.deepEqual(manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(), [
+				"packages/core/src/unit1.ts",
+				"packages/core/src/unit2.ts",
+			])
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("matches a stacked parent by base branch when another pull request shares its head", () => {
+		// Two open pull requests can point at the same commit while targeting different branches. Stopping
+		// at the first head-SHA match rejects that parent for the wrong reason and falls back to the event
+		// base, charging this unit every unmerged ancestor of a branch it is not merging into.
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const map = [
+				{ number: 9, headSha: parentSha, draft: false, baseRef: "feature/other" },
+				{ number: 1, headSha: parentSha, draft: false, baseRef: "main" },
+			]
+
+			const unitOnMain = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "main")
+			assert.equal(unitOnMain.baseSha, parentSha)
+			assert.equal(unitOnMain.stackedOn, 1)
+
+			// The same map read by a unit that targets the feature branch picks the other pull request,
+			// which is the only parent whose own gate measured against this unit's base.
+			const unitOnFeature = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "feature/other")
+			assert.equal(unitOnFeature.baseSha, parentSha)
+			assert.equal(unitOnFeature.stackedOn, 9)
+
+			// A map whose entries match no base still degrades instead of guessing.
+			const noMatch = resolveStackedUnitBase(repository, eventBaseSha, childSha, map, "release/none")
+			assert.equal(noMatch.baseSha, eventBaseSha)
+			assert.equal(noMatch.stackedOn, null)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("reads the stacked map from the artifact file the workflow publishes", () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stacked-map-"))
+		try {
+			fs.writeFileSync(
+				path.join(directory, "stacked-map.json"),
+				'[{ "number": 1, "headSha": "' + "a".repeat(40) + '", "draft": false, "baseRef": "main" }]',
+			)
+			const fromFile = parseStackedMap(readStackedMap(directory, "[]", "stacked-map.json"))
+			assert.deepEqual(fromFile, [{ number: 1, headSha: "a".repeat(40), draft: false, baseRef: "main" }])
+
+			// The inline form stays available for local runs, where no artifact exists.
+			const inline = parseStackedMap(
+				readStackedMap(
+					directory,
+					'[{ "number": 2, "headSha": "' + "b".repeat(40) + '", "draft": false, "baseRef": "main" }]',
+					undefined,
+				),
+			)
+			assert.deepEqual(inline, [{ number: 2, headSha: "b".repeat(40), draft: false, baseRef: "main" }])
+
+			// A missing artifact must not stop the gate. Falling back to the event base charges this unit
+			// every unmerged ancestor - stricter than the intended measurement, never looser - and the
+			// warning records which case ran.
+			const warnings = []
+			const warn = console.warn
+			console.warn = (message) => warnings.push(message)
+			try {
+				assert.equal(readStackedMap(directory, '[{ "number": 3 }]', "absent.json"), "")
+			} finally {
+				console.warn = warn
+			}
+			assert.equal(warnings.length, 1)
+			assert.ok(warnings[0].includes("the artifact was not published"))
+			assert.deepEqual(parseStackedMap(""), [])
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true })
+		}
+	})
+
+	it("reports the stacked base in the job summary when the aligned reinstall fails", () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), "reinstall-summary-"))
+		const summaryPath = path.join(directory, "step-summary.md")
+		const previous = process.env.GITHUB_STEP_SUMMARY
+		process.env.GITHUB_STEP_SUMMARY = summaryPath
+		const warnings = []
+		const warn = console.warn
+		console.warn = (message) => warnings.push(message)
+		try {
+			summarizeReinstallFailure(
+				{ stackedOn: 7, baseSha: "1".repeat(40), diffHead: "2".repeat(40) },
+				["src/package.json", "pnpm-lock.yaml"],
+				new Error("pnpm install exited 1"),
+			)
+			const summary = fs.readFileSync(summaryPath, "utf8")
+			// The whole point of the summary here: which base this unit was measured against, and the
+			// command that reproduces it - the parent head moves, the selected base is what is left.
+			assert.ok(summary.includes("Stacked unit: measured against the head of parent PR #7"))
+			assert.ok(
+				summary.includes(`node scripts/stryker-diff.mjs ci --base ${"1".repeat(40)} --head ${"2".repeat(40)}`),
+			)
+			assert.ok(summary.includes("git checkout " + "2".repeat(40)))
+			assert.ok(summary.includes("src/package.json, pnpm-lock.yaml"))
+			assert.ok(summary.includes("pnpm install exited 1"))
+			assert.equal(warnings.length, 1)
+		} finally {
+			console.warn = warn
+			if (previous === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previous
+			fs.rmSync(directory, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the exit status when the reinstall writes nothing to stderr", () => {
+		// A killed or signal-terminated pnpm leaves stderr empty, and "" is a valid ?? operand: with ?? the
+		// report would end in a blank detail and lose the only fact that is left.
+		assert.equal(reinstallFailureDetail({ status: 1, stderr: "" }), "exit 1")
+		assert.equal(reinstallFailureDetail({ status: null, stderr: undefined }), "exit null")
+		assert.equal(
+			reinstallFailureDetail({ status: 1, stderr: "  ERR_PNPM_OUTDATED_LOCKFILE  " }),
+			"ERR_PNPM_OUTDATED_LOCKFILE",
+		)
+		assert.equal(
+			reinstallFailureDetail({ status: null, stderr: "", error: new Error("spawnSync pnpm ENOENT") }),
+			"spawnSync pnpm ENOENT",
+		)
+	})
+
+	it("degrades to the event base for an unparsable stacked map", () => {
+		assert.deepEqual(parseStackedMap("not json"), [])
+		assert.deepEqual(parseStackedMap('{"number": 1}'), [])
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "abc"}]'), [])
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "' + "a".repeat(40) + '"}]'), [
+			{ number: 1, headSha: "a".repeat(40) },
+		])
+
+		// The base ref must survive the parse: rejecting a parent that targets a different branch is
+		// only possible when the entry carries the ref it was filtered with.
+		assert.deepEqual(
+			parseStackedMap('[{"number": 1, "headSha": "' + "e".repeat(40) + '", "draft": false, "baseRef": "main"}]'),
+			[{ number: 1, headSha: "e".repeat(40), draft: false, baseRef: "main" }],
+		)
+
+		// gh api --paginate emits one array per page, so a parent unit on page 2 arrives as a second
+		// document rather than inside the first array.
+		assert.deepEqual(
+			parseStackedMap(
+				'[{"number": 1, "headSha": "' +
+					"b".repeat(40) +
+					'"}]' +
+					'[{"number": 2, "headSha": "' +
+					"c".repeat(40) +
+					'"}]',
+			),
+			[
+				{ number: 1, headSha: "b".repeat(40) },
+				{ number: 2, headSha: "c".repeat(40) },
+			],
+		)
+		// Trailing content cannot be consumed as a page, so the whole map is rejected rather than
+		// keeping a partial entry that could select a parent base.
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "' + "d".repeat(40) + '"}]garbage'), [])
+		assert.deepEqual(parseStackedMap('[{"number": 1, "headSha": "' + "d".repeat(40) + '"}] [{"number": 2'), [])
+	})
+
+	it("the ci command picks the diff head from the commit graph", () => {
+		const { repository, eventBaseSha, parentSha, childSha, run, write } = createSyntheticStack()
+
+		try {
+			run("checkout", "--quiet", "-b", "merge-branch", eventBaseSha)
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "base advance")
+			const advancedBase = run("rev-parse", "HEAD")
+			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
+			const mergeSha = run("rev-parse", "HEAD")
+
+			// Stacked: base is the parent PR head and the diff head is the PR head, not the merge
+			// commit, so the base advance is not charged to this unit.
+			const stacked = resolveCiInvocation(
+				repository,
+				advancedBase,
+				mergeSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(stacked.baseSha, parentSha)
+			assert.equal(stacked.diffHead, childSha)
+			assert.equal(stacked.stackedOn, 1)
+
+			// Non-stacked: the merge commit stays the diff head and the base stays the event base.
+			const plain = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [], "main")
+			assert.equal(plain.baseSha, advancedBase)
+			assert.equal(plain.diffHead, mergeSha)
+			assert.equal(plain.stackedOn, null)
+
+			// --pr-head defaults to --head, so a plain pull request keeps the same decision.
+			const sameHead = resolveCiInvocation(repository, advancedBase, mergeSha, mergeSha, [], "main")
+			assert.equal(sameHead.diffHead, mergeSha)
+			assert.equal(sameHead.stackedOn, null)
+
+			// A unit branch that is itself a merge commit is not a single unit delta, so the fallback
+			// stays the event base even when one of its parents is an open pull request head.
+			run("checkout", "--quiet", "-b", "unit-3", advancedBase)
+			write("packages/core/src/unit3.ts", "export const unit3 = () => 3\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 3")
+			run("merge", "--no-ff", "--quiet", "-m", "unit merge", parentSha)
+			const multiParentHead = run("rev-parse", "HEAD")
+			assert.equal(
+				run("rev-list", "--parents", "-n", "1", multiParentHead).trim().split(/\s+/).slice(1).length,
+				2,
+			)
+			const multi = resolveStackedUnitBase(
+				repository,
+				advancedBase,
+				multiParentHead,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(multi.baseSha, advancedBase)
+			assert.equal(multi.stackedOn, null)
+			assert.equal(
+				resolveCiInvocation(
+					repository,
+					advancedBase,
+					multiParentHead,
+					multiParentHead,
+					[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+					"main",
+				).stackedOn,
+				null,
+			)
+
+			// The guard, not the map lookup, has to reject this merge: its FIRST parent is the open
+			// pull request head. Without the parents.length guard that match would win, the merge would
+			// be treated as a one-commit unit, and only the second-parent delta would be charged.
+			const mergeTree = run("rev-parse", `${parentSha}^{tree}`)
+			const firstParentOpenPrMerge = run(
+				"commit-tree",
+				mergeTree,
+				"-p",
+				parentSha,
+				"-p",
+				advancedBase,
+				"-m",
+				"unit merge with the open pull request head first",
+			)
+			assert.equal(
+				run("rev-list", "--parents", "-n", "1", firstParentOpenPrMerge).trim().split(/\s+/).slice(1)[0],
+				parentSha,
+			)
+			const firstParentLookup = resolveStackedUnitBase(
+				repository,
+				advancedBase,
+				firstParentOpenPrMerge,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(firstParentLookup.baseSha, advancedBase)
+			assert.equal(firstParentLookup.stackedOn, null)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("aligns the working tree to the diff head so selection and mutation see one tree", () => {
+		const { repository, eventBaseSha, parentSha, childSha, run, write } = createSyntheticStack()
+
+		try {
+			run("checkout", "--quiet", "-b", "merge-branch", eventBaseSha)
+			// The base advance changes a file, so the merge tree differs from the unit tree. The
+			// selectors are derived from the unit tree, so mutation has to run on that same tree.
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 99\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "base advance")
+			const advancedBase = run("rev-parse", "HEAD")
+			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
+			const mergeSha = run("rev-parse", "HEAD")
+
+			const invocation = resolveCiInvocation(
+				repository,
+				advancedBase,
+				mergeSha,
+				childSha,
+				[{ number: 1, headSha: parentSha, draft: false, baseRef: "main" }],
+				"main",
+			)
+			assert.equal(invocation.diffHead, childSha)
+			assert.equal(run("rev-parse", "HEAD").toLowerCase(), mergeSha.toLowerCase())
+
+			assert.equal(alignExecutionTree(repository, invocation.diffHead), true)
+			assert.equal(run("rev-parse", "HEAD").toLowerCase(), childSha.toLowerCase())
+			// The tree Stryker would mutate is now the unit tree, not the merge tree.
+			assert.equal(
+				fs.readFileSync(path.join(repository, "packages/core/src/unit2.ts"), "utf8").replace(/\r/g, ""),
+				"export const unit2 = () => 2\n",
+			)
+			// Aligning again is a no-op.
+			assert.equal(alignExecutionTree(repository, invocation.diffHead), false)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("aligned tree dependency manifests", () => {
+	const createManifestStack = () => {
+		const repository = fs.mkdtempSync(path.join(os.tmpdir(), "mutation-manifests-"))
+		try {
+			const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+			const write = (filePath, contents) => {
+				fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+				fs.writeFileSync(path.join(repository, filePath), contents)
+			}
+
+			run("init", "--quiet", "--initial-branch", "main")
+			run("config", "user.email", "gate@example.com")
+			run("config", "user.name", "Gate")
+			run("config", "commit.gpgsign", "false")
+
+			write("pnpm-lock.yaml", "lockfileVersion: 9\n")
+			write("packages/core/package.json", '{ "name": "@roo-code/core" }\n')
+			write("packages/core/src/unit1.ts", "export const unit1 = () => 1\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "parent unit")
+			const parentSha = run("rev-parse", "HEAD")
+
+			return { repository, parentSha, run, write }
+		} catch (error) {
+			fs.rmSync(repository, { recursive: true, force: true })
+			throw error
+		}
+	}
+
+	it("reports no drift when the stacked unit changes no dependency declaration", () => {
+		const { repository, parentSha, run, write } = createManifestStack()
+
+		try {
+			write("packages/core/src/unit2.ts", "export const unit2 = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 2 source change")
+			const childSha = run("rev-parse", "HEAD")
+
+			// The toolchain installed from the merge commit is the toolchain the aligned tree declares,
+			// so nothing has to be reinstalled.
+			assert.deepEqual(dependencyManifestDrift(repository, parentSha, childSha), [])
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("reports every dependency declaration a stacked unit changes under any package", () => {
+		const { repository, parentSha, run, write } = createManifestStack()
+
+		try {
+			write("packages/core/package.json", '{ "name": "@roo-code/core", "version": "0.0.1" }\n')
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 2 manifest change")
+			const manifestSha = run("rev-parse", "HEAD")
+			assert.deepEqual(dependencyManifestDrift(repository, parentSha, manifestSha), [
+				"packages/core/package.json",
+			])
+
+			write("pnpm-lock.yaml", "lockfileVersion: 9\nimporters: {}\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 3 lockfile change")
+			const lockfileSha = run("rev-parse", "HEAD")
+			assert.deepEqual(dependencyManifestDrift(repository, parentSha, lockfileSha), [
+				"packages/core/package.json",
+				"pnpm-lock.yaml",
+			])
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
 		}
@@ -936,6 +1627,61 @@ describe("failure output", () => {
 
 		assert.equal(new Set(summary.match(/Package\dMutator\d+/g)).size, 6 * MAX_MUTANTS)
 		assert.ok(Buffer.byteLength(summary) < 1024 * 1024)
+	})
+
+	it("names the parent pull request when the unit was measured against a stacked base", () => {
+		const rows = [
+			{
+				id: "extension",
+				changedLines: 12,
+				valid: 3,
+				killed: 3,
+				timeout: 0,
+				survived: 0,
+				noCoverage: 0,
+				blocking: [],
+				result: "Pass",
+			},
+		]
+		const summary = formatSummary(rows, [], { stackedOn: 1914 })
+		assert.ok(summary.includes("Stacked unit: measured against the head of parent PR #1914, not the event base."))
+
+		// A plain pull request has no stacked base, so the notice must not appear.
+		const plain = formatSummary(rows, [], { stackedOn: null })
+		assert.ok(!plain.includes("Stacked unit"))
+		assert.ok(plain.includes("## Changed-code mutation testing"))
+	})
+
+	it("prints the pull-request-head checkout a stacked reproduction needs", () => {
+		const rows = [
+			{
+				id: "extension",
+				changedLines: 12,
+				valid: 3,
+				killed: 3,
+				timeout: 0,
+				survived: 0,
+				noCoverage: 0,
+				blocking: [],
+				result: "Pass",
+			},
+		]
+		const baseSha = "a".repeat(40)
+		const prHeadSha = "b".repeat(40)
+
+		// CI aligned the working tree to the pull request head before mutating, so the reproduction has
+		// to say so; otherwise the same command selects the unit's lines from the unit diff but mutates
+		// the merge-commit tree.
+		const stacked = formatSummary(rows, [], { stackedOn: 1914, baseSha, headSha: prHeadSha })
+		assert.ok(stacked.includes("checked out at the pull request head"))
+		assert.ok(stacked.includes("git checkout " + prHeadSha))
+		assert.ok(stacked.includes("node scripts/stryker-diff.mjs ci --base " + baseSha + " --head " + prHeadSha))
+
+		// A plain pull request was measured on the merge commit, which is what CI already has checked
+		// out, so no checkout step belongs in its reproduction.
+		const plain = formatSummary(rows, [], { stackedOn: null, baseSha, headSha: "c".repeat(40) })
+		assert.ok(!plain.includes("git checkout"))
+		assert.ok(plain.includes("node scripts/stryker-diff.mjs ci --base " + baseSha + " --head " + "c".repeat(40)))
 	})
 })
 
