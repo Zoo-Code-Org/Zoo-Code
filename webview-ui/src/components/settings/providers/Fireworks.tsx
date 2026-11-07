@@ -30,7 +30,7 @@ export const Fireworks = ({ apiConfiguration, setApiConfigurationField }: Firewo
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.fireworksApiKey || ""}
+				value={apiConfiguration.fireworksApiKey || ""}
 				type="password"
 				onInput={handleInputChange("fireworksApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -40,7 +40,7 @@ export const Fireworks = ({ apiConfiguration, setApiConfigurationField }: Firewo
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.fireworksApiKey && (
+			{!apiConfiguration.fireworksApiKey && (
 				<VSCodeButtonLink href="https://fireworks.ai/" appearance="secondary">
 					{t("settings:providers.getFireworksApiKey")}
 				</VSCodeButtonLink>

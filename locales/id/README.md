@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.92.0
+## Yang Baru di v3.96.0
 
-- ✨ **Pilihan model lebih cepat dan dukungan model lebih kuat:** Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.
-- 🧭 **Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal:** Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.
-- 🔌 **Marketplace MCP yang diperluas:** Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP.
+- ✨ **Setelan obrolan dan diagnostik baru:** Tampilkan stempel waktu pesan dengan format waktu dan tanggal yang bisa dikonfigurasi, atur TTL prompt-cache untuk profil Anthropic, dan buat laporan diagnostik yang menjaga privasi.
+- 💸 **Biaya dan cache penyedia yang lebih akurat:** Jaga hasil tool Anthropic tetap utuh, pakai token keluaran kumulatif dalam biaya Anthropic dan MiniMax, baca penghitung prompt-cache DeepSeek, arahkan ke cache Responses xAI, dan tagih pembacaan cache Mistral pada 0,1x.
+- 🧭 **Obrolan yang lebih andal dan cepat:** Lanjutkan tugas yang selesai setelah mulai ulang, pulihkan checkpoint saat commit yang tersimpan hilang, muat ulang otomatis renderer webview yang mati, batasi pembaruan streaming, dan muat bahasa sesuai permintaan.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
