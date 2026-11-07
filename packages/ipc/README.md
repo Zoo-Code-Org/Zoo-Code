@@ -48,27 +48,27 @@ Resumes a task from history.
 
 ## Usage Example
 
+The package exports only the server half. A client connects to the socket
+`IpcServer` listens on and speaks the same `node-ipc` framing: a js-message
+envelope (`{"type":"message","data":…}`) terminated by a form feed. The
+extension exposes the server through `src/extension/api.ts` when
+`ROO_CODE_IPC_SOCKET_PATH` is set; `scripts/agent-evals/ipc-client.ts` is the
+in-repo reference client.
+
 ```typescript
-import { IpcClient } from "@roo-code/ipc"
+import { IpcMessageType, IpcOrigin, TaskCommandName } from "@roo-code/types"
 
-const client = new IpcClient("/path/to/socket")
-
-// Resume a task
-client.sendCommand({
-	commandName: "ResumeTask",
-	data: "task-123",
-})
-
-// Start a new task
-client.sendCommand({
-	commandName: "StartNewTask",
-	data: {
-		configuration: {/* RooCode settings */},
-		text: "Hello, world!",
-		images: [],
-		newTab: false,
-	},
-})
+socket.write(
+	JSON.stringify({
+		type: "message",
+		data: {
+			type: IpcMessageType.TaskCommand,
+			origin: IpcOrigin.Client,
+			clientId,
+			data: { commandName: TaskCommandName.ResumeTask, data: "task-123" },
+		},
+	}) + "\f",
+)
 ```
 
 ## Events
