@@ -756,6 +756,18 @@
 			"profileDescription": "Sadece bu profil için özel eşik (küresel varsayılanı geçersiz kılar)",
 			"usesGlobal": "(küresel {{threshold}}% kullanır)"
 		},
+		"idleCondensing": {
+			"name": "Boşta sıkıştırma",
+			"description": "Boşta anlarda bağlamı sıkıştırmak için daha düşük bir eşik; klavyeye geri döndüğünde her zaman temiz bir bağlamın olur.",
+			"thresholdDescription": "Boşta durumdayken bağlam bu yüzdelere ulaştığında boşta sıkıştırma zamanlayıcısı çalışır. Sıkıştırma Tetikleme Eşiği değerine eşit veya altında olmalıdır.",
+			"thresholdProfileDescription": "Yalnızca bu profil için özel boşta eşiği (küresel varsayılanı geçersiz kılar, profilin sıkıştırma eşiğiyle sınırlıdır)",
+			"idleTime": {
+				"label": "Boşta süresi",
+				"seconds": "saniye",
+				"description": "Sıkıştırmanın tetiklenmeden önce modelin ne kadar boşta kalması gerektiği. Model boşta kaldığı anda sıkıştırma yapmak için 0 olarak ayarlayın."
+			},
+			"useGlobal": "Küresel ayarları kullan"
+		},
 		"maxImageFileSize": {
 			"label": "Maksimum görüntü dosyası boyutu",
 			"mb": "MB",

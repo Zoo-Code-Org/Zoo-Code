@@ -756,6 +756,18 @@
 			"profileDescription": "이 프로필만을 위한 사용자 정의 임계값 (글로벌 기본값 재정의)",
 			"usesGlobal": "(글로벌 {{threshold}}% 사용)"
 		},
+		"idleCondensing": {
+			"name": "유휴 시 압축",
+			"description": "유휴 시간에 컨텍스트를 압축하기 위한 더 낮은 임계값으로, 키보드로 돌아올 때마다 항상 깨끗한 컨텍스트를 유지할 수 있습니다.",
+			"thresholdDescription": "유휴 상태인 동안 컨텍스트가 이 백분율에 도달하면 유휴 압축 타이머가 작동합니다. 압축 트리거 임계값 이하이어야 합니다.",
+			"thresholdProfileDescription": "이 프로필만의 사용자 정의 유휴 임계값 (글로벌 기본값을 재정의하며, 프로필의 압축 임계값을 상한으로 제한)",
+			"idleTime": {
+				"label": "유휴 시간",
+				"seconds": "초",
+				"description": "압축이 트리거되기 전에 모델이 유휴 상태여야 하는 시간. 모델이 유휴 상태가 되자마자 압축하려면 0으로 설정하세요."
+			},
+			"useGlobal": "전역 설정 사용"
+		},
 		"maxImageFileSize": {
 			"label": "최대 이미지 파일 크기",
 			"mb": "MB",

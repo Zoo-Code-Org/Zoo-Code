@@ -188,6 +188,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		allowedWriteFiles,
 		autoCondenseContext,
 		autoCondenseContextPercent,
+		idleCondenseContext,
+		idleCondenseContextPercent,
+		idleCondenseTimeInSeconds,
 		enableCheckpoints,
 		checkpointTimeout,
 		experiments,
@@ -218,6 +221,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		maxTotalImageSize,
 		customSupportPrompts,
 		profileThresholds,
+		profileIdleThresholds,
+		profileIdleCondenseTimes,
 		alwaysAllowFollowupQuestions,
 		followupAutoApproveTimeoutMs,
 		includeDiagnosticMessages,
@@ -438,6 +443,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					allowedMaxCost: allowedMaxCost ?? null,
 					autoCondenseContext,
 					autoCondenseContextPercent,
+					idleCondenseContext,
+					idleCondenseContextPercent,
+					idleCondenseTimeInSeconds,
 					soundEnabled: soundEnabled ?? true,
 					soundVolume: soundVolume ?? 0.5,
 					ttsEnabled,
@@ -485,6 +493,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 					autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 					profileThresholds,
+					profileIdleThresholds,
+					profileIdleCondenseTimes,
 					imageGenerationProvider,
 					openRouterImageApiKey,
 					openRouterImageGenerationSelectedModel,
@@ -931,6 +941,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<ContextManagementSettings
 								autoCondenseContext={autoCondenseContext}
 								autoCondenseContextPercent={autoCondenseContextPercent}
+								idleCondenseContext={idleCondenseContext}
+								idleCondenseContextPercent={idleCondenseContextPercent}
+								idleCondenseTimeInSeconds={idleCondenseTimeInSeconds}
 								listApiConfigMeta={listApiConfigMeta ?? []}
 								maxOpenTabsContext={maxOpenTabsContext}
 								maxWorkspaceFiles={maxWorkspaceFiles ?? 200}
@@ -939,6 +952,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								maxImageFileSize={maxImageFileSize}
 								maxTotalImageSize={maxTotalImageSize}
 								profileThresholds={profileThresholds}
+								profileIdleThresholds={profileIdleThresholds}
+								profileIdleCondenseTimes={profileIdleCondenseTimes}
 								includeDiagnosticMessages={includeDiagnosticMessages}
 								maxDiagnosticMessages={maxDiagnosticMessages}
 								writeDelayMs={writeDelayMs}

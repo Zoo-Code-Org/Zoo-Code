@@ -97,11 +97,16 @@ describe("ContextManagementSettings", () => {
 	const defaultProps = {
 		autoCondenseContext: false,
 		autoCondenseContextPercent: 80,
+		idleCondenseContext: false,
+		idleCondenseContextPercent: 50,
+		idleCondenseTimeInSeconds: 180,
 		listApiConfigMeta: [],
 		maxOpenTabsContext: 20,
 		maxWorkspaceFiles: 200,
 		showRooIgnoredFiles: false,
 		profileThresholds: {},
+		profileIdleThresholds: {},
+		profileIdleCondenseTimes: {},
 		includeDiagnosticMessages: true,
 		maxDiagnosticMessages: 50,
 		writeDelayMs: 1000,
@@ -470,6 +475,28 @@ describe("ContextManagementSettings", () => {
 			// When auto condense is false, threshold slider should not be visible
 			expect(screen.queryByTestId("condense-threshold-slider")).not.toBeInTheDocument()
 		})
+
+		it("does not render idle condensing controls when autoCondenseContext is false", () => {
+			render(
+				<ContextManagementSettings {...defaultProps} autoCondenseContext={false} idleCondenseContext={true} />,
+			)
+
+			// Idle condensing is nested under auto condense: everything idle
+			// should be hidden while auto condense is unchecked.
+			expect(screen.queryByTestId("idle-condense-context-checkbox")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("idle-condense-threshold-slider")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("idle-condense-time-input")).not.toBeInTheDocument()
+		})
+
+		it("renders idle condensing controls when autoCondenseContext is enabled", () => {
+			render(
+				<ContextManagementSettings {...defaultProps} autoCondenseContext={true} idleCondenseContext={true} />,
+			)
+
+			expect(screen.getByTestId("idle-condense-context-checkbox")).toBeInTheDocument()
+			expect(screen.getByTestId("idle-condense-threshold-slider")).toBeInTheDocument()
+			expect(screen.getByTestId("idle-condense-time-input")).toBeInTheDocument()
+		})
 	})
 
 	describe("Accessibility", () => {
@@ -527,6 +554,214 @@ describe("ContextManagementSettings", () => {
 			await waitFor(() => {
 				expect(setCachedStateField).toHaveBeenCalledWith("diffFuzzyThreshold", 0.85)
 			})
+		})
+	})
+
+	describe("Idle Condensing", () => {
+		const idleProps = {
+			...defaultProps,
+			autoCondenseContext: true,
+			autoCondenseContextPercent: 100,
+			idleCondenseContext: true,
+			idleCondenseContextPercent: 50,
+			idleCondenseTimeInSeconds: 180,
+			listApiConfigMeta: [
+				{ id: "config-1", name: "Config 1" },
+				{ id: "config-2", name: "Config 2" },
+			],
+		}
+
+		const selectIdleProfile = (profileId: string) => {
+			const idleSelect = screen.getByTestId("idle-threshold-profile-select")
+			const trigger = idleSelect.querySelector('button[data-testid="threshold-profile-change"]')
+			if (!trigger) {
+				throw new Error("idle profile trigger not found")
+			}
+			trigger.setAttribute("data-next-value", profileId)
+			fireEvent.click(trigger)
+		}
+
+		it("does not render idle controls when idle condensing is disabled", () => {
+			render(<ContextManagementSettings {...defaultProps} idleCondenseContext={false} />)
+
+			expect(screen.queryByTestId("idle-condense-threshold-slider")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("idle-condense-time-input")).not.toBeInTheDocument()
+		})
+
+		it("toggles idle condensing setting", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const checkbox = screen.getByTestId("idle-condense-context-checkbox")
+			expect(checkbox.querySelector('input[type="checkbox"]')).toBeChecked()
+
+			fireEvent.click(checkbox)
+			expect(setCachedStateField).toHaveBeenCalledWith("idleCondenseContext", false)
+		})
+
+		it("renders idle threshold slider and time input with current values", () => {
+			render(<ContextManagementSettings {...idleProps} />)
+
+			expect(screen.getByTestId("idle-threshold-profile-select")).toBeInTheDocument()
+			expect(screen.getByTestId("idle-condense-threshold-slider")).toHaveValue("50")
+			expect(screen.getByTestId("idle-condense-time-input")).toHaveValue(180)
+		})
+
+		it("updates the global idle threshold", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const slider = screen.getByTestId("idle-condense-threshold-slider")
+			fireEvent.change(slider, { target: { value: "70" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("idleCondenseContextPercent", 70)
+		})
+
+		it("keeps the idle slider max at 100 regardless of the main threshold", () => {
+			render(<ContextManagementSettings {...idleProps} autoCondenseContextPercent={40} />)
+
+			const slider = screen.getByTestId("idle-condense-threshold-slider")
+			expect(slider).toHaveAttribute("max", "100")
+		})
+
+		it("clamps the idle threshold value to the main condense threshold", () => {
+			const setCachedStateField = vi.fn()
+			render(
+				<ContextManagementSettings
+					{...idleProps}
+					autoCondenseContextPercent={40}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+
+			const slider = screen.getByTestId("idle-condense-threshold-slider")
+			// Nudging above the main threshold writes the clamped value.
+			slider.focus()
+			fireEvent.keyDown(slider, { key: "ArrowRight" })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("idleCondenseContextPercent", 40)
+		})
+
+		it("lowers the current idle threshold when the trigger threshold is reduced", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const triggerSlider = screen.getByTestId("condense-threshold-slider")
+			fireEvent.change(triggerSlider, { target: { value: "40" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("autoCondenseContextPercent", 40)
+			expect(setCachedStateField).toHaveBeenCalledWith("idleCondenseContextPercent", 40)
+		})
+
+		it("leaves the idle threshold alone when the trigger threshold change does not exceed it", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const triggerSlider = screen.getByTestId("condense-threshold-slider")
+			fireEvent.change(triggerSlider, { target: { value: "80" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("autoCondenseContextPercent", 80)
+			expect(setCachedStateField).not.toHaveBeenCalledWith("idleCondenseContextPercent", expect.anything())
+		})
+
+		it("lowers a profile idle override when its trigger threshold is reduced", () => {
+			const setCachedStateField = vi.fn()
+			render(
+				<ContextManagementSettings
+					{...idleProps}
+					profileThresholds={{ "config-1": 80 }}
+					profileIdleThresholds={{ "config-1": 70 }}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+
+			// Select config-1 in the trigger-threshold profile picker.
+			const triggerSelect = screen.getByTestId("threshold-profile-select")
+			const trigger = triggerSelect.querySelector('button[data-testid="threshold-profile-change"]')
+			if (!trigger) {
+				throw new Error("trigger profile trigger not found")
+			}
+			trigger.setAttribute("data-next-value", "config-1")
+			fireEvent.click(trigger)
+
+			const triggerSlider = screen.getByTestId("condense-threshold-slider")
+			fireEvent.change(triggerSlider, { target: { value: "60" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("profileThresholds", { "config-1": 60 })
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleThresholds", { "config-1": 60 })
+		})
+
+		it("updates the global idle time", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const input = screen.getByTestId("idle-condense-time-input")
+			fireEvent.change(input, { target: { value: "60" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("idleCondenseTimeInSeconds", 60)
+		})
+
+		it("clamps a negative idle time to zero", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const input = screen.getByTestId("idle-condense-time-input")
+			fireEvent.change(input, { target: { value: "-5" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("idleCondenseTimeInSeconds", 0)
+		})
+
+		it("writes profile-scoped idle threshold overrides", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			selectIdleProfile("config-1")
+
+			const slider = screen.getByTestId("idle-condense-threshold-slider")
+			fireEvent.change(slider, { target: { value: "55" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleThresholds", { "config-1": 55 })
+			expect(setCachedStateField).not.toHaveBeenCalledWith("idleCondenseContextPercent", expect.anything())
+		})
+
+		it("writes profile-scoped idle time overrides", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			selectIdleProfile("config-1")
+
+			const input = screen.getByTestId("idle-condense-time-input")
+			fireEvent.change(input, { target: { value: "90" } })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleCondenseTimes", { "config-1": 90 })
+			expect(setCachedStateField).not.toHaveBeenCalledWith("idleCondenseTimeInSeconds", expect.anything())
+		})
+
+		it("resets profile idle overrides to global via the use-global button", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			selectIdleProfile("config-1")
+
+			const button = screen.getByTestId("idle-condense-use-global-button")
+			fireEvent.click(button)
+
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleThresholds", { "config-1": -1 })
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleCondenseTimes", { "config-1": -1 })
+		})
+
+		it("buffers profile idle changes without persisting before Save", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			selectIdleProfile("config-1")
+
+			const slider = screen.getByTestId("idle-condense-threshold-slider")
+			slider.focus()
+			fireEvent.keyDown(slider, { key: "ArrowRight" })
+
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleThresholds", { "config-1": 51 })
+			expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
 		})
 	})
 })
