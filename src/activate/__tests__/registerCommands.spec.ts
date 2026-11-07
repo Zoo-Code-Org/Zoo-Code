@@ -94,6 +94,10 @@ vi.mock("../../i18n", () => ({
 	t: (key: string) => key,
 }))
 
+vi.mock("../../services/diagnostics", () => ({
+	createDiagnosticsReport: vi.fn(),
+}))
+
 vi.mock("../../services/ripgrep/diagnostic", () => ({
 	registerRipgrepDiagnosticCommand: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 }))
@@ -195,6 +199,25 @@ describe("registerCommands handlers", () => {
 			context: mockContext,
 			outputChannel: mockOutputChannel,
 			provider: mockProvider as unknown as ClineProvider,
+		})
+	})
+
+	it("creates diagnostics from all provider instances without requiring a visible provider", async () => {
+		// Restores the case 375e25546 dropped when it took this branch copy of the spec over
+		// main's. The command handler hands every live instance to the report builder and never
+		// consults the visible provider (registerCommands.ts:249-254), so a report still forms when
+		// no view is visible; the payload assertion is what pins that wiring.
+		const { createDiagnosticsReport } = await import("../../services/diagnostics")
+		const providers = [{}, {}]
+		;(ClineProvider.getAllInstances as Mock).mockReturnValue(providers)
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.createDiagnosticsReport"]()
+
+		expect(createDiagnosticsReport).toHaveBeenCalledWith({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			providers,
 		})
 	})
 
