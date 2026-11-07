@@ -137,6 +137,24 @@ const postActions = (
 	}
 }
 
+/**
+ * Resolve the provider a sidebar-scoped command should act on.
+ *
+ * The `view/title` rows scope these commands to the sidebar view, so a title-bar
+ * click always has a visible sidebar and the registered provider is the right
+ * target. The `commandPalette` rows added beside them do not: with a text editor
+ * focused and the sidebar collapsed, `activeWebviewPanelId` is unset, the
+ * `activeWebviewPanelId != zoo-code.TabPanelProvider` clause passes, and the
+ * palette runs the same handler. Falling back to the visible instance keeps the
+ * palette behaviour these handlers had before the click-origin split - act on
+ * whichever surface is on screen, and do nothing when none is - instead of
+ * evicting a task behind a webview nobody is looking at.
+ */
+const sidebarCommandTarget = (
+	provider: ClineProvider,
+	outputChannel: vscode.OutputChannel,
+): ClineProvider | undefined => (provider.isViewVisible ? provider : getVisibleProviderOrLog(outputChannel))
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -155,16 +173,23 @@ const getCommandsMap = ({
 	// visible-instance heuristic, which would follow the user's focus to a
 	// tab instance when both surfaces are open side-by-side. The `*InTab`
 	// variants serve the `editor/title` menu and target the tab instance
-	// through `getTabProvider()` instead.
+	// through `getTabProvider()` instead. `sidebarCommandTarget` keeps that
+	// targeting while the sidebar is visible and hands the palette path back to
+	// the visible instance.
 	plusButtonClicked: async () => {
+		const target = sidebarCommandTarget(provider, outputChannel)
+		if (!target) {
+			return
+		}
+
 		TelemetryService.instance.captureTitleButtonClicked("plus")
 
-		await provider.evictCurrentTask()
-		await provider.refreshWorkspace()
-		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		await target.evictCurrentTask()
+		await target.refreshWorkspace()
+		await target.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		// Send focusInput action immediately after chatButtonClicked
 		// This ensures the focus happens after the view has switched
-		await provider.postMessageToWebview({ type: "action", action: "focusInput" })
+		await target.postMessageToWebview({ type: "action", action: "focusInput" })
 	},
 	plusButtonClickedInTab: async () => {
 		const tabProvider = getTabProvider()
@@ -187,10 +212,15 @@ const getCommandsMap = ({
 	openInNewTab: () =>
 		openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker }),
 	settingsButtonClicked: () => {
+		const target = sidebarCommandTarget(provider, outputChannel)
+		if (!target) {
+			return
+		}
+
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
 		// Also explicitly post the visibility message to trigger scroll reliably.
-		postActions(outputChannel, provider, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
+		postActions(outputChannel, target, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
 	},
 	settingsButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -208,9 +238,14 @@ const getCommandsMap = ({
 		)
 	},
 	historyButtonClicked: () => {
+		const target = sidebarCommandTarget(provider, outputChannel)
+		if (!target) {
+			return
+		}
+
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		postActions(outputChannel, provider, ["historyButtonClicked"], "historyButtonClicked")
+		postActions(outputChannel, target, ["historyButtonClicked"], "historyButtonClicked")
 	},
 	historyButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()
@@ -223,7 +258,12 @@ const getCommandsMap = ({
 		postActions(outputChannel, tabProvider, ["historyButtonClicked"], "historyButtonClickedInTab")
 	},
 	marketplaceButtonClicked: () => {
-		postActions(outputChannel, provider, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
+		const target = sidebarCommandTarget(provider, outputChannel)
+		if (!target) {
+			return
+		}
+
+		postActions(outputChannel, target, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
 	},
 	marketplaceButtonClickedInTab: () => {
 		const tabProvider = getTabProvider()

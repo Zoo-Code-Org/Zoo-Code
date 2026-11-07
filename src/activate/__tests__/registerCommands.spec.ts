@@ -160,6 +160,7 @@ describe("registerCommands handlers", () => {
 		refreshWorkspace: Mock
 		webviewFocusTracker: WebviewFocusTracker
 		retryWebviewRecovery: Mock<() => Promise<void>>
+		isViewVisible: boolean
 	}
 	let mockVisibleProviderInstance: ClineProvider
 	let handlers: Record<string, (...args: unknown[]) => unknown>
@@ -194,6 +195,10 @@ describe("registerCommands handlers", () => {
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 			webviewFocusTracker: new WebviewFocusTracker(),
+			// The registered provider stands in for a visible sidebar: the view/title
+			// origin of these commands always has one. The palette cases below flip this
+			// flag to model a collapsed sidebar.
+			isViewVisible: true,
 		}
 		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(mockVisibleProvider)
 		;(vscode.commands.registerCommand as Mock).mockImplementation(
@@ -335,6 +340,64 @@ describe("registerCommands handlers", () => {
 		})
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
+
+	// The `commandPalette` rows sit beside the `view/title` rows in src/package.json and keep
+	// these commands reachable from the palette whenever a tab panel is not the active webview
+	// panel. That includes a text editor focused with the sidebar collapsed: there
+	// `activeWebviewPanelId` is unset, so the `activeWebviewPanelId != zoo-code.TabPanelProvider`
+	// clause passes and the handler runs against a provider whose view is not on screen.
+	it("plusButtonClicked targets the visible provider when the registered sidebar provider is hidden", async () => {
+		const collapsedSidebarTabProvider = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
+			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+		}
+		mockProvider.isViewVisible = false
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(collapsedSidebarTabProvider)
+
+		await handlers["zoo-code.plusButtonClicked"]()
+
+		// The registered provider holds a running task behind a view nobody is looking at: targeting
+		// it would abort that task and post into a webview that is not visible.
+		expect(mockProvider.evictCurrentTask).not.toHaveBeenCalled()
+		expect(mockProvider.refreshWorkspace).not.toHaveBeenCalled()
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(collapsedSidebarTabProvider.evictCurrentTask).toHaveBeenCalledTimes(1)
+		expect(collapsedSidebarTabProvider.postMessageToWebview).toHaveBeenNthCalledWith(1, {
+			type: "action",
+			action: "chatButtonClicked",
+		})
+		expect(collapsedSidebarTabProvider.postMessageToWebview).toHaveBeenNthCalledWith(2, {
+			type: "action",
+			action: "focusInput",
+		})
+	})
+
+	it("plusButtonClicked leaves the registered task alone when no surface is visible", async () => {
+		mockProvider.isViewVisible = false
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.plusButtonClicked"]()
+
+		expect(mockProvider.evictCurrentTask).not.toHaveBeenCalled()
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(TelemetryService.instance.captureTitleButtonClicked).not.toHaveBeenCalledWith("plus")
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith("Cannot find any visible Roo Code instances.")
+	})
+
+	it.each(["settingsButtonClicked", "historyButtonClicked", "marketplaceButtonClicked"])(
+		"%s posts on the visible provider when the registered sidebar provider is hidden",
+		(action) => {
+			const collapsedSidebarTabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+			mockProvider.isViewVisible = false
+			;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(collapsedSidebarTabProvider)
+
+			handlers[`zoo-code.${action}`]()
+
+			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+			expect(collapsedSidebarTabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action })
+		},
+	)
 
 	// The `*InTab` handlers serve the `editor/title` menu: they target the
 	// instance that owns the tracked tab panel, resolved via
