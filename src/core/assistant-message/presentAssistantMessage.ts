@@ -577,14 +577,33 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						// Best-effort only
 					}
 
+					// A streaming delta may have captured a fatal filesystem error for this task.
+					// handle() never runs on this path, and clearTaskState() (below) releases the
+					// state holding it, so the model must learn about it from this single result.
+					const retainedStreamError =
+						block.name === "write_to_file" ? writeToFileTool.getRetainedStreamError(cline) : undefined
+					const reportedMessage = retainedStreamError
+						? `${retainedStreamError.message}\n${errorMessage}`
+						: errorMessage
+
 					// Push tool_result directly without setting didAlreadyUseTool so streaming can
 					// continue gracefully.
 					cline.pushToolResultToUserContent({
 						type: "tool_result",
 						tool_use_id: sanitizeToolUseId(toolCallId),
-						content: formatResponse.toolError(errorMessage),
+						content: formatResponse.toolError(reportedMessage),
 						is_error: true,
 					})
+
+					// handle() is never reached on this path, so the parse-failure teardown it
+					// performs must run here instead: a streaming delta may already have opened a
+					// partial write_to_file ask and left per-task failure state behind.
+					if (block.name === "write_to_file") {
+						writeToFileTool.clearTaskState(cline)
+						await cline.finalizePartialToolAsk().catch((finalizeError) => {
+							console.error("Error finalizing write_to_file partial ask:", finalizeError)
+						})
+					}
 
 					break
 				}
