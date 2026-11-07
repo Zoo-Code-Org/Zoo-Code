@@ -12,7 +12,10 @@ const classifierPath = path.join(repositoryRoot, "scripts/change-classification.
 import { replayClassification, validationPolicyChanged } from "./change-gate.mjs"
 
 import {
+	NEVER_SKIP_SEGMENTS,
+	resolveCommits,
 	allowlistFingerprint,
+	changedEntries,
 	classifyEntries,
 	classifyEvent,
 	formatSummary,
@@ -23,7 +26,7 @@ import {
 
 describe("documentation-only allowlist", () => {
 	it("accepts the enumerated root documentation files", () => {
-		for (const filePath of ["README.md", "CONTRIBUTING.md", "SECURITY.md", "PRIVACY.md", "CODE_OF_CONDUCT.md"]) {
+		for (const filePath of ["CONTRIBUTING.md", "SECURITY.md", "PRIVACY.md", "CODE_OF_CONDUCT.md"]) {
 			assert.ok(isDocsOnlyPath(filePath), `${filePath} should be allowlisted`)
 		}
 	})
@@ -41,6 +44,7 @@ describe("documentation-only allowlist", () => {
 
 	it("rejects files that are build, runtime, test, or release inputs", () => {
 		for (const filePath of [
+			"README.md",
 			"CHANGELOG.md",
 			"src/CHANGELOG.md",
 			"AGENTS.md",
@@ -79,11 +83,17 @@ describe("documentation-only allowlist", () => {
 	})
 })
 
+for (const segment of NEVER_SKIP_SEGMENTS) {
+	it(`protects segment ${segment}`, () => {
+		for (const prefix of ["docs", ".github"]) assert.equal(isDocsOnlyPath(`${prefix}/${segment}/case.md`), false)
+	})
+}
+
 describe("name-status parsing", () => {
 	it("parses single-path entries", () => {
-		assert.deepEqual(parseNameStatus("A\0docs/new.md\0M\0README.md\0D\0src/gone.ts\0"), [
+		assert.deepEqual(parseNameStatus("A\0docs/new.md\0M\0CONTRIBUTING.md\0D\0src/gone.ts\0"), [
 			{ status: "A", path: "docs/new.md" },
-			{ status: "M", path: "README.md" },
+			{ status: "M", path: "CONTRIBUTING.md" },
 			{ status: "D", path: "src/gone.ts" },
 		])
 	})
@@ -111,7 +121,7 @@ describe("change classification", () => {
 	it("classifies an all-documentation range including deletions and renames", () => {
 		const result = classifyEntries([
 			{ status: "A", path: "docs/new.md" },
-			{ status: "M", path: "README.md" },
+			{ status: "M", path: "CONTRIBUTING.md" },
 			{ status: "D", path: "docs/gone.md" },
 			{ status: "R", oldPath: "docs/old.md", path: "docs/renamed.md" },
 			{ status: "T", path: "docs/symlinked.md" },
@@ -136,7 +146,7 @@ describe("change classification", () => {
 
 	it("fails safe on mixed documentation and source changes", () => {
 		const result = classifyEntries([
-			{ status: "M", path: "README.md" },
+			{ status: "M", path: "CONTRIBUTING.md" },
 			{ status: "M", path: "src/core/task/index.ts" },
 		])
 		assert.equal(result.category, "full")
@@ -307,6 +317,38 @@ describe("ci command", () => {
 		}
 	})
 
+	for (const [flags, reason] of [
+		[["--force-full-label"], "override-label"],
+		[["--force-full-variable"], "override-variable"],
+		[["--force-full-label", "--force-full-variable"], "override-label"],
+	]) {
+		it(`honors CLI overrides ${flags.join(" ")}`, () => {
+			const tempRepo = createTempRepository()
+			try {
+				const base = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+				fs.writeFileSync(path.join(tempRepo, "docs/base.md"), "updated")
+				git(tempRepo, ["add", "."])
+				git(tempRepo, ["commit", "-m", "docs"])
+				const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+				const { result, githubOutput } = runCi(tempRepo, [
+					"--event",
+					"pull_request",
+					"--base",
+					base,
+					"--head",
+					head,
+					"--repo-root",
+					tempRepo,
+					...flags,
+				])
+				assert.equal(result.status, 0, result.stderr)
+				assert.equal(readOutputEnv(githubOutput).get("category"), "full")
+				assert.equal(readOutputEnv(githubOutput).get("reason-code"), reason)
+			} finally {
+				fs.rmSync(tempRepo, { recursive: true, force: true })
+			}
+		})
+	}
 	it("forces full validation for non-pull_request events", () => {
 		const tempRepo = createTempRepository()
 		try {
@@ -436,4 +478,121 @@ describe("validation policy changes", () => {
 			fs.rmSync(tempRepo, { recursive: true, force: true })
 		}
 	})
+})
+
+it("escapes filenames in classification summaries", () => {
+	const filename = "docs/`<details>|\nforged.md"
+	const summary = formatSummary(classifyEntries([{ status: "M", path: filename }]))
+	assert.ok(summary.includes("docs/&#96;&lt;details&gt;&#124;&#10;forged.md"))
+	assert.ok(!summary.includes(filename))
+})
+
+it("pins the complete allowlist fingerprint including protected segments", () => {
+	assert.equal(allowlistFingerprint(), "15dc52b392ab")
+})
+
+for (const sha of ["", "abc", "g".repeat(40), "a".repeat(39), "a".repeat(41)]) {
+	it(`rejects invalid SHA ${sha}`, () => {
+		assert.throws(() => resolveCommits(repositoryRoot, sha, "a".repeat(40)), /40-character/)
+		assert.throws(() => resolveCommits(repositoryRoot, "a".repeat(40), sha), /40-character/)
+		assert.equal(validationPolicyChanged(repositoryRoot, sha, "a".repeat(40)), true)
+		assert.equal(validationPolicyChanged(repositoryRoot, "a".repeat(40), sha), true)
+	})
+}
+
+it("runs the gate CLI against a docs-only repository and writes its summary", () => {
+	const tempRepo = createTempRepository()
+	try {
+		fs.mkdirSync(path.join(tempRepo, "scripts"))
+		for (const file of ["change-classification.mjs", "change-gate.mjs"])
+			fs.copyFileSync(path.join(repositoryRoot, "scripts", file), path.join(tempRepo, "scripts", file))
+		git(tempRepo, ["add", "."])
+		git(tempRepo, ["commit", "-m", "install validation scripts"])
+		const base = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		fs.writeFileSync(path.join(tempRepo, "docs/base.md"), "updated")
+		git(tempRepo, ["add", "."])
+		git(tempRepo, ["commit", "-m", "docs"])
+		const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		for (const [actual, status] of [
+			["skipped", 0],
+			["success", 1],
+		]) {
+			const summary = path.join(tempRepo, `summary-${actual}.md`)
+			const result = spawnSync(
+				process.execPath,
+				[
+					path.join(tempRepo, "scripts/change-gate.mjs"),
+					"ci",
+					"--base",
+					base,
+					"--head",
+					head,
+					"--skip-metrics",
+				],
+				{
+					encoding: "utf8",
+					env: {
+						...process.env,
+						EVENT_NAME: "pull_request",
+						WATCHED_JOBS: "expensive:always:gated",
+						NEEDS_JSON: JSON.stringify({
+							classify: {
+								result: "success",
+								outputs: { category: "docs-only", "reason-code": "allowlisted-documentation" },
+							},
+							expensive: { result: actual },
+						}),
+						GITHUB_STEP_SUMMARY: summary,
+						FORCE_FULL_LABEL: "false",
+						FORCE_FULL_VARIABLE: "false",
+					},
+				},
+			)
+			assert.equal(result.status, status, result.stderr)
+			assert.match(fs.readFileSync(summary, "utf8"), /Validation gate/)
+			assert.match(fs.readFileSync(summary, "utf8"), /Runner-minute metrics were unavailable/)
+		}
+	} finally {
+		fs.rmSync(tempRepo, { recursive: true, force: true })
+	}
+})
+
+for (const source of ["process.exit(1)", 'console.log("malformed")']) {
+	it(`rejects a failed or malformed classifier replay: ${source}`, () => {
+		const tempRepo = createTempRepository()
+		try {
+			fs.mkdirSync(path.join(tempRepo, "scripts"))
+			fs.writeFileSync(path.join(tempRepo, "scripts/change-classification.mjs"), source)
+			assert.deepEqual(
+				replayClassification(tempRepo, {
+					baseSha: "a".repeat(40),
+					headSha: "b".repeat(40),
+					eventName: "pull_request",
+				}),
+				{ status: 1, classification: undefined },
+			)
+		} finally {
+			fs.rmSync(tempRepo, { recursive: true, force: true })
+		}
+	})
+}
+
+it("uses the PR merge base and detects documentation renames", () => {
+	const tempRepo = createTempRepository()
+	try {
+		git(tempRepo, ["checkout", "-b", "pr"])
+		git(tempRepo, ["mv", "docs/base.md", "docs/renamed.md"])
+		git(tempRepo, ["commit", "-m", "rename docs"])
+		const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		git(tempRepo, ["checkout", "main"])
+		fs.writeFileSync(path.join(tempRepo, "src-code.ts"), "main-only change")
+		git(tempRepo, ["add", "."])
+		git(tempRepo, ["commit", "-m", "advance main"])
+		const base = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		assert.deepEqual(changedEntries(tempRepo, base, head).entries, [
+			{ status: "R", oldPath: "docs/base.md", path: "docs/renamed.md" },
+		])
+	} finally {
+		fs.rmSync(tempRepo, { recursive: true, force: true })
+	}
 })

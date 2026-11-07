@@ -25,6 +25,8 @@ Zoo Code is a community project. We value every contribution. We work on an [Iss
     - [Writing Style](#writing-style)
 - [Legal](#legal)
 
+See [change-based CI validation](docs/ci-change-based-validation.md) for validation skips and full-validation overrides.
+
 ## Before You Contribute
 
 ### 1. Code of Conduct

@@ -7,7 +7,7 @@ on:
     # that do not match the filter, which blocks merging for a required check.
     # The merge_group event ignores path filters, so the queue is unaffected.
     pull_request:
-        types: [opened, reopened, ready_for_review, synchronize]
+        types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
     merge_group:
         types: [checks_requested]
 

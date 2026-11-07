@@ -17,8 +17,11 @@ their `needs` graph:
 - A job is skipped only when classification succeeded, the event is
   `pull_request`, and the category is exactly `docs-only`. The job-level
   condition reports `skipped`, and GitHub treats a skipped required check as
-  successful, so existing required-check contracts are preserved without any
-  ruleset change.
+  successful. The required unit-test matrix jobs start both platform checks
+  and gate their steps instead, so both required contexts are reported.
+  The required `compile` job also starts every time and fails unless the
+  always-running formatting and validation-policy tests passed; only its
+  expensive steps are gated. No ruleset change is needed for these checks.
 - Every other outcome runs the job unchanged: category `full`, a failed
   classification, a missing classification, or any non-`pull_request` event
   (merge queue, pushes, scheduled runs).
@@ -34,10 +37,11 @@ replays the classifier against the same commit range and rejects the run when:
 - the replay disagrees with the recorded classification,
 - a watched job is missing from the `needs` graph.
 
-On merge-queue events the gate additionally asserts that every watched job ran;
-classification can never reduce merge-queue validation. The gate writes a job
+On merge-queue events classification never reduces validation; existing
+event and draft conditions still apply, including skips for PR-only jobs.
+CodeQL does not currently subscribe to merge-queue events. The gate writes a job
 summary with the classification, the expected and actual outcome of every
-watched job, runner minutes per job, the total runner minutes of the run, and
+watched job, best-effort runner minutes per job, the total runner minutes of the run, and
 the time from run start to the last completed job (the required-check
 completion time).
 
@@ -48,7 +52,6 @@ files can produce a `docs-only` classification:
 
 | Pattern              | Reason                                            |
 | -------------------- | ------------------------------------------------- |
-| `README.md`          | Root readme; not read by any validation job.      |
 | `CONTRIBUTING.md`    | Contributor guide.                                |
 | `SECURITY.md`        | Security policy.                                  |
 | `PRIVACY.md`         | Privacy notice.                                   |
@@ -59,11 +62,12 @@ files can produce a `docs-only` classification:
 The allowlist is deliberately narrow:
 
 - Release inputs stay out. `CHANGELOG.md`, `src/CHANGELOG.md`, `locales/*/README.md`,
+  `README.md` (copied by `src/esbuild.mjs` into the packaged extension),
   and packaging manifests trigger full validation, and the separate
   release-validation workflow is untouched.
 - Workflow and toolchain configuration stays out. Only `.md` files under
-  `.github/` match; `workflows/**`, `actions/**`, and `CODEOWNERS` always
-  select full validation.
+  `.github/` match; executable workflow/action YAML and `CODEOWNERS` select
+  full validation. Inert Markdown notes under workflows or actions may skip.
 - Embedded fixtures, executable examples, and generated inputs never skip:
   any path containing `fixtures`, `__tests__`, `__mocks__`, `test-utils`,
   `snapshots`, `__snapshots__`, `generated`, `examples`, or `testdata` is
@@ -111,20 +115,26 @@ Full validation can be forced at three levels:
 3. **Permanent:** revert the pull request that introduced this change. All
    workflows then run exactly as before.
 
-Labels and repository variables do not start workflow runs. Both overrides take
-effect on the next run, such as after a push or a ready-for-review event. After
-setting an override, start a new run to apply it to an existing pull request.
-For a label override, push an update so the event payload includes the label;
-re-running an old run retains its original event payload.
+The label must exist in the repository before it can be applied. Adding or
+removing a label starts a fresh run in all five workflows. Their concurrency
+groups replace superseded PR runs, so the latest label state determines the
+active classification. Repository variables do not trigger runs: push an update
+or dispatch a fresh run after changing the variable. Re-running an old run
+retains its original event payload.
 
 The gate applies the same override rules when it replays the classifier, so an
 overridden run still validates coherence.
 
 ## Historical validation before enabling skips
 
-Before enabling skips, the classifier was run over the 500 most recent
+The original pre-enablement review snapshot (PR #2325 at `d13547de0`)
+reported the following results over the 500 most recent
 first-parent commits of `main` with `pull_request` semantics
-(`node scripts/change-classification.mjs history --limit 500`):
+(`node scripts/change-classification.mjs history --limit 500`). These are
+historical results, not a current measurement; the original capture date was
+not recorded. To reproduce the sample, fetch
+complete history first (`git fetch --unshallow` for a shallow checkout), check
+out the snapshot, and record the date and main SHA with the report:
 
 - 499 commits classified `full` (reason `non-documentation-path`).
 - 1 commit classified `docs-only`: `a704002b67fd`, "[Docs] Specify P1
@@ -158,3 +168,17 @@ scope until the shared-input audit is done; Zoo imports shared source outside
 package-local directories. Existing coverage slicing (issue #47) is a separate
 effort. A comprehensive merge-queue run is additional protection, not a
 substitute for correct pull request classification.
+
+## Trust boundary and maintenance
+
+Replay detects accidental disagreement. On `pull_request`, workflow, action,
+classifier, and gate code all come from the PR merge commit; the gate is not
+independent protection against a PR author who edits validation itself.
+Maintainers should review `.github/**` and `scripts/change-*.mjs` as CI policy;
+CODEOWNERS protection for these paths is a possible separate policy change.
+The gate jobs must be added to branch rulesets if maintainers want gate failures
+themselves to block merging. Formatting and policy-test failures already flow
+through the existing required `compile` context.
+
+The repeated gate jobs remain explicit to keep workflow needs and check names
+visible. Extracting a shared gate action is deferred to a separate refactor.

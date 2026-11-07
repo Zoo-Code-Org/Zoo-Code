@@ -21,7 +21,6 @@ import { fileURLToPath } from "node:url"
 // individually so an unexpected new root-level markdown file (for
 // example a release-affecting CHANGELOG.md) never matches by accident.
 const DOCS_ONLY_FILES = [
-	{ path: "README.md", description: "root readme" },
 	{ path: "CONTRIBUTING.md", description: "contributor guide" },
 	{ path: "SECURITY.md", description: "security policy" },
 	{ path: "PRIVACY.md", description: "privacy notice" },
@@ -40,7 +39,7 @@ const DOCS_ONLY_MARKDOWN_PREFIXES = [
 // by builds, tests, or examples even when they sit under an allowlisted
 // prefix. A Markdown file inside a fixtures or examples directory is a
 // build/runtime/test input, so it must never allow a skip.
-const NEVER_SKIP_SEGMENTS = [
+export const NEVER_SKIP_SEGMENTS = [
 	"fixtures",
 	"__tests__",
 	"__mocks__",
@@ -70,8 +69,6 @@ export const OUTPUT_REASONS = {
 	"non-documentation-path": "The change range contained paths outside the documentation-only allowlist.",
 	"protected-path-segment":
 		"An allowlisted path contained a protected segment (fixtures, tests, generated, examples).",
-	"missing-base": "The merge base could not be resolved from repository history.",
-	"classifier-failure": "The classifier could not enumerate the change range.",
 	"override-label": "Full validation was forced by the ci:full-validation pull request label.",
 	"override-variable": "Full validation was forced by the ZOO_CODE_REQUIRE_FULL_VALIDATION repository variable.",
 }
@@ -230,7 +227,6 @@ export function resolveCommits(repoRoot, baseSha, headSha) {
 			throw new Error(`Could not resolve ${label} commit ${sha} in the checkout (shallow or missing history)`)
 		}
 	}
-	return { baseSha, headSha }
 }
 
 export function changedEntries(repoRoot, baseSha, headSha) {
@@ -256,6 +252,17 @@ function escapeSummaryCell(value) {
 	return String(value).replaceAll("|", "\\|").replaceAll("\n", " ")
 }
 
+function escapeSummaryPath(value) {
+	return String(value)
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll("`", "&#96;")
+		.replaceAll("|", "&#124;")
+		.replaceAll("\r", "&#13;")
+		.replaceAll("\n", "&#10;")
+}
+
 export function formatSummary(result, { eventName, mergeBase, headSha } = {}) {
 	const lines = [
 		"## Change-based validation classification",
@@ -279,7 +286,7 @@ export function formatSummary(result, { eventName, mergeBase, headSha } = {}) {
 			"<details><summary>Allowlisted files</summary>",
 			"",
 		)
-		for (const { path: filePath } of result.docsFiles) lines.push(`- \`${filePath}\``)
+		for (const { path: filePath } of result.docsFiles) lines.push(`- ${escapeSummaryPath(filePath)}`)
 		lines.push("", "</details>")
 	} else if (result.reasonCode === "non-pr-event") {
 		lines.push(
@@ -290,7 +297,7 @@ export function formatSummary(result, { eventName, mergeBase, headSha } = {}) {
 		const details = result.offendingPaths ?? result.docsFiles.map(({ path: filePath }) => filePath)
 		if (details.length > 0) {
 			lines.push("", "<details><summary>Paths outside or straddling the allowlist</summary>", "")
-			for (const filePath of details) lines.push(`- \`${filePath}\``)
+			for (const filePath of details) lines.push(`- ${escapeSummaryPath(filePath)}`)
 			lines.push("", "</details>")
 		}
 	}
@@ -368,7 +375,7 @@ function formatHistory(rows) {
 		const skipList =
 			row.category === "docs-only"
 				? (row.docsFiles ?? [])
-						.map(({ path: filePath }) => `\`${filePath}\``)
+						.map(({ path: filePath }) => escapeSummaryPath(filePath))
 						.join(", ")
 						.slice(0, 180)
 				: ""

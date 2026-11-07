@@ -4,6 +4,7 @@ on:
     push:
         branches: ["main"]
     pull_request:
+        types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
     schedule:
         - cron: "24 19 * * 3"
 

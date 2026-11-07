@@ -32,12 +32,12 @@ describe("platform unit-test workflow", () => {
 		assert.ok(!workflow.includes("matrix.upload-coverage"))
 
 		assert.deepEqual(parseWorkflowStep("Run extension coverage lanes"), {
-			if: "matrix.collect-coverage",
+			if: "${{ env.RUN_VALIDATION == 'true' && (matrix.collect-coverage) }}",
 			run: 'pnpm turbo run test:coverage:api test:coverage:core test:coverage:services test:coverage:misc test:coverage:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only',
 		})
 
 		assert.deepEqual(parseWorkflowStep("Run extension test lanes"), {
-			if: "${{ !matrix.collect-coverage }}",
+			if: "${{ env.RUN_VALIDATION == 'true' && (!matrix.collect-coverage) }}",
 			run: 'pnpm turbo run test:api test:core test:services test:misc test:tree-sitter --filter="zoo-code" --concurrency=2 --log-order grouped --output-logs new-only',
 		})
 
@@ -62,16 +62,16 @@ describe("platform unit-test workflow", () => {
 			],
 		]) {
 			const coverageStep = parseWorkflowStep(coverageStepName)
-			assert.equal(coverageStep.if, "matrix.collect-coverage")
+			assert.equal(coverageStep.if, "${{ env.RUN_VALIDATION == 'true' && (matrix.collect-coverage) }}")
 			assert.ok(coverageStep.run.includes(coverageCommand), `missing command in step: ${coverageStepName}`)
 
 			const plainStep = parseWorkflowStep(plainStepName)
-			assert.equal(plainStep.if, "${{ !matrix.collect-coverage }}")
+			assert.equal(plainStep.if, "${{ env.RUN_VALIDATION == 'true' && (!matrix.collect-coverage) }}")
 			assert.ok(plainStep.run.includes(plainCommand), `missing command in step: ${plainStepName}`)
 			assert.ok(!plainStep.run.includes("--coverage"), `${plainStepName} must not collect coverage on Windows`)
 		}
 
-		assert.ok(!workflowStep("Run extension dist smoke test").includes("if:"))
+		assert.match(workflowStep("Run extension dist smoke test"), /if: env.RUN_VALIDATION == 'true'/)
 	})
 
 	it("does not run coverage verification or uploads on Windows", () => {
@@ -86,7 +86,10 @@ describe("platform unit-test workflow", () => {
 			"Upload core integration coverage to Codecov",
 			"Upload coverage reports to GitHub",
 		]) {
-			assert.match(workflowStep(stepName), /if: matrix\.collect-coverage/)
+			assert.match(
+				workflowStep(stepName),
+				/if: \$\{\{ env.RUN_VALIDATION == 'true' && \(matrix\.collect-coverage\) \}\}/,
+			)
 		}
 	})
 

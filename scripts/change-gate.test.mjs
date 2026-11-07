@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { parse } from "yaml"
 import fs from "node:fs"
 import path from "node:path"
 import { describe, it } from "node:test"
@@ -6,7 +7,14 @@ import { fileURLToPath } from "node:url"
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
-import { collectJobMetrics, evaluateGate, expectedResult, parseWatchSpec, renderGateSummary } from "./change-gate.mjs"
+import {
+	collectJobMetrics,
+	evaluateGate,
+	expectedResult,
+	parseWatchSpec,
+	parseClassifierStdout,
+	renderGateSummary,
+} from "./change-gate.mjs"
 
 const needsFor = (results, classify) => ({
 	classify: classify ?? { result: "success", outputs: { category: "full", "reason-code": "non-documentation-path" } },
@@ -68,6 +76,36 @@ describe("gate evaluation", () => {
 		{ name: "expensive", rule: "always", gated: true },
 	]
 
+	for (const result of ["skipped", "cancelled", "queued", undefined]) {
+		it(`rejects classification result ${result}`, () => {
+			const evaluation = evaluateGate({
+				needs: needsFor({ cheap: "success", expensive: "success" }, { result }),
+				watched,
+				eventName: "pull_request",
+			})
+			assert.equal(evaluation.ok, false)
+			assert.match(
+				evaluation.violations.join("; "),
+				result === undefined
+					? /result is missing/
+					: result === "queued"
+						? /non-terminal result/
+						: /must either succeed or fail/,
+			)
+		})
+	}
+	it("does not trust docs-only outputs leaked by a failed classifier", () => {
+		const evaluation = evaluateGate({
+			needs: needsFor(
+				{ cheap: "success", expensive: "skipped" },
+				{ result: "failure", outputs: { category: "docs-only" } },
+			),
+			watched,
+			eventName: "pull_request",
+		})
+		assert.equal(evaluation.ok, false)
+		assert.equal(evaluation.docsOnly, false)
+	})
 	it("passes when full validation ran for a code change", () => {
 		const evaluation = evaluateGate({
 			needs: needsFor({ cheap: "success", expensive: "success" }),
@@ -222,20 +260,25 @@ describe("gate evaluation", () => {
 		assert.ok(evaluation.ok, evaluation.violations.join("; "))
 	})
 
-	it("rejects a replay that disagrees with the recorded classification", () => {
-		const evaluation = evaluateGate({
-			needs: needsFor({ cheap: "success", expensive: "success" }),
-			watched,
-			eventName: "pull_request",
-			prDraft: false,
-			classifierReplay: {
-				status: 0,
-				classification: { category: "docs-only", reasonCode: "allowlisted-documentation", changedFiles: "1" },
-			},
+	for (const classification of [
+		{ category: "full", reasonCode: "different" },
+		{ category: "docs-only", reasonCode: "non-documentation-path" },
+	]) {
+		it(`rejects independent replay mismatch ${JSON.stringify(classification)}`, () => {
+			const evaluation = evaluateGate({
+				needs: needsFor({ cheap: "success", expensive: "success" }),
+				watched,
+				eventName: "pull_request",
+				prDraft: false,
+				classifierReplay: {
+					status: 0,
+					classification: classification,
+				},
+			})
+			assert.ok(!evaluation.ok)
+			assert.ok(evaluation.violations.some((violation) => violation.includes("replay disagrees")))
 		})
-		assert.ok(!evaluation.ok)
-		assert.ok(evaluation.violations.some((violation) => violation.includes("replay disagrees")))
-	})
+	}
 
 	it("rejects a replay failure when the classify job claimed success", () => {
 		const evaluation = evaluateGate({
@@ -327,20 +370,6 @@ describe("summary rendering", () => {
 
 // --- Workflow wiring assertions -------------------------------------------
 
-function jobBlock(workflow, jobId) {
-	const lines = workflow.split("\n")
-	const start = lines.findIndex((line) => line === `    ${jobId}:`)
-	assert.ok(start !== -1, `missing job: ${jobId}`)
-	let end = lines.length
-	for (let index = start + 1; index < lines.length; index++) {
-		if (/^    [a-z][a-z0-9-]*:$/.test(lines[index])) {
-			end = index
-			break
-		}
-	}
-	return lines.slice(start + 1, end).join("\n")
-}
-
 const GATING_TERMS = [
 	"!cancelled()",
 	"needs.classify.result != 'success'",
@@ -357,9 +386,9 @@ const WORKFLOW_EXPECTATIONS = [
 			{ id: "format-check", rule: "always", gated: false },
 			{ id: "check-translations", rule: "always", gated: true },
 			{ id: "knip", rule: "always", gated: false },
-			{ id: "compile", rule: "always", gated: true },
+			{ id: "compile", rule: "always", gated: false },
 			{ id: "build-vsix", rule: "pr-only", gated: true, prOnlyCondition: true },
-			{ id: "unit-test", rule: "always", gated: true },
+			{ id: "unit-test", rule: "always", gated: false },
 		],
 	},
 	{
@@ -390,88 +419,117 @@ const WORKFLOW_EXPECTATIONS = [
 
 describe("change-based validation workflow wiring", () => {
 	for (const expectation of WORKFLOW_EXPECTATIONS) {
-		describe(expectation.file, () => {
-			const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows", expectation.file), "utf8")
-			const watchedJobs = expectation.jobs
-				.map((job) => `${job.id}:${job.rule}:${job.gated ? "gated" : "ungated"}`)
-				.join(",")
-			const watchedNames = expectation.jobs.map((job) => job.id)
-
-			it("triggers on pull_request and merge_group without path filters", () => {
-				assert.match(workflow, /^    pull_request:/m)
-				assert.doesNotMatch(workflow, /^        paths(?:-ignore)?:/m)
-				if (expectation.hasMergeGroup) assert.match(workflow, /^    merge_group:/m)
-			})
-
-			it("uses unique check names for classification and the gate", () => {
-				for (const jobId of ["classify", "validation-gate"]) {
+		it(`validates ${expectation.file}`, () => {
+			const workflow = parse(
+				fs.readFileSync(path.join(repositoryRoot, ".github/workflows", expectation.file), "utf8"),
+			)
+			assert.ok(workflow.on.pull_request.types.includes("labeled"))
+			assert.ok(workflow.on.pull_request.types.includes("unlabeled"))
+			assert.equal(workflow.on.pull_request.paths, undefined)
+			assert.equal(workflow.on.pull_request["paths-ignore"], undefined)
+			assert.equal(Boolean(workflow.on.merge_group), expectation.hasMergeGroup)
+			const jobs = workflow.jobs
+			const gate = jobs["validation-gate"]
+			assert.equal(gate.if, "always()")
+			assert.deepEqual([...gate.needs].sort(), ["classify", ...expectation.jobs.map((job) => job.id)].sort())
+			const step = gate.steps.find((step) => step.name === "Run validation gate")
+			assert.equal(
+				step.env.WATCHED_JOBS,
+				expectation.jobs.map((job) => `${job.id}:${job.rule}:${job.gated ? "gated" : "ungated"}`).join(","),
+			)
+			assert.equal(step.env.NEEDS_JSON, "${{ toJSON(needs) }}")
+			assert.equal(step.env.EVENT_NAME, "${{ github.event_name }}")
+			assert.match(step.env.FORCE_FULL_LABEL, /ci:full-validation/)
+			assert.match(step.env.FORCE_FULL_VARIABLE, /ZOO_CODE_REQUIRE_FULL_VALIDATION/)
+			const classify = jobs.classify
+			const classifyStep = classify.steps.find((step) => step.id === "classify")
+			assert.equal(classify.steps[0].with["fetch-depth"], 0)
+			assert.equal(classifyStep.uses, "./.github/actions/classify-changes")
+			assert.equal(classifyStep.with["event-name"], "${{ github.event_name }}")
+			assert.equal(classifyStep.with["head-sha"], "${{ github.sha }}")
+			assert.equal(classifyStep.with["force-full-label"], step.env.FORCE_FULL_LABEL)
+			assert.equal(classifyStep.with["force-full-variable"], step.env.FORCE_FULL_VARIABLE)
+			assert.equal(gate.permissions.actions, "read")
+			assert.equal(gate.steps[0].with["fetch-depth"], 0)
+			assert.match(step.run, /node scripts\/change-gate\.mjs ci/)
+			for (const job of expectation.jobs) {
+				if (job.gated) {
+					assert.equal(jobs[job.id].needs, "classify")
+					for (const term of GATING_TERMS) assert.ok(jobs[job.id].if.includes(term))
 					assert.ok(
-						jobBlock(workflow, jobId).includes(
-							`name: ${jobId} (${expectation.file.replace(/\.yml$/, "")})`,
+						jobs[job.id].if.includes(
+							job.prOnlyCondition
+								? "github.event_name == 'pull_request'"
+								: "github.event_name != 'pull_request'",
 						),
 					)
 				}
-			})
-
-			it("runs a classify job with full history and override wiring", () => {
-				const classify = jobBlock(workflow, "classify")
-				assert.match(classify, /uses: \.\/\.github\/actions\/classify-changes/)
-				assert.match(classify, /fetch-depth: 0/)
-				assert.match(classify, /event-name: \$\{\{ github\.event_name \}\}/)
-				assert.match(classify, /ci:full-validation/)
-				assert.match(classify, /ZOO_CODE_REQUIRE_FULL_VALIDATION/)
-				assert.ok(!classify.includes("setup-node-pnpm"), "classify must stay a fast no-install job")
-			})
-
-			for (const job of expectation.jobs) {
-				it(`${job.gated ? "gates" : "keeps"} job ${job.id} correctly`, () => {
-					const block = jobBlock(workflow, job.id)
-					if (job.gated) {
-						assert.match(block, /needs: classify/)
-						for (const term of GATING_TERMS) {
-							assert.ok(block.includes(term), `${job.id} gating is missing term: ${term}`)
-						}
-						const eventTerm = job.prOnlyCondition
-							? "github.event_name == 'pull_request'"
-							: "github.event_name != 'pull_request'"
-						assert.ok(block.includes(eventTerm), `${job.id} must restrict skips to pull_request events`)
-					} else {
-						assert.ok(!block.includes("needs: classify"), `${job.id} must not depend on classification`)
-					}
-				})
 			}
-
-			it("runs a validation gate that watches exactly the classification and validation jobs", () => {
-				const gate = jobBlock(workflow, "validation-gate")
-				assert.match(gate, /if: always\(\)/)
-				assert.match(gate, /actions: read/)
-				assert.match(gate, /fetch-depth: 0/)
-				assert.match(gate, /node scripts\/change-gate\.mjs ci/)
-
-				const needsMatch = gate.match(/needs:\n((?:\s+- \S+\n)+)/)
-				assert.ok(needsMatch, "validation-gate must declare its needs as a list")
-				const needed = [...needsMatch[1].matchAll(/- (\S+)/g)].map((match) => match[1])
-				assert.deepEqual([...needed].sort(), ["classify", ...watchedNames].sort())
-
-				const watchedMatch = gate.match(/WATCHED_JOBS: (\S+)/)
-				assert.ok(watchedMatch, "validation-gate must declare WATCHED_JOBS")
-				assert.equal(watchedMatch[1], watchedJobs)
-
-				assert.match(gate, /ci:full-validation/)
-				assert.match(gate, /ZOO_CODE_REQUIRE_FULL_VALIDATION/)
-				assert.match(gate, /GH_TOKEN/)
-			})
+			for (const id of ["classify", "validation-gate"])
+				assert.equal(jobs[id].name, `${id} (${expectation.file.replace(/\.yml$/, "")})`)
 		})
 	}
-
-	it("moves markdown formatting into an always-running job so docs-only pull requests keep format validation", () => {
-		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/code-qa.yml"), "utf8")
-		const compile = jobBlock(workflow, "compile")
-		const formatCheck = jobBlock(workflow, "format-check")
-
-		assert.ok(!compile.includes("pnpm format:check"), "compile must no longer run format:check")
-		assert.match(formatCheck, /run: pnpm format:check/)
-		assert.match(formatCheck, /run: pnpm test:change-gate/)
-		assert.ok(!formatCheck.includes("needs: classify"), "format-check must always run")
+	it("keeps required compile and matrix checks while gating expensive steps", () => {
+		const { jobs } = parse(fs.readFileSync(path.join(repositoryRoot, ".github/workflows/code-qa.yml"), "utf8"))
+		assert.deepEqual(jobs.compile.needs, ["classify", "format-check"])
+		assert.equal(jobs.compile.steps[0].env.FORMAT_RESULT, "${{ needs.format-check.result }}")
+		assert.equal(jobs.compile.steps[0].run, 'test "$FORMAT_RESULT" = success')
+		assert.ok(jobs["format-check"].steps.some((step) => step.run === "pnpm format:check"))
+		assert.ok(jobs["format-check"].steps.some((step) => step.run === "pnpm test:change-gate"))
+		for (const id of ["compile", "unit-test"]) {
+			assert.equal(jobs[id].if, "${{ !cancelled() }}")
+			for (const term of GATING_TERMS.slice(1)) assert.ok(jobs[id].env.RUN_VALIDATION.includes(term))
+			for (const step of jobs[id].steps.slice(1))
+				assert.ok(step.if.includes("env.RUN_VALIDATION == 'true'"), step.name)
+		}
+		assert.equal(jobs["unit-test"].steps[0].if, "env.RUN_VALIDATION == 'false'")
+		assert.match(jobs["unit-test"].steps[0].run, /GITHUB_STEP_SUMMARY/)
+		assert.deepEqual(
+			jobs["unit-test"].strategy.matrix.include.map((entry) => entry.name),
+			["ubuntu-latest", "windows-latest"],
+		)
 	})
+})
+
+describe("classifier stdout", () => {
+	it("parses valid output and rejects malformed output", () => {
+		assert.deepEqual(parseClassifierStdout("Change classification: full (override-label), 12 changed file(s)"), {
+			category: "full",
+			reasonCode: "override-label",
+			changedFiles: 12,
+		})
+		for (const value of [
+			undefined,
+			"",
+			"Change classification: full",
+			"Change classification: full (reason), NaN changed file(s)",
+		])
+			assert.equal(parseClassifierStdout(value), undefined)
+	})
+})
+
+it("collects all metrics pages", () => {
+	const routes = []
+	const metrics = collectJobMetrics({
+		repository: "org/repo",
+		runId: "123",
+		fetchJson: (route) => {
+			routes.push(route)
+			if (!route.includes("/jobs?")) return { started_at: "2026-01-01T00:00:00Z" }
+			return {
+				jobs: Array.from({ length: route.endsWith("page=1") ? 100 : 1 }, (_, i) => ({
+					name: `job-${i}`,
+					started_at: "2026-01-01T00:00:00Z",
+					completed_at: "2026-01-01T00:01:00Z",
+				})),
+			}
+		},
+	})
+	assert.deepEqual(routes, [
+		"repos/org/repo/actions/runs/123",
+		"repos/org/repo/actions/runs/123/jobs?per_page=100&page=1",
+		"repos/org/repo/actions/runs/123/jobs?per_page=100&page=2",
+	])
+	assert.equal(metrics.perJob.length, 101)
+	assert.equal(metrics.totalRunnerMinutes, 101)
 })

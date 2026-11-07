@@ -2,7 +2,7 @@ name: Changed-code mutation testing
 
 on:
     pull_request:
-        types: [edited, opened, reopened, ready_for_review, synchronize]
+        types: [edited, opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
     merge_group:
         types: [checks_requested]
 

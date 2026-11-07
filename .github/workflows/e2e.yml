@@ -3,7 +3,7 @@ name: E2E Tests (Mocked)
 on:
     workflow_dispatch:
     pull_request:
-        types: [opened, reopened, ready_for_review, synchronize]
+        types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
     merge_group:
         types: [checks_requested]
 
