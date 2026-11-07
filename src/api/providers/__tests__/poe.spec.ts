@@ -866,16 +866,23 @@ describe("PoeHandler", () => {
 		it("classifies a fired timeout against the timeoutMs value that built the signal", async () => {
 			// mergeAbortSignalAndTimeout reads timeoutMs once, when the signal is built. The
 			// classification side must read the same decision: a caller that rewrites
-			// options.timeoutMs while the request is in flight (20 -> 0 here) would otherwise
-			// make our own fired TimeoutError read as a plain caller abort. Red without
-			// capturing the usability decision next to the merge call.
+			// options.timeoutMs while the request is in flight (250 -> 0 here) would otherwise
+			// make our own fired TimeoutError read as a plain caller abort. The request having
+			// begun is observed rather than slept on, and the deadline is wide enough that the
+			// mutation is certain to land before it fires.
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
-			mockGenerateText.mockImplementationOnce(async () => {
-				await new Promise<void>((resolve) => setTimeout(resolve, 200))
-				return { text: "too late" }
-			})
-			const options = { timeoutMs: 20 }
+			mockGenerateText.mockImplementationOnce(
+				() =>
+					new Promise<{ text: string }>((_resolve, reject) => {
+						const signal = mockGenerateText.mock.calls[0][0].abortSignal as AbortSignal
+						signal.addEventListener("abort", () => reject(signal.reason), { once: true })
+					}),
+			)
+			const options = { timeoutMs: 250 }
 			const promise = handler.completePrompt("test prompt", options)
+			// Poll on the observable fact that the request started, with a 1ms interval so the
+			// poll cannot itself outlast the deadline being mutated away.
+			await vi.waitFor(() => expect(mockGenerateText).toHaveBeenCalledTimes(1), { interval: 1 })
 			options.timeoutMs = 0
 			await expect(promise).rejects.toMatchObject({ name: "TimeoutError" })
 		})
