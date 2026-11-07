@@ -15,6 +15,7 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn(),
 	unlink: vi.fn(),
 	realpath: vi.fn(),
+	lstat: vi.fn(),
 	rmdir: vi.fn(),
 }))
 
@@ -63,6 +64,13 @@ function _backupUnlinkCalls(): number {
 		.filter((candidate) => candidate.includes("safeWriteText.bak_")).length
 }
 
+// A symlink stand-in: only isSymbolicLink and mode are read by safeWriteText.
+function _lstatLike(mode: number, symbolic: boolean): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+	Object.assign(s, { mode, isSymbolicLink: () => symbolic })
+	return s
+}
+
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
 	Object.assign(s, { mode })
@@ -77,6 +85,11 @@ describe("safeWriteText", () => {
 		// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
 		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
 		vi.mocked(fs.access).mockResolvedValue(undefined)
+		// lstat answers ENOENT for a name that does not exist yet, which is the default
+		// condition of the create-if-absent cases; the dangling-symlink case overrides it.
+		vi.mocked(fs.lstat).mockRejectedValue(
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		)
 		vi.mocked(fs.rename).mockResolvedValue(undefined)
 		vi.mocked(fs.unlink).mockResolvedValue(undefined)
 		// Existing-target default: a regular 0o644 file.
@@ -211,6 +224,17 @@ describe("safeWriteText", () => {
 			// the temp file was fully closed before the commit rename
 			expect(vi.mocked(fsSync.closeSync).mock.calls[0][0]).toBe(1)
 			expect(fs.rename).toHaveBeenCalled()
+
+			// ... and in that order: everything above counts calls, so a commit rename that
+			// ran before the file fsync would satisfy every assertion here. Compare call order
+			// across the four steps the durability contract is about.
+			const writeOrder = vi.mocked(fsSync.writeSync).mock.invocationCallOrder[0]
+			const fsyncOrder = vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]
+			const closeOrder = vi.mocked(fsSync.closeSync).mock.invocationCallOrder[0]
+			const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[0]
+			expect(writeOrder).toBeLessThan(fsyncOrder)
+			expect(fsyncOrder).toBeLessThan(closeOrder)
+			expect(closeOrder).toBeLessThan(renameOrder)
 		})
 	})
 
@@ -266,7 +290,19 @@ describe("safeWriteText", () => {
 			// The verifier runs after staging and fsync but before the rename, so the target
 			// was never moved and the staged content was cleaned up.
 			expect(verify).toHaveBeenCalledWith(targetPath)
-			expect(fs.rename).not.toHaveBeenCalled()
+			// Order is the contract here, not the call: the verifier must run after the staged
+			// file is written and fsynced. The other half - that it ran before the commit rename
+			// - is the rename assertion below, because a rejected verification never renames.
+			// Both sides of the comparison have to exist before they are compared: a verifier
+			// that runs too early never stages anything, and that must read as a failed call
+			// assertion rather than as a comparison against undefined.
+			expect(fsSync.writeSync).toHaveBeenCalledTimes(1)
+			expect(fsSync.fsyncSync).toHaveBeenCalled()
+			const stagedWriteOrder = vi.mocked(fsSync.writeSync).mock.invocationCallOrder[0]
+			const stagedFsyncOrder = vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]
+			const verifyOrder = verify.mock.invocationCallOrder[0]
+			expect(stagedWriteOrder).toBeLessThan(stagedFsyncOrder)
+			expect(stagedFsyncOrder).toBeLessThan(verifyOrder)
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
@@ -919,6 +955,63 @@ describe("safeWriteText", () => {
 				"access failed",
 			)
 			expect(fs.rename).not.toHaveBeenCalled()
+		})
+	})
+
+	// These three cases each pin one answer that the code currently gets wrong: what lstat
+	// says when realpath says ENOENT, what mode the generated staging file is published
+	// with, and who owns a backup whose cleanup unlink itself failed.
+	describe("publication guards: dangling links, target mode and retained backups", () => {
+		it("rejects a write whose target is a symlink with no referent instead of replacing the link", async () => {
+			const linkPath = "/tmp/test-dir/link.txt"
+			// realpath answers ENOENT both for a name that does not exist yet and for a symlink
+			// whose referent is gone. lstat is what tells the two apart, and the documented
+			// contract is that only an absent target may fall back to the link path.
+			vi.mocked(fs.realpath).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.lstat).mockResolvedValue(_lstatLike(0o777, true))
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux" })).rejects.toThrow(/dangling symlink/)
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+		it("fixes the generated staging file's mode with fchmod so the umask cannot narrow it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// A permissive target: the generated staging file must be published with the same
+			// mode rather than the creation mask the process happens to run under.
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "new data", { platform: "linux" })
+
+			// The open argument is not the outcome - openSync's mode is subject to the umask -
+			// so assert the call that fixes the mode on the descriptor, and that it lands
+			// between the open and the fsync.
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(1, 0o664)
+			const openOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[0]
+			const chmodOrder = vi.mocked(fsSync.fchmodSync).mock.invocationCallOrder[0]
+			const fsyncOrder = vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]
+			expect(openOrder).toBeLessThan(chmodOrder)
+			expect(chmodOrder).toBeLessThan(fsyncOrder)
+		})
+		it("keeps a backup whose creation cleanup failed for a later write to clear", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.copyFile).mockRejectedValue(new Error("EXDEV: cross-device copy not permitted"))
+			vi.mocked(fs.unlink).mockRejectedValue(new Error("EBUSY: resource busy or locked"))
+
+			await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toThrow(
+				"EXDEV: cross-device copy not permitted",
+			)
+
+			// The cleanup unlink failed, so the path must still be owned: it goes through the
+			// same retry loop as every other backup removal - three attempts - and a later
+			// flush has to be able to clear it instead of leaving it beside the target.
+			expect(_backupUnlinkCalls()).toBe(3)
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			await expect(flushPendingBackupRemovals()).resolves.toBe(1)
 		})
 	})
 })

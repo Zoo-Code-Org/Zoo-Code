@@ -206,12 +206,18 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  * across filesystems fails with EXDEV.
  */
 export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
-	return fs.realpath(absoluteFilePath).catch((error: unknown) => {
-		const code =
-			typeof error === "object" && error !== null && "code" in error
-				? (error as { code?: string }).code
-				: undefined
-		if (code !== "ENOENT") throw error
+	return fs.realpath(absoluteFilePath).catch(async (error: unknown) => {
+		if (_errorCode(error) !== "ENOENT") {
+			throw error
+		}
+		// realpath answers ENOENT for two different worlds: a name that does not exist
+		// yet, and a symlink whose referent is gone. lstat tells them apart, and only the
+		// first may fall back to the link path - writing through the second would let the
+		// commit rename replace the link with a regular file where a link used to stand.
+		const linkState = await fs.lstat(absoluteFilePath).catch(() => null)
+		if (linkState?.isSymbolicLink()) {
+			throw new Error(`Cannot write through a dangling symlink at ${absoluteFilePath}: its target does not exist`)
+		}
 		return absoluteFilePath
 	})
 }
@@ -259,6 +265,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// directory under a fresh name would put back under tempPath. The retry this
 			// branch used to carry therefore could only fail a second time.
 			const fd = fsSync.openSync(tempPath, "w", targetMode)
+			// open()'s mode argument is subject to the process umask, so asking for the
+			// target's mode at creation is not the same as publishing it: a 0o664 target under
+			// a 0o022 umask would come out 0o644. The chmod on the open descriptor is what
+			// fixes the mode we asked for - the same reason the caller-staged branch below
+			// fchmods rather than trusting its own open mode.
+			fsSync.fchmodSync(fd, targetMode)
 			try {
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
@@ -355,7 +367,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 						}
 					} catch (backupError: unknown) {
 						// A half-written backup is worse than none: it looks like a restore source.
-						await fs.unlink(backupPath).catch(() => {})
+						// The half-made backup has to go, but a failed unlink here must not orphan it:
+						// this is the only cleanup this path performs and nulling backupPath below would
+						// also hide the path from the rollback cleanup, so it goes through the same
+						// three-strike removal every other backup removal uses - which keeps the path in
+						// PENDING_BACKUP_REMOVALS for a later write to clear when this unlink fails.
+						await _removeBackupWithRetry(backupPath)
 						backupPath = null
 						throw backupError
 					}
