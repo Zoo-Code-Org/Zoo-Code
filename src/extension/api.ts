@@ -807,6 +807,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 										`read-back: this call cannot normalize its payload to judge what the record holds, so the ` +
 										`record is kept.`,
 								)
+							} else if (currentRecord.id !== id) {
+								// Identical settings under a different id is a replacement, not our own write:
+								// saveConfig keeps an existing id when it overwrites, so a new id can only come from
+								// a writer that replaced the record. Keeping it is the conservative direction, and
+								// it is what protects a profile an import replaced in place.
+								this.log(
+									`[setConfiguration] skipped restoring the prior profile record '${savedProfileName}' after a failed ` +
+										`read-back: it now carries id '${currentRecord.id}', not this call '${id}', so another writer ` +
+										`replaced it.`,
+								)
 							} else if (movedKeys.length > 0) {
 								this.log(
 									`[setConfiguration] skipped restoring the prior profile record '${savedProfileName}' after a failed ` +
@@ -857,7 +867,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			await this.sidebarProvider.setValues(
 				// Only the keys this call owns travel forward; see the filter comment above.
 				forwardValues,
-				{ savedProfileName },
+				// The settings that landed, not the payload: saveConfig normalizes before it stores,
+				// so a sibling overlay built from the payload could select a provider the saved
+				// record no longer carries.
+				{ savedProfileName, savedProfileSettings: savedSettings },
 			)
 			if (values.modeApiConfigs) {
 				await Promise.all(

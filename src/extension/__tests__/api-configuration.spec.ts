@@ -120,7 +120,7 @@ describe("API - configuration", () => {
 			}),
 			// The payload saves this profile: siblings pinned to it are refreshed
 			// from the payload instead of pinned to a pre-save snapshot.
-			{ savedProfileName: "default" },
+			{ savedProfileName: "default", savedProfileSettings: {} },
 		)
 		expect(setModeConfig).toHaveBeenCalledTimes(2)
 		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
@@ -730,7 +730,103 @@ describe("API - configuration", () => {
 		})
 		expect(logged()).toContain("after a failed read-back: another view wrote it (keys: openRouterModelId)")
 	})
+	it("restores the prior record only while it still carries the id this call wrote", async () => {
+		const store = makeProfileStoreDouble({
+			pinned: {
+				id: "prior-id",
+				settings: storedProfileSettingsFor({
+					currentApiConfigName: "pinned",
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "before",
+				}),
+			},
+		})
+		const { saveConfig, deleteConfig, hasConfig } = store
+		// An import replaced the profile in place while this call held the name: the settings now match
+		// what this call wrote, but the id is not the one this call holds. saveConfig keeps an existing
+		// id when it overwrites, so a different id can only come from a writer that replaced the
+		// record, and restoring our settings over it would leave the imported profile holding
+		// pre-import settings.
+		const prior = storedProfileSettingsFor({
+			currentApiConfigName: "pinned",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "before",
+		})
+		const replacement = storedProfileSettingsFor({
+			currentApiConfigName: "pinned",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+		})
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 1) {
+				// The prior record this call snapshots before it writes.
+				return Promise.resolve({ name, id: "prior-id", ...prior })
+			}
+			if (reads === 2) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			return Promise.resolve({ name, id: "imported-id", ...replacement })
+		})
+		const { api, logged, setValues } = makeReadbackHarness({
+			saveConfig,
+			deleteConfig,
+			hasConfig,
+			getProfile,
+		})
 
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		// One save: the initial write. Restoring the prior record would have been the second save, and
+		// a delete would have thrown the imported profile away.
+		expect(saveConfig.mock.calls.length).toBe(1)
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(setValues.mock.calls).toEqual([])
+		expect(logged()).toContain("not this call 'prior-id'")
+	})
+
+	it("reports the landed record, not the payload, for the sibling profile refresh", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, getProfile, deleteConfig, hasConfig } = store
+		const { api, setValues } = makeReadbackHarness({
+			saveConfig,
+			getProfile,
+			deleteConfig,
+			hasConfig,
+		})
+		// The record stores only the keys the profile schema knows, while a settings round trip also
+		// carries the profile pin and host-owned keys. Sibling overlays are rebuilt from the settings
+		// the caller reports, so those must be the record that landed: a provider the schema rewrote
+		// on the way in would otherwise stay selected in an idle sibling that cannot create a task
+		// with it. The recorded arguments come from a double-shaped mock, so reading them needs a
+		// cast.
+		type ProfileWriteOptions = {
+			savedProfileName?: string
+			savedProfileSettings?: Record<string, unknown>
+		}
+		const optionsOf = (call: unknown[]): ProfileWriteOptions | undefined =>
+			call[1] as ProfileWriteOptions | undefined
+		await api.setConfiguration({
+			currentApiConfigName: "pinned",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+			openRouterModelId: "gpt-4o",
+			modeApiConfigs: { act: "other-profile" },
+		})
+		const call = setValues.mock.calls.find((args: unknown[]) => optionsOf(args)?.savedProfileName === "pinned")
+		expect(call).toBeDefined()
+		const reported = optionsOf(call ?? [])?.savedProfileSettings
+		expect(reported).toEqual(store.entries.get("pinned")?.settings)
+		expect(reported).not.toHaveProperty("currentApiConfigName")
+		expect(reported).not.toHaveProperty("modeApiConfigs")
+	})
 	it("keeps the created record when the re-read matches the settings under a different id", async () => {
 		const store = makeProfileStoreDouble()
 		const { saveConfig, deleteConfig, hasConfig } = store
@@ -1744,7 +1840,12 @@ describe("API - configuration", () => {
 
 			// The settings write goes through the provider, which also carries the profile name the
 			// sibling refresh has to agree with.
-			expect(setValues).toHaveBeenCalledWith({ [key]: value }, { savedProfileName: "default" })
+			// The options object also carries the record that landed, which is what sibling overlays are
+			// rebuilt from. These payloads hold no profile keys, so the landed record is empty.
+			expect(setValues).toHaveBeenCalledWith(
+				{ [key]: value },
+				{ savedProfileName: "default", savedProfileSettings: {} },
+			)
 			expect(log).not.toHaveBeenCalled()
 		})
 
@@ -1775,7 +1876,10 @@ describe("API - configuration", () => {
 			// A hand-written value that the typed signature does not allow.
 			await api.setConfiguration({ [key]: value, soundEnabled: true } as unknown as RooCodeSettings)
 
-			expect(setValues).toHaveBeenCalledWith({ soundEnabled: true }, { savedProfileName: "default" })
+			expect(setValues).toHaveBeenCalledWith(
+				{ soundEnabled: true },
+				{ savedProfileName: "default", savedProfileSettings: {} },
+			)
 			expect(log).toHaveBeenCalledWith(`[setConfiguration] Ignored an invalid value for ${key}`)
 		})
 	})

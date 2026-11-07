@@ -5521,7 +5521,10 @@ export class ClineProvider
 		return { ...this.contextProxy.getValues(), ...publicOverlay }
 	}
 
-	public async setValues(values: RooCodeSettings, options?: { savedProfileName?: string }) {
+	public async setValues(
+		values: RooCodeSettings,
+		options?: { savedProfileName?: string; savedProfileSettings?: ProviderSettings },
+	) {
 		const sanitizedValues = withoutInvalidDisplaySettings(values, (key) =>
 			this.log(`[setValues] Ignored an invalid value for ${key}`),
 		)
@@ -5589,11 +5592,18 @@ export class ClineProvider
 			// Siblings pinned to the profile this payload saves: the shared store now
 			// carries the saved settings; refresh their overlays so they serve the
 			// fresh copy instead of a pre-save snapshot.
-			const savedSettings = Object.fromEntries(
-				PROVIDER_SETTINGS_KEYS.map((key) => [key, sanitizedValues[key]]).filter(
-					([, value]) => value !== undefined,
-				),
-			) as ProviderSettings
+			// The landed record when the caller reports it: the profile schema can drop keys the
+			// payload carried (a legacy provider is rewritten on the way in), so an overlay built
+			// from the payload could select a provider the saved record no longer holds. The
+			// payload-derived subset stays as the fallback for callers that save through this
+			// method without reporting the stored record.
+			const savedSettings =
+				options.savedProfileSettings ??
+				(Object.fromEntries(
+					PROVIDER_SETTINGS_KEYS.map((key) => [key, sanitizedValues[key]]).filter(
+						([, value]) => value !== undefined,
+					),
+				) as ProviderSettings)
 			await this.refreshViewLocalStateForUpdatedProfile(options.savedProfileName, savedSettings)
 		}
 	}
