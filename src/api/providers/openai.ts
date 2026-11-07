@@ -354,7 +354,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
@@ -372,10 +372,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let response
 			try {
-				response = await this.client.chat.completions.create(
-					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				response = await this.client.chat.completions.create(requestOptions, {
+					...(isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
+					...(options?.abortSignal ? { signal: options.abortSignal } : {}),
+				})
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}

@@ -179,9 +179,21 @@
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.generateGitCommitMessage",
+				"title": "%command.generateGitCommitMessage.title%",
+				"icon": "$(wand)"
 			}
 		],
 		"menus": {
+			"scm/inputBox": [
+				{
+					"command": "zoo-code.generateGitCommitMessage",
+					"group": "inline",
+					"when": "scmRepository && scmProvider == git"
+				}
+			],
 			"editor/context": [
 				{
 					"submenu": "zoo-code.contextMenu",
