@@ -69,6 +69,22 @@ export function resolveRecordedModelId(recorded: unknown, served: string | undef
 }
 
 /**
+ * Binds the placeholder message of a request to its serving handler (see `bindRequestToHandler`), found by identity:
+ * the messages can be rewound, deleted or edited while the request is being prepared, which moves the placeholder or
+ * removes it, so an index taken earlier may point at another message or at none. Resolves to `false`, and changes
+ * nothing, when the placeholder is no longer among the messages.
+ */
+export function bindRequestMessage(
+	messages: ClineMessage[],
+	placeholder: ClineMessage | undefined,
+	handler: Parameters<typeof bindRequestToHandler>[1],
+): boolean {
+	if (!placeholder || !messages.includes(placeholder)) return false
+	placeholder.text = bindRequestToHandler(placeholder.text, handler)
+	return true
+}
+
+/**
  * Binds a request's placeholder `api_req_started` to the handler that serves it. The placeholder is written before
  * the rate-limit wait and the environment details, and a profile switch in that window replaces the handler, so the
  * provider and model written then can differ from the handler whose tokens and cost are recorded at the end. Called

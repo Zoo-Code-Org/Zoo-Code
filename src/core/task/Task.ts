@@ -125,7 +125,7 @@ import {
 	taskMetadata,
 } from "../task-persistence"
 import { createTaskSaveQueues, enqueueTaskSave } from "./taskSaveQueue"
-import { bindRequestToHandler, resolveRecordedModelId } from "../task-persistence/usageByModel"
+import { bindRequestMessage, resolveRecordedModelId } from "../task-persistence/usageByModel"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
 import {
@@ -4143,6 +4143,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// potential details for example), we need to update the text of that
 			// message.
 			const lastApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
+			// The placeholder itself: the messages can be rewound or deleted during the waits below, which moves it or
+			// removes it, so the handler is bound to this message and not to an index taken now.
+			const requestMessage = this.clineMessages[lastApiReqIndex]
 
 			this.clineMessages[lastApiReqIndex].text = JSON.stringify({
 				apiProtocol,
@@ -4287,15 +4290,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					servingProvider && !isRetiredProvider(servingProvider) ? servingProvider : undefined,
 					resolveRecordedModelId(getModelId(this.apiConfiguration), served.modelId),
 				)
-				this.clineMessages[lastApiReqIndex].text = bindRequestToHandler(
-					this.clineMessages[lastApiReqIndex].text,
-					{
-						apiProvider: servingProvider,
-						configuredModelId: getModelId(this.apiConfiguration),
-						servedModelId: served.modelId,
-						apiProtocol,
-					},
-				)
+				const bound = bindRequestMessage(this.clineMessages, requestMessage, {
+					apiProvider: servingProvider,
+					configuredModelId: getModelId(this.apiConfiguration),
+					servedModelId: served.modelId,
+					apiProtocol,
+				})
+				if (!bound) {
+					// The conversation was rewound or edited while this request was being prepared: the message that stands
+					// for it is gone, and so is the turn it belonged to. Nothing has been sent yet, so it is stopped here, as
+					// an abort is, and no other message is changed in its place.
+					throw new Error(
+						`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} request was removed from the conversation`,
+					)
+				}
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate

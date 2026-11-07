@@ -1,5 +1,6 @@
 // npx vitest src/core/config/__tests__/ProviderSettingsManager.spec.ts
 
+import { loadProfilesWithActive } from "../../../services/language-models/providerQuotas"
 import {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	OpenAiCodexServiceTier,
@@ -667,6 +668,70 @@ describe("ProviderSettingsManager", () => {
 			)
 
 			expect(mockSecrets.get).not.toHaveBeenCalled()
+		})
+
+		it("reads nothing for a provider-limits load whose deadline expired while it waited behind another read, and frees the lock for the next", async () => {
+			vi.useFakeTimers()
+			try {
+				mockSecrets.get.mockClear()
+				let finishFirst: (value: string) => void = () => {}
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+					.mockResolvedValue(JSON.stringify(stored))
+				const load = vi.spyOn(providerSettingsManager as unknown as { load(): Promise<unknown> }, "load")
+
+				const first = providerSettingsManager.listConfig() // holds the lock: its read has started and hangs
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				const loading = loadProfilesWithActive(providerSettingsManager) // queued behind it, with the real manager
+				const failed = expect(loading).rejects.toThrow("Reading the saved profiles timed out")
+				const after = providerSettingsManager.listConfig() // queued behind both, and not abandoned
+
+				await vi.advanceTimersByTimeAsync(10_000) // the deadline of the load
+				await failed
+				finishFirst(JSON.stringify(stored))
+				await first
+				await expect(after).resolves.toHaveLength(2)
+
+				// The first call and the one that was not abandoned loaded the profiles: the queued load never did.
+				expect(load).toHaveBeenCalledTimes(2)
+				expect(mockSecrets.get).toHaveBeenCalledTimes(2)
+				load.mockRestore()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("also reads nothing for the per-profile reads of a source that has no bulk read, once their deadline expired", async () => {
+			vi.useFakeTimers()
+			try {
+				mockSecrets.get.mockClear()
+				let finishFirst: (value: string) => void = () => {}
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+					.mockResolvedValue(JSON.stringify(stored))
+				const load = vi.spyOn(providerSettingsManager as unknown as { load(): Promise<unknown> }, "load")
+				const perProfile = {
+					listConfig: (options?: { signal?: AbortSignal }) => providerSettingsManager.listConfig(options),
+					getProfile: (params: { id: string }, options?: { signal?: AbortSignal }) =>
+						providerSettingsManager.getProfile(params, options),
+				}
+
+				const first = providerSettingsManager.listConfig()
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				const loading = loadProfilesWithActive(perProfile)
+				const failed = expect(loading).rejects.toThrow("Reading the saved profiles timed out")
+
+				await vi.advanceTimersByTimeAsync(10_000)
+				await failed
+				finishFirst(JSON.stringify(stored))
+				await first
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(load).toHaveBeenCalledTimes(1) // the queued list never read anything
+				load.mockRestore()
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("reads as before when the signal is not aborted", async () => {

@@ -44,6 +44,7 @@ import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 import { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
+import { checkpointRestoreFailureMessage } from "../checkpoints/ConversationRewindError"
 import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -1932,11 +1933,7 @@ export const webviewMessageHandler = async (
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch (error) {
 					console.error("[checkpointRestore] checkpointRestore failed:", error)
-					void vscode.window.showErrorMessage(
-						t("common:errors.checkpoint_restore_failed", {
-							error: error instanceof Error ? error.message : String(error),
-						}),
-					)
+					void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))
 				}
 			}
 
@@ -1986,11 +1983,7 @@ export const webviewMessageHandler = async (
 					})
 				} catch (error) {
 					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
-					void vscode.window.showErrorMessage(
-						t("common:errors.checkpoint_restore_failed", {
-							error: error instanceof Error ? error.message : String(error),
-						}),
-					)
+					void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))
 				}
 			}
 

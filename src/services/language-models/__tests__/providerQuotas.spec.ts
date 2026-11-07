@@ -1454,7 +1454,7 @@ describe("loadProfiles", () => {
 			{ apiProvider: "x", openRouterApiKey: "key-a" },
 			{ apiProvider: "x", openRouterApiKey: "key-b" },
 		])
-		expect(source.getProfile).toHaveBeenCalledWith({ id: "a" }, { signal: undefined })
+		expect(source.getProfile).toHaveBeenCalledWith({ id: "a" }, { signal: expect.any(AbortSignal) })
 	})
 
 	it("hands the request's abort signal to the source, for the list and for every profile", async () => {
@@ -1469,9 +1469,10 @@ describe("loadProfiles", () => {
 
 		await loadProfilesWithActive(source, controller.signal)
 
-		expect(source.listConfig).toHaveBeenCalledExactlyOnceWith({ signal: controller.signal })
+		// Each read gets a signal of its own, which the request's abort reaches (see the deadline tests below).
+		expect(source.listConfig).toHaveBeenCalledExactlyOnceWith({ signal: expect.any(AbortSignal) })
 		expect(source.getProfile).toHaveBeenCalledTimes(2)
-		for (const call of source.getProfile.mock.calls) expect(call[1]).toEqual({ signal: controller.signal })
+		for (const call of source.getProfile.mock.calls) expect(call[1]).toEqual({ signal: expect.any(AbortSignal) })
 	})
 
 	it("skips a profile that fails to load instead of failing the whole refresh", async () => {
@@ -1662,7 +1663,7 @@ describe("loadProfiles", () => {
 
 			const result = await loadProfilesWithActive(source, controller.signal, "personal")
 
-			expect(source.getAllProfiles).toHaveBeenCalledExactlyOnceWith({ signal: controller.signal })
+			expect(source.getAllProfiles).toHaveBeenCalledExactlyOnceWith({ signal: expect.any(AbortSignal) })
 			expect(source.listConfig).not.toHaveBeenCalled()
 			expect(source.getProfile).not.toHaveBeenCalled()
 			expect(result.profiles.map((profile) => profile.apiProvider)).toEqual(["y", "x", "z"]) // the active first
@@ -1716,6 +1717,64 @@ describe("loadProfiles", () => {
 				name: "AbortError",
 			})
 			expect(cancelled.getAllProfiles).not.toHaveBeenCalled()
+		})
+
+		describe("the signal that each read is given", () => {
+			const signalOf = (read: { mock: { calls: unknown[][] } }) =>
+				(read.mock.calls[0][0] as { signal: AbortSignal }).signal
+
+			it("is aborted when the deadline is up, so a read that is still queued reads nothing", async () => {
+				const source = bulk([])
+				source.getAllProfiles.mockImplementation(() => new Promise<never>(() => {}))
+
+				const loading = loadProfilesWithActive(source)
+				const failed = expect(loading).rejects.toThrow("Reading the saved profiles timed out")
+				await vi.advanceTimersByTimeAsync(0)
+				expect(signalOf(source.getAllProfiles).aborted).toBe(false) // while it waits
+				await vi.advanceTimersByTimeAsync(10_000)
+
+				await failed
+				expect(signalOf(source.getAllProfiles).aborted).toBe(true)
+			})
+
+			it("is aborted when the request is cancelled", async () => {
+				const controller = new AbortController()
+				const source = bulk([])
+				source.getAllProfiles.mockImplementation(() => new Promise<never>(() => {}))
+
+				const loading = loadProfilesWithActive(source, controller.signal)
+				const rejected = expect(loading).rejects.toMatchObject({ name: "AbortError" })
+				await vi.advanceTimersByTimeAsync(0)
+				controller.abort()
+
+				await rejected
+				expect(signalOf(source.getAllProfiles).aborted).toBe(true)
+			})
+
+			it("is not aborted by a read that finishes in time", async () => {
+				const source = bulk([{ id: "a", name: "work", apiProvider: providerIdentifiers.openrouter }])
+
+				await loadProfilesWithActive(source)
+
+				expect(signalOf(source.getAllProfiles).aborted).toBe(false)
+			})
+
+			it("is aborted for the per-profile reads too, when their deadline is up", async () => {
+				const source = {
+					listConfig: vi.fn(async () => [{ id: "slow" }]),
+					getProfile: vi.fn(() => new Promise<never>(() => {})),
+				}
+
+				const loading = loadProfilesWithActive(source)
+				const failed = expect(loading).rejects.toThrow("None of the saved profiles could be read")
+				await vi.advanceTimersByTimeAsync(10_000)
+
+				await failed
+				expect(
+					(source.getProfile.mock.calls[0] as unknown as [unknown, { signal: AbortSignal }])[1].signal
+						.aborted,
+				).toBe(true)
+			})
 		})
 
 		it("returns an empty list when there are no saved profiles", async () => {

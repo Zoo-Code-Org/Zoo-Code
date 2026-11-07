@@ -680,32 +680,43 @@ const PROFILE_READ_TIMEOUT_MS = 10_000
  * released whichever way it ends, so a request that is abandoned leaves nothing behind while the work (which cannot be
  * cancelled) is still pending.
  */
-function withDeadline<T>(start: () => PromiseLike<T>, ms: number, message: string, signal?: AbortSignal): Promise<T> {
+function withDeadline<T>(
+	start: (signal: AbortSignal) => PromiseLike<T>,
+	ms: number,
+	message: string,
+	signal?: AbortSignal,
+): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"))
 
+		// The read is given a signal of its own: it is aborted when the deadline is up as well as when the request is,
+		// so a read that is still queued behind another one (it has not started) reads nothing when its turn comes.
+		// One that has started cannot be stopped, and runs to its end.
+		const work = new AbortController()
 		const done = () => {
 			clearTimeout(timer)
 			signal?.removeEventListener("abort", onAbort)
 		}
 		const onAbort = () => {
 			done()
+			work.abort()
 			reject(new DOMException("Aborted", "AbortError"))
 		}
 		const timer = setTimeout(() => {
 			done()
+			work.abort()
 			reject(new Error(message))
 		}, ms)
 		signal?.addEventListener("abort", onAbort, { once: true })
 
-		let work: PromiseLike<T>
+		let running: PromiseLike<T>
 		try {
-			work = start()
+			running = start(work.signal)
 		} catch (error) {
 			done()
 			return reject(error)
 		}
-		work.then(
+		running.then(
 			(value) => {
 				done()
 				resolve(value)
@@ -721,7 +732,7 @@ function withDeadline<T>(start: () => PromiseLike<T>, ms: number, message: strin
 /** Reads one profile; one that fails, takes too long, or is abandoned (`signal` aborts) reads as missing. */
 function readProfile(source: ProfileSource, id: string, signal?: AbortSignal): Promise<ProviderSettings | undefined> {
 	return withDeadline(
-		() => source.getProfile({ id }, { signal }),
+		(readSignal) => source.getProfile({ id }, { signal: readSignal }),
 		PROFILE_READ_TIMEOUT_MS,
 		"Reading a profile timed out",
 		signal,
@@ -774,7 +785,7 @@ async function readAllProfiles(
 ): Promise<ProfileRow[]> {
 	const all = await until(
 		withDeadline(
-			() => readAll({ signal }),
+			(readSignal) => readAll({ signal: readSignal }),
 			PROFILE_READ_TIMEOUT_MS,
 			"Reading the saved profiles timed out",
 			signal,
@@ -789,7 +800,7 @@ async function readAllProfiles(
 async function readEachProfile(source: ProfileSource, signal?: AbortSignal): Promise<ProfileRow[]> {
 	const listed = await until(
 		withDeadline(
-			() => source.listConfig({ signal }),
+			(readSignal) => source.listConfig({ signal: readSignal }),
 			PROFILE_READ_TIMEOUT_MS,
 			"Reading the saved profiles timed out",
 			signal,

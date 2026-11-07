@@ -283,6 +283,27 @@ describe("Checkpoint functionality", () => {
 			},
 		)
 
+		it("when only the closing message fails after the rewind was saved: reports it as a rewind error, keeps the rewound conversation, and starts the task again once", async () => {
+			const failure = new Error("could not say")
+			mockTask.say.mockRejectedValueOnce(failure)
+
+			const restoring = checkpointRestore(mockTask, {
+				ts: 2,
+				commitHash: RESTORE_HASH,
+				mode: "restore",
+				operation: "delete",
+			})
+
+			await expect(restoring).rejects.toBeInstanceOf(ConversationRewindError)
+			await expect(restoring).rejects.toMatchObject({ message: "could not say", cause: failure })
+			// The conversation was rewound and saved before the message failed: both writes were made and are kept.
+			expect(mockTask.overwriteClineMessages).toHaveBeenCalledWith([{ ts: 1, say: "user", text: "Message 1" }])
+			expect(mockTask.overwriteApiConversationHistory).toHaveBeenCalledWith([
+				{ ts: 1, role: "user", content: [{ type: "text", text: "Message 1" }] },
+			])
+			expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+		})
+
 		it.each([
 			["an Error", new Error("disk full"), "disk full"],
 			["a plain value", "disk full", "disk full"],

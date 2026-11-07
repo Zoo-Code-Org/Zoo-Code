@@ -1,5 +1,5 @@
 import { Task } from "../task/Task"
-import { ConversationRewindError } from "../checkpoints/ConversationRewindError"
+import { checkpointRestoreFailureMessage, ConversationRewindError } from "../checkpoints/ConversationRewindError"
 import { ClineProvider } from "./ClineProvider"
 import { saveTaskMessages } from "../task-persistence"
 import * as vscode from "vscode"
@@ -93,11 +93,7 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
 		}
 		console.error(`Error in checkpoint restore (${operation}):`, error)
-		void vscode.window.showErrorMessage(
-			t("common:errors.checkpoint_restore_failed", {
-				error: error instanceof Error ? error.message : String(error),
-			}),
-		)
+		void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))
 		if (operation === "delete" && !checkpointRestored && !taskRestarted && currentCline.abort) {
 			try {
 				const restart = t("common:checkpoints.restart")

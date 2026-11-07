@@ -362,8 +362,9 @@ describe("checkpointRestoreHandler", () => {
 
 			expect(fixture.store.get(`task-${fixture.task.taskId}`)?.editedContent).toBe("Edited prompt")
 			expect(fixture.providerDouble.clearPendingEditOperation).not.toHaveBeenCalled()
+			// The user is told that the files did change, and what to do: not a plain restore failure.
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
-				"common:errors.checkpoint_restore_failed: Failed to save the messages",
+				"common:errors.checkpoint_rewind_failed: Failed to save the messages",
 			)
 		})
 
@@ -376,7 +377,27 @@ describe("checkpointRestoreHandler", () => {
 
 			expect(showWarningMessage).not.toHaveBeenCalled()
 			expect(fixture.providerDouble.restartTaskIfCurrent).not.toHaveBeenCalled()
-			expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+				"common:errors.checkpoint_rewind_failed: Failed to save the messages",
+			)
+		})
+
+		it("for a deleted task that was aborted, tells the user the files changed, and neither saves nor rehydrates it again", async () => {
+			fixture.taskDouble.abort = true // the task was aborted before the restore, as a delete does
+			fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(rewindFailure())
+
+			await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toMatchObject({
+				name: "ConversationRewindError",
+				message: "Failed to save the messages",
+			})
+
+			// `checkpointRestore` started the task again itself (tested there): the handler only reports.
+			expect(saveTaskMessages).not.toHaveBeenCalled()
+			expect(fixture.providerDouble.createTaskWithHistoryItem).not.toHaveBeenCalled()
+			expect(showWarningMessage).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+				"common:errors.checkpoint_rewind_failed: Failed to save the messages",
+			)
 		})
 	})
 

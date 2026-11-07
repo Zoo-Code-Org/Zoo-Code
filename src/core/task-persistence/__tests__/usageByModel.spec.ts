@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import { providerIdentifiers, type ClineMessage } from "@roo-code/types"
 
-import { bindRequestToHandler, resolveRecordedModelId, summarizeUsageByModel } from "../usageByModel"
+import {
+	bindRequestMessage,
+	bindRequestToHandler,
+	resolveRecordedModelId,
+	summarizeUsageByModel,
+} from "../usageByModel"
 
 const req = (data: Record<string, unknown>, ts = 1): ClineMessage => ({
 	ts,
@@ -280,5 +285,35 @@ describe("bindRequestToHandler", () => {
 			}),
 		)
 		expect(bound).toEqual({ apiProvider: "p", modelId: "m" })
+	})
+})
+
+describe("bindRequestMessage", () => {
+	const handler = { apiProvider: "new-provider", configuredModelId: "new-model", servedModelId: undefined }
+	const message = (text: string, ts: number): ClineMessage => ({ ts, type: "say", say: "api_req_started", text })
+
+	it("binds the placeholder where it is now, though the messages before it were removed meanwhile", () => {
+		const placeholder = message(JSON.stringify({ apiProvider: "old" }), 3)
+		const messages = [message("a", 1), message("b", 2), placeholder]
+		messages.splice(0, 2) // a rewind moved it to index 0
+
+		expect(bindRequestMessage(messages, placeholder, handler)).toBe(true)
+
+		expect(JSON.parse(placeholder.text!)).toMatchObject({ apiProvider: "new-provider", modelId: "new-model" })
+	})
+
+	it("changes nothing, and says so, when the placeholder was removed, and does not touch the message at its old index", () => {
+		const placeholder = message(JSON.stringify({ apiProvider: "old" }), 3)
+		const other = message(JSON.stringify({ apiProvider: "other" }), 4)
+		const messages = [message("a", 1), message("b", 2), other] // the placeholder was deleted, `other` took its place
+
+		expect(bindRequestMessage(messages, placeholder, handler)).toBe(false)
+
+		expect(other.text).toBe(JSON.stringify({ apiProvider: "other" }))
+		expect(placeholder.text).toBe(JSON.stringify({ apiProvider: "old" }))
+	})
+
+	it("says it was not bound when there is no placeholder at all", () => {
+		expect(bindRequestMessage([message("a", 1)], undefined, handler)).toBe(false)
 	})
 })
