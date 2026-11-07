@@ -1,0 +1,56 @@
+name: "Classify changed files"
+
+description: "Classifies a pull request change range as documentation-only or full validation. The classification fails safe: every uncertain input selects full validation."
+
+inputs:
+    event-name:
+        description: "GitHub event name that drives skip eligibility"
+        required: true
+    head-sha:
+        description: "Head commit SHA of the classification range"
+        required: true
+    force-full-label:
+        description: "When true, force full validation because the ci:full-validation label is present"
+        required: false
+        default: "false"
+    force-full-variable:
+        description: "When true, force full validation because the ZOO_CODE_REQUIRE_FULL_VALIDATION repository variable is true"
+        required: false
+        default: "false"
+
+outputs:
+    category:
+        description: "docs-only or full"
+        value: ${{ steps.classify.outputs.category }}
+    reason:
+        description: "Human-readable classification reason"
+        value: ${{ steps.classify.outputs.reason }}
+    reason-code:
+        description: "Stable classification reason code"
+        value: ${{ steps.classify.outputs.reason-code }}
+    changed-files:
+        description: "Number of changed files in the classification range"
+        value: ${{ steps.classify.outputs.changed-files }}
+    allowlist-fingerprint:
+        description: "Fingerprint of the active documentation-only allowlist"
+        value: ${{ steps.classify.outputs.allowlist-fingerprint }}
+
+runs:
+    using: "composite"
+    steps:
+        - id: classify
+          shell: bash
+          run: |
+              HEAD_SHA="${{ inputs.head-sha }}"
+              FLAGS=()
+              if [[ "${{ inputs.force-full-label }}" == "true" ]]; then
+                  FLAGS+=("--force-full-label")
+              fi
+              if [[ "${{ inputs.force-full-variable }}" == "true" ]]; then
+                  FLAGS+=("--force-full-variable")
+              fi
+              # The pull_request checkout is the synthetic merge commit, so its
+              # first parent is the base branch tip that was actually merged
+              # into. A failed resolution fails the step and fails safe.
+              BASE_SHA="$(git rev-parse "${HEAD_SHA}^1")"
+              node scripts/change-classification.mjs ci --event "${{ inputs.event-name }}" --head "$HEAD_SHA" --base "$BASE_SHA" "${FLAGS[@]}"

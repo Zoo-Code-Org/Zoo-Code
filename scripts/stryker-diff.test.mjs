@@ -82,8 +82,14 @@ describe("mutation testing workflow", () => {
 		const workflow = readWorkflow()
 
 		assert.ok(workflow.includes("types: [edited, opened, reopened, ready_for_review, synchronize]"))
+		// The job condition keeps the draft and merge-group semantics asserted
+		// below and adds the fail-safe change-classification gate from issue
+		// #2291: only a successful documentation-only pull-request
+		// classification may skip the job.
 		assert.ok(
-			workflow.includes("if: github.event_name == 'merge_group' || github.event.pull_request.draft == false"),
+			workflow.includes(
+				"if: ${{ !cancelled() && (github.event_name == 'merge_group' || github.event.pull_request.draft == false) && (needs.classify.result != 'success' || github.event_name != 'pull_request' || needs.classify.outputs.category != 'docs-only') }}",
+			),
 		)
 
 		const draftToReadyRuns = [
