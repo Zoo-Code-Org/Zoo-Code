@@ -353,6 +353,28 @@ export class CustomModesManager {
 		}
 	}
 
+	/**
+	 * Every definition of a mode, per source file, without the project-over-global hiding that
+	 * `getCustomModes` applies. A rollback has to restore both: a batch that overwrites a global
+	 * definition through a slug that also exists as a project mode would otherwise leave the global
+	 * copy permanently replaced by the batch's version.
+	 */
+	public async getCustomModeDefinitions(slugs: readonly string[]): Promise<ModeConfig[]> {
+		const wanted = new Set(slugs)
+		const settingsPath = await this.getCustomModesFilePath()
+		const settingsModes = await this.loadModesFromFile(settingsPath)
+		const roomodesPath = await this.getWorkspaceRoomodes()
+		const roomodesModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
+
+		return [
+			...roomodesModes
+				.filter((mode) => wanted.has(mode.slug))
+				.map((mode) => ({ ...mode, source: "project" as const })),
+			...settingsModes
+				.filter((mode) => wanted.has(mode.slug))
+				.map((mode) => ({ ...mode, source: "global" as const })),
+		]
+	}
 	public async getCustomModes(): Promise<ModeConfig[]> {
 		// Check if we have a valid cached result.
 		const now = Date.now()
@@ -551,6 +573,44 @@ export class CustomModesManager {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			vscode.window.showErrorMessage(t("common:customModes.errors.deleteFailed", { error: errorMessage }))
 		}
+	}
+
+	/**
+	 * Removes a mode's entry from the mode files and refreshes the merged state, without
+	 * touching its rules folder. Rollback paths need this variant: `deleteCustomMode` also
+	 * deletes `.roo/rules-<slug>` (or `~/.roo/rules-<slug>`), and a rollback cannot know
+	 * whether that folder predates the batch whose registration it is undoing - deleting it
+	 * would discard rules the user wrote earlier.
+	 *
+	 * Returns whether an entry was actually removed so a caller can report a miss instead of
+	 * assuming cleanup happened. Errors propagate; rollback callers decide how loud to be.
+	 */
+	public async removeCustomModeEntry(slug: string): Promise<boolean> {
+		const settingsPath = await this.getCustomModesFilePath()
+		const roomodesPath = await this.getWorkspaceRoomodes()
+		const projectModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
+		const settingsModes = await this.loadModesFromFile(settingsPath)
+		const inProjectFile = projectModes.some((mode) => mode.slug === slug)
+		const inSettingsFile = settingsModes.some((mode) => mode.slug === slug)
+
+		if (!inProjectFile && !inSettingsFile) {
+			return false
+		}
+
+		await this.queueWrite(async () => {
+			if (roomodesPath && inProjectFile) {
+				await this.updateModesInFile(roomodesPath, (modes) => modes.filter((m) => m.slug !== slug))
+			}
+
+			if (inSettingsFile) {
+				await this.updateModesInFile(settingsPath, (modes) => modes.filter((m) => m.slug !== slug))
+			}
+
+			this.clearCache()
+			await this.refreshMergedState()
+		})
+
+		return true
 	}
 
 	/**
