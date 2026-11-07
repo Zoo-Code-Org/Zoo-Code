@@ -40,6 +40,7 @@ import McpResourceRow from "../mcp/McpResourceRow"
 import { Mention } from "./Mention"
 import { isShowableTimestamp, MessageTimestamp } from "./MessageTimestamp"
 import { CheckpointSaved } from "./checkpoints/CheckpointSaved"
+import { ChangeCard } from "./ChangeCard"
 import { FollowUpSuggest } from "./FollowUpSuggest"
 import { BatchFilePermission } from "./BatchFilePermission"
 import { BatchDiffApproval } from "./BatchDiffApproval"
@@ -1420,6 +1421,8 @@ export const ChatRowContent = ({
 							onJumpToPreviousCheckpoint={onJumpToPreviousCheckpoint}
 						/>
 					)
+				case "change_card":
+					return <ChangeCard message={message} />
 				case "condense_context":
 					// In-progress state
 					if (message.partial) {
