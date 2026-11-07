@@ -66,7 +66,7 @@ type FriendliChatCompletionNonStreamingParams = Omit<
  * reasoning parameters that the base class doesn't know about.
  */
 export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelId> {
-	private models: ModelRecord = {}
+	private models: ModelRecord = Object.create(null)
 	private modelsLoad?: Promise<void>
 
 	constructor(options: ApiHandlerOptions) {
@@ -103,7 +103,12 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 
 	override getModel() {
 		const id = (this.options.apiModelId || this.defaultProviderModelId) as FriendliModelId
-		const info = this.models[id] ?? this.providerModels[id] ?? openAiModelInfoSaneDefaults
+		// Own-property reads: the cached catalog may come back as a plain object, so an ID
+		// such as "toString" must not resolve to an inherited member.
+		const info =
+			(Object.hasOwn(this.models, id) ? this.models[id] : undefined) ??
+			(Object.hasOwn(this.providerModels, id) ? this.providerModels[id] : undefined) ??
+			openAiModelInfoSaneDefaults
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,
@@ -125,10 +130,24 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	 *   model's Jinja template from defaulting thinking ON.
 	 * - Non-reasoning models (DeepSeek-V3.2, MiniMax-M2.5): no extra params
 	 *   (reasoning_effort silently ignored).
+	 * - Toggle-only models (`supportsReasoningBinary`, e.g. GLM-5.1, Gemma): send
+	 *   `enable_thinking` from the on/off setting and never a reasoning_effort.
 	 */
 	private buildFriendliReasoningParams(): Partial<FriendliReasoningParams> {
 		const { info: modelInfo, reasoningEffort } = this.getModel()
 		const extra: Partial<FriendliReasoningParams> = {}
+
+		if (modelInfo.supportsReasoningBinary && !modelInfo.supportsReasoningEffort) {
+			if (!this.options.enableReasoningEffort) {
+				// The chat template defaults thinking on, so "off" must be explicit.
+				extra.chat_template_kwargs = { enable_thinking: false }
+				return extra
+			}
+			extra.parse_reasoning = true
+			extra.include_reasoning = true
+			extra.chat_template_kwargs = { enable_thinking: true }
+			return extra
+		}
 
 		const isControllableReasoning = Array.isArray(modelInfo.supportsReasoningEffort)
 

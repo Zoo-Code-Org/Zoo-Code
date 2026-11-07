@@ -637,4 +637,81 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 		expect(callArgs.parse_reasoning).toBe(true)
 		expect(callArgs.include_reasoning).toBe(true)
 	})
+
+	describe("toggle-only models (supportsReasoningBinary)", () => {
+		const toggleOnly = { contextWindow: 202_752, supportsPromptCache: false, supportsReasoningBinary: true }
+
+		const requestFor = async (settings: { enableReasoningEffort?: boolean; reasoningEffort?: "high" }) => {
+			mockGetModels.mockResolvedValueOnce({ "zai-org/GLM-5.1": toggleOnly })
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+			const handler = new FriendliHandler({ apiModelId: "zai-org/GLM-5.1", ...settings })
+			await handler.createMessage("system", []).next()
+			return mockCreate.mock.calls[0][0] as Record<string, unknown>
+		}
+
+		it("sends enable_thinking: true with reasoning parsing when enabled, without an effort", async () => {
+			// A stale effort from a previous model must not leak into a toggle-only request.
+			const callArgs = await requestFor({ enableReasoningEffort: true, reasoningEffort: "high" })
+
+			expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+			expect(callArgs.parse_reasoning).toBe(true)
+			expect(callArgs.include_reasoning).toBe(true)
+			expect(callArgs).not.toHaveProperty("reasoning_effort")
+		})
+
+		it.each([{ enableReasoningEffort: false }, {}])(
+			"sends enable_thinking: false when the toggle is off or unset (%o)",
+			async (settings) => {
+				const callArgs = await requestFor(settings)
+
+				expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: false })
+				expect(callArgs).not.toHaveProperty("parse_reasoning")
+				expect(callArgs).not.toHaveProperty("include_reasoning")
+				expect(callArgs).not.toHaveProperty("reasoning_effort")
+			},
+		)
+
+		it("completePrompt sends the same toggle params", async () => {
+			mockGetModels.mockResolvedValueOnce({ "zai-org/GLM-5.1": toggleOnly })
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+			const handler = new FriendliHandler({ apiModelId: "zai-org/GLM-5.1", enableReasoningEffort: true })
+
+			await handler.completePrompt("test")
+
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+			expect(callArgs).not.toHaveProperty("reasoning_effort")
+		})
+	})
+})
+
+describe("FriendliHandler — reserved model IDs", () => {
+	beforeEach(() => {
+		clearAllMocks()
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+	})
+
+	it.each(["toString", "constructor", "__proto__"])(
+		"does not resolve inherited members for %s (catalog as a plain object)",
+		async (id) => {
+			mockGetModels.mockResolvedValueOnce({})
+			const handler = new FriendliHandler({ apiModelId: id })
+
+			await handler.completePrompt("a")
+
+			expect(handler.getModel()).toEqual(expect.objectContaining({ id, info: openAiModelInfoSaneDefaults }))
+		},
+	)
+
+	it("resolves a fetched model whose upstream ID is __proto__", async () => {
+		const info = { contextWindow: 1000, supportsPromptCache: false }
+		const catalog: Record<string, typeof info> = Object.create(null)
+		catalog["__proto__"] = info
+		mockGetModels.mockResolvedValueOnce(catalog)
+		const handler = new FriendliHandler({ apiModelId: "__proto__" })
+
+		await handler.completePrompt("a")
+
+		expect(handler.getModel().info).toBe(info)
+	})
 })

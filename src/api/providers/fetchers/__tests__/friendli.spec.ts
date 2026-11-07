@@ -56,6 +56,51 @@ describe("getFriendliModels", () => {
 		expect(models["google/gemma-4-31B-it"].supportsPromptCache).toBe(false)
 	})
 
+	it("maps toggle-only reasoning to supportsReasoningBinary without inventing an effort", async () => {
+		vi.mocked(axios.get).mockResolvedValueOnce({
+			data: {
+				data: [
+					{
+						id: "zai-org/GLM-5.1",
+						reasoning_options: [{ type: "toggle" }, { type: "budget_tokens", min: -1, max: 202_752 }],
+					},
+					{
+						id: "zai-org/GLM-5.2",
+						reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["high", "max"] }],
+					},
+				],
+			},
+		})
+
+		const models = await getFriendliModels()
+
+		expect(models["zai-org/GLM-5.1"].supportsReasoningBinary).toBe(true)
+		expect(models["zai-org/GLM-5.1"].supportsReasoningEffort).toBeUndefined()
+		expect(models["zai-org/GLM-5.1"].reasoningEffort).toBeUndefined()
+		// A toggle next to effort levels keeps the effort selector.
+		expect(models["zai-org/GLM-5.2"].supportsReasoningBinary).toBeUndefined()
+		expect(models["zai-org/GLM-5.2"].supportsReasoningEffort).toEqual(["high", "max"])
+	})
+
+	it("keeps reserved upstream IDs as own keys", async () => {
+		vi.mocked(axios.get).mockResolvedValueOnce({
+			data: {
+				data: [
+					{ id: "__proto__", context_length: 1000 },
+					{ id: "toString", context_length: 2000 },
+				],
+			},
+		})
+
+		const models = await getFriendliModels()
+
+		expect(Object.getPrototypeOf(models)).toBeNull()
+		expect(Object.keys(models)).toEqual(["__proto__", "toString"])
+		expect(models["__proto__"].contextWindow).toBe(1000)
+		expect(models["toString"].contextWindow).toBe(2000)
+		expect(models["valueOf"]).toBeUndefined()
+	})
+
 	it("rethrows cancellation instead of returning an empty record", async () => {
 		const controller = new AbortController()
 		controller.abort()

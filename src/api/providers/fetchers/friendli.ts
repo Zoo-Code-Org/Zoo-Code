@@ -38,6 +38,8 @@ const parseFriendliModel = (model: FriendliModel): ModelInfo => {
 		?.values?.filter((v): v is ReasoningEffortExtended =>
 			(reasoningEffortsExtended as readonly string[]).includes(v),
 		)
+	// A toggle without effort levels (e.g. GLM-5.1, Gemma) is an on/off switch, not an effort scale.
+	const toggleOnly = !efforts?.length && !!model.reasoning_options?.some((option) => option.type === "toggle")
 
 	return {
 		maxTokens: model.max_completion_tokens,
@@ -52,13 +54,15 @@ const parseFriendliModel = (model: FriendliModel): ModelInfo => {
 			supportsReasoningEffort: efforts,
 			reasoningEffort: efforts.includes("high") ? "high" : efforts[0],
 		}),
+		...(toggleOnly && { supportsReasoningBinary: true }),
 		description: model.description,
 	}
 }
 
 /** Fetches the public (no auth) Friendli model catalog. */
 export async function getFriendliModels(opts?: { signal?: AbortSignal }): Promise<Record<string, ModelInfo>> {
-	const models: Record<string, ModelInfo> = {}
+	// Null prototype: upstream IDs such as "__proto__" or "toString" must stay plain keys.
+	const models: Record<string, ModelInfo> = Object.create(null)
 
 	try {
 		const response = await axios.get("https://api.friendli.ai/serverless/v1/models", { signal: opts?.signal })
