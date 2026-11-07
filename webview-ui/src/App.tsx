@@ -206,9 +206,6 @@ const App = () => {
 		}
 	}, [telemetrySetting, telemetryKey, machineId, vscodeTelemetryEnabled, didHydrateState])
 
-	// Tell the extension that we are ready to receive messages.
-	useEffect(() => vscode.postMessage({ type: "webviewDidLaunch" }), [])
-
 	// Heartbeat so the extension watchdog can detect a crashed webview renderer
 	// process (gray screen) and reload the view.
 	useEffect(() => {
@@ -218,8 +215,10 @@ const App = () => {
 		return () => clearInterval(interval)
 	}, [])
 
+	// Window activation and programmatic focus do not identify a chat interaction.
+	// (webviewDidLaunch is posted by ExtensionStateContext once the view state is
+	// hydrated; re-posting it here would double the launch message.)
 	useEffect(() => {
-		// Window activation and programmatic focus do not identify a chat interaction.
 		const onInteraction = () => vscode.postMessage({ type: "webviewDidFocus" })
 		document.addEventListener("pointerdown", onInteraction, true)
 		document.addEventListener("keydown", onInteraction, true)
@@ -228,7 +227,6 @@ const App = () => {
 			document.removeEventListener("keydown", onInteraction, true)
 		}
 	}, [])
-
 	// Initialize source map support for better error reporting
 	useEffect(() => {
 		// Initialize source maps for better error reporting in production

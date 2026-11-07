@@ -47,6 +47,8 @@ import {
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
 	didHydrateState: boolean
+	viewStateLoaded: boolean
+	setViewStateLoaded: (value: boolean) => void
 	showWelcome: boolean
 	theme: any
 	mcpServers: McpServer[]
@@ -358,6 +360,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	}, [state.currentTaskId, state.clineMessages.length, state.taskHistory.length, state.currentTaskTodos?.length])
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
+	const [viewStateLoaded, setViewStateLoaded] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
 	const [theme, setTheme] = useState<any>(undefined)
 	const [filePaths, setFilePaths] = useState<string[]>([])
@@ -448,6 +451,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
+					setViewStateLoaded(true)
 					recordDiagnosticsHydration(true)
 					// Update alwaysAllowFollowupQuestions if present in state message
 					if ((newState as any).alwaysAllowFollowupQuestions !== undefined) {
@@ -632,7 +636,10 @@ export const ExtensionStateContextProvider: React.FC<{
 	}, [handleMessage])
 
 	useEffect(() => {
-		vscode.postMessage({ type: "webviewDidLaunch" })
+		vscode.postMessage({
+			type: "webviewDidLaunch",
+			viewStateId: typeof vscode.getViewStateId === "function" ? vscode.getViewStateId() : undefined,
+		})
 	}, [])
 
 	// Apply the configurable chat font size as a CSS variable. When unset, the
@@ -656,6 +663,8 @@ export const ExtensionStateContextProvider: React.FC<{
 		showRelativeTimes: state.showRelativeTimes ?? true,
 		reasoningBlockCollapsed: state.reasoningBlockCollapsed ?? true,
 		didHydrateState,
+		viewStateLoaded,
+		setViewStateLoaded,
 		showWelcome,
 		theme,
 		mcpServers,

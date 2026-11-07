@@ -94,7 +94,7 @@ import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
-import { Mode, defaultModeSlug } from "../../shared/modes"
+import { Mode, defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { buildApiHandler, type ApiHandler } from "../../api"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
@@ -593,7 +593,20 @@ export const webviewMessageHandler = async (
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
 			}
 			break
-		case "webviewDidLaunch":
+		case "webviewDidLaunch": {
+			// A failed view-state registration must not abort launch handling: the
+			// initial state, theme and API-configuration sync below still run, and the
+			// provider restores its previous viewStateId on failure (setViewStateId) so
+			// a later launch retries registration and loadViewState instead of
+			// treating the failed id as already handled.
+			try {
+				await provider.setViewStateId(message.viewStateId)
+			} catch (error) {
+				provider.log(
+					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -642,17 +655,45 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					const currentConfigName = getGlobalState("currentApiConfigName")
+					const currentState = await provider.getState()
+					const currentConfigName = currentState.currentApiConfigName
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
-							// Current config name not valid, get first config in list.
+							// The merged name (which may be this view's durable pin) no longer
+							// resolves. When the shared global selection is still valid, re-pin
+							// only this view so the global selection is left untouched; only
+							// repair the global when it is invalid as well.
+							const globalConfigName = getGlobalState("currentApiConfigName")
+							const globalStillValid =
+								!!globalConfigName &&
+								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
-							await updateGlobalState("currentApiConfigName", name)
 
-							if (name) {
-								await provider.activateProviderProfile({ name })
-								return
+							if (globalStillValid && globalConfigName) {
+								// Re-pin this view to the still-valid shared global selection (not the
+								// first listed profile) so the view adopts the shared choice; the
+								// global selection itself is left untouched.
+								// Clear the buffered overlay first: it belongs to the profile that
+								// no longer resolves. If the pin write below then fails, the invalid
+								// selection stays retryable on the next launch; pinning first would
+								// leave a valid pin serving the stale profile's provider, model, and
+								// keys with the repair skipped.
+								await provider.saveViewState("apiConfiguration", undefined)
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The re-pin must reach this webview before the profile-list
+								// continuation below, otherwise it keeps rendering the stale name.
+								await provider.postStateToWebview()
+								// Fall through: refresh listApiConfigMeta and post listApiConfig
+								// to this webview below.
+							} else {
+								// Current config name not valid, get first config in list.
+								await updateGlobalState("currentApiConfigName", name)
+
+								if (name) {
+									await provider.activateProviderProfile({ name })
+									return
+								}
 							}
 						}
 					}
@@ -702,6 +743,7 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		}
 		case "webviewHeartbeat":
 			// Confirm renderer liveness and advance the watchdog recovery health window.
 			provider.updateWebviewHeartbeat()
@@ -887,9 +929,23 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "mode") {
+						// provider.setValue has no mode validation (setValues does): an unknown or
+						// non-string slug would land in the shared store and in this view's durable
+						// pin, where the next task reads it and records it in task history.
+						const customModes = await provider.customModesManager.getCustomModes()
+
+						if (typeof value !== "string" || !getModeBySlug(value, customModes)) {
+							provider.log(`[updateSettings] Ignoring invalid mode "${String(value)}"`)
+							continue
+						}
+
+						newValue = value
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					// Route through provider.setValue so view-local buffer/pin sync stays
+					// consistent with the other mutation paths.
+					await provider.setValue(key as keyof RooCodeSettings, newValue)
 				}
 			} catch (error) {
 				failed = true
@@ -1709,9 +1765,7 @@ export const webviewMessageHandler = async (
 			// containment as a literal and escape only after that later decode.
 			if (fromMarkdown) {
 				const decoded = decodeUntrustedPathToStable(rawPath)
-				// Stryker disable next-line ConditionalExpression,BlockStatement: hostile non-stabilizing encodings are unreachable from the webview (its posts are plain link targets); the bound is defensive
 				if (decoded === null) {
-					// Stryker disable next-line CallExpression: hostile non-stabilizing encodings are pinned by the direct decodeUntrustedPathToStable bound test; the webview never posts such values
 					rejectOutsideWorkspace()
 					break
 				}
@@ -2473,10 +2527,19 @@ export const webviewMessageHandler = async (
 		}
 		case "saveApiConfiguration":
 			if (message.text && message.apiConfiguration) {
+				const profileName = message.text
+				const profileSettings = message.apiConfiguration
 				try {
-					await provider.providerSettingsManager.saveConfig(message.text, message.apiConfiguration)
-					const listApiConfig = await provider.providerSettingsManager.listConfig()
-					await updateGlobalState("listApiConfigMeta", listApiConfig)
+					// The profile rename holds the manager's cross-instance critical section across its
+					// existence check, its save, and its compensation delete. A same-name save that
+					// skipped that section can land between another view's check and its save and then
+					// be removed by that rename's compensation, so this write joins the same section.
+					// The rename callback never calls this writer, so the wrap cannot nest on itself.
+					await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
+						await provider.providerSettingsManager.saveConfig(profileName, profileSettings)
+						const listApiConfig = await provider.providerSettingsManager.listConfig()
+						await updateGlobalState("listApiConfigMeta", listApiConfig)
+					})
 				} catch (error) {
 					provider.log(
 						`Error save api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -2513,14 +2576,98 @@ export const webviewMessageHandler = async (
 						break
 					}
 
-					// Load the old configuration to get its ID.
-					const { id } = await provider.providerSettingsManager.getProfile({ name: oldName })
+					// The webview's name validation treats a case-only difference from the
+					// current profile as the current profile, so a case-only collision reaches
+					// here as a rename onto an existing record. Reject it instead of
+					// overwriting that profile: the rollback below would otherwise delete a
+					// record the rename never owned.
 
-					// Create a new configuration with the new name and old ID.
-					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
+					// The name check, the save, and the compensation run in one critical
+					// section shared with every other view's manager (each view builds its own
+					// `ProviderSettingsManager` over the same secrets): with separate locked
+					// calls, a same-name create from another view fits between the check and
+					// the save, and the rollback then deletes that view's record.
+					await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
+						if (await provider.providerSettingsManager.hasConfig(newName)) {
+							throw new Error(`A profile named '${newName}' already exists`)
+						}
 
-					// Delete the old configuration.
-					await provider.providerSettingsManager.deleteConfig(oldName)
+						// Load the old configuration to get its ID, and keep its full stored
+						// record: a rollback must re-point views to the settings oldName actually
+						// persists, not to the payload the rename attempted.
+						const { name: _previousName, ...previousRecord } =
+							await provider.providerSettingsManager.getProfile({ name: oldName })
+						const { id } = previousRecord
+
+						// Create a new configuration with the new name and old ID.
+						await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
+
+						// saveConfig normalizes the record (legacy downgrades, schema parse): hand
+						// the stored copy to the views and task handlers instead of the raw
+						// webview payload, so unvalidated fields cannot bypass the profile-schema
+						// normalization on the way into view state. When the read-back fails the
+						// rename cannot proceed on a trustworthy record: remove the new record
+						// before reporting so the failed rename cannot leave both names resolving
+						// to the same id.
+						let normalizedRenamed: typeof previousRecord
+						try {
+							const { name: _renamedName, ...renamedRecord } =
+								await provider.providerSettingsManager.getProfile({ name: newName })
+							normalizedRenamed = renamedRecord
+						} catch (error) {
+							try {
+								await provider.providerSettingsManager.deleteConfig(newName)
+							} catch (cleanupError) {
+								provider.log(
+									`Rename rollback failed to remove '${newName}': ${JSON.stringify(cleanupError, Object.getOwnPropertyNames(cleanupError), 2)}`,
+								)
+							}
+							throw error
+						}
+
+						// Re-point live views pinned to the old name before it stops
+						// resolving: the rename keeps the id, so their pins should follow the
+						// record instead of dangling, and their overlays must serve the
+						// renamed settings rather than the pre-rename copy. A failed re-point can
+						// leave views already following newName, so undo this rename's own
+						// durable write before reporting: the reverse re-point returns the views
+						// that moved (the others never left oldName) and the new record goes
+						// away, leaving the pre-rename state intact.
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(oldName, newName, normalizedRenamed)
+						} catch (error) {
+							try {
+								await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+								await provider.providerSettingsManager.deleteConfig(newName)
+							} catch (compensationError) {
+								provider.log(
+									`Rename compensation failed after re-point rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+								)
+							}
+							throw error
+						}
+
+						// Delete the old configuration. A failure here would leave both names
+						// resolving and every live view pinned to the new name: undo the re-point
+						// with the previously stored record - not the attempted payload, which was
+						// never persisted under the old name - and drop the new record so the
+						// pre-rename state survives intact. A failed compensation is logged: both
+						// names can then remain stored, and the log is the only trace of that
+						// inconsistency.
+						try {
+							await provider.providerSettingsManager.deleteConfig(oldName)
+						} catch (error) {
+							try {
+								await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+								await provider.providerSettingsManager.deleteConfig(newName)
+							} catch (compensationError) {
+								provider.log(
+									`Rename compensation failed after delete rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+								)
+							}
+							throw error
+						}
+					})
 
 					// Re-activate to update the global settings related to the
 					// currently activated provider profile.
@@ -2656,10 +2803,14 @@ export const webviewMessageHandler = async (
 					const isNewMode = !existingModes.some((mode) => mode.slug === message.modeConfig?.slug)
 
 					await provider.customModesManager.updateCustomMode(message.modeConfig.slug, message.modeConfig)
-					// Update state after saving the mode
+					// Update state after saving the mode. Both keys go through provider.setValue so
+					// this view's mode pin and local buffer follow the slug this call just wrote, as in
+					// the updateSettings path; a direct ContextProxy write moves the shared store and
+					// leaves a view pinned elsewhere on that earlier slug. The webview refresh stays
+					// after the writes so the fan-out still reports what was stored.
 					const customModes = await provider.customModesManager.getCustomModes()
-					await updateGlobalState("customModes", customModes)
-					await updateGlobalState("mode", message.modeConfig.slug)
+					await provider.setValue("customModes", customModes)
+					await provider.setValue("mode", message.modeConfig.slug)
 					await provider.postStateToWebview()
 
 					// Track telemetry for custom mode creation or update
@@ -2733,8 +2884,10 @@ export const webviewMessageHandler = async (
 					break
 				}
 
-				// Delete the mode
-				await provider.customModesManager.deleteCustomMode(message.slug)
+				// Delete the mode through the provider-profile mutation queue: a queued mode
+				// switch must not read the mode list first and then persist a slug this
+				// deletion removed while it waited.
+				await provider.deleteCustomMode(message.slug)
 
 				// Delete the rules folder if it exists
 				if (rulesFolderExists) {
@@ -2754,8 +2907,21 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Switch back to default mode after deletion
-				await updateGlobalState("mode", defaultModeSlug)
+				// Move onto the default mode only for the view this call applies to: the one whose
+				// effective mode - its durable pin, or the shared selection when it has no pin of
+				// its own - is the slug being deleted. Routing that write through the provider keeps
+				// this view's pin and the shared store on the same slug. A view pinned to a mode this
+				// deletion did not touch keeps its pin: moving it here used to overwrite an unrelated
+				// selection with the default. When the shared selection is the deleted slug but this
+				// view pins something else, only the shared layer moves, so the views that follow it
+				// do not resolve to a slug that no longer exists while this view keeps its own.
+				const pinnedMode = provider.pinnedModeName
+				const sharedMode = getGlobalState("mode")
+				if ((pinnedMode ?? sharedMode) === message.slug) {
+					await provider.setValue("mode", defaultModeSlug)
+				} else if (sharedMode === message.slug) {
+					await updateGlobalState("mode", defaultModeSlug)
+				}
 				await provider.postStateToWebview()
 			}
 			break
@@ -3209,15 +3375,37 @@ export const webviewMessageHandler = async (
 							// rewritten only when they previously had a token to avoid no-op disk writes.
 							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
 
-							if (isThisProfileActive) {
-								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
-								provider.log(
-									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
-								)
-							} else if (profile.zooSessionToken) {
-								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
-								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
+							if (!isThisProfileActive && !profile.zooSessionToken) {
+								continue
 							}
+
+							// Route through the provider's mutation queue so live views pinned to this profile drop the
+							// token too: a direct saveConfig rewrites the record only, and a pinned view keeps buffering
+							// the cleared token, which its getState() reports and new tasks send. activate=false keeps the
+							// shared selection on the profile that was actually active.
+							//
+							// The queue result is the store's confirmation of the clear: upsertProviderProfile catches
+							// its own failure and resolves to undefined - persistProviderProfile only ever resolves to
+							// the id that saveConfig returned - so an undefined id here means the write group failed and
+							// the stored profile can still hold the token. Reporting the clear anyway would log a cleanup
+							// that never happened and leave a reader trusting a credential that is still live. A failed
+							// cleanup belongs to the per-profile error path below, which logs it and moves on to the
+							// next profile.
+							const clearedProfileId = await provider.upsertProviderProfile(
+								entry.name,
+								cleanedProfile,
+								isThisProfileActive,
+							)
+
+							if (clearedProfileId === undefined) {
+								throw new Error(
+									`upsertProviderProfile returned no profile id for "${entry.name}"; the stored profile may still hold zooSessionToken`,
+								)
+							}
+
+							provider.log(
+								`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile${isThisProfileActive ? " and updated in-memory handler" : ""}`,
+							)
 						} catch (profileError) {
 							// Log but continue to the next profile so one failure doesn't
 							// leave other profiles holding a stale token.

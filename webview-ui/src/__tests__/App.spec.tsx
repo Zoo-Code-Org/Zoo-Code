@@ -11,6 +11,7 @@ let nextChatViewInstance = 0
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
 		postMessage: vi.fn(),
+		getViewStateId: vi.fn(() => "test-view-state-id"),
 	},
 }))
 
