@@ -145,7 +145,7 @@ import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
-import { generateSessionTitle } from "./session-title"
+import { flushPendingSessionTitle, generateSessionTitle } from "./session-title"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 import {
 	divergenceKey,
@@ -1893,6 +1893,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+
+			// A title generated before this task's history item existed is retried now that the
+			// record is durable. The call is a no-op when no title is pending.
+			void flushPendingSessionTitle(this.taskId)
 		} catch (error) {
 			// The message array was persisted above; a metadata or task-history failure must
 			// not mask that write (see the method docs). The next saveClineMessages() call

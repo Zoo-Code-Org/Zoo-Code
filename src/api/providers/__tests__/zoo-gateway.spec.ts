@@ -506,6 +506,23 @@ describe("ZooGatewayHandler", () => {
 			}))
 		})
 
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("Complete this: Hello", { abortSignal: signal, timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+		})
+
+		it("sends a single-argument request when no cancellation or deadline is given", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await handler.completePrompt("Complete this: Hello", { timeoutMs: -1 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything())
+		})
+
 		it("returns completion text from the gateway", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 

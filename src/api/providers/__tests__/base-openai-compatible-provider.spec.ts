@@ -355,6 +355,26 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(mockCreate.mock.calls[0][0].max_tokens).toBeUndefined()
 		})
 
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+			const { signal } = new AbortController()
+
+			await new TestOpenAiCompatibleProvider("test-api-key", {}).completePrompt("hello", {
+				abortSignal: signal,
+				timeoutMs: 5_000,
+			})
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+		})
+
+		it("sends a single-argument request when no cancellation or deadline is given", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+
+			await new TestOpenAiCompatibleProvider("test-api-key", {}).completePrompt("hello", { timeoutMs: 0 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything())
+		})
+
 		it("completePrompt sends the custom model id verbatim to the API", async () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
 

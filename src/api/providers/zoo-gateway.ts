@@ -30,6 +30,7 @@ import type {
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
 import { getZooGatewayModels } from "./fetchers/zoo-gateway"
+import { hasUsableTimeout, throwIfAborted, toSdkTimeoutMs, withSdkRequestOptions } from "./utils/abort-signal"
 
 function getApiErrorStatus(error: unknown): number | undefined {
 	if (typeof error === "object" && error !== null && "status" in error) {
@@ -294,7 +295,9 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// An already-cancelled operation must not start a request.
+		throwIfAborted(options?.abortSignal)
 		this.ensureAuthenticated()
 
 		const { id: modelId, info } = await this.fetchModel()
@@ -312,7 +315,20 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 
 			requestOptions.max_completion_tokens = info.maxTokens
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Forward the caller's cancellation and deadline to the request itself.
+			const sdkRequestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				sdkRequestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				sdkRequestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				...withSdkRequestOptions(sdkRequestOptions),
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			try {

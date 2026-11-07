@@ -763,6 +763,23 @@ describe("VercelAiGatewayHandler", () => {
 			}))
 		})
 
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("Complete this: Hello", { abortSignal: signal, timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+		})
+
+		it("sends a single-argument request when no cancellation or deadline is given", async () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+
+			await handler.completePrompt("Complete this: Hello", { timeoutMs: Number.POSITIVE_INFINITY })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything())
+		})
+
 		it("completes prompt correctly", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
 			const prompt = "Complete this: Hello"

@@ -135,6 +135,18 @@ export type OpenAiRequestOptions = {
 }
 
 /**
+ * Build the trailing request-options argument for an SDK call: the options
+ * object when it carries anything, or no argument at all.
+ *
+ * Call sites that pass nothing keep their original single-argument shape, so a
+ * completion without cancellation or a deadline sends exactly the request it
+ * sent before these options existed.
+ */
+export function withSdkRequestOptions<T extends object>(options: T): [T] | [] {
+	return Object.keys(options).length > 0 ? [options] : []
+}
+
+/**
  * Whether a failure indicates an aborted request: the caller's signal fired,
  * an `Error` carries a native abort error name (`AbortError`,
  * `APIUserAbortError`), or an `Error` carries the OpenAI SDK abort error

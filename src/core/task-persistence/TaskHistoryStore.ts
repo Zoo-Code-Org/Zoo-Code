@@ -28,7 +28,7 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 
 /** Thrown inside the `setTitleIfUnset` merge callback to abort the write without touching the file. */
 class TitleWriteSkipped extends Error {
-	constructor(readonly reason: "missing" | "titled") {
+	constructor(readonly reason: "missing" | "titled" | "invalid" | "mismatched") {
 		// Stryker disable next-line StringLiteral: diagnostic error message only, caught internally
 		super(`title write skipped: ${reason}`)
 	}
@@ -1010,21 +1010,26 @@ export class TaskHistoryStore {
 	 * provider on the same storage path) saved a manual title, and a delta merge would
 	 * otherwise overwrite it.
 	 *
-	 * @returns "conflict" when a title already exists or the record was deleted on disk (the cache is refreshed).
-	 * @throws If the task ID is not present in the cache.
+	 * The locked record must be a valid task-history item carrying this task ID: a
+	 * malformed or mismatched record is never merged, rewritten, or cached.
+	 *
+	 * @returns "missing" when the task has no history item yet (the caller defers the title),
+	 * "conflict" when a title or a manual clear already owns the record, or when the
+	 * record was deleted or is invalid on disk (the cache is refreshed or dropped).
 	 */
-	public setTitleIfUnset(taskId: string, title: string): Promise<"applied" | "conflict"> {
+	public setTitleIfUnset(taskId: string, title: string): Promise<"applied" | "conflict" | "missing"> {
 		return this.withLock(async () => {
 			const current = this.cache.get(taskId)
 			if (!current) {
-				throw new Error(`[TaskHistoryStore] setTitleIfUnset: task ${taskId} not found in cache`)
+				return "missing"
 			}
-			if (current.title) {
+			if (current.title || current.titleCleared) {
 				return "conflict"
 			}
 
 			const filePath = await this.getTaskFilePath(taskId)
 			let written: HistoryItem = { ...current, title }
+			let diskRecord: HistoryItem | undefined
 			try {
 				await safeWriteJson(filePath, written, {
 					merge: (existing, incoming) => {
@@ -1034,11 +1039,25 @@ export class TaskHistoryStore {
 						if (!existing || typeof existing !== "object" || !("id" in existing)) {
 							throw new TitleWriteSkipped("missing")
 						}
-						if ((existing as HistoryItem).title) {
+						// Validate the locked disk record with the canonical task-history schema and
+						// the expected task ID, so a malformed record or another task's record is
+						// never merged into this task or sent to the history view.
+						const parsed = historyItemSchema.safeParse(existing)
+						if (!parsed.success) {
+							// Stryker disable next-line StringLiteral: internal discrimination literal between skip reasons
+							throw new TitleWriteSkipped("invalid")
+						}
+						if (parsed.data.id !== taskId) {
+							// Stryker disable next-line StringLiteral: internal discrimination literal between skip reasons
+							throw new TitleWriteSkipped("mismatched")
+						}
+						// Keep the validated record so a losing race refreshes the cache with it.
+						diskRecord = parsed.data
+						if (parsed.data.title || parsed.data.titleCleared) {
 							// Stryker disable next-line StringLiteral: internal discrimination literal between missing and titled reasons
 							throw new TitleWriteSkipped("titled")
 						}
-						written = mergeHistoryDelta(existing, incoming as HistoryItem, { title })
+						written = mergeHistoryDelta(parsed.data, incoming as HistoryItem, { title })
 						return written
 					},
 				})
@@ -1046,15 +1065,17 @@ export class TaskHistoryStore {
 				if (!(error instanceof TitleWriteSkipped)) {
 					throw error
 				}
-				if (error.reason === "missing") {
-					this.cache.delete(taskId)
-				} else {
-					const diskItem = await this.readTaskFile(taskId)
-					// Stryker disable next-line ConditionalExpression: defense-in-depth, disk item is always present when merge found titled record
-					if (diskItem) {
-						this.cache.set(taskId, diskItem)
+				if (error.reason === "titled") {
+					// Stryker disable next-line ConditionalExpression: defense-in-depth, a titled record is validated before the write
+					if (diskRecord) {
+						this.cache.set(taskId, diskRecord)
 					}
+					return "conflict"
 				}
+				// The record is gone or unusable, so the stale cache entry is dropped instead of
+				// being written back; the disk record itself is left untouched.
+				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
 				return "conflict"
 			}
 

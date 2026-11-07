@@ -764,8 +764,35 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(getStored("task-auto-blank")?.title).toBeUndefined()
 		})
 
-		it("throws for an unknown task so the caller can give up", async () => {
-			await expect(provider.applySessionTitle("missing-task", "Auto Title")).rejects.toThrow("not found in cache")
+		it("returns not-ready for a task whose history item does not exist yet", async () => {
+			const result = await provider.applySessionTitle("missing-task", "Auto Title")
+
+			expect(result).toBe("not-ready")
+			expect(getStored("missing-task")).toBeUndefined()
+		})
+
+		it("broadcasts the winning manual title when the automatic title conflicts", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto-lost", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			// Another window renames the task while this window's title is generating.
+			await provider.taskHistoryStore.atomicReadAndUpdate("task-auto-lost", (item) => ({
+				...item,
+				title: "Manual title",
+			}))
+			mockPostMessage.mockClear()
+
+			const result = await provider.applySessionTitle("task-auto-lost", "Auto Title")
+
+			expect(result).toBe("conflict")
+			expect(getStored("task-auto-lost")).toMatchObject({ title: "Manual title" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({
+				id: "task-auto-lost",
+				title: "Manual title",
+			})
 		})
 
 		it("keeps the auto title when the task later saves metadata without one", async () => {
@@ -806,15 +833,73 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")).toHaveLength(0)
 		})
 
-		it("cancels pending session title generation when deleting a task", async () => {
+		it("cancels pending generation on dispose so no title is written afterwards", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-dispose", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			let resolveCompletion!: (title: string) => void
+			const completionPromise = new Promise<string>((resolve) => {
+				resolveCompletion = resolve
+			})
+			const generation = generateSessionTitle({
+				provider,
+				taskId: "task-dispose",
+				userMessage: "Original prompt",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+					apiKey: "test-api-key",
+				},
+				completePrompt: async () => completionPromise,
+			})
+
+			// Disposal cancels and drains the generation before the history store is released.
+			await provider.dispose()
+			expect(provider.isDisposed).toBe(true)
+
+			resolveCompletion("Late Title")
+			await generation
+
+			expect(getStored("task-dispose")?.title).toBeUndefined()
+		})
+
+		it("cancels pending generation and writes no late title when deleting a task", async () => {
+			await provider.updateTaskHistory(
+				createHistoryItem({ id: "task-cancel-on-delete", task: "Original prompt" }),
+				{
+					broadcast: false,
+				},
+			)
+			let resolveCompletion!: (title: string) => void
+			const completionPromise = new Promise<string>((resolve) => {
+				resolveCompletion = resolve
+			})
+			const generation = generateSessionTitle({
+				provider,
+				taskId: "task-cancel-on-delete",
+				userMessage: "Original prompt",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+					apiKey: "test-api-key",
+				},
+				completePrompt: async () => completionPromise,
+			})
+
 			const cancelSpy = vi.spyOn(sessionTitleModule, "cancelSessionTitle")
 			try {
 				await provider.deleteTaskWithId("task-cancel-on-delete")
-			} catch {
-				// Task doesn't exist on disk, delete will catch/proceed
+				expect(cancelSpy).toHaveBeenCalledWith("task-cancel-on-delete")
+				// The deletion succeeded, so the task is gone from the store.
+				expect(getStored("task-cancel-on-delete")).toBeUndefined()
+
+				// A completion that settles after the deletion must not resurrect the task or its title.
+				resolveCompletion("Late Title")
+				await generation
+				expect(getStored("task-cancel-on-delete")).toBeUndefined()
+			} finally {
+				cancelSpy.mockRestore()
 			}
-			expect(cancelSpy).toHaveBeenCalledWith("task-cancel-on-delete")
-			cancelSpy.mockRestore()
 		})
 	})
 

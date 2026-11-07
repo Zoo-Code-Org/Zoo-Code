@@ -76,7 +76,12 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
-import { cancelSessionTitle, type SessionTitleApplyResult } from "../task/session-title"
+import {
+	cancelSessionTitle,
+	cancelSessionTitlesForProvider,
+	drainSessionTitles,
+	type SessionTitleApplyResult,
+} from "../task/session-title"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
 import {
@@ -1001,6 +1006,11 @@ export class ClineProvider
 		this.skillsManager = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
+		// Cancel and drain title generation this provider owns before releasing the
+		// history store, so an in-flight request or timer cannot write through the
+		// disposed store afterwards.
+		cancelSessionTitlesForProvider(this)
+		await drainSessionTitles(this)
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
@@ -1014,6 +1024,15 @@ export class ClineProvider
 
 	public get isViewVisible(): boolean {
 		return this.view?.visible === true
+	}
+
+	/**
+	 * True once disposal has started. Work started after this point (such as a
+	 * session title for a task still registering) must not touch the provider
+	 * or its history store.
+	 */
+	public get isDisposed(): boolean {
+		return this._disposed
 	}
 
 	public static getVisibleInstance(): ClineProvider | undefined {
@@ -2822,6 +2841,9 @@ export class ClineProvider
 		await this.taskHistoryStore.atomicReadAndUpdate(id, (historyItem) => ({
 			...historyItem,
 			title: trimmed ? trimmed : undefined,
+			// Persist the clear intent: an empty title is otherwise indistinguishable from a
+			// task that never had one, which lets another host's pending auto title win.
+			titleCleared: trimmed ? undefined : true,
 		}))
 		this.recentTasksCache = undefined
 
@@ -2848,7 +2870,14 @@ export class ClineProvider
 		}
 
 		const result = await this.taskHistoryStore.setTitleIfUnset(id, trimmed)
+		if (result === "missing") {
+			// The history item has not been persisted yet; the caller keeps the title and retries.
+			return "not-ready"
+		}
 		if (result === "conflict") {
+			// The store refreshed its cache with the winning manual record. Push it so this
+			// window shows the manual title instead of waiting for another history refresh.
+			await this.broadcastCachedTaskHistoryItem(id)
 			return "conflict"
 		}
 
@@ -2863,6 +2892,21 @@ export class ClineProvider
 		}
 
 		return "applied"
+	}
+
+	/**
+	 * Broadcasts the cached record for a task when one exists. Used when a manual
+	 * write won a race and the webview still shows the pre-race record.
+	 */
+	private async broadcastCachedTaskHistoryItem(id: string): Promise<void> {
+		if (!this.isViewLaunched) {
+			return
+		}
+		const cachedItem = this.taskHistoryStore.get(id)
+		if (cachedItem) {
+			this.recentTasksCache = undefined
+			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: cachedItem })
+		}
 	}
 
 	/* Condenses a task's message history to use fewer tokens. */
@@ -3686,7 +3730,8 @@ export class ClineProvider
 
 		// Drop the snapshot's title so upsertCore preserves the value held under the store lock
 		// instead of treating a stale title as a changed field and reverting a concurrent rename.
-		const { title: _title, ...itemWithoutTitle } = item
+		// The manual-clear intent is owned by `renameTaskWithId` for the same reason.
+		const { title: _title, titleCleared: _titleCleared, ...itemWithoutTitle } = item
 
 		const history = await this.taskHistoryStore.upsert(itemWithoutTitle)
 		this.recentTasksCache = undefined

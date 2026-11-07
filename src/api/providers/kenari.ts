@@ -24,6 +24,7 @@ import type {
 import { RouterProvider } from "./router-provider"
 import { getKenariModels } from "./fetchers/kenari"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, throwIfAborted, toSdkTimeoutMs, withSdkRequestOptions } from "./utils/abort-signal"
 
 /**
  * API handler for Kenari, an Indonesian OpenAI-compatible AI gateway billed
@@ -140,7 +141,9 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 	 * @returns The model's reply text, or an empty string if no content is returned.
 	 * @throws Error with a Kenari-specific prefix if the request fails.
 	 */
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// An already-cancelled operation must not start a request.
+		throwIfAborted(options?.abortSignal)
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {
@@ -156,7 +159,20 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 
 			requestOptions.max_completion_tokens = info.maxTokens
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Forward the caller's cancellation and deadline to the request itself.
+			const sdkRequestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				sdkRequestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				sdkRequestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				...withSdkRequestOptions(sdkRequestOptions),
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof Error) {

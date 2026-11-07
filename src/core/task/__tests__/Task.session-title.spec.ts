@@ -9,10 +9,26 @@ import type { GenerateSessionTitleOptions } from "../session-title"
 
 vi.mock("../session-title", () => ({
 	generateSessionTitle: vi.fn().mockResolvedValue(undefined),
+	flushPendingSessionTitle: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Import the mocked module for spy access.
-import { generateSessionTitle } from "../session-title"
+import { flushPendingSessionTitle, generateSessionTitle } from "../session-title"
+
+// The task save path is mocked so the retry trigger can be observed without touching disk.
+const persistenceMocks = vi.hoisted(() => ({
+	saveTaskMessages: vi.fn(),
+	taskMetadata: vi.fn(),
+}))
+
+vi.mock("../../task-persistence", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../task-persistence")>()
+	return {
+		...actual,
+		saveTaskMessages: persistenceMocks.saveTaskMessages,
+		taskMetadata: persistenceMocks.taskMetadata,
+	}
+})
 
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -111,6 +127,8 @@ function createMockProvider(): ClineProvider {
 		postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 		updateTaskHistory: vi.fn().mockResolvedValue(undefined),
+		// `saveClineMessages` reads the stored status before writing the item back.
+		taskHistoryStore: { get: vi.fn().mockReturnValue(undefined) },
 	} as unknown as ClineProvider
 }
 
@@ -148,6 +166,20 @@ function lastTitleCall(): GenerateSessionTitleOptions | undefined {
 describe("Task#startTask session title trigger", () => {
 	beforeEach(() => {
 		vi.mocked(generateSessionTitle).mockClear()
+		vi.mocked(flushPendingSessionTitle).mockClear()
+		persistenceMocks.saveTaskMessages.mockReset().mockResolvedValue(undefined)
+		persistenceMocks.taskMetadata.mockReset().mockImplementation(async ({ taskId }: { taskId: string }) => ({
+			historyItem: {
+				id: taskId,
+				number: 1,
+				ts: Date.now(),
+				task: "example root task",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			},
+			tokenUsage: { totalTokensIn: 0, totalTokensOut: 0, totalCacheWrites: 0, totalCacheReads: 0, totalCost: 0 },
+		}))
 	})
 
 	it("fires title generation for a root task without awaiting it", async () => {
@@ -290,6 +322,29 @@ describe("Task#startTask session title trigger", () => {
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			expect.stringContaining("[Task#startTask] session title generation failed: Error: boom"),
 		)
+		consoleErrorSpy.mockRestore()
+	})
+
+	it("retries a pending title once the history item is saved", async () => {
+		const provider = createMockProvider()
+		const task = createTestTask(provider)
+
+		await (task as unknown as { saveClineMessages: (merge?: boolean) => Promise<boolean> }).saveClineMessages()
+
+		expect(persistenceMocks.saveTaskMessages).toHaveBeenCalled()
+		expect(vi.mocked(flushPendingSessionTitle)).toHaveBeenCalledWith(task.taskId)
+	})
+
+	it("does not retry a pending title when the message save fails", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const provider = createMockProvider()
+		const task = createTestTask(provider)
+		persistenceMocks.saveTaskMessages.mockRejectedValue(new Error("disk full"))
+
+		await expect(
+			(task as unknown as { saveClineMessages: (merge?: boolean) => Promise<boolean> }).saveClineMessages(),
+		).resolves.toBe(false)
+		expect(vi.mocked(flushPendingSessionTitle)).not.toHaveBeenCalled()
 		consoleErrorSpy.mockRestore()
 	})
 })

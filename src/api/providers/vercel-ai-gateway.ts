@@ -27,6 +27,7 @@ import type {
 } from "../index"
 import { RouterProvider } from "./router-provider"
 import { getVercelAiGatewayModels } from "./fetchers/vercel-ai-gateway"
+import { hasUsableTimeout, throwIfAborted, toSdkTimeoutMs, withSdkRequestOptions } from "./utils/abort-signal"
 
 // Extend OpenAI's CompletionUsage to include Vercel AI Gateway specific fields
 interface VercelAiGatewayUsage extends OpenAI.CompletionUsage {
@@ -155,7 +156,9 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// An already-cancelled operation must not start a request.
+		throwIfAborted(options?.abortSignal)
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {
@@ -175,7 +178,20 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 
 			requestOptions.max_completion_tokens = info.maxTokens
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Forward the caller's cancellation and deadline to the request itself.
+			const sdkRequestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				sdkRequestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				sdkRequestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+
+			const response = await this.client.chat.completions.create(
+				requestOptions,
+				...withSdkRequestOptions(sdkRequestOptions),
+			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof Error) {

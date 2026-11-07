@@ -25,6 +25,7 @@ import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } 
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import type {
 	SingleCompletionHandler,
@@ -184,12 +185,17 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id } = this.getModel()
 		try {
+			// An already-cancelled operation must not start a request.
+			throwIfAborted(options?.abortSignal)
 			const { text } = await generateText({
 				model: this.poe(id),
 				prompt,
+				// Forward the caller's cancellation and deadline to the request itself so a
+				// superseded title request stops instead of running to the default timeout.
+				abortSignal: mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs),
 			})
 			return text
 		} catch (error) {

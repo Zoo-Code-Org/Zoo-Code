@@ -634,6 +634,25 @@ describe("RequestyHandler", () => {
 			})
 		})
 
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("test prompt", { abortSignal: signal, timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+		})
+
+		it("sends a single-argument request when no cancellation or deadline is given", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything())
+		})
+
 		it("omits temperature for Claude Fable 5 in completePrompt", async () => {
 			const handler = new RequestyHandler(
 				makeApiHandlerOptions({

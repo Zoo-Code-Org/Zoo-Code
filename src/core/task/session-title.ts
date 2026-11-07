@@ -16,8 +16,17 @@ Output only the title.
 
 `
 
-/** Outcome of `ClineProvider.applySessionTitle`. */
-export type SessionTitleApplyResult = "applied" | "conflict"
+/**
+ * Outcome of `ClineProvider.applySessionTitle`.
+ *
+ * - `applied`: the generated title was written.
+ * - `conflict`: a manual title (or a manual clear) already owns the task, so nothing was written.
+ * - `not-ready`: the task's history item does not exist yet; the caller keeps the title for later.
+ */
+export type SessionTitleApplyResult = "applied" | "conflict" | "not-ready"
+
+/** Outcome of one title write, including the local give-up case. */
+type TitleWriteOutcome = SessionTitleApplyResult | "failed"
 
 /** Removes system-injected `<system-reminder>` blocks and trims. */
 export function sanitizeUserMessageForTitle(raw: string): string {
@@ -75,10 +84,21 @@ export interface GenerateSessionTitleOptions {
 interface InFlightTitle {
 	controller: AbortController
 	userCancelled: boolean
+	/** Provider that owns this generation, so disposal can cancel and drain it. */
+	provider: ClineProvider
+	/** Settles once the generation has fully finished, including its write attempts. */
+	settled: Promise<void>
 }
 
 /** In-flight title generation abort controllers by task ID. */
 const inFlightTitles = new Map<string, InFlightTitle>()
+
+/**
+ * Generated titles whose history item did not exist yet, keyed by task ID.
+ * `Task` flushes these once the item is persisted, so a transient initial save
+ * failure cannot lose a title that was already generated.
+ */
+const pendingTitleWrites = new Map<string, { provider: ClineProvider; title: string }>()
 
 /**
  * Cancels any pending or in-flight title generation for a task.
@@ -86,10 +106,64 @@ const inFlightTitles = new Map<string, InFlightTitle>()
  * never overwrites the user's manual intent.
  */
 export function cancelSessionTitle(taskId: string): void {
+	pendingTitleWrites.delete(taskId)
 	const entry = inFlightTitles.get(taskId)
 	if (entry) {
 		entry.userCancelled = true
 		entry.controller.abort()
+	}
+}
+
+/**
+ * Cancels every pending or in-flight title generation owned by `provider`.
+ * Called from `ClineProvider#dispose()` so a request and its timer cannot
+ * outlive the provider and write through the disposed history store.
+ */
+export function cancelSessionTitlesForProvider(provider: ClineProvider): void {
+	for (const [taskId, entry] of inFlightTitles) {
+		if (entry.provider !== provider) {
+			continue
+		}
+		pendingTitleWrites.delete(taskId)
+		entry.userCancelled = true
+		entry.controller.abort()
+	}
+}
+
+/**
+ * Waits for `provider`'s in-flight title generation to settle, so disposal does
+ * not release the history store underneath a title that is still being written.
+ */
+export async function drainSessionTitles(provider: ClineProvider): Promise<void> {
+	const settled = Array.from(inFlightTitles.values())
+		.filter((entry) => entry.provider === provider)
+		.map((entry) => entry.settled)
+	await Promise.allSettled(settled)
+}
+
+/**
+ * Retries a title whose history item did not exist when the title was ready.
+ *
+ * The title write is deferred rather than dropped: `Task` calls this after a
+ * save that persisted the history item, so the task still receives the
+ * generated title (or the fallback) once its record exists.
+ */
+export async function flushPendingSessionTitle(taskId: string): Promise<void> {
+	const pending = pendingTitleWrites.get(taskId)
+	if (!pending) {
+		return
+	}
+	if (pending.provider.isDisposed) {
+		pendingTitleWrites.delete(taskId)
+		return
+	}
+	try {
+		const result = await pending.provider.applySessionTitle(taskId, pending.title)
+		if (result === "applied" || result === "conflict") {
+			pendingTitleWrites.delete(taskId)
+		}
+	} catch {
+		// Keep the title for the next save instead of losing it to a transient write failure.
 	}
 }
 
@@ -103,6 +177,12 @@ export function cancelSessionTitle(taskId: string): void {
 export async function generateSessionTitle(options: GenerateSessionTitleOptions): Promise<void> {
 	const { provider, taskId, userMessage, apiConfiguration, completePrompt = singleCompletionHandler } = options
 
+	// A disposed provider has no history store to write to; the task started after disposal
+	// must not launch a request that would outlive it.
+	if (provider.isDisposed) {
+		return
+	}
+
 	const sanitized = sanitizeUserMessageForTitle(userMessage)
 	if (!sanitized) {
 		return
@@ -111,9 +191,15 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 	if (inFlightTitles.has(taskId)) {
 		return
 	}
+	let settle!: () => void
+	const settled = new Promise<void>((resolve) => {
+		settle = resolve
+	})
 	const inFlight: InFlightTitle = {
 		controller: new AbortController(),
 		userCancelled: false,
+		provider,
+		settled,
 	}
 	inFlightTitles.set(taskId, inFlight)
 
@@ -137,15 +223,27 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 				}
 			}
 		}
-		let applied = false
 		if (title) {
-			applied = await applyTitleWithRetry(provider, taskId, title, () => inFlight.userCancelled)
+			const outcome = await applyTitleWithRetry(provider, taskId, title, () => inFlight.userCancelled)
+			if (outcome === "not-ready") {
+				// The history item is not persisted yet; `Task` retries this write once it is.
+				pendingTitleWrites.set(taskId, { provider, title })
+				return
+			}
+			// "applied" means the title is durable, and "conflict" means manual intent owns the
+			// task; neither may be followed by the fallback write.
+			if (outcome !== "failed") {
+				return
+			}
 		}
-		if (!applied && !inFlight.userCancelled) {
-			const fallback = fallbackTitle(sanitized)
-			// Stryker disable next-line ConditionalExpression,LogicalOperator: defense-in-depth, fallback is always truthy for non-empty sanitized messages and distinct from failed title
-			if (fallback && fallback !== title) {
-				await applyTitleWithRetry(provider, taskId, fallback, () => inFlight.userCancelled)
+		// `applyTitleWithRetry` owns the cancellation check, so a generation cancelled during
+		// the LLM title write never reaches the fallback write.
+		const fallback = fallbackTitle(sanitized)
+		// Stryker disable next-line ConditionalExpression,LogicalOperator: defense-in-depth, fallback is always truthy for non-empty sanitized messages and distinct from failed title
+		if (fallback && fallback !== title) {
+			const outcome = await applyTitleWithRetry(provider, taskId, fallback, () => inFlight.userCancelled)
+			if (outcome === "not-ready") {
+				pendingTitleWrites.set(taskId, { provider, title: fallback })
 			}
 		}
 	} catch (error) {
@@ -157,6 +255,7 @@ export async function generateSessionTitle(options: GenerateSessionTitleOptions)
 		}
 	} finally {
 		inFlightTitles.delete(taskId)
+		settle()
 	}
 }
 
@@ -208,16 +307,17 @@ async function applyTitleWithRetry(
 	taskId: string,
 	title: string,
 	isCancelled: () => boolean,
-): Promise<boolean> {
+): Promise<TitleWriteOutcome> {
 	for (let attempt = 0; ; attempt++) {
 		// Stryker disable next-line BooleanLiteral,ConditionalExpression: defense-in-depth, caller checks cancellation before initiating write
 		if (isCancelled()) {
-			// Stryker disable next-line BooleanLiteral: return value indicating write was not applied
-			return false
+			// Stryker disable next-line StringLiteral: return value indicating write was not applied
+			return "failed"
 		}
 		try {
-			await provider.applySessionTitle(taskId, title)
-			return true
+			// "not-ready" is a result, not an error: the history item does not exist yet, so an
+			// immediate retry cannot help. The caller keeps the title for a later apply.
+			return await provider.applySessionTitle(taskId, title)
 		} catch (error) {
 			if (isCancelled() || attempt >= TITLE_WRITE_MAX_RETRIES) {
 				if (!isCancelled()) {
@@ -226,7 +326,7 @@ async function applyTitleWithRetry(
 						error,
 					)
 				}
-				return false
+				return "failed"
 			}
 		}
 	}

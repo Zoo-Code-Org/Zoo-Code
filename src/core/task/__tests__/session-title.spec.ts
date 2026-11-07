@@ -10,6 +10,9 @@ import {
 	fallbackTitle,
 	generateSessionTitle,
 	cancelSessionTitle,
+	cancelSessionTitlesForProvider,
+	drainSessionTitles,
+	flushPendingSessionTitle,
 	sanitizeUserMessageForTitle,
 	extractLlmTitle,
 	type SessionTitleApplyResult,
@@ -31,10 +34,12 @@ type ApplyTitleCall = { taskId: string; title: string }
 function createTitleProvider(
 	overrides: {
 		applySessionTitle?: (taskId: string, title: string) => Promise<SessionTitleApplyResult>
+		isDisposed?: boolean
 	} = {},
 ): ClineProvider {
 	const provider = {
 		applySessionTitle: overrides.applySessionTitle ?? (async () => "applied" as const),
+		isDisposed: overrides.isDisposed ?? false,
 	}
 	return provider as unknown as ClineProvider
 }
@@ -527,6 +532,30 @@ describe("generateSessionTitle", () => {
 		consoleErrorSpy.mockRestore()
 	})
 
+	it("does not write the fallback title once the generation was cancelled", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		let applyCalls = 0
+		const provider = createTitleProvider({
+			applySessionTitle: async () => {
+				applyCalls++
+				// A manual rename lands while this write is in flight and the write fails.
+				cancelSessionTitle("task-cancel-before-fallback")
+				throw new Error("transient failure")
+			},
+		})
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-cancel-before-fallback",
+			userMessage: "Fix login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		// The fallback write is skipped at the cancellation check instead of being attempted.
+		expect(applyCalls).toBe(1)
+	})
+
 	it("stops fallback retry immediately if the generation is cancelled", async () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		const recorder = createCompletePromptRecorder(async () => {
@@ -580,5 +609,254 @@ describe("generateSessionTitle", () => {
 				},
 			}),
 		).resolves.toBeUndefined()
+	})
+
+	it("sends only the user text to the model when the message carries a system reminder", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Login fix title")
+		const applied: ApplyTitleCall[] = []
+		const provider = createTitleProvider({
+			applySessionTitle: async (taskId, title) => {
+				applied.push({ taskId, title })
+				return "applied"
+			},
+		})
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-reminder",
+			userMessage:
+				"<system-reminder>Environment details: workspace /home/user/project</system-reminder>Please fix the login button",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		expect(recorder.calls).toHaveLength(1)
+		expect(recorder.calls[0].prompt).toContain("Please fix the login button")
+		expect(recorder.calls[0].prompt).not.toContain("<system-reminder>")
+		expect(recorder.calls[0].prompt).not.toContain("</system-reminder>")
+		expect(recorder.calls[0].prompt).not.toContain("Environment details")
+		expect(applied).toEqual([{ taskId: "task-reminder", title: "Login fix title" }])
+	})
+
+	it("does not start a request for a provider that is already disposed", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Should not be requested")
+		const provider = createTitleProvider({ isDisposed: true })
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-disposed-start",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		expect(recorder.calls).toHaveLength(0)
+	})
+
+	it("cancels and drains the generation a disposing provider owns", async () => {
+		let abortSignal: AbortSignal | undefined
+		const recorder = createCompletePromptRecorder(async ({ options }) => {
+			abortSignal = options?.abortSignal
+			return new Promise<string>(() => {})
+		})
+		const provider = createTitleProvider()
+
+		const generation = generateSessionTitle({
+			provider,
+			taskId: "task-dispose",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		expect(abortSignal?.aborted).toBe(false)
+		cancelSessionTitlesForProvider(provider)
+		expect(abortSignal?.aborted).toBe(true)
+
+		// Draining waits for the aborted generation to settle instead of leaving the write behind.
+		await drainSessionTitles(provider)
+		await generation
+	})
+
+	it("cancels only the disposing provider's generation", async () => {
+		const signals: Record<string, AbortSignal | undefined> = {}
+		const recorder = createCompletePromptRecorder(async ({ prompt, options }) => {
+			signals[prompt] = options?.abortSignal
+			return new Promise<string>(() => {})
+		})
+		const providerA = createTitleProvider()
+		const providerB = createTitleProvider()
+
+		const generationA = generateSessionTitle({
+			provider: providerA,
+			taskId: "task-dispose-a",
+			userMessage: "message for A",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+		const generationB = generateSessionTitle({
+			provider: providerB,
+			taskId: "task-dispose-b",
+			userMessage: "message for B",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		cancelSessionTitlesForProvider(providerA)
+
+		const signalForA = Object.entries(signals).find(([prompt]) => prompt.includes("message for A"))?.[1]
+		const signalForB = Object.entries(signals).find(([prompt]) => prompt.includes("message for B"))?.[1]
+		expect(signalForA?.aborted).toBe(true)
+		expect(signalForB?.aborted).toBe(false)
+
+		await generationA
+		cancelSessionTitle("task-dispose-b")
+		await generationB
+	})
+})
+
+describe("flushPendingSessionTitle", () => {
+	it("applies a title that was generated before the history item existed", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		let historyItemPersisted = false
+		const applied: ApplyTitleCall[] = []
+		const provider = createTitleProvider({
+			applySessionTitle: async (taskId, title) => {
+				if (!historyItemPersisted) {
+					return "not-ready"
+				}
+				applied.push({ taskId, title })
+				return "applied"
+			},
+		})
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-deferred",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+		expect(applied).toHaveLength(0)
+
+		// The first write attempted before the record existed is retried until it lands.
+		await flushPendingSessionTitle("task-deferred")
+		expect(applied).toHaveLength(0)
+
+		historyItemPersisted = true
+		await flushPendingSessionTitle("task-deferred")
+
+		expect(applied).toEqual([{ taskId: "task-deferred", title: "Generated Title" }])
+
+		// The title is applied once; a later save does not repeat the write.
+		await flushPendingSessionTitle("task-deferred")
+		expect(applied).toHaveLength(1)
+	})
+
+	it("applies the fallback title once the history item exists", async () => {
+		const recorder = createCompletePromptRecorder(async () => {
+			throw new Error("api down")
+		})
+		let historyItemPersisted = false
+		const applied: ApplyTitleCall[] = []
+		const provider = createTitleProvider({
+			applySessionTitle: async (taskId, title) => {
+				if (!historyItemPersisted) {
+					return "not-ready"
+				}
+				applied.push({ taskId, title })
+				return "applied"
+			},
+		})
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-deferred-fallback",
+			userMessage: "Fix login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		historyItemPersisted = true
+		await flushPendingSessionTitle("task-deferred-fallback")
+
+		expect(applied).toEqual([{ taskId: "task-deferred-fallback", title: "Fix login bug" }])
+	})
+
+	it("keeps the pending title when the retry fails", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		let attempt = 0
+		const applied: ApplyTitleCall[] = []
+		const provider = createTitleProvider({
+			applySessionTitle: async (taskId, title) => {
+				attempt++
+				if (attempt === 1) {
+					return "not-ready"
+				}
+				if (attempt === 2) {
+					throw new Error("transient write failure")
+				}
+				applied.push({ taskId, title })
+				return "applied"
+			},
+		})
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-deferred-retry",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		await flushPendingSessionTitle("task-deferred-retry")
+		expect(applied).toHaveLength(0)
+
+		await flushPendingSessionTitle("task-deferred-retry")
+		expect(applied).toEqual([{ taskId: "task-deferred-retry", title: "Generated Title" }])
+	})
+
+	it("drops the pending title of a disposed provider", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		const applySpy = vi.fn().mockResolvedValue("not-ready" as const)
+		const provider = createTitleProvider({ applySessionTitle: applySpy })
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-deferred-disposed",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		Object.assign(provider, { isDisposed: true })
+		await flushPendingSessionTitle("task-deferred-disposed")
+
+		expect(applySpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("drops the pending title when the task is cancelled", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		let historyItemPersisted = false
+		const applySpy = vi.fn().mockImplementation(async () => (historyItemPersisted ? "applied" : "not-ready"))
+		const provider = createTitleProvider({ applySessionTitle: applySpy })
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-deferred-cancelled",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		cancelSessionTitle("task-deferred-cancelled")
+		historyItemPersisted = true
+		await flushPendingSessionTitle("task-deferred-cancelled")
+
+		expect(applySpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("does nothing when no title is pending", async () => {
+		await expect(flushPendingSessionTitle("unknown-task")).resolves.toBeUndefined()
 	})
 })
