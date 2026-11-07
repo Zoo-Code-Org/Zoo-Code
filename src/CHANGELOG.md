@@ -1,5 +1,136 @@
 # Zoo Code Changelog
 
+## [3.96.0]
+
+- ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.
+- 💸 **More accurate provider costs and caching:** Keep Anthropic tool results intact, adopt cumulative output tokens in Anthropic and MiniMax costs, read DeepSeek prompt-cache counters, target the xAI Responses cache, and bill Mistral cache reads at 0.1x.
+- 🧭 **More reliable and faster chats:** Resume completed tasks after a restart, restore checkpoints when the saved commit is missing, auto-reload a dead webview renderer, throttle streaming updates, and load locales on demand.
+
+### New Chat Settings and Diagnostics
+
+- Add time and date format settings and message timestamps (#2221 by @KarthickMahalingam, PR #2223 by @KarthickMahalingam)
+- Add a user-facing prompt-cache TTL for Anthropic profiles (PR #2271 by @simurg79)
+- Add privacy-safe diagnostics reports (PR #2292 by @app/zoomote2)
+
+### More Accurate Provider Costs and Caching
+
+- Keep tool_result blocks contiguous in Anthropic requests by grouping image blocks separately (#1307 by @alaskanloosemoose-dotcom, PR #2243 by @myk1yt)
+- Adopt cumulative message_delta output tokens in Anthropic and MiniMax cost (#1727 by @myk1yt, PR #2242 by @myk1yt)
+- Read documented top-level prompt-cache counters for DeepSeek (PR #2252 by @myk1yt)
+- Send body prompt_cache_key for xAI Responses cache affinity (PR #2256 by @myk1yt)
+- Bill Mistral cache reads at 0.1x instead of the full input price (PR #2257 by @myk1yt)
+- Map xAI tool_choice to the Responses API shape with a typed request body (PR #2036 by @easonLiangWorldedtech)
+- Add MiMo V2.6 Flash and Pro model configurations for OpenCode Go (#1997 by @WebMad, PR #2246 by @myk1yt)
+
+### More Reliable and Faster Chats
+
+- Resume completed tasks after a restart when a message write is interrupted (#2130 by @edelauna, PR #2297 by @app/zoomote2)
+- Restore checkpoints when the saved commit is missing (PR #2269 by @simurg79)
+- Detect a dead webview renderer via heartbeat and auto-reload (PR #1715 by @myk1yt)
+- Report emergency condense like the automatic path (PR #1838 by @PierrunoYT)
+- Summarize only the API-visible history when condensing (#1342 by @RemainIndoors1, PR #2300 by @RytisLT)
+- Propagate beyond-EOF read-file errors instead of reporting the file as empty (PR #1734 by @myk1yt)
+- Throttle partial message updates while streaming (PR #2120 by @PierrunoYT)
+- Replace axios with fetch in key-info hooks (PR #2261 by @myk1yt)
+- Load locales on demand instead of eager-globbing all 18 (PR #2267 by @myk1yt)
+- Replace the debounce package with a local leading-edge helper (PR #2268 by @myk1yt)
+
+### New Features and Integrations
+
+- Add a dependency-free BM25 ranker tool (PR #1207 by @edelauna)
+- Add abort-signal wiring for lm-studio and qwen-code (PR #1309 by @easonLiangWorldedtech)
+- Add Keenable to the MCP marketplace (#2312 by @ilya-bogin-keenable, PR #2313 by @ilya-bogin-keenable)
+
+### Testing, CI, and Repository Automation
+
+- Cancel obsolete PR CI runs and remove duplicate builds (#2289 by @edelauna, PR #2294 by @app/zoomote2)
+- Post surviving mutants as a PR comment (#2287 by @edelauna, PR #2293 by @app/zoomote2)
+- Run webview CI tests with four workers (#2288 by @edelauna, PR #2308 by @app/zoomote2)
+- Use plugin-side related-test discovery for the extension package mutation gate (PR #2211 by @easonLiangWorldedtech)
+- Add test-utils guardrails and convert remaining stragglers (PR #2279 by @app/zoomote2)
+- Drop test-only tool-use interfaces from shared/tools (PR #2258 by @myk1yt)
+- Show the Zoo Code panel in the Solheim smoke video and bound the apt step (#2158 by @edelauna, PR #2195 by @app/zoomote2)
+
+### Refactoring and Code Health
+
+- Move default provider ID functionality into the provider definition (PR #2233 by @p12tic)
+- Resolve profile model IDs through provider definitions (PR #2239 by @p12tic)
+- Remove no-explicit-any suppressions in utils (PR #2281 by @app/zoomote2)
+- Remove no-explicit-any suppressions in small directories (PR #2286 by @app/zoomote2)
+- Close lint coverage and knip hygiene gaps (PR #2280 by @app/zoomote2)
+- Sweep dead locale keys behind an AST gate (PR #2263 by @myk1yt)
+- Remove dead CSS classes from the global stylesheet (PR #2251 by @myk1yt)
+
+### Dependencies and Maintenance
+
+- Update @tanstack/react-query to v5.105.0 (PR #2180 by @app/renovate)
+- Update ignore to v7.0.14 (PR #2181 by @app/renovate)
+- Update posthog-js to v1.440.0 (PR #2182 by @app/renovate)
+- Update posthog-node to v5.57.2 (PR #2183 by @app/renovate)
+- Update GitHub Actions (PR #2186 by @app/renovate)
+- Update qs to v6.16.1 [security] (PR #2214 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.94.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.96.0 feature (PR #2272 by @app/zoomote2)
+
+## [3.94.0]
+
+- ✨ **Broader model and provider support:** Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.
+- 🔐 **More flexible MCP OAuth:** Configure static OAuth client settings, use custom callback paths, discover authentication details from `WWW-Authenticate`, and see callback failures before retrying.
+- 🧭 **Smoother chats and long sessions:** Rename tasks in history, drag files into chat without holding Shift, reduce memory retained during long sessions, and keep subtask links and replaced webviews stable.
+
+### Broader Model and Provider Support
+
+- Add Claude Haiku 5.5 to the Anthropic provider (#2208 by @app/zoomote2, PR #2212 by @app/zoomote2)
+- Add runtime image input support to VS Code language models (PR #2159 by @simurg79)
+- Add image input conversion and shim data parts for VS Code language models (PR #2196 by @simurg79)
+- Update VS Code language model metadata and regression tests (PR #2255 by @simurg79)
+- Add opt-in temperature support for OpenCode Go Responses models (#2055 by @AntzCode, PR #2160 by @AntzCode)
+- Add abort-signal support for Anthropic, Anthropic Vertex, xAI, and MiniMax (PR #1293 by @easonLiangWorldedtech)
+- Add abort-signal support for VS Code language models (PR #1300 by @easonLiangWorldedtech)
+- Add abort-signal support for Gemini, Mistral, and LiteLLM (PR #1303 by @easonLiangWorldedtech)
+- Add ensureModelFetched to the six catalog providers (PR #2191 by @p12tic)
+- Resolve the CLI model ID through provider definitions (PR #2192 by @p12tic)
+- Count compatible cache reads for OpenAI (#1591 by @GeenccMustafa, PR #1662 by @PierrunoYT)
+
+### More Flexible MCP OAuth
+
+- Add static OAuth client settings for MCP servers (#2096 by @SoccerField24x7, PR #2129 by @SoccerField24x7)
+- Support custom MCP OAuth callback paths and WWW-Authenticate discovery (#2218 by @sdbrother0, PR #2219 by @sdbrother0)
+- Report MCP OAuth callback failures before retrying (#2187 by @SoccerField24x7, PR #2238 by @SoccerField24x7)
+
+### Smoother Chats and Long Sessions
+
+- Rename tasks in history (#2112 by @designPrj, PR #2122 by @designPrj)
+- Allow dragging files into the chat input without holding Shift (#2139 by @juneleung, PR #2184 by @app/zoomote2)
+- Reduce chat memory retained during long sessions (PR #2217 by @app/zoomote2)
+- Preserve subtask link identities (PR #2228 by @simurg79)
+- Dispose view listeners and ignore stale views when the webview is replaced (#2205 by @edelauna, PR #2213 by @app/zoomote2)
+- Replace dispatch lock booleans with DispatchState (#374 by @edelauna, PR #2198 by @edelauna)
+- Treat apiConfiguration as always defined in the webview (PR #2234 by @p12tic)
+
+### Testing and Repository Automation
+
+- Use the real VS Code toolkit in Playwright visual baselines (#2105 by @edelauna, PR #2163 by @app/zoomote2)
+- Fix five webview visual tests that failed on every pull request (#2206 by @edelauna, PR #2209 by @app/zoomote2)
+- Link review gate Details to the workflow run (PR #2204 by @app/zoomote2)
+- Move the release kickoff to 12pm EST (PR #2190 by @app/zoomote2)
+
+### Dependencies and Maintenance
+
+- Update build, lint, and test tooling (PR #2101 by @app/renovate)
+- Update AI SDK core and providers (PR #2103 by @app/renovate)
+- Update @modelcontextprotocol/sdk to v1.32.0 [security] (PR #2131 by @app/renovate)
+- Update @next/eslint-plugin-next to v15.5.28 (PR #2132 by @app/renovate)
+- Update @types/node (PR #2135 by @app/renovate)
+- Update esbuild-wasm to v0.28.2 (PR #2137 by @app/renovate)
+- Update undici to v6.29.1 [security] (PR #2169 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.92.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.94.0 feature (PR #2166 by @taltas)
+
 ## [3.92.0]
 
 - ✨ **Faster model choice and stronger model support:** Switch models from the chat composer. Use Claude Haiku 5.5 on Amazon Bedrock, get more accurate Kimi K3 capabilities on OpenRouter, and use corrected Gemini 4 Argon limits on Vercel AI Gateway.
