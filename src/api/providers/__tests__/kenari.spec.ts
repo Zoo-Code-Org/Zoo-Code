@@ -345,6 +345,25 @@ describe("KenariHandler", () => {
 			await expect(handler.completePrompt("ping")).rejects.toThrow("Kenari completion error: boom")
 		})
 
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const handler = new KenariHandler(mockOptions)
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("ping", { abortSignal: signal, timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+		})
+
+		it("sends a single-argument request when no cancellation or deadline is given", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const handler = new KenariHandler(mockOptions)
+
+			await handler.completePrompt("ping", { timeoutMs: Number.NaN })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything())
+		})
+
 		it("re-throws non-Error rejections unchanged", async () => {
 			mockCreate.mockRejectedValue("string failure")
 			const handler = new KenariHandler(mockOptions)

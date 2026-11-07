@@ -76,6 +76,12 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
+import {
+	cancelSessionTitle,
+	cancelSessionTitlesForProvider,
+	drainSessionTitles,
+	type SessionTitleApplyResult,
+} from "../task/session-title"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
 import {
@@ -1000,6 +1006,11 @@ export class ClineProvider
 		this.skillsManager = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
+		// Cancel and drain title generation this provider owns before releasing the
+		// history store, so an in-flight request or timer cannot write through the
+		// disposed store afterwards.
+		cancelSessionTitlesForProvider(this)
+		await drainSessionTitles(this)
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
@@ -1013,6 +1024,15 @@ export class ClineProvider
 
 	public get isViewVisible(): boolean {
 		return this.view?.visible === true
+	}
+
+	/**
+	 * True once disposal has started. Work started after this point (such as a
+	 * session title for a task still registering) must not touch the provider
+	 * or its history store.
+	 */
+	public get isDisposed(): boolean {
+		return this._disposed
 	}
 
 	public static getVisibleInstance(): ClineProvider | undefined {
@@ -2809,6 +2829,7 @@ export class ClineProvider
 	 * clears it so the history falls back to the original prompt.
 	 */
 	async renameTaskWithId(id: string, title: string | undefined) {
+		cancelSessionTitle(id)
 		if (!this.taskHistoryStore.get(id)) {
 			this.log(`[renameTaskWithId] task ${id} not found in history`)
 			return
@@ -2820,6 +2841,9 @@ export class ClineProvider
 		await this.taskHistoryStore.atomicReadAndUpdate(id, (historyItem) => ({
 			...historyItem,
 			title: trimmed ? trimmed : undefined,
+			// Persist the clear intent: an empty title is otherwise indistinguishable from a
+			// task that never had one, which lets another host's pending auto title win.
+			titleCleared: trimmed ? undefined : true,
 		}))
 		this.recentTasksCache = undefined
 
@@ -2828,6 +2852,60 @@ export class ClineProvider
 			if (updatedItem) {
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 			}
+		}
+	}
+
+	/*
+	 * Applies an auto-generated session title, but only while the item still
+	 * carries its default name. The title check runs inside the store's
+	 * lock and re-reads the title on disk, so a manual rename that lands while a title is
+	 * generating always wins and is never overwritten. Returns "conflict"
+	 * when nothing was applied (an existing title won, or the title was
+	 * blank); throws on transient write failures so the caller can retry.
+	 */
+	async applySessionTitle(id: string, title: string): Promise<SessionTitleApplyResult> {
+		const trimmed = title.trim()
+		if (!trimmed) {
+			return "conflict"
+		}
+
+		const result = await this.taskHistoryStore.setTitleIfUnset(id, trimmed)
+		if (result === "missing") {
+			// The history item has not been persisted yet; the caller keeps the title and retries.
+			return "not-ready"
+		}
+		if (result === "conflict") {
+			// The store refreshed its cache with the winning manual record. Push it so this
+			// window shows the manual title instead of waiting for another history refresh.
+			await this.broadcastCachedTaskHistoryItem(id)
+			return "conflict"
+		}
+
+		this.recentTasksCache = undefined
+
+		if (this.isViewLaunched) {
+			const updatedItem = this.taskHistoryStore.get(id)
+			// Stryker disable next-line ConditionalExpression: equivalent mutant, setTitleIfUnset guarantees the item is in the cache
+			if (updatedItem) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+			}
+		}
+
+		return "applied"
+	}
+
+	/**
+	 * Broadcasts the cached record for a task when one exists. Used when a manual
+	 * write won a race and the webview still shows the pre-race record.
+	 */
+	private async broadcastCachedTaskHistoryItem(id: string): Promise<void> {
+		if (!this.isViewLaunched) {
+			return
+		}
+		const cachedItem = this.taskHistoryStore.get(id)
+		if (cachedItem) {
+			this.recentTasksCache = undefined
+			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: cachedItem })
 		}
 	}
 
@@ -2844,6 +2922,7 @@ export class ClineProvider
 	// this function deletes a task from task history, and deletes its checkpoints and delete the task folder
 	// If the task has subtasks (childIds), they will also be deleted recursively
 	async deleteTaskWithId(id: string, cascadeSubtasks: boolean = true) {
+		cancelSessionTitle(id)
 		try {
 			await this.getTaskWithId(id)
 
@@ -3637,9 +3716,10 @@ export class ClineProvider
 	 * Updates a task in the task history and optionally broadcasts the updated history to the webview.
 	 * Now delegates to TaskHistoryStore for per-task file persistence.
 	 *
-	 * This writer never owns the `title` field: `title` is written only by the rename path
-	 * (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`). Callers here build items
-	 * from snapshots read before taking the store lock, so any title they carry can be stale.
+	 * This writer never owns the `title` field: `title` is written only by the title-owning paths
+	 * (`renameTaskWithId` via `atomicReadAndUpdate` and `applySessionTitle` via `setTitleIfUnset`).
+	 * Callers here build items from snapshots read before taking the store lock, so any title they
+	 * carry can be stale.
 	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
@@ -3650,7 +3730,8 @@ export class ClineProvider
 
 		// Drop the snapshot's title so upsertCore preserves the value held under the store lock
 		// instead of treating a stale title as a changed field and reverting a concurrent rename.
-		const { title: _title, ...itemWithoutTitle } = item
+		// The manual-clear intent is owned by `renameTaskWithId` for the same reason.
+		const { title: _title, titleCleared: _titleCleared, ...itemWithoutTitle } = item
 
 		const history = await this.taskHistoryStore.upsert(itemWithoutTitle)
 		this.recentTasksCache = undefined

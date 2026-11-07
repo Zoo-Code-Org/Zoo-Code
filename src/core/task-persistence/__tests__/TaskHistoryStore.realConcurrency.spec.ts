@@ -137,6 +137,71 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
+	it("keeps a manual rename that commits while the automatic title waits on the file lock", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-title-race-"))
+		// storeA generates the session title; storeB is a second window that renames the task.
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+		const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		let signalRenameRead!: () => void
+		const renameRead = new Promise<void>((resolve) => {
+			signalRenameRead = resolve
+		})
+		let releaseRename!: () => void
+		const renameCanCommit = new Promise<void>((resolve) => {
+			releaseRename = resolve
+		})
+		let pauseRenameRead = false
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+
+			// Pause the rename inside the per-file lock, after its disk read and before
+			// its commit, so the automatic title write is queued behind the rename.
+			vi.mocked(fs.readFile).mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+				const result = await actualFs.readFile(...args)
+				if (pauseRenameRead && args[0] === filePath) {
+					pauseRenameRead = false
+					signalRenameRead()
+					await renameCanCommit
+				}
+				return result
+			})
+
+			pauseRenameRead = true
+			const rename = storeB.atomicReadAndUpdate("shared-task", (current) => ({
+				...current,
+				title: "Manual title",
+			}))
+			await renameRead
+
+			const autoTitle = storeA.setTitleIfUnset("shared-task", "Auto title")
+			let autoSettled = false
+			void autoTitle.finally(() => {
+				autoSettled = true
+			})
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			// The automatic write must stay queued while the rename holds the lock.
+			expect(autoSettled).toBe(false)
+
+			releaseRename()
+			await rename
+			await expect(autoTitle).resolves.toBe("conflict")
+
+			const onDisk = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+			expect(onDisk.title).toBe("Manual title")
+			expect(storeA.get("shared-task")?.title).toBe("Manual title")
+		} finally {
+			vi.mocked(fs.readFile).mockImplementation(actualFs.readFile)
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("reports a bounded error when one store never reaches the write barrier", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missed-barrier-"))
 		const storeA = new TaskHistoryStore(storagePath)

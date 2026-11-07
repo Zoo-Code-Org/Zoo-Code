@@ -402,6 +402,29 @@ describe("PoeHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("forwards the abort signal and deadline to the generation", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockResolvedValue({ text: "generated response" })
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("complete this", { abortSignal: signal, timeoutMs: 5_000 })
+
+			const options = mockGenerateText.mock.calls[0][0]
+			// The deadline is merged into a per-request signal that still follows the caller's stop.
+			expect(options.abortSignal).not.toBe(signal)
+			expect(options.abortSignal?.aborted).toBe(false)
+		})
+
+		it("does not start a generation when the caller already aborted", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockClear()
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(handler.completePrompt("complete this", { abortSignal: controller.signal })).rejects.toThrow()
+			expect(mockGenerateText).not.toHaveBeenCalled()
+		})
+
 		it("returns generated text", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 

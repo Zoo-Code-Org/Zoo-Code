@@ -973,7 +973,42 @@ describe("OpenRouterHandler", () => {
 		})
 	})
 
+	// Installs a typed completion double without widening the client to `any`.
+	const installMockClient = (create: ReturnType<typeof vitest.fn>) => {
+		;(OpenAI as unknown as { prototype: { chat: unknown } }).prototype.chat = {
+			completions: { create },
+		}
+	}
+
 	describe("completePrompt", () => {
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const { signal } = new AbortController()
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			installMockClient(mockCreate)
+
+			await handler.completePrompt("test prompt", { abortSignal: signal, timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.openRouterModelId }), {
+				headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+				signal,
+				timeout: 5_000,
+			})
+		})
+
+		it("does not start a request when the caller already aborted", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn()
+			installMockClient(mockCreate)
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("returns correct response", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockResponse = { choices: [{ message: { content: "test completion" } }] }

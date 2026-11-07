@@ -14,6 +14,7 @@ import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, toSdkTimeoutMs, withSdkRequestOptions } from "./utils/abort-signal"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -212,7 +213,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info: modelInfo } = this.getModel()
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
@@ -226,7 +227,19 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 
 		try {
-			const response = await this.client.chat.completions.create(params)
+			// Forward the caller's cancellation and deadline to the request itself, so a
+			// superseded title request stops instead of running to the client default timeout.
+			// The OpenAI SDK rejects a present-but-undefined or unusable `timeout`, so only a
+			// real value is forwarded, rounded and capped like mergeAbortSignalAndTimeout.
+			const requestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				requestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+			const response = await this.client.chat.completions.create(params, ...withSdkRequestOptions(requestOptions))
 
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const responseAny = response as any

@@ -34,6 +34,7 @@ export const historyItemSchema = z.object({
 	ts: z.number(),
 	task: z.string(),
 	title: z.string().optional(), // User-assigned display name; `task` keeps the original prompt
+	titleCleared: z.boolean().optional(), // Persisted manual clear: blocks an automatically generated title
 	tokensIn: z.number(),
 	tokensOut: z.number(),
 	cacheWrites: z.number().optional(),

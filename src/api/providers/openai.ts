@@ -29,6 +29,7 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, throwIfAborted, toSdkTimeoutMs } from "./utils/abort-signal"
 
 type OpenAiUsage =
 	| {
@@ -354,8 +355,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
+			// An already-cancelled operation must not start a request.
+			throwIfAborted(options?.abortSignal)
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
 			const modelInfo = model.info
@@ -372,10 +375,19 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let response
 			try {
-				response = await this.client.chat.completions.create(
-					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				// Forward the caller's cancellation and deadline to the request itself, so a
+				// superseded title request stops instead of running to the client default timeout.
+				const sdkRequestOptions: OpenAI.RequestOptions = isAzureAiInference
+					? { path: OPENAI_AZURE_AI_INFERENCE_PATH }
+					: {}
+				if (options?.abortSignal !== undefined) {
+					sdkRequestOptions.signal = options.abortSignal
+				}
+				const timeoutMs = options?.timeoutMs
+				if (hasUsableTimeout(timeoutMs)) {
+					sdkRequestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+				}
+				response = await this.client.chat.completions.create(requestOptions, sdkRequestOptions)
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}

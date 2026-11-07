@@ -942,6 +942,25 @@ describe("OpenAiHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("forwards the abort signal and deadline to the completion request", async () => {
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("Test prompt", { abortSignal: signal, timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+		})
+
+		it("does not start a request when the caller already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+			mockCreate.mockClear()
+
+			await expect(handler.completePrompt("Test prompt", { abortSignal: controller.signal })).rejects.toThrow(
+				"This operation was aborted",
+			)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")

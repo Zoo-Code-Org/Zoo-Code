@@ -29,6 +29,7 @@ import type {
 } from "../index"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
+import { hasUsableTimeout, throwIfAborted, toSdkTimeoutMs, withSdkRequestOptions } from "./utils/abort-signal"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -249,7 +250,9 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// An already-cancelled operation must not start a request.
+		throwIfAborted(options?.abortSignal)
 		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
@@ -263,7 +266,19 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 
 		let response: OpenAI.Chat.ChatCompletion
 		try {
-			response = await this.client.chat.completions.create(completionParams)
+			// Forward the caller's cancellation and deadline to the request itself.
+			const sdkRequestOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal !== undefined) {
+				sdkRequestOptions.signal = options.abortSignal
+			}
+			const timeoutMs = options?.timeoutMs
+			if (hasUsableTimeout(timeoutMs)) {
+				sdkRequestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			}
+			response = await this.client.chat.completions.create(
+				completionParams,
+				...withSdkRequestOptions(sdkRequestOptions),
+			)
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}

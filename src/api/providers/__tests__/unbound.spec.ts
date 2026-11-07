@@ -204,6 +204,29 @@ describe("UnboundHandler", () => {
 		)
 	})
 
+	type OpenAiClientStub = { chat: { completions: { create: ReturnType<typeof vi.fn> } } }
+
+	it("forwards the abort signal and deadline to the completion request", async () => {
+		const mockCreate = (OpenAI as unknown as () => OpenAiClientStub)().chat.completions.create
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handler = new UnboundHandler({ unboundApiKey: "test-key", unboundModelId: "openai/gpt-4o" })
+		const { signal } = new AbortController()
+
+		await handler.completePrompt("Write a haiku", { abortSignal: signal, timeoutMs: 5_000 })
+
+		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal, timeout: 5_000 })
+	})
+
+	it("sends a single-argument request when no cancellation or deadline is given", async () => {
+		const mockCreate = (OpenAI as unknown as () => OpenAiClientStub)().chat.completions.create
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handler = new UnboundHandler({ unboundApiKey: "test-key", unboundModelId: "openai/gpt-4o" })
+
+		await handler.completePrompt("Write a haiku", { timeoutMs: -1 })
+
+		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything())
+	})
+
 	describe("model catalog", () => {
 		it("reports its cache scope", () => {
 			const handler = new UnboundHandler({ unboundApiKey: "test-key", unboundModelId: "openai/gpt-4o" })

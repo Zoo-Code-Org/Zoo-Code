@@ -43,6 +43,7 @@ import type {
 	SingleCompletionHandler,
 } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import { hasUsableTimeout, resolveModelWithAbort, throwIfAborted, toSdkTimeoutMs } from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -600,8 +601,16 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
-		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
+	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+		// A cancelled operation must not start a request, and model discovery must not outlive
+		// the caller's cancellation: both run under the caller's signal.
+		throwIfAborted(options?.abortSignal)
+		const {
+			id: modelId,
+			maxTokens,
+			temperature,
+			reasoning,
+		} = await resolveModelWithAbort(() => this.fetchModel(), options?.abortSignal, this.providerName)
 
 		const completionParams: OpenRouterChatCompletionParams = {
 			model: modelId,
@@ -622,14 +631,27 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		const requestOptions = modelId.startsWith("anthropic/")
-			? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-			: undefined
+		const requestOptions: OpenAI.RequestOptions = {}
+		if (modelId.startsWith("anthropic/")) {
+			requestOptions.headers = { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" }
+		}
+		// Propagate the caller's cancellation and deadline to the request itself, so a
+		// superseded title request stops instead of running to the client default timeout.
+		if (options?.abortSignal !== undefined) {
+			requestOptions.signal = options.abortSignal
+		}
+		const timeoutMs = options?.timeoutMs
+		if (hasUsableTimeout(timeoutMs)) {
+			requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+		}
 
 		let response
 
 		try {
-			response = await this.client.chat.completions.create(completionParams, requestOptions)
+			response = await this.client.chat.completions.create(
+				completionParams,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 		} catch (error) {
 			// Try to parse as OpenRouter error structure using Zod
 			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
