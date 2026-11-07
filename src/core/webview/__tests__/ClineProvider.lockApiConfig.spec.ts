@@ -331,6 +331,8 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// These tests stub providerSettingsManager; without an opening snapshot, mode lookups read it.
+		provider["initialModeConfigIds"] = Promise.resolve(undefined)
 
 		// Mock getMcpHub method
 		provider.getMcpHub = vi.fn().mockReturnValue({
