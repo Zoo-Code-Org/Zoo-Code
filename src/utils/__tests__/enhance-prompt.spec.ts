@@ -118,6 +118,23 @@ describe("enhancePrompt", () => {
 		expect(succeeding.dispose).toHaveBeenCalledOnce()
 	})
 
+	it("settles on abort and disposes the handler while the provider request is still pending", async () => {
+		// Model discovery or provider preparation may never settle; the caller's stop must still
+		// release the handler and its listeners.
+		const pendingHandler = createCompletionHandlerDouble({
+			completePrompt: vi.fn(() => new Promise<string>(() => {})),
+			dispose: vi.fn(),
+		})
+		vi.mocked(buildApiHandler).mockReturnValueOnce(pendingHandler)
+		const abortController = new AbortController()
+
+		const completion = singleCompletionHandler(mockApiConfig, "a", { abortSignal: abortController.signal })
+		abortController.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(pendingHandler.dispose).toHaveBeenCalledOnce()
+	})
+
 	it("disposes the handler when the provider does not support prompt enhancement", async () => {
 		const unsupported = createApiHandlerDouble({ dispose: vi.fn() })
 		vi.mocked(buildApiHandler).mockReturnValueOnce(unsupported)

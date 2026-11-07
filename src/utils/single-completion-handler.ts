@@ -1,6 +1,7 @@
 import type { ProviderSettings } from "@roo-code/types"
 
 import { buildApiHandler, disposeApiHandler, SingleCompletionHandler, type CompletePromptOptions } from "../api"
+import { settleOnAbort } from "../api/providers/utils/abort-signal"
 
 /**
  * Enhances a prompt using the configured API without creating a full Cline instance or task history.
@@ -26,7 +27,11 @@ export async function singleCompletionHandler(
 			throw new Error("The selected API provider does not support prompt enhancement")
 		}
 
-		return await (handler as SingleCompletionHandler).completePrompt(promptText, options)
+		const completion = (handler as SingleCompletionHandler).completePrompt(promptText, options)
+		// Settle on the caller's stop even when the provider never returns (model discovery or a
+		// preparation step can outlive it), so the handler below is disposed and its listeners are
+		// released instead of being retained by a request nobody waits for any more.
+		return await settleOnAbort(completion, options?.abortSignal, apiConfiguration.apiProvider)
 	} finally {
 		// Handlers such as VS Code LM / GitHub Copilot hold listeners that must be released.
 		disposeApiHandler(handler)

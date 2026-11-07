@@ -145,9 +145,11 @@ describe("KimiCodeHandler", () => {
 
 		await expect(handler.completePrompt("test", { abortSignal: signal, timeoutMs: 5_000 })).resolves.toBe("retried")
 
-		// Both the initial attempt and the retry after the forced refresh carry the options.
-		expect(createCompletion).toHaveBeenNthCalledWith(1, expect.anything(), { signal, timeout: 5_000 })
-		expect(createCompletion).toHaveBeenNthCalledWith(2, expect.anything(), { signal, timeout: 5_000 })
+		// Both the initial attempt and the retry after the forced refresh carry the caller's own signal.
+		expect(createCompletion.mock.calls[0][1].signal).toBe(signal)
+		expect(createCompletion.mock.calls[0][1].timeout).toBe(5_000)
+		expect(createCompletion.mock.calls[1][1].signal).toBe(signal)
+		expect(createCompletion.mock.calls[1][1].timeout).toBe(5_000)
 	})
 
 	it("does not start preparation when the caller already aborted", async () => {
@@ -157,6 +159,26 @@ describe("KimiCodeHandler", () => {
 
 		await expect(handler.completePrompt("test", { abortSignal: controller.signal })).rejects.toThrow()
 		expect(mockGetAccessToken).not.toHaveBeenCalled()
+	})
+
+	it("stops before model discovery and completion when aborted during token resolution", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		let resolveToken!: (token: string) => void
+		mockGetAccessToken.mockReturnValueOnce(
+			new Promise<string>((resolve) => {
+				resolveToken = resolve
+			}),
+		)
+		const controller = new AbortController()
+
+		const completion = handler.completePrompt("test", { abortSignal: controller.signal })
+		await vi.waitFor(() => expect(resolveToken).toBeDefined())
+		controller.abort()
+		resolveToken("oauth-token")
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		// The cancelled request never reaches model discovery or the provider.
+		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 
 	it("does not retry on 401 when using API key auth", async () => {
