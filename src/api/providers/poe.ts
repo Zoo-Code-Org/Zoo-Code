@@ -248,6 +248,11 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		// bounds the request (timeoutMs <= 0 disables it). The configured provider request timeout
 		// is NOT applied here, matching the pre-PR behavior of this method.
 		const callerAbortSignal = options?.abortSignal
+		// The timeout decision is taken once, here, and the classification below reads this
+		// local rather than options.timeoutMs: the caller still holds that object and can
+		// rewrite timeoutMs while the request is in flight, which would otherwise make our
+		// own fired TimeoutError read as a plain caller abort.
+		const configuredTimeoutUsable = hasUsableTimeout(options?.timeoutMs)
 		const mergedAbortSignal = mergeAbortSignalAndTimeout(callerAbortSignal, options?.timeoutMs)
 		// The shared timeout error keeps the series contract (name TimeoutError, distinct from the
 		// abort contract) instead of a provider-local closure, as mistral.ts and gemini.ts do.
@@ -263,7 +268,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		// wins, which is the series contract.
 		const abortedByTimeout = () =>
 			Boolean(mergedAbortSignal?.aborted) &&
-			hasUsableTimeout(options?.timeoutMs) &&
+			configuredTimeoutUsable &&
 			(mergedAbortSignal?.reason as { name?: string } | undefined)?.name === "TimeoutError"
 		let text: string
 		try {
