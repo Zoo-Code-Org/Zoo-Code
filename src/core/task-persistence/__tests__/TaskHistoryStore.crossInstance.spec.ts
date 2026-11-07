@@ -460,7 +460,7 @@ describe("TaskHistoryStore cross-instance safety", () => {
 
 			// The user renames in window A; window B's background generation finishes later.
 			await storeA.upsert({ ...item, title: "Renamed by user" })
-			await storeB.reconcile()
+			await storeB.reconcile({ forceRefresh: true })
 
 			await expect(storeB.setTitleIfEmpty("shared-rename", "Generated title")).resolves.toBeUndefined()
 			expect(storeB.get("shared-rename")?.title).toBe("Renamed by user")

@@ -740,7 +740,6 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 
 		it("gives up quietly after the retries are exhausted", async () => {
-			const logSpy = vi.spyOn(provider, "log")
 			vi.spyOn(provider.taskHistoryStore, "setTitleIfEmpty").mockRejectedValue(new Error("still missing"))
 
 			await expect(
