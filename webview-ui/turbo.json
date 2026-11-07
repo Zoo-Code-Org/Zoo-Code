@@ -4,12 +4,23 @@
 	"tasks": {
 		"build": {
 			"outputs": ["../src/webview-ui/**"],
-			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/src/shared/**", "$TURBO_ROOT$/src/package.json"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/src/shared/**",
+				"$TURBO_ROOT$/src/core/**",
+				"$TURBO_ROOT$/src/services/**",
+				"$TURBO_ROOT$/src/package.json"
+			],
 			"env": ["PKG_RELEASE_CHANNEL", "VSCODE_TEXTMATE_DEBUG"]
 		},
 		"check-types": {
 			"dependsOn": ["@roo-code/types#build"],
-			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/src/shared/**"]
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/src/shared/**",
+				"$TURBO_ROOT$/src/core/**",
+				"$TURBO_ROOT$/src/services/**"
+			]
 		}
 	}
 }

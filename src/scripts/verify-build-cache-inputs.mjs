@@ -53,11 +53,28 @@ const git = (gitArgs) => {
 	if (result.status !== 0) throw gitError(result)
 }
 
-const worktreeCommit = () => {
-	const result = spawnSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" })
-	if (result.status === 0 && result.stdout.trim()) return result.stdout.trim()
+const trackedTreeStatus = () =>
+	spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=no"], { cwd: root, encoding: "utf8" })
+
+// Probe the working tree so local runs validate uncommitted task edits. CI
+// runs on a clean tree, where stash create exits without a SHA and this
+// falls back to HEAD. git stash create can exit 1 with empty output when
+// stale index metadata refreshes to a clean tracked tree. Confirm a clean
+// tracked tree before trusting that exit.
+const stashCommit = (result, trackedTree = trackedTreeStatus) => {
+	if (result.status === 0) return result.stdout.trim() || "HEAD"
+	const quietExit = result.status === 1 && !result.error && !result.signal && !result.stdout && !result.stderr
+	if (!quietExit) throw gitError(result)
+	const status = trackedTree()
+	if (status.status !== 0) throw gitError(status)
+	if (status.stdout.trim() !== "") {
+		const changes = status.stdout.trim()
+		throw new Error(`git stash create found no changes, but git status reports tracked changes:\n${changes}`)
+	}
 	return "HEAD"
 }
+
+const worktreeCommit = () => stashCommit(spawnSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" }))
 
 const hashes = (env = process.env) => {
 	const resolvedArgs = turboArgs.map((arg) => (arg === "__PROBE_ROOT__" ? probeRoot : arg))
@@ -113,6 +130,36 @@ const expectChanged = (changed, expected, label) => {
 	)
 }
 
+test("stash commit probe rejects git failures and keeps the clean-tree fallback", () => {
+	const cleanTree = () => ({ status: 0, stdout: "" })
+	const dirtyTree = () => ({ status: 0, stdout: " M src/utils/path.ts\n" })
+	const brokenTree = () => ({ status: 128, stdout: "", stderr: "fatal: unable to read the index" })
+	const failures = [
+		{ status: 128, stdout: "", stderr: "fatal: not a git repository" },
+		{ status: null, error: new Error("spawn git ENOENT") },
+		{ status: 1, signal: "SIGTERM", stdout: "", stderr: "" },
+		{ status: 1, stdout: "unexpected output", stderr: "" },
+	]
+
+	assert.equal(stashCommit({ status: 0, stdout: "0f53a1c\n" }, cleanTree), "0f53a1c")
+	assert.equal(stashCommit({ status: 0, stdout: "\n" }, cleanTree), "HEAD")
+	assert.equal(stashCommit({ status: 1, stdout: "", stderr: "" }, cleanTree), "HEAD")
+	for (const result of failures) {
+		assert.throws(
+			() => stashCommit(result, cleanTree),
+			(error) => error.message.length > 0,
+		)
+	}
+	assert.throws(
+		() => stashCommit({ status: 1, stdout: "", stderr: "" }, dirtyTree),
+		/git status reports tracked changes/,
+	)
+	assert.throws(
+		() => stashCommit({ status: 1, stdout: "", stderr: "" }, brokenTree),
+		/fatal: unable to read the index/,
+	)
+})
+
 test("build cache input contract", async (context) => {
 	probeRoot = mkdtempSync(resolve(tmpdir(), "zoo-build-cache-probe-"))
 	let worktreeAdded = false
@@ -160,6 +207,28 @@ test("build cache input contract", async (context) => {
 				"shared source edit",
 			)
 		})
+
+		for (const path of [
+			"src/core/prompts/sections/custom-instructions.ts",
+			"src/services/roo-config/index.ts",
+			"src/services/destructive-command-guard/runner.ts",
+		]) {
+			await context.test(`webview build and typecheck hash shared imports outside src/shared: ${path}`, () => {
+				const before = hashesOnly()
+				const after = withChangedFile(path, appendComment, hashesOnly)
+				expectChanged(
+					changedTasks(before, after),
+					[
+						"@roo-code/vscode-webview#build",
+						"@roo-code/vscode-webview#check-types",
+						"zoo-code#bundle",
+						"zoo-code#check-types",
+						"zoo-code#vsix",
+					],
+					`${path} edit`,
+				)
+			})
+		}
 
 		await context.test("webview build hashes its entry HTML", () => {
 			const before = hashesOnly()
