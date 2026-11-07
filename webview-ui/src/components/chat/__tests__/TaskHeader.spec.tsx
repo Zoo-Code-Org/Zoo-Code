@@ -38,9 +38,11 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
-	currentTaskItem: { id: string } | null
+	currentTaskItem: { id: string; task?: string; title?: string } | null
 	clineMessages: any[]
 	taskHistory: any[]
+	timeFormat?: "auto" | "12h" | "24h"
+	dateFormat?: "auto" | "mdy" | "dmy" | "ymd"
 } = {
 	apiConfiguration: {
 		apiProvider: providerIdentifiers.anthropic,
@@ -148,6 +150,82 @@ describe("TaskHeader", () => {
 		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
 		expect(condenseButton).toBeDefined()
 		expect(condenseButton?.querySelector("svg")).toBeInTheDocument()
+	})
+
+	describe("when the task was sent", () => {
+		const SENT = new Date(2024, 2, 7, 14, 41, 0, 0).getTime() // years back: a date, not "Today"
+		const expand = () => fireEvent.click(screen.getByText("Test task"))
+		const task = { ...defaultProps.task, ts: SENT }
+
+		afterEach(() => {
+			delete mockExtensionState.timeFormat
+			delete mockExtensionState.dateFormat
+		})
+
+		it("shows the time under the expanded task, in the chosen time and date format", () => {
+			Object.assign(mockExtensionState, { timeFormat: "24h", dateFormat: "ymd" })
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+
+			const timestamp = screen.getByTestId("message-timestamp")
+			expect(timestamp.textContent).toContain("2024-03-07")
+			expect(timestamp.textContent).toContain("14:41")
+			expect(timestamp).toHaveAttribute("datetime", new Date(SENT).toISOString())
+		})
+
+		it("follows a different format", () => {
+			Object.assign(mockExtensionState, { timeFormat: "12h", dateFormat: "dmy" })
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+
+			const text = screen.getByTestId("message-timestamp").textContent!
+			expect(text).toContain("07/03/2024")
+			expect(text).toMatch(/2:41\s?PM/i)
+		})
+
+		it.each([
+			["zero", 0],
+			["negative", -1],
+			["not a number", Number.NaN],
+			["beyond the range of a date", 8.64e15 + 1],
+		])("shows no time, and still the expanded task, when the task's time is %s", (_name, ts) => {
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={{ ...defaultProps.task, ts }} />)
+
+			expand()
+
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+			expect(screen.queryByTestId("message-timestamp")).not.toBeInTheDocument()
+		})
+
+		it("leaves no empty block under the expanded task when the time is invalid", () => {
+			const valid = renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+			const withTime = valid.container.querySelectorAll("div").length
+			valid.unmount()
+
+			const invalid = renderWithExtensionState(
+				<TaskHeader {...defaultProps} task={{ ...defaultProps.task, ts: 0 }} />,
+			)
+			expand()
+
+			expect(invalid.container.querySelectorAll("div").length).toBe(withTime - 1)
+		})
+
+		it("is not shown while the task is collapsed", () => {
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+
+			expect(screen.queryByTestId("message-timestamp")).not.toBeInTheDocument()
+		})
+
+		it("keeps the task expanded when the time is clicked, as for the other controls under the task", () => {
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+
+			fireEvent.click(screen.getByTestId("message-timestamp"))
+
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+		})
 	})
 
 	it("should call handleCondenseContext when condense context button is clicked", () => {
@@ -269,6 +347,68 @@ describe("TaskHeader", () => {
 
 			expect(screen.getByText("chat:task.waitingOnSubtask")).toBeInTheDocument()
 			expect(screen.queryByText("history:abandonSubtask")).not.toBeInTheDocument()
+		})
+	})
+
+	describe("Rename", () => {
+		beforeEach(() => {
+			mockPostMessage.mockClear()
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task" }
+		})
+
+		afterEach(() => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+		})
+
+		it("shows the custom title instead of the first message when the task is renamed", () => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task", title: "My title" }
+			renderTaskHeader()
+
+			expect(screen.getByText("My title")).toBeInTheDocument()
+			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
+		})
+
+		it.each([
+			["the custom title", "My title", "My title"],
+			["the default label without a custom title", undefined, "chat:task.title"],
+		])("shows %s as the expanded heading", (_label, title, expected) => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task", title }
+			renderTaskHeader()
+			fireEvent.click(screen.getByText(title ?? "Test task"))
+
+			expect(screen.getByText(expected)).toHaveClass("font-bold")
+			expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+		})
+
+		it("closes the header editor on Escape without saving", () => {
+			renderTaskHeader()
+			fireEvent.click(screen.getByText("Test task"))
+			fireEvent.click(screen.getByTestId("rename-current-task-button"))
+
+			fireEvent.keyDown(screen.getByTestId("task-title-input"), { key: "Escape" })
+
+			expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
+		it("renames from the expanded header without collapsing it", () => {
+			renderTaskHeader()
+			fireEvent.click(screen.getByText("Test task"))
+
+			fireEvent.click(screen.getByTestId("rename-current-task-button"))
+			const input = screen.getByTestId("task-title-input")
+			fireEvent.click(input)
+			fireEvent.change(input, { target: { value: "Renamed" } })
+			fireEvent.keyDown(input, { key: "Enter" })
+
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "renameTaskWithId",
+				taskId: "test-task-id",
+				text: "Renamed",
+			})
+			expect(screen.queryByTestId("task-title-input")).not.toBeInTheDocument()
+			expect(screen.getByTestId("rename-current-task-button")).toBeInTheDocument()
 		})
 	})
 

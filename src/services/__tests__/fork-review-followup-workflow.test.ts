@@ -15,36 +15,43 @@ const workflow = parse(
 )
 const dispatchScript = workflow.jobs.dispatch.steps[0].with.script as string
 
-const SHA = "a".repeat(40)
+// Head commit and branch of fork PR #1662 (fork-owner/Zoo-Code), the run
+// documented in issue #2133.
+const SHA = "029ea76b91f0c784087989470c81ade55b13c82f"
+const HEAD_BRANCH = "fix/1591-openai-compatible-cache-reads"
 const OLD_SHA = "b".repeat(40)
 
 interface HarnessOptions {
 	workflowRunEvent?: string
-	fork?: boolean
 	associatedPrNumbers?: number[]
-	fallback?: "match" | "sha-mismatch" | "base-mismatch" | "none"
-	headRepository?: null
-	headSha?: string
+	fallback?: "match" | "sha-mismatch" | "ref-mismatch" | "base-mismatch" | "none"
+	headBranch?: string | null
+	headSha?: string | null
 	failDispatchFor?: number
 }
 
 function buildForkPr() {
 	return {
-		number: 1437,
+		number: 1662,
 		state: "open",
-		head: { sha: SHA, repo: { full_name: "contributor/Zoo-Code" } },
+		head: { ref: HEAD_BRANCH, sha: SHA, repo: { full_name: "fork-owner/Zoo-Code" } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 	}
 }
 
 /** Executes the embedded github-script follow-up against deterministic GitHub API doubles. */
 async function runFollowup(options: HarnessOptions = {}) {
-	const fork = options.fork ?? true
 	const pr = buildForkPr()
-	const listPullRequests = vi.fn(async ({ state }: { state?: string }) => {
+	// Like the GitHub API, honor a `head` filter ("owner:branch"). A base-owner filter
+	// matches no fork PR, so the broken request cannot pass the regression scenario.
+	const listPullRequests = vi.fn(async ({ state, head }: { state?: string; head?: string }) => {
 		if (state !== "open") return []
+		if (head !== undefined && head !== `fork-owner:${HEAD_BRANCH}`) return []
 		if (options.fallback === "match") return [pr]
 		if (options.fallback === "sha-mismatch") return [{ ...pr, head: { ...pr.head, sha: OLD_SHA } }]
+		if (options.fallback === "ref-mismatch") {
+			return [{ ...pr, head: { ...pr.head, ref: "some-other-branch" } }]
+		}
 		if (options.fallback === "base-mismatch") {
 			return [{ ...pr, base: { ...pr.base, repo: { full_name: "someone-else/Zoo-Code" } } }]
 		}
@@ -69,18 +76,21 @@ async function runFollowup(options: HarnessOptions = {}) {
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
 		payload: {
 			workflow_run: {
-				id: 987654,
+				// Fields copied from workflow run 39534658962, the read-only fork
+				// review run for PR #1662 documented in issue #2133. Fields the
+				// script never reads are trimmed. GitHub reports the base
+				// repository as head_repository on every pull_request_review run,
+				// even for fork PRs, and backfills pull_requests empty for them.
+				id: 39534658962,
 				event: options.workflowRunEvent ?? "pull_request_review",
 				pull_requests: (options.associatedPrNumbers ?? []).map((number) => ({ number })),
-				head_repository:
-					options.headRepository === null
-						? null
-						: {
-								owner: { login: fork ? "contributor" : "Zoo-Code-Org" },
-								fork,
-							},
-				head_branch: "feature/test",
-				head_sha: options.headSha ?? SHA,
+				head_repository: {
+					full_name: "Zoo-Code-Org/Zoo-Code",
+					owner: { login: "Zoo-Code-Org" },
+					fork: false,
+				},
+				head_branch: options.headBranch === undefined ? HEAD_BRANCH : options.headBranch,
+				head_sha: options.headSha === undefined ? SHA : options.headSha,
 			},
 		},
 	}
@@ -97,7 +107,7 @@ async function runFollowup(options: HarnessOptions = {}) {
 	return { listPullRequests, createWorkflowDispatch, info: core.info, setFailed: core.setFailed }
 }
 
-describe("fork review follow-up workflow (#2046, #2086)", () => {
+describe("fork review follow-up workflow (#2046, #2086, #2133)", () => {
 	it("listens to the label workflow without listing itself", () => {
 		expect(workflow.name).toBe("Label PR review state fork review follow-up")
 		expect(workflow.on.workflow_run.workflows).toEqual(["Label PR review state"])
@@ -121,26 +131,30 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 	})
 
 	it("dispatches a privileged reconciliation for the fork PR a read-only review run targeted", async () => {
-		// Fork runs backfill pull_requests empty, so the follow-up resolves the
-		// PR by exact head owner, branch, and SHA.
+		// Fork runs backfill pull_requests empty, and head_repository is the
+		// base repository (issue #2133), so the follow-up resolves the PR by
+		// exact head branch, SHA, and base repository.
 		const result = await runFollowup({ associatedPrNumbers: [], fallback: "match" })
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(
-			expect.objectContaining({ head: "contributor:feature/test", state: "open" }),
-		)
+		expect(result.listPullRequests).toHaveBeenCalledWith({
+			owner: "Zoo-Code-Org",
+			repo: "Zoo-Code",
+			state: "open",
+			per_page: 100,
+		})
 		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(1)
 		expect(result.createWorkflowDispatch).toHaveBeenCalledWith({
 			owner: "Zoo-Code-Org",
 			repo: "Zoo-Code",
 			workflow_id: "label-pr-review-state.yml",
 			ref: "main",
-			inputs: { pull_request_number: "1437" },
+			inputs: { pull_request_number: "1662" },
 		})
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	it("dispatches directly for runs whose pull_requests are populated", async () => {
-		const result = await runFollowup({ associatedPrNumbers: [1437] })
+		const result = await runFollowup({ associatedPrNumbers: [1662] })
 
 		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(1)
@@ -169,18 +183,28 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 		}
 	})
 
-	it("ignores a same-repository review run, which already wrote its labels", async () => {
-		const result = await runFollowup({ fork: false, associatedPrNumbers: [1437] })
+	it("dispatches for a same-repository review run, whose payload is indistinguishable from a fork run", async () => {
+		// Every pull_request_review run reports head_repository as the base
+		// repository with fork: false (issue #2133), so fork-ness cannot gate
+		// the dispatch. Same-repo PRs appear in pull_requests, but resolving
+		// through the fallback works for them too, and the dispatch is
+		// idempotent: the reconciliation writes the same labels.
+		const result = await runFollowup({ fallback: "match" })
 
-		expect(result.listPullRequests).not.toHaveBeenCalled()
-		expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
+		expect(result.createWorkflowDispatch).toHaveBeenCalledTimes(1)
+		expect(result.createWorkflowDispatch).toHaveBeenCalledWith(
+			expect.objectContaining({ inputs: { pull_request_number: "1662" } }),
+		)
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
-	it("dispatches nothing when no open PR matches the run's exact head", async () => {
-		const result = await runFollowup({ fallback: "sha-mismatch" })
+	it("dispatches nothing when no open PR matches the run's exact head branch and SHA", async () => {
+		for (const fallback of ["sha-mismatch", "ref-mismatch", "none"] as const) {
+			const result = await runFollowup({ fallback })
 
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
-		expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
+			expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+			expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
+		}
 	})
 
 	it("dispatches nothing when the matching PR targets another base repository", async () => {
@@ -190,8 +214,8 @@ describe("fork review follow-up workflow (#2046, #2086)", () => {
 		expect(result.createWorkflowDispatch).not.toHaveBeenCalled()
 	})
 
-	it("dispatches nothing when the run has no head repository or head SHA to resolve", async () => {
-		for (const options of [{ headRepository: null }, { headSha: "" }] as const) {
+	it("dispatches nothing when the run has no head branch or head SHA to resolve", async () => {
+		for (const options of [{ headBranch: null }, { headSha: null }] as const) {
 			const result = await runFollowup({ ...options, fallback: "match" })
 
 			expect(result.listPullRequests).not.toHaveBeenCalled()

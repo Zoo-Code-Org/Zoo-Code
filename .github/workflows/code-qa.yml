@@ -9,6 +9,12 @@ on:
     merge_group:
         types: [checks_requested]
 
+# Cancel superseded runs when a pull request is updated. Non-PR events keep
+# unique groups, so main, merge-queue, and manual runs are never cancelled.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Least privilege: every job below escalates only where it needs to.
 permissions:
     contents: read
@@ -66,8 +72,12 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Verify all translations are complete
               run: node scripts/find-missing-translations.js
+            - name: Verify t() calls pass every interpolation variable
+              run: node scripts/check-i18n-interpolation.js
 
     knip:
         runs-on: ubuntu-latest
@@ -76,6 +86,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Verify Knip guardrails
               run: pnpm test:knip-policy
             - name: Run knip checks
@@ -90,6 +102,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Check formatting
               run: pnpm format:check
             - name: Lint
@@ -98,8 +112,20 @@ jobs:
               run: pnpm check-types
             - name: Validate Code QA workflow
               run: pnpm test:code-qa-ci
+            - name: Validate Solheim provider smoke workflow
+              run: pnpm test:solheim-smoke-ci
+            - name: Test Solheim provider smoke units
+              run: pnpm test:solheim-smoke:unit
+            - name: Check Solheim provider smoke types
+              run: pnpm solheim-smoke:check-types
+            - name: Test agent evals units
+              run: pnpm test:agent-evals:unit
+            - name: Check agent evals types
+              run: pnpm agent-evals:check-types
             - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
+            - name: Model-check webview recovery
+              run: pnpm webview-recovery:check-types && pnpm webview-recovery:model-check
             - name: Validate MCP OAuth integration
               run: pnpm mcp:integration-check
 
@@ -123,7 +149,7 @@ jobs:
             - name: Package extension
               run: pnpm --filter ./src vsix
             - name: Upload test VSIX
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: zoo-code-vsix-pr-${{ github.event.pull_request.number }}
                   path: bin/*.vsix
@@ -153,6 +179,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
             - name: Restore Turbo cache
               id: turbo-cache
               uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -236,7 +264,7 @@ jobs:
             # See https://docs.codecov.com/docs/flags
             - name: Upload non-core coverage to Codecov
               if: matrix.collect-coverage
-              uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: >-
                       src/coverage/merged/lcov.info,
@@ -248,7 +276,7 @@ jobs:
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload webview JSDOM coverage to Codecov
               if: matrix.collect-coverage
-              uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: webview-ui/coverage/lcov.info
                   disable_search: true
@@ -256,7 +284,7 @@ jobs:
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload core unit coverage to Codecov
               if: matrix.collect-coverage
-              uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: packages/core/coverage/unit/lcov.info
                   disable_search: true
@@ -264,7 +292,7 @@ jobs:
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload core integration coverage to Codecov
               if: matrix.collect-coverage
-              uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: packages/core/coverage/integration/lcov.info
                   disable_search: true
@@ -272,7 +300,7 @@ jobs:
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload coverage reports to GitHub
               if: matrix.collect-coverage
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: coverage-reports-${{ matrix.name }}
                   path: |

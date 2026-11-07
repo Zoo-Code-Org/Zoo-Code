@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.90.0
+## Novetats a la v3.94.0
 
-- ✨ **Proveïdors i models:** GitHub Copilot ara és un proveïdor: inicia la sessió i Zoo Code carrega els teus models de Copilot. IO Intelligence és un proveïdor amb la seva pròpia clau d'API. Gemini 4 Argon és a Gemini i Vertex. GPT-6 Luna és a OpenCode Go. Gemini 4 Argon i GPT-6 Luna també són a Zoo Gateway.
-- 🧭 **Execució d'eines:** Repetir la mateixa crida d'eina mostra un avís i després Zoo Code atura aquest bucle. Desactivar `attempt_completion` ja no deixa una tasca sense poder acabar. Els missatges en cua passen les mateixes comprovacions de protecció d'ordres que les ordres que envies directament.
-- ⚡ **Raonament i streaming:** El pensament adaptatiu d'Anthropic es mostra al xat i es compten els thinking tokens. L'interruptor R1 conserva el raonament de llama.cpp, Ollama i LM Studio. Codex conserva el raonament xifrat amb el resum que veus. Els streams del model de llenguatge de VS Code fan servir recuperació protegida quan un stream falla.
+- ✨ **Compatibilitat més àmplia amb models i proveïdors:** Utilitza Claude Haiku 5.5 mitjançant Anthropic, envia imatges a models VS Code LM compatibles, ajusta la temperatura per als models OpenCode Go Responses i cancel·la sol·licituds de forma neta a més proveïdors.
+- 🔐 **MCP OAuth més flexible:** Configura opcions estàtiques de client OAuth, usa rutes de callback personalitzades, descobreix detalls d'autenticació de `WWW-Authenticate` i veu els errors de callback abans de tornar-ho a provar.
+- 🧭 **Xats i sessions llargues més fluides:** Reanomena tasques a l'historial, arrossega fitxers al xat sense mantenir premut Shift, redueix la memòria que es conserva durant les sessions llargues i mantén estables els enllaços de subtasques i els webviews substituïts.
 
 ## Què pot fer Zoo Code per TU?
 

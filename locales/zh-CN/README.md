@@ -43,11 +43,11 @@ Zoo Code 基于 Roo Code 打下的基础持续扩展，新增了：
 - **更可靠的终端和编辑工作流** — 修复终端过早完成、任务状态竞争、上下文管理、差异更新编辑和提供商专用工具调用等问题。
 - **更全面的工作区控制** — 支持规则管理、按模式限制 MCP、多根工作区路径控制、模型推理选项和完成后的变更审查操作。
 
-## v3.90.0 新增内容
+## v3.94.0 新增内容
 
-- ✨ **Provider 与模型：** GitHub Copilot 现在是一个 provider：登录后，Zoo Code 会加载您的 Copilot 模型。IO Intelligence 是使用自己 API 密钥的 provider。Gemini 4 Argon 在 Gemini 和 Vertex 上。GPT-6 Luna 在 OpenCode Go 上。Gemini 4 Argon 和 GPT-6 Luna 也在 Zoo Gateway 上。
-- 🧭 **工具执行：** 重复同一次工具调用会先警告，然后 Zoo Code 停止这个循环。关闭 `attempt_completion` 不再让任务无法结束。排队消息会经过与直接发送的命令相同的命令保护检查。
-- ⚡ **推理与流式输出：** Anthropic adaptive thinking 会显示在聊天中，并统计 thinking tokens。R1 开关会保留 llama.cpp、Ollama 和 LM Studio 的推理。Codex 会把加密推理和您看到的摘要一起保留。VS Code 语言模型流在流失败时使用 guarded recovery。
+- ✨ **更广泛的模型和提供商支持：** 通过 Anthropic 使用 Claude Haiku 5.5，向兼容的 VS Code LM 模型发送图片，为 OpenCode Go Responses 模型调节 temperature，并在更多提供商上顺畅取消请求。
+- 🔐 **更灵活的 MCP OAuth：** 配置静态 OAuth 客户端设置，使用自定义回调路径，从 `WWW-Authenticate` 中发现认证详情，并在重试前看到回调失败。
+- 🧭 **更流畅的聊天和长会话：** 在历史记录中重命名任务，无需按住 Shift 即可将文件拖入聊天，减少长会话期间占用的内存，并保持子任务链接和被替换的 webview 稳定。
 
 ## Zoo Code 能为您做什么？
 

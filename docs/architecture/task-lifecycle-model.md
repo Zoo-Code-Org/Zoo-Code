@@ -102,7 +102,7 @@ The model maps its state to production fields as follows:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `phase`, `index`           | `Task.assistantMessageContent` partial flags, matching `tool_result` blocks in `userMessageContent`, and `currentStreamingContentIndex` |
 | `stream`                   | `didCompleteReadingStream`                                                                                                              |
-| `lock`, `owner`, `pending` | `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`, owned by the `presentAssistantMessage` wrapper          |
+| `lock`, `owner`, `pending` | `dispatchState` (not `IDLE`) and `pendingWork` (not `null`), owned by the `presentAssistantMessage` wrapper                             |
 | `latch`                    | `userMessageContentReady`                                                                                                               |
 | `epoch`                    | the per-request reset in the request loop (`Task.ts`)                                                                                   |
 | `poll` and `post-wait`     | the `pWaitFor` condition and the abort check that follows it                                                                            |
@@ -205,6 +205,14 @@ The production mapping above names primary lifecycle transitions, not every muta
 CI runs `pnpm lifecycle:model-check` in `.github/workflows/code-qa.yml` after lint and type checking. Extension-host subtask and restart-persistence E2E run separately; a green umbrella command therefore says nothing about an omitted E2E boundary or an unmodeled downstream consumer.
 
 ## Gap audit
+
+The independent [file replacement/restart model](./file-replacement-restart-model.md)
+checks the process-crash replacement protocol separately from completion readiness.
+It models three task files, initial publication, one replacement, one crash,
+locked recovery on fresh reads/startup, and successful explicit deletion. Its
+contract, production mapping, old-protocol counterexample, refinement tests, and
+filesystem/lock assumptions are documented there. A passing completion-readiness
+model alone does not establish this file-level contract.
 
 This section is a summary tracker. Issue links are historical provenance rather than specifications. Coverage status uses these evidence classes:
 

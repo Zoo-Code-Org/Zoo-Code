@@ -37,11 +37,13 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
+import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
 	handleRequestSkills,
@@ -700,6 +702,10 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		case "webviewHeartbeat":
+			// Confirm renderer liveness and advance the watchdog recovery health window.
+			provider.updateWebviewHeartbeat()
+			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -737,8 +743,18 @@ export const webviewMessageHandler = async (
 			}
 			break
 
-		case "updateSettings":
-			if (message.updatedSettings) {
+		case "updateSettings": {
+			// The settings are written one at a time, in the order sent, and not as a transaction. If a write fails, the
+			// ones before it stay stored and the ones after it are not written. The display settings only change how
+			// times are shown, so a partial save is harmless, and saving again completes it. Either way the webview is
+			// refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`): the
+			// settings page keeps the user's edits as unsaved after a failure. The error is then thrown, as it always was.
+			let failed = false
+			let failure: unknown
+
+			try {
+				if (!message.updatedSettings) break
+
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
@@ -758,6 +774,12 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// An invalid display value is ignored, before anything is done for it.
+					if (isInvalidDisplayValue(key, value)) {
+						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {
@@ -869,11 +891,33 @@ export const webviewMessageHandler = async (
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
-
-				await provider.postStateToWebview()
+			} catch (error) {
+				failed = true
+				failure = error
 			}
 
+			// A failed refresh must neither undo a stored save nor keep the webview from getting the result.
+			try {
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			if (message.requestId) {
+				await provider.postMessageToWebview({
+					type: "settingsSaveResult",
+					requestId: message.requestId,
+					success: !failed,
+					...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+				})
+			}
+
+			if (failed) throw failure
+
 			break
+		}
 
 		case "terminalOperation":
 			if (message.terminalOperation) {
@@ -980,6 +1024,11 @@ export const webviewMessageHandler = async (
 		}
 		case "exportTaskWithId":
 			await provider.exportTaskWithId(message.text!)
+			break
+		case "renameTaskWithId":
+			if (message.taskId) {
+				await provider.renameTaskWithId(message.taskId, message.text)
+			}
 			break
 		case "getTaskWithAggregatedCosts": {
 			try {
@@ -1779,19 +1828,30 @@ export const webviewMessageHandler = async (
 			const result = checkoutRestorePayloadSchema.safeParse(message.payload)
 
 			if (result.success) {
-				await provider.cancelTask()
-
 				try {
-					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
-					return
-				}
+					const taskBeforeCancel = provider.getCurrentTask()
+					// Reject a bad hash before cancelling, so the running task survives.
+					if (taskBeforeCancel) {
+						assertRecordedCheckpoint(taskBeforeCancel, result.data.commitHash)
+					}
 
-				try {
+					await provider.cancelTask()
+
+					try {
+						await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
+					} catch {
+						vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+						return
+					}
+
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				} catch (error) {
+					console.error("[checkpointRestore] checkpointRestore failed:", error)
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -1841,7 +1901,11 @@ export const webviewMessageHandler = async (
 					})
 				} catch (error) {
 					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -2247,6 +2311,7 @@ export const webviewMessageHandler = async (
 						includeTaskHistoryInEnhance,
 						currentClineMessages: currentCline?.clineMessages,
 						providerSettingsManager: provider.providerSettingsManager,
+						taskId: currentCline?.taskId,
 					})
 
 					if (result.success && result.enhancedText) {
