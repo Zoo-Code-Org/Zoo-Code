@@ -13,6 +13,7 @@ import {
 	type RooCodeEvents,
 	type ProviderSettings,
 	type ProviderSettingsEntry,
+	type ProviderSettingsWithId,
 	type TaskEvent,
 	type TaskStartResponse,
 	type CreateTaskOptions,
@@ -25,6 +26,9 @@ import {
 	IpcMessageType,
 	TASK_START_FAILURE_ERROR_CODE,
 	TASK_START_FAILURE_ERROR_MESSAGE,
+	isRetiredProvider,
+	providerSettingsWithIdSchema,
+	discriminatedProviderSettingsWithIdSchema,
 } from "@roo-code/types"
 
 import { IpcServer } from "@roo-code/ipc"
@@ -35,6 +39,7 @@ import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { isNonPortableSettingsKey } from "../core/config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
+import { downgradeLegacyRooConfig } from "../core/config/routerRemoval"
 import { readTaskMessages, TaskMessagesReadError } from "../core/task-persistence/taskMessages"
 import { getErrorCode } from "../core/task-persistence/readFileWithMissingRetry"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
@@ -48,15 +53,31 @@ const differingProfileKeys = (a: Record<string, unknown>, b: Record<string, unkn
 		.filter((key) => !deepEqual(a[key], b[key]))
 		.sort()
 
-// Used when the stored record cannot be read back: the payload is then the only content this call
-// can point at, so ownership is judged on the settings keys it supplied that the stored record also
-// carries. Keys the profile schema strips are absent from the record and drop out; id and name are
-// meta rather than settings, and a save over an existing name inherits the id, not the content.
-const payloadKeyDifferences = (payload: Record<string, unknown>, record: Record<string, unknown>): string[] => {
-	const carried = new Set(Object.keys(record).filter((key) => key !== "id" && key !== "name"))
-	return Object.keys(payload)
-		.filter((key) => key !== "id" && key !== "name" && carried.has(key) && !deepEqual(payload[key], record[key]))
-		.sort()
+// The ownership tests below need what saveConfig actually stores: it runs downgradeLegacyRooConfig and
+// then providerSettingsWithIdSchema or discriminatedProviderSettingsWithIdSchema over the payload, so the
+// record legitimately carries keys the payload never mentioned (schema defaults) and legitimately lacks
+// keys the payload supplied (the mode and profile-pin keys the profile schema strips). Only the same
+// normalization on both sides gets both of those right, which is why the compensation compares the stored
+// record against this rather than against the caller payload or the id - id and name are meta rather than
+// settings, and saveConfig keeps the id of the record it overwrites. A payload that cannot be normalized
+// returns undefined: ownership is then not provable and the callers keep the record instead of deleting
+// or restoring it on a guess.
+const normalizedProfileSettings = (payload: Record<string, unknown>): Record<string, unknown> | undefined => {
+	try {
+		// Same two steps saveConfig runs, in the same order: the legacy router downgrade, then the
+		// profile schema parse (passthrough for a retired provider, so its extra fields survive).
+		const downgraded = downgradeLegacyRooConfig(payload).config as ProviderSettingsWithId
+		const parsed =
+			typeof downgraded.apiProvider === "string" && isRetiredProvider(downgraded.apiProvider)
+				? providerSettingsWithIdSchema.passthrough().parse(downgraded)
+				: discriminatedProviderSettingsWithIdSchema.parse(downgraded)
+		// The two schemas are separate zod objects over the same record shape; the field names below are the
+		// meta pair both of them carry, so the widening here is the parse result rather than the caller input.
+		const { id: _id, name: _name, ...settings } = parsed as Record<string, unknown>
+		return settings
+	} catch {
+		return undefined
+	}
 }
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
@@ -743,7 +764,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				const priorRecord = existed ? await manager.getProfile({ name: savedProfileName }) : undefined
 				// saveConfig validates before storing, so a rejected save leaves every domain
 				// untouched and the call fails with nothing to roll back.
-				const id = await manager.saveConfig(savedProfileName, values)
+				// The filtered payload is what the record stores: the host-owned keys a caller may carry in the
+				// payload are not this call's profile content, and a retired profile must not keep a stale map.
+				const id = await manager.saveConfig(savedProfileName, forwardValues)
 				// saveConfig normalizes before it stores: it drops the keys the profile schema does not
 				// know (the mode and profile-pin keys a settings round trip carries) and can rewrite
 				// legacy fields. The record this call owns is therefore the stored one, not the caller
@@ -757,32 +780,56 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				try {
 					savedRecord = await manager.getProfile({ name: savedProfileName })
 				} catch (readError) {
-					// Undo while the section is still held, then rethrow so the caller still sees the read
-					// failure. Restoring the prior record is safe on content: this call read that record in
-					// here before overwriting it. Deleting the record this call created is not, because the
-					// read that would have proved it is the read that failed. Re-read once and delete only
-					// when the record still carries the id this call received and none of the settings this
-					// payload supplied changed: a matching id is necessary but not sufficient, since
-					// saveConfig keeps the id of the record it overwrote and a writer that saved over this
-					// name inherited it. If the record cannot be read at all it is kept - a leftover record
-					// costs less than deleting another view write on a guess.
+					// Undo while the section is still held, then rethrow so the caller still sees the read failure.
+					// Both undos first re-read the record and compare it against what this call wrote, because the
+					// read-back that would have proved it is the read that failed. The settings write is not ordered by
+					// this lock - it takes no part in this critical section - so it can land between this save and this
+					// land between this save and this compensation, and an unconditional undo would restore over it.
+					// Comparing against the normalized payload catches the three ways another writer shows up: it
+					// changed a key this call wrote, it deleted a key this call wrote (present in the expectation,
+					// absent from the record), or it added a key this call never mentioned (present in the record,
+					// absent from the expectation). Anything else, including a record this call cannot judge, is newer
+					// content to keep: keeping it leaves the other writer's content in place rather than restoring ours,
+					// which is the conservative direction and the same rule the existence check above follows when it
+					// treats a failed read as may exist.
 					try {
+						const currentRecord = await manager.getProfile({ name: savedProfileName })
+						const { name: _currentName, id: _currentId, ...currentSettings } = currentRecord
+						const expectedSettings = normalizedProfileSettings(forwardValues)
+						const movedKeys = expectedSettings
+							? differingProfileKeys(expectedSettings, currentSettings)
+							: []
 						if (existed && priorRecord) {
 							const { name: _undoName, id: _undoId, ...previousSettings } = priorRecord
-							await manager.saveConfig(savedProfileName, previousSettings)
+							if (!expectedSettings) {
+								this.log(
+									`[setConfiguration] skipped undoing the profile write for '${savedProfileName}' after a failed ` +
+										`read-back: this call cannot normalize its payload to judge what the record holds, so the ` +
+										`record is kept.`,
+								)
+							} else if (movedKeys.length > 0) {
+								this.log(
+									`[setConfiguration] skipped restoring the prior profile record '${savedProfileName}' after a failed ` +
+										`read-back: the record now differs from what this call wrote (keys: ${movedKeys.join(", ")}).`,
+								)
+							} else {
+								await manager.saveConfig(savedProfileName, previousSettings)
+							}
 						} else if (!existed) {
-							const currentRecord = await manager.getProfile({ name: savedProfileName })
-							const { name: _currentName, id: _currentId, ...currentSettings } = currentRecord
-							const differingKeys = payloadKeyDifferences(values, currentSettings).join(", ")
 							if (currentRecord.id !== id) {
 								this.log(
-									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed ` +
-										`read-back: it now carries id '${currentRecord.id}', not this call '${id}'.`,
+									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed read-back: it now ` +
+										`carries id '${currentRecord.id}', not this call '${id}'.`,
 								)
-							} else if (differingKeys) {
+							} else if (!expectedSettings) {
 								this.log(
-									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed ` +
-										`read-back: another view wrote it (keys: ${differingKeys}).`,
+									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed read-back: this call ` +
+										`cannot normalize its payload to judge what the record holds.`,
+								)
+							} else if (movedKeys.length > 0) {
+								this.log(
+									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed read-back: another ` +
+										`view wrote it (keys: ${movedKeys.join(", ")}).`,
 								)
 							} else {
 								await manager.deleteConfig(savedProfileName)

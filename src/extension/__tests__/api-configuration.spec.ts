@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
-import { providerIdentifiers, providerSettingsWithIdSchema } from "@roo-code/types"
+import {
+	discriminatedProviderSettingsWithIdSchema,
+	isRetiredProvider,
+	providerIdentifiers,
+	providerSettingsWithIdSchema,
+	type ProviderSettingsWithId,
+} from "@roo-code/types"
 import type { RooCodeSettings } from "@roo-code/types"
 
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
+import { downgradeLegacyRooConfig } from "../../core/config/routerRemoval"
 
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},
@@ -16,6 +23,20 @@ vi.mock("@roo-code/ipc", () => ({
 // does whenever no other view holds it. The queue itself is exercised by the interleaving test
 // below, which installs its own.
 const runManagerSectionInline = <T>(cb: () => Promise<T>): Promise<T> => cb()
+
+// What the real manager would hold for this payload: the legacy router downgrade, then the profile schema
+// parse (passthrough for a retired provider, so its extra fields survive). The store double above mirrors
+// only the key stripping, so the reads that stand in for the store inside the compensation return this
+// shape - the ownership comparison in setConfiguration judges against exactly this.
+const storedProfileSettingsFor = (payload: Record<string, unknown>): Record<string, unknown> => {
+	const downgraded = downgradeLegacyRooConfig(payload).config as ProviderSettingsWithId
+	const parsed =
+		typeof downgraded.apiProvider === "string" && isRetiredProvider(downgraded.apiProvider)
+			? providerSettingsWithIdSchema.passthrough().parse(downgraded)
+			: discriminatedProviderSettingsWithIdSchema.parse(downgraded)
+	const { id: _id, name: _name, ...settings } = parsed as Record<string, unknown>
+	return settings
+}
 
 // The manager double for the profile store: hasConfig, getProfile, saveConfig and deleteConfig all
 // read and write one map, so the existence re-read that the compensation runs inside the critical
@@ -311,6 +332,19 @@ describe("API - configuration", () => {
 			if (reads === 2) {
 				return Promise.reject(new Error("secrets storage read failed"))
 			}
+			// The third read is the compensation re-read. It returns what the real manager would store for the
+			// payload this call passes below, which is the shape the ownership comparison judges against.
+			if (reads === 3) {
+				return Promise.resolve({
+					name,
+					id: "pinned-id",
+					...storedProfileSettingsFor({
+						currentApiConfigName: "pinned",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "after",
+					}),
+				})
+			}
 			return store.getProfile({ name })
 		})
 		const provider = {
@@ -387,6 +421,19 @@ describe("API - configuration", () => {
 			if (reads === 1) {
 				return Promise.reject(new Error("secrets storage read failed"))
 			}
+			// The second read is the compensation re-read: it returns what the real manager would store for the
+			// payload below, which is the shape the ownership comparison judges against.
+			if (reads === 2) {
+				return Promise.resolve({
+					name,
+					id: "created-id",
+					...storedProfileSettingsFor({
+						currentApiConfigName: "pinned",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "after",
+					}),
+				})
+			}
 			return store.getProfile({ name })
 		})
 		const provider = {
@@ -424,12 +471,19 @@ describe("API - configuration", () => {
 				currentApiConfigName: "pinned",
 				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "after",
+				viewStates: {},
 			}),
 		).rejects.toThrow("secrets storage read failed")
 
 		// The record this call created is the record this call may remove, so the store ends exactly as it
 		// began: without the name. The delete is named by its whole argument list.
 		expect(deleteConfig.mock.calls).toEqual([["pinned"]])
+		// The record stores the filtered payload: per-view selection state is machine-local, and a map
+		// written under the profile name is what a retired profile would keep behind forever.
+		expect(saveConfig.mock.calls[0]).toEqual([
+			"pinned",
+			{ apiProvider: providerIdentifiers.openrouter, apiKey: "after", currentApiConfigName: "pinned" },
+		])
 		expect(store.entries.has("pinned")).toBe(false)
 		expect(saveConfig.mock.calls.length).toBe(1)
 		expect(setValues.mock.calls).toEqual([])
@@ -562,6 +616,205 @@ describe("API - configuration", () => {
 		expect(logged).toContain("failed to undo the profile write after a failed read-back")
 	})
 
+	// The provider double the read-back cases share: logging on, and every step after the save section
+	// recorded, so a compensation decision is asserted through calls and log text rather than silence.
+	const makeReadbackHarness = (providerSettingsManager: Record<string, unknown>) => {
+		const appendLine = vi.fn()
+		const outputChannel = { appendLine } as unknown as vscode.OutputChannel
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				...providerSettingsManager,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+		const logged = () => appendLine.mock.calls.map((args: unknown[]) => String(args[0])).join("\n")
+		return { api, logged, setValues, setProviderSettings, setModeConfig, postStateToWebview }
+	}
+
+	it("keeps the created record when another writer deleted a key this call wrote", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig } = store
+		// The sibling removed the model id this call supplied. A comparison that walks only the keys the
+		// payload supplied and the record also carries cannot see a deletion: the key is absent from both
+		// sides of it. A whole-record comparison shows the record lost something this call wrote.
+		const landed = storedProfileSettingsFor({
+			currentApiConfigName: "pinned",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+			openRouterModelId: "gpt-4o",
+		})
+		delete landed.openRouterModelId
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 1) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			return Promise.resolve({ name, id: "created-id", ...landed })
+		})
+		const { api, logged, setValues } = makeReadbackHarness({ saveConfig, deleteConfig, hasConfig, getProfile })
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+				openRouterModelId: "gpt-4o",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(store.entries.has("pinned")).toBe(true)
+		expect(saveConfig.mock.calls.length).toBe(1)
+		expect(setValues.mock.calls).toEqual([])
+		expect(logged()).toContain("after a failed read-back: another view wrote it (keys: openRouterModelId)")
+	})
+
+	it("keeps the created record when another writer added a key this call never mentioned", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig } = store
+		// The mirror image of the deletion above: a credential the sibling added under the id this call
+		// created. Deleting on the old comparison would have thrown the sibling secret away.
+		const landed = storedProfileSettingsFor({
+			currentApiConfigName: "pinned",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+		})
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 1) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			return Promise.resolve({
+				name,
+				id: "created-id",
+				...landed,
+				openRouterModelId: "added-by-another-view",
+			})
+		})
+		const { api, logged } = makeReadbackHarness({ saveConfig, deleteConfig, hasConfig, getProfile })
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(store.entries.get("pinned")?.settings).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+		})
+		expect(logged()).toContain("after a failed read-back: another view wrote it (keys: openRouterModelId)")
+	})
+
+	it("keeps the created record when the re-read matches the settings under a different id", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig } = store
+		// The ownership guard reject path with content this call cannot fault: the settings equal what
+		// this call wrote, but the id does not, so the record is not this call to remove.
+		const landed = storedProfileSettingsFor({
+			currentApiConfigName: "pinned",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+		})
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 1) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			return Promise.resolve({ name, id: "another-view-id", ...landed })
+		})
+		const { api, logged } = makeReadbackHarness({ saveConfig, deleteConfig, hasConfig, getProfile })
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(store.entries.has("pinned")).toBe(true)
+		expect(logged()).toContain("it now carries id 'another-view-id', not this call 'created-id'")
+	})
+
+	it("skips restoring the prior record when a newer write landed before the compensation", async () => {
+		const store = makeProfileStoreDouble({
+			pinned: { id: "pinned-id", settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "before" } },
+		})
+		const { saveConfig, deleteConfig, hasConfig } = store
+		// The settings import path takes no part in the cross-instance section, so its write can land
+		// between this save and this compensation. The undo re-reads first: the record now holds the
+		// import content, which this call cannot attribute to its own save, so it keeps it rather than
+		// restoring the prior record over it. The differing field is a model id rather than a credential:
+		// the openrouter branch of the profile schema does not keep the shared apiKey field, so a credential
+		// change is not visible in the record at all and could not carry this comparison.
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 2) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			if (reads === 3) {
+				return Promise.resolve({
+					name,
+					id: "pinned-id",
+					...storedProfileSettingsFor({
+						currentApiConfigName: "pinned",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "imported-by-settings",
+					}),
+				})
+			}
+			return store.getProfile({ name })
+		})
+		const { api, logged, setValues } = makeReadbackHarness({ saveConfig, deleteConfig, hasConfig, getProfile })
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+				openRouterModelId: "gpt-4o",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		// One save only: the undo wrote nothing, because the record it would have overwritten is not the
+		// one this call left behind. The import content stays.
+		expect(saveConfig.mock.calls.length).toBe(1)
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(setValues.mock.calls).toEqual([])
+		expect(logged()).toContain(
+			"skipped restoring the prior profile record 'pinned' after a failed read-back: the record now differs",
+		)
+		expect(logged()).toContain("from what this call wrote (keys: openRouterModelId)")
+	})
 	it("keeps a record another view rewrote under the id this call created", async () => {
 		// This call creates the name, so the id check is the only guard the delete leg had. It is not
 		// enough: saveConfig keeps the id of the record it overwrote, so a view that saved over the
