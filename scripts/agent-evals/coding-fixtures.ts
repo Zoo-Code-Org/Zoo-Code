@@ -9,7 +9,10 @@ export const CODING_BASE_URL = "https://api.solheim.ai/v1"
 export const CODING_MODEL_ID = "qwen3.8-27b"
 
 const CODING_ROLE_DEFINITION = "Complete one bounded coding task in this workspace. Work only inside the workspace."
+// Hosts have no filesystem sandbox. Keep command execution unavailable until
+// an equivalent boundary isolates commands from host secrets.
 const CODING_DISABLED_TOOLS = [
+	"execute_command",
 	"ask_followup_question",
 	"new_task",
 	"switch_mode",
@@ -42,7 +45,7 @@ function buildCodingConfiguration(apiKey: string): RooCodeSettings {
 				slug: "coding-eval",
 				name: "Coding eval",
 				roleDefinition: CODING_ROLE_DEFINITION,
-				groups: ["read", "edit", "command"],
+				groups: ["read", "edit"],
 			},
 		],
 		disabledTools: [...CODING_DISABLED_TOOLS],
@@ -52,7 +55,7 @@ function buildCodingConfiguration(apiKey: string): RooCodeSettings {
 		alwaysAllowWrite: true,
 		alwaysAllowWriteOutsideWorkspace: false,
 		alwaysAllowWriteProtected: false,
-		alwaysAllowExecute: true,
+		alwaysAllowExecute: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
 		alwaysAllowSubtasks: false,
@@ -77,7 +80,7 @@ const codingSettingsProjection: Record<string, unknown> = {
 			slug: "coding-eval",
 			name: "Coding eval",
 			roleDefinition: CODING_ROLE_DEFINITION,
-			groups: ["read", "edit", "command"],
+			groups: ["read", "edit"],
 		},
 	],
 	disabledTools: [...CODING_DISABLED_TOOLS],
@@ -87,7 +90,7 @@ const codingSettingsProjection: Record<string, unknown> = {
 	alwaysAllowWrite: true,
 	alwaysAllowWriteOutsideWorkspace: false,
 	alwaysAllowWriteProtected: false,
-	alwaysAllowExecute: true,
+	alwaysAllowExecute: false,
 	alwaysAllowMcp: false,
 	alwaysAllowModeSwitch: false,
 	alwaysAllowSubtasks: false,
@@ -148,7 +151,7 @@ const bundle = (
 		toolPolicy: {
 			mode: "coding-eval",
 			roleDefinition: CODING_ROLE_DEFINITION,
-			groups: ["read", "edit", "command"],
+			groups: ["read", "edit"],
 			disabledTools: [...CODING_DISABLED_TOOLS],
 			allow: {
 				readOnly: true,
@@ -156,7 +159,7 @@ const bundle = (
 				write: true,
 				writeOutsideWorkspace: false,
 				writeProtected: false,
-				execute: true,
+				execute: false,
 				mcp: false,
 				modeSwitch: false,
 				subtasks: false,
@@ -600,7 +603,7 @@ export const CODING_FIXTURE_BUNDLES: readonly CodingFixtureBundle[] = [
 		"clamp-range",
 		"1.0.0",
 		"Implement clamp(value, min, max) with empty-range semantics; visible tests miss the empty-range case.",
-		"Implement the clamp function in src/clamp.js so the test suite passes. The header comment in src/clamp.js defines the exact behavior, including the empty range rule. Check your work with npm test. Do not modify the test files or package.json.",
+		"Implement the clamp function in src/clamp.js so the test suite passes. The header comment in src/clamp.js defines the exact behavior, including the empty range rule. Command execution is disabled; review your changes without running commands. Do not modify the test files or package.json.",
 		[
 			workspacePackageJson("clamp-range"),
 			{ path: "src/clamp.js", content: clampStub },
@@ -614,7 +617,7 @@ export const CODING_FIXTURE_BUNDLES: readonly CodingFixtureBundle[] = [
 		"slugify-text",
 		"1.0.0",
 		"Implement slugify(text) with punctuation-as-separator semantics; visible tests miss punctuation runs.",
-		"Implement the slugify function in src/slugify.js so the test suite passes. The header comment in src/slugify.js defines the exact behavior. Check your work with npm test. Do not modify the test files or package.json.",
+		"Implement the slugify function in src/slugify.js so the test suite passes. The header comment in src/slugify.js defines the exact behavior. Command execution is disabled; review your changes without running commands. Do not modify the test files or package.json.",
 		[
 			workspacePackageJson("slugify-text"),
 			{ path: "src/slugify.js", content: slugifyStub },
@@ -628,7 +631,7 @@ export const CODING_FIXTURE_BUNDLES: readonly CodingFixtureBundle[] = [
 		"parse-csv-line",
 		"1.0.0",
 		"Implement parseCsvLine(line) with doubled-quote unescaping; visible tests miss escaped quotes.",
-		"Implement the parseCsvLine function in src/parse-csv-line.js so the test suite passes. The header comment in src/parse-csv-line.js defines the quoting rules, including doubled quotes. Check your work with npm test. Do not modify the test files or package.json.",
+		"Implement the parseCsvLine function in src/parse-csv-line.js so the test suite passes. The header comment in src/parse-csv-line.js defines the quoting rules, including doubled quotes. Command execution is disabled; review your changes without running commands. Do not modify the test files or package.json.",
 		[
 			workspacePackageJson("parse-csv-line"),
 			{ path: "src/parse-csv-line.js", content: csvStub },
@@ -642,7 +645,7 @@ export const CODING_FIXTURE_BUNDLES: readonly CodingFixtureBundle[] = [
 		"format-bytes",
 		"1.0.0",
 		"Implement formatBytes(bytes) with SI decimal units; visible tests miss zero and the MB and GB boundaries.",
-		"Implement the formatBytes function in src/format-bytes.js so the test suite passes. The header comment in src/format-bytes.js defines the exact units and rounding. Check your work with npm test. Do not modify the test files or package.json.",
+		"Implement the formatBytes function in src/format-bytes.js so the test suite passes. The header comment in src/format-bytes.js defines the exact units and rounding. Command execution is disabled; review your changes without running commands. Do not modify the test files or package.json.",
 		[
 			workspacePackageJson("format-bytes"),
 			{ path: "src/format-bytes.js", content: bytesStub },
@@ -656,7 +659,7 @@ export const CODING_FIXTURE_BUNDLES: readonly CodingFixtureBundle[] = [
 		"deep-get",
 		"1.0.0",
 		"Implement get(object, path) that never throws on missing data; visible tests miss the missing-data paths.",
-		"Implement the get function in src/deep-get.js so the test suite passes. The header comment in src/deep-get.js defines the missing-data rules. Check your work with npm test. Do not modify the test files or package.json.",
+		"Implement the get function in src/deep-get.js so the test suite passes. The header comment in src/deep-get.js defines the missing-data rules. Command execution is disabled; review your changes without running commands. Do not modify the test files or package.json.",
 		[
 			workspacePackageJson("deep-get"),
 			{ path: "src/deep-get.js", content: deepGetStub },
