@@ -1263,12 +1263,14 @@ export class DiffViewProvider {
 			})
 		} else {
 			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+			await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
-			}
+			// A dirty document here carries unsaved user edits: VS Code hands back the
+			// existing instance rather than a fresh one. Saving it now would flush that stale
+			// buffer over the bytes the guarded write just published, which is the same reason
+			// saveChanges publishes a dirty buffer through the guard instead of saving it. The
+			// buffer is left to the user's own save; the document is still open, so diagnostics
+			// run against it either way.
 
 			// Force a small delay to ensure diagnostics are triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))

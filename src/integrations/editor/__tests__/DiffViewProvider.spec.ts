@@ -868,6 +868,29 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("does not save an in-memory document that already holds unsaved user edits", async () => {
+			// VS Code hands back the existing document instance, so the one this branch
+			// receives can carry unsaved user edits. Saving it would flush that stale buffer
+			// over the bytes the guarded write just published - the rule saveChanges follows
+			// for the same reason. The double is a structural cast: vscode.d.ts offers no
+			// constructor for a TextDocument.
+			const save = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue({
+				isDirty: true,
+				save,
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+			} as unknown as vscode.TextDocument)
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+				preCommitVerify: expect.any(Function),
+			})
+			expect(vscode.workspace.openTextDocument).toHaveBeenCalled()
+			expect(save).not.toHaveBeenCalled()
+		})
+
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {
 			const mockDelay = vi.mocked(delay)
 			mockDelay.mockClear()
