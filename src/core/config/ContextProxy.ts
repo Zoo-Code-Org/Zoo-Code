@@ -67,6 +67,9 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
 export class ContextProxy {
@@ -78,6 +81,7 @@ export class ContextProxy {
 
 	constructor(context: vscode.ExtensionContext) {
 		this.originalContext = context
+
 		this.stateCache = {}
 		this.secretCache = {}
 		this._isInitialized = false
@@ -397,6 +401,18 @@ export class ContextProxy {
 	 */
 	private readonly stateWriteOwner = new Map<string, object>()
 	private readonly secretWriteOwner = new Map<string, object>()
+	/**
+	 * The secret writes that are still in flight, each paired with the claim it took,
+	 * so a reset can wait for them to settle before it deletes the keys. Without the
+	 * pairing a reset cannot tell a settled-but-orphaned write from a live one.
+	 */
+	private readonly pendingSecretWrites = new Map<string, Set<{ settle: Promise<void> }>>()
+	// A reset is in progress: the caches are meaningless mid-reset, and a secret write begun
+	// inside it would commit after the delete pass and survive the erase.
+	private resetting = false
+	// The reset pass currently in flight, if any: single-flight so that two callers cannot each run a
+	// delete pass and have whichever finishes first lower the guard under the other.
+	private resetInFlight: Promise<void> | null = null
 	/** How many writes of each secret were started. Unlike the owners, it is not cleared when a write is over. */
 	private readonly secretWriteCount = new Map<string, number>()
 
@@ -443,6 +459,13 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
+		if (this.resetting) {
+			// Refused rather than deferred: a deferred secret write would re-store exactly the
+			// value the user asked to erase, and a silently dropped one would lose the save.
+			return Promise.reject(
+				new SettingsWriteError([], [key], new Error("secret writes are refused while state is being reset")),
+			)
+		}
 		// Update cache.
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
@@ -454,7 +477,19 @@ export class ContextProxy {
 		// cache (it stays empty until the next write, `refreshSecrets` or a restart) rather than being served.
 		// The entry of the key is removed when the write and its read-back are over (if it is still the latest). A store
 		// that throws at once is turned into a rejection, so it is handled the same.
+		const pending = this.pendingSecretWrites.get(key) ?? new Set<{ settle: Promise<void> }>()
+		let settleWrite: () => void = () => {}
+		const entry: { settle: Promise<void> } = {
+			settle: new Promise<void>((resolve) => {
+				settleWrite = resolve
+			}),
+		}
+		pending.add(entry)
+		this.pendingSecretWrites.set(key, pending)
 		const release = () => {
+			pending.delete(entry)
+			if (pending.size === 0) this.pendingSecretWrites.delete(key)
+			settleWrite()
 			if (this.secretWriteOwner.get(key) === owner) this.secretWriteOwner.delete(key)
 		}
 		const stored = (async () =>
@@ -715,18 +750,48 @@ export class ContextProxy {
 	 * This clears all data from both the in-memory caches and the VSCode storage.
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
-	public async resetAllState() {
-		// Clear in-memory caches
-		this.stateCache = {}
-		this.secretCache = {}
+	public resetAllState(): Promise<void> {
+		if (this.resetInFlight) {
+			// A caller that arrives mid-reset joins the pass already running rather than starting a
+			// second delete pass whose end could lower the guard while the first was still writing.
+			return this.resetInFlight
+		}
+		this.resetting = true
+		const pass = (async () => {
+			try {
+				// A secret write that is in flight at this moment has already committed nothing, but it will
+				// commit as soon as it settles, and the deletes below cannot un-commit a write that lands
+				// after them. Wait for the pending writes first, then end the claims, then delete, so the
+				// cleared copy is the last one to land in storage and the cache stays empty afterwards.
+				const inFlight = [...this.pendingSecretWrites.values()].flatMap((writes) =>
+					[...writes].map((w) => w.settle),
+				)
+				await Promise.allSettled(inFlight)
 
-		await Promise.all([
-			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-		])
+				// Clear in-memory caches
+				this.stateCache = {}
+				this.secretCache = {}
+				// A reset also ends write ownership: a write that is still in flight reads the Memento back
+				// into the cache it just lost, so clearing the caches is not enough to keep pre-reset state
+				// out. Ownership is what the rejection handlers gate on.
+				this.stateWriteOwner.clear()
+				this.secretWriteOwner.clear()
 
-		await this.initialize()
+				await Promise.all([
+					...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+					...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+					...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				])
+
+				await this.initialize()
+				this.resetting = false
+			} finally {
+				this.resetting = false
+				this.resetInFlight = null
+			}
+		})()
+		this.resetInFlight = pass
+		return pass
 	}
 
 	private static _instance: ContextProxy | null = null
