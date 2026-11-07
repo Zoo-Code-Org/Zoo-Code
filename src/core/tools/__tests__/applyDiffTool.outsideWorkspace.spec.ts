@@ -52,6 +52,11 @@ vi.mock("vscode", () => ({
 	window: { showWarningMessage: vi.fn() },
 	env: { openExternal: vi.fn() },
 	Uri: { parse: vi.fn() },
+	workspace: {
+		get workspaceFolders() {
+			return [{ uri: { fsPath: path.resolve(CWD) } }]
+		},
+	},
 }))
 
 const CWD = "/workspace"
@@ -133,6 +138,7 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		vi.mocked(isPathOutsideWorkspace).mockReset()
 		applyDiffTool.resetPartialState()
 		vi.mocked(fs.readFile).mockResolvedValue("old\n")
 		askApproval = vi.fn<ToolCallbacks["askApproval"]>().mockResolvedValue(true)
@@ -166,6 +172,40 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 		const payload = JSON.parse(String(vi.mocked(task.ask).mock.calls[0][1])) as ClineSayTool
 		expect(isPathOutsideWorkspace).toHaveBeenCalledWith(path.resolve(CWD, relPath))
 		expect(payload.isOutsideWorkspace).toBe(isOutside)
+	})
+
+	describe("with the real workspace check", () => {
+		it.each([
+			{
+				name: "a ../ path that resolves outside",
+				relPath: "../outside/config.json",
+				isOutside: true,
+				expected: "ask",
+			},
+			{ name: "a path inside", relPath: "src/index.ts", isOutside: false, expected: "approve" },
+		])("marks $name the workspace and returns $expected", async ({ relPath, isOutside, expected }) => {
+			const actual = await vi.importActual<typeof import("../../../utils/pathUtils")>("../../../utils/pathUtils")
+			vi.mocked(isPathOutsideWorkspace).mockImplementation(actual.isPathOutsideWorkspace)
+
+			await applyDiffTool.execute({ path: relPath, diff: DIFF }, createTask(), {
+				askApproval,
+				handleError: vi.fn().mockResolvedValue(undefined),
+				pushToolResult: vi.fn(),
+				toolCallId: "tool-call-1",
+			})
+
+			const text = String(askApproval.mock.calls[0][1])
+			const payload = JSON.parse(text) as ClineSayTool
+			expect(payload.isOutsideWorkspace).toBe(isOutside)
+
+			const result = await checkAutoApproval({
+				state: { ...baseState, alwaysAllowWrite: true },
+				cwd: CWD,
+				ask: "tool",
+				text,
+			})
+			expect(result).toEqual({ decision: expected })
+		})
 	})
 
 	describe("auto-approval decision with alwaysAllowWrite on", () => {
