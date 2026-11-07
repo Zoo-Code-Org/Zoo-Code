@@ -206,6 +206,21 @@ const App = () => {
 		}
 	}, [telemetrySetting, telemetryKey, machineId, vscodeTelemetryEnabled, didHydrateState])
 
+	// Tell the extension that this renderer is alive. The launch must leave before the
+	// first heartbeat: the host starts its heartbeat accounting from the launch message
+	// (the visual recovery case releases its heartbeat block on exactly that message), so
+	// a heartbeat that overtakes the launch is counted against a view the host has not
+	// paired with this renderer yet. Both posts live in this component, so their order is
+	// fixed by declaration order rather than by effect-flush order across components.
+	useEffect(
+		() =>
+			vscode.postMessage({
+				type: "webviewDidLaunch",
+				viewStateId: typeof vscode.getViewStateId === "function" ? vscode.getViewStateId() : undefined,
+			}),
+		[],
+	)
+
 	// Heartbeat so the extension watchdog can detect a crashed webview renderer
 	// process (gray screen) and reload the view.
 	useEffect(() => {
@@ -216,8 +231,6 @@ const App = () => {
 	}, [])
 
 	// Window activation and programmatic focus do not identify a chat interaction.
-	// (webviewDidLaunch is posted by ExtensionStateContext once the view state is
-	// hydrated; re-posting it here would double the launch message.)
 	useEffect(() => {
 		const onInteraction = () => vscode.postMessage({ type: "webviewDidFocus" })
 		document.addEventListener("pointerdown", onInteraction, true)

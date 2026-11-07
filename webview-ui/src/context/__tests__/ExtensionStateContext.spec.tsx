@@ -23,7 +23,6 @@ import {
 	createInitialExtensionState,
 } from "../ExtensionStateContext"
 import { StringCache } from "@/utils/stringCache"
-import { vscode } from "@src/utils/vscode"
 
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
@@ -170,33 +169,6 @@ describe("ExtensionStateContext", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
-	})
-
-	it("posts webviewDidLaunch with the stable viewStateId from vscode API", () => {
-		render(
-			<ExtensionStateContextProvider>
-				<TestComponent />
-			</ExtensionStateContextProvider>,
-		)
-
-		expect(vscode.getViewStateId).toHaveBeenCalled()
-		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: "view-a" })
-	})
-
-	it("posts webviewDidLaunch without a viewStateId when getViewStateId is unavailable", () => {
-		const savedGetViewStateId = vscode.getViewStateId
-		Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: undefined })
-		try {
-			render(
-				<ExtensionStateContextProvider>
-					<TestComponent />
-				</ExtensionStateContextProvider>,
-			)
-
-			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: undefined })
-		} finally {
-			Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: savedGetViewStateId })
-		}
 	})
 
 	it("applies mode and profile from a later state payload after local edits", () => {

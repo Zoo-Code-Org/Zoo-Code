@@ -635,13 +635,6 @@ export const ExtensionStateContextProvider: React.FC<{
 		}
 	}, [handleMessage])
 
-	useEffect(() => {
-		vscode.postMessage({
-			type: "webviewDidLaunch",
-			viewStateId: typeof vscode.getViewStateId === "function" ? vscode.getViewStateId() : undefined,
-		})
-	}, [])
-
 	// Apply the configurable chat font size as a CSS variable. When unset, the
 	// override is removed so the UI falls back to VS Code's `--vscode-font-size`.
 	useEffect(() => {

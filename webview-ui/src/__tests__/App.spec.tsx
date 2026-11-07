@@ -606,5 +606,47 @@ describe("App", () => {
 
 			expect(postMessageMock.mock.calls.length).toBe(callsAfterMount)
 		})
+
+		// The host opens its heartbeat accounting only when the launch message arrives (the
+		// visual recovery case releases its blocked/forwarded counter on exactly that message),
+		// so the launch has to be the first message the renderer posts: a heartbeat that
+		// overtakes it is counted as delivery that never happened, and the case then waits a
+		// full 30-second interval for a heartbeat that was already sent.
+		it("posts webviewDidLaunch before the first mount heartbeat", () => {
+			vi.useFakeTimers()
+			render(<AppWithProviders />)
+
+			const posted = vi.mocked(vscode.postMessage).mock.calls.map((call) => call[0].type)
+			const launchIndex = posted.indexOf("webviewDidLaunch")
+			const heartbeatIndex = posted.indexOf("webviewHeartbeat")
+
+			expect(launchIndex).toBeGreaterThanOrEqual(0)
+			expect(heartbeatIndex).toBeGreaterThanOrEqual(0)
+			expect(launchIndex).toBeLessThan(heartbeatIndex)
+		})
+	})
+
+	describe("launch message", () => {
+		it("posts webviewDidLaunch with the stable viewStateId from the vscode API", () => {
+			render(<AppWithProviders />)
+
+			expect(vscode.getViewStateId).toHaveBeenCalled()
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "webviewDidLaunch",
+				viewStateId: "test-view-state-id",
+			})
+		})
+
+		it("posts webviewDidLaunch without a viewStateId when getViewStateId is unavailable", () => {
+			const savedGetViewStateId = vscode.getViewStateId
+			Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: undefined })
+			try {
+				render(<AppWithProviders />)
+
+				expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: undefined })
+			} finally {
+				Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: savedGetViewStateId })
+			}
+		})
 	})
 })
