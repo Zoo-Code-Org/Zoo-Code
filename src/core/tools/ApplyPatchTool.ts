@@ -6,11 +6,12 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
+import { checkpointSave } from "../checkpoints"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
-import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { sanitizeUnifiedDiff, computeDiffStats, type DiffStats } from "../diff/stats"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -18,6 +19,20 @@ import type { ApplyPatchFileChange } from "./apply-patch"
 
 interface ApplyPatchParams {
 	patch: string
+}
+
+/**
+ * B2: result of a single file operation within a patch. `succeeded` controls
+ * the whole-patch success state (and therefore the per-patch checkpoint),
+ * while `wrote` records whether the operation actually wrote a file — a no-op
+ * update must not produce a change-journal entry for a file that was never
+ * written. `diffStats` carries the approval-diff statistics of a written file
+ * so the journal entry can report the size of the change.
+ */
+interface ApplyPatchFileOpResult {
+	succeeded: boolean
+	wrote: boolean
+	diffStats?: DiffStats
 }
 
 export class ApplyPatchTool extends BaseTool<"apply_patch"> {
@@ -55,6 +70,35 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 	async execute(params: ApplyPatchParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { patch } = params
 		const { handleError, pushToolResult } = callbacks
+
+		// Set once the success-path flush actually proceeds to checkpointSave, so
+		// the catch below does not persist the same writes twice while a
+		// settings-read rejection before that decision leaves the catch flush
+		// armed with default-on semantics.
+		let writeMetadataFlushed = false
+		// Cached perWriteCheckpoints lookup shared by the success-path flush and
+		// the catch flush: the catch must not call getState() again, because a
+		// rejecting settings read must not skip persisting writes already on disk.
+		let perWriteCheckpoints: boolean | undefined
+		const successfulChanges: { change: ApplyPatchFileChange; diffStats?: DiffStats }[] = []
+		// Journal payload builder shared by the success-path flush and the
+		// catch-path flush for writes recorded before an unexpected throw.
+		const journalEntries = () =>
+			successfulChanges.flatMap(({ change, diffStats }) => {
+				const written = {
+					path: change.movePath ?? change.path,
+					operation: change.type === "add" ? ("create" as const) : change.type,
+					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,
+				}
+				// A completed move also DELETES its source: journal that deletion
+				// after the destination write so a step rollback restores the
+				// removed file from its pre-step state. A move whose source unlink
+				// failed left the source on disk and gets no deletion entry.
+				if (change.movePath && change.moveSourceDeleted) {
+					return [written, { path: change.path, operation: "delete" as const, diffStats: undefined }]
+				}
+				return [written]
+			})
 
 		try {
 			// Validate required parameters
@@ -102,7 +146,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each file change
+			// Process each file change. The handlers report whether their file
+			// operation succeeded (which controls the whole-patch checkpoint); each
+			// write is recorded through the onWrote callback at the moment it lands
+			// on disk, so a throw from post-write bookkeeping cannot lose the
+			// journal entry for a completed write (a no-op update never calls the
+			// callback). A rejected approval or a failed local write never gets
+			// checkpointed as a success.
+			let patchSucceeded = true
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -112,7 +163,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (!accessAllowed) {
 					await task.say("rooignore_error", relPath)
 					pushToolResult(formatResponse.rooIgnoreError(relPath))
-					return
+					// B2 partial flush: break, not return - an earlier hunk may have
+					// already written a file, and those writes must still receive the
+					// checkpoint, journal entry, and change card. Failing the patch
+					// also keeps the consecutive-mistake counter from resetting.
+					patchSucceeded = false
+					break
 				}
 
 				// Check if file is write-protected
@@ -120,19 +176,114 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					const addResult = await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						(diffStats) => successfulChanges.push({ change, diffStats }),
+					)
+					patchSucceeded = addResult.succeeded && patchSucceeded
 				} else if (change.type === "delete") {
 					// Delete file
-					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					const deleteResult = await this.handleDeleteFile(
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						() => successfulChanges.push({ change }),
+					)
+					patchSucceeded = deleteResult.succeeded && patchSucceeded
 				} else if (change.type === "update") {
-					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					// Update file (a no-op update succeeds without writing)
+					const updateResult = await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						(diffStats) => successfulChanges.push({ change, diffStats }),
+					)
+					patchSucceeded = updateResult.succeeded && patchSucceeded
 				}
 			}
 
-			task.consecutiveMistakeCount = 0
+			// Reset the consecutive-mistake counter only after a fully successful
+			// patch: a failed operation (missing file, rejected move, ...) increments
+			// the counter, and the count must survive a partially written patch so
+			// the auto-approval safety net still engages across consecutive failed
+			// patches.
+			if (patchSucceeded) {
+				task.consecutiveMistakeCount = 0
+			}
+
+			// B1: one checkpoint for the whole patch (not per file). Live
+			// setting with default-on semantics: skip only when explicitly false.
+			// B3a partial flush: the checkpoint and journal are also taken when at
+			// least one file operation wrote, even if a later hunk of the same
+			// patch failed - the journal then documents exactly the subset that
+			// was written, and the failed operation was already reported through
+			// pushToolResult. A fully failed patch (nothing written) leaves no
+			// checkpoint behind.
+			if (patchSucceeded || successfulChanges.length > 0) {
+				perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					writeMetadataFlushed = true
+					// B2: one journal entry per file that was actually written by
+					// the patch (the simplest correct design for multi-file patches),
+					// all referencing the single checkpoint above. A no-op update
+					// contributes no entry because nothing was written. `movePath`,
+					// when present, is the file's final location, and a completed move
+					// additionally journals its source deletion. Each entry carries the
+					// approval-diff statistics the handler computed.
+					// Await so the checkpoint (staging + commit + journal)
+					// completes before queued messages are processed below;
+					// otherwise a queued write's own checkpoint could interleave
+					// with this commit.
+					await checkpointSave(task, false, true, journalEntries()).catch(() => {})
+				}
+			}
+
+			// B2: deferred from the per-file handlers — a queued write must not
+			// start until the post-patch checkpoint above has persisted. The
+			// handlers used to process queued messages right after each
+			// successful write; a write happened if and only if
+			// `successfulChanges` is non-empty, so one call here preserves that.
+			if (successfulChanges.length > 0) {
+				task.processQueuedMessages()
+			}
 		} catch (error) {
-			await handleError("apply patch", error as Error)
+			// A handler that throws after recording its write (post-write
+			// bookkeeping such as trackFileContext) skips the success-path flush
+			// above. Persist the accumulated write metadata here, awaited, before
+			// the generic error handling: the writes are on disk and the journal
+			// must document them. A flush that already ran (or was skipped by the
+			// setting) is not attempted twice.
+			let reportedError: unknown = error
+			if (!writeMetadataFlushed && successfulChanges.length > 0) {
+				if (perWriteCheckpoints !== false) {
+					let flushError: unknown
+					await checkpointSave(task, false, true, journalEntries()).catch((flushFailure) => {
+						flushError = flushFailure
+					})
+					if (flushError !== undefined) {
+						// The completed write lacks rollback metadata: report the
+						// persistence failure alongside the bookkeeping error without
+						// replacing it as the reported failure.
+						const flushMessage = flushError instanceof Error ? flushError.message : String(flushError)
+						const baseMessage = error instanceof Error ? error.message : String(error)
+						console.error("[ApplyPatchTool] catch-path checkpoint flush failed:", flushError)
+						reportedError = new Error(`${baseMessage} (checkpoint flush also failed: ${flushMessage})`, {
+							cause: error,
+						})
+					}
+				}
+			}
+			await handleError("apply patch", reportedError as Error)
 			await task.diffViewProvider.reset()
 		}
 	}
@@ -144,7 +295,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+		onWrote?: (diffStats?: DiffStats) => void,
+	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file already exists
@@ -155,7 +307,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File already exists: ${relPath}. Use Update File instead.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		const newContent = change.newContent || ""
@@ -209,7 +361,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		// Save the changes
@@ -219,6 +371,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 		}
 
+		// Record the completed write before post-write bookkeeping can fail:
+		// a throw from trackFileContext must not lose the journal entry for
+		// a file that is already on disk.
+		onWrote?.(diffStats)
+
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		task.didEditFile = true
@@ -226,7 +383,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
+		// so it runs only after the post-patch checkpoint has completed.
+		return { succeeded: true, wrote: true, diffStats }
 	}
 
 	private async handleDeleteFile(
@@ -235,7 +394,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+		onWrote?: () => void,
+	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file exists
@@ -246,7 +406,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot delete a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
@@ -268,7 +428,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		if (!didApprove) {
 			pushToolResult("Delete operation was rejected by the user.")
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		// Delete the file
@@ -278,12 +438,17 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `Failed to delete file '${relPath}': ${error instanceof Error ? error.message : String(error)}`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
+
+		// The deletion is complete; record it before the result handoff can fail.
+		onWrote?.()
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		task.processQueuedMessages()
+		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
+		// so it runs only after the post-patch checkpoint has completed.
+		return { succeeded: true, wrote: true }
 	}
 
 	private async handleUpdateFile(
@@ -293,8 +458,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+		onWrote?: (diffStats?: DiffStats) => void,
+	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
+
+		// A move reports failure when the original file cannot be deleted
+		// after the copy (both paths would remain on disk).
+		let moveSucceeded = true
 
 		// Check if file exists
 		const fileExists = await fileExistsAtPath(absolutePath)
@@ -304,7 +474,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot update a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		const originalContent = change.originalContent || ""
@@ -318,9 +488,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// Generate and validate diff
 		const diff = formatResponse.createPrettyPatch(relPath, originalContent, newContent)
 		if (!diff) {
+			// A no-op change is not a failure: the patch processed cleanly and
+			// nothing was written, so the whole-patch success state is kept —
+			// but `wrote` stays false so the change journal does not document a
+			// write that never happened.
 			pushToolResult(`No changes needed for '${relPath}'`)
 			await task.diffViewProvider.reset()
-			return
+			return { succeeded: true, wrote: false }
 		}
 
 		// Check experiment settings
@@ -366,7 +540,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return { succeeded: false, wrote: false }
 		}
 
 		// Handle file move if specified
@@ -379,7 +553,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("rooignore_error", change.movePath)
 				pushToolResult(formatResponse.rooIgnoreError(change.movePath))
 				await task.diffViewProvider.reset()
-				return
+				return { succeeded: false, wrote: false }
 			}
 
 			// Check if destination path is write-protected
@@ -391,7 +565,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return { succeeded: false, wrote: false }
 			}
 
 			// Check if destination path is outside workspace
@@ -403,7 +577,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return { succeeded: false, wrote: false }
 			}
 
 			// Save new content to the new path
@@ -422,12 +596,25 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
 			}
 
-			// Delete the original file
+			// Delete the original file. A failed deletion leaves both paths on
+			// disk, so the move must be reported as a failure rather than
+			// checkpointed and journaled as a completed move.
 			try {
 				await fs.unlink(absolutePath)
+				change.moveSourceDeleted = true
 			} catch (error) {
+				moveSucceeded = false
 				console.error(`Failed to delete original file after move: ${error}`)
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_patch")
+				const errorMessage = `Move of '${relPath}' to '${change.movePath}' failed: could not delete the original file.`
+				await task.say("error", errorMessage)
+				pushToolResult(formatResponse.toolError(errorMessage))
 			}
+
+			// The destination write is on disk whether or not the source unlink
+			// succeeded; record it before bookkeeping can fail.
+			onWrote?.(diffStats)
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
 		} else {
@@ -438,6 +625,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
 
+			// Record the completed write before post-write bookkeeping can fail.
+			onWrote?.(diffStats)
+
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		}
 
@@ -446,7 +636,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
+		// so it runs only after the post-patch checkpoint has completed.
+		if (!moveSucceeded) {
+			// The destination file was written on disk before the source
+			// deletion failed, so the write must still be checkpointed and
+			// journaled; the move itself is reported as failed.
+			return { succeeded: false, wrote: true, diffStats }
+		}
+		return { succeeded: true, wrote: true, diffStats }
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {
