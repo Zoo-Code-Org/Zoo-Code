@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
 import { API } from "../api"
-import type { ClineProvider } from "../../core/webview/ClineProvider"
+import { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("@roo-code/ipc", () => ({
@@ -19,15 +19,27 @@ describe("API - configuration", () => {
 			context: {},
 			on: vi.fn(),
 			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig },
+			providerSettingsManager: {
+				saveConfig,
+				setModeConfig,
+				listConfig: vi.fn().mockResolvedValue([
+					{ name: "code", id: "code-config" },
+					{ name: "custom", id: "architect-config" },
+				]),
+			},
+			localModeConfigIds: new Map<string, string>(),
+			initialModeConfigIds: Promise.resolve({}),
+			setModeConfig: ClineProvider.prototype.setModeConfig,
+			getModeConfigId: ClineProvider.prototype["getModeConfigId"],
 			postStateToWebview,
+			// Provides the configuration methods and event registration used by API.
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		await api.setConfiguration({
 			currentApiConfigName: "default",
-			modeApiConfigs: { code: "code-config", architect: "architect-config" },
+			modeApiConfigs: { code: "code-config", "new-custom-mode": "architect-config" },
 		})
 
 		expect(saveConfig).toHaveBeenCalledWith("default", expect.objectContaining({ currentApiConfigName: "default" }))
@@ -39,7 +51,9 @@ describe("API - configuration", () => {
 		)
 		expect(setModeConfig).toHaveBeenCalledTimes(2)
 		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
-		expect(setModeConfig).toHaveBeenCalledWith("architect", "architect-config")
+		expect(setModeConfig).toHaveBeenCalledWith("new-custom-mode", "architect-config")
+		await expect(provider["getModeConfigId"]("code")).resolves.toBe("code-config")
+		await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBe("architect-config")
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
 
@@ -52,8 +66,10 @@ describe("API - configuration", () => {
 			context: {},
 			on: vi.fn(),
 			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig },
+			providerSettingsManager: { saveConfig },
+			setModeConfig,
 			postStateToWebview,
+			// Provides the configuration methods and event registration used by API.
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider, makeClineProviderFactory())

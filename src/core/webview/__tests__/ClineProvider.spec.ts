@@ -4523,6 +4523,19 @@ describe("ClineProvider", () => {
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
 		})
 
+		it.each(["architect", "new-custom-mode"])(
+			"adopts imported defaults for %s without adopting other windows' writes",
+			async (mode) => {
+				provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
+				existingProfiles("opened-with-id", "imported-id", "other-window-id")
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")
+				provider.adoptModeConfigIds({ [mode]: "imported-id" })
+
+				await expect(provider["getModeConfigId"](mode)).resolves.toBe("imported-id")
+				await expect(provider["getModeConfigId"]("unrelated-mode")).resolves.toBeUndefined()
+			},
+		)
+
 		it("falls back to the shared value when the snapshot cannot be read", async () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValue(new Error("unreadable"))
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")

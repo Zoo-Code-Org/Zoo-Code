@@ -15,7 +15,7 @@ import { importSettingsFromPath, ImportOptions } from "../core/config/importExpo
  */
 export async function autoImportSettings(
 	outputChannel: vscode.OutputChannel,
-	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager, onModeConfigIdsImported }: ImportOptions,
 ): Promise<void> {
 	try {
 		// Get the auto-import settings path from VSCode settings
@@ -41,6 +41,7 @@ export async function autoImportSettings(
 			providerSettingsManager,
 			contextProxy,
 			customModesManager,
+			onModeConfigIdsImported,
 		})
 
 		if (result.success) {

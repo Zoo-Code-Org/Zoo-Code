@@ -2196,7 +2196,14 @@ export class ClineProvider
 		return this.providerSettingsManager.getModeConfigId(mode)
 	}
 
-	private async setModeConfig(mode: Mode, id: string): Promise<void> {
+	/** Adopt only mappings explicitly written by an import in this window. */
+	public adoptModeConfigIds(ids: Record<string, string>): void {
+		for (const [mode, id] of Object.entries(ids)) {
+			this.localModeConfigIds.set(mode, id)
+		}
+	}
+
+	public async setModeConfig(mode: Mode, id: string): Promise<void> {
 		const previousId = this.localModeConfigIds.get(mode)
 		this.localModeConfigIds.set(mode, id)
 		try {
