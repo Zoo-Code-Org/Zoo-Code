@@ -863,6 +863,25 @@ describe("PoeHandler", () => {
 			expect(callArgs.abortSignal.aborted).toBe(true)
 		})
 
+		it("reports a caller timeout abort as AbortError when no per-request timeout is configured", async () => {
+			// A caller that passes AbortSignal.timeout(ms) aborts with a reason whose name is
+			// "TimeoutError". With no timeoutMs of our own this method created no timeout
+			// source, so that abort must stay on the caller-abort contract (AbortError) and
+			// not be reported as this provider timing out. Red without the hasUsableTimeout
+			// condition in abortedByTimeout().
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				await new Promise<void>((resolve) => {
+					args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+				})
+				return { text: "late result" }
+			})
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			controller.abort(new DOMException("caller deadline exceeded", "TimeoutError"))
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
 		it("does not apply a timeout when the caller supplies no options", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			mockGenerateText.mockResolvedValueOnce({ text: "response" })

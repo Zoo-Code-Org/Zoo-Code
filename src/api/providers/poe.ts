@@ -33,7 +33,12 @@ import type {
 	ModelCacheScope,
 } from "../index"
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
-import { bridgeExternalAbortSignal, createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	mergeAbortSignalAndTimeout,
+} from "./utils/abort-signal"
 import { createTimeoutError } from "./utils/request-timeout"
 import { getPoeModels } from "./fetchers/poe"
 
@@ -249,8 +254,16 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		// The merged signal keeps the FIRST abort reason. A timeout that fires before the caller
 		// aborts must stay a TimeoutError even if the caller signal aborts before the late result
 		// settles, so classify by the signal's reason rather than the caller signal's later state.
+		// A reason named TimeoutError is not proof of our own deadline: AbortSignal.timeout()
+		// produces exactly that reason, so a caller that passes a timeout signal without
+		// timeoutMs would otherwise be reported as this provider timing out. The reading is
+		// sound only when this method configured a timeout, so a caller-only timeout abort
+		// stays on the AbortError contract. Where a caller timeout signal and our own
+		// timeoutMs both exist the two reasons are indistinguishable and the timeout reading
+		// wins, which is the series contract.
 		const abortedByTimeout = () =>
 			Boolean(mergedAbortSignal?.aborted) &&
+			hasUsableTimeout(options?.timeoutMs) &&
 			(mergedAbortSignal?.reason as { name?: string } | undefined)?.name === "TimeoutError"
 		let text: string
 		try {
