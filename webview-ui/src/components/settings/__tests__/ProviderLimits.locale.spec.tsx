@@ -130,14 +130,20 @@ describe("ProviderLimits in another language", () => {
 			const english = settingsOf("en").usage.limits
 			const limits = settingsOf(locale).usage.limits
 
+			// What is wrong, by key, so that a failure says which key of which locale it is.
+			const problems: string[] = []
 			for (const key of valueKeys) {
-				expect(typeof limits.value[key], `${locale} value.${key}`).toBe("string")
-				expect(placeholders(limits.value[key]), `${locale} value.${key}`).toEqual(
-					placeholders(english.value[key]),
-				)
+				const text = limits.value[key]
+				if (typeof text !== "string") problems.push(`value.${key} is missing`)
+				else if (placeholders(text).join() !== placeholders(english.value[key]).join()) {
+					problems.push(`value.${key} has other placeholders than English: ${text}`)
+				}
 			}
-			for (const key of ["credits", "tokens"])
-				expect(typeof limits.window[key], `${locale} window.${key}`).toBe("string")
+			for (const key of ["credits", "tokens"]) {
+				if (typeof limits.window[key] !== "string") problems.push(`window.${key} is missing`)
+			}
+
+			expect(problems).toEqual([])
 		})
 	})
 })

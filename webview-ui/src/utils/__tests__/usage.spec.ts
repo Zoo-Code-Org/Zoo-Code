@@ -688,22 +688,20 @@ describe("the ends of today, to the millisecond", () => {
 		item({ task: "tomorrow-first-ms", ts: at(1, 0, 0, 0, 0), tokensIn: 1, totalCost: 8 }),
 	]
 
-	it("includes the first and the last millisecond of today, and excludes the first millisecond of tomorrow, in every bounded range", () => {
-		for (const range of ["today", "7d", "30d"] as const) {
+	it.each(["today", "7d", "30d"] as const)(
+		"includes the first and the last millisecond of today, and excludes the first millisecond of tomorrow, in the %s range",
+		(range) => {
 			const csv = usageToCsv(tasks(), { range, now: NOW })
-			expect(csv, range).toContain("today-first-ms")
-			expect(csv, range).toContain("today-last-ms")
-			expect(csv, range).not.toContain("tomorrow-first-ms")
+			expect(csv).toContain("today-first-ms")
+			expect(csv).toContain("today-last-ms")
+			expect(csv).not.toContain("tomorrow-first-ms")
 
 			const summary = summarizeUsage(tasks(), { range, now: NOW })
 			// The export and the headline agree, and the chart adds up to it.
-			expect(
-				summary.daily.reduce((sum, d) => sum + d.cost, 0),
-				range,
-			).toBe(summary.totalCost)
-			expect(summary.totalCost, range).toBe(range === "today" ? 6 : 7) // yesterday's last millisecond is in the longer ranges
-		}
-	})
+			expect(summary.daily.reduce((sum, d) => sum + d.cost, 0)).toBe(summary.totalCost)
+			expect(summary.totalCost).toBe(range === "today" ? 6 : 7) // yesterday's last millisecond is in the longer ranges
+		},
+	)
 
 	it("excludes the last millisecond of yesterday from today alone", () => {
 		expect(usageToCsv(tasks(), { range: "today", now: NOW })).not.toContain("yesterday-last-ms")
