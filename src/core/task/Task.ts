@@ -144,7 +144,7 @@ import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
-import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 import {
 	divergenceKey,
@@ -392,7 +392,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
-	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
@@ -410,7 +409,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	didFinishAbortingStream = false
 	abandoned = false
-	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
 
 	runState: RunState = initialRunState
@@ -3581,8 +3579,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.driveRunEvent({ tag: "completionAccepted", askTs })
 	}
 
+	get abort(): boolean {
+		return abort(this.runState)
+	}
+
+	get abortReason(): ClineApiReqCancelReason | undefined {
+		return abortReason(this.runState)
+	}
+
 	setAbortReason(reason: ClineApiReqCancelReason): void {
-		this.abortReason ??= reason
 		this.driveRunEvent({ tag: "reasonSet", reason })
 	}
 
@@ -3590,7 +3595,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (isAbandoned) {
 			this.abandoned = true
 		}
-		this.abort = true
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}
 
@@ -3600,7 +3604,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	requestDispose(): void {
-		this.abort = true
 		this.driveRunEvent({ tag: "disposeRequested" })
 	}
 
