@@ -41,6 +41,7 @@ describe("ClineProviderFactory", () => {
 			context,
 			outputChannel,
 			webviewFocusTracker: tracker,
+			forceNew: true,
 		})
 	})
 
@@ -57,11 +58,13 @@ describe("ClineProviderFactory", () => {
 			context,
 			outputChannel,
 			webviewFocusTracker: tracker,
+			forceNew: true,
 		})
 		expect(openClineInNewTab).toHaveBeenNthCalledWith(2, {
 			context: secondContext,
 			outputChannel,
 			webviewFocusTracker: secondTracker,
+			forceNew: true,
 		})
 	})
 
