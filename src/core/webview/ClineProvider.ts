@@ -135,7 +135,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
-import { CustomModesManager } from "../config/CustomModesManager"
+import { CustomModesManager, type CustomModesSnapshot } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
@@ -5005,11 +5005,24 @@ export class ClineProvider
 			// Snapshot every definition of every slug this batch touches, one per source file. Filtering
 			// the merged list would keep only the project copy of a slug that exists in both files, and
 			// the rollback would then restore that copy while the global definition stayed overwritten.
-			const savedCustomModes = configuration.customModes?.length
+			const snapshot: CustomModesSnapshot = configuration.customModes?.length
 				? await this.customModesManager.getCustomModeDefinitions(
 						configuration.customModes.map((candidate) => candidate.slug),
 					)
-				: []
+				: { definitions: [], failures: [] }
+
+			// A snapshot taken from a file that could not be read has nothing to roll back to, so the
+			// batch would be installed with no way to put the previous definitions back. Refuse before any
+			// write: nothing is registered, nothing is removed, setValues does not run, and createTask does
+			// not go on to construct the task with modes it cannot restore.
+			if (snapshot.failures.length > 0) {
+				const unread = snapshot.failures.map((failure) => `${failure.path} (${failure.reason})`).join(", ")
+				throw new Error(
+					`createTask: custom mode definitions could not be read before registering the batch: ${unread}`,
+				)
+			}
+
+			const savedCustomModes = snapshot.definitions
 
 			// Registration lives inside the try below: a mode whose write fails partway through
 			// the batch must trigger the same rollback as a failure after setValues.

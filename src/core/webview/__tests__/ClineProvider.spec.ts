@@ -6963,7 +6963,9 @@ describe("ClineProvider", () => {
 			// The merged read hides the global copy behind the project one; the rollback snapshot must
 			// not, or restoring it would write the project definition to the global file as well.
 			getCustomModes: vi.fn().mockResolvedValue([projectCopy]),
-			getCustomModeDefinitions: vi.fn().mockResolvedValue([projectCopy, globalCopy]),
+			getCustomModeDefinitions: vi
+				.fn()
+				.mockResolvedValue({ definitions: [projectCopy, globalCopy], failures: [] }),
 			updateCustomMode: vi.fn().mockResolvedValue(undefined),
 			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
 		})
@@ -7003,7 +7005,7 @@ describe("ClineProvider", () => {
 		Object.assign(manager, {
 			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
 			// The rollback snapshot reads both source files, so the double answers that reader too.
-			getCustomModeDefinitions: vi.fn().mockResolvedValue([savedMode]),
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({ definitions: [savedMode], failures: [] }),
 			updateCustomMode: vi.fn().mockResolvedValue(undefined),
 			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
 		})
@@ -7039,7 +7041,7 @@ describe("ClineProvider", () => {
 		Object.assign(manager, {
 			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
 			// The rollback snapshot reads both source files, so the double answers that reader too.
-			getCustomModeDefinitions: vi.fn().mockResolvedValue([savedMode]),
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({ definitions: [savedMode], failures: [] }),
 			updateCustomMode: vi.fn((slug: string, mode: typeof savedMode) => {
 				calls.push([slug, mode.name])
 				// The batch's second registration is the one that throws.
@@ -7067,6 +7069,71 @@ describe("ClineProvider", () => {
 		expect(manager.removeCustomModeEntry).toHaveBeenCalledWith("new-mode")
 		expect(manager.removeCustomModeEntry).not.toHaveBeenCalledWith("existing-mode")
 		expect(setValuesSpy).not.toHaveBeenCalled()
+
+		await provider.dispose()
+	})
+
+	it("refuses the batch when a definition file could not be read, before registering anything", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const batchMode = { slug: "batch-mode", name: "Batch", roleDefinition: "r", groups: ["read" as const] }
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			getCustomModes: vi.fn().mockResolvedValue([]),
+			// The definition file exists but does not validate, so there is no trustworthy snapshot to
+			// roll back to.
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({
+				definitions: [],
+				failures: [{ path: "/mock/settings/custom_modes.yaml", reason: "invalid" }],
+			}),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		const setValuesSpy = vi.spyOn(provider, "setValues").mockResolvedValue(undefined)
+
+		await expect(
+			provider.createTask("text", undefined, undefined, {}, { customModes: [batchMode] }),
+		).rejects.toThrow("custom mode definitions could not be read")
+
+		// The batch never reaches storage: no registration, no rules-folder removal, no setValues, and
+		// createTask does not go on to construct a task with modes it cannot restore.
+		expect(manager.updateCustomMode).not.toHaveBeenCalled()
+		expect(manager.removeCustomModeEntry).not.toHaveBeenCalled()
+		expect(setValuesSpy).not.toHaveBeenCalled()
+
+		await provider.dispose()
+	})
+
+	it("registers the batch when the snapshot reports no failure, even with an absent definition file", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const batchMode = { slug: "batch-mode", name: "Batch", roleDefinition: "r", groups: ["read" as const] }
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			getCustomModes: vi.fn().mockResolvedValue([]),
+			// An absent file is an empty snapshot with no failure, which is a legitimate thing to
+			// register against.
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({ definitions: [], failures: [] }),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		vi.spyOn(provider, "setValues").mockRejectedValue(new Error("configuration write failed"))
+
+		await expect(
+			provider.createTask("text", undefined, undefined, {}, { customModes: [batchMode] }),
+		).rejects.toThrow("configuration write failed")
+
+		expect(manager.updateCustomMode).toHaveBeenCalledWith("batch-mode", batchMode)
 
 		await provider.dispose()
 	})

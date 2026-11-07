@@ -828,6 +828,61 @@ describe("CustomModesManager", () => {
 		})
 	})
 
+	describe("getCustomModeDefinitions (the rollback snapshot)", () => {
+		const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
+		it("reports an absent definition file as an empty snapshot with no failure", async () => {
+			;(fs.readFile as Mock).mockRejectedValue(enoent())
+			;(fileExistsAtPath as Mock).mockResolvedValue(false)
+
+			const snapshot = await manager.getCustomModeDefinitions(["any-mode"])
+
+			// A file that is not there really is a definition list of length zero, so a rollback that
+			// restores nothing against it is correct rather than a lost snapshot.
+			expect(snapshot.definitions).toEqual([])
+			expect(snapshot.failures).toEqual([])
+		})
+
+		it("reports a corrupt definition file as unreadable instead of an empty snapshot", async () => {
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				if (filePath === mockSettingsPath) {
+					return "customModes: [invalid yaml content"
+				}
+				throw enoent()
+			})
+			;(fileExistsAtPath as Mock).mockResolvedValue(false)
+
+			const snapshot = await manager.getCustomModeDefinitions(["any-mode"])
+
+			// Same empty definition list as an absent file, but the rollback has to be able to tell them
+			// apart: registering against this snapshot would overwrite a definition nobody could read.
+			expect(snapshot.definitions).toEqual([])
+			expect(snapshot.failures).toEqual([{ path: mockSettingsPath, reason: "unreadable" }])
+		})
+
+		it("reports a schema-invalid definition file as invalid and keeps the source that read cleanly", async () => {
+			const projectMode = {
+				slug: "project-only",
+				name: "Project",
+				roleDefinition: "r",
+				groups: ["read"] as const,
+			}
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				if (filePath === mockRoomodes) {
+					return yaml.stringify({ customModes: [projectMode] })
+				}
+				// No roleDefinition: the file parses, so this is not a read failure, it is a definition
+				// the schema rejects.
+				return yaml.stringify({ customModes: [{ slug: "broken", name: "Broken", groups: ["read"] }] })
+			})
+			;(fileExistsAtPath as Mock).mockResolvedValue(true)
+
+			const snapshot = await manager.getCustomModeDefinitions(["project-only", "broken"])
+
+			expect(snapshot.failures).toEqual([{ path: mockSettingsPath, reason: "invalid" }])
+			expect(snapshot.definitions.map((mode) => mode.slug)).toEqual(["project-only"])
+		})
+	})
 	describe("updateModesInFile", () => {
 		it("handles corrupted YAML content gracefully", async () => {
 			const corruptedYaml = "customModes: [invalid yaml content"
