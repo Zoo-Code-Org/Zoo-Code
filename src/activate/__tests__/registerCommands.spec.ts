@@ -187,7 +187,10 @@ describe("registerCommands handlers", () => {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 		}
 
-		// The visible-provider double supplies message posting and explicit recovery retry.
+		// The visible-provider double supplies message posting and explicit recovery retry. In the
+		// sidebar cases it stands for a second surface - a visible tab editor - so asserting that it
+		// receives no message pins the property that a click stays on the sidebar whenever the
+		// sidebar's own view is visible, whatever else is on screen.
 		mockVisibleProviderInstance = mockVisibleProvider as unknown as ClineProvider
 		mockProvider = {
 			retryWebviewRecovery: vi.fn().mockResolvedValue(undefined),
@@ -396,6 +399,28 @@ describe("registerCommands handlers", () => {
 
 			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 			expect(collapsedSidebarTabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action })
+		},
+	)
+
+	// The same three handlers are reachable from the `commandPalette` with the sidebar collapsed
+	// and no other surface on screen. `sidebarCommandTarget` then finds no target and each handler
+	// must stop before its telemetry call and before posting into any webview. Only settings and
+	// history record telemetry, and both record it after the guard, so the assertion is uniform
+	// over the three. This is the branch the mutation advisory on this PR named
+	// (`src/activate/registerCommands.ts:216`, 2 mutation test gaps with a `NoCoverage BlockStatement
+	// mutant (replacement: {})` example): dropping an `if (!target) return` is observable twice
+	// over here - the handler both records telemetry and dereferences `undefined` in `postActions`.
+	it.each(["settingsButtonClicked", "historyButtonClicked", "marketplaceButtonClicked"])(
+		"%s does nothing when the sidebar is hidden and no provider is visible",
+		(action) => {
+			mockProvider.isViewVisible = false
+			;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+			handlers[`zoo-code.${action}`]()
+
+			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureTitleButtonClicked).not.toHaveBeenCalled()
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith("Cannot find any visible Roo Code instances.")
 		},
 	)
 
