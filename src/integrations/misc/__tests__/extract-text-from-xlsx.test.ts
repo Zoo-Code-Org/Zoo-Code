@@ -214,6 +214,110 @@ describe("formatWorkbook", () => {
 			expect(result).toContain("30") // Formula with result
 			expect(result).toContain("[Formula: SUM(B1:B10)]") // Formula without result
 		})
+
+		it("should read every cell of a filled-down formula", () => {
+			const workbook = new ExcelJS.Workbook()
+			const worksheet = workbook.addWorksheet("Sheet1")
+
+			// Excel saves a formula filled down a column as one shared formula
+			worksheet.getCell("A1").value = { formula: "B1*2", result: 2 }
+			worksheet.getCell("A2").value = { sharedFormula: "A1", result: 4 }
+			worksheet.getCell("A3").value = { sharedFormula: "A1" }
+
+			const result = formatWorkbook(workbook)
+
+			expect(result).toBe("--- Sheet: Sheet1 ---\n2\n4\n[Formula: B3*2]")
+		})
+
+		it("should read a cached 0 or false formula result, not the formula", () => {
+			const workbook = new ExcelJS.Workbook()
+			const worksheet = workbook.addWorksheet("Sheet1")
+
+			// ExcelJS keeps a falsy cached result in cell.result but leaves it out of cell.value
+			worksheet.getCell("A1").value = { formula: "B1*2", result: 0 }
+			worksheet.getCell("A2").value = { sharedFormula: "A1", result: 0 }
+			worksheet.getCell("A3").value = { formula: "B1>1", result: false }
+
+			const result = formatWorkbook(workbook)
+
+			expect(result).toBe("--- Sheet: Sheet1 ---\n0\n0\nfalse")
+		})
+
+		it("should read every cell of a merged formula through the top-left cell", () => {
+			const workbook = new ExcelJS.Workbook()
+			const worksheet = workbook.addWorksheet("Sheet1")
+
+			// The other cells of a merged range return the top-left cell's value, but not its result
+			worksheet.getCell("A1").value = { formula: "C1*2", result: 4 }
+			worksheet.mergeCells("A1:B1")
+			worksheet.getCell("A2").value = { formula: "C2*2", result: 0 }
+			worksheet.mergeCells("A2:B2")
+			worksheet.getCell("A3").value = { formula: "C3+30", result: new Date("2024-10-30T00:00:00.000Z") }
+			worksheet.getCell("A3").numFmt = "yyyy-mm-dd"
+			worksheet.mergeCells("A3:B3")
+
+			const result = formatWorkbook(workbook)
+
+			expect(result).toBe("--- Sheet: Sheet1 ---\n4\t4\n0\t0\n2024-10-30\t2024-10-30")
+		})
+
+		it("should read formula errors and dates like plain values", () => {
+			const workbook = new ExcelJS.Workbook()
+			const worksheet = workbook.addWorksheet("Sheet1")
+
+			worksheet.getCell("A1").value = { formula: "1/0", result: { error: "#DIV/0!" } }
+			worksheet.getCell("B1").value = { formula: "A2+30", result: new Date("2024-10-30T00:00:00.000Z") }
+			worksheet.getCell("B1").numFmt = "yyyy-mm-dd"
+
+			const result = formatWorkbook(workbook)
+
+			expect(result).toBe("--- Sheet: Sheet1 ---\n[Error: #DIV/0!]\t2024-10-30")
+		})
+
+		it("should keep the time of dates and read times of day and durations", () => {
+			const workbook = new ExcelJS.Workbook()
+			const worksheet = workbook.addWorksheet("Sheet1")
+
+			// ExcelJS reads a time of day or a duration as a Date counted from 1899-12-30
+			const cells: [string, string, string][] = [
+				["2024-09-30T14:04:59.900Z", "yyyy-mm-dd h:mm", "2024-09-30 14:05:00"],
+				["2024-09-30T09:30:00.000Z", "DD.MM.YYYY HH:MM", "2024-09-30 09:30:00"],
+				["2024-05-01T00:00:00.000Z", "mmm yyyy", "2024-05-01"],
+				["2024-09-30T00:00:00.000Z", "d-mmm", "2024-09-30"],
+				["1899-12-30T06:00:00.000Z", "h:mm", "06:00:00"],
+				["1899-12-30T12:00:00.000Z", "[$-x-systime]h:mm:ss AM/PM", "12:00:00"],
+				["1899-12-30T18:00:00.000Z", 'h:mm" daily"', "18:00:00"],
+				["1899-12-31T12:00:00.000Z", "[h]:mm:ss", "36:00:00"],
+				["1899-12-31T12:00:30.000Z", "[h]:mm", "36:00"],
+				["1899-12-31T01:00:30.000Z", "[m]", "1500"],
+				["1899-12-31T01:00:30.000Z", "[mm]:ss", "1500:30"],
+				["1899-12-30T01:30:00.000Z", "[ss]", "5400"],
+				["2024-09-30T00:00:00.000Z", "mmmm", "2024-09-30"],
+				["1899-12-30T18:00:00.000Z", "h:mm\\ \\d\\a\\i\\l\\y", "18:00:00"],
+			]
+			cells.forEach(([date, numFmt], index) => {
+				const cell = worksheet.getRow(1).getCell(index + 1)
+				cell.value = new Date(date)
+				cell.numFmt = numFmt
+			})
+
+			const result = formatWorkbook(workbook)
+
+			expect(result).toBe(`--- Sheet: Sheet1 ---\n${cells.map(([, , text]) => text).join("\t")}`)
+		})
+
+		it("should count durations from 1904-01-01 in a 1904 workbook", () => {
+			const workbook = new ExcelJS.Workbook()
+			workbook.properties.date1904 = true
+			const worksheet = workbook.addWorksheet("Sheet1")
+
+			worksheet.getCell("A1").value = new Date("1904-01-02T12:00:00.000Z")
+			worksheet.getCell("A1").numFmt = "[h]:mm"
+
+			const result = formatWorkbook(workbook)
+
+			expect(result).toBe("--- Sheet: Sheet1 ---\n36:00")
+		})
 	})
 
 	describe("edge cases", () => {
