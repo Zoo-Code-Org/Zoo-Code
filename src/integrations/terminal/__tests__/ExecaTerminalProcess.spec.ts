@@ -4,10 +4,10 @@ const mockPid = 12345
 
 vitest.mock("execa", () => {
 	const mockKill = vitest.fn()
-	const execa = vitest.fn(function (_options: any) {
-		return (_template: TemplateStringsArray, ..._args: any[]) => ({
+	const execa = vitest.fn(function (_options: Record<string, unknown>) {
+		return (_template: TemplateStringsArray, ..._args: unknown[]) => ({
 			pid: mockPid,
-			iterable: (_opts: any) =>
+			iterable: (_opts: Record<string, unknown>) =>
 				(async function* () {
 					yield "test output\n"
 				})(),
@@ -18,7 +18,7 @@ vitest.mock("execa", () => {
 })
 
 vitest.mock("ps-tree", () => ({
-	default: vitest.fn(function (_: number, cb: any) {
+	default: vitest.fn(function (_: number, cb: (error: Error | null, children: readonly { PID: string }[]) => void) {
 		return cb(null, [])
 	}),
 }))
@@ -109,7 +109,7 @@ describe("ExecaTerminalProcess", () => {
 			terminalProcess = new ExecaTerminalProcess(mockTerminal)
 			await terminalProcess.run("echo test")
 			const execaMock = vitest.mocked(execa)
-			const calledOptions = execaMock.mock.calls[0][0] as any
+			const calledOptions = execaMock.mock.calls[0][0] as unknown as { env: NodeJS.ProcessEnv }
 			expect(calledOptions.env.EXISTING_VAR).toBe("existing")
 		})
 
@@ -120,7 +120,7 @@ describe("ExecaTerminalProcess", () => {
 			terminalProcess = new ExecaTerminalProcess(mockTerminal)
 			await terminalProcess.run("echo test")
 			const execaMock = vitest.mocked(execa)
-			const calledOptions = execaMock.mock.calls[0][0] as any
+			const calledOptions = execaMock.mock.calls[0][0] as unknown as { env: NodeJS.ProcessEnv }
 			expect(calledOptions.env.LANG).toBe("en_US.UTF-8")
 			expect(calledOptions.env.LC_ALL).toBe("en_US.UTF-8")
 		})
@@ -186,7 +186,7 @@ describe("ExecaTerminalProcess", () => {
 			terminalProcess["lastRetrievedIndex"] = 16 // Same as fullOutput.length
 
 			// Access the protected method through type casting
-			;(terminalProcess as any).trimRetrievedOutput()
+			terminalProcess["trimRetrievedOutput"]()
 
 			expect(terminalProcess["fullOutput"]).toBe("")
 			expect(terminalProcess["lastRetrievedIndex"]).toBe(0)
@@ -196,7 +196,7 @@ describe("ExecaTerminalProcess", () => {
 			// Set up a scenario where not all output has been retrieved
 			terminalProcess["fullOutput"] = "test output data"
 			terminalProcess["lastRetrievedIndex"] = 5 // Less than fullOutput.length
-			;(terminalProcess as any).trimRetrievedOutput()
+			terminalProcess["trimRetrievedOutput"]()
 
 			// Buffer should NOT be cleared - there's still unretrieved content
 			expect(terminalProcess["fullOutput"]).toBe("test output data")
@@ -206,7 +206,7 @@ describe("ExecaTerminalProcess", () => {
 		it("does nothing when buffer is already empty", () => {
 			terminalProcess["fullOutput"] = ""
 			terminalProcess["lastRetrievedIndex"] = 0
-			;(terminalProcess as any).trimRetrievedOutput()
+			terminalProcess["trimRetrievedOutput"]()
 
 			expect(terminalProcess["fullOutput"]).toBe("")
 			expect(terminalProcess["lastRetrievedIndex"]).toBe(0)
@@ -216,7 +216,7 @@ describe("ExecaTerminalProcess", () => {
 			// Edge case: index is greater than current length (could happen if output was modified)
 			terminalProcess["fullOutput"] = "short"
 			terminalProcess["lastRetrievedIndex"] = 100
-			;(terminalProcess as any).trimRetrievedOutput()
+			terminalProcess["trimRetrievedOutput"]()
 
 			expect(terminalProcess["fullOutput"]).toBe("")
 			expect(terminalProcess["lastRetrievedIndex"]).toBe(0)
