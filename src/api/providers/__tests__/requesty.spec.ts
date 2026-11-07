@@ -10,6 +10,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { providerIdentifiers, requestyDefaultModelInfo } from "@roo-code/types"
+import type { ModelRecord } from "@roo-code/types"
 
 import { getModels } from "../fetchers/modelCache"
 import { RequestyHandler } from "../requesty"
@@ -18,6 +19,7 @@ import { ApiHandlerCreateMessageMetadata } from "../../index"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { withSettleGuard } from "../../../test-utils/settle-guard"
 
 const mockCreate = vitest.fn()
 
@@ -616,6 +618,13 @@ describe("RequestyHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		// The createMessage tests leave behind a persistent stream mock plus queued
+		// one-shot implementations; reset so each completePrompt test starts from a clean
+		// mock (its own mockSetup below is authoritative).
+		beforeEach(() => {
+			mockCreate.mockReset()
+		})
+
 		it("returns correct response", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const mockResponse = { choices: [{ message: { content: "test completion" } }] }
@@ -626,12 +635,15 @@ describe("RequestyHandler", () => {
 
 			expect(result).toBe("test completion")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.requestyModelId,
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: 0,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.requestyModelId,
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: 0,
+				},
+				{},
+			)
 		})
 
 		it("omits temperature for Claude Fable 5 in completePrompt", async () => {
@@ -645,12 +657,15 @@ describe("RequestyHandler", () => {
 
 			await handler.completePrompt("test prompt")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "anthropic/claude-fable-5",
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: undefined,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "anthropic/claude-fable-5",
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: undefined,
+				},
+				{},
+			)
 		})
 
 		it("omits temperature for Claude Sonnet 5 in completePrompt", async () => {
@@ -664,12 +679,15 @@ describe("RequestyHandler", () => {
 
 			await handler.completePrompt("test prompt")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "anthropic/claude-sonnet-5",
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: undefined,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "anthropic/claude-sonnet-5",
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: undefined,
+				},
+				{},
+			)
 		})
 
 		it("omits temperature for Claude Opus 5 in completePrompt", async () => {
@@ -683,12 +701,15 @@ describe("RequestyHandler", () => {
 
 			await handler.completePrompt("test prompt")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "anthropic/claude-opus-5",
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: undefined,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "anthropic/claude-opus-5",
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: undefined,
+				},
+				{},
+			)
 		})
 
 		it("handles API errors", async () => {
@@ -704,6 +725,491 @@ describe("RequestyHandler", () => {
 			mockCreate.mockRejectedValue(new Error("Unexpected error"))
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
+		})
+		it.each([
+			["an external signal", { abortSignal: new AbortController().signal }],
+			["a per-request timeout", { timeoutMs: 5_000 }],
+		])(
+			"does not classify an ordinary SDK failure as an abort when %s is configured",
+			async (_label, options: { abortSignal?: AbortSignal; timeoutMs?: number }) => {
+				// The catch must key on the MERGED SIGNAL BEING ABORTED, not on the signal merely
+				// being configured: a real API failure with a live signal is a provider error.
+				const handler = new RequestyHandler(mockOptions)
+				mockCreate.mockRejectedValue(new Error("API Error"))
+
+				const error = await handler.completePrompt("test prompt", options).catch((e: unknown) => e)
+
+				expect(error).toBeInstanceOf(Error)
+				expect((error as Error).name).not.toBe("AbortError")
+				expect((error as Error).message).toContain("API Error")
+			},
+		)
+
+		it("should pass abort signal through to client", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
+				requestSignal = options?.signal
+				// Emulate the OpenAI SDK: the in-flight request settles through its signal.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				return { choices: [{ message: { content: "response" } }] }
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			void promise.catch(() => {})
+			await withSettleGuard(createStarted)
+
+			expect(requestSignal).toBeDefined()
+			// The SDK receives the bridged per-request signal rather than the caller's own: the SDK
+			// leaves its abort listener attached after a completed request, so that listener has to
+			// land on a signal that dies with the request. What the contract requires is that the
+			// signal tracks the caller, which the mock above proves: it settles only through the
+			// signal it was handed.
+			expect(requestSignal).not.toBe(controller.signal)
+			expect(requestSignal?.aborted).toBe(false)
+
+			controller.abort()
+			// The late response must be discarded, and the bridged signal must have aborted with the
+			// caller's.
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(requestSignal?.aborted).toBe(true)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			// Capture the exact timeout signal instance the provider creates so the
+			// test can assert identity, not just type, for the signal it forwards.
+			const timeoutSignalSpy = vitest.spyOn(AbortSignal, "timeout")
+			try {
+				await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+				// Assert the factory argument and call count too: the identity check
+				// below would also pass for a signal created with the wrong duration.
+				expect(timeoutSignalSpy).toHaveBeenCalledTimes(1)
+				expect(timeoutSignalSpy).toHaveBeenCalledWith(5000)
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String) }),
+					expect.objectContaining({ timeout: 5000 }),
+				)
+				// Without a caller signal the merged signal is exactly the
+				// AbortSignal.timeout instance; the SDK relies on it to reject with a
+				// DOM-standard AbortError when the timeout fires.
+				const clientOptions = mockCreate.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+				const expectedSignal = timeoutSignalSpy.mock.results[0]?.value
+				expect(expectedSignal).toBeInstanceOf(AbortSignal)
+				expect(clientOptions?.signal).toBe(expectedSignal)
+			} finally {
+				// Restore on every exit path: a failed assertion above must not leave
+				// the static spy installed for the remaining tests in this file.
+				timeoutSignalSpy.mockRestore()
+			}
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+
+		it("rejects with AbortError when the signal is pre-aborted", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "This operation was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+			// Pre-flight cancellation must skip model lookup entirely: the
+			// getModels mock must remain uncalled, not just the SDK create call.
+			const { getModels } = await import("../fetchers/modelCache")
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
+		})
+
+		it("rejects with AbortError when the signal aborts during model lookup", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Model discovery is deferred and never settles: with rejectOnAbort racing the
+			// lookup, the abort must end the request before the lookup resolves.
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const deferredModelLookup = new Promise<ModelRecord>(() => {})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void promise.catch(() => {})
+			await withSettleGuard(lookupStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("rethrows non-abort model lookup failures from completePrompt", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+			const lookupError = new Error("lookup failed")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				return Promise.reject(lookupError)
+			})
+
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow("lookup failed")
+		})
+
+		it("normalizes raw AbortError lookup failures to the provider AbortError", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+			const rawAbort = new Error("The user aborted a request")
+			rawAbort.name = "AbortError"
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				return Promise.reject(rawAbort)
+			})
+
+			await expect(handler.completePrompt("test prompt")).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+
+		it("rejects with AbortError when aborted mid-flight", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Deterministic synchronization (mirrors the Requesty test): the mock notifies the
+			// test when the request actually starts, so the abort lands mid-flight (after model
+			// lookup) instead of winning the race at model discovery on a slow runner.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
+				// Emulate the OpenAI SDK: the in-flight request rejects when the signal aborts.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void promise.catch(() => {})
+			// Abort only once create() has actually started (after model lookup).
+			await withSettleGuard(createStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+		it("rejects with AbortError when only a timeout is provided and it elapses", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				// Emulate the OpenAI SDK: the in-flight request rejects when the signal times out.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const timeoutError = new Error("TimeoutError: Request timed out.")
+				timeoutError.name = "TimeoutError"
+				throw timeoutError
+			})
+
+			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
+				name: "AbortError",
+				// Pin the complete contract: the timeout must be normalized to the
+				// provider abort message, not merely to a generic AbortError name.
+				message: "The Requesty request was aborted",
+			})
+		})
+
+		it("does not return a late result when the response resolves after abort", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Emulate the OpenAI SDK: the pending request resolves once the signal aborts,
+			// i.e. after the caller has already cancelled.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				return { choices: [{ message: { content: "late" } }] }
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void promise.catch(() => {})
+			// Abort while the request is in flight; the resolved response is late and must
+			// be discarded instead of returned.
+			await withSettleGuard(createStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+
+		it("discards a completion that resolves in the same turn the caller aborts", async () => {
+			// The race above settles at the abort, so the post-completion check is reached only when the
+			// SDK wins the race outright: the response promise resolves, the abort lands before the
+			// provider continues with the value, and the value must still be discarded. Aborting from a
+			// handler on the response promise - queued one step ahead of the provider's race handler -
+			// pins that interleaving without timing it.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => {
+				const response = Promise.resolve({ choices: [{ message: { content: "late" } }] })
+				void response.then(() => {
+					queueMicrotask(() => controller.abort())
+				})
+				return response
+			})
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+
+		it.each([
+			["an empty message content", { choices: [{ message: { content: "" } }] }],
+			["no choices at all", { choices: [] }],
+		])("returns an empty string when the completion carries %s", async (_label: string, response: unknown) => {
+			// The fallback is what makes completePrompt return "" rather than an empty value or a
+			// TypeError, and callers render the result directly.
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce(response)
+
+			await expect(handler.completePrompt("test prompt")).resolves.toBe("")
+		})
+
+		it("does not forward a non-positive timeout to the client", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {})
+		})
+
+		it("rejects with AbortError when both an abort signal and a timeout are provided", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
+				requestSignal = options?.signal
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const promise = handler.completePrompt("test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 100_000,
+			})
+			// Defensive: the fast-fail path may reject before the barrier below settles,
+			// which would otherwise surface as an unhandled rejection.
+			void promise.catch(() => {})
+			// Abort only once create() has actually started (after model lookup).
+			await withSettleGuard(createStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({ name: "AbortError" })
+			// The SDK received a merged signal (not the caller's signal) plus the timeout.
+			expect(requestSignal).toBeDefined()
+			expect(requestSignal).not.toBe(controller.signal)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({
+					timeout: 100_000,
+				}),
+			)
+		})
+
+		it("settles on abort while the SDK is sleeping between retries instead of waiting for the completion", async () => {
+			// openai@5.23.2 runs "await sleep(timeoutMillis)" inside retryRequest before issuing the
+			// next attempt, and that sleep does not observe the request signal: awaiting the SDK call
+			// alone keeps completePrompt pending for the rest of the backoff (a server-provided
+			// retry-after-ms may stretch it to about a minute). The race against the cancellation
+			// scope must settle the caller at the abort instead, exactly as the model lookup above
+			// already does.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let releaseBackoff!: () => void
+			const backoffSleep = new Promise<void>((resolve) => {
+				releaseBackoff = resolve
+			})
+			let completionSettled = false
+			mockCreate.mockImplementationOnce(async () => {
+				notifyCreateStarted()
+				await backoffSleep
+				completionSettled = true
+				return { choices: [{ message: { content: "late" } }] }
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Defensive: the race may reject before the barrier below settles, which would otherwise
+			// surface as an unhandled rejection.
+			void promise.catch(() => {})
+			await withSettleGuard(createStarted)
+			controller.abort()
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			// The caller settled while the SDK was still inside its retry sleep.
+			expect(completionSettled).toBe(false)
+			releaseBackoff()
+		})
+
+		it("detaches the abort listener from the caller's signal when the completion finishes", async () => {
+			// The bridge registers its listener on the caller's long-lived signal, so completion must
+			// detach it: otherwise one listener plus one per-request controller is retained for every
+			// completed request on a reused signal.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			try {
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+				const registered = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+				expect(registered).toBeDefined()
+				expect(removeSpy).toHaveBeenCalledWith("abort", registered)
+			} finally {
+				addSpy.mockRestore()
+				removeSpy.mockRestore()
+			}
+		})
+
+		it("detaches the abort listener from the caller's signal when the completion fails", async () => {
+			// Failure is an exit path too: dispose() runs in finally, so a provider error must not
+			// leave the listener behind either.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+			mockCreate.mockRejectedValueOnce(new Error("API Error"))
+
+			try {
+				await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toThrow(
+					"API Error",
+				)
+
+				const registered = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+				expect(registered).toBeDefined()
+				expect(removeSpy).toHaveBeenCalledWith("abort", registered)
+			} finally {
+				addSpy.mockRestore()
+				removeSpy.mockRestore()
+			}
+		})
+
+		it("does not leave the SDK's abort listener on the caller's signal after a completed request", async () => {
+			// Emulate openai@5.23.2: its request path attaches an abort listener to the signal it is
+			// handed and leaves it attached once the request completes. Reusing one caller signal
+			// therefore retains that listener - and the per-request state it closes over - for every
+			// completed request, unless the provider hands the SDK a signal that dies with the request.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			let leakedListenerFired = false
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener(
+					"abort",
+					() => {
+						leakedListenerFired = true
+					},
+					{ once: true },
+				)
+				return { choices: [{ message: { content: "response" } }] }
+			})
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+			// Nothing the request created may still be listening on the caller's signal: aborting it
+			// now must not reach the listener the SDK installed during the request.
+			controller.abort()
+			expect(leakedListenerFired).toBe(false)
 		})
 	})
 
