@@ -996,6 +996,54 @@ describe("OpenRouterHandler", () => {
 			})
 		})
 
+		it("sends no request options when the caller passes none", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			installMockClient(mockCreate)
+
+			await handler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.objectContaining({ model: "openai/gpt-4o" }), undefined)
+		})
+
+		it("forwards only the abort signal when no deadline is given", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			installMockClient(mockCreate)
+			const { signal } = new AbortController()
+
+			await handler.completePrompt("test prompt", { abortSignal: signal })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.objectContaining({ model: "openai/gpt-4o" }), { signal })
+		})
+
+		it("forwards only the deadline when no signal is given", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			installMockClient(mockCreate)
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5_000 })
+
+			expect(mockCreate).toHaveBeenLastCalledWith(expect.objectContaining({ model: "openai/gpt-4o" }), {
+				timeout: 5_000,
+			})
+		})
+
 		it("does not start a request when the caller already aborted", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn()

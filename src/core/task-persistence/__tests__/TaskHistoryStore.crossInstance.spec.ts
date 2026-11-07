@@ -208,6 +208,22 @@ describe("TaskHistoryStore cross-instance safety", () => {
 			storeWithOnWrite.dispose()
 		})
 
+		it("preserves fields written by another extension version when applying a title", async () => {
+			await storeA.initialize()
+			await storeA.upsert(makeHistoryItem({ id: "title-extra-fields", task: "Prompt" }))
+			const filePath = path.join(tmpDir, "tasks", "title-extra-fields", GlobalFileNames.historyItem)
+			const onDisk = JSON.parse(await fs.readFile(filePath, "utf8"))
+			// A field this version does not know about, written by another build.
+			onDisk.futureField = "kept"
+			await fs.writeFile(filePath, JSON.stringify(onDisk), "utf8")
+
+			await expect(storeA.setTitleIfUnset("title-extra-fields", "Auto title")).resolves.toBe("applied")
+
+			const final = JSON.parse(await fs.readFile(filePath, "utf8"))
+			expect(final.title).toBe("Auto title")
+			expect(final.futureField).toBe("kept")
+		})
+
 		it("re-throws unexpected errors from safeWriteJson", async () => {
 			await storeA.initialize()
 			await storeA.upsert(makeHistoryItem({ id: "title-io-err", task: "Prompt" }))

@@ -1057,7 +1057,9 @@ export class TaskHistoryStore {
 							// Stryker disable next-line StringLiteral: internal discrimination literal between missing and titled reasons
 							throw new TitleWriteSkipped("titled")
 						}
-						written = mergeHistoryDelta(parsed.data, incoming as HistoryItem, { title })
+						// Merge into the raw record, not the parsed copy: Zod strips unknown keys, and a
+						// field written by another extension version must not be deleted by a title write.
+						written = mergeHistoryDelta(existing, incoming as HistoryItem, { title })
 						return written
 					},
 				})

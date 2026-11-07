@@ -402,17 +402,31 @@ describe("PoeHandler", () => {
 	})
 
 	describe("completePrompt", () => {
-		it("forwards the abort signal and deadline to the generation", async () => {
+		it("links the caller's stop into the merged generation signal", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			mockGenerateText.mockResolvedValue({ text: "generated response" })
-			const { signal } = new AbortController()
+			const abortController = new AbortController()
 
-			await handler.completePrompt("complete this", { abortSignal: signal, timeoutMs: 5_000 })
+			await handler.completePrompt("complete this", { abortSignal: abortController.signal, timeoutMs: 5_000 })
 
-			const options = mockGenerateText.mock.calls[0][0]
-			// The deadline is merged into a per-request signal that still follows the caller's stop.
-			expect(options.abortSignal).not.toBe(signal)
-			expect(options.abortSignal?.aborted).toBe(false)
+			const mergedSignal = mockGenerateText.mock.calls[0][0].abortSignal
+			// A per-request signal carries both the caller's stop and the deadline.
+			expect(mergedSignal).not.toBe(abortController.signal)
+			expect(mergedSignal?.aborted).toBe(false)
+
+			abortController.abort()
+			expect(mergedSignal?.aborted).toBe(true)
+		})
+
+		it("aborts the merged generation signal when the deadline passes", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockResolvedValue({ text: "generated response" })
+
+			await handler.completePrompt("complete this", { timeoutMs: 200 })
+
+			const mergedSignal = mockGenerateText.mock.calls[0][0].abortSignal
+			expect(mergedSignal?.aborted).toBe(false)
+			await vi.waitFor(() => expect(mergedSignal?.aborted).toBe(true))
 		})
 
 		it("does not start a generation when the caller already aborted", async () => {
