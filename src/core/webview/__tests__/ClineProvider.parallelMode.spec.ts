@@ -2448,6 +2448,58 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await providerB.dispose()
 		})
 
+		// Back from the survivor sweep, not written fresh: the merge 152e5e1af resolved this file to
+		// the 17890eba0 copy and dropped the cf80e4bbd copy that carried this case (see the #1562 sweep report).
+		it("should leave the sibling overlay untouched and log when the pinned profile cannot be resolved", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(providerA, "log")
+
+			// B pins profile-y without an overlay; the profile cannot be resolved
+			// through A's manager. A wrong snapshot is worse than the pre-write
+			// shared values, so the miss must leave B's buffer as is and be logged.
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("profile store unavailable"),
+			)
+
+			// The read failure now fails the activation closed before the shared write, which is what keeps
+			// the sibling buffer untouched. The case landed while the miss was only logged, so the await is
+			// wrapped for the contract this chain has; the two assertions below are the original ones.
+			await expect(providerA.activateProviderProfile({ name: "profile-x" })).rejects.toThrow(
+				"could not be resolved: profile-y",
+			)
+
+			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Unable to resolve profile 'profile-y'"))
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
 		it("should still write the shared store when a sibling pins a deleted profile", async () => {
 			const providerA = new ClineProvider(
 				mockContext,
