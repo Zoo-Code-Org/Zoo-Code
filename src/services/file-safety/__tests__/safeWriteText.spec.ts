@@ -89,6 +89,15 @@ describe("safeWriteText", () => {
 		)
 	})
 
+	// PENDING_BACKUP_REMOVALS is module state, not per-case state: a case whose write retains a
+	// backup hands that path to the next case's write, which then unlinks a path it never created.
+	// Draining through the exported flush with unlink made to succeed empties the set without
+	// reaching for a private symbol, so no case here depends on which cases ran before it.
+	afterEach(async () => {
+		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		await flushPendingBackupRemovals()
+	})
+
 	describe("staging and cleanup", () => {
 		it("creates a temp file in the staging dir, fsyncs it, renames to target, and cleans up on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -336,14 +345,15 @@ describe("safeWriteText", () => {
 			await expect(flushPendingBackupRemovals()).resolves.toBe(0)
 		})
 
-		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind", async () => {
+		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and the path is handed to a later write", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// The post-commit backup unlink (SUT step 6) fails — the write must
-			// still succeed; an orphaned backup is the documented acceptable
-			// outcome, so the failure is swallowed instead of rolling back.
-			vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("EPERM"))
+			// The post-commit backup unlink (SUT step 6) fails for the whole attempt. The write
+			// still succeeds: the failure is swallowed rather than rolled back, and the path is
+			// retained for a later write rather than abandoned. Rejecting once would let the
+			// helper's own second attempt succeed and the retention would never be observable.
+			vi.mocked(fs.unlink).mockRejectedValue(new Error("EPERM"))
 
 			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
 
@@ -352,16 +362,21 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 
-			// the failing cleanup was the post-commit backup unlink
+			// the failing cleanup was the post-commit backup unlink, retried to exhaustion
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(_backupUnlinkCalls()).toBe(3)
 
-			// no rollback rename: the backup is a copy, so nothing is renamed back over
-			// the committed target.
-			expect(fs.rename).toHaveBeenCalledTimes(1)
+			// no rollback rename: nothing was ever renamed away from the committed target
+			expect(fs.rename).not.toHaveBeenCalledWith(targetPath, expect.anything())
 
 			// the staging temp was already committed by the rename; nothing
 			// temp-shaped is unlinked afterwards
 			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+
+			// retention is the outcome this failure produces and it is observable: with the
+			// filesystem let go, a flush clears exactly the one path this write left behind
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			await expect(flushPendingBackupRemovals()).resolves.toBe(1)
 		})
 	})
 
