@@ -1,33 +1,20 @@
 import { retiredProviderIdentifiers } from "../provider-identifiers.js"
+import { providerDefinitionList } from "../providers/index.js"
 import {
 	getModelId,
-	modelIdKeys,
 	providerIdentifiers,
 	providerSettingsSchema,
+	PROVIDER_SETTINGS_KEYS,
 	type ProviderSettings,
 } from "../index.js"
 
-const expectedModelIdKeys = [
-	"apiModelId",
-	"openRouterModelId",
-	"openAiModelId",
-	"ollamaModelId",
-	"lmStudioModelId",
-	"lmStudioDraftModelId",
-	"requestyModelId",
-	"unboundModelId",
-	"litellmModelId",
-	"vercelAiGatewayModelId",
-	"opencodeGoModelId",
-	"kenariModelId",
-	"nanoGptModelId",
-	"ioIntelligenceModelId",
-	"zooGatewayModelId",
-] as const
-
-describe("modelIdKeys", () => {
-	it("preserves every model ID setting and its legacy precedence order", () => {
-		expect(modelIdKeys).toEqual(expectedModelIdKeys)
+describe("provider model ID fields", () => {
+	it.each(
+		providerDefinitionList.flatMap((definition) =>
+			definition.modelIdKey ? [[definition.apiProvider, definition.modelIdKey] as const] : [],
+		),
+	)("declares a persisted ProviderSettings key for %s", (_apiProvider, modelIdKey) => {
+		expect(PROVIDER_SETTINGS_KEYS).toContain(modelIdKey)
 	})
 })
 
@@ -115,14 +102,28 @@ describe("getModelId", () => {
 		expect(getModelId({})).toBeUndefined()
 	})
 
-	it("preserves legacy model ID precedence for retired providers", () => {
-		const settings: ProviderSettings = {
-			apiProvider: retiredProviderIdentifiers.groq,
-			lmStudioDraftModelId: "draft-model",
-			requestyModelId: "requesty-model",
-		}
+	it.each([
+		[retiredProviderIdentifiers.cerebras, "apiModelId"],
+		[retiredProviderIdentifiers.chutes, "apiModelId"],
+		[retiredProviderIdentifiers.deepinfra, "deepInfraModelId"],
+		[retiredProviderIdentifiers.doubao, "apiModelId"],
+		[retiredProviderIdentifiers.featherless, "apiModelId"],
+		[retiredProviderIdentifiers.groq, "apiModelId"],
+		[retiredProviderIdentifiers.huggingface, "huggingFaceModelId"],
+		[retiredProviderIdentifiers.roo, "apiModelId"],
+	] as const)("reads the retired provider's own model ID field for %s", (apiProvider, modelIdField) => {
+		const settings = {
+			apiProvider,
+			[modelIdField]: "retired-model",
+			// A field belonging to a different provider must not win.
+			requestyModelId: "other-provider-model",
+		} as ProviderSettings
 
-		expect(getModelId(settings)).toBe("draft-model")
+		expect(getModelId(settings)).toBe("retired-model")
+	})
+
+	it("returns undefined for a retired provider without a model ID", () => {
+		expect(getModelId({ apiProvider: retiredProviderIdentifiers.groq })).toBeUndefined()
 	})
 
 	it("resolves a model ID for every provider definition without throwing", () => {
