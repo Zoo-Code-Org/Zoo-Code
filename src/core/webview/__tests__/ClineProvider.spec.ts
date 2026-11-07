@@ -6743,6 +6743,43 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		it("discards a load that a reset cleared underneath it instead of applying pre-reset selections", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
+			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			// Its own view id and profile name, so this case neither reads nor writes another case's slot.
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "reset-race-profile")
+			// Registering the stable id starts the load of the entry this instance authored, and the load
+			// stalls inside the profile lookup - the await a reset most often lands in while a view opens.
+			const settling = provider["setViewStateId"]("reset-race-view")
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+
+			// The reset's own two moves, taken from resetState(): bump the generation that already guards
+			// the durable write queue, then clear this instance's buffer as the live-instance loop does.
+			ClineProvider["viewStatesResetGeneration"] += 1
+			provider["viewLocalState"] = {}
+			resolveProfile({ name: "reset-race-profile" })
+			await settling
+
+			// The load started before the reset and its view id never changed, so an id-only guard lets it
+			// write the pre-reset selections back into a buffer the reset had just emptied.
+			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
+			expect(provider["viewLocalState"].mode).not.toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).not.toBe("reset-race-profile")
+			expect(provider.getValues().mode).not.toBe("architect")
+			expect(provider.getValues().currentApiConfigName).not.toBe("reset-race-profile")
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("state was reset during the load"))
+			await provider.dispose()
+		})
 	})
 
 	describe("persisted view state pruning", () => {

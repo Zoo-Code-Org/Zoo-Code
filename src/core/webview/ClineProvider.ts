@@ -1007,6 +1007,9 @@ export class ClineProvider
 	private async loadViewState(): Promise<void> {
 		// A newer id registered while this load is in flight must win.
 		const loadedForViewId = this.viewStateId
+		// A reset clears this view's buffer and advances the generation without touching the id,
+		// so the id alone cannot tell a load that started before the reset from one started after it.
+		const loadedForResetGeneration = ClineProvider.viewStatesResetGeneration
 
 		// Before registration the key is the session-local name, which can be a stale entry
 		// from another session: load only entries this instance authored.
@@ -1046,6 +1049,14 @@ export class ClineProvider
 				}
 			}
 
+			if (ClineProvider.viewStatesResetGeneration !== loadedForResetGeneration) {
+				// The reset emptied this buffer while the load was awaiting modes and profile data; applying
+				// what it read would put back selections a reload would drop.
+				this.log(
+					`[loadViewState] Discarding pre-reset load for view id ${loadedForViewId}: state was reset during the load`,
+				)
+				return
+			}
 			if (this.viewStateId !== loadedForViewId) {
 				this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
 				return
