@@ -11,7 +11,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
-import { generateSessionTitle } from "../../task/session-title"
+import { flushPendingSessionTitle, generateSessionTitle } from "../../task/session-title"
 import * as sessionTitleModule from "../../task/session-title"
 
 // Mock setup
@@ -878,6 +878,67 @@ describe("ClineProvider Task History Synchronization", () => {
 			await generation
 
 			expect(getStored("task-dispose")?.title).toBeUndefined()
+		})
+
+		it("waits for a deferred title write before releasing the history store", async () => {
+			const taskId = "task-dispose-deferred"
+			let resolveCompletion!: (title: string) => void
+			const completion = new Promise<string>((resolve) => {
+				resolveCompletion = resolve
+			})
+			const generation = generateSessionTitle({
+				provider,
+				taskId,
+				userMessage: "Original prompt",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+					apiKey: "test-api-key",
+				},
+				completePrompt: async () => completion,
+			})
+			// The title is generated before the history item exists, so it is deferred.
+			resolveCompletion("Generated Title")
+			await generation
+			await provider.updateTaskHistory(createHistoryItem({ id: taskId, task: "Original prompt" }), {
+				broadcast: false,
+			})
+
+			// Pause the deferred write inside the store.
+			let releaseWrite!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			const originalSetTitle = provider.taskHistoryStore.setTitleIfUnset.bind(provider.taskHistoryStore)
+			vi.spyOn(provider.taskHistoryStore, "setTitleIfUnset").mockImplementation(async (id, title) => {
+				await writeGate
+				return originalSetTitle(id, title)
+			})
+			const storeEvents: string[] = []
+			const originalDispose = provider.taskHistoryStore.dispose.bind(provider.taskHistoryStore)
+			vi.spyOn(provider.taskHistoryStore, "dispose").mockImplementation(() => {
+				storeEvents.push("store-dispose")
+				originalDispose()
+			})
+
+			const flush = flushPendingSessionTitle(taskId)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			// Disposal is held open while the deferred write is still running.
+			let disposed = false
+			const disposal = provider.dispose().then(() => {
+				disposed = true
+			})
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(disposed).toBe(false)
+			expect(storeEvents).toEqual([])
+
+			releaseWrite()
+			await flush
+			await disposal
+
+			expect(storeEvents).toEqual(["store-dispose"])
+			expect(getStored(taskId)?.title).toBe("Generated Title")
 		})
 
 		it("cancels pending generation and writes no late title when deleting a task", async () => {

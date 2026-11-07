@@ -131,6 +131,13 @@ export function cancelSessionTitlesForProvider(provider: ClineProvider): void {
 		entry.userCancelled = true
 		entry.controller.abort()
 	}
+	// Titles whose generation already finished keep their entry until a save flushes or a cancel
+	// drops it; disposal drops them too, so the released store is never written afterwards.
+	for (const [taskId, pending] of pendingTitleWrites) {
+		if (pending.provider === provider) {
+			pendingTitleWrites.delete(taskId)
+		}
+	}
 }
 
 /**

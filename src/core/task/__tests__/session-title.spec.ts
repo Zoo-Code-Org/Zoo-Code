@@ -921,6 +921,28 @@ describe("flushPendingSessionTitle", () => {
 		expect(drained).toBe(true)
 	})
 
+	it("drops a settled pending title when the provider is disposed", async () => {
+		const recorder = createCompletePromptRecorder(async () => "Generated Title")
+		let historyItemPersisted = false
+		const applySpy = vi.fn().mockImplementation(async () => (historyItemPersisted ? "applied" : "not-ready"))
+		const provider = createTitleProvider({ applySessionTitle: applySpy })
+
+		await generateSessionTitle({
+			provider,
+			taskId: "task-dispose-pending",
+			userMessage: "Fix the login bug",
+			apiConfiguration: testApiConfiguration,
+			completePrompt: recorder.fn,
+		})
+
+		// The generation already finished, so only the pending entry remains for disposal to drop.
+		cancelSessionTitlesForProvider(provider)
+		historyItemPersisted = true
+		await flushPendingSessionTitle("task-dispose-pending")
+
+		expect(applySpy).toHaveBeenCalledTimes(1)
+	})
+
 	it("does nothing when no title is pending", async () => {
 		await expect(flushPendingSessionTitle("unknown-task")).resolves.toBeUndefined()
 	})

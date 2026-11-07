@@ -145,7 +145,8 @@ describe("KimiCodeHandler", () => {
 
 		await expect(handler.completePrompt("test", { abortSignal: signal, timeoutMs: 5_000 })).resolves.toBe("retried")
 
-		// The retry after the forced refresh keeps the same options.
+		// Both the initial attempt and the retry after the forced refresh carry the options.
+		expect(createCompletion).toHaveBeenNthCalledWith(1, expect.anything(), { signal, timeout: 5_000 })
 		expect(createCompletion).toHaveBeenNthCalledWith(2, expect.anything(), { signal, timeout: 5_000 })
 	})
 
