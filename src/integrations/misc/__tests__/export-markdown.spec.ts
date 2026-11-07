@@ -69,7 +69,8 @@ describe("export-markdown", () => {
 		})
 
 		it("should handle unexpected content types", () => {
-			const block = { type: "unknown_type" as const } as any
+			// Deliberately malformed block exercising the default branch.
+			const block = { type: "unknown_type" } as unknown as ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Unexpected content type: unknown_type]")
 		})
 

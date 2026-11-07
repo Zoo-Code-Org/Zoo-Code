@@ -120,7 +120,6 @@ import {
 	type DiagnosticsProviderSourceSnapshot,
 } from "../../services/diagnostics"
 
-import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
 import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
@@ -155,6 +154,7 @@ import {
 	LifecycleTransitionError,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
+import { readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
 import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
@@ -544,7 +544,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
+	public readonly latestAnnouncementId = "nov-2026-v3.96.0-settings-costs-reliability" // v3.96.0 chat settings, provider costs, and reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -4177,21 +4177,13 @@ export class ClineProvider
 		const taskDirPath = await getTaskDirectoryPath(globalStoragePath, id)
 		const apiConversationHistoryFilePath = path.join(taskDirPath, GlobalFileNames.apiConversationHistory)
 		const uiMessagesFilePath = path.join(taskDirPath, GlobalFileNames.uiMessages)
-		const fileExists = await fileExistsAtPath(apiConversationHistoryFilePath)
-
 		let apiConversationHistory: Anthropic.MessageParam[] = []
 
-		if (fileExists) {
-			try {
-				apiConversationHistory = JSON.parse(await fs.readFile(apiConversationHistoryFilePath, "utf8"))
-			} catch (error) {
-				console.warn(
-					`[getTaskWithId] api_conversation_history.json corrupted for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-		} else {
+		try {
+			apiConversationHistory = JSON.parse(await readFileWithMissingRetry(apiConversationHistoryFilePath))
+		} catch (error) {
 			console.warn(
-				`[getTaskWithId] api_conversation_history.json missing for task ${id}, returning empty history`,
+				`[getTaskWithId] Could not read API conversation history for task ${id}, returning empty history: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
 
@@ -4208,11 +4200,13 @@ export class ClineProvider
 		historyItem: HistoryItem
 		aggregatedCosts: AggregatedCosts
 	}> {
-		const { historyItem } = await this.getTaskWithId(taskId)
+		const historyItem = this.getTaskHistoryItem(taskId)
+		if (!historyItem) throw new Error("Task not found")
 
 		const aggregatedCosts = await aggregateTaskCostsRecursive(taskId, async (id: string) => {
-			const result = await this.getTaskWithId(id)
-			return result.historyItem
+			const item = this.getTaskHistoryItem(id)
+			if (!item) throw new Error("Task not found")
+			return item
 		})
 
 		return { historyItem, aggregatedCosts }
