@@ -1,9 +1,16 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { type FriendliModelId, friendliDefaultModelId, friendliModels } from "@roo-code/types"
+import {
+	type FriendliModelId,
+	type ModelRecord,
+	friendliDefaultModelId,
+	friendliModels,
+	openAiModelInfoSaneDefaults,
+	providerIdentifiers,
+} from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { shouldUseReasoningEffort, getModelMaxOutputTokens } from "../../shared/api"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -11,7 +18,11 @@ import { getModelParams } from "../transform/model-params"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
-import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
+import { hasUsableTimeout, settleOnAbort, toSdkTimeoutMs } from "./utils/abort-signal"
+import { NOT_PROVIDED } from "./constants"
+import { getModels } from "./fetchers/modelCache"
+import { getFriendliModels } from "./fetchers/friendli"
+import type { ApiStream } from "../transform/stream"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -55,28 +66,44 @@ type FriendliChatCompletionNonStreamingParams = Omit<
  * reasoning parameters that the base class doesn't know about.
  */
 export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelId> {
-	/**
-	 * @param options  Provider settings; `friendliApiKey` is required.
-	 */
+	private models: ModelRecord = {}
+	private modelsLoad?: Promise<void>
+
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
 			providerName: "Friendli",
 			baseURL: "https://api.friendli.ai/serverless/v1",
-			apiKey: options.friendliApiKey,
+			apiKey: options.friendliApiKey || NOT_PROVIDED,
 			defaultProviderModelId: friendliDefaultModelId,
 			providerModels: friendliModels,
 			defaultTemperature: 0.6,
 		})
 	}
 
-	override getModel() {
-		const id =
-			this.options.apiModelId && this.options.apiModelId in this.providerModels
-				? (this.options.apiModelId as FriendliModelId)
-				: this.defaultProviderModelId
+	private loadModels(): Promise<void> {
+		this.modelsLoad ??= getModels({ provider: providerIdentifiers.friendli }, this)
+			.then((models) => void (this.models = models))
+			.catch(() => {}) // static friendliModels remain the fallback
+		return this.modelsLoad
+	}
 
-		const info = this.providerModels[id]
+	override async *createMessage(
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): ApiStream {
+		await settleOnAbort(this.loadModels(), metadata?.abortSignal, this.providerName)
+		yield* super.createMessage(systemPrompt, messages, metadata)
+	}
+
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		return getFriendliModels({ signal })
+	}
+
+	override getModel() {
+		const id = (this.options.apiModelId || this.defaultProviderModelId) as FriendliModelId
+		const info = this.models[id] ?? this.providerModels[id] ?? openAiModelInfoSaneDefaults
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,
@@ -184,6 +211,7 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	}
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		await settleOnAbort(this.loadModels(), options?.abortSignal, this.providerName)
 		const { id: modelId } = this.getModel()
 		const friendliExtra = this.buildFriendliReasoningParams()
 

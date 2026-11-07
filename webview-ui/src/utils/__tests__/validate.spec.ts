@@ -63,6 +63,7 @@ describe("Model Validation Functions", () => {
 		nanogpt: {},
 		"zoo-gateway": {},
 		"kimi-code": {},
+		friendli: {},
 		moonshot: {},
 	}
 

@@ -3,7 +3,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { friendliDefaultModelId, friendliModels } from "@roo-code/types"
+import { friendliDefaultModelId, friendliModels, openAiModelInfoSaneDefaults } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
@@ -14,6 +14,13 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
 const mockCreate = vi.fn()
+const { mockGetModels, mockGetFriendliModels } = vi.hoisted(() => ({
+	mockGetModels: vi.fn(async () => ({})),
+	mockGetFriendliModels: vi.fn(),
+}))
+
+vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
+vi.mock("../fetchers/friendli", () => ({ getFriendliModels: mockGetFriendliModels }))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -80,8 +87,71 @@ describe("FriendliHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: friendliApiKey }))
 	})
 
-	it("should throw error when API key is not provided", () => {
-		expect(() => new FriendliHandler({})).toThrow("API key is required")
+	it("should construct without an API key and without fetching the catalog", () => {
+		expect(() => new FriendliHandler({})).not.toThrow()
+		expect(mockGetModels).not.toHaveBeenCalled()
+	})
+
+	it("should load the catalog once before building requests for fetched-only models", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
+
+		await handlerWithModel.completePrompt("a")
+		await handlerWithModel.completePrompt("b")
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(handlerWithModel.getModel()).toEqual(expect.objectContaining({ id: "vendor/new-model", info }))
+	})
+
+	it("should wait for the catalog before streaming", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
+
+		await handlerWithModel.createMessage("system", []).next()
+
+		expect(mockCreate.mock.calls[0][0]).toEqual(expect.objectContaining({ max_tokens: 8192 }))
+	})
+
+	it("should not start a chat request when cancelled during catalog loading", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+		const controller = new AbortController()
+		const pending = handler.createMessage("system", [], { taskId: "t", abortSignal: controller.signal }).next()
+
+		controller.abort()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it("should fall back to static models when the catalog is empty", async () => {
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		await handler.completePrompt("a")
+
+		expect(handler.getModel().info).toEqual(friendliModels[friendliDefaultModelId])
+	})
+
+	it("should keep an unknown model id with default metadata when the catalog fails", async () => {
+		mockGetModels.mockRejectedValueOnce(new Error("Network error"))
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/unknown", friendliApiKey: "test-key" })
+
+		await handlerWithModel.completePrompt("a")
+
+		expect(handlerWithModel.getModel()).toEqual(
+			expect.objectContaining({ id: "vendor/unknown", info: openAiModelInfoSaneDefaults }),
+		)
+	})
+
+	it("fetchModels should load the public /v1/models catalog", async () => {
+		const fetched = { "vendor/new-model": { contextWindow: 100_000, supportsPromptCache: false } }
+		mockGetFriendliModels.mockResolvedValueOnce(fetched)
+		const signal = new AbortController().signal
+
+		expect(await handler.fetchModels({ provider: providerIdentifiers.friendli }, signal)).toBe(fetched)
+		expect(mockGetFriendliModels).toHaveBeenCalledWith({ signal })
 	})
 
 	it("should return default model when no model is specified", () => {

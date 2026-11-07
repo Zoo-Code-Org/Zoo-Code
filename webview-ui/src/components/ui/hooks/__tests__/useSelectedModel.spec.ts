@@ -1855,7 +1855,9 @@ describe("useSelectedModel", () => {
 
 	describe("friendli provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {}, friendli: {} }),
+			)
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1889,6 +1891,30 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+
+		it("should use static model info before router models load", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+			const apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.friendli }
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should prefer fetched router model info", () => {
+			const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: { "vendor/new-model": info } }))
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "vendor/new-model",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("vendor/new-model")
+			expect(result.current.info).toEqual(info)
 		})
 	})
 

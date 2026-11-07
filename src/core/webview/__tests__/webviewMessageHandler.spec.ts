@@ -1212,6 +1212,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1487,6 +1488,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1554,6 +1556,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
