@@ -263,12 +263,26 @@ export async function checkpointRestore(
 		await provider?.postMessageToWebview({ type: "currentCheckpointUpdated", text: commitHash })
 
 		if (mode === "restore") {
+			let deletedRequests: ClineApiReqInfo
 			try {
-				await rewindConversation(task, ts, index, operation)
+				deletedRequests = await rewindConversation(task, ts, index, operation)
 			} catch (error) {
 				// The workspace is already restored: the task still has to be started again, as after a rewind that worked.
 				provider?.cancelTask()
 				throw new ConversationRewindError(error)
+			}
+
+			// The rewind is saved. The row that reports the deleted requests is only a note: a task that cannot say it
+			// (it was aborted, as a delete does) has been rewound all the same, so this is not a failed rewind, and the
+			// task is started again, and a pending edit applied, as after any rewind that worked.
+			try {
+				await task.say("api_req_deleted", JSON.stringify(deletedRequests))
+			} catch (error) {
+				provider?.log(
+					`[checkpointRestore] the conversation was rewound, but the deleted requests could not be noted: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
 			}
 		}
 
@@ -289,7 +303,13 @@ export async function checkpointRestore(
 	}
 }
 
-async function rewindConversation(task: Task, ts: number, index: number, operation: "delete" | "edit") {
+/** Rewinds the conversation to the checkpoint, and gives the usage of the requests that it deleted. */
+async function rewindConversation(
+	task: Task,
+	ts: number,
+	index: number,
+	operation: "delete" | "edit",
+): Promise<ClineApiReqInfo> {
 	// Calculate metrics from messages that will be deleted (must be done before rewind)
 	const deletedMessages = task.clineMessages.slice(index + 1)
 
@@ -303,17 +323,13 @@ async function rewindConversation(task: Task, ts: number, index: number, operati
 		includeTargetMessage: operation === "edit",
 	})
 
-	// Report the deleted API request metrics
-	await task.say(
-		"api_req_deleted",
-		JSON.stringify({
-			tokensIn: totalTokensIn,
-			tokensOut: totalTokensOut,
-			cacheWrites: totalCacheWrites,
-			cacheReads: totalCacheReads,
-			cost: totalCost,
-		} satisfies ClineApiReqInfo),
-	)
+	return {
+		tokensIn: totalTokensIn,
+		tokensOut: totalTokensOut,
+		cacheWrites: totalCacheWrites,
+		cacheReads: totalCacheReads,
+		cost: totalCost,
+	} satisfies ClineApiReqInfo
 }
 
 export type CheckpointDiffOptions = {

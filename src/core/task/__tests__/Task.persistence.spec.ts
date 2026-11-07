@@ -18,6 +18,8 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { PendingActionSettlementError, Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+import { mergeApiMessageSnapshots } from "../../task-persistence/mergeMessageSnapshots"
+import type { ApiMessage } from "../../task-persistence/apiMessages"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
 import type { ToolUse } from "../../../shared/tools"
@@ -354,36 +356,106 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).not.toHaveBeenCalled()
 		})
 
-		it("keeps the cut API history in memory, without rejecting, when its write fails, and the next save writes it", async () => {
-			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
+		describe("after an overwrite of the API history whose write failed", () => {
+			/** The file, with what the real write does to it: authoritative for an overwrite, merging for every other save. */
+			let disk: ApiMessage[]
+			const useFile = () => {
+				mockSaveApiMessages.mockImplementation(
+					async ({ messages, merge }: { messages: ApiMessage[]; merge?: boolean }) => {
+						disk = merge ? (mergeApiMessageSnapshots(disk, messages) as ApiMessage[]) : messages
+						return disk
+					},
+				)
+			}
+			const contents = (messages: ApiMessage[]) => messages.map((message) => message.content)
+			const newTaskWithHistory = async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.overwriteApiConversationHistory(
+					[
+						{ role: "user", content: "first", ts: 1, messageId: "m1" },
+						{ role: "user", content: "second", ts: 2, messageId: "m2" },
+					],
+					false,
+				)
+				disk = structuredClone(task.apiConversationHistory) // both are stored
+				return task
+			}
+
+			beforeEach(() => {
+				mockSaveApiMessages.mockReset()
+				useFile()
+				vi.spyOn(console, "error").mockImplementation(() => {})
 			})
-			await task.overwriteApiConversationHistory(
-				[
-					{ role: "user", content: "first", ts: 1 },
-					{ role: "user", content: "second", ts: 2 },
-				],
-				false,
-			)
-			mockSaveApiMessages.mockClear()
-			mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+			afterEach(() => vi.restoreAllMocks())
 
-			// The failure is the task's own to retry: a caller (the edit after a checkpoint restore) is not told of it.
-			await expect(
-				task.overwriteApiConversationHistory([task.apiConversationHistory[0]]),
-			).resolves.toBeUndefined()
-			expect(task.apiConversationHistory.map((message) => message.content)).toEqual(["first"])
+			it("keeps the cut history in memory, without rejecting, and the next save stores only the cut history", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
 
-			mockSaveApiMessages.mockClear()
-			expect(await task.retrySaveApiConversationHistory()).toBe(true)
-			expect(
-				mockSaveApiMessages.mock.calls[0][0].messages.map((message: { content: unknown }) => message.content),
-			).toEqual(["first"])
-			consoleError.mockRestore()
+				// The failure is the task's own to retry: a caller (the edit after a checkpoint restore) is not told of it.
+				await expect(
+					task.overwriteApiConversationHistory([task.apiConversationHistory[0]]),
+				).resolves.toBeUndefined()
+				expect(contents(task.apiConversationHistory)).toEqual(["first"])
+				expect(contents(disk)).toEqual(["first", "second"]) // the write was lost: the file still has both
+
+				expect(await task.retrySaveApiConversationHistory()).toBe(true)
+
+				// A merging save would have kept "second", which is on disk and not in memory.
+				expect(contents(disk)).toEqual(["first"])
+			})
+
+			it("also for an ordinary save that comes before any retry", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+
+				const flushed = await task["saveApiConversationHistory"]()
+
+				expect(flushed).toBe(true)
+				expect(contents(disk)).toEqual(["first"])
+			})
+
+			it("goes back to merging saves once the authoritative write has been stored", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+				await task["saveApiConversationHistory"]() // authoritative, and stored
+				mockSaveApiMessages.mockClear()
+
+				await task["saveApiConversationHistory"]()
+
+				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: true }))
+			})
+
+			it("stays authoritative while the saves keep failing, and is not made so by a merging save that failed", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("still full"))
+				expect(await task["saveApiConversationHistory"]()).toBe(false)
+				mockSaveApiMessages.mockClear()
+
+				await task["saveApiConversationHistory"]()
+
+				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: false }))
+			})
+
+			it("does not turn the merging saves of a task that never lost an overwrite into authoritative ones", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task["saveApiConversationHistory"]() // a merging save that failed
+				mockSaveApiMessages.mockClear()
+
+				await task["saveApiConversationHistory"]()
+
+				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: true }))
+			})
 		})
 
 		it("returns false on failure", async () => {

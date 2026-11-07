@@ -283,24 +283,42 @@ describe("Checkpoint functionality", () => {
 			},
 		)
 
-		it("when only the closing message fails after the rewind was saved: reports it as a rewind error, keeps the rewound conversation, and starts the task again once", async () => {
-			const failure = new Error("could not say")
-			mockTask.say.mockRejectedValueOnce(failure)
+		it.each(["delete", "edit"] as const)(
+			"is not a failed rewind when only the closing message cannot be said after the rewind was saved (%s): the task is started again, as after any rewind that worked",
+			async (operation) => {
+				mockTask.say.mockRejectedValueOnce(new Error("task aborted"))
 
-			const restoring = checkpointRestore(mockTask, {
-				ts: 2,
-				commitHash: RESTORE_HASH,
-				mode: "restore",
-				operation: "delete",
-			})
+				await expect(
+					checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation }),
+				).resolves.toBeUndefined()
 
-			await expect(restoring).rejects.toBeInstanceOf(ConversationRewindError)
-			await expect(restoring).rejects.toMatchObject({ message: "could not say", cause: failure })
-			// The conversation was rewound and saved before the message failed: both writes were made and are kept.
-			expect(mockTask.overwriteClineMessages).toHaveBeenCalledWith([{ ts: 1, say: "user", text: "Message 1" }])
-			expect(mockTask.overwriteApiConversationHistory).toHaveBeenCalledWith([
-				{ ts: 1, role: "user", content: [{ type: "text", text: "Message 1" }] },
-			])
+				// The conversation was rewound and saved: both writes were made and are kept.
+				expect(mockTask.overwriteClineMessages).toHaveBeenCalledTimes(1)
+				expect(mockTask.overwriteApiConversationHistory).toHaveBeenCalledTimes(1)
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+				// The note is skipped, and the reason is logged for whoever looks.
+				expect(mockProvider.log).toHaveBeenCalledWith(
+					expect.stringContaining("could not be noted: task aborted"),
+				)
+			},
+		)
+
+		it("says the deleted requests when the task can, with their usage", async () => {
+			mockTask.combineMessages.mockReturnValue([])
+
+			await checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" })
+
+			expect(mockTask.say).toHaveBeenCalledExactlyOnceWith("api_req_deleted", expect.stringContaining("tokensIn"))
+		})
+
+		it("still reports a rewind that failed, whatever the closing message would have done", async () => {
+			mockTask.overwriteClineMessages.mockRejectedValueOnce(new Error("Failed to save the messages"))
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" }),
+			).rejects.toBeInstanceOf(ConversationRewindError)
+
+			expect(mockTask.say).not.toHaveBeenCalled()
 			expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
 		})
 

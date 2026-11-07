@@ -1615,18 +1615,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return saved
 	}
 
+	/**
+	 * An authoritative write of the API history (an overwrite: a rewind or an edit cut it) failed, so the disk still has
+	 * the messages that were cut. A merging save (every ordinary save) would bring them back: it keeps what is on disk and
+	 * not in memory. Until an authoritative write succeeds, the saves are authoritative too.
+	 */
+	private apiHistoryOverwriteNotStored = false
+
 	/** Persists the current API conversation history to disk, returning false on I/O errors. */
 	private async saveApiConversationHistory(merge = true): Promise<boolean> {
+		const authoritative = !merge || this.apiHistoryOverwriteNotStored
 		try {
 			await saveApiMessages({
 				messages: structuredClone(this.apiConversationHistory),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
-				merge,
+				merge: !authoritative,
 			})
+			if (authoritative) this.apiHistoryOverwriteNotStored = false
 			return true
 		} catch (error) {
 			console.error("Failed to save API conversation history:", error)
+			if (!merge) this.apiHistoryOverwriteNotStored = true
 			return false
 		}
 	}

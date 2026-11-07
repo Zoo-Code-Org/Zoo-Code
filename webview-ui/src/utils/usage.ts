@@ -359,9 +359,12 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 
 	// Spreadsheet apps evaluate a quoted cell that starts with = + - @ (or tab/CR) as a formula, and the
 	// task text is user- and model-controlled. A leading apostrophe makes the cell inert text.
+	// The text is made one line first, and judged as it is written: a line break in front of a sign becomes a space, and
+	// an application that trims spaces (or skips invisible characters) would read the sign as the start of the cell.
 	const escape = (value: string) => {
-		const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
-		return `"${safe.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`
+		const flat = value.replace(/\r?\n/g, " ")
+		const safe = /^[\s\p{Cc}\p{Cf}]*[=+\-@\t\r]/u.test(flat) ? `'${flat}` : flat
+		return `"${safe.replace(/"/g, '""')}"`
 	}
 
 	// A counter that is not a finite, non-negative number (corrupted history, or text such as "=1+1" that a

@@ -511,6 +511,31 @@ describe("usageToCsv formula safety", () => {
 		},
 	)
 
+	// A line break in front of a sign is written as a space: the cell is then read with its leading spaces trimmed.
+	it.each([
+		["\n=1+1", "' =1+1"],
+		["\r\n+SUM(A1)", "' +SUM(A1)"],
+		["\n\n@x", "'  @x"],
+		["  =1+1", "'  =1+1"],
+		["\n\u0000=1+1", "' \u0000=1+1"],
+		["\u200B\n-2+3", "'\u200B -2+3"],
+		["\n\tcmd", "' \tcmd"],
+	])("neutralises a cell whose sign comes after line breaks or spaces: %j", (text, written) => {
+		const csv = usageToCsv([item({ task: text })], { range: "all", now: NOW })
+
+		const cell = csv.split("\n")[1].split(",")[1]
+		expect(cell).toBe(`"${written}"`)
+	})
+
+	it.each(["line\n=1+1", "a = b", "x\n- list item", "\nplain text"])(
+		"leaves %j alone: no sign starts the cell",
+		(text) => {
+			const csv = usageToCsv([item({ task: text })], { range: "all", now: NOW })
+
+			expect(csv.split("\n")[1].split(",")[1]).toBe(`"${text.replace(/\n/g, " ")}"`)
+		},
+	)
+
 	it("leaves ordinary text and the numeric columns alone", () => {
 		const csv = usageToCsv([item({ task: "Fix the = sign", totalCost: 1.5, tokensIn: 10 })], {
 			range: "all",
@@ -649,6 +674,44 @@ describe("in a time zone where the day of a change of daylight saving time begin
 		expect(summary.daily[0]).toMatchObject({ cost: 3 }) // and in the bar of that day
 		expect(summary.daily[6]).toMatchObject({ cost: 1 })
 		expect(usageToCsv(history, { range: "7d", now }).split("\n")).toHaveLength(3)
+	})
+})
+
+describe("the ends of today, to the millisecond", () => {
+	const today = new Date(NOW)
+	const at = (dayOffset: number, h: number, min: number, sec: number, ms: number) =>
+		new Date(today.getFullYear(), today.getMonth(), today.getDate() + dayOffset, h, min, sec, ms).getTime()
+	const tasks = () => [
+		item({ task: "yesterday-last-ms", ts: at(-1, 23, 59, 59, 999), tokensIn: 1, totalCost: 1 }),
+		item({ task: "today-first-ms", ts: at(0, 0, 0, 0, 0), tokensIn: 1, totalCost: 2 }),
+		item({ task: "today-last-ms", ts: at(0, 23, 59, 59, 999), tokensIn: 1, totalCost: 4 }),
+		item({ task: "tomorrow-first-ms", ts: at(1, 0, 0, 0, 0), tokensIn: 1, totalCost: 8 }),
+	]
+
+	it("includes the first and the last millisecond of today, and excludes the first millisecond of tomorrow, in every bounded range", () => {
+		for (const range of ["today", "7d", "30d"] as const) {
+			const csv = usageToCsv(tasks(), { range, now: NOW })
+			expect(csv, range).toContain("today-first-ms")
+			expect(csv, range).toContain("today-last-ms")
+			expect(csv, range).not.toContain("tomorrow-first-ms")
+
+			const summary = summarizeUsage(tasks(), { range, now: NOW })
+			// The export and the headline agree, and the chart adds up to it.
+			expect(
+				summary.daily.reduce((sum, d) => sum + d.cost, 0),
+				range,
+			).toBe(summary.totalCost)
+			expect(summary.totalCost, range).toBe(range === "today" ? 6 : 7) // yesterday's last millisecond is in the longer ranges
+		}
+	})
+
+	it("excludes the last millisecond of yesterday from today alone", () => {
+		expect(usageToCsv(tasks(), { range: "today", now: NOW })).not.toContain("yesterday-last-ms")
+		expect(usageToCsv(tasks(), { range: "7d", now: NOW })).toContain("yesterday-last-ms")
+	})
+
+	it("keeps a task of tomorrow in all time, which has no end", () => {
+		expect(usageToCsv(tasks(), { range: "all", now: NOW })).toContain("tomorrow-first-ms")
 	})
 })
 
