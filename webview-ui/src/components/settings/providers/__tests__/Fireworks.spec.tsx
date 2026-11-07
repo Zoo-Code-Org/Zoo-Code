@@ -1,0 +1,798 @@
+// npx vitest src/components/settings/providers/__tests__/Fireworks.spec.tsx
+
+import React from "react"
+import {
+	act,
+	createTestQueryClient,
+	fireEvent,
+	render,
+	renderWithExtensionState,
+	screen,
+	waitFor,
+} from "@/utils/test-utils"
+import {
+	allRouterModelsProvider,
+	fireworksDefaultModelId,
+	providerIdentifiers,
+	type ModelInfo,
+	type ProviderSettings,
+} from "@roo-code/types"
+
+import { Fireworks } from "../Fireworks"
+
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
+		t: (key: string) => key,
+	}),
+}))
+
+vi.mock("@vscode/webview-ui-toolkit/react", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@vscode/webview-ui-toolkit/react")>()
+	return {
+		...actual,
+		VSCodeTextField: ({ children, value, onInput, type, placeholder }: any) => (
+			<div data-testid="vscode-text-field">
+				{children}
+				<input
+					type={type}
+					value={value}
+					onInput={(e) => onInput?.(e)}
+					placeholder={placeholder}
+					data-testid="fireworks-api-key-input"
+				/>
+			</div>
+		),
+	}
+})
+
+vi.mock("../../ModelPicker", () => ({
+	ModelPicker: function MockModelPicker({
+		models,
+		defaultModelId,
+		onModelChange,
+		organizationAllowList,
+		errorMessage,
+	}: {
+		models: Record<string, ModelInfo>
+		defaultModelId: string
+		onModelChange?: (modelId: string) => void
+		organizationAllowList?: unknown
+		errorMessage?: string
+	}) {
+		return React.createElement(
+			"div",
+			{ "data-testid": "model-picker" },
+			React.createElement("span", { "data-testid": "model-picker-default" }, defaultModelId),
+			React.createElement("span", { "data-testid": "model-picker-ids" }, Object.keys(models).join(",")),
+			React.createElement(
+				"span",
+				{ "data-testid": "model-picker-allow-list" },
+				organizationAllowList ? "allow-list" : "no-allow-list",
+			),
+			React.createElement("span", { "data-testid": "model-picker-error" }, errorMessage ?? ""),
+			React.createElement(
+				"button",
+				{
+					"data-testid": "change-model",
+					onClick: () => onModelChange?.("accounts/fireworks/models/glm-5p3"),
+				},
+				"Change model",
+			),
+		)
+	},
+}))
+
+vi.mock("@src/utils/vscode", () => {
+	const mockPostMessage = vi.fn()
+	return {
+		vscode: { postMessage: mockPostMessage },
+	}
+})
+
+vi.mock("@src/context/ExtensionStateContext", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@src/context/ExtensionStateContext")>()),
+	useExtensionState: vi.fn(),
+}))
+
+vi.mock("@src/components/ui", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@src/components/ui")>()
+	return {
+		...actual,
+		Button: ({ children, onClick, disabled, variant }: any) => (
+			<button data-testid="button" disabled={disabled} onClick={onClick} data-variant={variant}>
+				{children}
+			</button>
+		),
+	}
+})
+
+vi.mock("@src/components/common/VSCodeButtonLink", () => ({
+	VSCodeButtonLink: ({ href, children }: any) => (
+		<a data-testid="vscode-button-link" href={href}>
+			{children}
+		</a>
+	),
+}))
+
+import { useExtensionState } from "@src/context/ExtensionStateContext"
+import { vscode } from "@src/utils/vscode"
+
+const mockUseExtensionState = useExtensionState as ReturnType<typeof vi.fn>
+
+const getRefreshButton = () =>
+	screen.getAllByTestId("button").find((button) => button.getAttribute("data-variant") === "outline")!
+
+/** The identifier echoed by the extension on the response to the most recent request. */
+const getLastRequestId = () => {
+	const calls = vi.mocked(vscode.postMessage).mock.calls
+	const last = calls[calls.length - 1]?.[0] as { requestId?: string } | undefined
+	return last?.requestId
+}
+
+describe("Fireworks Component", () => {
+	const mockSetApiConfigurationField = vi.fn()
+
+	const createApiConfiguration = (overrides?: Partial<ProviderSettings>): ProviderSettings => ({
+		apiProvider: providerIdentifiers.fireworks,
+		...overrides,
+	})
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockUseExtensionState.mockReturnValue({ routerModels: {} })
+	})
+
+	it("shows API-fetched models in the picker when available", () => {
+		mockUseExtensionState.mockReturnValue({
+			routerModels: {
+				[providerIdentifiers.fireworks]: {
+					"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+				},
+			},
+		})
+
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "k" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
+		expect(screen.getByTestId("model-picker-default")).toHaveTextContent(fireworksDefaultModelId)
+	})
+
+	it("shows no models when nothing has been fetched from the API", () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration()}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		expect(screen.getByTestId("model-picker-ids")).toBeEmptyDOMElement()
+	})
+
+	it("disables refresh without an API key and shows the get-key link", () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration()}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		expect(getRefreshButton()).toBeDisabled()
+		expect(screen.getByTestId("vscode-button-link")).toBeInTheDocument()
+	})
+
+	it("sends a Fireworks-scoped refresh request with the current key", () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		expect(screen.queryByTestId("vscode-button-link")).not.toBeInTheDocument()
+		fireEvent.click(getRefreshButton())
+
+		expect(getRefreshButton()).toBeDisabled()
+		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "requestRouterModels",
+			requestId: expect.any(String),
+			values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "fw-key" },
+		})
+	})
+
+	it("shows success and seeds the Fireworks + shared router-model caches from the response", async () => {
+		const queryClient = createTestQueryClient()
+		const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries")
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+		const refreshedModels = {
+			"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+		}
+
+		renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		fireEvent.click(getRefreshButton())
+		const requestId = getLastRequestId()
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId,
+						routerModels: { [providerIdentifiers.fireworks]: refreshedModels },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		await waitFor(() => {
+			expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument()
+			// Seeding avoids a refetch that would use the saved key instead of the edited one.
+			expect(setQueryData).toHaveBeenCalledWith(
+				["routerModels", providerIdentifiers.fireworks],
+				expect.any(Function),
+			)
+			expect(setQueryData).toHaveBeenCalledWith(["routerModels", allRouterModelsProvider], expect.any(Function))
+			expect(invalidateQueries).not.toHaveBeenCalled()
+		})
+	})
+
+	it("ignores a superseded request's response so a stale catalog cannot replace the newer one", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+
+		const { rerender } = renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "old-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		fireEvent.click(getRefreshButton())
+		const staleRequestId = getLastRequestId()
+
+		// A key edit starts a second request while the first is still in flight.
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "new-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "requestRouterModels",
+					values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-key" },
+				}),
+			),
+		)
+		const currentRequestId = getLastRequestId()
+		expect(currentRequestId).not.toBe(staleRequestId)
+
+		// The older request finishes last: its catalog belongs to the previous key.
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: staleRequestId,
+						routerModels: { [providerIdentifiers.fireworks]: { "accounts/fireworks/models/stale": {} } },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		expect(setQueryData).not.toHaveBeenCalled()
+		expect(screen.queryByText("settings:providers.refreshModels.success")).not.toBeInTheDocument()
+
+		// The response to the current request is still accepted.
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: currentRequestId,
+						routerModels: { [providerIdentifiers.fireworks]: { "accounts/fireworks/models/fresh": {} } },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		await waitFor(() => {
+			expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument()
+			expect(setQueryData).toHaveBeenCalledWith(
+				["routerModels", providerIdentifiers.fireworks],
+				expect.any(Function),
+			)
+		})
+	})
+
+	it("ignores a Fireworks-scoped response that carries no request identifier", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+
+		renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		fireEvent.click(getRefreshButton())
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument())
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						routerModels: { [providerIdentifiers.fireworks]: { "accounts/fireworks/models/other": {} } },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		expect(setQueryData).not.toHaveBeenCalled()
+		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+	})
+
+	it("does not create the aggregate cache entry from a Fireworks-only payload", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+
+		renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		fireEvent.click(getRefreshButton())
+		const requestId = getLastRequestId()
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId,
+						routerModels: { [providerIdentifiers.fireworks]: {} },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		await waitFor(() => expect(setQueryData).toHaveBeenCalled())
+		// The updater must leave an absent aggregate entry absent rather than seeding it
+		// with a payload that only contains Fireworks.
+		const aggregateCall = setQueryData.mock.calls.find(
+			([key]) => Array.isArray(key) && key[1] === allRouterModelsProvider,
+		)
+		expect(aggregateCall).toBeDefined()
+		const updater = aggregateCall![1] as (current: unknown) => unknown
+		expect(updater(undefined)).toBeUndefined()
+	})
+
+	it("ignores an aggregate routerModels response while loading", async () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(getRefreshButton())
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument())
+
+		act(() => {
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "routerModels" } }))
+		})
+
+		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+		expect(screen.queryByText("settings:providers.refreshModels.success")).not.toBeInTheDocument()
+	})
+
+	it("shows the error and does not flip to success when a Fireworks routerModels response arrives afterwards", async () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(getRefreshButton())
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument())
+		const requestId = getLastRequestId()
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "singleRouterModelFetchResponse",
+						requestId,
+						success: false,
+						error: "HTTP 401: Unauthorized",
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+		await waitFor(() => expect(screen.getByText("HTTP 401: Unauthorized")).toBeInTheDocument())
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId,
+						routerModels: { [providerIdentifiers.fireworks]: {} },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		expect(screen.getByText("HTTP 401: Unauthorized")).toBeInTheDocument()
+		expect(screen.queryByText("settings:providers.refreshModels.success")).not.toBeInTheDocument()
+	})
+
+	it("ignores another provider's failure while loading", async () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(getRefreshButton())
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument())
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "singleRouterModelFetchResponse",
+						success: false,
+						error: "OpenRouter unavailable",
+						values: { provider: providerIdentifiers.openrouter },
+					},
+				}),
+			)
+		})
+
+		expect(screen.queryByText("OpenRouter unavailable")).not.toBeInTheDocument()
+		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+	})
+
+	it("keeps the last catalog in the picker when a refresh fails for the same key", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+		const cachedModels = {
+			"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+		}
+
+		renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		// A successful refresh records the key the catalog belongs to.
+		fireEvent.click(getRefreshButton())
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: getLastRequestId(),
+						routerModels: { [providerIdentifiers.fireworks]: cachedModels },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument())
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
+
+		// A later refresh with the same key fails and publishes an empty catalog.
+		setQueryData.mockClear()
+		fireEvent.click(getRefreshButton())
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: getLastRequestId(),
+						routerModels: { [providerIdentifiers.fireworks]: {} },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		// The cached catalog stays in place instead of being replaced with an empty one.
+		expect(setQueryData).not.toHaveBeenCalled()
+		// The picker renders extension state, so the retained catalog must feed it directly.
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
+	})
+
+	it("keeps a catalog that extension state already held when a same-key refresh fails", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+		const extensionModels = {
+			"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576, supportsPromptCache: false },
+		}
+
+		// Extension state already holds a catalog for the saved key.
+		mockUseExtensionState.mockReturnValue({
+			routerModels: { [providerIdentifiers.fireworks]: extensionModels },
+		})
+
+		const { rerender } = renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		// A same-key refresh fails and the backend has no cache entry, so it publishes an
+		// empty Fireworks catalog into extension state.
+		fireEvent.click(getRefreshButton())
+		mockUseExtensionState.mockReturnValue({
+			routerModels: { [providerIdentifiers.fireworks]: {} },
+		})
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: getLastRequestId(),
+						routerModels: { [providerIdentifiers.fireworks]: {} },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		// The picker keeps the catalog instead of going empty.
+		expect(setQueryData).not.toHaveBeenCalled()
+		expect(screen.getByTestId("model-picker-ids")).toHaveTextContent("accounts/fireworks/models/glm-5p3")
+	})
+
+	it("clears the catalog when a refresh fails for a different key", async () => {
+		const queryClient = createTestQueryClient()
+		const setQueryData = vi.spyOn(queryClient, "setQueryData")
+
+		const { rerender } = renderWithExtensionState(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "old-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
+		)
+
+		fireEvent.click(getRefreshButton())
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: getLastRequestId(),
+						routerModels: {
+							[providerIdentifiers.fireworks]: {
+								"accounts/fireworks/models/old-key-model": { contextWindow: 8192 },
+							},
+						},
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument())
+
+		// The key changes, so the previous account's catalog must not survive a failure.
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "new-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "requestRouterModels",
+					values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-key" },
+				}),
+			),
+		)
+
+		setQueryData.mockClear()
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId: getLastRequestId(),
+						routerModels: { [providerIdentifiers.fireworks]: {} },
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+
+		await waitFor(() => {
+			const fireworksCall = setQueryData.mock.calls.find(
+				([key]) => Array.isArray(key) && key[1] === providerIdentifiers.fireworks,
+			)
+			expect(fireworksCall).toBeDefined()
+			const updater = fireworksCall![1] as (current: unknown) => unknown
+			expect(updater({ [providerIdentifiers.fireworks]: { stale: {} } })).toEqual({
+				[providerIdentifiers.fireworks]: {},
+			})
+		})
+	})
+
+	it("clears a stale refresh error when the key changes", async () => {
+		const { rerender } = render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "old-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(getRefreshButton())
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "singleRouterModelFetchResponse",
+						requestId: getLastRequestId(),
+						success: false,
+						error: "HTTP 401: Unauthorized",
+						values: { provider: providerIdentifiers.fireworks },
+					},
+				}),
+			)
+		})
+		await waitFor(() => expect(screen.getByText("HTTP 401: Unauthorized")).toBeInTheDocument())
+
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "new-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		await waitFor(() => expect(screen.queryByText("HTTP 401: Unauthorized")).not.toBeInTheDocument())
+		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+	})
+
+	it("requests the catalog with the new key when the key changes", async () => {
+		const { rerender } = render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "old-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "new-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "requestRouterModels",
+				requestId: expect.any(String),
+				values: { provider: providerIdentifiers.fireworks, fireworksApiKey: "new-key" },
+			}),
+		)
+	})
+
+	it("does not request the catalog on mount or when the key is cleared", async () => {
+		// Extension state still holds the previous account's catalog.
+		mockUseExtensionState.mockReturnValue({
+			routerModels: {
+				[providerIdentifiers.fireworks]: {
+					"accounts/fireworks/models/glm-5p3": { contextWindow: 1_048_576 },
+				},
+			},
+		})
+
+		const { rerender } = render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		rerender(
+			<Fireworks
+				apiConfiguration={createApiConfiguration()}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		await new Promise((resolve) => setTimeout(resolve, 300))
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		// Nothing can be fetched without a key, so the previous catalog must not stay selectable.
+		expect(screen.getByTestId("model-picker-ids")).toBeEmptyDOMElement()
+	})
+
+	it("uses a request identifier that is unique to the page load", async () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(getRefreshButton())
+		const firstPageRequestId = getLastRequestId()
+		expect(firstPageRequestId).toBeTruthy()
+
+		// A webview reload re-evaluates the module, which restarts the module-scoped counter.
+		// The identifier must still differ, or the extension would treat the new page's
+		// request as the one still in flight from the previous page.
+		vi.resetModules()
+		const { nextFireworksRouterModelsRequestId } = await import("../Fireworks")
+		expect(nextFireworksRouterModelsRequestId()).not.toBe(firstPageRequestId)
+	})
+
+	it("threads the organization allow list and validation error into the picker", () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={{ allowAll: false, providers: {} }}
+				modelValidationError="model not allowed"
+			/>,
+		)
+
+		expect(screen.getByTestId("model-picker-allow-list")).toHaveTextContent("allow-list")
+		expect(screen.getByTestId("model-picker-error")).toHaveTextContent("model not allowed")
+	})
+
+	it("resets model-specific settings when the selected model changes", () => {
+		render(
+			<Fireworks
+				apiConfiguration={createApiConfiguration({ fireworksApiKey: "fw-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("change-model"))
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+	})
+})

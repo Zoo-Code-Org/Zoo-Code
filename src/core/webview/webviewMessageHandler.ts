@@ -24,6 +24,7 @@ import {
 	getCompletionCheckpoint,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
+	allRouterModelsProvider,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -96,7 +97,7 @@ import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler, type ApiHandler } from "../../api"
-import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
+import { getModels, getModelsFromCache, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -131,6 +132,80 @@ import {
 
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
+
+// Router-model requests per provider, ordered by arrival. A caller that supplies a request
+// identifier (the Fireworks settings page does) can have several requests in flight at once;
+// publishing a superseded one would replace the newer catalog in every webview consumer,
+// including the extension-state copy the model picker renders. Anonymous requests are ordered
+// too, so a stale aggregate response cannot replace a catalog that a newer request published.
+type RouterModelRequest = {
+	/** Arrival order across every request for this provider. */
+	sequence: number
+	/** Caller-supplied identifier, absent for requests that cannot be attributed. */
+	requestId?: string
+}
+
+type RouterModelRequestLog = {
+	/** Arrival order of the newest request per key, identified or not. */
+	latestSequenceByKey: Map<string, number>
+	/** Identifier of the newest identified request per key. */
+	latestIdentifiedByKey: Map<string, string>
+}
+
+const routerModelRequestLogs = new WeakMap<object, RouterModelRequestLog>()
+let routerModelRequestSequence = 0
+
+const recordRouterModelRequest = (
+	provider: object,
+	requestKey: string,
+	requestId: string | undefined,
+): RouterModelRequest => {
+	let log = routerModelRequestLogs.get(provider)
+	if (!log) {
+		log = { latestSequenceByKey: new Map(), latestIdentifiedByKey: new Map() }
+		routerModelRequestLogs.set(provider, log)
+	}
+
+	const request = { sequence: ++routerModelRequestSequence, requestId }
+	log.latestSequenceByKey.set(requestKey, request.sequence)
+	if (requestId !== undefined) {
+		log.latestIdentifiedByKey.set(requestKey, requestId)
+	}
+
+	return request
+}
+
+// An aggregate request carries every provider, so it overlaps every provider-scoped request.
+const routerModelRequestKeysOverlap = (a: string, b: string) =>
+	a === b || a === allRouterModelsProvider || b === allRouterModelsProvider
+
+/**
+ * True when a request that arrived after `request` owns the same catalog.
+ *
+ * An identified request is superseded only by a newer identified request for its own key: its
+ * caller waits for that identifier, so suppressing it on behalf of an anonymous request would
+ * leave the caller waiting forever. An anonymous response has no caller waiting on it, so any
+ * newer overlapping request owns the catalog.
+ */
+const isSupersededRouterModelRequest = (provider: object, requestKey: string, request: RouterModelRequest): boolean => {
+	const log = routerModelRequestLogs.get(provider)
+	if (!log) {
+		return false
+	}
+
+	if (request.requestId !== undefined) {
+		const latestIdentified = log.latestIdentifiedByKey.get(requestKey)
+		return latestIdentified !== undefined && latestIdentified !== request.requestId
+	}
+
+	for (const [key, sequence] of log.latestSequenceByKey) {
+		if (sequence > request.sequence && routerModelRequestKeysOverlap(key, requestKey)) {
+			return true
+		}
+	}
+
+	return false
+}
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -1174,11 +1249,17 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case RouterModelsMessageType.requestRouterModels: {
-			const { apiConfiguration } = await provider.getState()
-
 			// Optional single provider filter from webview
 			const requestedProvider = message?.values?.provider
 			const providerFilter = requestedProvider ? toRouterName(requestedProvider) : undefined
+
+			// Record the request before the first await so arrival order decides which request
+			// owns the catalog. Recording after `getState()` would let a slower, older request
+			// claim the newest slot and publish its stale catalog over the newer one.
+			const requestKey = providerFilter ?? allRouterModelsProvider
+			const routerModelRequest = recordRouterModelRequest(provider, requestKey, message.requestId)
+
+			const { apiConfiguration } = await provider.getState()
 
 			// Optional refresh flag to flush cache before fetching (useful for providers requiring credentials)
 			const shouldRefresh = message?.values?.refresh === true
@@ -1197,6 +1278,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.fireworks]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.ioIntelligence]: {},
@@ -1340,6 +1422,25 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// Fireworks is conditional on apiKey (its /models endpoint requires auth and the
+			// returned list is scoped to the account).
+			const fireworksApiKey = message?.values?.fireworksApiKey ?? apiConfiguration.fireworksApiKey
+
+			if (fireworksApiKey) {
+				if (message?.values?.fireworksApiKey) {
+					await flushModels(
+						{ provider: providerIdentifiers.fireworks, apiKey: fireworksApiKey },
+						handlerFor(apiConfiguration, providerIdentifiers.fireworks),
+						true,
+					)
+				}
+
+				candidates.push({
+					key: providerIdentifiers.fireworks,
+					options: { provider: providerIdentifiers.fireworks, apiKey: fireworksApiKey },
+				})
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1461,22 +1562,39 @@ export const webviewMessageHandler = async (
 					const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason)
 					console.error(`Error fetching models for ${routerName}:`, result.reason)
 
-					routerModels[routerName] = {} // Ensure it's an empty object in the main routerModels message.
+					// Keep the catalog the same key already loaded: a transient failure must not
+					// empty the picker. A different key must clear it, because the previous
+					// account's models may not be usable with the edited key.
+					const failedOptions = modelFetchPromises[index].options
+					const retainedModels = getModelsFromCache(failedOptions, handlerFor(apiConfiguration, routerName))
 
-					void provider.postMessageToWebview({
-						type: RouterModelsMessageType.singleRouterModelFetchResponse,
-						success: false,
-						error: errorMessage,
-						values: { provider: routerName },
-					})
+					routerModels[routerName] = retainedModels ?? {}
+
+					if (!isSupersededRouterModelRequest(provider, requestKey, routerModelRequest)) {
+						void provider.postMessageToWebview({
+							type: RouterModelsMessageType.singleRouterModelFetchResponse,
+							success: false,
+							error: errorMessage,
+							values: { provider: routerName },
+							// Echo the caller's identifier so it can discard responses from
+							// requests it has already superseded.
+							requestId: message.requestId,
+						})
+					}
 				}
 			})
 
-			await provider.postMessageToWebview({
-				type: RouterModelsMessageType.routerModels,
-				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
-			})
+			// A superseded request must not publish: its catalog belongs to an older key and
+			// would replace the newer one in extension state and the query cache.
+			if (!isSupersededRouterModelRequest(provider, requestKey, routerModelRequest)) {
+				await provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: providerFilter ? { provider: requestedProvider } : undefined,
+					// Echo the caller's identifier so overlapping requests can be told apart.
+					requestId: message.requestId,
+				})
+			}
 			break
 		}
 		case OllamaModelsMessageType.requestOllamaModels: {
