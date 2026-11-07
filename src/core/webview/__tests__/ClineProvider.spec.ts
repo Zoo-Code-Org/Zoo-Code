@@ -4177,40 +4177,68 @@ describe("ClineProvider", () => {
 		expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 	})
 
-	test.each([
-		["marks the state that follows a failed import for the settings form", 1_700_000_000_000],
-		["leaves the mark out of every other state", undefined],
-	])("%s", async (_name, markedAt) => {
-		await provider.resolveWebviewView(mockWebviewView)
-		provider.settingsImportRefreshedAt = markedAt
+	describe("the refresh that follows an import that failed part of the way", () => {
+		const postedState = () => {
+			const message = mockPostMessage.mock.calls
+				.map(([m]) => m)
+				.filter((m) => m.type === "state")
+				.at(-1)
+			return message.state
+		}
 
-		const state = await provider.getStateToPostToWebview()
+		test("marks the state that is posted with it, with what the import stored", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
 
-		expect(state.settingsImportRefreshedAt).toBe(markedAt)
-	})
+			await provider.postStateToWebview({
+				at: 1_700_000_000_000,
+				storedKeys: ["terminalFontSize", "mode"],
+				late: false,
+			})
 
-	test.each([
-		["names the settings that a failed import stored", ["terminalFontSize", "mode"]],
-		["leaves them out of every other state", undefined],
-	])("%s", async (_name, keys) => {
-		await provider.resolveWebviewView(mockWebviewView)
-		provider.settingsImportStoredKeys = keys
+			expect(postedState()).toMatchObject({
+				settingsImportRefreshedAt: 1_700_000_000_000,
+				settingsImportStoredKeys: ["terminalFontSize", "mode"],
+			})
+			expect(postedState().settingsImportRefreshIsLate).toBeUndefined()
+		})
 
-		const state = await provider.getStateToPostToWebview()
+		test("marks a refresh that follows a late rollback as late", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
 
-		expect(state.settingsImportStoredKeys).toEqual(keys)
-	})
+			await provider.postStateToWebview({ at: 1, storedKeys: ["terminalFontSize"], late: true })
 
-	test.each([
-		["marks a refresh that follows a late rollback", true],
-		["leaves the mark out of every other state", undefined],
-	])("%s", async (_name, late) => {
-		await provider.resolveWebviewView(mockWebviewView)
-		provider.settingsImportRefreshIsLate = late
+			expect(postedState().settingsImportRefreshIsLate).toBe(true)
+		})
 
-		const state = await provider.getStateToPostToWebview()
+		test("leaves the marks out of every other state, also the one that follows a marked one", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.postStateToWebview({ at: 1, storedKeys: ["mode"], late: true })
 
-		expect(state.settingsImportRefreshIsLate).toBe(late)
+			await provider.postStateToWebview()
+
+			expect(postedState().settingsImportRefreshedAt).toBeUndefined()
+			expect(postedState().settingsImportStoredKeys).toBeUndefined()
+			expect(postedState().settingsImportRefreshIsLate).toBeUndefined()
+			expect((await provider.getStateToPostToWebview()).settingsImportRefreshedAt).toBeUndefined()
+		})
+
+		test("gives overlapping posts their own marks", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await Promise.all([
+				provider.postStateToWebview({ at: 1, storedKeys: ["mode"], late: false }),
+				provider.postStateToWebview({ at: 2, storedKeys: ["terminalFontSize"], late: true }),
+			])
+
+			const states = mockPostMessage.mock.calls.map(([m]) => m).filter((m) => m.type === "state")
+			const marked = states.filter((m) => m.state.settingsImportRefreshedAt !== undefined)
+			expect(marked.map((m) => [m.state.settingsImportRefreshedAt, m.state.settingsImportStoredKeys])).toEqual(
+				expect.arrayContaining([
+					[1, ["mode"]],
+					[2, ["terminalFontSize"]],
+				]),
+			)
+		})
 	})
 
 	test("isDisposed tells whether dispose has run", async () => {

@@ -139,6 +139,7 @@ import {
 } from "../config/appearanceSettingWrites"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
+import type { SettingsImportRefresh } from "../config/importExport"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
@@ -442,9 +443,6 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public settingsImportRefreshedAt?: number
-	public settingsImportStoredKeys?: string[]
-	public settingsImportRefreshIsLate?: boolean
 	public readonly latestAnnouncementId = "oct-2026-v3.94.0-models-oauth-chat" // v3.94.0 model support, MCP OAuth, and chat reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
@@ -2969,7 +2967,11 @@ export class ClineProvider
 		await this.postStateToWebview()
 	}
 
-	async postStateToWebview() {
+	/**
+	 * `importRefresh` marks this one state as the refresh that follows an import that failed part of the way (see
+	 * `SettingsImportRefresh`): it is put on the state that is posted, and on no other.
+	 */
+	async postStateToWebview(importRefresh?: SettingsImportRefresh) {
 		// A disposed provider has no webview to show a state to: it is not built, and no sequence number is spent.
 		if (this._disposed) return
 		const clineMessagesSeq = ++this.clineMessagesSeq
@@ -2983,6 +2985,11 @@ export class ClineProvider
 		// It may have been disposed while the state was being built (the settings and the history are read first).
 		if (this._disposed) return
 		state.clineMessagesSeq = clineMessagesSeq
+		if (importRefresh) {
+			state.settingsImportRefreshedAt = importRefresh.at
+			state.settingsImportStoredKeys = importRefresh.storedKeys
+			state.settingsImportRefreshIsLate = importRefresh.late || undefined
+		}
 		await this.postMessageToWebview({ type: "state", state })
 	}
 
@@ -3469,9 +3476,6 @@ export class ClineProvider
 			maxImageFileSize: maxImageFileSize ?? 5,
 			maxTotalImageSize: maxTotalImageSize ?? 20,
 			settingsImportedAt: this.settingsImportedAt,
-			settingsImportRefreshedAt: this.settingsImportRefreshedAt,
-			settingsImportStoredKeys: this.settingsImportStoredKeys,
-			settingsImportRefreshIsLate: this.settingsImportRefreshIsLate,
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,

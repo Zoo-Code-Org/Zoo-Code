@@ -44,11 +44,21 @@ type ExportOptions = {
 type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
-		settingsImportRefreshedAt?: number
-		settingsImportStoredKeys?: string[]
-		settingsImportRefreshIsLate?: boolean
-		postStateToWebview: () => Promise<void>
+		postStateToWebview: (refresh?: SettingsImportRefresh) => Promise<void>
 	}
+}
+
+/**
+ * What a state that follows an import that failed part of the way tells the settings form: it takes what the import
+ * stored (`storedKeys`), and keeps its other edits. It travels with the one state post it belongs to, never on the
+ * provider, so refreshes that overlap cannot clear or mix each other's marks.
+ */
+export type SettingsImportRefresh = {
+	/** Distinct for every refresh: the form acts on each stamp once. */
+	at: number
+	storedKeys: string[]
+	/** The refresh follows a rollback that finished after the import was answered: an edit made since is kept. */
+	late: boolean
 }
 
 /** An import that failed after it had started to change settings. */
@@ -77,17 +87,11 @@ async function refreshWebviewAfterPartialImport(
 	late = false,
 ) {
 	// Distinct from the stamp of an earlier refresh, so the form never takes two of them for one.
-	provider.settingsImportRefreshedAt = lastRefreshStamp = Math.max(Date.now(), lastRefreshStamp + 1)
-	provider.settingsImportStoredKeys = storedSettings
-	provider.settingsImportRefreshIsLate = late || undefined
+	lastRefreshStamp = Math.max(Date.now(), lastRefreshStamp + 1)
 	try {
-		await provider.postStateToWebview()
+		await provider.postStateToWebview({ at: lastRefreshStamp, storedKeys: storedSettings, late })
 	} catch {
 		// Nobody is waiting for the refresh.
-	} finally {
-		provider.settingsImportRefreshedAt = undefined
-		provider.settingsImportStoredKeys = undefined
-		provider.settingsImportRefreshIsLate = undefined
 	}
 }
 
