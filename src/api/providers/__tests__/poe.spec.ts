@@ -401,32 +401,55 @@ describe("PoeHandler", () => {
 		})
 	})
 
+	// Holds generateText pending so a test can observe the request signal while it is in
+	// flight; `release` settles the call.
+	function holdGeneration(generateTextMock: {
+		mockImplementation: (fn: (options: { abortSignal?: AbortSignal }) => Promise<{ text: string }>) => unknown
+	}) {
+		let captured: { abortSignal?: AbortSignal } | undefined
+		let release: () => void = () => {}
+		generateTextMock.mockImplementation(
+			(options) =>
+				new Promise<{ text: string }>((resolve) => {
+					captured = options
+					release = () => resolve({ text: "generated response" })
+				}),
+		)
+		return { release: () => release(), abortSignal: () => captured?.abortSignal }
+	}
+
 	describe("completePrompt", () => {
-		it("links the caller's stop into the merged generation signal", async () => {
+		it("links the caller's stop into the in-flight generation signal", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
-			mockGenerateText.mockResolvedValue({ text: "generated response" })
+			const { release, abortSignal } = holdGeneration(mockGenerateText)
 			const abortController = new AbortController()
 
-			await handler.completePrompt("complete this", { abortSignal: abortController.signal, timeoutMs: 5_000 })
-
-			const mergedSignal = mockGenerateText.mock.calls[0][0].abortSignal
-			// A per-request signal carries both the caller's stop and the deadline.
-			expect(mergedSignal).not.toBe(abortController.signal)
-			expect(mergedSignal?.aborted).toBe(false)
+			const generation = handler.completePrompt("complete this", {
+				abortSignal: abortController.signal,
+				timeoutMs: 5_000,
+			})
+			await vi.waitFor(() => expect(abortSignal()).toBeDefined())
+			// A per-request signal carries the caller's stop while the request is still running.
+			expect(abortSignal()?.aborted).toBe(false)
 
 			abortController.abort()
-			expect(mergedSignal?.aborted).toBe(true)
+			expect(abortSignal()?.aborted).toBe(true)
+			// The generation only settles when the provider call is released.
+			release()
+			await expect(generation).resolves.toBe("generated response")
 		})
 
-		it("aborts the merged generation signal when the deadline passes", async () => {
+		it("aborts the in-flight generation signal when the deadline passes", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
-			mockGenerateText.mockResolvedValue({ text: "generated response" })
+			const { release, abortSignal } = holdGeneration(mockGenerateText)
 
-			await handler.completePrompt("complete this", { timeoutMs: 200 })
+			const generation = handler.completePrompt("complete this", { timeoutMs: 200 })
+			await vi.waitFor(() => expect(abortSignal()).toBeDefined())
 
-			const mergedSignal = mockGenerateText.mock.calls[0][0].abortSignal
-			expect(mergedSignal?.aborted).toBe(false)
-			await vi.waitFor(() => expect(mergedSignal?.aborted).toBe(true))
+			// The deadline aborts the request while the provider call is still pending.
+			await vi.waitFor(() => expect(abortSignal()?.aborted).toBe(true))
+			release()
+			await expect(generation).resolves.toBe("generated response")
 		})
 
 		it("does not start a generation when the caller already aborted", async () => {
