@@ -45,6 +45,7 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
+import { resolveMcpToolByName, toolNamesMatch } from "../../utils/mcp-name"
 
 /**
  * Maps a raw, potentially model-controlled tool name to a safe analytics key.
@@ -330,6 +331,25 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				}
 			}
 
+			// A name shortened to fit the provider limit cannot be parsed back into its tool, so
+			// when the parsed names match nothing, look the called name up among the declared ones.
+			let resolvedToolName = mcpBlock.toolName
+			if (mcpHub && !mcpBlock.partial) {
+				const servers = mcpHub.getAllServers()
+				const parsedServer = servers.find((server) => server.name === resolvedServerName)
+				const parsedToolExists = parsedServer?.tools?.some((tool) =>
+					toolNamesMatch(tool.name, resolvedToolName),
+				)
+
+				if (!parsedToolExists) {
+					const resolved = resolveMcpToolByName(servers, mcpBlock.name)
+					if (resolved) {
+						resolvedServerName = resolved.serverName
+						resolvedToolName = resolved.toolName
+					}
+				}
+			}
+
 			// Execute the MCP tool using the same handler as use_mcp_tool
 			// Create a synthetic ToolUse block that the useMcpToolTool can handle
 			const syntheticToolUse: ToolUse<"use_mcp_tool"> = {
@@ -338,13 +358,13 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				name: "use_mcp_tool",
 				params: {
 					server_name: resolvedServerName,
-					tool_name: mcpBlock.toolName,
+					tool_name: resolvedToolName,
 					arguments: JSON.stringify(mcpBlock.arguments),
 				},
 				partial: mcpBlock.partial,
 				nativeArgs: {
 					server_name: resolvedServerName,
-					tool_name: mcpBlock.toolName,
+					tool_name: resolvedToolName,
 					arguments: mcpBlock.arguments,
 				},
 			}
