@@ -727,6 +727,28 @@ describe("RequestyHandler", () => {
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
 		})
 		it.each([
+			// Ceiled up: 1500.5 ms is a usable timeout and toSdkTimeoutMs rounds it to 1501.
+			// Without the conversion the SDK would receive 1500.5 and the assertion below fails.
+			{ input: 1500.5, expected: 1501 },
+			// Clamped down: 3e9 exceeds the platform timer ceiling, so it is capped at MAX.
+			// Without the conversion the SDK would receive 3e9 and the assertion below fails.
+			{ input: 3e9, expected: 2147483647 },
+		] as const)(
+			"normalises a fractional or oversized timeoutMs to the SDK timeout value $input -> $expected",
+			async ({ input, expected }) => {
+				// The wiring under test is toSdkTimeoutMs at the createOptions construction: whole
+				// numbers alone cannot tell the conversion from a pass-through, so both a value that
+				// must be ceiled and a value that must be clamped are asserted on what the SDK is
+				// actually handed.
+				const handler = new RequestyHandler(mockOptions)
+				mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+				await handler.completePrompt("test prompt", { timeoutMs: input })
+				const options = mockCreate.mock.calls.at(-1)?.[1] as { timeout?: number } | undefined
+				expect(options?.timeout).toBe(expected)
+			},
+		)
+
+		it.each([
 			["an external signal", { abortSignal: new AbortController().signal }],
 			["a per-request timeout", { timeoutMs: 5_000 }],
 		])(
@@ -881,6 +903,25 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("applies timeoutMs to model lookup with no caller signal at all", async () => {
+			// The comment above completePrompt claims timeoutMs covers model lookup too. With no
+			// caller signal the only cancellation source is the timeout this method configures, so
+			// the lookup race must be driven by that merged signal: a never-settling getModels has
+			// to be ended by the 20ms deadline rather than hanging. Red if the lookup race is
+			// driven by the bridged caller signal instead (undefined here), which leaves the
+			// lookup awaited forever and the settle guard fires first.
+			const handler = new RequestyHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => new Promise<ModelRecord>(() => {}))
+			const promise = handler.completePrompt("test prompt", { timeoutMs: 20 })
+			void promise.catch(() => {})
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("rethrows non-abort model lookup failures from completePrompt", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")
@@ -911,7 +952,7 @@ describe("RequestyHandler", () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
 
-			// Deterministic synchronization (mirrors the Requesty test): the mock notifies the
+			// Deterministic synchronization: the mock notifies the
 			// test when the request actually starts, so the abort lands mid-flight (after model
 			// lookup) instead of winning the race at model discovery on a slow runner.
 			let notifyCreateStarted!: () => void
@@ -1140,50 +1181,90 @@ describe("RequestyHandler", () => {
 			releaseBackoff()
 		})
 
-		it("detaches the abort listener from the caller's signal when the completion finishes", async () => {
-			// The bridge registers its listener on the caller's long-lived signal, so completion must
-			// detach it: otherwise one listener plus one per-request controller is retained for every
-			// completed request on a reused signal.
-			const handler = new RequestyHandler(mockOptions)
-			const controller = new AbortController()
-			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
-			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
-			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
-
-			try {
-				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
-
-				const registered = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
-				expect(registered).toBeDefined()
-				expect(removeSpy).toHaveBeenCalledWith("abort", registered)
-			} finally {
-				addSpy.mockRestore()
-				removeSpy.mockRestore()
-			}
-		})
-
-		it("detaches the abort listener from the caller's signal when the completion fails", async () => {
-			// Failure is an exit path too: dispose() runs in finally, so a provider error must not
-			// leave the listener behind either.
-			const handler = new RequestyHandler(mockOptions)
-			const controller = new AbortController()
-			const addSpy = vitest.spyOn(controller.signal, "addEventListener")
-			const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
-			mockCreate.mockRejectedValueOnce(new Error("API Error"))
-
-			try {
-				await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toThrow(
-					"API Error",
-				)
-
-				const registered = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
-				expect(registered).toBeDefined()
-				expect(removeSpy).toHaveBeenCalledWith("abort", registered)
-			} finally {
-				addSpy.mockRestore()
-				removeSpy.mockRestore()
-			}
-		})
+		it.each([
+			{
+				outcome: "completes",
+				expectRejection: undefined as string | undefined,
+				barrier: undefined as Promise<void> | undefined,
+				start: (controller: AbortController) => {
+					mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+					return new RequestyHandler(mockOptions).completePrompt("test prompt", {
+						abortSignal: controller.signal,
+					})
+				},
+			},
+			{
+				outcome: "fails",
+				expectRejection: "API Error",
+				barrier: undefined as Promise<void> | undefined,
+				start: (controller: AbortController) => {
+					mockCreate.mockRejectedValueOnce(new Error("API Error"))
+					return new RequestyHandler(mockOptions).completePrompt("test prompt", {
+						abortSignal: controller.signal,
+					})
+				},
+			},
+			{
+				// Aborting mid-flight is the third exit path through finally: the SDK-shaped mock
+				// rejects once the signal aborts, so dispose() must detach on that path too.
+				outcome: "aborts mid-flight",
+				expectRejection: "aborted",
+				start: (controller: AbortController) => {
+					let notifyStarted!: () => void
+					const barrier = new Promise<void>((resolve) => {
+						notifyStarted = resolve
+					})
+					mockCreate.mockImplementationOnce(async (_params: unknown, opts?: { signal?: AbortSignal }) => {
+						notifyStarted()
+						await new Promise<void>((resolve) =>
+							opts?.signal?.addEventListener("abort", () => resolve(), { once: true }),
+						)
+						const abortError = new Error("The user aborted a request")
+						abortError.name = "AbortError"
+						throw abortError
+					})
+					return {
+						pending: new RequestyHandler(mockOptions).completePrompt("test prompt", {
+							abortSignal: controller.signal,
+						}),
+						barrier,
+					}
+				},
+			},
+		] as const)(
+			"detaches the abort listener from the caller's signal when the completion $outcome",
+			async (item) => {
+				// The bridge registers its listener on the caller's long-lived signal, so every exit
+				// path - resolve, provider error and abort - must detach it: otherwise one listener plus
+				// one per-request controller is retained for every request on a reused signal. The
+				// abort case adds nothing the two originals asserted about detaching; it pins that the
+				// finally dispose also runs when the request ends by cancellation rather than by settling.
+				const controller = new AbortController()
+				const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+				const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+				const started = item.start(controller)
+				const pending = "pending" in started ? started.pending : started
+				const barrier = "pending" in started ? started.barrier : item.barrier
+				void pending.catch(() => {})
+				try {
+					if (barrier) {
+						await withSettleGuard(barrier)
+						controller.abort()
+					}
+					if (item.expectRejection) {
+						await expect(pending).rejects.toThrow(item.expectRejection)
+					} else {
+						await pending
+					}
+					const registered = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+					expect(registered).toBeDefined()
+					expect(removeSpy).toHaveBeenCalledWith("abort", registered)
+				} finally {
+					addSpy.mockRestore()
+					removeSpy.mockRestore()
+				}
+			},
+		)
 
 		it("does not leave the SDK's abort listener on the caller's signal after a completed request", async () => {
 			// Emulate openai@5.23.2: its request path attaches an abort listener to the signal it is
