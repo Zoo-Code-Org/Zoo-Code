@@ -77,6 +77,7 @@ import {
 	modelIdKeys,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
+	isSecretStateKey,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -5501,7 +5502,23 @@ export class ClineProvider
 	}
 
 	public getValues() {
-		return { ...this.contextProxy.getValues(), ...this.viewLocalState }
+		// The view-local overlay can carry this view profile credentials, and this is the public
+		// view of settings: an API client reads it through getConfiguration and can hand the same
+		// object straight back to setConfiguration. The credentials are dropped from the copy only
+		// - the buffer keeps them, and the internal consumers read viewLocalState directly: getState
+		// merges the buffer below, and the profile rollback path reads the stored record rather
+		// than this getter.
+		const { apiConfiguration } = this.viewLocalState
+		if (apiConfiguration === undefined) {
+			return { ...this.contextProxy.getValues(), ...this.viewLocalState }
+		}
+		const publicOverlay: Partial<ExtensionState> = {
+			...this.viewLocalState,
+			apiConfiguration: Object.fromEntries(
+				Object.entries(apiConfiguration).filter(([key]) => !isSecretStateKey(key)),
+			) as ProviderSettings,
+		}
+		return { ...this.contextProxy.getValues(), ...publicOverlay }
 	}
 
 	public async setValues(values: RooCodeSettings, options?: { savedProfileName?: string }) {
@@ -5540,16 +5557,23 @@ export class ClineProvider
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(options?.savedProfileName)
 		}
 
+		// The profile overlay is view-local: it is applied to this view buffer below, and its
+		// credentials belong in secret storage. Handing it to the shared write would put a profile
+		// whole settings, credentials included, into ordinary global state - which is where an API
+		// client that passed getConfiguration back to setConfiguration would leave it.
+		const sharedValues: Partial<RooCodeSettings> & Partial<ExtensionState> = { ...sanitizedValues }
+		delete sharedValues.apiConfiguration
 		const previousSharedValues = Object.fromEntries(
-			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
+			Object.keys(sharedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
 		) as RooCodeSettings
 		try {
-			await this.contextProxy.setValues(sanitizedValues)
+			await this.contextProxy.setValues(sharedValues)
 		} catch (error) {
 			// Same scope rule as setValue: a multi-key write that fails partway has
 			// already persisted a durable subset, so the restore must cover the
-			// initial shared write, not only the per-view persistence below.
-			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues)
+			// initial shared write, not only the per-view persistence below. Compared against the
+			// shared subset, because that is what the shared layer was written.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sharedValues)
 			throw error
 		}
 		try {
@@ -5694,9 +5718,14 @@ export class ClineProvider
 			)
 		}
 
+		// Clear every live buffer before awaiting any post: a sibling whose state post stalls - it
+		// reads through customModesManager and reaches the settings file - must not leave the views
+		// after it serving selections this reset already threw away.
 		for (const instance of allInstances) {
 			instance._clearViewLocalState()
+		}
 
+		for (const instance of allInstances) {
 			if (instance !== this) {
 				// A sibling's post can throw mid-reset (state generation reaches the
 				// settings file through customModesManager.getCustomModes): the failure
@@ -5754,9 +5783,35 @@ export class ClineProvider
 		// a per-view clear here would only add a failure point that can strand the
 		// reset between the shared and provider resets.
 
-		await this.providerSettingsManager.resetAllConfigs()
-		await this.customModesManager.resetCustomModes()
-		await this.removeClineFromStack()
+		try {
+			await this.providerSettingsManager.resetAllConfigs()
+			await this.customModesManager.resetCustomModes()
+			await this.removeClineFromStack()
+		} catch (resetError) {
+			// The shared reset already landed when this rejected, so the live views still hold the
+			// modes, profiles and credentials the reset threw away and a new task would run on them.
+			// Invalidate the live buffers and refresh the views before the error surfaces, and keep
+			// the original failure as the one the caller sees.
+			try {
+				await this.broadcastResetToAllInstances()
+			} catch (invalidateError) {
+				this.log(
+					`[resetState] failed to invalidate live views after a failed reset step: ${
+						invalidateError instanceof Error ? invalidateError.message : String(invalidateError)
+					}`,
+				)
+			}
+			try {
+				await this.postStateToWebview()
+			} catch (postError) {
+				this.log(
+					`[resetState] failed to refresh this view after a failed reset step: ${
+						postError instanceof Error ? postError.message : String(postError)
+					}`,
+				)
+			}
+			throw resetError
+		}
 
 		// Clear durable and in-memory per-view state across live instances so parallel tabs don't keep stale state.
 		await this.broadcastResetToAllInstances()

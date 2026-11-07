@@ -4314,6 +4314,147 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("view-local secrets and reset invalidation", () => {
+		it("clears every live buffer before awaiting any sibling post", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const firstSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const secondSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			provider["viewLocalState"] = { mode: "architect" }
+			firstSibling["viewLocalState"] = { mode: "plan" }
+			secondSibling["viewLocalState"] = { mode: "code" }
+
+			// The first sibling stalls and then fails; what it can still see is the point.
+			let secondBufferAtFirstPost: unknown
+			vi.spyOn(firstSibling, "postStateToWebview").mockImplementation(async () => {
+				secondBufferAtFirstPost = secondSibling["viewLocalState"].mode
+				throw new Error("sibling post stalled")
+			})
+			const secondPost = vi.spyOn(secondSibling, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.broadcastResetToAllInstances()
+
+			// Clearing happens before any await, so a stalled sibling cannot leave a later view
+			// serving a selection this reset already threw away, and the failure does not stop the
+			// reset from reaching the remaining view.
+			expect(secondBufferAtFirstPost).toBeUndefined()
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(firstSibling["viewLocalState"]).toEqual({})
+			expect(secondSibling["viewLocalState"]).toEqual({})
+			expect(secondPost).toHaveBeenCalledTimes(1)
+
+			await provider.dispose()
+			await firstSibling.dispose()
+			await secondSibling.dispose()
+		})
+
+		it("invalidates and refreshes live views when a reset step rejects after the shared reset", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			provider["viewLocalState"] = { mode: "architect" }
+			const broadcast = vi.spyOn(provider, "broadcastResetToAllInstances").mockResolvedValue(undefined)
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider["providerSettingsManager"], "resetAllConfigs").mockRejectedValue(
+				new Error("profile reset failed"),
+			)
+			// @ts-ignore - the real resetCustomModes writes to disk; this path must not reach it.
+			provider.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				t("common:answers.yes") as unknown as vscode.MessageItem,
+			)
+
+			await expect(provider.resetState()).rejects.toThrow("profile reset failed")
+
+			// The shared reset had already landed, so the live views had to be invalidated and
+			// refreshed rather than left serving the discarded modes and credentials; the original
+			// failure is still what the caller sees.
+			expect(broadcast).toHaveBeenCalledTimes(1)
+			expect(post).toHaveBeenCalledTimes(1)
+
+			await provider.dispose()
+		})
+
+		it("drops the overlay credentials from the public values without touching the buffer", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			provider["viewLocalState"] = { apiConfiguration: { apiKey: "sk-view-local", apiModelId: "m1" } }
+
+			const values = provider.getValues()
+
+			// getValues is the surface getConfiguration exposes to an API client, and that client can
+			// hand the same object back to setConfiguration: the profile credential must not ride
+			// along. The buffer keeps it, because this view still has to serve its own profile.
+			expect(values.apiConfiguration).toEqual({ apiModelId: "m1" })
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiKey: "sk-view-local",
+				apiModelId: "m1",
+			})
+
+			await provider.dispose()
+		})
+
+		it("keeps a credential-bearing overlay out of the shared write", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			const sharedWrites: Record<string, unknown>[] = []
+			vi.spyOn(contextProxy, "setValues").mockImplementation(async (values) => {
+				sharedWrites.push({ ...values })
+			})
+
+			// An API payload shape: the overlay key is not part of RooCodeSettings, but the
+			// mutation path accepts it and that is how a client passing getConfiguration back
+			// delivers it.
+			const payload: Partial<RooCodeSettings> & Partial<ExtensionState> = {
+				apiConfiguration: { apiKey: "sk-overlay", apiModelId: "m2" },
+			}
+			await provider.setValues(payload)
+
+			// The overlay is view-local: its place is the per-view record and secret storage, not the
+			// shared slot, where an API payload would persist the profile credential in global state.
+			expect(sharedWrites).toHaveLength(1)
+			expect(sharedWrites[0]).not.toHaveProperty("apiConfiguration")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiKey: "sk-overlay",
+				apiModelId: "m2",
+			})
+
+			await provider.dispose()
+		})
+	})
+
 	describe("setViewStateId", () => {
 		it('should ignore "__proto__" and keep the temporary viewId', async () => {
 			const provider = new ClineProvider(
@@ -5357,9 +5498,10 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "stale-key",
 			})
+			// The public getter is the API surface: it reports the overlay without its credential,
+			// which still identifies which source serves the view, and the buffer keeps the credential.
 			expect(provider.getValues().apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.openrouter,
-				apiKey: "stale-key",
 			})
 
 			await provider.activateProviderProfile({ name: "new-profile" })
@@ -5524,9 +5666,10 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "stale-key",
 			})
+			// The public getter is the API surface: it reports the overlay without its credential,
+			// which still identifies which source serves the view, and the buffer keeps the credential.
 			expect(provider.getValues().apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.anthropic,
-				apiKey: "stale-key",
 			})
 
 			await provider.upsertProviderProfile("fresh-profile", { apiProvider: providerIdentifiers.openrouter })
@@ -5930,9 +6073,10 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "stale-key",
 			})
+			// The public getter is the API surface: it reports the overlay without its credential,
+			// which still identifies which source serves the view, and the buffer keeps the credential.
 			expect(provider.getValues().apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.openrouter,
-				apiKey: "stale-key",
 			})
 
 			await provider.deleteProviderProfile(oldProfile)
@@ -6811,7 +6955,12 @@ describe("ClineProvider", () => {
 
 			expect(values.mode).toBe("architect")
 			expect(values.currentApiConfigName).toBe("view-profile")
+			// The credential stays in the buffer; the public getter reports the overlay without it,
+			// so the merge claim is carried by the provider identity.
 			expect(values.apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "view-key",
 			})
