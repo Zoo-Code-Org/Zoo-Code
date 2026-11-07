@@ -41,7 +41,9 @@ import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import type { Task } from "../core/task/Task"
 import { isNonPortableSettingsKey } from "../core/config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
-import { readTaskMessages } from "../core/task-persistence/taskMessages"
+import { readTaskMessages, TaskMessagesReadError } from "../core/task-persistence/taskMessages"
+import { getErrorCode } from "../core/task-persistence/readFileWithMissingRetry"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { createClineTabPanel } from "../activate/registerCommands"
@@ -459,10 +461,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				taskId,
 				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,
 			})
-		} catch {
+		} catch (error: unknown) {
+			tracePersistenceEvent("ui-messages-marker-check", {
+				taskId,
+				result: "read-error",
+				detail:
+					error instanceof TaskMessagesReadError
+						? `${error.kind}:${getErrorCode(error.originalError) ?? "unknown"}`
+						: (getErrorCode(error) ?? "unknown"),
+			})
 			return false
 		}
-		return uiMessages.some((message) => message.text?.includes(text))
+		const hasText = uiMessages.some((message) => message.text?.includes(text))
+		tracePersistenceEvent("ui-messages-marker-check", { taskId, result: hasText ? "match" : "no-match" })
+		return hasText
 	}
 
 	public getCurrentTaskStack() {
