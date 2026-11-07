@@ -1822,4 +1822,68 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 			{ timeout: 2000 },
 		)
 	})
+
+	it("queues messages sent while a condense is in progress", async () => {
+		// While isCondensing is true, handleSendMessage must queue the message
+		// (queueMessage) instead of sending askResponse, so it drains via
+		// processQueuedMessages once the condensation finishes.
+		const { getByTestId } = renderChatView()
+
+		// Hydrate with a completed API request so sending is enabled and not streaming
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "say",
+					say: "api_req_started",
+					ts: Date.now() - 1000,
+					text: JSON.stringify({ apiProtocol: "anthropic", cost: 0.05, tokensIn: 100, tokensOut: 50 }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+
+		// Put ChatView into the condensing state the way the extension does
+		await act(async () => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "condenseTaskContextStarted", text: "test-task-id" },
+				}),
+			)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+
+		vscodePostMessageMock.cleanup()
+
+		const chatTextArea = getByTestId("chat-textarea")
+		const input = chatTextArea.querySelector("input")! as HTMLInputElement
+
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "queued during condense" } })
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "queueMessage",
+				text: "queued during condense",
+				images: [],
+			})
+		})
+
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "askResponse",
+				askResponse: "messageResponse",
+			}),
+		)
+	})
 })
