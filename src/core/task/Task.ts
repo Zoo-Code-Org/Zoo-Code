@@ -141,6 +141,7 @@ import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { normalizeToolResultPairing } from "./normalizeToolResultPairing"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
@@ -578,7 +579,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Push a tool_result block to userMessageContent, preventing duplicates.
+	 * Push a tool_result block to userMessageContent after any existing tool_results
+	 * (ahead of images and text), preventing duplicates.
 	 * Duplicate tool_use_ids cause API errors.
 	 *
 	 * Keeps all tool_result blocks first and contiguous, as the Anthropic API
@@ -612,7 +614,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 		const others = this.userMessageContent.filter((block) => block.type !== "tool_result")
 		this.userMessageContent.splice(0, this.userMessageContent.length, ...results, ...others)
-
 		return true
 	}
 
@@ -5916,7 +5917,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// For API only: merge consecutive user messages (excludes summary messages per
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
 		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
-		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
+		const messagesWithoutImages = maybeRemoveImageBlocks(normalizeToolResultPairing(mergedForApi), this.api)
 		const cleanConversationHistory = this.buildCleanConversationHistory(
 			messagesWithoutImages as ApiMessage[],
 			requestModelInfo,
