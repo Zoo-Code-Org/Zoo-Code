@@ -32,9 +32,25 @@ const TITLE_SYSTEM_PROMPT =
  * removed to the end of the message.
  */
 export function stripSystemReminderBlocks(message: string): string {
-	return message
-		.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, "")
-		.replace(/<system-reminder>[\s\S]*$/i, "")
+	const open = "<system-reminder>"
+	const close = "</system-reminder>"
+	let result = ""
+	let cursor = 0
+	const lower = message.toLowerCase()
+	while (cursor < message.length) {
+		const start = lower.indexOf(open, cursor)
+		if (start === -1) {
+			result += message.slice(cursor)
+			break
+		}
+		result += message.slice(cursor, start)
+		const end = lower.indexOf(close, start + open.length)
+		if (end === -1) {
+			break
+		}
+		cursor = end + close.length
+	}
+	return result
 }
 
 /**
@@ -115,7 +131,10 @@ export async function generateSessionTitle(
 	})
 
 	try {
-		const raw = await Promise.race([requestSingleShotCompletion(handler, prompt, controller, taskId), timeoutRejection])
+		const raw = await Promise.race([
+			requestSingleShotCompletion(handler, prompt, controller, taskId),
+			timeoutRejection,
+		])
 		return sanitizeGeneratedTitle(raw) || fallback
 	} catch {
 		return fallback
@@ -146,11 +165,10 @@ async function requestSingleShotCompletion(
 		return singleShot.completePrompt(prompt, options)
 	}
 
-	const stream: ApiStream = handler.createMessage(
-		prompt,
-		[{ role: "user", content: prompt }],
-		{ taskId: taskId ?? "", abortSignal: controller.signal },
-	)
+	const stream: ApiStream = handler.createMessage(prompt, [{ role: "user", content: prompt }], {
+		taskId: taskId ?? "",
+		abortSignal: controller.signal,
+	})
 
 	let text = ""
 	for await (const chunk of stream) {

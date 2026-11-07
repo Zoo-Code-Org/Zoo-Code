@@ -2867,7 +2867,10 @@ export class ClineProvider
 				if (this.isViewLaunched) {
 					const updatedItem = this.taskHistoryStore.get(taskId)
 					if (updatedItem) {
-						await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+						await this.postMessageToWebview({
+							type: "taskHistoryItemUpdated",
+							taskHistoryItem: updatedItem,
+						})
 					}
 				}
 				return true

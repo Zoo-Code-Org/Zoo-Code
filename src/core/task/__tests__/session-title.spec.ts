@@ -46,7 +46,9 @@ describe("stripSystemReminderBlocks", () => {
 describe("createSessionTitleFallback", () => {
 	it("returns the message unchanged when it is within the length limit", () => {
 		expect(createSessionTitleFallback("Fix the login bug")).toBe("Fix the login bug")
-		expect(createSessionTitleFallback("Fix the login bug").length).toBeLessThanOrEqual(SESSION_TITLE_FALLBACK_LENGTH)
+		expect(createSessionTitleFallback("Fix the login bug").length).toBeLessThanOrEqual(
+			SESSION_TITLE_FALLBACK_LENGTH,
+		)
 	})
 
 	it("cuts the first 42 characters of a long message", () => {
@@ -57,13 +59,16 @@ describe("createSessionTitleFallback", () => {
 	})
 
 	it("collapses whitespace and trims the cut at a word boundary", () => {
-		const title = createSessionTitleFallback("hello\tworld\nthis is a long message that goes past the limit for sure")
+		const title = createSessionTitleFallback(
+			"hello\tworld\nthis is a long message that goes past the limit for sure",
+		)
 		expect(title).toBe("hello world this is a long message that go")
 		expect(title).not.toMatch(/\s$/)
 	})
 
 	it("ignores system-reminder blocks when building the fallback", () => {
-		const message = "<system-reminder>very long reminder text that alone would exceed the fallback limit anyway</system-reminder>"
+		const message =
+			"<system-reminder>very long reminder text that alone would exceed the fallback limit anyway</system-reminder>"
 		expect(createSessionTitleFallback(message)).toBe("")
 
 		const mixed = "<system-reminder>hidden</system-reminder>Fix the login bug"

@@ -287,6 +287,9 @@ export class PendingActionSettlementError extends Error {
 	}
 }
 
+// Literal, not the vscode enum: specs that mock "vscode" without ExtensionMode would throw on the read.
+const EXTENSION_MODE_TEST = 3
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -3203,7 +3206,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		const provider = this.providerRef.deref()
-		if (!provider) {
+		if (!provider || provider.context.extensionMode === EXTENSION_MODE_TEST) {
 			return
 		}
 
