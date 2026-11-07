@@ -388,6 +388,20 @@ export class DiffViewProvider {
 		const absolutePath = path.resolve(this.cwd, this.relPath)
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
+		// Capture the fields the continuation below reads, as editedContent is already captured. saveChanges
+		// awaits provider state twice, the tab closes, and the diagnostics window before it
+		// normalizes EOLs and builds the user-edits patch, and reset() can land inside any of
+		// those awaits: Task.ts resets the provider at the top of every new API attempt, and
+		// this tool resets it on its own teardown paths. Reading this.newContent or this.relPath
+		// after those awaits threw a TypeError for a write that had already saved and had
+		// already passed the commit point, and getNewDiagnostics compared against the empty
+		// list reset() installs, so every current problem looked new. Measured: interleaving
+		// reset() into the provider-state await throws
+		// "Cannot read properties of undefined (reading 'includes')" at the EOL line with
+		// document.save() already called once.
+		const newContentForEol = this.newContent
+		const relPathForPatch = this.relPath
+		const preDiagnosticsForCompare = this.preDiagnostics
 
 		if (updatedDocument.isDirty) {
 			const saved = await updatedDocument.save()
@@ -471,7 +485,7 @@ export class DiffViewProvider {
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 
 			const newProblems = await diagnosticsToProblemsString(
-				getNewDiagnostics(this.preDiagnostics, postDiagnostics),
+				getNewDiagnostics(preDiagnosticsForCompare, postDiagnostics),
 				[
 					vscode.DiagnosticSeverity.Error, // only including errors since warnings can be distracting (if user wants to fix warnings they can use the @problems mention)
 				],
@@ -486,18 +500,18 @@ export class DiffViewProvider {
 
 		// If the edited content has different EOL characters, we don't want to
 		// show a diff with all the EOL differences.
-		const newContentEOL = this.newContent.includes("\r\n") ? "\r\n" : "\n"
+		const newContentEOL = newContentForEol.includes("\r\n") ? "\r\n" : "\n"
 
 		// Normalize EOL characters without trimming content
 		const normalizedEditedContent = editedContent.replace(/\r\n|\n/g, newContentEOL)
 
 		// Just in case the new content has a mix of varying EOL characters.
-		const normalizedNewContent = this.newContent.replace(/\r\n|\n/g, newContentEOL)
+		const normalizedNewContent = newContentForEol.replace(/\r\n|\n/g, newContentEOL)
 
 		if (normalizedEditedContent !== normalizedNewContent) {
 			// User made changes before approving edit.
 			const userEdits = formatResponse.createPrettyPatch(
-				this.relPath.toPosix(),
+				relPathForPatch!.toPosix(),
 				normalizedNewContent,
 				normalizedEditedContent,
 			)
@@ -1022,12 +1036,22 @@ export class DiffViewProvider {
 	private async discardFileTab(absolutePath: string): Promise<void> {
 		const tabs = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)
-			.filter(
-				(tab) =>
-					tab.input instanceof vscode.TabInputText &&
-					tab.input.uri.scheme === "file" &&
-					arePathsEqual(tab.input.uri.fsPath, absolutePath),
-			)
+			.filter((tab) => {
+				const input = tab.input
+				if (input instanceof vscode.TabInputText) {
+					return input.uri.scheme === "file" && arePathsEqual(input.uri.fsPath, absolutePath)
+				}
+				// A composite diff tab for the same file counts too. The plain tab can be closed while
+				// the diff tab survives - the user closes it, or it was never opened separately -
+				// and TabInputTextDiff is not a TabInputText, so a text-only filter left the tab
+				// holding the unapproved content open while the rollback unlinked the file under it.
+				// closeAllDiffViews() will not take it either: it skips dirty tabs. This is the only
+				// place that can restore and close it before the unlink.
+				if (input instanceof vscode.TabInputTextDiff) {
+					return input.modified.scheme === "file" && arePathsEqual(input.modified.fsPath, absolutePath)
+				}
+				return false
+			})
 
 		for (const tab of tabs) {
 			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: a
