@@ -1057,7 +1057,10 @@ export class DiffViewProvider {
 			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: a
 			// dirty tab prompts or is refused, which is how unapproved streamed content survived a
 			// "forced" close. Restore the buffer to its pre-stream content and save it clean first,
-			// so close() never sees a dirty tab and nothing unapproved reaches disk.
+			// so close() never sees a dirty tab and nothing unapproved reaches disk. saveBufferClean
+			// reports a save that did not land, so a false there stops this loop before the close is
+			// attempted: the tab stays open on the restored buffer instead of being closed on a dirty
+			// one, and the caller keeps its failure instead of receiving a misattributed close error.
 			await this.restorePreStreamBuffer(absolutePath)
 			await this.saveBufferClean(absolutePath)
 
@@ -1121,13 +1124,25 @@ export class DiffViewProvider {
 	 * force-discard parameter, so a dirty tab would prompt or be refused; saving the restored
 	 * content is what makes the close unconditional. For a new file the placeholder is unlinked
 	 * a moment later, so the saved content is transient by design.
+	 *
+	 * The save result is read here, before the caller attempts the close, exactly as the
+	 * existing-file rollback reads it. A save that reports false never landed: the buffer is still
+	 * dirty, so the close would hand content the user never approved to the editor and the failure
+	 * the rollback reported would name the close rather than the save that failed. Reporting it
+	 * here leaves the tab open on the restored-but-unsaved buffer and stops the rollback before it
+	 * unlinks the file underneath that tab. A save that rejects still propagates as before.
 	 */
 	private async saveBufferClean(absolutePath: string): Promise<void> {
 		const document = vscode.workspace.textDocuments.find(
 			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
 		)
 		if (document?.isDirty) {
-			await document.save()
+			const saved = await document.save()
+			if (!saved) {
+				throw new Error(
+					`Rollback could not save the restored buffer for ${absolutePath}: the document save reported failure, so the buffer is still dirty and the tab is left open rather than closed on content the user never approved.`,
+				)
+			}
 		}
 	}
 

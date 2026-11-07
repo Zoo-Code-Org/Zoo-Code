@@ -1776,16 +1776,91 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledTimes(1)
 		})
 
+		it("revertChanges() reports a restored-buffer save that did not land instead of closing the dirty tab", async () => {
+			// Ordering, not severity: close() has no force-discard parameter, so a tab that is still
+			// dirty goes to the editor, which prompts or refuses. The teardown used to run the save,
+			// drop its boolean, attempt the close anyway, and then either report nothing (a close that
+			// went through despite the dirty buffer) or report a close failure for what was a failed
+			// save. The order is now save result first, report on false, close only after a save that
+			// landed - so the tab is left open on restored-but-unsaved content and the created file is
+			// never unlinked underneath it. Red on the previous shape: the close ran and no failure was
+			// reported at all.
+			const editor = buildActiveDiffEditor({ isDirty: true })
+			editor.document.save = vi.fn().mockResolvedValue(false)
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			const originalClose = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "close")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			const close = vi.fn().mockResolvedValue(true)
+			Object.defineProperty(vscode.window.tabGroups, "close", {
+				value: close,
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not save the restored buffer")
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+				if (originalClose) {
+					Object.defineProperty(vscode.window.tabGroups, "close", originalClose)
+				}
+			}
+
+			// The restore landed first, so the failure being reported is the save and not the edit; the
+			// save was asked once; and nothing that follows a successful save ran.
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			expect(close).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
 		it("revertChanges() leaves a retained file and surfaces the occupied directory it cannot remove", async () => {
 			// The geometry the rollback is actually in: a non-empty file inside a directory this edit
 			// created. The retained file must survive, and the directory cannot go - a real rmdir on
 			// a non-empty directory fails with ENOTEMPTY, which removeCreatedDir tolerates only for
 			// ENOENT. Asserting the rejection is what stops the rollback from reporting a completed
 			// cleanup while a directory the user can still see is left behind.
-			const createdDirs = [`${mockCwd}/new-parent`, `${mockCwd}/new-parent/nested`]
+			//
+			// Honest about what this fixture can and cannot show: the rmdir rejection below is scripted
+			// once, so it rejects whatever the contents are and does not derive the failure from
+			// occupancy. The geometry - the retained file living inside the directory the rollback is
+			// removing - is therefore the only part of the case that carries the occupancy claim, and
+			// it is asserted below rather than left to the comment. A stateful filesystem double that
+			// rejects rmdir only for a non-empty directory is the fuller version of this test.
+			const occupiedDir = `${mockCwd}/new-parent/nested`
+			const retainedFile = `${occupiedDir}/mock-target-file.ts`
+			const createdDirs = [`${mockCwd}/new-parent`, occupiedDir]
 			Object.assign(diffViewProvider, {
 				isEditing: true,
-				relPath: "nested/mock-target-file.ts",
+				relPath: "new-parent/nested/mock-target-file.ts",
 				activeDiffEditor: undefined,
 				editType: "create",
 				createdDirs,
@@ -1797,9 +1872,13 @@ describe("DiffViewProvider", () => {
 
 			await expect(diffViewProvider.revertChanges()).rejects.toThrow("ENOTEMPTY")
 
-			expect(fs.unlink).not.toHaveBeenCalledWith(`${mockCwd}/nested/mock-target-file.ts`)
+			expect(fs.unlink).not.toHaveBeenCalledWith(retainedFile)
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledWith(createdDirs[1])
+			// The occupancy the case claims: the directory rmdir was asked to remove is the directory
+			// the retained file is in. Without this the two fixture halves could name unrelated paths
+			// and the case would still pass on the scripted rejection.
+			expect(createdDirs.at(-1)).toBe(retainedFile.slice(0, retainedFile.lastIndexOf("/")))
 		})
 
 		it("revertChanges() skips the unlink when stat cannot answer about the placeholder", async () => {
