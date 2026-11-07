@@ -322,10 +322,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.94.0 の新機能",
-			"highlight1": "✨ さらに広がるモデルとプロバイダーのサポート: Anthropic 経由で Claude Haiku 5.5 を使用し、対応する VS Code LM モデルに画像を送信し、OpenCode Go Responses モデルの temperature を調整し、より多くのプロバイダーでリクエストをクリーンにキャンセルできます。",
-			"highlight2": "🔐 より柔軟な MCP OAuth: 静的な OAuth クライアント設定を構成し、カスタムコールバックパスを使用し、WWW-Authenticate から認証の詳細を取得し、再試行前にコールバックの失敗を確認できます。",
-			"highlight3": "🧭 よりスムーズなチャットと長時間セッション: 履歴でタスク名を変更し、Shift を押さずにファイルをチャットにドラッグし、長時間セッション中に保持されるメモリを削減し、サブタスクのリンクと置き換えられた webview を安定して維持できます。"
+			"heading": "Zoo Code v3.96.0 の新機能",
+			"highlight1": "✨ チャット設定と診断の新機能: 設定可能な時刻・日付形式でメッセージのタイムスタンプを表示し、Anthropic プロファイルの prompt-cache TTL を調整し、プライバシーに配慮した診断レポートを生成できます。",
+			"highlight2": "💸 より正確なプロバイダーコストとキャッシュ: Anthropic のツール結果を壊さずそのまま維持し、Anthropic と MiniMax のコストに累積 output token を採用し、DeepSeek の prompt-cache カウンターを読み取り、xAI Responses のキャッシュをターゲットにし、Mistral のキャッシュ読み取りを 0.1 倍で計上します。",
+			"highlight3": "🧭 より信頼性が高く高速なチャット: 再起動後に完了済みタスクを再開し、保存された commit がない場合でも checkpoint を復元し、応答しなくなった webview レンダラーを自動リロードし、ストリーミング更新を間引き、ロケールを必要なときに読み込みます。"
 		}
 	},
 	"costs": {

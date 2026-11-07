@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.94.0
+## Điểm mới trong v3.96.0
 
-- ✨ **Hỗ trợ model và provider rộng hơn:** Dùng Claude Haiku 5.5 qua Anthropic, gửi hình ảnh tới các model VS Code LM tương thích, chỉnh temperature cho các model OpenCode Go Responses và hủy request gọn gàng trên nhiều provider hơn.
-- 🔐 **MCP OAuth linh hoạt hơn:** Cấu hình cài đặt OAuth client tĩnh, dùng đường dẫn callback tùy chỉnh, tìm hiểu chi tiết xác thực từ `WWW-Authenticate` và xem lỗi callback trước khi thử lại.
-- 🧭 **Chat mượt mà và phiên dài hơn:** Đổi tên task trong lịch sử, kéo file vào chat mà không cần giữ Shift, giảm bộ nhớ giữ lại trong các phiên dài và giữ ổn định các liên kết subtask cùng webview đã thay thế.
+- ✨ **Cài đặt trò chuyện và chẩn đoán mới:** Hiển thị dấu thời gian của tin nhắn với định dạng giờ và ngày có thể cấu hình, điều chỉnh TTL prompt-cache cho hồ sơ Anthropic và tạo báo cáo chẩn đoán tôn trọng quyền riêng tư.
+- 💸 **Chi phí và bộ nhớ đệm của nhà cung cấp chính xác hơn:** Giữ nguyên kết quả công cụ của Anthropic, áp dụng token đầu ra tích lũy trong chi phí Anthropic và MiniMax, đọc bộ đếm prompt-cache của DeepSeek, nhắm tới bộ nhớ đệm Responses của xAI và tính phí đọc bộ nhớ đệm Mistral ở mức 0,1x.
+- 🧭 **Trò chuyện đáng tin cậy và nhanh hơn:** Tiếp tục tác vụ đã hoàn thành sau khi khởi động lại, khôi phục checkpoint khi commit đã lưu bị thiếu, tự động tải lại renderer webview đã treo, điều tiết các bản cập nhật trực tuyến và tải ngôn ngữ theo yêu cầu.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

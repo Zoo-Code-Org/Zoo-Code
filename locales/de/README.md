@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.94.0
+## Neu in v3.96.0
 
-- ✨ **Breitere Modell- und Providerunterstützung:** Nutze Claude Haiku 5.5 über Anthropic, schicke Bilder an kompatible VS Code LM-Modelle, stelle die Temperatur für OpenCode Go Responses-Modelle ein und brich Anfragen sauber bei mehr Providern ab.
-- 🔐 **Flexibleres MCP OAuth:** Konfiguriere statische OAuth-Client-Einstellungen, nutze eigene Callback-Pfade, ermittle Authentifizierungsdetails aus `WWW-Authenticate` und sieh Callback-Fehler, bevor du es erneut versuchst.
-- 🧭 **Flüssigere Chats und lange Sessions:** Benenne Aufgaben im Verlauf um, ziehe Dateien per Drag-and-drop in den Chat, ohne Shift gedrückt zu halten, reduziere den Speicherbedarf bei langen Sessions und halte Subtask-Links und ausgetauschte Webviews stabil.
+- ✨ **Neue Chat-Einstellungen und Diagnose:** Zeige Nachrichten-Zeitstempel mit konfigurierbaren Zeit- und Datumsformaten, stimme die Prompt-Cache-TTL für Anthropic-Profile ab und erstelle datenschutzfreundliche Diagnoseberichte.
+- 💸 **Genauere Anbieterkosten und Caching:** Anthropic-Ergebnisse bleiben intakt, kumulative Output-Tokens fließen in Anthropic- und MiniMax-Kosten ein, DeepSeek-Prompt-Cache-Zähler werden ausgelesen, der xAI-Responses-Cache wird gezielt angesprochen und Mistral-Cache-Lesungen werden mit 0,1x abgerechnet.
+- 🧭 **Zuverlässigere und schnellere Chats:** Setze abgeschlossene Aufgaben nach einem Neustart fort, stelle Checkpoints wieder her, wenn der gespeicherte Commit fehlt, lade einen toten Webview-Renderer automatisch neu, drossle Streaming-Updates und lade Sprachen bei Bedarf.
 
 ## Was kann Zoo Code für DICH tun?
 
