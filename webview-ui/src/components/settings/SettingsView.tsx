@@ -17,6 +17,7 @@ import {
 	FlaskConical,
 	TriangleAlert,
 	Globe,
+	ChartColumn,
 	Info,
 	MessageSquare,
 	LucideIcon,
@@ -76,6 +77,7 @@ import { TerminalSettings } from "./TerminalSettings"
 import { ExperimentalSettings } from "./ExperimentalSettings"
 import { LanguageSettings } from "./LanguageSettings"
 import { About } from "./About"
+import { UsageSettings } from "./UsageSettings"
 import { Section } from "./Section"
 import PromptsSettings from "./PromptsSettings"
 import { SlashCommandsSettings } from "./SlashCommandsSettings"
@@ -124,6 +126,7 @@ export const sectionNames = [
 	"ui",
 	"experimental",
 	"language",
+	"usage",
 	"about",
 ] as const
 
@@ -617,6 +620,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			{ id: "ui", icon: Glasses },
 			{ id: "experimental", icon: FlaskConical },
 			{ id: "language", icon: Globe },
+			{ id: "usage", icon: ChartColumn },
 			{ id: "about", icon: Info },
 		],
 		[], // No dependencies needed now
@@ -1038,6 +1042,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								setCachedStateField={setCachedStateField}
 							/>
 						)}
+
+						{/* Usage Section */}
+						{renderTab === "usage" && <UsageSettings providerLimitsEnabled={isIndexingComplete} />}
 
 						{/* About Section */}
 						{renderTab === "about" && (

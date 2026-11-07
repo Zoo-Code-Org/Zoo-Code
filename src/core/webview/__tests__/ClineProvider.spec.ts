@@ -4185,6 +4185,17 @@ describe("ClineProvider", () => {
 		expect(state.allowedReadFiles).toEqual([])
 	})
 
+	test("dispose stops the provider-limit requests still in flight for this provider", async () => {
+		const abort = vi.spyOn(await import("../webviewMessageHandler"), "abortProviderQuotaRequests")
+		try {
+			await provider.dispose()
+
+			expect(abort).toHaveBeenCalledWith(provider)
+		} finally {
+			abort.mockRestore()
+		}
+	})
+
 	describe("date and time display settings", () => {
 		const defaults = { timeFormat: "auto", dateFormat: "auto", showRelativeTimes: true }
 

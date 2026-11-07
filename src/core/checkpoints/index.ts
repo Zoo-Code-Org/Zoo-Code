@@ -17,6 +17,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 import { assertRecordedCheckpoint } from "./recordedCheckpoint"
+import { ConversationRewindError } from "./ConversationRewindError"
 
 const WARNING_THRESHOLD_MS = 5000
 
@@ -262,30 +263,27 @@ export async function checkpointRestore(
 		await provider?.postMessageToWebview({ type: "currentCheckpointUpdated", text: commitHash })
 
 		if (mode === "restore") {
-			// Calculate metrics from messages that will be deleted (must be done before rewind)
-			const deletedMessages = task.clineMessages.slice(index + 1)
+			let deletedRequests: ClineApiReqInfo
+			try {
+				deletedRequests = await rewindConversation(task, ts, index, operation)
+			} catch (error) {
+				// The workspace is already restored: the task still has to be started again, as after a rewind that worked.
+				provider?.cancelTask()
+				throw new ConversationRewindError(error)
+			}
 
-			const { totalTokensIn, totalTokensOut, totalCacheWrites, totalCacheReads, totalCost } = getApiMetrics(
-				task.combineMessages(deletedMessages),
-			)
-
-			// Use MessageManager to properly handle context-management events
-			// This ensures orphaned Summary messages and truncation markers are cleaned up
-			await task.messageManager.rewindToTimestamp(ts, {
-				includeTargetMessage: operation === "edit",
-			})
-
-			// Report the deleted API request metrics
-			await task.say(
-				"api_req_deleted",
-				JSON.stringify({
-					tokensIn: totalTokensIn,
-					tokensOut: totalTokensOut,
-					cacheWrites: totalCacheWrites,
-					cacheReads: totalCacheReads,
-					cost: totalCost,
-				} satisfies ClineApiReqInfo),
-			)
+			// The rewind is saved. The row that reports the deleted requests is only a note: a task that cannot say it
+			// (it was aborted, as a delete does) has been rewound all the same, so this is not a failed rewind, and the
+			// task is started again, and a pending edit applied, as after any rewind that worked.
+			try {
+				await task.say("api_req_deleted", JSON.stringify(deletedRequests))
+			} catch (error) {
+				provider?.log(
+					`[checkpointRestore] the conversation was rewound, but the deleted requests could not be noted: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
 		}
 
 		// The task is already cancelled by the provider beforehand, but we
@@ -303,6 +301,35 @@ export async function checkpointRestore(
 		provider?.log("[checkpointRestore] failed to restore checkpoint")
 		throw error
 	}
+}
+
+/** Rewinds the conversation to the checkpoint, and gives the usage of the requests that it deleted. */
+async function rewindConversation(
+	task: Task,
+	ts: number,
+	index: number,
+	operation: "delete" | "edit",
+): Promise<ClineApiReqInfo> {
+	// Calculate metrics from messages that will be deleted (must be done before rewind)
+	const deletedMessages = task.clineMessages.slice(index + 1)
+
+	const { totalTokensIn, totalTokensOut, totalCacheWrites, totalCacheReads, totalCost } = getApiMetrics(
+		task.combineMessages(deletedMessages),
+	)
+
+	// Use MessageManager to properly handle context-management events
+	// This ensures orphaned Summary messages and truncation markers are cleaned up
+	await task.messageManager.rewindToTimestamp(ts, {
+		includeTargetMessage: operation === "edit",
+	})
+
+	return {
+		tokensIn: totalTokensIn,
+		tokensOut: totalTokensOut,
+		cacheWrites: totalCacheWrites,
+		cacheReads: totalCacheReads,
+		cost: totalCost,
+	} satisfies ClineApiReqInfo
 }
 
 export type CheckpointDiffOptions = {

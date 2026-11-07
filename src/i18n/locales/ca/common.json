@@ -22,6 +22,7 @@
 		"checkpoint_timeout": "S'ha esgotat el temps en intentar restaurar el punt de control.",
 		"checkpoint_failed": "Ha fallat la restauració del punt de control.",
 		"checkpoint_restore_failed": "Error durant la restauració del punt de control: {{error}}",
+		"checkpoint_rewind_failed": "Els fitxers s'han restaurat al punt de control, però no s'ha pogut rebobinar la conversa: {{error}}. La tasca s'ha reiniciat amb la conversa anterior; torna a restaurar el punt de control per rebobinar-la.",
 		"checkpoint_missing": "No es pot restaurar el punt de control {{commitHash}}: aquest punt de control ja no existeix al repositori de punts de control. No s'ha modificat cap fitxer.",
 		"checkpoint_invalid_hash": "No es pot restaurar ni comparar el punt de control: la referència no correspon a cap punt de control vàlid d'aquesta tasca. No s'ha modificat cap fitxer.",
 		"git_not_installed": "Git és necessari per a la funció de punts de control. Si us plau, instal·la Git per activar els punts de control.",

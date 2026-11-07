@@ -16,7 +16,7 @@ import { RouterModelsMessageType, type ModelInfo, type ModelRecord, type RouterM
 import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
-import { VsCodeLmModelsMessageType } from "./providers/vscode-llm.js"
+import { VsCodeLmModelsMessageType, type ProviderQuota } from "./providers/vscode-llm.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
 import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
@@ -50,6 +50,7 @@ export interface ExtensionMessage {
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotSignInResult
+		| typeof VsCodeLmModelsMessageType.providerQuotas
 		| "settingsSaveResult"
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
@@ -160,6 +161,9 @@ export interface ExtensionMessage {
 		modelInfo?: ModelInfo
 	}[]
 	githubCopilotAccount?: string | null
+	providerQuotas?: ProviderQuota[]
+	/** True when the quotas could not be loaded at all (as opposed to "no provider has a usage API"). */
+	providerQuotasFailed?: boolean
 	mcpServers?: McpServer[]
 	commits?: GitCommit[]
 	listApiConfig?: ProviderSettingsEntry[]
@@ -546,6 +550,7 @@ export interface WebviewMessage {
 		| "renameTaskWithId"
 		| "importSettings"
 		| "exportSettings"
+		| "exportUsageCsv"
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
@@ -557,6 +562,8 @@ export interface WebviewMessage {
 		| typeof VsCodeLmModelsMessageType.githubCopilotSignIn
 		| typeof VsCodeLmModelsMessageType.githubCopilotReconnect
 		| typeof VsCodeLmModelsMessageType.githubCopilotManageAccount
+		| typeof VsCodeLmModelsMessageType.requestProviderQuotas
+		| typeof VsCodeLmModelsMessageType.cancelProviderQuotas
 		| "openImage"
 		| "saveImage"
 		| "openFile"
@@ -995,6 +1002,13 @@ export interface ClineApiReqInfo {
 	cancelReason?: ClineApiReqCancelReason
 	streamingFailedMessage?: string
 	apiProtocol?: "anthropic" | "openai"
+	/**
+	 * The provider and model that actually served this request, recorded at the
+	 * time of the call. Usage reporting reads these instead of the *current*
+	 * profile, so switching providers later doesn't relabel past requests.
+	 */
+	apiProvider?: string
+	modelId?: string
 }
 
 export type ClineApiReqCancelReason = "streaming_failed" | "user_cancelled"

@@ -2,7 +2,7 @@ import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 
-import type { HistoryItem } from "@roo-code/types"
+import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
@@ -131,6 +131,80 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			expect(storeA.get("shared-task")).toMatchObject({ mode: "architect", totalCost: 42 })
 		} finally {
 			writeBarrier?.dispose()
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("clears a stored usageByModel when the same task is saved again without one (e.g. after a rewind)", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-usage-clear-"))
+		const store = new TaskHistoryStore(storagePath)
+		const usageByModel = [
+			{
+				apiProvider: providerIdentifiers.anthropic,
+				modelId: "m",
+				requests: 1,
+				tokensIn: 5,
+				tokensOut: 5,
+				cost: 1,
+			},
+		]
+
+		try {
+			await store.initialize()
+			await store.upsert({ ...item("usage-task"), usageByModel })
+			expect(store.get("usage-task")?.usageByModel).toEqual(usageByModel)
+
+			// What taskMetadata emits when the replaced messages record no usage.
+			await store.upsert({ ...item("usage-task"), usageByModel: undefined })
+			expect(store.get("usage-task")?.usageByModel).toBeUndefined()
+
+			// ...and the stored file no longer carries the stale breakdown either.
+			await store.invalidate("usage-task")
+			expect(store.get("usage-task")).toBeDefined()
+			expect(store.get("usage-task")?.usageByModel).toBeUndefined()
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("clears a usageByModel that another host wrote, when this host saves the task without one", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-usage-clear-other-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const usageByModel = [
+			{
+				apiProvider: providerIdentifiers.anthropic,
+				modelId: "m",
+				requests: 1,
+				tokensIn: 5,
+				tokensOut: 5,
+				cost: 1,
+			},
+		]
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-usage-task")) // A's cache has no usageByModel
+			await storeB.initialize()
+			await storeB.upsert({ ...item("shared-usage-task"), usageByModel }) // another host records usage on disk
+
+			// The setup really happened: the usage is on disk, and this host's cache does not have it yet.
+			const file = path.join(storagePath, "tasks", "shared-usage-task", "history_item.json")
+			expect(JSON.parse(await fs.readFile(file, "utf8")).usageByModel).toEqual(usageByModel)
+			expect(storeA.get("shared-usage-task")?.usageByModel).toBeUndefined()
+
+			// This host saves the task after its messages were replaced: no usage, so none must remain on disk.
+			await storeA.upsert({ ...item("shared-usage-task"), usageByModel: undefined })
+
+			expect(JSON.parse(await fs.readFile(file, "utf8")).usageByModel).toBeUndefined()
+			await storeA.invalidate("shared-usage-task")
+			expect(storeA.get("shared-usage-task")?.usageByModel).toBeUndefined()
+			await storeB.invalidate("shared-usage-task")
+			expect(storeB.get("shared-usage-task")?.usageByModel).toBeUndefined()
+		} finally {
 			storeA.dispose()
 			storeB.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })

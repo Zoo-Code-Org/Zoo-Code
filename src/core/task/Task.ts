@@ -124,6 +124,8 @@ import {
 	saveTaskMessages,
 	taskMetadata,
 } from "../task-persistence"
+import { createTaskSaveQueues, enqueueTaskSave } from "./taskSaveQueue"
+import { bindRequestMessage, resolveRecordedModelId } from "../task-persistence/usageByModel"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
 import {
@@ -152,6 +154,10 @@ import {
 	isDivergenceCheckEnabled,
 	reportDivergence,
 } from "./run-state/runStateDivergence"
+
+// The save queues of every task of this extension host: see `taskSaveQueue.ts`.
+const messageWriteQueues = createTaskSaveQueues()
+const taskMetadataQueues = createTaskSaveQueues()
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -1609,18 +1615,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return saved
 	}
 
+	/**
+	 * An authoritative write of the API history (an overwrite: a rewind or an edit cut it) failed, so the disk still has
+	 * the messages that were cut. A merging save (every ordinary save) would bring them back: it keeps what is on disk and
+	 * not in memory. Until an authoritative write succeeds, the saves are authoritative too.
+	 */
+	private apiHistoryOverwriteNotStored = false
+
 	/** Persists the current API conversation history to disk, returning false on I/O errors. */
 	private async saveApiConversationHistory(merge = true): Promise<boolean> {
+		const authoritative = !merge || this.apiHistoryOverwriteNotStored
 		try {
 			await saveApiMessages({
 				messages: structuredClone(this.apiConversationHistory),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
-				merge,
+				merge: !authoritative,
 			})
+			if (authoritative) this.apiHistoryOverwriteNotStored = false
 			return true
 		} catch (error) {
 			console.error("Failed to save API conversation history:", error)
+			if (!merge) this.apiHistoryOverwriteNotStored = true
 			return false
 		}
 	}
@@ -1727,10 +1743,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Also resets cloud sync tracking to avoid re-syncing previously synced messages.
 	 */
 	public async overwriteClineMessages(newMessages: ClineMessage[], persist = true) {
+		const replaced = this.clineMessages
 		this.hydrateClineMessages(newMessages)
+		const replacement = new Set(this.clineMessages)
 		if (persist) {
-			await this.saveClineMessages(false)
+			// A failed write is reported to the caller: the delete, edit and checkpoint flows go on to save the
+			// messages again, and carrying on after a lost write would leave the history entry (and its usage
+			// breakdown) describing messages that are no longer the ones on disk.
+			// The rewind flows cut the API history only after this, so a rejection leaves it as it was: the messages are put
+			// back, with what came in while the write was on its way, and the two stay consistent. They are put back by the
+			// write itself, before the next save in the line starts: one behind this would otherwise copy the cut messages,
+			// and a message that was never on the disk would be lost to it.
+			if (!(await this.saveClineMessages(false, () => this.restoreReplacedMessages(replaced, replacement)))) {
+				throw new Error("Failed to save the messages")
+			}
 		}
+	}
+
+	/**
+	 * Undoes a replacement whose write was lost: the messages that were replaced come back, and so does every message
+	 * that was added to the task after the replacement (an update made to a message that both share is in the message
+	 * itself), so nothing that happened while the write was on its way is dropped.
+	 */
+	private restoreReplacedMessages(replaced: ClineMessage[], replacement: ReadonlySet<ClineMessage>) {
+		const addedSince = this.clineMessages.filter((message) => !replacement.has(message))
+		this.hydrateClineMessages([...replaced, ...addedSince])
 	}
 
 	private hydrateClineMessages(messages: ClineMessage[]) {
@@ -1848,19 +1885,50 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
 	 * to replace the stored messages outright.
 	 */
-	private async saveClineMessages(merge = true): Promise<boolean> {
+	private async saveClineMessages(merge = true, onWriteLost?: () => void): Promise<boolean> {
+		// Two queues per task, shared by every instance of the task. The message writes go one at a time, and a write
+		// never waits for the metadata of the save before it: the messages are what must reach the disk, so a slow
+		// history write cannot delay them. The metadata stage (the history entry, derived from the messages that save
+		// persisted) also goes one at a time, in the order the message writes finished, which is the order the saves
+		// were asked for: callers that do not wait for a save (the fire-and-forget ones) would otherwise let an older
+		// save's metadata land after a newer save's and replace it, an explicit clear of the usage breakdown included.
+		// A save that fails does not hold up the next one.
+		const result = await enqueueTaskSave(messageWriteQueues, this.taskId, () =>
+			this.writeClineMessages(merge, onWriteLost),
+		)
+		if (!result.saved) return false
+
+		await enqueueTaskSave(taskMetadataQueues, this.taskId, () => this.writeTaskMetadata(result.persistedMessages))
+		return true
+	}
+
+	/** The message write: `saved` is whether it reached the disk, and `persistedMessages` what was actually stored. */
+	private async writeClineMessages(
+		merge: boolean,
+		onWriteLost?: () => void,
+	): Promise<{ saved: false } | { saved: true; persistedMessages: ClineMessage[] | undefined }> {
+		// What was actually persisted: with `merge`, newer messages another host wrote are folded in. The metadata
+		// (including the usage breakdown) is computed from it, so a stale local snapshot cannot clear usage that
+		// the stored messages still contain.
 		try {
-			await saveTaskMessages({
+			const persistedMessages = await saveTaskMessages({
 				messages: structuredClone(this.clineMessages),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
 				merge,
 			})
+			return { saved: true, persistedMessages }
 		} catch (error) {
 			console.error("Failed to save Roo messages:", error)
-			return false
+			// Still inside the queued work: what the save asked to put right is put right before the next save in the line
+			// takes its copy of the messages.
+			onWriteLost?.()
+			return { saved: false }
 		}
+	}
 
+	/** The metadata stage of a save: it never fails the save, whose messages are already persisted. */
+	private async writeTaskMetadata(persistedMessages: ClineMessage[] | undefined): Promise<void> {
 		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
@@ -1871,7 +1939,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				rootTaskId: this.rootTaskId,
 				parentTaskId: this.parentTaskId,
 				taskNumber: this.taskNumber,
-				messages: this.clineMessages,
+				messages: persistedMessages ?? this.clineMessages,
 				globalStoragePath: this.globalStoragePath,
 				workspace: this.cwd,
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
@@ -1895,8 +1963,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// recomputes and re-emits the metadata update.
 			console.error("Failed to save task metadata:", error)
 		}
-
-		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
@@ -3988,7 +4054,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Determine API protocol based on provider and model
 			const modelId = getModelId(this.apiConfiguration)
 			const apiProvider = this.apiConfiguration.apiProvider
-			const apiProtocol = getApiProtocol(
+			// A placeholder: it is replaced below by the protocol of the handler that serves the request, which may be
+			// another one if the profile is switched during the waits that come first.
+			let apiProtocol = getApiProtocol(
 				apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
 				modelId,
 			)
@@ -4008,6 +4076,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				"api_req_started",
 				JSON.stringify({
 					apiProtocol,
+					// Recorded now so Usage reflects what served this request, not the profile selected later.
+					apiProvider,
+					modelId,
 				}),
 			)
 
@@ -4082,9 +4153,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// potential details for example), we need to update the text of that
 			// message.
 			const lastApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
+			// The placeholder itself: the messages can be rewound or deleted during the waits below, which moves it or
+			// removes it, so the handler is bound to this message and not to an index taken now.
+			const requestMessage = this.clineMessages[lastApiReqIndex]
 
 			this.clineMessages[lastApiReqIndex].text = JSON.stringify({
 				apiProtocol,
+				apiProvider,
+				modelId,
 			} satisfies ClineApiReqInfo)
 
 			await this.saveClineMessages()
@@ -4098,6 +4174,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let inputTokens = 0
 				let outputTokens = 0
 				let totalCost: number | undefined
+				// The model that served this request, captured when it was chosen: a later request replaces
+				// `cachedStreamingModel` while this one's usage is still being collected in the background.
+				const served: { modelId?: string } = {}
 
 				// We can't use `api_req_finished` anymore since it's a unique case
 				// where it could come after a streaming message (i.e. in the middle
@@ -4113,14 +4192,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					const existingData = JSON.parse(this.clineMessages[lastApiReqIndex].text || "{}")
 
-					// Calculate total tokens and cost using provider-aware function
-					const modelId = getModelId(this.apiConfiguration)
-					const apiProvider = this.apiConfiguration.apiProvider
-					const apiProtocol = getApiProtocol(
-						apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
-						modelId,
-					)
-
+					// Calculate total tokens and cost with the protocol this request started with: a profile switch
+					// while the usage is still being drained must not price it with another provider's formula.
 					const costResult =
 						apiProtocol === "anthropic"
 							? calculateApiCostAnthropic(
@@ -4145,6 +4218,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
 						...existingData,
+						modelId: resolveRecordedModelId(existingData.modelId, served.modelId),
 						tokensIn: costResult.totalInputTokens,
 						tokensOut: costResult.totalOutputTokens,
 						cacheWrites: cacheWriteTokens,
@@ -4214,6 +4288,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
 				const streamModelInfo = this.cachedStreamingModel.info
+				served.modelId = this.cachedStreamingModel.id
+
+				// The handler that serves this request is known now. The placeholder was written before the waits
+				// above, so bring its provider, model and pricing protocol in line with this handler: the cost is
+				// worked out with the model info of this handler, so it needs the protocol of the same one. (The
+				// protocol is fixed from here on: a profile switch while the usage is still being collected does not
+				// change how this request is priced.)
+				const servingProvider = this.apiConfiguration.apiProvider
+				apiProtocol = getApiProtocol(
+					servingProvider && !isRetiredProvider(servingProvider) ? servingProvider : undefined,
+					resolveRecordedModelId(getModelId(this.apiConfiguration), served.modelId),
+				)
+				const bound = bindRequestMessage(this.clineMessages, requestMessage, {
+					apiProvider: servingProvider,
+					configuredModelId: getModelId(this.apiConfiguration),
+					servedModelId: served.modelId,
+					apiProtocol,
+				})
+				if (!bound) {
+					// The conversation was rewound or edited while this request was being prepared: the message that stands
+					// for it is gone, and so is the turn it belonged to. Nothing has been sent yet, so it is stopped here, as
+					// an abort is, and no other message is changed in its place.
+					throw new Error(
+						`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} request was removed from the conversation`,
+					)
+				}
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
@@ -4592,14 +4692,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									await this.updateClineMessage(apiReqMessage)
 								}
 
-								// Capture telemetry with provider-aware cost calculation
-								const modelId = getModelId(this.apiConfiguration)
-								const apiProvider = this.apiConfiguration.apiProvider
-								const apiProtocol = getApiProtocol(
-									apiProvider && !isRetiredProvider(apiProvider) ? apiProvider : undefined,
-									modelId,
-								)
-
+								// Capture telemetry with provider-aware cost calculation, using the protocol this request
+								// started with (see `updateApiReqMsg`).
 								// Use the appropriate cost function based on the API protocol.
 								// The per-TTL split must be passed here too: without it this
 								// telemetry recompute bills every write at the short-TTL rate,

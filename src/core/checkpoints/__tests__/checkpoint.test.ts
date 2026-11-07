@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { checkpointSave, checkpointRestore, checkpointDiff, getCheckpointService } from "../index"
+import { ConversationRewindError } from "../ConversationRewindError"
 import { MessageManager } from "../../message-manager"
 import { RepoPerTaskCheckpointService } from "../../../services/checkpoints"
 import * as vscode from "vscode"
@@ -255,6 +256,92 @@ describe("Checkpoint functionality", () => {
 				{ ts: 2, say: "assistant", text: "Message 2" },
 			])
 			expect(mockProvider.cancelTask).toHaveBeenCalled()
+		})
+
+		it.each(["delete", "edit"] as const)(
+			"starts the task again, and reports the failure, when the files were restored but the messages could not be saved (%s)",
+			async (operation) => {
+				const failure = new Error("Failed to save the messages")
+				mockTask.overwriteClineMessages.mockRejectedValueOnce(failure)
+
+				const restoring = checkpointRestore(mockTask, {
+					ts: 2,
+					commitHash: RESTORE_HASH,
+					mode: "restore",
+					operation,
+				})
+
+				await expect(restoring).rejects.toBeInstanceOf(ConversationRewindError)
+				await expect(restoring).rejects.toMatchObject({
+					message: "Failed to save the messages",
+					cause: failure,
+				})
+				expect(mockCheckpointService.restoreCheckpoint).toHaveBeenCalledWith(RESTORE_HASH) // the files are back
+				// The messages were left as they were, so the history is not cut, and the task is started again (once).
+				expect(mockTask.overwriteApiConversationHistory).not.toHaveBeenCalled()
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+			},
+		)
+
+		it.each(["delete", "edit"] as const)(
+			"is not a failed rewind when only the closing message cannot be said after the rewind was saved (%s): the task is started again, as after any rewind that worked",
+			async (operation) => {
+				mockTask.say.mockRejectedValueOnce(new Error("task aborted"))
+
+				await expect(
+					checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation }),
+				).resolves.toBeUndefined()
+
+				// The conversation was rewound and saved: both writes were made and are kept.
+				expect(mockTask.overwriteClineMessages).toHaveBeenCalledTimes(1)
+				expect(mockTask.overwriteApiConversationHistory).toHaveBeenCalledTimes(1)
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+				// The note is skipped, and the reason is logged for whoever looks.
+				expect(mockProvider.log).toHaveBeenCalledWith(
+					expect.stringContaining("could not be noted: task aborted"),
+				)
+			},
+		)
+
+		it("says the deleted requests when the task can, with their usage", async () => {
+			mockTask.combineMessages.mockReturnValue([])
+
+			await checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" })
+
+			expect(mockTask.say).toHaveBeenCalledExactlyOnceWith("api_req_deleted", expect.stringContaining("tokensIn"))
+		})
+
+		it("still reports a rewind that failed, whatever the closing message would have done", async () => {
+			mockTask.overwriteClineMessages.mockRejectedValueOnce(new Error("Failed to save the messages"))
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" }),
+			).rejects.toBeInstanceOf(ConversationRewindError)
+
+			expect(mockTask.say).not.toHaveBeenCalled()
+			expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+		})
+
+		it.each([
+			["an Error", new Error("disk full"), "disk full"],
+			["a plain value", "disk full", "disk full"],
+		])("says the failure of the rewind as it is, for %s", (_name, cause, message) => {
+			const error = new ConversationRewindError(cause)
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.name).toBe("ConversationRewindError")
+			expect(error.message).toBe(message)
+			expect(error.cause).toBe(cause)
+		})
+
+		it("does not start the task again when the files could not be restored", async () => {
+			mockCheckpointService.restoreCheckpoint.mockRejectedValueOnce(new Error("no such commit"))
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "edit" }),
+			).rejects.toThrow("no such commit")
+
+			expect(mockProvider.cancelTask).not.toHaveBeenCalled()
 		})
 
 		it("should handle preview mode without modifying messages", async () => {

@@ -30,6 +30,7 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
+	type ProviderQuota,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -43,6 +44,7 @@ import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 import { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
+import { checkpointRestoreFailureMessage } from "../checkpoints/ConversationRewindError"
 import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -62,6 +64,7 @@ import {
 } from "./rulesMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
+import { ProfileValidator } from "../../shared/ProfileValidator"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
@@ -73,6 +76,7 @@ import { Terminal } from "../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { openFile } from "../../integrations/misc/open-file"
 import { openImage, saveImage } from "../../integrations/misc/image-handler"
+import { exportUsageCsv } from "../../integrations/misc/export-usage-csv"
 import { selectImages } from "../../integrations/misc/process-images"
 import { getTheme } from "../../integrations/theme/getTheme"
 import { searchWorkspaceFiles } from "../../services/search/file-search"
@@ -131,6 +135,29 @@ import {
 
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
+
+/**
+ * In-flight `requestProviderQuotas` work, so a cancel message and a disposal can abort it. Each ClineProvider
+ * (sidebar, editor tab) has its own entry: the webviews number their requests independently, so a shared map keyed
+ * by request id alone would let one webview cancel, or overwrite, another's request. `all` holds every request,
+ * including one sent without an id (which a cancel message cannot name, but a disposal must still stop); `byId`
+ * is how a cancel message finds its request.
+ */
+const pendingProviderQuotaRequests = new WeakMap<
+	ClineProvider,
+	{ all: Set<AbortController>; byId: Map<string, AbortController> }
+>()
+/** Stops the provider-limit requests still in flight for a provider, e.g. when it is disposed. */
+export const abortProviderQuotaRequests = (provider: ClineProvider) => {
+	for (const controller of pendingProviderQuotaRequests.get(provider)?.all ?? []) controller.abort()
+	pendingProviderQuotaRequests.delete(provider)
+}
+
+const pendingQuotaFor = (provider: ClineProvider) => {
+	let pending = pendingProviderQuotaRequests.get(provider)
+	if (!pending) pendingProviderQuotaRequests.set(provider, (pending = { all: new Set(), byId: new Map() }))
+	return pending
+}
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -1151,6 +1178,9 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
+		case "exportUsageCsv":
+			await exportUsageCsv(message.text, message.values?.range, provider.contextProxy)
+			break
 		case "exportSettings":
 			await exportSettings({
 				providerSettingsManager: provider.providerSettingsManager,
@@ -1614,6 +1644,62 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
+		case VsCodeLmModelsMessageType.cancelProviderQuotas:
+			// The Usage tab was closed (or the request superseded): stop the profile load and any fetches.
+			if (message.requestId) pendingQuotaFor(provider).byId.get(message.requestId)?.abort()
+			break
+		case VsCodeLmModelsMessageType.requestProviderQuotas: {
+			// Always answer (unless cancelled): the webview shows a spinner until a response arrives and
+			// disables refresh while it waits, so a thrown error here would leave it stuck. The answer
+			// carries the request's id so the webview can ignore one that has been superseded.
+			const requestId = message.requestId
+			const controller = new AbortController()
+			pendingQuotaFor(provider).all.add(controller)
+			if (requestId) pendingQuotaFor(provider).byId.set(requestId, controller)
+			let providerQuotas: ProviderQuota[] = []
+			let providerQuotasFailed = false
+			try {
+				const { getProviderQuotas, loadProfilesWithActive } =
+					await import("../../services/language-models/providerQuotas")
+				// The organisation allow list applies here as it does to a request: a profile it refuses is not read for its
+				// credentials, and no quota is fetched with them. Only the allow list is wanted: the task history is not.
+				const { organizationAllowList } = await provider.getState({ includeTaskHistory: false })
+				const { profiles, activeProfileId } = await loadProfilesWithActive(
+					provider.providerSettingsManager,
+					controller.signal,
+					provider.contextProxy.getValue("currentApiConfigName"),
+					(profile) => ProfileValidator.isProfileAllowed(profile, organizationAllowList),
+				)
+				providerQuotas = await getProviderQuotas(profiles, {
+					force: message.bool === true,
+					signal: controller.signal,
+					activeProfileId,
+				})
+			} catch (error) {
+				providerQuotasFailed = true
+				if (!controller.signal.aborted) {
+					provider.log(
+						`[requestProviderQuotas] ${error instanceof Error ? error.message : "Failed to load provider limits"}`,
+					)
+				}
+			} finally {
+				// Only remove our own entry: a newer request with the same id from this webview owns the slot now.
+				pendingQuotaFor(provider).all.delete(controller)
+				if (requestId && pendingQuotaFor(provider).byId.get(requestId) === controller) {
+					pendingQuotaFor(provider).byId.delete(requestId)
+				}
+			}
+			// Nobody is waiting for a cancelled request: skip the post.
+			if (!controller.signal.aborted) {
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.providerQuotas,
+					providerQuotas,
+					providerQuotasFailed,
+					requestId,
+				})
+			}
+			break
+		}
 		case VsCodeLmModelsMessageType.githubCopilotManageAccount:
 			try {
 				await openGitHubAccountManagement()
@@ -1847,11 +1933,7 @@ export const webviewMessageHandler = async (
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch (error) {
 					console.error("[checkpointRestore] checkpointRestore failed:", error)
-					void vscode.window.showErrorMessage(
-						t("common:errors.checkpoint_restore_failed", {
-							error: error instanceof Error ? error.message : String(error),
-						}),
-					)
+					void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))
 				}
 			}
 
@@ -1901,11 +1983,7 @@ export const webviewMessageHandler = async (
 					})
 				} catch (error) {
 					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
-					void vscode.window.showErrorMessage(
-						t("common:errors.checkpoint_restore_failed", {
-							error: error instanceof Error ? error.message : String(error),
-						}),
-					)
+					void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))
 				}
 			}
 

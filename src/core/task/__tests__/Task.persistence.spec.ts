@@ -18,6 +18,8 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { PendingActionSettlementError, Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+import { mergeApiMessageSnapshots } from "../../task-persistence/mergeMessageSnapshots"
+import type { ApiMessage } from "../../task-persistence/apiMessages"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
 import type { ToolUse } from "../../../shared/tools"
@@ -352,6 +354,108 @@ describe("Task persistence", () => {
 				expect.objectContaining({ role: "user", content: "merged", messageId: expect.any(String) }),
 			])
 			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+		})
+
+		describe("after an overwrite of the API history whose write failed", () => {
+			/** The file, with what the real write does to it: authoritative for an overwrite, merging for every other save. */
+			let disk: ApiMessage[]
+			const useFile = () => {
+				mockSaveApiMessages.mockImplementation(
+					async ({ messages, merge }: { messages: ApiMessage[]; merge?: boolean }) => {
+						disk = merge ? (mergeApiMessageSnapshots(disk, messages) as ApiMessage[]) : messages
+						return disk
+					},
+				)
+			}
+			const contents = (messages: ApiMessage[]) => messages.map((message) => message.content)
+			const newTaskWithHistory = async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.overwriteApiConversationHistory(
+					[
+						{ role: "user", content: "first", ts: 1, messageId: "m1" },
+						{ role: "user", content: "second", ts: 2, messageId: "m2" },
+					],
+					false,
+				)
+				disk = structuredClone(task.apiConversationHistory) // both are stored
+				return task
+			}
+
+			beforeEach(() => {
+				mockSaveApiMessages.mockReset()
+				useFile()
+				vi.spyOn(console, "error").mockImplementation(() => {})
+			})
+			afterEach(() => vi.restoreAllMocks())
+
+			it("keeps the cut history in memory, without rejecting, and the next save stores only the cut history", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+
+				// The failure is the task's own to retry: a caller (the edit after a checkpoint restore) is not told of it.
+				await expect(
+					task.overwriteApiConversationHistory([task.apiConversationHistory[0]]),
+				).resolves.toBeUndefined()
+				expect(contents(task.apiConversationHistory)).toEqual(["first"])
+				expect(contents(disk)).toEqual(["first", "second"]) // the write was lost: the file still has both
+
+				expect(await task.retrySaveApiConversationHistory()).toBe(true)
+
+				// A merging save would have kept "second", which is on disk and not in memory.
+				expect(contents(disk)).toEqual(["first"])
+			})
+
+			it("also for an ordinary save that comes before any retry", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+
+				const flushed = await task["saveApiConversationHistory"]()
+
+				expect(flushed).toBe(true)
+				expect(contents(disk)).toEqual(["first"])
+			})
+
+			it("goes back to merging saves once the authoritative write has been stored", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+				await task["saveApiConversationHistory"]() // authoritative, and stored
+				mockSaveApiMessages.mockClear()
+
+				await task["saveApiConversationHistory"]()
+
+				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: true }))
+			})
+
+			it("stays authoritative while the saves keep failing, and is not made so by a merging save that failed", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("still full"))
+				expect(await task["saveApiConversationHistory"]()).toBe(false)
+				mockSaveApiMessages.mockClear()
+
+				await task["saveApiConversationHistory"]()
+
+				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: false }))
+			})
+
+			it("does not turn the merging saves of a task that never lost an overwrite into authoritative ones", async () => {
+				const task = await newTaskWithHistory()
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task["saveApiConversationHistory"]() // a merging save that failed
+				mockSaveApiMessages.mockClear()
+
+				await task["saveApiConversationHistory"]()
+
+				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: true }))
+			})
 		})
 
 		it("returns false on failure", async () => {
@@ -999,6 +1103,157 @@ describe("Task persistence", () => {
 
 			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
 		})
+		describe("overwriteClineMessages", () => {
+			const replacement = [{ ts: 1, type: "say" as const, say: "text" as const, text: "replacement" }]
+			const newTask = () =>
+				new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+			it("reports a lost write to the caller, so that the flow does not go on to save the messages again", async () => {
+				mockSaveTaskMessages.mockRejectedValueOnce(new Error("disk full"))
+				const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+				const task = newTask()
+				task.clineMessages.push({ ts: 1, type: "say", say: "text", text: "before" })
+
+				await expect(task.overwriteClineMessages(replacement)).rejects.toThrow("Failed to save the messages")
+
+				consoleError.mockRestore()
+				// The history entry was not written for them, and the messages are the ones that were on the disk.
+				expect(task.clineMessages.map((message) => message.text)).toEqual(["before"])
+				expect(mockTaskMetadata).not.toHaveBeenCalled()
+			})
+
+			describe("when the write is lost", () => {
+				const text = (value: string, ts: number): ClineMessage => ({
+					ts,
+					type: "say",
+					say: "text",
+					text: value,
+				})
+				/** A write that is slow to fail: it settles, as a failure, when the test says so. */
+				const slowFailingWrite = () => {
+					let fail!: (error: Error) => void
+					const promise = new Promise<never>((_resolve, reject) => (fail = reject))
+					mockSaveTaskMessages.mockImplementationOnce(() => promise)
+					return () => fail(new Error("disk full"))
+				}
+				const texts = (task: Task) => task.clineMessages.map((message) => message.text)
+
+				it("puts the replaced messages back, and keeps the ones that came in while the write was on its way", async () => {
+					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+					const failTheWrite = slowFailingWrite()
+					const task = newTask()
+					task.clineMessages.push(text("kept", 1), text("cut", 2))
+
+					const overwriting = task.overwriteClineMessages([text("kept", 1)]) // a rewind cuts the second message
+					const failed = expect(overwriting).rejects.toThrow("Failed to save the messages")
+					await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+					expect(texts(task)).toEqual(["kept"]) // while it is written, the task has the replacement
+					task.clineMessages.push(text("arrived meanwhile", 3))
+					failTheWrite()
+					await failed
+
+					expect(texts(task)).toEqual(["kept", "cut", "arrived meanwhile"])
+					consoleError.mockRestore()
+				})
+
+				it("restores the messages before the save queued behind the lost write starts, so it does not write the cut ones", async () => {
+					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+					const failTheWrite = slowFailingWrite()
+					mockSaveTaskMessages.mockResolvedValue([])
+					const task = newTask()
+					task.clineMessages.push(text("on the disk", 1), text("not on the disk yet", 2)) // the second was never saved
+
+					const overwriting = task.overwriteClineMessages([task.clineMessages[0]]) // a rewind cuts it
+					const failed = expect(overwriting).rejects.toThrow("Failed to save the messages")
+					await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+					const queued = getTaskPersistenceAccess(task).saveClineMessages() // an ordinary save, behind the lost write
+					failTheWrite()
+					await failed
+					await queued
+
+					const [, queuedWrite] = mockSaveTaskMessages.mock.calls
+					// Nothing on the disk has that message: the write behind the lost one must not be the last to have a say
+					// with the messages cut.
+					expect((queuedWrite[0].messages as ClineMessage[]).map((message) => message.text)).toEqual([
+						"on the disk",
+						"not on the disk yet",
+					])
+					expect(texts(task)).toEqual(["on the disk", "not on the disk yet"])
+					consoleError.mockRestore()
+				})
+
+				it("keeps an update made to a message while the write was on its way", async () => {
+					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+					const failTheWrite = slowFailingWrite()
+					const task = newTask()
+					task.clineMessages.push(text("kept", 1), text("cut", 2))
+
+					const failed = expect(task.overwriteClineMessages([task.clineMessages[0]])).rejects.toThrow(
+						"Failed to save the messages",
+					)
+					await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+					task.clineMessages[0].text = "kept, and then updated" // the message is shared by both arrays
+					failTheWrite()
+					await failed
+
+					expect(texts(task)).toEqual(["kept, and then updated", "cut"])
+					consoleError.mockRestore()
+				})
+
+				it("leaves the messages and the API history of a rewind consistent: both as they were", async () => {
+					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+					mockSaveTaskMessages.mockRejectedValueOnce(new Error("disk full"))
+					const task = newTask()
+					task.clineMessages.push(text("first", 1), text("second", 2), text("third", 3))
+					const history = [
+						{ ts: 1, role: "user" as const, content: [{ type: "text" as const, text: "first" }] },
+						{ ts: 2, role: "assistant" as const, content: [{ type: "text" as const, text: "second" }] },
+						{ ts: 3, role: "user" as const, content: [{ type: "text" as const, text: "third" }] },
+					]
+					task.apiConversationHistory.push(...history)
+
+					await expect(task.messageManager.rewindToTimestamp(2)).rejects.toThrow(
+						"Failed to save the messages",
+					)
+
+					expect(texts(task)).toEqual(["first", "second", "third"])
+					expect(task.apiConversationHistory.map((message) => message.ts)).toEqual([1, 2, 3])
+					consoleError.mockRestore()
+				})
+
+				it("does not touch the messages when the write was stored", async () => {
+					mockSaveTaskMessages.mockResolvedValueOnce([text("kept", 1)])
+					const task = newTask()
+					task.clineMessages.push(text("kept", 1), text("cut", 2))
+
+					await task.overwriteClineMessages([task.clineMessages[0]])
+
+					expect(texts(task)).toEqual(["kept"])
+				})
+			})
+
+			it("resolves once the messages and the history entry are written", async () => {
+				mockSaveTaskMessages.mockResolvedValueOnce(replacement)
+				const task = newTask()
+
+				await expect(task.overwriteClineMessages(replacement)).resolves.toBeUndefined()
+
+				expect(mockTaskMetadata).toHaveBeenCalledTimes(1)
+			})
+
+			it("writes nothing, and cannot fail, when it is told not to persist", async () => {
+				const task = newTask()
+
+				await expect(task.overwriteClineMessages(replacement, false)).resolves.toBeUndefined()
+
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			})
+		})
 
 		it("can hydrate UI history without persisting it", async () => {
 			const task = new Task({
@@ -1101,6 +1356,230 @@ describe("Task persistence", () => {
 					tokensIn: 10,
 				}),
 			)
+		})
+	})
+
+	// ── one save at a time ────────────────────────────────────────────────
+
+	describe("saveClineMessages ordering", () => {
+		afterEach(() => {
+			mockSaveTaskMessages.mockReset()
+			mockSaveTaskMessages.mockResolvedValue(undefined)
+		})
+
+		const metadataFor = (usage: boolean) => ({
+			historyItem: { id: "t", number: 1, ts: 1, task: "x", tokensIn: 0, tokensOut: 0, totalCost: 0, usage },
+			tokenUsage: { totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, contextTokens: 0 },
+		})
+
+		it("does not let the metadata of an older save land after the metadata of a newer one, whatever the timing", async () => {
+			const events: string[] = []
+			const firstMetadata = createDeferred<ReturnType<typeof metadataFor>>()
+			const firstHistoryWrite = createDeferred<undefined>()
+			mockSaveTaskMessages.mockImplementation(async () => {
+				events.push("messages")
+				return []
+			})
+			mockTaskMetadata
+				.mockImplementationOnce(() => firstMetadata.promise)
+				.mockImplementationOnce(async () => metadataFor(true))
+			const updateTaskHistory = vi
+				.fn()
+				.mockImplementationOnce(async () => {
+					await firstHistoryWrite.promise
+					events.push("history 1")
+				})
+				.mockImplementationOnce(async () => {
+					events.push("history 2")
+				})
+			const provider = { ...mockProvider, updateTaskHistory }
+			const task = new Task({
+				provider: provider as unknown as ClineProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+
+			const older = save() // not awaited, like the fire-and-forget callers
+			const newer = save()
+			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1))
+
+			// The older save is in its metadata stage; the newer one has written its messages but not its metadata.
+			expect(events).toEqual(["messages", "messages"])
+
+			firstMetadata.resolve(metadataFor(false))
+			await vi.waitFor(() => expect(updateTaskHistory).toHaveBeenCalledTimes(1))
+			expect(events).toEqual(["messages", "messages"]) // the newer metadata waits for the older one
+			firstHistoryWrite.resolve(undefined)
+			await Promise.all([older, newer])
+
+			// The newer save's entry is the last one written, whatever the timing of the older one.
+			expect(events).toEqual(["messages", "messages", "history 1", "history 2"])
+			expect(updateTaskHistory.mock.calls.map(([item]) => item.usage)).toEqual([false, true])
+		})
+
+		it("orders the saves of two instances of the same task, so the older one's metadata cannot replace the newer one's", async () => {
+			const events: string[] = []
+			const firstMetadata = createDeferred<ReturnType<typeof metadataFor>>()
+			mockSaveTaskMessages.mockResolvedValue([])
+			mockTaskMetadata
+				.mockImplementationOnce(() => firstMetadata.promise)
+				.mockImplementationOnce(async () => metadataFor(true))
+			const updateTaskHistory = vi.fn(
+				async (item: { usage: boolean }) => void events.push(`history ${item.usage}`),
+			)
+			const provider = { ...mockProvider, updateTaskHistory } as unknown as ClineProvider
+			const instance = () =>
+				new Task({
+					provider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					taskId: "shared-task",
+					startTask: false,
+				})
+			const older = instance() // for instance, a task that was reopened while the old one still saves
+			const newer = instance()
+
+			const olderSave = getTaskPersistenceAccess(older).saveClineMessages()
+			const newerSave = getTaskPersistenceAccess(newer).saveClineMessages()
+			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1))
+			expect(updateTaskHistory).not.toHaveBeenCalled() // the newer metadata is queued behind the older one
+
+			firstMetadata.resolve(metadataFor(false))
+			await Promise.all([olderSave, newerSave])
+
+			expect(events).toEqual(["history false", "history true"])
+		})
+
+		it("does not make a message write wait for the metadata stage of the save before it", async () => {
+			const slowMetadata = createDeferred<ReturnType<typeof metadataFor>>()
+			mockSaveTaskMessages.mockResolvedValue([])
+			mockTaskMetadata.mockImplementationOnce(() => slowMetadata.promise)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+
+			const first = save()
+			await vi.waitFor(() => expect(mockTaskMetadata).toHaveBeenCalledTimes(1)) // the first is in its metadata stage
+			const second = save()
+
+			// The second message write reaches the disk while the first metadata is still pending.
+			await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(2))
+			slowMetadata.resolve(metadataFor(false))
+			await Promise.all([first, second])
+		})
+
+		it("runs the next save even when the one before it failed", async () => {
+			mockSaveTaskMessages.mockRejectedValueOnce(new Error("write error")).mockResolvedValueOnce([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+
+			const first = save()
+			const second = save()
+
+			expect(await first).toBe(false)
+			expect(await second).toBe(true)
+		})
+
+		describe("what each save writes when the messages change while a write waits", () => {
+			const text = (value: string, ts: number): ClineMessage => ({ ts, type: "say", say: "text", text: value })
+			const newTask = () =>
+				new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+			/** Every call of the write, with the messages it was given and how, in the order they were made. */
+			const writes = () =>
+				mockSaveTaskMessages.mock.calls.map(([call]) => ({
+					texts: (call.messages as ClineMessage[]).map((message) => message.text),
+					merge: call.merge,
+				}))
+
+			it("writes the messages as they are when its turn comes, with the flag it was asked with, and the overwrite last", async () => {
+				const release = createDeferred<undefined>()
+				mockSaveTaskMessages.mockImplementationOnce(async () => {
+					await release.promise // the first write is slow to reach the disk
+					return []
+				})
+				const task = newTask()
+				const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+				task.clineMessages.push(text("first", 1))
+
+				const first = save() // blocked on the disk, with the messages it was started with
+				await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+				task.clineMessages.push(text("second", 2))
+				const second = save() // queued behind it, as an ordinary save (merged with what is on the disk)
+				const overwrite = task.overwriteClineMessages([text("replacement", 3)]) // queued behind both, authoritative
+				task.clineMessages.push(text("after the replacement", 4)) // a message that comes in while both wait
+
+				release.resolve(undefined)
+				await Promise.all([first, second, overwrite])
+
+				expect(writes()).toEqual([
+					// Started before any change: it has what the task had then, and is not touched by what came after.
+					{ texts: ["first"], merge: true },
+					// Its turn came after the task was given the replacement, so that is what it writes, still merged.
+					{ texts: ["replacement", "after the replacement"], merge: true },
+					// The authoritative save replaces what is stored, and keeps the message that came in meanwhile.
+					{ texts: ["replacement", "after the replacement"], merge: false },
+				])
+			})
+
+			it("does not give a save started earlier the messages that a later overwrite removed from the task", async () => {
+				const release = createDeferred<undefined>()
+				mockSaveTaskMessages.mockImplementationOnce(async () => {
+					await release.promise
+					return []
+				})
+				const task = newTask()
+				task.clineMessages.push(text("kept", 1), text("removed", 2))
+
+				const first = getTaskPersistenceAccess(task).saveClineMessages()
+				await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+				const overwrite = task.overwriteClineMessages([text("kept", 1)]) // the edit removes the second message
+				release.resolve(undefined)
+				await Promise.all([first, overwrite])
+
+				const [started, authoritative] = writes()
+				expect(started.texts).toEqual(["kept", "removed"]) // what the task had when that write began
+				expect(authoritative).toEqual({ texts: ["kept"], merge: false }) // and the last word is the replacement
+			})
+		})
+
+		it("keeps saves in the order they were asked for", async () => {
+			const order: number[] = []
+			let n = 0
+			mockSaveTaskMessages.mockImplementation(async () => {
+				const mine = ++n
+				// The first save is the slowest: without the queue it would finish last.
+				await new Promise((resolve) => setTimeout(resolve, mine === 1 ? 30 : 0))
+				order.push(mine)
+				return []
+			})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const save = () => getTaskPersistenceAccess(task).saveClineMessages()
+
+			await Promise.all([save(), save(), save()])
+
+			expect(order).toEqual([1, 2, 3])
 		})
 	})
 

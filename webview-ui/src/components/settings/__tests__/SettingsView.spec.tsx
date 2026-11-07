@@ -703,6 +703,59 @@ describe("SettingsView - Sound Settings", () => {
 	})
 })
 
+describe("SettingsView - Usage tab", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("renders the Usage tab content when it is the target section", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="usage" />)
+
+		const content = screen.getByTestId("settings-content")
+		expect(within(content).getByTestId("usage-empty")).toBeInTheDocument()
+	})
+
+	it("lists a Usage tab entry, and shows the usage content when it is clicked", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="providers" />)
+		expect(within(screen.getByTestId("settings-content")).queryByTestId("usage-empty")).not.toBeInTheDocument()
+
+		fireEvent.click(screen.getByTestId("tab-usage"))
+
+		expect(within(screen.getByTestId("settings-content")).getByTestId("usage-empty")).toBeInTheDocument()
+	})
+
+	it("shows the totals and the filters when there is history", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="usage" />, {
+			state: {
+				cwd: "/ws/a",
+				taskHistory: [
+					{
+						id: "t1",
+						number: 1,
+						ts: Date.now(),
+						task: "a task",
+						tokensIn: 100,
+						tokensOut: 50,
+						totalCost: 0.5,
+						workspace: "/ws/a",
+					},
+				],
+			},
+		})
+
+		const content = screen.getByTestId("settings-content")
+		// The totals of the supplied task, not just an element that exists.
+		const stats = within(content).getByTestId("usage-stats").textContent ?? ""
+		expect(stats).toContain("$0.50")
+		expect(stats).toContain("150") // 100 tokens in + 50 out
+		// The filter controls and the export are there.
+		expect(within(content).getByTestId("usage-range-7d")).toBeInTheDocument()
+		expect(within(content).getByTestId("usage-range-all")).toBeInTheDocument()
+		expect(within(content).getByTestId("usage-export-csv")).toBeInTheDocument()
+		expect(within(content).queryByTestId("usage-empty")).not.toBeInTheDocument()
+	})
+})
+
 describe("SettingsView - API Configuration", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

@@ -393,10 +393,15 @@ export class ProviderSettingsManager {
 
 	/**
 	 * List all available configs with metadata.
+	 *
+	 * With `signal`, a call that is aborted by the time its turn comes (it waited behind other operations) reads
+	 * nothing from storage. A read that has started cannot be stopped: it holds the lock until it settles, because
+	 * a second `load` (which may migrate and write) must not run beside it.
 	 */
-	public async listConfig(): Promise<ProviderSettingsEntry[]> {
+	public async listConfig(options?: { signal?: AbortSignal }): Promise<ProviderSettingsEntry[]> {
 		try {
 			return await this.lock(async () => {
+				options?.signal?.throwIfAborted()
 				const providerProfiles = await this.load()
 
 				return Object.entries(providerProfiles.apiConfigs).map(([name, apiConfig]) => ({
@@ -408,6 +413,27 @@ export class ProviderSettingsManager {
 			})
 		} catch (error) {
 			throw new Error(`Failed to list configs: ${error}`)
+		}
+	}
+
+	/**
+	 * Every profile with its name, read in one locked load (a `getProfile` per profile would load and parse all of them
+	 * again for each, one lock turn after the other). A profile without an id is left out: it cannot be asked for by id.
+	 * With `signal`, a call that is aborted by the time its turn comes reads nothing from storage (see `listConfig`).
+	 */
+	public async getAllProfiles(options?: {
+		signal?: AbortSignal
+	}): Promise<Array<ProviderSettingsWithId & { id: string; name: string }>> {
+		try {
+			return await this.lock(async () => {
+				options?.signal?.throwIfAborted()
+				const providerProfiles = await this.load()
+				return Object.entries(providerProfiles.apiConfigs).flatMap(([name, apiConfig]) =>
+					apiConfig.id ? [{ ...apiConfig, id: apiConfig.id, name }] : [],
+				)
+			})
+		} catch (error) {
+			throw new Error(`Failed to get profiles: ${error instanceof Error ? error.message : error}`)
 		}
 	}
 
@@ -443,11 +469,14 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	/** With `signal`, a call that is aborted by the time its turn comes reads nothing from storage (see `listConfig`). */
 	public async getProfile(
 		params: { name: string } | { id: string },
+		options?: { signal?: AbortSignal },
 	): Promise<ProviderSettingsWithId & { name: string }> {
 		try {
 			return await this.lock(async () => {
+				options?.signal?.throwIfAborted()
 				const providerProfiles = await this.load()
 				let name: string
 				let providerSettings: ProviderSettingsWithId

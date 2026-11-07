@@ -1,0 +1,895 @@
+import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
+
+import {
+	UNRECORDED,
+	bucketView,
+	metricTotal,
+	modelIdFromKey,
+	pickMetric,
+	primaryUsage,
+	rangeStart,
+	summarizeUsage,
+	usageToCsv,
+} from "../usage"
+
+// Fixed "now": Wed 2026-10-14 15:00 local time.
+const NOW = new Date(2026, 9, 14, 15, 0, 0).getTime()
+const DAY = 24 * 60 * 60 * 1000
+
+let counter = 0
+const item = (overrides: Partial<HistoryItem>): HistoryItem => ({
+	id: `t${++counter}`,
+	number: counter,
+	ts: NOW,
+	task: `task ${counter}`,
+	tokensIn: 0,
+	tokensOut: 0,
+	totalCost: 0,
+	workspace: "/ws/a",
+	...overrides,
+})
+
+describe("rangeStart", () => {
+	it("returns local midnight for today", () => {
+		expect(rangeStart("today", NOW)).toBe(new Date(2026, 9, 14).getTime())
+	})
+
+	it("includes today in 7d / 30d windows", () => {
+		expect(rangeStart("7d", NOW)).toBe(new Date(2026, 9, 8).getTime())
+		expect(rangeStart("30d", NOW)).toBe(new Date(2026, 8, 15).getTime())
+	})
+
+	it("is unbounded for all", () => {
+		expect(rangeStart("all", NOW)).toBeUndefined()
+	})
+})
+
+describe("summarizeUsage", () => {
+	const used = (apiProvider: string, modelId: string, tokensIn: number, tokensOut: number, cost: number) => [
+		{ apiProvider, modelId, requests: 1, tokensIn, tokensOut, cost },
+	]
+	const history = [
+		item({
+			totalCost: 1.5,
+			tokensIn: 1000,
+			tokensOut: 200,
+			cacheReads: 3000,
+			mode: "code",
+			usageByModel: used(providerIdentifiers.anthropic, "opus", 1000, 200, 1.5),
+		}),
+		item({
+			totalCost: 0.5,
+			tokensIn: 500,
+			tokensOut: 100,
+			mode: "architect",
+			ts: NOW - DAY,
+			usageByModel: used(providerIdentifiers.githubCopilot, "gpt-5", 500, 100, 0.5),
+		}),
+		item({
+			totalCost: 2,
+			tokensIn: 10,
+			tokensOut: 10,
+			mode: "code",
+			workspace: "/ws/b",
+			usageByModel: used(providerIdentifiers.anthropic, "opus", 10, 10, 2),
+		}),
+		// Outside 7d window
+		item({
+			totalCost: 99,
+			mode: "code",
+			ts: NOW - 10 * DAY,
+			usageByModel: used(providerIdentifiers.anthropic, "opus", 0, 0, 99),
+		}),
+	]
+
+	it("totals only items inside the range", () => {
+		const s = summarizeUsage(history, { range: "7d", now: NOW })
+		expect(s.taskCount).toBe(3)
+		expect(s.totalCost).toBeCloseTo(4)
+		expect(s.totalTokens).toBe(1000 + 200 + 500 + 100 + 20)
+	})
+
+	it("filters by workspace", () => {
+		const s = summarizeUsage(history, { range: "7d", now: NOW, workspace: "/ws/a" })
+		expect(s.taskCount).toBe(2)
+		expect(s.totalCost).toBeCloseTo(2)
+	})
+
+	it("treats an empty workspace (no folder open) as a filter that matches nothing, and only an unset one as all", () => {
+		expect(summarizeUsage(history, { range: "7d", now: NOW, workspace: "" }).taskCount).toBe(0)
+		expect(usageToCsv(history, { range: "7d", now: NOW, workspace: "" }).split("\n")).toHaveLength(1)
+		expect(summarizeUsage(history, { range: "7d", now: NOW }).taskCount).toBeGreaterThan(2)
+		// A task that recorded an empty workspace is the one task that matches it.
+		const withEmpty = [...history, item({ task: "no folder", workspace: "" })]
+		expect(summarizeUsage(withEmpty, { range: "7d", now: NOW, workspace: "" }).taskCount).toBe(1)
+	})
+
+	it("groups by recorded provider and by model, sorted by cost desc", () => {
+		const s = summarizeUsage(history, { range: "7d", now: NOW })
+		expect(s.byProvider.map((b) => [b.key, b.tasks])).toEqual([
+			[providerIdentifiers.anthropic, 2],
+			[providerIdentifiers.githubCopilot, 1],
+		])
+		expect(s.byProvider[0].cost).toBeCloseTo(3.5)
+		expect(s.byModel.map((b) => [modelIdFromKey(b.key), b.apiProvider])).toEqual([
+			["opus", providerIdentifiers.anthropic],
+			["gpt-5", providerIdentifiers.githubCopilot],
+		])
+		expect(s.byMode.map((b) => b.key)).toEqual(["code", "architect"])
+	})
+
+	it("REGRESSION: provider/model come from what was recorded, not from any current profile", () => {
+		// The bug: usage was attributed via the *currently selected* profile, so
+		// switching providers relabelled past Copilot work as the new provider.
+		// Aggregation now takes no profile information at all.
+		const copilotTask = item({
+			tokensIn: 16_700_000,
+			tokensOut: 83_400,
+			usageByModel: used(providerIdentifiers.githubCopilot, "claude-opus-5.5", 16_700_000, 83_400, 0),
+			apiConfigName: "default", // the profile name is irrelevant to attribution
+		})
+		const before = summarizeUsage([copilotTask], { range: "all", now: NOW })
+
+		// "Switch provider": same history, but the user's profile now points at Gemini.
+		const after = summarizeUsage([{ ...copilotTask, apiConfigName: "gemini-profile" }], { range: "all", now: NOW })
+
+		for (const s of [before, after]) {
+			expect(s.byProvider.map((b) => b.key)).toEqual([providerIdentifiers.githubCopilot])
+			expect(modelIdFromKey(s.byModel[0].key)).toBe("claude-opus-5.5")
+		}
+	})
+
+	it("attributes a task that switched providers mid-way to each provider by its own tokens", () => {
+		const s = summarizeUsage(
+			[
+				item({
+					tokensIn: 400,
+					tokensOut: 0,
+					usageByModel: [
+						{
+							apiProvider: providerIdentifiers.githubCopilot,
+							modelId: "claude-opus-5.5",
+							requests: 1,
+							tokensIn: 100,
+							tokensOut: 0,
+							cost: 0,
+						},
+						{
+							apiProvider: providerIdentifiers.gemini,
+							modelId: "gemini-pro",
+							requests: 1,
+							tokensIn: 300,
+							tokensOut: 0,
+							cost: 0,
+						},
+					],
+				}),
+			],
+			{ range: "all", now: NOW },
+		)
+		expect(s.byProvider.map((b) => [b.key, b.tokens])).toEqual([
+			[providerIdentifiers.gemini, 300],
+			[providerIdentifiers.githubCopilot, 100],
+		])
+		expect(s.byProvider.every((b) => b.tasks === 1)).toBe(true)
+	})
+
+	it("buckets tasks with no recorded provider/model as unrecorded instead of guessing", () => {
+		const s = summarizeUsage([item({ totalCost: 1, tokensIn: 10, tokensOut: 5 })], { range: "all", now: NOW })
+		expect(s.byProvider.map((b) => b.key)).toEqual([UNRECORDED])
+		expect(s.byModel.map((b) => b.key)).toEqual([UNRECORDED])
+		expect(modelIdFromKey(UNRECORDED)).toBeUndefined()
+		expect(s.byMode[0].key).toBe("unknown")
+	})
+
+	it("computes the cache hit rate against tokensIn, which already counts the cached tokens", () => {
+		const s = summarizeUsage(
+			[item({ tokensIn: 4000, cacheReads: 3000 }), item({ tokensIn: 1000, cacheReads: 0 })],
+			{ range: "all", now: NOW },
+		)
+		// 3000 of 5000 input tokens came from the cache: 60%, not 3000 / (5000 + 3000).
+		expect(s.cacheHitRate).toBeCloseTo(0.6)
+	})
+
+	it("never reports more than 100%, and 0 with no input", () => {
+		expect(
+			summarizeUsage([item({ tokensIn: 100, cacheReads: 250 })], { range: "all", now: NOW }).cacheHitRate,
+		).toBe(1)
+		expect(summarizeUsage([item({ tokensIn: 0, cacheReads: 0 })], { range: "all", now: NOW }).cacheHitRate).toBe(0)
+	})
+
+	it("produces a dense daily series for bounded ranges", () => {
+		const s = summarizeUsage(history, { range: "7d", now: NOW })
+		expect(s.daily).toHaveLength(7)
+		expect(s.daily.at(-1)!.cost).toBeCloseTo(3.5)
+		expect(s.daily.at(-2)!.cost).toBeCloseTo(0.5)
+		expect(s.daily[0].cost).toBe(0)
+	})
+
+	it("returns top tasks by cost, limited", () => {
+		const s = summarizeUsage(history, { range: "all", now: NOW, topTaskLimit: 2 })
+		expect(s.topTasks.map((t) => t.totalCost)).toEqual([99, 2])
+	})
+
+	it("breaks cost ties by tokens so equal-priced tasks still rank meaningfully", () => {
+		const s = summarizeUsage(
+			[item({ id: "few", totalCost: 1, tokensIn: 10 }), item({ id: "many", totalCost: 1, tokensIn: 9_000 })],
+			{ range: "all", now: NOW },
+		)
+		expect(s.topTasks.map((t) => t.id)).toEqual(["many", "few"])
+	})
+
+	it("is safe on empty history", () => {
+		const s = summarizeUsage([], { range: "7d", now: NOW })
+		expect(s.taskCount).toBe(0)
+		expect(s.totalCost).toBe(0)
+		expect(s.cacheHitRate).toBe(0)
+	})
+
+	it("tracks tokens per day alongside cost", () => {
+		const s = summarizeUsage(history, { range: "7d", now: NOW })
+		expect(s.daily.at(-1)!.tokens).toBe(1000 + 200 + 20)
+	})
+
+	it("ranks zero-cost tasks by tokens (subscription providers)", () => {
+		const s = summarizeUsage([item({ id: "small", tokensIn: 10 }), item({ id: "big", tokensIn: 5_000_000 })], {
+			range: "all",
+			now: NOW,
+		})
+		expect(s.topTasks.map((t) => t.id)).toEqual(["big", "small"])
+	})
+
+	it("ignores non-finite costs", () => {
+		const s = summarizeUsage([item({ totalCost: NaN })], { range: "all", now: NOW })
+		expect(s.totalCost).toBe(0)
+	})
+})
+
+describe("mixed priced and unpriced providers", () => {
+	const mixed = () => {
+		const mk = (provider: string, model: string, tokens: number, cost: number) =>
+			item({
+				tokensIn: tokens,
+				tokensOut: 0,
+				totalCost: cost,
+				usageByModel: [
+					{ apiProvider: provider, modelId: model, requests: 1, tokensIn: tokens, tokensOut: 0, cost },
+				],
+			})
+		return summarizeUsage(
+			[
+				mk(providerIdentifiers.githubCopilot, "claude-opus-5.5", 16_000_000, 0),
+				mk(providerIdentifiers.anthropic, "claude-sonnet-5", 200_000, 1.2),
+			],
+			{ range: "all", now: NOW },
+		)
+	}
+
+	it("prioritises cost as soon as any usage in the range is priced", () => {
+		expect(pickMetric(mixed())).toBe("cost")
+	})
+
+	it("flags each bucket as priced or not so subscription usage isn't shown as $0.00", () => {
+		const s = mixed()
+		const byKey = Object.fromEntries(s.byProvider.map((b) => [b.key, b]))
+		expect(byKey[providerIdentifiers.anthropic].priced).toBe(true)
+		expect(byKey[providerIdentifiers.githubCopilot].priced).toBe(false)
+		expect(s.byModel.find((b) => modelIdFromKey(b.key) === "claude-opus-5.5")!.priced).toBe(false)
+	})
+
+	it("keeps all-unpriced ranges on tokens and all-priced ranges on cost", () => {
+		const unpriced = summarizeUsage([item({ tokensIn: 5, usageByModel: [] })], { range: "all", now: NOW })
+		expect(pickMetric(unpriced)).toBe("tokens")
+	})
+})
+
+describe("bucketView", () => {
+	const priced = { cost: 3, tokens: 1000, priced: true }
+	const unpriced = { cost: 0, tokens: 16_000_000, priced: false }
+
+	it("cost mode: a priced bucket is its cost and its share of total cost", () => {
+		expect(bucketView(priced, "cost", 12)).toEqual({ value: 3, unpriced: false, percent: 25 })
+	})
+
+	it("cost mode: an unpriced bucket carries tokens, is flagged, and has no share (never 0%)", () => {
+		expect(bucketView(unpriced, "cost", 12)).toEqual({ value: 0, unpriced: true, percent: 0 })
+	})
+
+	it("tokens mode: everything is tokens and nothing is flagged unpriced", () => {
+		expect(bucketView(unpriced, "tokens", 32_000_000)).toEqual({ value: 16_000_000, unpriced: false, percent: 50 })
+		expect(bucketView(priced, "tokens", 2000)).toEqual({ value: 1000, unpriced: false, percent: 50 })
+	})
+
+	it("guards division by zero", () => {
+		expect(bucketView(priced, "cost", 0).percent).toBe(0)
+	})
+
+	it("rounds shares to whole numbers", () => {
+		expect(bucketView({ cost: 1, tokens: 0, priced: true }, "cost", 3).percent).toBe(33)
+	})
+})
+
+describe("metricTotal", () => {
+	it("selects the headline value for the metric", () => {
+		const s = { totalCost: 2.5, totalTokens: 900 }
+		expect(metricTotal(s, "cost")).toBe(2.5)
+		expect(metricTotal(s, "tokens")).toBe(900)
+	})
+})
+
+describe("primaryUsage", () => {
+	it("returns the provider+model that used the most tokens", () => {
+		const task = item({
+			usageByModel: [
+				{ apiProvider: "a", modelId: "small", requests: 1, tokensIn: 10, tokensOut: 0, cost: 0 },
+				{ apiProvider: "b", modelId: "big", requests: 1, tokensIn: 900, tokensOut: 0, cost: 0 },
+			],
+		})
+		expect(primaryUsage(task)).toEqual({ apiProvider: "b", modelId: "big" })
+	})
+
+	it("is undefined when nothing was recorded", () => {
+		expect(primaryUsage(item({}))).toBeUndefined()
+		expect(
+			primaryUsage(item({ usageByModel: [{ requests: 1, tokensIn: 1, tokensOut: 1, cost: 0 }] })),
+		).toBeUndefined()
+	})
+})
+
+describe("pickMetric", () => {
+	it("uses cost when any cost was recorded", () => {
+		expect(pickMetric({ totalCost: 0.01, totalTokens: 10 })).toBe("cost")
+	})
+
+	it("falls back to tokens when tokens exist but cost is zero (e.g. GitHub Copilot)", () => {
+		expect(pickMetric({ totalCost: 0, totalTokens: 6_200_000 })).toBe("tokens")
+	})
+
+	it("stays on cost when there is no usage at all", () => {
+		expect(pickMetric({ totalCost: 0, totalTokens: 0 })).toBe("cost")
+	})
+})
+
+describe("spend that has no provider or model (context condensing)", () => {
+	const entry = (cost: number) => ({
+		apiProvider: providerIdentifiers.anthropic,
+		modelId: "claude-sonnet-5",
+		requests: 1,
+		tokensIn: 100,
+		tokensOut: 10,
+		cost,
+	})
+
+	it("puts the unattributed remainder in the 'not recorded' rows so the rows add up to the total", () => {
+		// The task cost 5.00, but its recorded requests only account for 4.00: 1.00 was condensing.
+		const s = summarizeUsage([item({ totalCost: 5, usageByModel: [entry(4)] })], { range: "all", now: NOW })
+
+		expect(s.totalCost).toBe(5)
+		expect(s.byProvider.reduce((sum, b) => sum + b.cost, 0)).toBeCloseTo(5)
+		expect(s.byModel.reduce((sum, b) => sum + b.cost, 0)).toBeCloseTo(5)
+		expect(s.byProvider.find((b) => b.key === UNRECORDED)?.cost).toBeCloseTo(1)
+		expect(s.byModel.find((b) => b.key === UNRECORDED)?.cost).toBeCloseTo(1)
+	})
+
+	it("does not add a token count or a task to the 'not recorded' rows for that remainder", () => {
+		const s = summarizeUsage([item({ totalCost: 5, usageByModel: [entry(4)] })], { range: "all", now: NOW })
+		const unrecorded = s.byProvider.find((b) => b.key === UNRECORDED)!
+		expect(unrecorded.tokens).toBe(0)
+		expect(unrecorded.cost).toBe(1)
+		// The one task is counted under its real provider; the remainder is a cost line, not another task.
+		expect(s.byProvider.find((b) => b.key === providerIdentifiers.anthropic)?.tasks).toBe(1)
+		expect(unrecorded.tasks).toBe(0)
+		// The same in the model rows.
+		const unrecordedModel = s.byModel.find((b) => b.key === UNRECORDED)!
+		expect(unrecordedModel.cost).toBe(1)
+		expect(unrecordedModel.tasks).toBe(0)
+		expect(unrecordedModel.tokens).toBe(0)
+	})
+
+	it("still counts a task under 'not recorded' when it has no usage record at all", () => {
+		const s = summarizeUsage([item({ totalCost: 2, tokensIn: 50 })], { range: "all", now: NOW })
+		expect(s.byProvider.find((b) => b.key === UNRECORDED)?.tasks).toBe(1)
+		expect(s.byModel.find((b) => b.key === UNRECORDED)?.tasks).toBe(1)
+	})
+
+	it("counts a task under 'not recorded' once when a recorded request has no provider, plus the remainder", () => {
+		const noProvider = { requests: 1, tokensIn: 1, tokensOut: 1, cost: 1 }
+		const s = summarizeUsage([item({ totalCost: 3, usageByModel: [noProvider] })], { range: "all", now: NOW })
+		const unrecorded = s.byProvider.find((b) => b.key === UNRECORDED)!
+		expect(unrecorded.tasks).toBe(1)
+		expect(unrecorded.cost).toBe(3)
+	})
+
+	it("ignores float noise: no spurious 'not recorded' row when the costs agree", () => {
+		const s = summarizeUsage([item({ totalCost: 0.1 + 0.2, usageByModel: [entry(0.1), entry(0.2)] })], {
+			range: "all",
+			now: NOW,
+		})
+		expect(s.byProvider.find((b) => b.key === UNRECORDED)).toBeUndefined()
+		expect(s.byModel.find((b) => b.key === UNRECORDED)).toBeUndefined()
+	})
+
+	it("adds nothing when the recorded requests cost more than the task total", () => {
+		const s = summarizeUsage([item({ totalCost: 3, usageByModel: [entry(4)] })], { range: "all", now: NOW })
+		expect(s.byProvider.find((b) => b.key === UNRECORDED)).toBeUndefined()
+	})
+
+	it("leaves tasks with no usage record exactly as before", () => {
+		const s = summarizeUsage([item({ totalCost: 2, tokensIn: 50 })], { range: "all", now: NOW })
+		expect(s.byProvider).toHaveLength(1)
+		expect(s.byProvider[0]).toMatchObject({ key: UNRECORDED, cost: 2 })
+	})
+})
+
+describe("modelIdFromKey", () => {
+	it("returns undefined for the unrecorded bucket, the id after the provider separator, or a bare key", () => {
+		expect(modelIdFromKey(UNRECORDED)).toBeUndefined()
+		expect(modelIdFromKey("anthropic\u0000claude-sonnet-5")).toBe("claude-sonnet-5")
+		expect(modelIdFromKey("plain-model")).toBe("plain-model")
+	})
+})
+
+describe("usage attribution edge cases", () => {
+	const entry = (overrides: Record<string, unknown>) => ({
+		requests: 1,
+		tokensIn: 10,
+		tokensOut: 0,
+		cost: 0,
+		...overrides,
+	})
+
+	it("keeps the first entry when two entries used the same number of tokens", () => {
+		const task = item({
+			usageByModel: [
+				entry({ apiProvider: "a", modelId: "first", tokensIn: 50 }),
+				entry({ apiProvider: "b", modelId: "second", tokensIn: 50 }),
+			],
+		})
+		expect(primaryUsage(task)).toEqual({ apiProvider: "a", modelId: "first" })
+	})
+
+	it("buckets a model with no provider under an empty provider key, and a provider with no model as unrecorded", () => {
+		const s = summarizeUsage(
+			[
+				item({
+					totalCost: 1,
+					usageByModel: [entry({ modelId: "orphan", cost: 1 }), entry({ apiProvider: "p", cost: 0 })],
+				}),
+			],
+			{ range: "all", now: NOW },
+		)
+		expect(new Set(s.byModel.map((b) => modelIdFromKey(b.key)))).toEqual(new Set([undefined, "orphan"]))
+		expect(new Set(s.byProvider.map((b) => b.key))).toEqual(new Set([UNRECORDED, "p"]))
+	})
+
+	it("counts a task once per bucket even when several of its requests land in it", () => {
+		const s = summarizeUsage(
+			[
+				item({
+					usageByModel: [
+						entry({ apiProvider: "p", modelId: "m", tokensIn: 1 }),
+						entry({ apiProvider: "p", modelId: "m", tokensIn: 2 }),
+					],
+				}),
+			],
+			{ range: "all", now: NOW },
+		)
+		expect(s.byProvider[0].tasks).toBe(1)
+		expect(s.byModel[0].tasks).toBe(1)
+		expect(s.byProvider[0].tokens).toBe(3)
+	})
+
+	it("orders top tasks by cost, then by tokens, and treats missing numbers as zero", () => {
+		const cheapBig = item({ id: "cheap-big", totalCost: 1, tokensIn: 900, tokensOut: 100 })
+		const cheapSmall = item({ id: "cheap-small", totalCost: 1, tokensIn: 10, tokensOut: 0 })
+		const pricey = item({ id: "pricey", totalCost: 5, tokensIn: 1, tokensOut: 0 })
+		const bare = (id: string) =>
+			item({ id, totalCost: undefined as never, tokensIn: undefined as never, tokensOut: undefined as never })
+		const s = summarizeUsage([cheapSmall, bare("bare-1"), cheapBig, pricey, bare("bare-2")], {
+			range: "all",
+			now: NOW,
+		})
+		expect(s.topTasks.map((t) => t.id).slice(0, 3)).toEqual(["pricey", "cheap-big", "cheap-small"])
+		expect(
+			s.topTasks
+				.map((t) => t.id)
+				.slice(3)
+				.sort(),
+		).toEqual(["bare-1", "bare-2"])
+	})
+})
+
+describe("usageToCsv formula safety", () => {
+	it.each(['=HYPERLINK("http://x")', "+1+1", "-2+3", "@SUM(A1)", "\tcmd", "\rcmd"])(
+		"neutralises a cell that starts with %j",
+		(text) => {
+			const csv = usageToCsv([item({ task: text, mode: text })], { range: "all", now: NOW })
+			const row = csv.split("\n")[1]
+			// Each text cell is quoted and prefixed with an apostrophe, so it cannot start with a trigger character.
+			expect(row).toMatch(/^[^,]+,"'[=+\-@\t\r]/)
+			expect(row).not.toMatch(/,"[=+\-@\t\r]/)
+		},
+	)
+
+	// A line break in front of a sign is written as a space: the cell is then read with its leading spaces trimmed.
+	it.each([
+		["\n=1+1", "' =1+1"],
+		["\r\n+SUM(A1)", "' +SUM(A1)"],
+		["\n\n@x", "'  @x"],
+		["  =1+1", "'  =1+1"],
+		["\n\u0000=1+1", "' \u0000=1+1"],
+		["\u200B\n-2+3", "'\u200B -2+3"],
+		["\n\tcmd", "' \tcmd"],
+	])("neutralises a cell whose sign comes after line breaks or spaces: %j", (text, written) => {
+		const csv = usageToCsv([item({ task: text })], { range: "all", now: NOW })
+
+		const cell = csv.split("\n")[1].split(",")[1]
+		expect(cell).toBe(`"${written}"`)
+	})
+
+	it.each(["line\n=1+1", "a = b", "x\n- list item", "\nplain text"])(
+		"leaves %j alone: no sign starts the cell",
+		(text) => {
+			const csv = usageToCsv([item({ task: text })], { range: "all", now: NOW })
+
+			expect(csv.split("\n")[1].split(",")[1]).toBe(`"${text.replace(/\n/g, " ")}"`)
+		},
+	)
+
+	it("leaves ordinary text and the numeric columns alone", () => {
+		const csv = usageToCsv([item({ task: "Fix the = sign", totalCost: 1.5, tokensIn: 10 })], {
+			range: "all",
+			now: NOW,
+		})
+		const row = csv.split("\n")[1]
+		expect(row).toContain('"Fix the = sign"')
+		expect(row).not.toContain("'Fix")
+		expect(row.endsWith(",1.5000")).toBe(true)
+	})
+})
+
+describe("usageToCsv and summarizeUsage count the same tasks", () => {
+	it("leaves out a task whose time is not a number, in the export as in the totals", () => {
+		const history = [
+			item({ task: "good", ts: NOW, tokensIn: 7, totalCost: 1 }),
+			item({ task: "no time", ts: null as never, tokensIn: 99, totalCost: 50 }),
+			item({ task: "text time", ts: "yesterday" as never, tokensIn: 99, totalCost: 50 }),
+		]
+
+		const rows = usageToCsv(history, { range: "all", now: NOW }).split("\n").slice(1)
+		const summary = summarizeUsage(history, { range: "all", now: NOW })
+
+		expect(rows).toHaveLength(1)
+		expect(rows[0]).toContain('"good"')
+		expect(summary.taskCount).toBe(1)
+		expect(summary.totalCost).toBe(1)
+	})
+})
+
+describe("a time that Date cannot represent", () => {
+	it.each([1e20, -1e20, 8.64e15 + 1, Number.POSITIVE_INFINITY, Number.NaN])(
+		"is left out of the totals, the daily series and the export (ts = %s)",
+		(ts) => {
+			const history = [
+				item({ task: "good", ts: NOW, tokensIn: 7, totalCost: 1 }),
+				item({ task: "bad", ts, totalCost: 50 }),
+			]
+
+			const summary = summarizeUsage(history, { range: "all", now: NOW })
+
+			expect(summary.taskCount).toBe(1)
+			expect(summary.totalCost).toBe(1)
+			expect(summary.daily.every((d) => Number.isFinite(d.day))).toBe(true)
+			expect(summary.daily).toHaveLength(1)
+			expect(usageToCsv(history, { range: "all", now: NOW }).split("\n")).toHaveLength(2)
+		},
+	)
+
+	it("keeps the upper boundary time, and writes its date so that a spreadsheet cannot read it as a formula", () => {
+		const history = [item({ task: "edge", ts: 8.64e15, totalCost: 1 })]
+		const summary = summarizeUsage(history, { range: "all", now: NOW })
+		expect(summary.taskCount).toBe(1)
+
+		// The ISO form of this date starts with "+" (+275760-09-13T00:00:00.000Z).
+		const row = usageToCsv(history, { range: "all", now: NOW }).split("\n")[1]
+		expect(row.startsWith("'+275760-09-13T00:00:00.000Z,")).toBe(true)
+		expect(row).not.toMatch(/^[=+\-@]/)
+	})
+
+	describe("in UTC, where the dates near the ends of the range keep their year", () => {
+		let originalTz: string | undefined
+		beforeEach(() => {
+			originalTz = process.env.TZ
+			process.env.TZ = "UTC"
+		})
+		afterEach(() => {
+			if (originalTz === undefined) delete process.env.TZ
+			else process.env.TZ = originalTz
+		})
+
+		it("neutralises a date written with a negative year, and leaves an ordinary date alone", () => {
+			// A fixed UTC time, not NOW (which is built in the machine's own zone, so its UTC date moves with it).
+			const fixed = Date.UTC(2026, 9, 14, 15, 0, 0)
+			const ordinary = usageToCsv([item({ task: "t", ts: fixed })], { range: "all", now: fixed }).split("\n")[1]
+			expect(ordinary.startsWith("2026-10-14T15:00:00.000Z,")).toBe(true)
+			expect(ordinary).not.toMatch(/^'/)
+
+			// A year before 0 is written with a leading "-": the earliest date is -271821-04-20T00:00:00.000Z.
+			const early = usageToCsv([item({ task: "t", ts: -8.64e15 + 24 * 3600 * 1000 })], { range: "all", now: NOW })
+			expect(early.split("\n")[1].startsWith("'-271821-04-21T00:00:00.000Z,")).toBe(true)
+		})
+	})
+
+	describe("in a time zone ahead of UTC, near the start of the range of dates", () => {
+		let originalTz: string | undefined
+		beforeEach(() => {
+			originalTz = process.env.TZ
+			process.env.TZ = "Pacific/Kiritimati" // UTC+14
+		})
+		afterEach(() => {
+			if (originalTz === undefined) delete process.env.TZ
+			else process.env.TZ = originalTz
+		})
+
+		it("leaves out a time whose local day starts before the range, so no day is NaN and the chart can format every day", () => {
+			const history = [
+				item({ task: "early", ts: -8.64e15 + 3600 * 1000, totalCost: 7 }), // 1 h after the earliest date
+				item({ task: "ok", ts: NOW, totalCost: 1 }),
+			]
+
+			const summary = summarizeUsage(history, { range: "all", now: NOW })
+
+			expect(summary.daily.every((d) => Number.isFinite(d.day))).toBe(true)
+			expect(summary.taskCount).toBe(1)
+			expect(summary.totalCost).toBe(1)
+			expect(usageToCsv(history, { range: "all", now: NOW }).split("\n")).toHaveLength(2)
+			for (const d of summary.daily) expect(() => new Intl.DateTimeFormat("en").format(d.day)).not.toThrow()
+		})
+	})
+})
+
+describe("in a time zone where the day of a change of daylight saving time begins at 01:00", () => {
+	let originalTz: string | undefined
+	beforeEach(() => {
+		originalTz = process.env.TZ
+		process.env.TZ = "America/Santiago" // on Sunday 6 September 2026 the clocks go from 00:00 to 01:00
+	})
+	afterEach(() => {
+		if (originalTz === undefined) delete process.env.TZ
+		else process.env.TZ = originalTz
+	})
+
+	it("starts the range at the start of its first day, not at 01:00, and gives every day a bar of its own", () => {
+		const now = new Date(2026, 8, 6, 12, 0, 0).getTime() // the day that starts at 01:00
+		const history = [
+			item({ task: "just after midnight", ts: new Date(2026, 8, 0, 0, 30).getTime(), totalCost: 3 }), // 31 August 00:30
+			item({ task: "today", ts: now, totalCost: 1 }),
+		]
+
+		const summary = summarizeUsage(history, { range: "7d", now })
+
+		expect(summary.taskCount).toBe(2) // the task at 00:30 on the first day is in the range
+		expect(summary.totalCost).toBe(4)
+		expect(summary.daily).toHaveLength(7)
+		expect(summary.daily[0]).toMatchObject({ cost: 3 }) // and in the bar of that day
+		expect(summary.daily[6]).toMatchObject({ cost: 1 })
+		expect(usageToCsv(history, { range: "7d", now }).split("\n")).toHaveLength(3)
+	})
+})
+
+describe("the ends of today, to the millisecond", () => {
+	const today = new Date(NOW)
+	const at = (dayOffset: number, h: number, min: number, sec: number, ms: number) =>
+		new Date(today.getFullYear(), today.getMonth(), today.getDate() + dayOffset, h, min, sec, ms).getTime()
+	const tasks = () => [
+		item({ task: "yesterday-last-ms", ts: at(-1, 23, 59, 59, 999), tokensIn: 1, totalCost: 1 }),
+		item({ task: "today-first-ms", ts: at(0, 0, 0, 0, 0), tokensIn: 1, totalCost: 2 }),
+		item({ task: "today-last-ms", ts: at(0, 23, 59, 59, 999), tokensIn: 1, totalCost: 4 }),
+		item({ task: "tomorrow-first-ms", ts: at(1, 0, 0, 0, 0), tokensIn: 1, totalCost: 8 }),
+	]
+
+	it.each(["today", "7d", "30d"] as const)(
+		"includes the first and the last millisecond of today, and excludes the first millisecond of tomorrow, in the %s range",
+		(range) => {
+			const csv = usageToCsv(tasks(), { range, now: NOW })
+			expect(csv).toContain("today-first-ms")
+			expect(csv).toContain("today-last-ms")
+			expect(csv).not.toContain("tomorrow-first-ms")
+
+			const summary = summarizeUsage(tasks(), { range, now: NOW })
+			// The export and the headline agree, and the chart adds up to it.
+			expect(summary.daily.reduce((sum, d) => sum + d.cost, 0)).toBe(summary.totalCost)
+			expect(summary.totalCost).toBe(range === "today" ? 6 : 7) // yesterday's last millisecond is in the longer ranges
+		},
+	)
+
+	it("excludes the last millisecond of yesterday from today alone", () => {
+		expect(usageToCsv(tasks(), { range: "today", now: NOW })).not.toContain("yesterday-last-ms")
+		expect(usageToCsv(tasks(), { range: "7d", now: NOW })).toContain("yesterday-last-ms")
+	})
+
+	it("keeps a task of tomorrow in all time, which has no end", () => {
+		expect(usageToCsv(tasks(), { range: "all", now: NOW })).toContain("tomorrow-first-ms")
+	})
+})
+
+describe("a task dated after today", () => {
+	const DAY = 24 * 3600 * 1000
+	const history = () => [
+		item({ task: "today", ts: NOW, tokensIn: 10, totalCost: 1 }),
+		item({ task: "later today", ts: NOW + 2 * 3600 * 1000, tokensIn: 10, totalCost: 2 }),
+		item({ task: "tomorrow", ts: NOW + DAY, tokensIn: 10, totalCost: 4 }),
+		item({ task: "next year", ts: NOW + 365 * DAY, tokensIn: 10, totalCost: 8 }),
+	]
+
+	it.each(["today", "7d", "30d"] as const)(
+		"is left out of the totals and the export for %s, so the chart adds up to the headline",
+		(range) => {
+			const summary = summarizeUsage(history(), { range, now: NOW })
+
+			// A task later on the same day is still today's.
+			expect(summary.taskCount).toBe(2)
+			expect(summary.totalCost).toBe(3)
+			expect(summary.daily.reduce((sum, d) => sum + d.cost, 0)).toBe(summary.totalCost)
+			expect(usageToCsv(history(), { range, now: NOW }).split("\n")).toHaveLength(3)
+		},
+	)
+
+	it("is kept for all time, where the daily series has a bar for every day with spend", () => {
+		const summary = summarizeUsage(history(), { range: "all", now: NOW })
+
+		expect(summary.taskCount).toBe(4)
+		expect(summary.totalCost).toBe(15)
+		expect(summary.daily.reduce((sum, d) => sum + d.cost, 0)).toBe(15)
+	})
+})
+
+describe("usageToCsv numeric columns", () => {
+	const numericKeys = ["tokensIn", "tokensOut", "cacheReads", "cacheWrites", "totalCost"] as const
+	const cells = (overrides: Record<string, unknown>) =>
+		usageToCsv([item(overrides as never)], { range: "all", now: NOW })
+			.split("\n")[1]
+			.split(",")
+			.slice(-5)
+
+	it.each(numericKeys)("exports a formula in %s as 0, so no cell can be evaluated", (key) => {
+		for (const text of ['=HYPERLINK("http://x")', "+1+1", "-2+3", "@SUM(A1)", "\tcmd", "1;2"]) {
+			const row = cells({ [key]: text })
+			const index = numericKeys.indexOf(key)
+			expect(row[index]).toBe(key === "totalCost" ? "0.0000" : "0")
+		}
+	})
+
+	it.each([[Number.NaN], [Number.POSITIVE_INFINITY], [Number.NEGATIVE_INFINITY], [-5], [null], [{}]])(
+		"exports %p as 0",
+		(value) => {
+			expect(
+				cells({ tokensIn: value, tokensOut: value, cacheReads: value, cacheWrites: value, totalCost: value }),
+			).toEqual(["0", "0", "0", "0", "0.0000"])
+		},
+	)
+
+	it("keeps real counters as they are", () => {
+		expect(cells({ tokensIn: 10, tokensOut: 20, cacheReads: 3, cacheWrites: 4, totalCost: 1.5 })).toEqual([
+			"10",
+			"20",
+			"3",
+			"4",
+			"1.5000",
+		])
+	})
+
+	it("leaves out a task whose time cannot be written, instead of throwing or writing a blank date", () => {
+		for (const ts of [Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1, 1e20, -1e20]) {
+			const csv = usageToCsv([item({ task: "t", ts })], { range: "all", now: NOW })
+			expect(csv.split("\n")).toHaveLength(1) // the header only
+		}
+	})
+
+	it("every cell of a row is digits, a quoted text with no leading trigger, or an ISO date", () => {
+		const hostile = '=cmd|" /C calc"!A0'
+		const row = usageToCsv(
+			[item({ task: hostile, mode: hostile, tokensIn: hostile as never, totalCost: hostile as never })],
+			{ range: "all", now: NOW },
+		).split("\n")[1]
+
+		expect(row).not.toMatch(/(^|,)[=+\-@\t\r]/)
+		expect(row).not.toMatch(/,"[=+\-@\t\r]/)
+	})
+})
+
+describe("usageToCsv", () => {
+	it("sorts oldest first and leaves provider, model and counters blank or zero when nothing was recorded", () => {
+		const csv = usageToCsv(
+			[
+				item({ task: "later", ts: NOW }),
+				item({
+					task: "earlier",
+					title: undefined,
+					ts: NOW - DAY,
+					tokensIn: undefined as never,
+					tokensOut: undefined as never,
+					totalCost: undefined as never,
+					mode: undefined,
+				}),
+			],
+			{ range: "all", now: NOW },
+		)
+		const lines = csv.split("\n")
+		expect(lines[1]).toContain("earlier")
+		expect(lines[1].endsWith(',"","","",0,0,0,0,0.0000')).toBe(true)
+		expect(lines[2]).toContain("later")
+	})
+
+	it("exports a row for a task with neither a title nor a task text", () => {
+		const csv = usageToCsv([item({ task: undefined as never, title: undefined })], { range: "all", now: NOW })
+		expect(csv.split("\n")[1]).toContain(',"",')
+	})
+
+	it("filters to a workspace and ignores one that is not set", () => {
+		const history = [item({ task: "in", workspace: "/ws/a" }), item({ task: "out", workspace: "/ws/b" })]
+		expect(usageToCsv(history, { range: "all", now: NOW, workspace: "/ws/a" }).split("\n")).toHaveLength(2)
+		expect(usageToCsv(history, { range: "all", now: NOW }).split("\n")).toHaveLength(3)
+	})
+
+	it("escapes quotes and newlines and respects the range", () => {
+		const csv = usageToCsv(
+			[
+				item({ task: 'say "hi"\nthen go', totalCost: 0.12345, mode: "code" }),
+				item({ task: "old", ts: NOW - 40 * DAY }),
+			],
+			{ range: "30d", now: NOW },
+		)
+		const lines = csv.split("\n")
+		expect(lines[0]).toBe("date,task,mode,provider,model,tokensIn,tokensOut,cacheReads,cacheWrites,cost")
+		expect(lines).toHaveLength(2)
+		expect(lines[1]).toContain('"say ""hi"" then go"')
+		expect(lines[1].endsWith(",0.1235")).toBe(true)
+	})
+})
+
+describe("defaults and non-finite input", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("uses the current time when no `now` is given", () => {
+		vi.useFakeTimers()
+		vi.setSystemTime(NOW)
+		const recent = item({ ts: NOW - 1000, totalCost: 1 })
+		const old = item({ ts: NOW - 3 * DAY, totalCost: 2 })
+
+		expect(summarizeUsage([recent, old], { range: "today" }).totalCost).toBe(1)
+		expect(usageToCsv([recent, old], { range: "today" }).split("\n")).toHaveLength(2)
+	})
+
+	it("ignores a non-finite per-model cost when reconciling the task cost", () => {
+		const summary = summarizeUsage(
+			[
+				item({
+					totalCost: 3,
+					usageByModel: [
+						{
+							apiProvider: providerIdentifiers.anthropic,
+							modelId: "m",
+							requests: 1,
+							tokensIn: 1,
+							tokensOut: 1,
+							cost: Number.NaN,
+						},
+					],
+				}),
+			],
+			{ range: "all", now: NOW },
+		)
+
+		// The whole task cost is unattributed because the recorded model cost is unusable.
+		expect(summary.byProvider.find((b) => b.key === UNRECORDED)?.cost).toBe(3)
+		// The unusable cost never reaches the recorded buckets as NaN.
+		const recordedProvider = summary.byProvider.find((b) => b.key === providerIdentifiers.anthropic)
+		expect(recordedProvider).toMatchObject({ cost: 0, tokens: 2, priced: false })
+		expect(summary.byModel.find((b) => b.key !== UNRECORDED)).toMatchObject({ cost: 0, tokens: 2, priced: false })
+		expect(summary.byProvider.reduce((sum, b) => sum + b.cost, 0)).toBe(3)
+		expect(summary.byModel.reduce((sum, b) => sum + b.cost, 0)).toBe(3)
+	})
+})

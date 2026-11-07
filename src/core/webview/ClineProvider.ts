@@ -136,7 +136,7 @@ import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
-import { webviewMessageHandler } from "./webviewMessageHandler"
+import { abortProviderQuotaRequests, webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
@@ -903,6 +903,9 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		// The view that asked for provider limits is gone or replaced: stop fetching them. A replaced view may not get
+		// to send its cancel message (a crashed one never does), and the new view asks again by itself.
+		abortProviderQuotaRequests(this)
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		this.stopWebviewWatchdog()
 		// Invalidate any recovery reload still awaiting its HTML so it cannot
@@ -959,6 +962,9 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
+
+		// Provider-limit requests still running would keep fetching for a view that is gone.
+		abortProviderQuotaRequests(this)
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
@@ -1692,6 +1698,23 @@ export class ClineProvider
 					}
 				} catch (error) {
 					this.log(`[createTaskWithHistoryItem] Error processing pending edit: ${error}`)
+					// The pending edit was taken out of the store when this began, so it is handed back to the user, not
+					// lost: the failure is reported and the edited message is put back in the chat box to be sent again.
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
+					try {
+						await this.postMessageToWebview({
+							type: "invoke",
+							invoke: "setChatBoxMessage",
+							text: pendingEdit.editedContent,
+							images: pendingEdit.images,
+						})
+					} catch {
+						// The failure is reported above; the edit cannot be shown if the webview is gone.
+					}
 				}
 			}, 100) // Small delay to ensure task is fully ready
 		}

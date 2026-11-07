@@ -41,7 +41,8 @@
 		"language": "Idioma",
 		"about": "Sobre",
 		"skills": "Skills",
-		"rules": "Regras"
+		"rules": "Regras",
+		"usage": "Uso"
 	},
 	"about": {
 		"bugReport": {
@@ -1118,6 +1119,78 @@
 			"descriptionTooLong": "A descrição deve ter no máximo 1024 caracteres"
 		},
 		"footer": "Crie suas próprias skills com o modo Skill Writer, disponível em <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"usage": {
+		"description": "Tokens e custo do histórico de tarefas do Zoo Code nesta máquina.",
+		"range": {
+			"label": "Intervalo de tempo",
+			"today": "Hoje",
+			"7d": "7 dias",
+			"30d": "30 dias",
+			"all": "Todo o período"
+		},
+		"scope": {
+			"label": "Mostrar",
+			"workspace": "Este espaço de trabalho",
+			"all": "Todos os espaços de trabalho"
+		},
+		"empty": "Nenhuma tarefa neste intervalo de tempo.",
+		"stats": {
+			"cost": "custo",
+			"tokens": "tokens",
+			"tasks": "tarefas",
+			"cacheHit": "{{percent}}% do cache",
+			"inOut": "{{input}} de entrada · {{output}} de saída",
+			"models": "modelos"
+		},
+		"dailyCost": "Custo diário",
+		"byMode": "Por modo",
+		"topTasks": "Tarefas mais caras",
+		"disclaimer": "Os custos são estimativas do histórico de tarefas e podem diferir da fatura do seu provedor.",
+		"exportCsv": "Exportar CSV",
+		"noPricingNote": "Alguns provedores (ex.: GitHub Copilot) cobram por assinatura e não informam um preço por tarefa, por isso este histórico é mostrado em tokens. Veja os limites dos provedores acima para os créditos.",
+		"dailyTokens": "Tokens diários",
+		"topTasksTokens": "Maiores tarefas",
+		"byProvider": "Por provedor",
+		"history": "Histórico de uso",
+		"limits": {
+			"title": "Limites dos provedores",
+			"refresh": "Atualizar",
+			"updated": "Atualizado {{time}}",
+			"loading": "Verificando os provedores conectados…",
+			"resets": "Redefine em {{date}}",
+			"signedOut": "Sem login",
+			"noCopilot": "Sem cota do Copilot",
+			"noKey": "Chave de API ausente ou inválida",
+			"unsupported": "URL base personalizada — não verificada",
+			"error": "Não foi possível carregar",
+			"window": {
+				"weekly": "Semanal",
+				"daily": "Diário",
+				"monthly": "Mensal",
+				"unlimited": "Ilimitado",
+				"hours": "{{n}} h",
+				"days": "{{n}} d",
+				"credits": "Créditos",
+				"tokens": "Tokens"
+			},
+			"value": {
+				"usedOf": "{{used}} / {{limit}} usados",
+				"percentUsed": "{{percent}}% usado",
+				"spentMonth": "{{amount}} gastos neste mês",
+				"spentTotal": "{{amount}} gastos no total",
+				"left": "{{amount}} restantes",
+				"notReported": "Uso não informado",
+				"creditsOf": "{{window}}: {{used}} / {{total}} créditos",
+				"windowState": "{{window}} ({{state}})",
+				"windowDegraded": "{{window}} (degradado)"
+			}
+		},
+		"byModel": "Por modelo",
+		"notRecorded": "Não registrado",
+		"noPrice": "sem preço",
+		"tokensShort": "tok",
+		"chartLabel": "{{metric}}, total {{total}}"
 	},
 	"language": {
 		"description": "Idioma e exibição de data e hora.",

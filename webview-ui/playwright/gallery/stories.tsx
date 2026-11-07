@@ -415,6 +415,22 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"usage-settings": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory />
+	},
+	"usage-settings-degraded": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory variant="degraded" />
+	},
+	"usage-settings-long-text": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory variant="long-text" />
+	},
+	"usage-settings-empty": async () => {
+		const { UsageSettingsStory } = await import("@/components/settings/__tests__/UsageSettings.visual.fixture")
+		return <UsageSettingsStory variant="empty" />
+	},
 	"chat-row-timestamps": async () => {
 		const { ChatRowTimestampsStory } = await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
 		return <ChatRowTimestampsStory />

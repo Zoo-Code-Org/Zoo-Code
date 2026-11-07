@@ -64,6 +64,7 @@ type TaskTestAccess = {
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
 	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
+	maybeWaitForProviderRateLimit: (retryAttempt: number) => Promise<void>
 	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
 	condenseContextWithActiveApi: () => Promise<void>
 	retiredApis: Set<unknown>
@@ -584,6 +585,154 @@ describe("Cline", () => {
 			// The pre-fix lumped behaviour billed (3.75 / 1_000_000) * 100_000 = 0.375.
 			expect(call![1].cost).toBeCloseTo(0.6, 9)
 			expect(call![1].cost).not.toBeCloseTo(0.375, 9)
+		})
+
+		it("prices a request with the protocol it started with when the profile is switched while its usage is drained", async () => {
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+			// The spy is shared with the tests before this one: their calls (this token count included) are not this test's.
+			captureLlmCompletion.mockClear()
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						yield { type: "text", text: "partial response" }
+						// The user switches to a profile whose provider prices requests the OpenAI way, while the
+						// usage of this request has not been collected yet.
+						task.apiConfiguration = {
+							...mockApiConfig,
+							apiProvider: providerIdentifiers.openai,
+							apiModelId: "gpt-4o",
+						}
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 100_000,
+							cacheWrite1hTokens: 100_000,
+							cacheReadTokens: 0,
+						}
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
+
+			// Still the Anthropic accounting the request started with: its input tokens add the cache writes back in
+			// (100k), where the OpenAI accounting of the new profile would report the 0 input tokens as they are.
+			expect(call![1].inputTokens).toBe(100_000)
+			expect(call![1].cost).toBeCloseTo(0.6, 9)
+		})
+	})
+
+	describe("the protocol that prices a request follows the handler that serves it", () => {
+		const openAiModelInfo = {
+			contextWindow: 128_000,
+			supportsPromptCache: true,
+			inputPrice: 3,
+			outputPrice: 15,
+			cacheWritesPrice: 3.75,
+			cacheWritesPrice1h: 6,
+			cacheReadsPrice: 0.3,
+		} as ModelInfo
+
+		// The handler is shared by the tests of this file, so what is replaced on it is put back after each test.
+		const spies: Array<{ mockRestore: () => void }> = []
+		afterEach(() => {
+			for (const spy of spies.splice(0)) spy.mockRestore()
+		})
+
+		const run = async (switchProfileBeforeTheRequestStarts: boolean) => {
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+			captureLlmCompletion.mockClear() // earlier tests spied on it too: only the calls of this one are wanted
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			if (switchProfileBeforeTheRequestStarts) {
+				// The profile is switched while the request waits to start, so the handler that serves it is the new one,
+				// which prices requests the OpenAI way.
+				spies.push(
+					vi.spyOn(getTaskTestAccess(task), "maybeWaitForProviderRateLimit").mockImplementation(async () => {
+						task.apiConfiguration = {
+							...mockApiConfig,
+							apiProvider: providerIdentifiers.openai,
+							apiModelId: "gpt-4o",
+						}
+					}),
+					vi.spyOn(task.api, "getModel").mockReturnValue({ id: "gpt-4o", info: openAiModelInfo }),
+				)
+			}
+			const lastRequestRecord = () =>
+				JSON.parse([...task.clineMessages].reverse().find((m) => m.say === "api_req_started")?.text ?? "{}")
+			let recordedAtStart: Record<string, unknown> = {}
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						// The request has been bound to its handler by now, and is not finished.
+						recordedAtStart = lastRequestRecord()
+						yield { type: "text", text: "partial response" }
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 200_000,
+							cacheWrite1hTokens: 200_000,
+							cacheReadTokens: 0,
+						}
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 200_000),
+				).toBe(true),
+			)
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 200_000)
+			return { payload: call![1], recorded: lastRequestRecord(), recordedAtStart }
+		}
+
+		it("prices the request with the OpenAI formula when the profile was switched to an OpenAI one before it started", async () => {
+			const { payload, recorded, recordedAtStart } = await run(true)
+
+			// OpenAI accounting: the input tokens are what was reported (none), where the Anthropic accounting of the profile the
+			// request was written with would add the cache writes back in (200k).
+			expect(payload.inputTokens).toBe(0)
+			expect(payload.cost).toBeCloseTo(1.2, 9) // 200k tokens written for an hour, at 6 per million
+			// The record says the same, from the moment the request is bound: the provider, the model and the protocol of
+			// the handler that serves it, and not those of the placeholder that was written before the switch.
+			expect(recordedAtStart).toMatchObject({
+				apiProtocol: "openai",
+				apiProvider: providerIdentifiers.openai,
+				modelId: "gpt-4o",
+			})
+			expect(recorded).toMatchObject({
+				apiProtocol: "openai",
+				apiProvider: providerIdentifiers.openai,
+				modelId: "gpt-4o",
+			})
+		})
+
+		it("still prices an unswitched request with the formula of the profile it started with", async () => {
+			const { payload, recorded, recordedAtStart } = await run(false)
+
+			// Anthropic accounting: the cache writes are added to the input tokens.
+			expect(payload.inputTokens).toBe(200_000)
+			expect(recordedAtStart).toMatchObject({ apiProtocol: "anthropic", apiProvider: mockApiConfig.apiProvider })
+			expect(recorded).toMatchObject({ apiProtocol: "anthropic", apiProvider: mockApiConfig.apiProvider })
 		})
 	})
 
@@ -2166,6 +2315,43 @@ describe("Cline", () => {
 				await loop
 				await vi.waitFor(() => expect(oldDispose).toHaveBeenCalledOnce())
 			})
+
+			it.each([
+				{
+					name: "fills in the serving model when the profile named none",
+					profile: undefined,
+					expected: "served-model",
+				},
+				{ name: "keeps the model the profile named", profile: "profile-model", expected: "profile-model" },
+			])("finalized api_req_started $name", async ({ profile, expected }) => {
+				const task = await createTaskWithManualRetries()
+				task.apiConfiguration = {
+					...task.apiConfiguration,
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: profile,
+				}
+				disposableApi(task)
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: "served-model",
+					info: { supportsPromptCache: true, contextWindow: 200_000, maxTokens: 4096 } as ModelInfo,
+				})
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						yield { type: "text", text: "a" }
+						yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+					},
+				)
+				realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+
+				const started = task.clineMessages.find((m) => m.say === "api_req_started")
+				const payload = JSON.parse(started?.text ?? "{}")
+				expect(payload.apiProvider).toBe(providerIdentifiers.anthropic)
+				expect(payload.modelId).toBe(expected)
+				expect(payload.tokensIn).toBe(1)
+			})
 		})
 
 		it("disposes the current handler exactly once even when dispose is called twice", async () => {
@@ -3629,6 +3815,82 @@ describe("Cline", () => {
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
 
 				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
+			})
+		})
+
+		describe("api_req_started usage attribution", () => {
+			/** Runs the request setup and returns the JSON the first api_req_started message was written with. */
+			const firstApiReqPayload = async (
+				apiConfiguration: ProviderSettings,
+				servedModelId?: string,
+			): Promise<Record<string, unknown>> => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration,
+					task: "test task",
+					startTask: false,
+				})
+
+				Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: servedModelId ?? "served-model",
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200_000,
+						maxTokens: 4096,
+					} as ModelInfo,
+				})
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "hello" }],
+					mode: undefined,
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+					throw new Error("stop after the request message is written")
+				})
+
+				const payloads: string[] = []
+				vi.spyOn(task, "say").mockImplementation(async (type, text) => {
+					if (type === "api_req_started") payloads.push(String(text))
+					return undefined as never
+				})
+				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+
+				// Only the stop that the test asks for is expected: any other failure is a failure of the test.
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }]).catch((error: unknown) => {
+					if (!(error instanceof Error) || error.message !== "stop after the request message is written")
+						throw error
+				})
+				// A request that wrote no message has no payload: that must fail the test, not read as "nothing set".
+				if (payloads.length === 0) throw new Error("The request wrote no api_req_started message")
+				return JSON.parse(payloads[0])
+			}
+
+			it("records the provider and model that serve the request", async () => {
+				const payload = await firstApiReqPayload({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "k",
+					apiModelId: "claude-sonnet-5",
+				})
+				expect(payload).toMatchObject({
+					apiProvider: providerIdentifiers.anthropic,
+					modelId: "claude-sonnet-5",
+				})
+			})
+
+			it("leaves the model unset when the profile names none, and records the provider", async () => {
+				const payload = await firstApiReqPayload({ apiProvider: providerIdentifiers.anthropic, apiKey: "k" })
+				expect(payload.apiProvider).toBe(providerIdentifiers.anthropic)
+				// The first write cannot know the served model; the finalized message fills it in (below).
+				expect(payload.modelId).toBeUndefined()
+			})
+
+			it("records neither provider nor model when the profile sets no provider", async () => {
+				const payload = await firstApiReqPayload({} as ProviderSettings)
+				expect(payload.apiProvider).toBeUndefined()
 			})
 		})
 
@@ -7803,6 +8065,104 @@ describe("Cline", () => {
 				// leaving it for whichever test cleans up next.
 				fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
 				updateSpy.mockRestore()
+				historySpy.mockRestore()
+			}
+		})
+
+		it("overwriteClineMessages sends an explicit empty usageByModel when the replacement records no usage", async () => {
+			// The history store merges onto the stored item, so a replacement with no recorded usage (for example
+			// after a rewind) must say so explicitly, or the earlier breakdown would stay on the stored item.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory")
+			try {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const say = (kind: ClineMessage["say"], text: string, ts: number): ClineMessage => ({
+					ts,
+					type: "say",
+					say: kind,
+					text,
+				})
+				const withUsage = [
+					say("text", "do it", 1),
+					say(
+						"api_req_started",
+						JSON.stringify({
+							apiProvider: providerIdentifiers.anthropic,
+							modelId: "claude-sonnet-5",
+							tokensIn: 10,
+							tokensOut: 5,
+							cost: 0.5,
+						}),
+						2,
+					),
+				]
+
+				await task.overwriteClineMessages(withUsage)
+				const first = historySpy.mock.calls.at(-1)?.[0]
+				expect(first?.usageByModel).toEqual([
+					expect.objectContaining({ apiProvider: providerIdentifiers.anthropic, requests: 1, cost: 0.5 }),
+				])
+
+				// A rewind to before the request: the replacement records nothing.
+				await task.overwriteClineMessages([say("text", "do it", 1)])
+				const second = historySpy.mock.calls.at(-1)?.[0]
+				expect(second).toBeDefined()
+				expect(second).toHaveProperty("usageByModel", undefined)
+				expect(second?.totalCost).toBe(0)
+			} finally {
+				fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
+				historySpy.mockRestore()
+			}
+		})
+
+		it("computes the usage breakdown from the merged persisted messages, not a stale local snapshot", async () => {
+			// Another host appended a request that records usage. This host's snapshot does not have that message;
+			// saving merges the stored one in, and the metadata must follow what was persisted.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			// The mocked fs.readFile serves `mockMessages` as the stored ui_messages.json.
+			const originalStored = mockMessages.splice(0)
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory")
+			try {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const recorded = JSON.stringify({
+					apiProvider: providerIdentifiers.anthropic,
+					modelId: "claude-sonnet-5",
+					tokensIn: 10,
+					tokensOut: 5,
+					cost: 0.5,
+				})
+				const message = (text: string, messageId: string) => ({
+					ts: 2,
+					type: "say" as const,
+					say: "api_req_started" as const,
+					text,
+					messageId,
+				})
+				const first = { ts: 1, type: "say" as const, say: "text" as const, text: "do it", messageId: "m1" }
+				mockMessages.push(first, message(recorded, "m2"))
+
+				task.clineMessages = [first]
+				await getTaskTestAccess(task).saveClineMessages()
+
+				const saved = historySpy.mock.calls.at(-1)?.[0]
+				expect(saved?.usageByModel).toEqual([
+					expect.objectContaining({ apiProvider: providerIdentifiers.anthropic, requests: 1, cost: 0.5 }),
+				])
+			} finally {
+				mockMessages.splice(0, mockMessages.length, ...originalStored)
+				fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
 				historySpy.mockRestore()
 			}
 		})
