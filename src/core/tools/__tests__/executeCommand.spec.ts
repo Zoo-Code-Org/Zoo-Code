@@ -275,10 +275,11 @@ describe("executeCommand", () => {
 			}
 
 			// Execute
-			const [rejected, result] = await executeCommandInTerminal(mockTask, options)
+			const [rejected, result, commandSubmitted] = await executeCommandInTerminal(mockTask, options)
 
 			// Verify
 			expect(rejected).toBe(false)
+			expect(commandSubmitted).toBe(false)
 			expect(result).toBe(`Working directory '${nonExistentCwd}' does not exist.`)
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
 		})
@@ -312,7 +313,7 @@ describe("executeCommand", () => {
 				customCwd: "/existing/file.txt/child",
 			})
 
-			expect(result).toEqual([false, "Working directory '/existing/file.txt/child' is not a directory."])
+			expect(result).toEqual([false, "Working directory '/existing/file.txt/child' is not a directory.", false])
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
 		})
 	})
@@ -433,8 +434,10 @@ describe("executeCommand", () => {
 			expect(mockTask.terminalProcesses.size).toBe(0)
 		})
 
-		it("posts timeout status when command execution exceeds the user limit", async () => {
+		it("reports no submission when the user timeout fires before the command starts", async () => {
 			vitest.useFakeTimers()
+			// A never-starting process: `TerminalProcess.run()` never reached
+			// `sendText`/`executeCommand`, so no `shell_execution_started` fires.
 			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
 				continue: vitest.fn(),
 				abort: vitest.fn(),
@@ -449,9 +452,11 @@ describe("executeCommand", () => {
 				commandExecutionTimeout: 1_000,
 			})
 			await vitest.advanceTimersByTimeAsync(1_000)
-			const [rejected, result] = await executionPromise
+			const [rejected, result, commandSubmitted] = await executionPromise
 
 			expect(rejected).toBe(false)
+			// Nothing ran, so the caller must not drain queued feedback.
+			expect(commandSubmitted).toBe(false)
 			expect(result).toContain("terminated after exceeding")
 			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -459,6 +464,35 @@ describe("executeCommand", () => {
 					text: expect.stringContaining('"status":"timeout"'),
 				}),
 			)
+			expect(pendingProcess.abort).toHaveBeenCalled()
+		})
+
+		it("reports submission when the user timeout fires after the command started", async () => {
+			vitest.useFakeTimers()
+			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+				// The shell reported execution start, so the command really ran.
+				setTimeout(() => callbacks.onShellExecutionStarted(4242, mockProcess), 0)
+				return pendingProcess
+			})
+
+			const executionPromise = executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
+				command: "sleep 10",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 1_000,
+			})
+			await vitest.advanceTimersByTimeAsync(1_000)
+			const [rejected, result, commandSubmitted] = await executionPromise
+
+			expect(rejected).toBe(false)
+			// The command did run, so the drain is owed.
+			expect(commandSubmitted).toBe(true)
+			expect(result).toContain("terminated after exceeding")
 			expect(pendingProcess.abort).toHaveBeenCalled()
 		})
 
@@ -480,10 +514,11 @@ describe("executeCommand", () => {
 			}
 
 			// Execute
-			const [rejected, result] = await executeCommandInTerminal(mockTask, options)
+			const [rejected, result, commandSubmitted] = await executeCommandInTerminal(mockTask, options)
 
 			// Verify
 			expect(rejected).toBe(false)
+			expect(commandSubmitted).toBe(true)
 			expect(result).toContain("Exit code: 0")
 			expect(result).toContain("within working directory '/test/project'")
 		})
@@ -540,10 +575,11 @@ describe("executeCommand", () => {
 			}
 
 			// Execute
-			const [rejected, result] = await executeCommandInTerminal(mockTask, options)
+			const [rejected, result, commandSubmitted] = await executeCommandInTerminal(mockTask, options)
 
 			// Verify
 			expect(rejected).toBe(false)
+			expect(commandSubmitted).toBe(true)
 			expect(result).toContain("Process terminated by signal SIGINT")
 			expect(result).toContain("within working directory '/test/project'")
 		})
