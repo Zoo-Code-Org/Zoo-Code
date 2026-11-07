@@ -21,14 +21,14 @@ describe("TelemetryClient", () => {
 		expect(telemetryClient).toBeDefined()
 	})
 
-	it("should have updateTelemetryState method", () => {
+	it("should have updateTelemetryState method", async () => {
 		// Test if the method exists
 		expect(typeof telemetryClient.updateTelemetryState).toBe("function")
 
 		// Call it with different values to verify it doesn't throw errors
-		expect(() => telemetryClient.updateTelemetryState("enabled")).not.toThrow()
-		expect(() => telemetryClient.updateTelemetryState("disabled")).not.toThrow()
-		expect(() => telemetryClient.updateTelemetryState("unset")).not.toThrow()
+		await expect(telemetryClient.updateTelemetryState("enabled")).resolves.toBeUndefined()
+		await expect(telemetryClient.updateTelemetryState("disabled")).resolves.toBeUndefined()
+		await expect(telemetryClient.updateTelemetryState("unset")).resolves.toBeUndefined()
 	})
 
 	it("should have capture method", () => {
@@ -40,21 +40,22 @@ describe("TelemetryClient", () => {
 		expect(() => telemetryClient.capture("test_event", { key: "value" })).not.toThrow()
 	})
 
-	it("should reset PostHog when updating telemetry state", () => {
+	it("should not touch PostHog before the chunk is loaded", async () => {
 		// Act
-		telemetryClient.updateTelemetryState("enabled")
+		await telemetryClient.updateTelemetryState("disabled")
 
-		// Assert
-		expect(posthog.reset).toHaveBeenCalled()
+		// Assert - a disabled update must not load the PostHog chunk or reset an
+		// uninitialized client, which only logged a console error.
+		expect(posthog.reset).not.toHaveBeenCalled()
 	})
 
-	it("should initialize PostHog when telemetry is enabled with API key and distinctId", () => {
+	it("should initialize PostHog when telemetry is enabled with API key and distinctId", async () => {
 		// Arrange
 		const API_KEY = "test-api-key"
 		const DISTINCT_ID = "test-user-id"
 
 		// Act
-		telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
+		await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
 
 		// Assert
 		expect(posthog.init).toHaveBeenCalledWith(
