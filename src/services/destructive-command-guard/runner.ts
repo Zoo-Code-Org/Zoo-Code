@@ -23,9 +23,17 @@ function getDcgEnvironment(): NodeJS.ProcessEnv {
 	return env
 }
 
+// These packs are off by default; they cover cmd.exe forms such as `rd /s /q` and `format`.
+const DCG_WINDOWS_PACKS = "windows.filesystem,windows.misc"
+
+export function getDcgArgs(command: string, platform: NodeJS.Platform = process.platform): string[] {
+	const packArgs = platform === "win32" ? ["--with-packs", DCG_WINDOWS_PACKS] : []
+	return ["test", "--format", "json", "--no-color", ...packArgs, command]
+}
+
 export function runDcg(binaryPath: string, command: string, cwd: string): Promise<DcgDecision> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(binaryPath, ["test", "--format", "json", "--no-color", command], {
+		const child = spawn(binaryPath, getDcgArgs(command), {
 			cwd,
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
