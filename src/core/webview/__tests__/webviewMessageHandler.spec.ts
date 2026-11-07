@@ -3162,15 +3162,18 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 	})
 
 	it("rejects a rename onto an existing profile without saving", async () => {
+		const hasConfig = vi.fn().mockResolvedValue(true)
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		const activate = vi.fn().mockResolvedValue(undefined)
 		provider.providerSettingsManager = {
 			runExclusiveAcrossInstances,
-			hasConfig: vi.fn().mockResolvedValue(true),
+			hasConfig,
 			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
-		provider.repointViewLocalStateAfterProfileRename = vi.fn().mockResolvedValue(undefined)
-		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = activate
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "renameApiConfiguration",
@@ -3182,8 +3185,17 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// current profile as the current profile, so a case-only collision would
 		// otherwise overwrite the existing record - and the delete-failure rollback
 		// would then delete a profile the rename never owned.
+		// hasConfig answers true for every name here on purpose: an always-true
+		// manager cannot show *which* name the guard asked about, so the only thing
+		// that can catch a check aimed at oldName is the argument it was called with.
+		expect(hasConfig).toHaveBeenCalledWith("foo")
 		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		// Rejecting the save is only half the contract. A rename that reports the
+		// collision but still re-points live views or activates the colliding profile
+		// has already moved user-visible state before the rejection is even shown.
+		expect(repoint).not.toHaveBeenCalled()
+		expect(activate).not.toHaveBeenCalled()
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 
