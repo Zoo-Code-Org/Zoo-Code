@@ -459,10 +459,12 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				const isComposing = event.nativeEvent?.isComposing ?? false
 
 				if (showContextMenu) {
-					if (event.key === "Escape") {
+					if (event.key === "Escape" && !isComposing) {
 						// Dismiss the menu outright. `!` is easy to type by
 						// accident, so Escape must actually close the picker
 						// rather than leave the arrow keys captured by it.
+						// While composing, Escape belongs to the IME candidate
+						// window and must not dismiss the picker.
 						suppressedHistoryRef.current = normalizedInputValue
 						setShowContextMenu(false)
 						setSearchQuery("")

@@ -790,6 +790,23 @@ describe("ChatTextArea", () => {
 				expect(container.textContent).toContain("Third prompt")
 			})
 
+			it("should keep the picker open on a composing Escape", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				// Escape belongs to the IME candidate window while composing.
+				fireEvent.keyDown(textarea, { key: "Escape", isComposing: true })
+				expect(container.textContent).toContain("Third prompt")
+
+				// A plain Escape still dismisses the picker.
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(container.textContent).not.toContain("Third prompt")
+			})
+
 			it("should reset history navigation when sending message", () => {
 				const onSend = vi.fn()
 				const setInputValue = vi.fn()
