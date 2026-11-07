@@ -11,6 +11,7 @@ import { test } from "node:test"
 // environment must not disturb hashes.
 
 const sharedConsumers = [
+	"zoo-code#build",
 	"@roo-code/vscode-webview#build",
 	"@roo-code/vscode-webview#check-types",
 	"zoo-code#bundle",
@@ -27,14 +28,22 @@ const webviewConsumers = [
 
 const bundleConsumers = ["zoo-code#bundle", "zoo-code#vsix"]
 
-const trackedTasks = [
-	"@roo-code/types#build",
+// Keep this explicit: deriving consumers from the graph would hide a removed edge.
+const typesConsumers = [
+	"@roo-code/cloud#build",
+	"@roo-code/core#build",
+	"@roo-code/ipc#build",
+	"@roo-code/telemetry#build",
+	"@roo-code/types#check-types",
 	"@roo-code/vscode-webview#build",
 	"@roo-code/vscode-webview#check-types",
+	"zoo-code#build",
 	"zoo-code#bundle",
-	"zoo-code#vsix",
 	"zoo-code#check-types",
+	"zoo-code#vsix",
 ]
+
+const trackedTasks = ["@roo-code/types#build", ...typesConsumers]
 
 const turboArgs = [
 	"build",
@@ -199,17 +208,10 @@ test("build cache input contract", async (context) => {
 			assert.deepEqual(changedTasks(before, after), [])
 		})
 
-		await context.test("types source changes invalidate every dependent typecheck", () => {
+		await context.test("types source changes invalidate every dependent task", () => {
 			const before = hashesOnly()
 			const after = withChangedFile("packages/types/src/index.ts", appendComment, hashesOnly)
-			const changed = changedTasks(before, after)
-			for (const task of [
-				"@roo-code/types#build",
-				"@roo-code/vscode-webview#check-types",
-				"zoo-code#check-types",
-			]) {
-				if (!changed.includes(task)) throw new Error(`types source edit did not invalidate ${task}`)
-			}
+			expectChanged(changedTasks(before, after), trackedTasks, "types source edit")
 		})
 
 		await context.test("typechecks depend on the types build", () => {
@@ -249,16 +251,26 @@ test("build cache input contract", async (context) => {
 				const inputs = tasks[name].inputs.map((input) => input.replaceAll("\\", "/"))
 				for (const entry of entries) assert.ok(inputs.includes(entry), `${name} does not hash ${entry}`)
 			}
-			assert.deepEqual(tasks["zoo-code#bundle"].definition.outputs, [
-				// .env may contain secrets; exclude it from cached outputs before enabling a shared remote cache.
-				".env",
-				"CHANGELOG.md",
-				"LICENSE",
-				"README.md",
-				"assets/vscode-material-icons/**",
-				"dist/**",
-				"webview-ui/audio/**",
-			])
+		})
+		await context.test("build and packaging tasks declare every cached output", () => {
+			const tasks = hashes()
+			const expected = {
+				"@roo-code/types#build": ["dist/**"],
+				"zoo-code#build": ["dist/**"],
+				"@roo-code/vscode-webview#build": ["../src/webview-ui/**"],
+				"zoo-code#bundle": [
+					"CHANGELOG.md",
+					"LICENSE",
+					"README.md",
+					"assets/vscode-material-icons/**",
+					"dist/**",
+					"webview-ui/audio/**",
+				],
+				"zoo-code#vsix": ["../bin/**"],
+			}
+			for (const [name, outputs] of Object.entries(expected)) {
+				assert.deepEqual(tasks[name].definition.outputs, outputs, `${name} cached outputs`)
+			}
 		})
 	} finally {
 		probe.cleanup()

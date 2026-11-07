@@ -236,7 +236,6 @@
 				"README.md",
 				"CHANGELOG.md",
 				"LICENSE",
-				".env",
 				"webview-ui/audio/**",
 				"assets/vscode-material-icons/**"
 			],
