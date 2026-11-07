@@ -286,11 +286,19 @@ describe("getRequestyModels", () => {
 		vi.useFakeTimers()
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		// The merged deadline uses the native AbortSignal.timeout, which fake timers cannot
-		// advance. Drive it with a controller scheduled by fake setTimeout instead so the test
-		// is deterministic and does not wait 10 real seconds.
-		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(((ms: number) => {
+		// The merged deadline uses the native AbortSignal.timeout, which fake timers cannot
+		// advance. Rather than scheduling a fake sleep inside the mock (a fixed sleep in a spec
+		// either flakes or hides a missing await), the mock hands back a controller whose abort
+		// the test itself releases once it has advanced the clock past the deadline.
+		let reachDeadline: () => void = () => {}
+		const deadline = new Promise<void>((resolve) => {
+			reachDeadline = resolve
+		})
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(((_ms: number) => {
 			const controller = new AbortController()
-			setTimeout(() => controller.abort(new DOMException("The operation timed out.", "TimeoutError")), ms)
+			void deadline.then(() => {
+				controller.abort(new DOMException("The operation timed out.", "TimeoutError"))
+			})
 			return controller.signal
 		}) as unknown as typeof AbortSignal.timeout)
 		try {
@@ -315,7 +323,11 @@ describe("getRequestyModels", () => {
 			await vi.advanceTimersByTimeAsync(9_999)
 			// Nothing may settle before the deadline fires.
 			expect(settled).toBe(false)
-			await vi.advanceTimersByTimeAsync(1)
+			// The deadline is reached explicitly instead of by a timer the test would have to
+			// sleep through: the clock is advanced to just under the documented 10 s, nothing may
+			// settle, and then the deadline is released.
+			reachDeadline()
+			await vi.waitFor(() => expect(settled).toBe(true), { interval: 1 })
 			const models = await pending
 			expect(settled).toBe(true)
 			// The fallback is intentional: callers use the cached/default model info.
