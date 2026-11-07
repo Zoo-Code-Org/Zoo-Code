@@ -458,7 +458,12 @@ export const createClineTabPanel = async ({
 		await vscode.commands.executeCommand("workbench.action.newGroupRight")
 	}
 
-	const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
+	// With no editors visible the panel must land in the group newGroupRight just
+	// created, which that command makes the active group. Hardcoding ViewColumn.Two
+	// re-targets whatever group two already is - a second Zoo panel when one is open
+	// there - and leaves the newly created group empty, so repeated requests pile up
+	// empty groups instead of hosting panels in them.
+	const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Active
 
 	const newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
 		enableScripts: true,
@@ -551,8 +556,25 @@ export const createClineTabPanel = async ({
 	}
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.
+	// This step runs after the panel and provider are live, so a failure here must
+	// release them the same way the resolve-failure branch above does: otherwise the
+	// caller sees a rejected creation while the panel stays open with a registered
+	// provider behind it.
 	await delay(100)
-	await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+	try {
+		await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+	} catch (error) {
+		newPanel.dispose()
+		liveTabPanels.delete(newPanel)
+		await tabProvider
+			.dispose()
+			.catch((disposeError) =>
+				outputChannel.appendLine(
+					`[openClineInNewTab] provider dispose failed after a group-lock failure: ${disposeError}`,
+				),
+			)
+		throw error
+	}
 
 	return tabProvider
 }

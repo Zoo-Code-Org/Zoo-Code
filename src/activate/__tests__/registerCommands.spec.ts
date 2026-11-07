@@ -32,6 +32,10 @@ vi.mock("vscode", () => ({
 		joinPath: vi.fn((_base: unknown, ..._pathSegments: string[]) => ({ path: _pathSegments.join("/") })),
 	},
 	ViewColumn: {
+		// Active is the value the no-visible-editors path targets: newGroupRight makes
+		// the group it creates the active one. -1 is the vscode.d.ts value; the mock previously
+		// carried only Two, which the old hardcoded target depended on.
+		Active: -1,
 		Two: 2,
 	},
 	window: {
@@ -950,7 +954,7 @@ describe("openClineInNewTab", () => {
 		)
 	})
 
-	it("opens a new group to the right and targets ViewColumn.Two when no editors are visible", async () => {
+	it("opens a new group to the right and targets the group it just created when no editors are visible", async () => {
 		// The vscode mock factory declares a mutable visibleTextEditors slot that the
 		// readonly public API type hides, so seed it through Object.assign.
 		Object.assign(vscode.window, { visibleTextEditors: [] })
@@ -966,7 +970,7 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
 			"zoo-code.TabPanelProvider",
 			"Zoo Code",
-			vscode.ViewColumn.Two,
+			vscode.ViewColumn.Active,
 			{
 				enableScripts: true,
 				retainContextWhenHidden: true,

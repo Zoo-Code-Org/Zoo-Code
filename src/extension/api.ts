@@ -608,6 +608,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			}
 		}
 
+		// The mode switch above awaits, so the registration can change underneath this call:
+		// the task may have completed and been removed, or a replacement instance may have
+		// taken the id. Answering the captured entry would then report success for a task the
+		// registry no longer maps to that instance.
+		if (this.tasksById.get(taskId) !== entry) {
+			this.log(
+				`[API#selectTaskFollowupSuggestion] task ${taskId} was unregistered or replaced during the mode switch; answer not delivered`,
+			)
+			return false
+		}
+
 		entry.task.handleWebviewAskResponse("messageResponse", answer)
 		return true
 	}
@@ -906,7 +917,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	 * created is never deleted by this call rollback. On failure the call restores the prior record,
 	 * the prior shared settings, the prior shared mode and profile pin, and the prior mapping of every
 	 * mode the payload touched, then replays only the settings keys this call itself wrote, taken from
-	 * the snapshot it captured; the original error is rethrown.
+	 * the snapshot it captured; the replay is best effort - a restore that itself fails is logged
+	 * with the failing key and swallowed, so a rollback can leave some keys restored and others
+	 * not - and the original error is rethrown.
 	 */
 	public async setConfiguration(allValues: RooCodeSettings) {
 		const values = withoutInvalidDisplaySettings(allValues, (key) =>
