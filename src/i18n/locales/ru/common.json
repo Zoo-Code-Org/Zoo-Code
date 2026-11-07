@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "Не выбрано содержимое терминала",
 		"auto_import_failed": "Не удалось автоматически импортировать настройки ZooCode: {{error}}",
+		"profile_deleted_activation_failed": "Профиль удалён, но не удалось активировать заменяющий профиль '{{name}}'.",
 		"rooHistoryImport": {
 			"nothingFound": "История задач Roo Code для импорта из {{domain}} не найдена.",
 			"alreadyImported_one": "{{count}} история задач Roo Code уже импортирована в Zoo Code.",

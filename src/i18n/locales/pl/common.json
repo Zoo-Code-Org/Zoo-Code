@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "Nie wybrano zawartości terminala",
 		"auto_import_failed": "Nie udało się automatycznie zaimportować ustawień ZooCode: {{error}}",
+		"profile_deleted_activation_failed": "Profil został usunięty, ale nie udało się aktywować profilu zastępczego '{{name}}'.",
 		"rooHistoryImport": {
 			"nothingFound": "Nie znaleziono historii zadań Roo Code do zaimportowania z {{domain}}.",
 			"alreadyImported_one": "Cała {{count}} historia zadań Roo Code została już zaimportowana do Zoo Code.",

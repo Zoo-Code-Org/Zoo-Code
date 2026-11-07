@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "Tidak ada konten terminal yang dipilih",
 		"auto_import_failed": "Gagal mengimpor pengaturan ZooCode secara otomatis: {{error}}",
+		"profile_deleted_activation_failed": "Profil telah dihapus, tetapi mengaktifkan profil pengganti '{{name}}' gagal.",
 		"rooHistoryImport": {
 			"nothingFound": "Tidak ada riwayat tugas Roo Code yang ditemukan untuk diimpor dari {{domain}}.",
 			"alreadyImported_one": "Semua {{count}} riwayat tugas Roo Code sudah diimpor ke Zoo Code.",

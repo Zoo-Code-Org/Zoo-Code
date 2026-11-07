@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "Không có nội dung terminal được chọn",
 		"auto_import_failed": "Không thể tự động nhập cài đặt ZooCode: {{error}}",
+		"profile_deleted_activation_failed": "Đã xóa hồ sơ, nhưng không thể kích hoạt hồ sơ thay thế '{{name}}'.",
 		"rooHistoryImport": {
 			"nothingFound": "Không tìm thấy lịch sử nhiệm vụ Roo Code nào để nhập từ {{domain}}.",
 			"alreadyImported_one": "{{count}} lịch sử nhiệm vụ Roo Code đã được nhập vào Zoo Code.",
