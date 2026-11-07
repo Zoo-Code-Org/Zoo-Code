@@ -11581,6 +11581,82 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("retries a transiently missing API history before returning an empty conversation", async () => {
+			const historyItem = {
+				id: "retry-api-history",
+				task: "test task",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			let reads = 0
+			vi.mocked(fsp.readFile).mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				if (++reads === 1) throw Object.assign(new Error("Replacement in progress"), { code: "ENOENT" })
+				return JSON.stringify([{ role: "assistant", content: "committed" }])
+			})
+
+			const result = await provider.getTaskWithId(historyItem.id)
+
+			expect(result.apiConversationHistory).toEqual([{ role: "assistant", content: "committed" }])
+		})
+
+		it.each(["ENOENT", "EACCES"])("returns empty history after %s without removing the task", async (code) => {
+			const item = {
+				id: "failed-api-read",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			const read = vi.mocked(fsp.readFile)
+			let reads = 0
+			read.mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				reads++
+				throw Object.assign(new Error("read failed"), { code })
+			})
+			const result = await provider.getTaskWithId(item.id)
+			expect(result.apiConversationHistory).toEqual([])
+			expect(provider.taskHistoryStore.get(item.id)).toEqual(item)
+			expect(reads).toBe(code === "ENOENT" ? 2 : 1)
+		})
+
+		it("aggregates parent and child costs without reading API history", async () => {
+			const parent = {
+				id: "cost-parent",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 2,
+				childIds: ["cost-child"],
+			}
+			provider.taskHistoryStore["cache"].set(parent.id, parent)
+			provider.taskHistoryStore["cache"].set("cost-child", {
+				...parent,
+				id: "cost-child",
+				totalCost: 3,
+				childIds: [],
+			})
+			provider["taskHistoryStoreInitialized"] = true
+			const read = vi.spyOn(provider, "getTaskWithId")
+			const result = await provider.getTaskWithAggregatedCosts(parent.id)
+			expect(result.aggregatedCosts.totalCost).toBe(5)
+			expect(read).not.toHaveBeenCalled()
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",
