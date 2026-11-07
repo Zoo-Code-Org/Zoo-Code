@@ -170,6 +170,8 @@ A side run invalidates its output directory first. Before the first repetition e
 
 The side process arms one flag when it receives SIGINT or SIGTERM. The flag starts no further repetition and blocks the completion marker, so an interrupted side exits with the conventional signal code and publishes nothing.
 
+Comparisons acquire an exclusive lock for the canonical output directory before invalidation and hold it through publication and all failure or interrupt cleanup. An overlapping comparison (including a symlink alias of `--out`) fails before touching reports. Locks live in the system temporary directory; after a hard crash, remove a stale lock only after verifying no comparison owns that output.
+
 The comparison reports are published as one generation. `comparison-report.json` and `comparison-report.md` carry the report's `generatedAt` stamp, and `comparison-report.complete` holds that stamp; it is written last. Consumers must require the marker and match its stamp against the report files. `readPublishedComparisonReport` enforces this: it returns the report only when the marker exists and its stamp matches both files. The marker is removed before publication starts, so a crash between the two file publications leaves a detectable incomplete generation instead of a mixed one. A thrown failure rolls both files back; a failed comparison leaves no report files.
 
 ### Commands
@@ -192,3 +194,5 @@ pnpm coding-evals:compare --baseline <sha> --candidate <sha> --trust-file trust-
 1. Release integration: trigger runs, store baselines, and promote them. See issue #2085.
 2. Later suites: repository navigation, debugging, and cost stress, toward the 21-task set.
 3. Optimization experiments: per-request context instrumentation, non-progress loop detection, tool-output filtering, compaction strategies, and dynamic tool-schema loading.
+
+Coding fixtures run in a host VS Code process without a filesystem sandbox. Command tools are disabled in both the mode and tool policy, and command auto-approval is off. Agents can read and edit workspace files; test execution happens only in the isolated grader. Fixture prompts do not request host commands.

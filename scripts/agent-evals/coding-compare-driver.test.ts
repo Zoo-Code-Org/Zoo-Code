@@ -7,6 +7,7 @@ import { describe, it } from "node:test"
 import {
 	executeComparisonFlow,
 	publishedComparisonGeneration,
+	readPublishedComparisonReport,
 	runCompareSide,
 	type CompareSideWiring,
 	type ComparisonFlowWiring,
@@ -470,3 +471,65 @@ it("attempts every report removal and refuses to start sides when invalidation f
 		await remove(dir, { recursive: true, force: true })
 	}
 })
+
+for (const fails of [false, true]) {
+	it(`excludes overlapping comparisons through ${fails ? "failure" : "successful"} cleanup`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-overlap-"))
+		let release: () => void = () => {}
+		let entered: () => void = () => {}
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		const started = new Promise<void>((resolve) => {
+			entered = resolve
+		})
+		const out = path.join(dir, "out")
+		const first = flowWiring({
+			flag: createInterruptFlag(),
+			out,
+			scratchDir: path.join(dir, "first"),
+			runSide: async (side) => record(side, COMMIT),
+		})
+		first.interruptKill = async () => {
+			entered()
+			await gate
+		}
+		if (fails)
+			first.runSide = async () => {
+				throw new Error("first failed")
+			}
+		const running = executeComparisonFlow(first)
+		const settled = running.then(
+			() => undefined,
+			(error: unknown) => error,
+		)
+		try {
+			await started
+			const before = await publishedComparisonGeneration(out)
+			let ran = false
+			const second = flowWiring({
+				flag: createInterruptFlag(),
+				out,
+				scratchDir: path.join(dir, "second"),
+				runSide: async (side) => {
+					ran = true
+					return record(side, COMMIT)
+				},
+			})
+			await fs.symlink(out, path.join(dir, "alias"))
+			await assert.rejects(executeComparisonFlow({ ...second, out: path.join(dir, "alias") }), /output lock/)
+			assert.equal(ran, false)
+			assert.equal(await publishedComparisonGeneration(out), before)
+			if (!fails) assert.equal((await readPublishedComparisonReport(out))?.pins.baseline.commit, COMMIT)
+			release()
+			const error = await settled
+			assert.equal(error instanceof Error, fails)
+			assert.equal((await executeComparisonFlow(second)).status, "completed")
+			assert.equal((await readPublishedComparisonReport(out))?.pins.baseline.commit, COMMIT)
+		} finally {
+			release()
+			await settled
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

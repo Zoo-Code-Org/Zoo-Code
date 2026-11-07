@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -253,6 +254,28 @@ export type ComparisonFlowOutcome =
 // caller exits with the conventional code on the normal and the throwing
 // path alike; any other failure stays a thrown failure.
 export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
+	await fs.mkdir(wiring.out, { recursive: true })
+	const canonicalOut = await fs.realpath(wiring.out)
+	// A canonical path also excludes aliases through symlinks. Keep the lock
+	// outside scratch/output so cleanup cannot remove it before ownership ends.
+	const key = createHash("sha256").update(canonicalOut).digest("hex")
+	const lock = path.join(os.tmpdir(), `coding-comparison-${key}.lock`)
+	try {
+		await fs.mkdir(lock, { mode: 0o700 })
+	} catch (error) {
+		throw new Error(
+			`cannot acquire comparison output lock for ${canonicalOut}; another comparison may be running`,
+			{ cause: error },
+		)
+	}
+	try {
+		return await executeLockedComparisonFlow(wiring)
+	} finally {
+		await fs.rmdir(lock)
+	}
+}
+
+const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
 	let completed: ComparisonReport | undefined
 	let failure: unknown
 	try {

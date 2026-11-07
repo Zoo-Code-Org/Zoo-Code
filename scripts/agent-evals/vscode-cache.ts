@@ -45,7 +45,10 @@ export function createPrivateVSCodeDownloader(
 				if (relative.startsWith("..") || path.isAbsolute(relative))
 					throw new Error("VS Code executable outside cache")
 				return { source, relative, digest: await digestTree(source) }
-			})()
+			})().catch((error: unknown) => {
+				downloads.delete(version)
+				throw error
+			})
 			downloads.set(version, download)
 		}
 		const cached = await download
