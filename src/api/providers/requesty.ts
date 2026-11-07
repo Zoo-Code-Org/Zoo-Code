@@ -199,7 +199,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
 			if (requestSignal.aborted) {
-				throw createAbortError("Requesty")
+				throw createAbortError(this.providerName)
 			}
 
 			// Model discovery is shared single-flight: the lookup carries no signal (see fetchModel),
@@ -246,7 +246,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
 				if (requestSignal.aborted) {
-					throw createAbortError("Requesty")
+					throw createAbortError(this.providerName)
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -314,7 +314,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
 				// DOM-standard AbortError so callers can detect the aborted request.
 				if (requestSignal.aborted) {
-					throw createAbortError("Requesty")
+					throw createAbortError(this.providerName)
 				}
 				throw error
 			}
