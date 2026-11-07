@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, providerSettingsWithIdSchema } from "@roo-code/types"
 import type { RooCodeSettings } from "@roo-code/types"
 
 import { API } from "../api"
@@ -31,9 +31,18 @@ const makeProfileStoreDouble = (seed: Record<string, { id: string; settings: Rec
 		}
 		return Promise.resolve({ name, id: entry.id, ...entry.settings })
 	})
+	// The keys providerSettingsWithIdSchema keeps, which is the shape saveConfig stores. Used only to
+	// mirror the key-stripping: the double does not re-run validation or the legacy rewrite, and the
+	// payloads here are not full profiles. A double that stored the raw payload would let a rollback
+	// compare against keys that never landed in the record.
+	const profileRecordKeys = new Set<string>(Object.keys(providerSettingsWithIdSchema.shape))
+
 	const saveConfig = vi.fn((name: string, settings: Record<string, unknown>) => {
 		const id = entries.get(name)?.id ?? "created-id"
-		entries.set(name, { id, settings })
+		const profileSettings = Object.fromEntries(
+			Object.entries(settings).filter(([key]) => key !== "id" && profileRecordKeys.has(key)),
+		)
+		entries.set(name, { id, settings: profileSettings })
 		return Promise.resolve(id)
 	})
 	const deleteConfig = vi.fn((name: string) => {
@@ -66,6 +75,10 @@ describe("API - configuration", () => {
 				saveConfig,
 				setModeConfig,
 				hasConfig: vi.fn().mockResolvedValue(false),
+				// The rollback capture reads the stored record back inside the same critical section. These
+				// tests are about the mode fan-out and the payload carries no profile keys, so the record
+				// this call saved is just the name plus the id the save returned.
+				getProfile: vi.fn().mockResolvedValue({ id: "default-id", name: "default" }),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview,
@@ -170,6 +183,10 @@ describe("API - configuration", () => {
 				saveConfig,
 				setModeConfig,
 				hasConfig: vi.fn().mockResolvedValue(false),
+				// The rollback capture reads the stored record back inside the same critical section. These
+				// tests are about the mode fan-out and the payload carries no profile keys, so the record
+				// this call saved is just the name plus the id the save returned.
+				getProfile: vi.fn().mockResolvedValue({ id: "default-id", name: "default" }),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview,
@@ -276,6 +293,136 @@ describe("API - configuration", () => {
 			apiKey: "another-view",
 		})
 	})
+
+	it("keeps a record another view rewrote under the id this call created", async () => {
+		// This call creates the name, so the id check is the only guard the delete leg had. It is not
+		// enough: saveConfig keeps the id of the record it overwrote, so a view that saved over the
+		// name afterwards inherited this call id, and deleting on the id alone drops that record -
+		// secrets included. Only the record comparison sees the write.
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = store
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const sharedBefore = { apiProvider: providerIdentifiers.anthropic, apiModelId: "model-old" }
+		// The other view writes through the same map while this call is still landing its mappings.
+		const setModeConfig = vi.fn().mockImplementation(async () => {
+			await saveConfig("pinned", {
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "another-view",
+			})
+			throw new Error("mode mapping down")
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		// Logging is off by default, and the keep decision is reported through this.log; enable it
+		// so the log line is observable. No socket path, so no IPC server is started.
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "code-config" } }),
+		).rejects.toThrow("mode mapping down")
+
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(store.entries.get("pinned")?.settings).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "another-view",
+		})
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("under the id this call created"))
+	})
+
+	it("restores the previous record when the payload carried keys the profile schema strips", async () => {
+		// saveConfig drops the keys the profile schema does not know, so the record this call owns is
+		// narrower than its payload. Comparing the re-read record against the payload instead of
+		// against what the save wrote reads an untouched record as another view write, and the
+		// rollback returns without putting the previous record back.
+		const store = makeProfileStoreDouble({
+			pinned: {
+				id: "pinned-id",
+				settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "before" },
+			},
+		})
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = store
+		// currentApiConfigName and mode are settings keys, not profile keys: the save strips both.
+		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const sharedBefore = { apiProvider: providerIdentifiers.anthropic, apiModelId: "model-old" }
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				mode: "code",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("refresh down")
+
+		// Only the profile part of the payload landed, so the record is still this call to roll back:
+		// the previous record comes back under the id it already had, and the delete leg is not
+		// taken for a name that existed before the call.
+		expect(store.entries.get("pinned")).toEqual({
+			id: "pinned-id",
+			settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "before" },
+		})
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(saveConfig).toHaveBeenLastCalledWith("pinned", {
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "before",
+		})
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+
 	it("restores the stored profile and shared settings when the refresh fails after the save", async () => {
 		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
 		// The store double keeps the compensation re-read honest: this call creates the record, so the

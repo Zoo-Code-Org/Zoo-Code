@@ -40,6 +40,12 @@ import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
 
+// Key names only: a profile record carries secrets, and a rollback log must not echo them.
+const differingProfileKeys = (a: Record<string, unknown>, b: Record<string, unknown>): string[] =>
+	Array.from(new Set([...Object.keys(a), ...Object.keys(b)]))
+		.filter((key) => !deepEqual(a[key], b[key]))
+		.sort()
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
@@ -702,19 +708,39 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// existing record and let rollback delete it. A failed existence read is treated as "may exist"
 		// so rollback never deletes blindly, and the prior-record read still fails closed before
 		// anything is mutated.
-		const { recordExisted, previousRecord, savedId } = await manager.runExclusiveAcrossInstances(async () => {
-			let existed: boolean
-			try {
-				existed = await manager.hasConfig(savedProfileName)
-			} catch {
-				existed = true
-			}
-			const priorRecord = existed ? await manager.getProfile({ name: savedProfileName }) : undefined
-			// saveConfig validates before storing, so a rejected save leaves every domain
-			// untouched and the call fails with nothing to roll back.
-			const id = await manager.saveConfig(savedProfileName, values)
-			return { recordExisted: existed, previousRecord: priorRecord, savedId: id }
-		})
+		const { recordExisted, previousRecord, savedId, savedSettings } = await manager.runExclusiveAcrossInstances(
+			async () => {
+				let existed: boolean
+				try {
+					existed = await manager.hasConfig(savedProfileName)
+				} catch {
+					existed = true
+				}
+				const priorRecord = existed ? await manager.getProfile({ name: savedProfileName }) : undefined
+				// saveConfig validates before storing, so a rejected save leaves every domain
+				// untouched and the call fails with nothing to roll back.
+				const id = await manager.saveConfig(savedProfileName, values)
+				// saveConfig normalizes before it stores: it drops the keys the profile schema does not
+				// know (the mode and profile-pin keys a settings round trip carries) and can rewrite
+				// legacy fields. The record this call owns is therefore the stored one, not the caller
+				// payload, so read it back inside this same section - getProfile takes only the inner
+				// per-instance lock, so the hold lengthens by one read and nothing re-joins the queue -
+				// and destructure it here so the snapshot is a copy rather than a view of the store.
+				const {
+					name: _savedName,
+					id: _savedId,
+					...savedSettings
+				} = await manager.getProfile({
+					name: savedProfileName,
+				})
+				return {
+					recordExisted: existed,
+					previousRecord: priorRecord,
+					savedId: id,
+					savedSettings,
+				}
+			},
+		)
 		try {
 			await this.sidebarProvider.setValues(
 				// Only the keys this call owns travel forward; see the filter comment above.
@@ -743,15 +769,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			try {
 				await manager.runExclusiveAcrossInstances(async () => {
 					if (recordExisted && previousSettings) {
-						// Another view may have saved this name after the critical section above. The id
-						// comparison cannot see it (saveConfig keeps the existing id), so compare the record
-						// itself against what this call wrote before replaying the pre-call settings over it.
+						// Another view may have saved this name after the section above. Neither of the obvious
+						// comparisons sees it: the id is not evidence, because saveConfig keeps the existing id
+						// when it overwrites, and the caller payload is not what landed, because saveConfig
+						// strips the keys the profile schema does not know. Compare the stored record against
+						// the normalized snapshot this call captured inside the save section.
 						const currentRecord = await manager.getProfile({ name: savedProfileName })
 						const { name: _currentName, id: _currentId, ...currentSettings } = currentRecord
-						if (!deepEqual(currentSettings, values)) {
+						if (!deepEqual(currentSettings, savedSettings)) {
+							const differingKeys = differingProfileKeys(savedSettings, currentSettings).join(", ")
 							this.log(
 								`[setConfiguration] kept the profile record '${savedProfileName}': another view wrote ` +
-									`it after this call saved.`,
+									`it after this call saved (keys: ${differingKeys}).`,
 							)
 							return
 						}
@@ -765,10 +794,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						return
 					}
 					const currentRecord = await manager.getProfile({ name: savedProfileName })
+					const { name: _keptName, id: _keptId, ...keptSettings } = currentRecord
 					if (currentRecord.id !== savedId) {
 						this.log(
 							`[setConfiguration] kept the profile record '${savedProfileName}': another view wrote ` +
 								`it (id '${currentRecord.id}', this call wrote '${savedId}').`,
+						)
+						return
+					}
+					// The matching id is not proof of an untouched record: saveConfig keeps the id of the
+					// record it overwrote, so a writer that saved over the name this call created inherits
+					// this call id. Delete only the content this call wrote, and name the differing keys
+					// rather than their values - a profile record carries secrets.
+					if (!deepEqual(keptSettings, savedSettings)) {
+						const differingKeys = differingProfileKeys(savedSettings, keptSettings).join(", ")
+						this.log(
+							`[setConfiguration] kept the profile record '${savedProfileName}': another view wrote it ` +
+								`under the id this call created (keys: ${differingKeys}).`,
 						)
 						return
 					}
