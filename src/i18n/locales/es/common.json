@@ -89,7 +89,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "La clave API contiene caracteres inválidos.",
-			"apiRequestFailed": "La solicitud API falló ({{status}})"
+			"apiRequestFailed": "La solicitud API falló ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI no encontró la implementación \"{{deployment}}\". Establece \"Nombre de implementación de Azure\" con el nombre exacto de la implementación de Azure AI Foundry, no el nombre del modelo (por ejemplo gpt-4o). Si el nombre de la implementación es correcto, comprueba que la URL base sea el punto de conexión de tu recurso de Azure (por ejemplo https://<resource>.openai.azure.com) sin segmentos de ruta adicionales como /openai/v1. Detalles: {{message}}"
 		},
 		"manual_url_empty": "Por favor, introduce una URL de callback válida",
 		"manual_url_no_query": "URL de callback inválida: faltan parámetros de consulta",

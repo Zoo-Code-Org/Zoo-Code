@@ -89,7 +89,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Klucz API zawiera nieprawidłowe znaki.",
-			"apiRequestFailed": "Żądanie API nie powiodło się ({{status}})"
+			"apiRequestFailed": "Żądanie API nie powiodło się ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI nie znalazło wdrożenia \"{{deployment}}\". Ustaw \"Nazwa wdrożenia Azure\" na dokładną nazwę wdrożenia z Azure AI Foundry, a nie na nazwę modelu (na przykład gpt-4o). Jeśli nazwa wdrożenia jest poprawna, sprawdź, czy bazowy URL to punkt końcowy zasobu Azure (na przykład https://<resource>.openai.azure.com) bez dodatkowych segmentów ścieżki, takich jak /openai/v1. Szczegóły: {{message}}"
 		},
 		"manual_url_empty": "Wprowadź prawidłowy URL callback",
 		"manual_url_no_query": "Nieprawidłowy URL callback: brak parametrów zapytania",

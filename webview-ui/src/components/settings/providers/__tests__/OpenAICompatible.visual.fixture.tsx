@@ -27,7 +27,7 @@ const translations = flattenTranslations(enSettings as Record<string, unknown>)
 
 const apiConfiguration: ProviderSettings = {
 	apiProvider: providerIdentifiers.openai,
-	openAiBaseUrl: "",
+	openAiBaseUrl: "https://my-resource.openai.azure.com/",
 	openAiModelId: "my-gpt4o-deployment",
 	openAiUseAzure: true,
 }

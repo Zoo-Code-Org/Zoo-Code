@@ -89,7 +89,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 키에 유효하지 않은 문자가 포함되어 있습니다.",
-			"apiRequestFailed": "API 요청 실패 ({{status}})"
+			"apiRequestFailed": "API 요청 실패 ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI에서 배포 \"{{deployment}}\"을(를) 찾을 수 없습니다. \"Azure 배포 이름\"을 모델 이름(예: gpt-4o)이 아닌 Azure AI Foundry의 정확한 배포 이름으로 설정하세요. 배포 이름이 올바르다면 기본 URL이 Azure 리소스 엔드포인트(예: https://<resource>.openai.azure.com)이며 /openai/v1 같은 추가 경로 세그먼트가 없는지 확인하세요. 세부 정보: {{message}}"
 		},
 		"manual_url_empty": "유효한 콜백 URL을 입력하세요",
 		"manual_url_no_query": "유효하지 않은 콜백 URL: 쿼리 매개변수 누락",

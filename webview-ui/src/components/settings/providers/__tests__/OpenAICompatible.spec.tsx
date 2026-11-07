@@ -1,7 +1,7 @@
 import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { OpenAICompatible } from "../OpenAICompatible"
-import { ProviderSettings } from "@roo-code/types"
+import { ProviderSettings, azureOpenAiDefaultApiVersion } from "@roo-code/types"
 
 // Mock the vscrui Checkbox component
 vi.mock("vscrui", () => ({
@@ -175,6 +175,49 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			expect(screen.getByText("settings:providers.azureOpenAiDeploymentNameDescription")).toBeInTheDocument()
 		})
 
+		it.each([
+			{
+				name: "the configured deployment and API version",
+				apiConfiguration: {
+					openAiBaseUrl: "https://resource.openai.azure.com/openai/",
+					openAiModelId: "brotherhood",
+					azureApiVersion: "2025-01-01-preview",
+				},
+				expectedUrl:
+					"https://resource.openai.azure.com/openai/deployments/brotherhood/chat/completions?api-version=2025-01-01-preview",
+			},
+			{
+				name: "a placeholder deployment and the default API version",
+				apiConfiguration: { openAiBaseUrl: "https://resource.openai.azure.com" },
+				expectedUrl: `https://resource.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=${azureOpenAiDefaultApiVersion}`,
+			},
+		])("shows the Azure request URL with $name", ({ apiConfiguration, expectedUrl }) => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByTestId("azure-request-url")).toHaveTextContent(
+				`settings:providers.azureOpenAiRequestUrl ${expectedUrl}`,
+			)
+		})
+
+		it("omits the Azure request URL until a base URL is entered", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiUseAzure: true } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByText("settings:providers.azureOpenAiDeploymentNameDescription")).toBeInTheDocument()
+			expect(screen.queryByTestId("azure-request-url")).not.toBeInTheDocument()
+		})
+
 		it("keeps generic OpenAI-compatible guidance for non-Azure endpoints", () => {
 			render(
 				<OpenAICompatible
@@ -189,6 +232,7 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			expect(
 				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
 			).not.toBeInTheDocument()
+			expect(screen.queryByTestId("azure-request-url")).not.toBeInTheDocument()
 		})
 
 		it("keeps generic OpenAI-compatible guidance for Azure AI Inference endpoints", () => {
