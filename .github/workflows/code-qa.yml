@@ -250,6 +250,7 @@ jobs:
             # Validate build/static cache inputs (issue #2290 contract) so a
             # stale webview or extension bundle is never restored as a hit.
             - name: Verify build cache inputs
+              if: matrix.collect-coverage
               run: pnpm --dir src run verify:build-cache-inputs
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'

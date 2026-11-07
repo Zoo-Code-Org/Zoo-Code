@@ -1,7 +1,6 @@
+import { createProbe, turboGraph } from "./cache-probe.mjs"
 import assert from "node:assert/strict"
-import { spawnSync } from "node:child_process"
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { appendFileSync, readFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import process from "node:process"
 import { test } from "node:test"
@@ -11,11 +10,22 @@ import { test } from "node:test"
 // corresponding tasks, identical inputs must stay reusable, and unrelated
 // environment must not disturb hashes.
 
-const root = resolve(import.meta.dirname, "../..")
-const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
-if (!pnpm) throw new Error("pnpm executable path is unavailable")
-const command = process.platform === "win32" ? process.execPath : pnpm
-const args = process.platform === "win32" ? [pnpm] : []
+const sharedConsumers = [
+	"@roo-code/vscode-webview#build",
+	"@roo-code/vscode-webview#check-types",
+	"zoo-code#bundle",
+	"zoo-code#check-types",
+	"zoo-code#vsix",
+]
+
+const webviewConsumers = [
+	"@roo-code/vscode-webview#build",
+	"@roo-code/vscode-webview#check-types",
+	"zoo-code#bundle",
+	"zoo-code#vsix",
+]
+
+const bundleConsumers = ["zoo-code#bundle", "zoo-code#vsix"]
 
 const trackedTasks = [
 	"@roo-code/types#build",
@@ -27,10 +37,6 @@ const trackedTasks = [
 ]
 
 const turboArgs = [
-	"turbo",
-	"--cwd",
-	"__PROBE_ROOT__",
-	"run",
 	"build",
 	"check-types",
 	"bundle",
@@ -38,66 +44,25 @@ const turboArgs = [
 	"--filter=zoo-code",
 	"--filter=@roo-code/vscode-webview",
 	"--filter=@roo-code/types",
-	"--dry=json",
 ]
 
 let probeRoot
 
-const gitError = (result) => {
-	const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
-	return new Error(details || `git exited with status ${result.status ?? "unknown"}`)
-}
-
-const git = (gitArgs) => {
-	const result = spawnSync("git", gitArgs, { cwd: root, encoding: "utf8" })
-	if (result.status !== 0) throw gitError(result)
-}
-
-const trackedTreeStatus = () =>
-	spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=no"], { cwd: root, encoding: "utf8" })
-
-// Probe the working tree so local runs validate uncommitted task edits. CI
-// runs on a clean tree, where stash create exits without a SHA and this
-// falls back to HEAD. git stash create can exit 1 with empty output when
-// stale index metadata refreshes to a clean tracked tree. Confirm a clean
-// tracked tree before trusting that exit.
-const stashCommit = (result, trackedTree = trackedTreeStatus) => {
-	if (result.status === 0) return result.stdout.trim() || "HEAD"
-	const quietExit = result.status === 1 && !result.error && !result.signal && !result.stdout && !result.stderr
-	if (!quietExit) throw gitError(result)
-	const status = trackedTree()
-	if (status.status !== 0) throw gitError(status)
-	if (status.stdout.trim() !== "") {
-		const changes = status.stdout.trim()
-		throw new Error(`git stash create found no changes, but git status reports tracked changes:\n${changes}`)
-	}
-	return "HEAD"
-}
-
-const worktreeCommit = () => stashCommit(spawnSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" }))
-
 const hashes = (env = process.env) => {
-	const resolvedArgs = turboArgs.map((arg) => (arg === "__PROBE_ROOT__" ? probeRoot : arg))
-	const result = spawnSync(command, [...args, ...resolvedArgs], { cwd: root, encoding: "utf8", env })
-	if (result.status !== 0) {
-		const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
-		throw new Error(details || `pnpm exited with status ${result.status ?? "unknown"}`)
-	}
-	const lines = result.stdout.split("\n")
-	let jsonStart = -1
-	for (let i = 0; i < lines.length; i++) {
-		if (lines[i].startsWith("{")) jsonStart = i
-	}
-	if (jsonStart < 0) {
-		const details = [result.error?.message, result.stderr, result.stdout].filter(Boolean).join("\n")
-		throw new Error(details || "turbo dry run produced no JSON graph")
-	}
-	const graph = JSON.parse(lines.slice(jsonStart).join("\n"))
+	const graph = turboGraph(probeRoot, turboArgs, env)
 	return Object.fromEntries(
 		trackedTasks.map((taskName) => {
 			const task = graph.tasks.find(({ taskId }) => taskId === taskName)
 			if (!task) throw new Error(`Tracked task missing from Turbo graph: ${taskName}`)
-			return [taskName, { hash: task.hash, inputs: Object.keys(task.inputs ?? {}) }]
+			return [
+				taskName,
+				{
+					hash: task.hash,
+					inputs: Object.keys(task.inputs ?? {}),
+					dependencies: task.dependencies,
+					definition: task.resolvedTaskDefinition,
+				},
+			]
 		}),
 	)
 }
@@ -125,67 +90,19 @@ const appendComment = (target) => appendFileSync(target, "\n// cache-input-test\
 const expectChanged = (changed, expected, label) => {
 	assert.deepEqual(
 		changed,
-		expected.sort(),
-		`${label}: expected invalidation [${expected.sort().join(", ")}], got [${changed.join(", ") || "nothing"}]`,
+		[...expected].sort(),
+		`${label}: expected invalidation [${[...expected].sort().join(", ")}], got [${changed.join(", ") || "nothing"}]`,
 	)
 }
 
-test("stash commit probe rejects git failures and keeps the clean-tree fallback", () => {
-	const cleanTree = () => ({ status: 0, stdout: "" })
-	const dirtyTree = () => ({ status: 0, stdout: " M src/utils/path.ts\n" })
-	const brokenTree = () => ({ status: 128, stdout: "", stderr: "fatal: unable to read the index" })
-	const failures = [
-		{ status: 128, stdout: "", stderr: "fatal: not a git repository" },
-		{ status: null, error: new Error("spawn git ENOENT") },
-		{ status: 1, signal: "SIGTERM", stdout: "", stderr: "" },
-		{ status: 1, stdout: "unexpected output", stderr: "" },
-	]
-
-	assert.equal(stashCommit({ status: 0, stdout: "0f53a1c\n" }, cleanTree), "0f53a1c")
-	assert.equal(stashCommit({ status: 0, stdout: "\n" }, cleanTree), "HEAD")
-	assert.equal(stashCommit({ status: 1, stdout: "", stderr: "" }, cleanTree), "HEAD")
-	for (const result of failures) {
-		assert.throws(
-			() => stashCommit(result, cleanTree),
-			(error) => error.message.length > 0,
-		)
-	}
-	assert.throws(
-		() => stashCommit({ status: 1, stdout: "", stderr: "" }, dirtyTree),
-		/git status reports tracked changes/,
-	)
-	assert.throws(
-		() => stashCommit({ status: 1, stdout: "", stderr: "" }, brokenTree),
-		/fatal: unable to read the index/,
-	)
-})
-
 test("build cache input contract", async (context) => {
-	probeRoot = mkdtempSync(resolve(tmpdir(), "zoo-build-cache-probe-"))
-	let worktreeAdded = false
-	let cleaned = false
-	const cleanup = () => {
-		if (cleaned) return
-		cleaned = true
-		try {
-			if (worktreeAdded) git(["worktree", "remove", "--force", probeRoot])
-		} finally {
-			rmSync(probeRoot, { recursive: true, force: true })
-		}
-	}
-	const terminate = (signal) => {
-		cleanup()
-		process.kill(process.pid, signal)
-	}
-	const onSigint = () => terminate("SIGINT")
-	const onSigterm = () => terminate("SIGTERM")
-	process.once("SIGINT", onSigint)
-	process.once("SIGTERM", onSigterm)
-
+	const probe = createProbe()
+	probeRoot = probe.probeRoot
 	try {
-		git(["worktree", "add", "--detach", probeRoot, worktreeCommit()])
-		worktreeAdded = true
-
+		writeFileSync(resolve(probeRoot, ".env"), "CACHE_PROBE=before\n")
+		for (const file of ["README.md", "LICENSE"]) writeFileSync(resolve(probeRoot, "src", file), "cache probe\n")
+		mkdirSync(resolve(probeRoot, "src/dist"), { recursive: true })
+		writeFileSync(resolve(probeRoot, "src/dist/cache-probe.js"), "// probe\n")
 		await context.test("identical inputs keep hashes stable so reuse is permitted", () => {
 			const first = hashesOnly()
 			const second = hashesOnly()
@@ -195,17 +112,7 @@ test("build cache input contract", async (context) => {
 		await context.test("webview build and typecheck hash the shared extension source", () => {
 			const before = hashesOnly()
 			const after = withChangedFile("src/shared/package.ts", appendComment, hashesOnly)
-			expectChanged(
-				changedTasks(before, after),
-				[
-					"@roo-code/vscode-webview#build",
-					"@roo-code/vscode-webview#check-types",
-					"zoo-code#bundle",
-					"zoo-code#check-types",
-					"zoo-code#vsix",
-				],
-				"shared source edit",
-			)
+			expectChanged(changedTasks(before, after), sharedConsumers, "shared source edit")
 		})
 
 		for (const path of [
@@ -216,33 +123,14 @@ test("build cache input contract", async (context) => {
 			await context.test(`webview build and typecheck hash shared imports outside src/shared: ${path}`, () => {
 				const before = hashesOnly()
 				const after = withChangedFile(path, appendComment, hashesOnly)
-				expectChanged(
-					changedTasks(before, after),
-					[
-						"@roo-code/vscode-webview#build",
-						"@roo-code/vscode-webview#check-types",
-						"zoo-code#bundle",
-						"zoo-code#check-types",
-						"zoo-code#vsix",
-					],
-					`${path} edit`,
-				)
+				expectChanged(changedTasks(before, after), sharedConsumers, `${path} edit`)
 			})
 		}
 
 		await context.test("webview build hashes its entry HTML", () => {
 			const before = hashesOnly()
 			const after = withChangedFile("webview-ui/index.html", appendComment, hashesOnly)
-			expectChanged(
-				changedTasks(before, after),
-				[
-					"@roo-code/vscode-webview#build",
-					"@roo-code/vscode-webview#check-types",
-					"zoo-code#bundle",
-					"zoo-code#vsix",
-				],
-				"index.html edit",
-			)
+			expectChanged(changedTasks(before, after), webviewConsumers, "index.html edit")
 		})
 
 		await context.test("webview build hashes the extension package version", () => {
@@ -256,18 +144,14 @@ test("build cache input contract", async (context) => {
 				},
 				hashesOnly,
 			)
-			expectChanged(
-				changedTasks(before, after),
-				["@roo-code/vscode-webview#build", "zoo-code#bundle", "zoo-code#check-types", "zoo-code#vsix"],
-				"package version bump",
-			)
+			expectChanged(changedTasks(before, after), sharedConsumers, "package version bump")
 		})
 
 		await context.test("extension bundle hashes repo-root packaging files", () => {
 			for (const path of ["README.md", "CHANGELOG.md", "LICENSE"]) {
 				const before = hashesOnly()
 				const after = withChangedFile(path, appendComment, hashesOnly)
-				expectChanged(changedTasks(before, after), ["zoo-code#bundle", "zoo-code#vsix"], `${path} edit`)
+				expectChanged(changedTasks(before, after), bundleConsumers, `${path} edit`)
 			}
 		})
 
@@ -278,16 +162,7 @@ test("build cache input contract", async (context) => {
 				(target) => appendFileSync(target, "\0"),
 				hashesOnly,
 			)
-			expectChanged(
-				changedTasks(before, after),
-				[
-					"@roo-code/vscode-webview#build",
-					"@roo-code/vscode-webview#check-types",
-					"zoo-code#bundle",
-					"zoo-code#vsix",
-				],
-				"audio asset edit",
-			)
+			expectChanged(changedTasks(before, after), webviewConsumers, "audio asset edit")
 		})
 
 		await context.test("release and debug env inputs invalidate the builds they feed", () => {
@@ -306,6 +181,18 @@ test("build cache input contract", async (context) => {
 			)
 		})
 
+		await context.test("bundle env declarations independently include both embedded values", () => {
+			const bundle = hashes()["zoo-code#bundle"]
+			assert.deepEqual(bundle.definition.env, ["PKG_RELEASE_CHANNEL", "POSTHOG_API_KEY"])
+			const before = hashesOnly()
+			const after = hashesOnly({ ...process.env, POSTHOG_API_KEY: "cache-probe-key" })
+			expectChanged(changedTasks(before, after), bundleConsumers, "POSTHOG_API_KEY change")
+		})
+		await context.test("optional root .env is hashed", () => {
+			const before = hashesOnly()
+			const after = withChangedFile(".env", appendComment, hashesOnly)
+			expectChanged(changedTasks(before, after), bundleConsumers, ".env change")
+		})
 		await context.test("unrelated env stays out of every task hash", () => {
 			const before = hashesOnly()
 			const after = hashesOnly({ ...process.env, ZOO_UNRELATED_CACHE_PROBE: "1" })
@@ -325,28 +212,55 @@ test("build cache input contract", async (context) => {
 			}
 		})
 
-		await context.test("hashed input sets contain the corrected entries", () => {
+		await context.test("typechecks depend on the types build", () => {
 			const tasks = hashes()
-			const webviewBuildInputs = tasks["@roo-code/vscode-webview#build"].inputs
-			for (const entry of ["index.html", "vite.config.ts", "src/shared/package.ts", "src/package.json"]) {
-				if (!webviewBuildInputs.some((input) => input === entry || input.endsWith(`/${entry}`)))
-					throw new Error(`webview build does not hash ${entry}`)
-			}
-			const bundleInputs = tasks["zoo-code#bundle"].inputs
-			for (const entry of [
-				"README.md",
-				"CHANGELOG.md",
-				"LICENSE",
-				"webview-ui/audio/celebration.wav",
-				"esbuild.mjs",
-			]) {
-				if (!bundleInputs.some((input) => input === entry || input.endsWith(`/${entry}`)))
-					throw new Error(`extension bundle does not hash ${entry}`)
+			for (const name of ["zoo-code#check-types", "@roo-code/vscode-webview#check-types"]) {
+				assert.deepEqual(tasks[name].dependencies, ["@roo-code/types#build"], name)
 			}
 		})
+		await context.test("hashed input sets contain exact corrected paths", () => {
+			const tasks = hashes()
+			const required = {
+				"@roo-code/vscode-webview#build": [
+					"index.html",
+					"vite.config.ts",
+					"../src/shared/package.ts",
+					"../src/package.json",
+				],
+				"@roo-code/vscode-webview#check-types": ["../src/package.json"],
+				"zoo-code#bundle": [
+					"../README.md",
+					"../CHANGELOG.md",
+					"../LICENSE",
+					"../.env",
+					"../webview-ui/audio/celebration.wav",
+					"esbuild.mjs",
+				],
+				"zoo-code#vsix": [
+					"README.md",
+					"CHANGELOG.md",
+					"LICENSE",
+					"dist/cache-probe.js",
+					"package.nls.json",
+					"esbuild.mjs",
+				],
+			}
+			for (const [name, entries] of Object.entries(required)) {
+				const inputs = tasks[name].inputs.map((input) => input.replaceAll("\\", "/"))
+				for (const entry of entries) assert.ok(inputs.includes(entry), `${name} does not hash ${entry}`)
+			}
+			assert.deepEqual(tasks["zoo-code#bundle"].definition.outputs, [
+				// .env may contain secrets; exclude it from cached outputs before enabling a shared remote cache.
+				".env",
+				"CHANGELOG.md",
+				"LICENSE",
+				"README.md",
+				"assets/vscode-material-icons/**",
+				"dist/**",
+				"webview-ui/audio/**",
+			])
+		})
 	} finally {
-		process.off("SIGINT", onSigint)
-		process.off("SIGTERM", onSigterm)
-		cleanup()
+		probe.cleanup()
 	}
 })

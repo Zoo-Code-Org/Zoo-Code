@@ -19,7 +19,8 @@
 				"$TURBO_DEFAULT$",
 				"$TURBO_ROOT$/src/shared/**",
 				"$TURBO_ROOT$/src/core/**",
-				"$TURBO_ROOT$/src/services/**"
+				"$TURBO_ROOT$/src/services/**",
+				"$TURBO_ROOT$/src/package.json"
 			]
 		}
 	}
