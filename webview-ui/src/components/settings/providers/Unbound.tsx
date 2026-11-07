@@ -51,7 +51,7 @@ export const Unbound = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.unboundApiKey || ""}
+				value={apiConfiguration.unboundApiKey || ""}
 				type="password"
 				onInput={handleInputChange("unboundApiKey")}
 				placeholder={t("settings:providers.unboundApiKey")}

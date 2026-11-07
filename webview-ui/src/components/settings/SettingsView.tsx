@@ -89,6 +89,14 @@ import McpView from "../mcp/McpView"
 import { WorktreesView } from "../worktrees/WorktreesView"
 import { SettingsSearch } from "./SettingsSearch"
 import { useSearchIndexRegistry, SearchIndexProvider } from "./useSettingsSearch"
+import { nextSaveRequestId } from "./saveRequestId"
+
+/**
+ * How long the form waits for the host to answer a save that changes a time or date setting. The host always answers
+ * (success or failure), but a write that never settles would otherwise leave Save disabled until the webview reloads.
+ * After this the save is treated as failed: the edits stay unsaved and Save works again.
+ */
+export const SAVE_ANSWER_TIMEOUT_MS = 20_000
 
 export const settingsTabsContainer = "flex flex-1 overflow-hidden [&.narrow_.tab-label]:hidden"
 export const settingsTabList =
@@ -161,6 +169,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const submittedExperiments = useRef(new Map<ExperimentId, boolean>())
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
+	// The save waiting for the host's answer, and the form state it sent. The "unsaved changes" flag stays on until the
+	// host says it was stored, and then goes off only if the user has not edited anything since.
+	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
+	const sentState = useRef<typeof extensionState | undefined>(undefined)
+	const latestCachedState = useRef(cachedState)
+	latestCachedState.current = cachedState
 
 	const {
 		alwaysAllowReadOnly,
@@ -223,6 +237,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		openRouterImageGenerationSelectedModel,
 		reasoningBlockCollapsed,
 		chatFontSize,
+		timeFormat,
+		dateFormat,
+		showRelativeTimes,
 		enterBehavior,
 		includeCurrentTime,
 		includeCurrentCost,
@@ -232,7 +249,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedNewFiles,
 	} = cachedState
 
-	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
+	const apiConfiguration = cachedState.apiConfiguration
 
 	useEffect(() => {
 		// Update when currentApiConfigName or mode changes.
@@ -288,11 +305,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setApiConfigurationField = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K], isUserAction: boolean = true) => {
 			setCachedState((prevState) => {
-				if (prevState.apiConfiguration?.[field] === value) {
+				if (prevState.apiConfiguration[field] === value) {
 					return prevState
 				}
 
-				const previousValue = prevState.apiConfiguration?.[field]
+				const previousValue = prevState.apiConfiguration[field]
 
 				// Helper to check if two values are semantically equal
 				const areValuesEqual = (a: any, b: any): boolean => {
@@ -406,8 +423,21 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const isSettingValid = !errorMessage
 
+	// The time and date values are written one at a time on the host, and a write can fail: a save that changes one of
+	// them waits for the host's answer. Every other save behaves as it always did.
+	const displayChanged =
+		(cachedState.timeFormat ?? "auto") !== (extensionState.timeFormat ?? "auto") ||
+		(cachedState.dateFormat ?? "auto") !== (extensionState.dateFormat ?? "auto") ||
+		(cachedState.showRelativeTimes ?? true) !== (extensionState.showRelativeTimes ?? true)
+
 	const handleSubmit = () => {
 		if (isSettingValid) {
+			const saveId = displayChanged ? nextSaveRequestId() : undefined
+			if (saveId) {
+				sentState.current = cachedState
+				setPendingSaveId(saveId)
+			}
+
 			// Only experiments that actually differ from the live state are persisted, so a
 			// future default flip still reaches users who have saved other settings before.
 			const experimentChanges: Record<string, boolean> = {}
@@ -426,6 +456,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 			vscode.postMessage({
 				type: "updateSettings",
+				requestId: saveId,
 				updatedSettings: {
 					language,
 					alwaysAllowReadOnly: alwaysAllowReadOnly ?? undefined,
@@ -484,6 +515,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
+					timeFormat: timeFormat ?? "auto",
+					dateFormat: dateFormat ?? "auto",
+					showRelativeTimes: showRelativeTimes ?? true,
 					enterBehavior: enterBehavior ?? "send",
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
@@ -516,9 +550,34 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					submittedExperiments.current.set(id, submitted)
 				}
 			}
-			setChangeDetected(false)
+			// With a time or date edit the flag is cleared when the host reports the save (see below). A failed save
+			// leaves the user's edits in place to retry.
+			if (!saveId) setChangeDetected(false)
 		}
 	}
+
+	useEffect(() => {
+		if (!pendingSaveId) return
+
+		const settle = (success: boolean) => {
+			setPendingSaveId(undefined)
+			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
+			if (success && latestCachedState.current === sentState.current) setChangeDetected(false)
+		}
+
+		const onResult = (event: MessageEvent) => {
+			const message = event.data
+			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
+			settle(message.success === true)
+		}
+
+		window.addEventListener("message", onResult)
+		const timer = setTimeout(() => settle(false), SAVE_ANSWER_TIMEOUT_MS)
+		return () => {
+			clearTimeout(timer)
+			window.removeEventListener("message", onResult)
+		}
+	}, [pendingSaveId])
 
 	const checkUnsaveChanges = useCallback(
 		(then: () => void) => {
@@ -749,7 +808,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							variant={isSettingValid ? "primary" : "secondary"}
 							className={!isSettingValid ? "!border-vscode-errorForeground" : ""}
 							onClick={handleSubmit}
-							disabled={!isChangeDetected || !isSettingValid}
+							disabled={!isChangeDetected || !isSettingValid || !!pendingSaveId}
 							data-testid="save-button">
 							{t("settings:common.save")}
 						</Button>
@@ -1024,7 +1083,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 						{/* Language Section */}
 						{renderTab === "language" && (
-							<LanguageSettings language={language || "en"} setCachedStateField={setCachedStateField} />
+							<LanguageSettings
+								language={language || "en"}
+								timeFormat={timeFormat}
+								dateFormat={dateFormat}
+								showRelativeTimes={showRelativeTimes}
+								setCachedStateField={setCachedStateField}
+							/>
 						)}
 
 						{/* About Section */}
