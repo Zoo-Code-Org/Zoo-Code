@@ -211,10 +211,6 @@ export class TelemetryService {
 		})
 	}
 
-	public captureConversationMessage(taskId: string, source: "user" | "assistant"): void {
-		this.captureEvent(TelemetryEventName.TASK_CONVERSATION_MESSAGE, { taskId, source })
-	}
-
 	public captureLlmCompletion(
 		taskId: string,
 		properties: {
@@ -230,10 +226,6 @@ export class TelemetryService {
 
 	public captureModeSwitch(taskId: string, newMode: string): void {
 		this.captureEvent(TelemetryEventName.MODE_SWITCH, { taskId, newMode })
-	}
-
-	public captureToolUsage(taskId: string, tool: string): void {
-		this.captureEvent(TelemetryEventName.TOOL_USED, { taskId, tool })
 	}
 
 	public captureCheckpointCreated(taskId: string): void {
