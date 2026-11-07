@@ -48,6 +48,17 @@ const differingProfileKeys = (a: Record<string, unknown>, b: Record<string, unkn
 		.filter((key) => !deepEqual(a[key], b[key]))
 		.sort()
 
+// Used when the stored record cannot be read back: the payload is then the only content this call
+// can point at, so ownership is judged on the settings keys it supplied that the stored record also
+// carries. Keys the profile schema strips are absent from the record and drop out; id and name are
+// meta rather than settings, and a save over an existing name inherits the id, not the content.
+const payloadKeyDifferences = (payload: Record<string, unknown>, record: Record<string, unknown>): string[] => {
+	const carried = new Set(Object.keys(record).filter((key) => key !== "id" && key !== "name"))
+	return Object.keys(payload)
+		.filter((key) => key !== "id" && key !== "name" && carried.has(key) && !deepEqual(payload[key], record[key]))
+		.sort()
+}
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
@@ -676,8 +687,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		const savedProfileName = values.currentApiConfigName || "default"
 		const manager = this.sidebarProvider.providerSettingsManager
 		// The payload may carry machine-local state this call does not own (the host-owned viewStates
-		// map above all): the forward write and the rollback below both filter it out, using the same
-		// list the export schema and the import path consult (NON_PORTABLE_SETTINGS_KEYS).
+		// map above all): the forward write and the rollback below both filter it out with the shared
+		// NON_PORTABLE_SETTINGS_KEYS, which the settings import path consults as well. The export
+		// schema omits viewStates in its own omit list, so a key added here has to be added there.
 		const forwardValues: RooCodeSettings = Object.fromEntries(
 			Object.entries(values).filter(([key]) => !isNonPortableSettingsKey(key)),
 		)
@@ -737,14 +749,55 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				// legacy fields. The record this call owns is therefore the stored one, not the caller
 				// payload, so read it back inside this same section - getProfile takes only the inner
 				// per-instance lock, so the hold lengthens by one read and nothing re-joins the queue -
-				// and destructure it here so the snapshot is a copy rather than a view of the store.
-				const {
-					name: _savedName,
-					id: _savedId,
-					...savedSettings
-				} = await manager.getProfile({
-					name: savedProfileName,
-				})
+				// and destructure it below so the snapshot is a copy rather than a view of the store.
+				// The read is wrapped because it is the only step that can fail after the write landed:
+				// a failing secrets storage read used to reject the section with the record already
+				// written and no compensation, while the shared settings and mode mappings never ran.
+				let savedRecord: Awaited<ReturnType<typeof manager.getProfile>>
+				try {
+					savedRecord = await manager.getProfile({ name: savedProfileName })
+				} catch (readError) {
+					// Undo while the section is still held, then rethrow so the caller still sees the read
+					// failure. Restoring the prior record is safe on content: this call read that record in
+					// here before overwriting it. Deleting the record this call created is not, because the
+					// read that would have proved it is the read that failed. Re-read once and delete only
+					// when the record still carries the id this call received and none of the settings this
+					// payload supplied changed: a matching id is necessary but not sufficient, since
+					// saveConfig keeps the id of the record it overwrote and a writer that saved over this
+					// name inherited it. If the record cannot be read at all it is kept - a leftover record
+					// costs less than deleting another view write on a guess.
+					try {
+						if (existed && priorRecord) {
+							const { name: _undoName, id: _undoId, ...previousSettings } = priorRecord
+							await manager.saveConfig(savedProfileName, previousSettings)
+						} else if (!existed) {
+							const currentRecord = await manager.getProfile({ name: savedProfileName })
+							const { name: _currentName, id: _currentId, ...currentSettings } = currentRecord
+							const differingKeys = payloadKeyDifferences(values, currentSettings).join(", ")
+							if (currentRecord.id !== id) {
+								this.log(
+									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed ` +
+										`read-back: it now carries id '${currentRecord.id}', not this call '${id}'.`,
+								)
+							} else if (differingKeys) {
+								this.log(
+									`[setConfiguration] kept the profile record '${savedProfileName}' after a failed ` +
+										`read-back: another view wrote it (keys: ${differingKeys}).`,
+								)
+							} else {
+								await manager.deleteConfig(savedProfileName)
+							}
+						}
+					} catch (undoError) {
+						this.log(
+							`[setConfiguration] failed to undo the profile write after a failed read-back of ` +
+								`'${savedProfileName}': ` +
+								(undoError instanceof Error ? undoError.message : String(undoError)),
+						)
+					}
+					throw readError
+				}
+				const { name: _savedName, id: _savedId, ...savedSettings } = savedRecord
 				return {
 					recordExisted: existed,
 					previousRecord: priorRecord,

@@ -294,6 +294,274 @@ describe("API - configuration", () => {
 		})
 	})
 
+	it("restores the prior record when the read-back after the save fails", async () => {
+		const store = makeProfileStoreDouble({
+			pinned: { id: "pinned-id", settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "before" } },
+		})
+		const { saveConfig, deleteConfig, hasConfig } = store
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		// The first read is the prior-record read the section runs before the save. The second is the
+		// read-back after the save, and that is the one the failing secrets storage read hits.
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 2) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			return store.getProfile({ name })
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const appendLine = vi.fn()
+		const outputChannel = { appendLine } as unknown as vscode.OutputChannel
+		// Logging is on so the rollback decisions are asserted through the output channel rather than
+		// inferred from silence.
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		// The failed read rejects the section, so the compensation that runs after a failed settings write
+		// never starts: the record has to come back inside the section itself. The restore is named by its
+		// whole argument list, because not.toHaveBeenCalledWith compares the way toEqual does and ignores
+		// undefined-valued keys, so it would pass on a partial or differently shaped argument.
+		expect(saveConfig.mock.calls.at(-1)).toEqual([
+			"pinned",
+			{ apiProvider: providerIdentifiers.anthropic, apiKey: "before" },
+		])
+		expect(store.entries.get("pinned")).toEqual({
+			id: "pinned-id",
+			settings: { apiProvider: providerIdentifiers.anthropic, apiKey: "before" },
+		})
+		// Nothing after the section ran: the shared settings, the mode mappings and the refresh are still
+		// at their pre-call state, which is why the record could not simply be left behind.
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(setValues.mock.calls).toEqual([])
+		expect(setProviderSettings.mock.calls).toEqual([])
+		expect(setModeConfig.mock.calls).toEqual([])
+		expect(postStateToWebview.mock.calls).toEqual([])
+	})
+
+	it("deletes the record this call created when the read-back after the save fails", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig } = store
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		// The name did not exist, so there is no prior-record read: the read-back is the first read, and
+		// the undo path re-reads once before it is willing to delete.
+		let reads = 0
+		const getProfile = vi.fn(({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 1) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			return store.getProfile({ name })
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const appendLine = vi.fn()
+		const outputChannel = { appendLine } as unknown as vscode.OutputChannel
+		// Logging is on so the rollback decisions are asserted through the output channel rather than
+		// inferred from silence.
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		// The record this call created is the record this call may remove, so the store ends exactly as it
+		// began: without the name. The delete is named by its whole argument list.
+		expect(deleteConfig.mock.calls).toEqual([["pinned"]])
+		expect(store.entries.has("pinned")).toBe(false)
+		expect(saveConfig.mock.calls.length).toBe(1)
+		expect(setValues.mock.calls).toEqual([])
+		expect(setModeConfig.mock.calls).toEqual([])
+	})
+
+	it("keeps a record another view rewrote under the created id when the read-back fails", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig } = store
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		// A writer that saves over the name inherits the id this call created, because saveConfig keeps
+		// the id of the record it overwrote, so the re-read in the undo path has to judge content.
+		let reads = 0
+		const getProfile = vi.fn(async ({ name }: { name: string }) => {
+			reads += 1
+			if (reads === 1) {
+				return Promise.reject(new Error("secrets storage read failed"))
+			}
+			if (reads === 2) {
+				await saveConfig("pinned", { apiProvider: providerIdentifiers.openrouter, apiKey: "another-view" })
+			}
+			return store.getProfile({ name })
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const appendLine = vi.fn()
+		const outputChannel = { appendLine } as unknown as vscode.OutputChannel
+		// Logging is on so the rollback decisions are asserted through the output channel rather than
+		// inferred from silence.
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(store.entries.get("pinned")?.settings).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "another-view",
+		})
+		const logged = appendLine.mock.calls.map((args: unknown[]) => String(args[0])).join("\n")
+		expect(logged).toContain("after a failed read-back: another view wrote it (keys: apiKey)")
+	})
+
+	it("keeps the created record when the read-back failure leaves nothing to judge it by", async () => {
+		const store = makeProfileStoreDouble()
+		const { saveConfig, deleteConfig, hasConfig } = store
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		// Both the read-back and the undo re-read fail, so this call never learns what the record holds.
+		const getProfile = vi.fn(() => Promise.reject(new Error("secrets storage read failed")))
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const appendLine = vi.fn()
+		const outputChannel = { appendLine } as unknown as vscode.OutputChannel
+		// Logging is on so the rollback decisions are asserted through the output channel rather than
+		// inferred from silence.
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "after",
+			}),
+		).rejects.toThrow("secrets storage read failed")
+
+		// A record that cannot be read cannot be proved to be this call write, and the id is not evidence
+		// either, so it is kept: a leftover record costs less than deleting another view write on a guess,
+		// which is the rule the existence read above the section already follows.
+		expect(deleteConfig.mock.calls).toEqual([])
+		expect(store.entries.get("pinned")?.settings).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "after",
+		})
+		const logged = appendLine.mock.calls.map((args: unknown[]) => String(args[0])).join("\n")
+		expect(logged).toContain("failed to undo the profile write after a failed read-back")
+	})
+
 	it("keeps a record another view rewrote under the id this call created", async () => {
 		// This call creates the name, so the id check is the only guard the delete leg had. It is not
 		// enough: saveConfig keeps the id of the record it overwrote, so a view that saved over the
@@ -665,9 +933,10 @@ describe("API - configuration", () => {
 		// the pre-call snapshot each carry a viewStates map: the forward write would pin other
 		// views where this caller found them, and the replay would roll them back to where this
 		// call found them. Both are machine-local host state, excluded by
-		// NON_PORTABLE_SETTINGS_KEYS - the same list the export and import paths use, and the
-		// list #2226 filters the read side with. getValues() itself keeps the key: the host's
-		// own consumers still need it.
+		// NON_PORTABLE_SETTINGS_KEYS, the shared list the settings import path consults as well; the
+		// export schema omits viewStates in its own omit list, and #2226 filters the read side with
+		// the shared list. getValues() itself keeps the key: the host's own consumers still
+		// need it.
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		// The store double keeps the compensation re-read honest: this call creates the record, so
 		// the re-read inside the critical section must find it rather than repeat the pre-call answer.

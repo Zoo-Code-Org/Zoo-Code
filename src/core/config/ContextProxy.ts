@@ -75,8 +75,9 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 /**
  * Global settings the API round trip may not carry in either direction. Per-view selections
  * are minted and held by the extension host - they name a view, not a user - so a caller that
- * could write them could pin another view's identity. The export schema above omits the key;
- * the API surface consults this list on both of its settings writes.
+ * could write them could pin another view's identity. The API surface consults this list on both
+ * of its settings writes and the settings import path consults it too; the export schema
+ * above omits the key in its own omit list, so a key added here must be added there as well.
  */
 const NON_PORTABLE_SETTINGS_KEYS: readonly string[] = ["viewStates"]
 

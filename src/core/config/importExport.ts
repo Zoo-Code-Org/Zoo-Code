@@ -17,7 +17,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
-import { ContextProxy } from "./ContextProxy"
+import { ContextProxy, isNonPortableSettingsKey } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -100,10 +100,11 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
 
-		// Per-view selection state is machine-local: it round-trips through the
-		// normal runtime and pruning paths, but importing it would pin selections
-		// from another machine's views on this one.
-		if (key === "viewStates") {
+		// Machine-local state is not portable between settings files: it round-trips through
+		// the normal runtime and pruning paths, but importing it would pin the view selections
+		// of another machine onto this one. The shared filter is the list the API surface consults
+		// too, so a key added there is skipped here without a second edit.
+		if (isNonPortableSettingsKey(key)) {
 			continue
 		}
 
