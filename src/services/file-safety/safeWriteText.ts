@@ -10,13 +10,27 @@ import { execFile } from "child_process"
 // transient EBUSY or a scanner holding the file does not leave the backup in the workspace for good.
 const PENDING_BACKUP_REMOVALS = new Set<string>()
 
+function _errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? (error as { code?: string }).code
+		: undefined
+}
+
 async function _removeBackupWithRetry(backupPath: string, attempts = 3): Promise<boolean> {
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		try {
 			await fs.unlink(backupPath)
 			PENDING_BACKUP_REMOVALS.delete(backupPath)
 			return true
-		} catch {
+		} catch (error: unknown) {
+			// A backup that is already gone is the outcome this cleanup was after: someone deleted
+			// the retained file, or a second flush is iterating a snapshot of the set that another
+			// flush has already cleared. Treating that as work retries a file that cannot come back
+			// and re-adds its path, so every later write pays the retry sleeps on it.
+			if (_errorCode(error) === "ENOENT") {
+				PENDING_BACKUP_REMOVALS.delete(backupPath)
+				return true
+			}
 			if (attempt < attempts - 1) {
 				await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)))
 			}
@@ -343,11 +357,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
-					const code =
-						typeof err === "object" && err !== null && "code" in err
-							? (err as { code?: string }).code
-							: undefined
-					if (code !== "ENOENT") throw err
+					if (_errorCode(err) !== "ENOENT") throw err
 				}
 			}
 

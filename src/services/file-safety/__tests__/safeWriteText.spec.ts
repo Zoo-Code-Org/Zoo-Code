@@ -54,6 +54,15 @@ function _stagingDir(dir: string): string {
 }
 
 // Minimal Stats stand-in: the SUT only reads `.mode` from it.
+// Counts unlinks that targeted a backup path, so a retry loop cannot hide inside a
+// total unlink count that also covers the staging temp and the DACL dump.
+function _backupUnlinkCalls(): number {
+	return vi
+		.mocked(fs.unlink)
+		.mock.calls.map(([candidate]) => String(candidate))
+		.filter((candidate) => candidate.includes("safeWriteText.bak_")).length
+}
+
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
 	Object.assign(s, { mode })
@@ -273,6 +282,60 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.unlink).mockResolvedValue(undefined)
 			await expect(flushPendingBackupRemovals()).resolves.toBe(1)
 		})
+		it("treats a backup that is already gone as removed rather than re-registering it for every later write", async () => {
+			const targetPath = "/tmp/test-dir/enoent-target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The backup disappears between the commit and the cleanup, so every unlink reports
+			// ENOENT - the outcome the cleanup was after. Retrying it treats a missing file as
+			// work, and the 25 + 50 ms of retry sleep is then paid on every later write, because
+			// safeWriteText flushes the pending set before it does anything else.
+			vi.mocked(fs.unlink).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+
+			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
+
+			// One attempt on the backup, not three.
+			expect(_backupUnlinkCalls()).toBe(1)
+			// Nothing is left pending: an already-removed backup is done, not owed.
+			await expect(flushPendingBackupRemovals()).resolves.toBe(0)
+
+			// A later write to the same target attempts its own cleanup once and never revisits
+			// the path that is already gone.
+			await safeWriteText(targetPath, "data2", { backup: true, platform: "linux" })
+			expect(_backupUnlinkCalls()).toBe(2)
+		})
+
+		it("does not re-register a backup path that a concurrent flush already removed", async () => {
+			const targetPath = "/tmp/test-dir/race-target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// A scanner holds the backup for the whole write, so the path is retained at the end
+			// of step 6 - the state two flushes can then race over.
+			vi.mocked(fs.unlink).mockRejectedValue(new Error("EBUSY"))
+			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
+
+			// Two flushes iterate the same snapshot of the pending set. The first unlink succeeds
+			// and removes the file, so every attempt the losing flush makes afterwards reports
+			// ENOENT for a path it is still holding in its own iteration.
+			let unlinkAttempts = 0
+			vi.mocked(fs.unlink).mockImplementation(async () => {
+				unlinkAttempts += 1
+				if (unlinkAttempts === 1) {
+					return undefined
+				}
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			})
+			const cleared = await Promise.all([flushPendingBackupRemovals(), flushPendingBackupRemovals()])
+			expect(cleared).toEqual([1, 1])
+
+			// The path must not be back in the set: with unlink working again there is nothing
+			// left for a later write to clear.
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			await expect(flushPendingBackupRemovals()).resolves.toBe(0)
+		})
+
 		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
