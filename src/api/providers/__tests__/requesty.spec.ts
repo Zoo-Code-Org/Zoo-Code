@@ -1444,6 +1444,47 @@ describe("RequestyHandler", () => {
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
 		})
+
+		it("reports the abort contract when a lookup failure races the caller abort", async () => {
+			// Discriminates the guard in the completePrompt catch: the lookup fails for a real
+			// reason (name Error, message not an abort shape) and the caller signal fires one
+			// microtask later. The shared lookup helper runs its own abort check first, sees a
+			// not-yet-aborted signal and rethrows the genuine failure; the provider catch then
+			// sees the aborted signal and must normalize to the Task.ts abort contract. The
+			// abort is scheduled from the first property read of the failure object, which
+			// happens inside that helper check, so it lands after the helper check and before
+			// this catch resumes. No timers and no sleeps are involved.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			let abortScheduled = false
+			class LookupFailure extends Error {
+				override get name(): string {
+					if (!abortScheduled) {
+						abortScheduled = true
+						void Promise.resolve().then(() => {
+							controller.abort()
+						})
+					}
+					return "Error"
+				}
+				override get message(): string {
+					return "catalog request failed"
+				}
+			}
+			vitest.mocked(getModels).mockRejectedValueOnce(new LookupFailure())
+
+			const outcome: unknown = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.then(
+					(value): unknown => value,
+					(caught: unknown): unknown => caught,
+				)
+			if (!(outcome instanceof Error)) {
+				throw new Error("expected the abort contract to reject with an Error, got " + typeof outcome)
+			}
+			expect(outcome.name).toBe("AbortError")
+			expect(outcome.message).toBe("The Requesty request was aborted")
+		})
 		it("should pass abort signal through to client", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
@@ -1601,7 +1642,7 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
-		it("rethrows non-abort model lookup failures from completePrompt", async () => {
+		it("rethrows non-abort model lookup outcomes from completePrompt", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")
 			const lookupError = new Error("lookup failed")
@@ -1612,7 +1653,7 @@ describe("RequestyHandler", () => {
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("lookup failed")
 		})
 
-		it("normalizes raw AbortError lookup failures to the provider AbortError", async () => {
+		it("normalizes raw AbortError lookup outcomes to the provider AbortError", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")
 			const rawAbort = new Error("The user aborted a request")
