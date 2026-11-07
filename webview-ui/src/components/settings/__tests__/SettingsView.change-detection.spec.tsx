@@ -472,7 +472,7 @@ describe("SettingsView - Change Detection Fix", () => {
 
 	it("should not show unsaved changes when no changes are made", async () => {
 		const onDone = vi.fn()
-		;(useExtensionState as any).mockReturnValue(createExtensionState())
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue(createExtensionState())
 
 		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
@@ -497,7 +497,7 @@ describe("SettingsView - Change Detection Fix", () => {
 	}, 10000)
 
 	it("persists a normalized reasoning default through Save", async () => {
-		;(useExtensionState as any).mockReturnValue(createExtensionState())
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue(createExtensionState())
 
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
@@ -544,7 +544,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			},
 		})
 
-		;(useExtensionState as any).mockImplementation(() => extensionState)
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 		const { rerender } = renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
@@ -580,7 +580,7 @@ describe("SettingsView - Change Detection Fix", () => {
 					basetenApiKey: "test-baseten-key",
 				},
 			})
-			;(useExtensionState as any).mockImplementation(() => extensionState)
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 			rerender(<SettingsView onDone={onDone} />)
 		})
@@ -615,7 +615,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			},
 		})
 
-		;(useExtensionState as any).mockImplementation(() => extensionState)
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 		const { rerender } = renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
@@ -635,7 +635,7 @@ describe("SettingsView - Change Detection Fix", () => {
 					basetenApiKey: "imported-baseten-key",
 				},
 			})
-			;(useExtensionState as any).mockImplementation(() => extensionState)
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 			rerender(<SettingsView onDone={onDone} />)
 		})
@@ -660,7 +660,7 @@ describe("SettingsView - Change Detection Fix", () => {
 				},
 			})
 
-			;(useExtensionState as any).mockImplementation(() => extensionState)
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 			const { rerender } = renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
@@ -720,7 +720,7 @@ describe("SettingsView - Change Detection Fix", () => {
 						apiModelId: "friendli-model",
 					},
 				})
-				;(useExtensionState as any).mockImplementation(() => extensionState)
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 				rerender(<SettingsView onDone={onDone} />)
 			})
@@ -743,7 +743,7 @@ describe("SettingsView - Change Detection Fix", () => {
 				},
 			})
 
-			;(useExtensionState as any).mockImplementation(() => extensionState)
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 			const { rerender } = renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
@@ -766,7 +766,7 @@ describe("SettingsView - Change Detection Fix", () => {
 						apiModelId: "gpt-4.1",
 					},
 				})
-				;(useExtensionState as any).mockImplementation(() => extensionState)
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
 
 				rerender(<SettingsView onDone={onDone} />)
 			})
@@ -774,5 +774,110 @@ describe("SettingsView - Change Detection Fix", () => {
 			// Provider value should remain unchanged from the dirty state
 			expect(screen.getByTestId("provider-value")).toHaveTextContent("baseten")
 		}, 20000)
+	})
+
+	describe("command-list refresh while the dialog is open", () => {
+		it("merges an externally added deny entry into the buffer before a later save", async () => {
+			let extensionState = createExtensionState({ deniedCommands: [] })
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
+
+			const { rerender } = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+			// Buffer an unrelated edit so a Save happens later in this dialog session.
+			fireEvent.click(screen.getByTestId("set-provider-baseten"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			// A deny entry lands externally while the dialog is open.
+			await act(async () => {
+				extensionState = createExtensionState({ deniedCommands: ["rm -rf"] })
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
+				rerender(<SettingsView onDone={vi.fn()} />)
+			})
+			await act(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 0))
+			})
+
+			// Save must submit the list that includes the entry the dialog now displays, not the
+			// stale one captured when the dialog opened.
+			fireEvent.click(screen.getByTestId("save-button"))
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ deniedCommands: ["rm -rf"] }),
+				}),
+			)
+		}, 10000)
+
+		it("baselines the save on the post-merge lists, not the lists shown when the dialog opened", async () => {
+			let extensionState = createExtensionState({ deniedCommands: [] })
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
+
+			const { rerender } = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+			// Buffer an unrelated edit so a Save happens later in this dialog session.
+			fireEvent.click(screen.getByTestId("set-provider-baseten"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			// A deny entry lands externally and the merge puts it into the displayed lists.
+			await act(async () => {
+				extensionState = createExtensionState({ deniedCommands: ["rm -rf"] })
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
+				rerender(<SettingsView onDone={vi.fn()} />)
+			})
+			await act(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 0))
+			})
+
+			// The baseline must be the list the dialog NOW displays (post-merge), so the
+			// merge's entry counts as shown - not the empty list present when the dialog
+			// opened, which would make the merge's own entry look externally added.
+			fireEvent.click(screen.getByTestId("save-button"))
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					commandListBaseline: { allowedCommands: [], deniedCommands: ["rm -rf"] },
+				}),
+			)
+		}, 10000)
+
+		it("merges without clearing unsaved changes when the command-list state flips externally", async () => {
+			let extensionState = createExtensionState()
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
+
+			const { rerender } = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+			// Buffer an edit that touches neither command list, so the dialog is dirty.
+			fireEvent.click(screen.getByTestId("set-provider-baseten"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			// One state post flips the workspace command-list gate and adds a deny entry, which is
+			// what enabling the gate does: workspace entries become part of the displayed lists.
+			await act(async () => {
+				extensionState = createExtensionState({
+					deniedCommands: ["git push"],
+					workspaceCommandListsEnabled: true,
+				})
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockImplementation(() => extensionState)
+				rerender(<SettingsView onDone={vi.fn()} />)
+			})
+			await act(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 0))
+			})
+
+			// The merge must not clear the dirty flag or discard the buffered provider edit...
+			expect(screen.getByTestId("provider-value")).toHaveTextContent("baseten")
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			// ...while the flip's list change still reaches the buffer and the next Save.
+			fireEvent.click(screen.getByTestId("save-button"))
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ deniedCommands: ["git push"] }),
+				}),
+			)
+		}, 10000)
 	})
 })

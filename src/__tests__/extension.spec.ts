@@ -22,6 +22,7 @@ vi.mock("vscode", () => ({
 		registerTextDocumentContentProvider: vi.fn(),
 		getConfiguration: vi.fn().mockReturnValue({
 			get: vi.fn().mockReturnValue([]),
+			inspect: vi.fn(),
 		}),
 		createFileSystemWatcher: vi.fn().mockReturnValue({
 			onDidCreate: vi.fn(),
@@ -228,15 +229,17 @@ vi.mock("../api/providers/fetchers/modelCache", () => ({
 
 describe("extension.ts", () => {
 	let mockContext: vscode.ExtensionContext
+	let globalStateValues: Map<string, unknown>
 	let settingsUpdatedHandler: ((data: Record<string, never>) => void | Promise<void>) | undefined
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 
+		globalStateValues = new Map<string, unknown>()
 		mockContext = {
 			extensionPath: "/test/path",
 			globalState: {
-				get: vi.fn().mockReturnValue(undefined),
+				get: vi.fn((key: string) => globalStateValues.get(key)),
 				update: vi.fn(),
 			},
 			subscriptions: [],
@@ -534,6 +537,80 @@ describe("extension.ts", () => {
 		await activate(mockContext)
 
 		expect(dotenv.config).toHaveBeenCalledTimes(1)
+	})
+
+	describe("allowedCommands activation seeding", () => {
+		function setConfigScope(
+			vscode: typeof import("vscode"),
+			scope: { globalValue?: string[]; workspaceValue?: string[] },
+		) {
+			const { globalValue, workspaceValue } = scope
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				// Key-scoped so proxy/other activation reads still see no value.
+				get: vi.fn((key: string) =>
+					key === "allowedCommands" ? [...(globalValue ?? []), ...(workspaceValue ?? [])] : undefined,
+				),
+				inspect: vi.fn().mockReturnValue({
+					key: "allowedCommands",
+					// Real inspect() always reports the declared package default;
+					// including it here lets the workspace-override test prove the
+					// default stays unseeded beside an override, not just absent.
+					defaultValue: ["git log", "git diff", "git show"],
+					globalValue,
+					workspaceValue,
+				}),
+				update: vi.fn(),
+				// The double scripts key-scoped get() and per-scope inspect()
+				// shapes the shared helper cannot express without obscuring them.
+			} as unknown as vscode.WorkspaceConfiguration)
+		}
+
+		beforeEach(() => {
+			vi.resetModules()
+		})
+
+		afterEach(async () => {
+			const vscode = await import("vscode")
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+				get: vi.fn().mockReturnValue([]),
+				inspect: vi.fn(),
+				// Restores the neutral default after the scope fixtures above;
+				// update is intentionally absent because no test runs after this.
+			} as unknown as vscode.WorkspaceConfiguration)
+		})
+
+		test("does not seed global state from a workspace-scoped override", async () => {
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { workspaceValue: ["docker"] })
+
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("allowedCommands", expect.anything())
+			expect(globalStateValues.get("allowedCommands")).toBeUndefined()
+		})
+
+		test("seeds global state from the user-scoped value when it is empty", async () => {
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"] })
+
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("allowedCommands", ["git"])
+		})
+
+		test("does not overwrite global state that is already populated", async () => {
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"] })
+			globalStateValues.set("allowedCommands", ["npm"])
+
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("allowedCommands", expect.anything())
+			expect(globalStateValues.get("allowedCommands")).toEqual(["npm"])
+		})
 	})
 
 	describe("cloud organization settings handling", () => {
