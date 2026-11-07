@@ -3375,6 +3375,68 @@ describe("ClineProvider", () => {
 		releaseAck()
 	})
 
+	const webviewOutPhases = (type: string, action?: string) =>
+		provider
+			.getDiagnosticsSnapshot()
+			.events.filter(
+				(event) => event.boundary === "webview-out" && event.type === type && event.action === action,
+			)
+			.map((event) => event.phase)
+
+	test("postMessageToWebview records the delivery outcome when the ack settles, not in the caller's path", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		let releaseAck!: (delivered: boolean) => void
+		const ack = new Promise<boolean>((resolve) => {
+			releaseAck = resolve
+		})
+		mockPostMessage.mockImplementationOnce(() => ack)
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await provider.postMessageToWebview(message)
+
+		// The caller is already back while the renderer ack is still outstanding, so only the start
+		// event may exist: an outcome recorded at this point would mean the caller awaited the ack.
+		expect(webviewOutPhases("action", "chatButtonClicked")).toEqual(["start"])
+
+		// This continuation attaches after the recorder's handler on the same promise, so by the
+		// time it runs the outcome has been recorded.
+		releaseAck(true)
+		await ack
+
+		expect(webviewOutPhases("action", "chatButtonClicked")).toEqual(["start", "success"])
+	})
+
+	test("postMessageToWebview records a failure outcome when the webview post rejects", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockRejectedValueOnce(new Error("Webview is disposed"))
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+
+		await vi.waitFor(() => expect(webviewOutPhases("action", "chatButtonClicked")).toEqual(["start", "failure"]))
+	})
+
+	test("postMessageToWebview records a failure outcome when the ack says the page did not take the message", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		mockPostMessage.mockResolvedValueOnce(false)
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+
+		await vi.waitFor(() => expect(webviewOutPhases("action", "chatButtonClicked")).toEqual(["start", "failure"]))
+	})
+
+	test("postMessageToWebview records a failure outcome when no webview is attached", async () => {
+		provider["view"] = undefined
+
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+
+		expect(webviewOutPhases("action", "chatButtonClicked")).toEqual(["start", "failure"])
+		expect(mockPostMessage).not.toHaveBeenCalled()
+	})
+
 	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 

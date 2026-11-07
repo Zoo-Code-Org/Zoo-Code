@@ -2419,12 +2419,13 @@ export class ClineProvider
 	public async postMessageToWebview(message: ExtensionMessage) {
 		const startedAt = Date.now()
 		const taskId = this.getCurrentTask()?.taskId
+		const stateSequence = message.type === "state" ? message.state?.clineMessagesSeq : undefined
 		this.diagnosticsRecorder.record({
 			boundary: "webview-out",
 			phase: "start",
 			type: message.type,
 			action: message.action,
-			stateSequence: message.type === "state" ? message.state?.clineMessagesSeq : undefined,
+			stateSequence,
 			taskId,
 		})
 		if (this._disposed) {
@@ -2434,6 +2435,7 @@ export class ClineProvider
 				type: message.type,
 				action: message.action,
 				elapsedMs: Date.now() - startedAt,
+				stateSequence,
 				taskId,
 			})
 			return
@@ -2441,6 +2443,15 @@ export class ClineProvider
 
 		const webview = this.view?.webview
 		if (!webview) {
+			this.diagnosticsRecorder.record({
+				boundary: "webview-out",
+				phase: "failure",
+				type: message.type,
+				action: message.action,
+				elapsedMs: Date.now() - startedAt,
+				stateSequence,
+				taskId,
+			})
 			return
 		}
 
@@ -2449,15 +2460,39 @@ export class ClineProvider
 		// orphans that promise forever. Awaiting it could wedge every caller on the task critical
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
-		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch((error) => {
-			// Swallow: postMessage rejects when the webview is disposed in flight.
-			// Log the dropped message type so a wedged webview channel is diagnosable
-			// instead of silently losing state updates.
-			this.log(
-				`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
-			)
-		})
+		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the handlers.
+		// The delivery outcome is recorded on the settlement of the promise already in hand -
+		// postMessage resolves with whether the page took the message, so an undelivered or
+		// rejected post still leaves an outcome in diagnostics without the caller waiting for it.
+		void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message)))
+			.then((delivered) => {
+				this.diagnosticsRecorder.record({
+					boundary: "webview-out",
+					phase: delivered ? "success" : "failure",
+					type: message.type,
+					action: message.action,
+					elapsedMs: Date.now() - startedAt,
+					stateSequence,
+					taskId,
+				})
+			})
+			.catch((error) => {
+				// Swallow: postMessage rejects when the webview is disposed in flight.
+				// Record the failure and log the dropped message type so a wedged webview channel
+				// is diagnosable instead of silently losing state updates.
+				this.diagnosticsRecorder.record({
+					boundary: "webview-out",
+					phase: "failure",
+					type: message.type,
+					action: message.action,
+					elapsedMs: Date.now() - startedAt,
+					stateSequence,
+					taskId,
+				})
+				this.log(
+					`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
