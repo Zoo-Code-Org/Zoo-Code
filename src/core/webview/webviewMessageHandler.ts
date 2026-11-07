@@ -593,7 +593,20 @@ export const webviewMessageHandler = async (
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
 			}
 			break
-		case "webviewDidLaunch":
+		case "webviewDidLaunch": {
+			// A failed view-state registration must not abort launch handling: the
+			// initial state, theme and API-configuration sync below still run, and the
+			// provider restores its previous viewStateId on failure (setViewStateId) so
+			// a later launch retries registration and loadViewState instead of
+			// treating the failed id as already handled.
+			try {
+				await provider.setViewStateId(message.viewStateId)
+			} catch (error) {
+				provider.log(
+					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -642,17 +655,70 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					const currentConfigName = getGlobalState("currentApiConfigName")
+					const currentState = await provider.getState()
+					const currentConfigName = currentState.currentApiConfigName
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
-							// Current config name not valid, get first config in list.
+							// The merged name (which may be this view's durable pin) no longer
+							// resolves. When the shared global selection is still valid, re-pin
+							// only this view so the global selection is left untouched; only
+							// repair the global when it is invalid as well.
+							const globalConfigName = getGlobalState("currentApiConfigName")
+							const globalStillValid =
+								!!globalConfigName &&
+								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
-							await updateGlobalState("currentApiConfigName", name)
 
-							if (name) {
-								await provider.activateProviderProfile({ name })
-								return
+							if (globalStillValid && globalConfigName) {
+								// Re-pin this view to the still-valid shared global selection (not the
+								// first listed profile) so the view adopts the shared choice; the
+								// global selection itself is left untouched.
+								// Seed the pinned profile's snapshot instead of only clearing the buffer: a view whose
+								// overlay carries a name but no apiConfiguration resolves that field from the shared
+								// ContextProxy - getState merges viewLocalState over it at ClineProvider.ts:4913 - so the
+								// view would show its own pin while running whatever profile the shared store names next.
+								// The snapshot is taken the way loadViewState takes it (ClineProvider.ts:1137-1140): the
+								// stored record without its name.
+								// Seed before the pin write. A seed write that fails leaves the pin unwritten, so the
+								// invalid selection stays retryable on the next launch, and a seed that lands while the
+								// pin write fails leaves the view holding the settings of the profile it is about to be
+								// pinned to rather than the missing profile's stale buffer.
+								let seedSettings: ProviderSettings | undefined
+								try {
+									const { name: _seedProfileName, ...seedProfile } =
+										await provider.providerSettingsManager.getProfile({
+											name: globalConfigName,
+										})
+									seedSettings = seedProfile as ProviderSettings
+								} catch (error) {
+									// The record can vanish between the hasConfig check above and this read. Fall back to
+									// an empty overlay - what a re-pin left before the seed existed - so the pin write
+									// still lands instead of the whole repair being lost to this error.
+									provider.log(
+										`[webviewDidLaunch] Seed read failed for "${globalConfigName}"; re-pinning without a settings snapshot: ${String(error)}`,
+									)
+								}
+								// The durable view entry carries only mode and currentApiConfigName (see
+								// _persistViewLocalStateFromMutation), so this seed is an in-memory overlay write; the
+								// pin below is what persists.
+								await provider.saveViewState("apiConfiguration", seedSettings)
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The repair changes what this view resolves to, so the state has to be posted: the
+								// two writes above update provider state without posting it, and the listApiConfig
+								// message below carries the profile list only, so without this the webview keeps
+								// rendering the profile that no longer resolves until another message arrives.
+								await provider.postStateToWebview()
+								// Fall through: refresh listApiConfigMeta and post listApiConfig
+								// to this webview below.
+							} else {
+								// Current config name not valid, get first config in list.
+								await updateGlobalState("currentApiConfigName", name)
+
+								if (name) {
+									await provider.activateProviderProfile({ name })
+									return
+								}
 							}
 						}
 					}
@@ -702,6 +768,7 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		}
 		case "webviewHeartbeat":
 			// Confirm renderer liveness and advance the watchdog recovery health window.
 			provider.updateWebviewHeartbeat()
@@ -777,6 +844,14 @@ export const webviewMessageHandler = async (
 					// An invalid display value is ignored, before anything is done for it.
 					if (isInvalidDisplayValue(key, value)) {
 						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
+					// viewStates is server-owned per-view persistence (identity pins and
+					// loaded-profile overlays). The settings UI never puts it into
+					// updatedSettings, so a crafted renderer payload must not be able to
+					// rewrite the whole map through the generic loop below.
+					if (key === "viewStates") {
 						continue
 					}
 
@@ -889,7 +964,9 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					// Route through provider.setValue so view-local buffer/pin sync stays
+					// consistent with the other mutation paths.
+					await provider.setValue(key as keyof RooCodeSettings, newValue)
 				}
 			} catch (error) {
 				failed = true
@@ -1709,9 +1786,7 @@ export const webviewMessageHandler = async (
 			// containment as a literal and escape only after that later decode.
 			if (fromMarkdown) {
 				const decoded = decodeUntrustedPathToStable(rawPath)
-				// Stryker disable next-line ConditionalExpression,BlockStatement: hostile non-stabilizing encodings are unreachable from the webview (its posts are plain link targets); the bound is defensive
 				if (decoded === null) {
-					// Stryker disable next-line CallExpression: hostile non-stabilizing encodings are pinned by the direct decodeUntrustedPathToStable bound test; the webview never posts such values
 					rejectOutsideWorkspace()
 					break
 				}
@@ -2513,14 +2588,98 @@ export const webviewMessageHandler = async (
 						break
 					}
 
-					// Load the old configuration to get its ID.
-					const { id } = await provider.providerSettingsManager.getProfile({ name: oldName })
+					// The webview's name validation treats a case-only difference from the
+					// current profile as the current profile, so a case-only collision reaches
+					// here as a rename onto an existing record. Reject it instead of
+					// overwriting that profile: the rollback below would otherwise delete a
+					// record the rename never owned.
 
-					// Create a new configuration with the new name and old ID.
-					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
+					// The name check, the save, and the compensation run in one critical
+					// section shared with every other view's manager (each view builds its own
+					// `ProviderSettingsManager` over the same secrets): with separate locked
+					// calls, a same-name create from another view fits between the check and
+					// the save, and the rollback then deletes that view's record.
+					await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
+						if (await provider.providerSettingsManager.hasConfig(newName)) {
+							throw new Error(`A profile named '${newName}' already exists`)
+						}
 
-					// Delete the old configuration.
-					await provider.providerSettingsManager.deleteConfig(oldName)
+						// Load the old configuration to get its ID, and keep its full stored
+						// record: a rollback must re-point views to the settings oldName actually
+						// persists, not to the payload the rename attempted.
+						const { name: _previousName, ...previousRecord } =
+							await provider.providerSettingsManager.getProfile({ name: oldName })
+						const { id } = previousRecord
+
+						// Create a new configuration with the new name and old ID.
+						await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
+
+						// saveConfig normalizes the record (legacy downgrades, schema parse): hand
+						// the stored copy to the views and task handlers instead of the raw
+						// webview payload, so unvalidated fields cannot bypass the profile-schema
+						// normalization on the way into view state. When the read-back fails the
+						// rename cannot proceed on a trustworthy record: remove the new record
+						// before reporting so the failed rename cannot leave both names resolving
+						// to the same id.
+						let normalizedRenamed: typeof previousRecord
+						try {
+							const { name: _renamedName, ...renamedRecord } =
+								await provider.providerSettingsManager.getProfile({ name: newName })
+							normalizedRenamed = renamedRecord
+						} catch (error) {
+							try {
+								await provider.providerSettingsManager.deleteConfig(newName)
+							} catch (cleanupError) {
+								provider.log(
+									`Rename rollback failed to remove '${newName}': ${JSON.stringify(cleanupError, Object.getOwnPropertyNames(cleanupError), 2)}`,
+								)
+							}
+							throw error
+						}
+
+						// Re-point live views pinned to the old name before it stops
+						// resolving: the rename keeps the id, so their pins should follow the
+						// record instead of dangling, and their overlays must serve the
+						// renamed settings rather than the pre-rename copy. A failed re-point can
+						// leave views already following newName, so undo this rename's own
+						// durable write before reporting: the reverse re-point returns the views
+						// that moved (the others never left oldName) and the new record goes
+						// away, leaving the pre-rename state intact.
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(oldName, newName, normalizedRenamed)
+						} catch (error) {
+							try {
+								await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+								await provider.providerSettingsManager.deleteConfig(newName)
+							} catch (compensationError) {
+								provider.log(
+									`Rename compensation failed after re-point rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+								)
+							}
+							throw error
+						}
+
+						// Delete the old configuration. A failure here would leave both names
+						// resolving and every live view pinned to the new name: undo the re-point
+						// with the previously stored record - not the attempted payload, which was
+						// never persisted under the old name - and drop the new record so the
+						// pre-rename state survives intact. A failed compensation is logged: both
+						// names can then remain stored, and the log is the only trace of that
+						// inconsistency.
+						try {
+							await provider.providerSettingsManager.deleteConfig(oldName)
+						} catch (error) {
+							try {
+								await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+								await provider.providerSettingsManager.deleteConfig(newName)
+							} catch (compensationError) {
+								provider.log(
+									`Rename compensation failed after delete rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+								)
+							}
+							throw error
+						}
+					})
 
 					// Re-activate to update the global settings related to the
 					// currently activated provider profile.
