@@ -118,8 +118,13 @@ describe("VSCodeAPIWrapper", () => {
 		expect(wrapper.getViewStateId()).toBe("memory-view")
 		expect(wrapper.getViewStateId()).toBe("memory-view")
 		expect(randomUUID).toHaveBeenCalledTimes(1)
-		expect(storage.getItem).toHaveBeenCalled()
-		expect(storage.setItem).toHaveBeenCalled()
+		// The persisted payload, not merely that a call happened: the id must be written under
+		// the same key getState reads back, and the payload itself must carry the id.
+		expect(storage.getItem).toHaveBeenCalledWith("vscodeState")
+		const writes = vi.mocked(storage.setItem).mock.calls
+		expect(writes).toHaveLength(1)
+		expect(writes[0][0]).toBe("vscodeState")
+		expect(JSON.parse(String(writes[0][1]))).toEqual({ viewStateId: "memory-view" })
 	})
 
 	it("falls back to a timestamp-random id when crypto.randomUUID is unavailable", () => {

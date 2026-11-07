@@ -75,6 +75,9 @@ type ProviderDouble = EventEmitter & {
 	getState: Mock<() => Promise<{ customModes?: ModeConfig[] }>>
 	handleModeSwitch: Mock<(mode: string, targetTask?: unknown) => Promise<void>>
 	viewLaunched: boolean
+	// Disposal is exercised by the newTab readiness-timeout case: a tab start that
+	// cannot become ready disposes the panel it created.
+	dispose: Mock<() => Promise<void>>
 	isDisposed: boolean
 	viewStateReadiness: Promise<void>
 	taskHistoryStore: Map<string, unknown>
@@ -114,6 +117,7 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.getState = vi.fn().mockResolvedValue({ customModes: [] })
 	provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 	provider.viewLaunched = true
+	provider.dispose = vi.fn().mockResolvedValue(undefined)
 	provider.isDisposed = false
 	provider.viewStateReadiness = Promise.resolve()
 	provider.taskHistoryStore = new Map()
@@ -270,6 +274,31 @@ describe("API task controls", () => {
 			}
 		})
 
+		it("disposes the tab panel when a newTab readiness bound expires", async () => {
+			// A newTab start always owns a freshly created panel. Falling back to the headless
+			// shared-state path would leave that panel open with no task behind it and would
+			// answer the caller with a task id built on defaults the panel is about to overwrite.
+			vi.useFakeTimers()
+			const newTabProvider = createProvider("new-tab-task")
+			newTabProvider.viewLaunched = false
+			newTabProvider.viewStateReadiness = new Promise<void>(() => {})
+			createClineTabPanelMock.mockResolvedValue(newTabProvider)
+
+			const started = api.startNewTask({ configuration, text: "failed tab task", newTab: true })
+			// Attach the rejection handler before advancing: with fake timers the bound fires
+			// during the advance, and a handler attached afterwards would see it briefly unhandled.
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			await vi.advanceTimersByTimeAsync(3000)
+
+			try {
+				await settled
+				expect(newTabProvider.dispose).toHaveBeenCalledOnce()
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {
 			// Disposal resolves viewStateReadiness to release waiters (see ClineProvider.dispose)
 			// and marks the provider disposed first: the wait must then fail instead of
@@ -290,7 +319,6 @@ describe("API task controls", () => {
 			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
 		})
 	})
-
 	describe("task ask registry", () => {
 		it("returns false when approving an unknown task", async () => {
 			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)

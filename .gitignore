@@ -67,3 +67,6 @@ roo-cli-*.tar.gz*
 .prettier-check.txt
 .suites*.txt
 .tsc.txt
+.cp-*.txt
+.rc-*.txt
+.rcspec-*.txt

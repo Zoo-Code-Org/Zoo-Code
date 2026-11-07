@@ -2278,13 +2278,13 @@ it("persists alwaysDenyUnapprovedCommands through the generic updateSettings loo
 	expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 })
 
-// A mode slug reaches the shared store and this view's durable pin through the
-// per-key updateSettings path, so an unknown slug must be rejected there: only
-// setValues validates modes, and this loop does not go through it.
+// Mode validation lives in provider.setValue (ClineProvider#setValue, and its spec
+// covers the rejected slug): an invalid slug is logged and dropped there before any
+// write. What this loop owns is the routing - the slug has to reach provider.setValue
+// so the view-local buffer and the durable pin move with the shared store.
 describe("webviewMessageHandler - mode through updateSettings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
 	})
 
 	it("persists a mode that resolves", async () => {
@@ -2296,15 +2296,17 @@ describe("webviewMessageHandler - mode through updateSettings", () => {
 		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", "architect")
 	})
 
-	it("drops an unknown mode instead of writing it to the shared store and the view pin", async () => {
+	it("hands an unknown slug to provider.setValue instead of writing it past it", async () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
 			updatedSettings: { mode: "no-such-mode" },
 		})
 
-		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", "no-such-mode")
-		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", expect.anything())
-		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Ignoring invalid mode"))
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", "no-such-mode")
+		// The double delegates provider.setValue to contextProxy.setValue, so the absence of a
+		// second mode check here is what this asserts: the handler must not read the custom
+		// modes a second time to decide for itself.
+		expect(mockClineProvider.customModesManager.getCustomModes).not.toHaveBeenCalled()
 	})
 })
 

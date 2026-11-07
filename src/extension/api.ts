@@ -308,6 +308,24 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			) {
 				throw error
 			}
+			if (newTab) {
+				// A newTab start always owns a freshly created panel: an expired readiness bound
+				// is a real failure for it, not the headless fallback the sidebar path relies on.
+				// Close the panel so it does not stay open with no task behind it, then rethrow
+				// so the caller sees the failure instead of a task id built on shared defaults.
+				await provider
+					.dispose()
+					.catch((disposeError) =>
+						this.log(
+							`[API#startNewTask] tab panel could not be disposed after a readiness timeout: ${
+								disposeError instanceof Error ? disposeError.message : String(disposeError)
+							},`,
+						),
+					)
+
+				throw error
+			}
+
 			// Headless API callers create tasks without ever launching a webview: the
 			// readiness bound expiring keeps the pre-existing shared-state fallback.
 			// A launched view whose readiness failed is a real failure and rethrows.

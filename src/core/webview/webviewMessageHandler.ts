@@ -94,7 +94,7 @@ import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
-import { Mode, defaultModeSlug, getModeBySlug } from "../../shared/modes"
+import { Mode, defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler, type ApiHandler } from "../../api"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
@@ -929,19 +929,11 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
-					} else if (key === "mode") {
-						// provider.setValue has no mode validation (setValues does): an unknown or
-						// non-string slug would land in the shared store and in this view's durable
-						// pin, where the next task reads it and records it in task history.
-						const customModes = await provider.customModesManager.getCustomModes()
-
-						if (typeof value !== "string" || !getModeBySlug(value, customModes)) {
-							provider.log(`[updateSettings] Ignoring invalid mode "${String(value)}"`)
-							continue
-						}
-
-						newValue = value
 					}
+
+					// Mode needs no branch of its own: provider.setValue validates the slug against
+					// the custom modes and returns before writing when it does not resolve, so a second copy
+					// of that predicate here could only drift from it (see ClineProvider#setValue).
 
 					// Route through provider.setValue so view-local buffer/pin sync stays
 					// consistent with the other mutation paths.
