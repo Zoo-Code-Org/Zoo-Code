@@ -1,4 +1,4 @@
-import { buildWorktreeEnvironment } from "./coding-trust.ts"
+import { buildDownloaderEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
 import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -22,8 +22,12 @@ export const downloadVSCodeIsolated = async (
 	const { stdout } = await execFileAsync(
 		process.execPath,
 		[fileURLToPath(downloader), options.version ?? "stable", options.cachePath ?? ""],
-		{ env: buildWorktreeEnvironment(process.env), timeout: 300_000 },
-	)
+		{ env: buildDownloaderEnvironment(process.env), timeout: 300_000 },
+	).catch(() => {
+		// Download errors can include authenticated proxy URLs in stderr.
+		// Do not propagate subprocess output into repetition diagnostics.
+		throw new Error("VS Code download failed")
+	})
 	const executable: unknown = JSON.parse(stdout)
 	if (typeof executable !== "string" || !path.isAbsolute(executable)) throw new Error("invalid VS Code executable")
 	return executable

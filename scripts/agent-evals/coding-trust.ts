@@ -168,6 +168,18 @@ const PROCESS_ENV_ALLOWLIST = [
 	"PATHEXT",
 ] as const
 
+// Proxy URLs can contain credentials. Forward them only to the side and
+// downloader, never to evaluated builds, hosts, reports, or graders.
+const DOWNLOAD_NETWORK_ALLOWLIST = ["npm_config_proxy", "npm_config_https_proxy", "NODE_EXTRA_CA_CERTS"] as const
+
+export function buildDownloaderEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const child = buildWorktreeEnvironment(env)
+	for (const name of DOWNLOAD_NETWORK_ALLOWLIST) {
+		if (env[name] !== undefined) child[name] = env[name]
+	}
+	return child
+}
+
 // Container client endpoint and TLS configuration. Provider credentials are
 // handled separately and never forwarded to the container CLI.
 export const CONTAINER_ENDPOINT_ALLOWLIST = [
@@ -195,7 +207,7 @@ export function buildSideEnvironment(
 	side: "baseline" | "candidate",
 ): NodeJS.ProcessEnv {
 	const child: NodeJS.ProcessEnv = {}
-	for (const name of [...PROCESS_ENV_ALLOWLIST, ...CONTAINER_ENDPOINT_ALLOWLIST]) {
+	for (const name of [...PROCESS_ENV_ALLOWLIST, ...CONTAINER_ENDPOINT_ALLOWLIST, ...DOWNLOAD_NETWORK_ALLOWLIST]) {
 		const value = env[name]
 		if (value !== undefined) child[name] = value
 	}

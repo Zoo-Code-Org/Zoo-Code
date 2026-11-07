@@ -240,3 +240,23 @@ it("captures workspace files through the host runtime after launch", async () =>
 		await fs.rm(dir, { recursive: true, force: true })
 	}
 })
+
+it("does not expose authenticated proxy URLs from downloader failures", async () => {
+	const dir = await tempDir("download-failure-")
+	try {
+		const downloader = path.join(dir, "download.mjs")
+		await fs.writeFile(downloader, "throw new Error('http://user:proxy-secret@localhost:8080')")
+		const { downloadVSCodeIsolated } = await import("./launcher.ts")
+		await assert.rejects(
+			downloadVSCodeIsolated({ cachePath: dir }, pathToFileURL(downloader)),
+			(error: unknown) => {
+				assert.ok(error instanceof Error)
+				assert.equal(error.message, "VS Code download failed")
+				assert.equal(error.cause, undefined)
+				return true
+			},
+		)
+	} finally {
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})

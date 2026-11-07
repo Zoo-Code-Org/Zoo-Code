@@ -19,6 +19,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { createHostRuntime } from "./launcher.ts"
+import { createPrivateVSCodeDownloader } from "./vscode-cache.ts"
 import { createContainerGradingRuntime } from "./container-runtime.ts"
 import { runCodingFixtureOnce, type CodingRunRecord } from "./coding-run.ts"
 import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
@@ -166,6 +167,7 @@ await invalidateSideArtifacts(out)
 // executed.
 const sideScratch = await fs.mkdtemp(path.join(os.tmpdir(), "coding-evals-side-"))
 const evaluatedWorktree = path.join(sideScratch, "worktree")
+const downloadVSCode = createPrivateVSCodeDownloader(path.join(sideScratch, "vscode-cache"))
 
 // Removal is best effort and bounded, like the comparison flow cleanup. The
 // escalation of an in-flight preparation child settles before any tree is
@@ -273,6 +275,7 @@ try {
 				runtime: createHostRuntime({
 					root: evaluatedWorktree,
 					artifactsDir,
+					downloadVSCode,
 				}),
 				gradingRuntime,
 				scratchDir: artifactsDir,
