@@ -7,6 +7,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
+import type { Mode } from "../../../shared/modes"
 import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -1185,6 +1186,31 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
 			expect(mockTask["_taskMode"]).toBe("architect")
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("should handle invalid mode gracefully", async () => {
+			// Restores the case the 64ce56bfb merge of upstream/main dropped without a substitute.
+			// Upstream asserted the opposite of this branch: there, handleModeSwitch wrote the
+			// unknown slug straight through to storage. Here the slug is resolved through
+			// getModeBySlug first and an unknown one returns before the mutation is queued, so the
+			// contract is that an unknown mode is ignored and nothing about the current mode moves.
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug).mockReturnValue(undefined)
+
+			const mockTask = createModeSwitchTask()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+
+			await provider.handleModeSwitch("not-a-mode" as Mode, mockTask)
+
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(mockTask.emit).not.toHaveBeenCalled()
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "not-a-mode")
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining('ignoring unknown mode "not-a-mode"'),
+			)
 		})
 	})
 
