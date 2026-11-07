@@ -7,6 +7,7 @@ import {
 	TelemetryEventName,
 	type TelemetrySetting,
 	type ToolUsage,
+	isApiProviderError,
 } from "@roo-code/types"
 
 /**
@@ -26,6 +27,43 @@ const CIRCUIT_BREAKER_WINDOW_MS = 10 * 60 * 1000
 
 /** How long a tripped breaker stays tripped before allowing captures again. */
 const CIRCUIT_BREAKER_COOLDOWN_MS = 10 * 60 * 1000
+
+/**
+ * How long an exception fingerprint is remembered for the single-capture
+ * policy below. Provider retry loops re-enter the provider per attempt and each
+ * attempt builds a fresh error, so identical errors re-thrown across attempts
+ * collapse into the first capture within this window. A recurring identical
+ * error keeps the window alive while it keeps happening, so one persistent
+ * failure surfaces as one $exception event instead of one per retry.
+ */
+const EXCEPTION_DEDUPE_WINDOW_MS = 30 * 1000
+
+/**
+ * Upper bound on remembered exception fingerprints (oldest evicted) so a long
+ * session streaming many distinct errors cannot grow the map without bound.
+ */
+const EXCEPTION_DEDUPE_CACHE_LIMIT = 100
+
+/**
+ * Stable identity for an exception under the single-capture policy: everything
+ * providers put on an ApiProviderError (provider, model, operation, code,
+ * message), or type plus message for other errors. Two errors with the same
+ * fingerprint within the dedupe window are treated as one occurrence.
+ */
+function exceptionFingerprint(error: Error): string {
+	if (isApiProviderError(error)) {
+		return [
+			"ApiProviderError",
+			error.provider,
+			error.modelId,
+			error.operation,
+			error.errorCode ?? "",
+			error.message,
+		].join("|")
+	}
+
+	return [error.name, error.message].join("|")
+}
 
 /**
  * Upper bound applied separately to each phase of shutdown(): draining in-flight capture
@@ -48,6 +86,13 @@ export class TelemetryService {
 	// Timestamps of recent guarded-event occurrences, per event name, oldest first.
 	private guardedEventOccurrences = new Map<TelemetryEventName, number[]>()
 	private trippedUntil = new Map<TelemetryEventName, number>()
+
+	// Exception fingerprint -> time of the latest capture attempt, oldest first.
+	// Backs the single-capture policy in captureException(); entries are re-dated
+	// (and moved to the back) on every dedupe hit so the window slides while an
+	// identical error keeps recurring, and the oldest entry is the eviction
+	// candidate when the cache outgrows EXCEPTION_DEDUPE_CACHE_LIMIT.
+	private recentExceptionFingerprints = new Map<string, number>()
 
 	// In-flight client.capture()/captureException() promises. captureEvent/captureException are
 	// synchronous (void-returning) for callers, but the underlying client calls are async (e.g.
@@ -169,6 +214,53 @@ export class TelemetryService {
 	public captureException(error: Error, additionalProperties?: Record<string, unknown>): void {
 		if (!this.isReady || this.isShuttingDown) {
 			return
+		}
+
+		// Single-capture policy (issue #513): one error occurrence must produce one
+		// $exception event, but provider catch blocks capture and re-throw, and the
+		// retry loop in Task#attemptApiRequest re-enters the provider per attempt,
+		// so the same failure reaches this method several times. Two guards, in
+		// order:
+		//
+		// 1. Identity. An ApiProviderError is marked on its first capture; any
+		//    later capture of the same instance (enclosing catch, re-throw) is a
+		//    no-op. Marking happens only after the readiness check above, so an
+		//    error captured while telemetry is down can still be captured later.
+		//
+		// 2. Fingerprint window. Each retry attempt constructs a fresh
+		//    ApiProviderError, which identity cannot see, so identical errors
+		//    within EXCEPTION_DEDUPE_WINDOW_MS collapse into their first capture.
+		if (isApiProviderError(error)) {
+			if (error.captured) {
+				return
+			}
+
+			error.captured = true
+		}
+
+		const fingerprint = exceptionFingerprint(error)
+		const now = Date.now()
+		const lastSeenAt = this.recentExceptionFingerprints.get(fingerprint)
+
+		if (lastSeenAt !== undefined && now - lastSeenAt < EXCEPTION_DEDUPE_WINDOW_MS) {
+			// Re-dating an existing key must move it to the back so the oldest
+			// entry stays the correct eviction candidate.
+			this.recentExceptionFingerprints.delete(fingerprint)
+			this.recentExceptionFingerprints.set(fingerprint, now)
+			return
+		}
+
+		this.recentExceptionFingerprints.delete(fingerprint)
+		this.recentExceptionFingerprints.set(fingerprint, now)
+
+		while (this.recentExceptionFingerprints.size > EXCEPTION_DEDUPE_CACHE_LIMIT) {
+			const oldest = this.recentExceptionFingerprints.keys().next().value
+
+			if (oldest === undefined) {
+				break
+			}
+
+			this.recentExceptionFingerprints.delete(oldest)
 		}
 
 		this.clients.forEach((client) =>
