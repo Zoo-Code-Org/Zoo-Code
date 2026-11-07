@@ -1310,6 +1310,47 @@ Output only the summary of the conversation so far, without any additional comme
 			expect(stateCache["polluted"]).toBeUndefined()
 			expect(mockGlobalState.update).not.toHaveBeenCalledWith("__proto__", expect.anything())
 		})
+		it("settles every delete before the reset rejects, so no save can land between the guard coming down and a straggler erasing it", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			// openRouterApiKey rejects first; apiKey lands 20 ms later on its own, the way a slow
+			// keychain call does. stragglerLanded is what the two shapes disagree about.
+			let stragglerLanded = false
+			let landStraggler: (() => void) | undefined
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "openRouterApiKey") {
+					return Promise.reject(new Error("keychain locked"))
+				}
+				if (key === "apiKey") {
+					return new Promise<void>((resolve) => {
+						landStraggler = () => {
+							durable.delete(key)
+							stragglerLanded = true
+							resolve()
+						}
+					})
+				}
+				durable.delete(key)
+				return Promise.resolve()
+			})
+			const reset = proxy.resetAllState()
+			setTimeout(() => landStraggler?.(), 20)
+			// While the pass is still settling the guard is up, so a save here is refused rather than
+			// accepted and erased later. That refusal is the observable the fix bought.
+			await expect(proxy.storeSecret("apiKey", "mid-settling-save")).rejects.toThrow(
+				"secret writes are refused while state is being reset",
+			)
+			await expect(reset).rejects.toThrow("keychain locked")
+			// A reset that rejects before every delete has landed leaves an outstanding delete that can
+			// still reach storage after the guard is down. This is the line the two shapes split on.
+			expect(stragglerLanded).toBe(true)
+			await expect(proxy.storeSecret("apiKey", "saved-after-settled-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("saved-after-settled-reset")
+			expect(proxy.getSecret("apiKey")).toBe("saved-after-settled-reset")
+		})
 	})
 
 	describe("state write generations", () => {
