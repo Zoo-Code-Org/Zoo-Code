@@ -690,6 +690,90 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("applyGeneratedSessionTitle", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("writes the generated title when the item has none and broadcasts it", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-generated", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			mockPostMessage.mockClear()
+
+			await expect(provider.applyGeneratedSessionTitle("task-generated", "  Generated title  ")).resolves.toBe(
+				true,
+			)
+
+			expect(getStored("task-generated")).toMatchObject({ title: "Generated title", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({
+				id: "task-generated",
+				title: "Generated title",
+			})
+		})
+
+		it("never overwrites a title the user set by hand", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-manual", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-manual", "My own title")
+
+			await expect(provider.applyGeneratedSessionTitle("task-manual", "Generated title")).resolves.toBe(false)
+
+			expect(getStored("task-manual")).toMatchObject({ title: "My own title" })
+		})
+
+		it("retries when the item is not in the store yet and writes once it appears", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-late", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			// Simulate the race where generation finishes before the first save:
+			// the first write attempt misses the item, the next one succeeds.
+			const setTitleIfEmpty = vi.spyOn(provider.taskHistoryStore, "setTitleIfEmpty")
+			setTitleIfEmpty.mockRejectedValueOnce(new Error("task task-late not found in cache"))
+
+			await expect(provider.applyGeneratedSessionTitle("task-late", "Generated title")).resolves.toBe(true)
+
+			expect(setTitleIfEmpty).toHaveBeenCalledTimes(2)
+			expect(getStored("task-late")).toMatchObject({ title: "Generated title" })
+		})
+
+		it("gives up quietly after the retries are exhausted", async () => {
+			const logSpy = vi.spyOn(provider, "log")
+			vi.spyOn(provider.taskHistoryStore, "setTitleIfEmpty").mockRejectedValue(new Error("still missing"))
+
+			await expect(
+				provider.applyGeneratedSessionTitle("task-never", "Generated title", { retries: 2, retryDelayMs: 0 }),
+			).resolves.toBe(false)
+
+			expect(getStored("task-never")).toBeUndefined()
+		})
+
+		it("ignores a blank title", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-blank", task: "Original prompt" }), {
+				broadcast: false,
+			})
+
+			await expect(provider.applyGeneratedSessionTitle("task-blank", "   ")).resolves.toBe(false)
+
+			expect(getStored("task-blank")?.title).toBeUndefined()
+		})
+
+		it("does not broadcast when the view is not launched", async () => {
+			provider.isViewLaunched = false
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-noview", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			mockPostMessage.mockClear()
+
+			await expect(provider.applyGeneratedSessionTitle("task-noview", "Generated title")).resolves.toBe(true)
+
+			expect(getStored("task-noview")).toMatchObject({ title: "Generated title" })
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("broadcastTaskHistoryUpdate", () => {
 		it("sends taskHistoryUpdated message with sorted history", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

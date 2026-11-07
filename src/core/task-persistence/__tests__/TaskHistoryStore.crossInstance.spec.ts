@@ -418,4 +418,72 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		// B wrote last, so B's value wins.
 		expect(final.totalCost).toBe(2.0)
 	})
+
+	describe("setTitleIfEmpty (background session title)", () => {
+		it("writes the title when the item has none", async () => {
+			await storeA.initialize()
+			const item = makeHistoryItem({ id: "title-empty" })
+			await storeA.upsert(item)
+
+			const written = await storeA.setTitleIfEmpty("title-empty", "Generated title")
+
+			expect(written).toMatchObject({ id: "title-empty", title: "Generated title" })
+			expect(storeA.get("title-empty")?.title).toBe("Generated title")
+		})
+
+		it("keeps a title the user set by hand", async () => {
+			await storeA.initialize()
+			const item = makeHistoryItem({ id: "title-manual" })
+			await storeA.upsert(item)
+			await storeA.upsert({ ...item, title: "My own title" })
+
+			await expect(storeA.setTitleIfEmpty("title-manual", "Generated title")).resolves.toBeUndefined()
+
+			expect(storeA.get("title-manual")?.title).toBe("My own title")
+		})
+
+		it("throws when the task is not in the cache", async () => {
+			await storeA.initialize()
+
+			await expect(storeA.setTitleIfEmpty("missing-task", "Generated title")).rejects.toThrow(
+				"task missing-task not found in cache",
+			)
+		})
+
+		it("protects a manual title written by another instance", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+
+			const item = makeHistoryItem({ id: "shared-rename" })
+			await storeA.upsert(item)
+			await storeB.reconcile()
+
+			// The user renames in window A; window B's background generation finishes later.
+			await storeA.upsert({ ...item, title: "Renamed by user" })
+			await storeB.reconcile()
+
+			await expect(storeB.setTitleIfEmpty("shared-rename", "Generated title")).resolves.toBeUndefined()
+			expect(storeB.get("shared-rename")?.title).toBe("Renamed by user")
+
+			const filePath = path.join(tmpDir, "tasks", "shared-rename", GlobalFileNames.historyItem)
+			const final = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+			expect(final.title).toBe("Renamed by user")
+		})
+
+		it("lands a generated title from another instance on the shared task file", async () => {
+			await storeA.initialize()
+			await storeB.initialize()
+
+			const item = makeHistoryItem({ id: "shared-generated" })
+			await storeA.upsert(item)
+			await storeB.reconcile()
+
+			const written = await storeB.setTitleIfEmpty("shared-generated", "Generated title")
+			expect(written).toBeDefined()
+
+			// The write goes through the per-task file lock, so the peer sees it.
+			await storeA.invalidate("shared-generated")
+			expect(storeA.get("shared-generated")?.title).toBe("Generated title")
+		})
+	})
 })

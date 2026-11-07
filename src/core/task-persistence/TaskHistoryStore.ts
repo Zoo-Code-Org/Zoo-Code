@@ -1025,6 +1025,32 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Set the title of a history item only when it has no title yet, inside a
+	 * single lock acquisition (in-process write lock plus the per-task file
+	 * lock in `safeWriteJson`). Used by the background session-title flow so a
+	 * generated title can never overwrite a title the user set by hand.
+	 *
+	 * @returns The updated item when a title was written, or `undefined` when
+	 * the item already has a title (which is left untouched).
+	 * @throws If the task ID is not present in the cache.
+	 */
+	public setTitleIfEmpty(taskId: string, title: string): Promise<HistoryItem | undefined> {
+		return this.withLock(async () => {
+			const current = this.cache.get(taskId)
+			if (!current) {
+				throw new Error(`[TaskHistoryStore] setTitleIfEmpty: task ${taskId} not found in cache`)
+			}
+			if (current.title && current.title.trim()) {
+				return undefined
+			}
+			// Deep-copy so the write cannot mutate cached state before persistence.
+			const updated = { ...structuredClone(current), title }
+			await this.upsertCore(updated)
+			return updated
+		})
+	}
+
+	/**
 	 * Update two related HistoryItems within a single in-process lock acquisition.
 	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes
 	 * complete before the lock releases, so no in-process reader can observe an

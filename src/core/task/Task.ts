@@ -7,6 +7,7 @@ import EventEmitter from "events"
 
 import { AskIgnoredError } from "./AskIgnoredError"
 import { RateLimitClock, createRateLimitClock } from "./RateLimitClock"
+import { generateSessionTitle } from "./session-title"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -3110,6 +3111,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			await this.say("text", task, images)
 
+			// Generate a session title in the background (fire-and-forget) so the
+			// task list shows a short title without delaying the task. Subtasks and
+			// resumed tasks keep their existing names.
+			this.generateSessionTitleInBackground(task ?? "")
+
 			// Check for too many MCP tools and warn the user
 			const { enabledToolCount, enabledServerCount } = await this.getEnabledMcpToolsCount()
 			if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
@@ -3181,6 +3187,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 			throw error
 		}
+	}
+
+	/**
+	 * Fire-and-forget session title generation for a new root task.
+	 *
+	 * Runs after the first user message is stored. A generated title is written
+	 * only when the history item has no title yet, so a title the user set by
+	 * hand is never replaced. Subtasks and resumed tasks keep their existing
+	 * names. Failures are logged and never shown in the chat.
+	 */
+	private generateSessionTitleInBackground(firstMessage: string): void {
+		if (!firstMessage || this.parentTaskId || this._isHistoryTask) {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return
+		}
+
+		void generateSessionTitle(this.api, firstMessage, { taskId: this.taskId })
+			.then((title) => provider.applyGeneratedSessionTitle(this.taskId, title))
+			.catch((error) => {
+				console.error(`[Task#generateSessionTitleInBackground] failed for ${this.taskId}:`, error)
+			})
 	}
 
 	private async resumeTaskFromHistory() {

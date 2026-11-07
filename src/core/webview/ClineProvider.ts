@@ -2831,6 +2831,61 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Applies a generated session title to a history item when it has no title
+	 * yet. The write lands inside the store lock (see
+	 * `taskHistoryStore.setTitleIfEmpty`), so a title the user set by hand is
+	 * never overwritten, even when it arrives while the title is in flight.
+	 *
+	 * The history item may not be in the store yet when the background
+	 * generation finishes (the task persists it with its first save), so the
+	 * write is retried a few times before it gives up. Failures are logged and
+	 * never shown in the chat.
+	 *
+	 * @returns true when a generated title was written.
+	 */
+	async applyGeneratedSessionTitle(
+		taskId: string,
+		title: string,
+		options: { retries?: number; retryDelayMs?: number } = {},
+	): Promise<boolean> {
+		const { retries = 3, retryDelayMs = 1_000 } = options
+		const trimmed = title?.trim()
+		if (!trimmed) {
+			return false
+		}
+
+		for (let attempt = 1; attempt <= retries; attempt++) {
+			try {
+				const written = await this.taskHistoryStore.setTitleIfEmpty(taskId, trimmed)
+				if (!written) {
+					// The item already has a title. It is kept, whatever set it.
+					return false
+				}
+				this.recentTasksCache = undefined
+
+				if (this.isViewLaunched) {
+					const updatedItem = this.taskHistoryStore.get(taskId)
+					if (updatedItem) {
+						await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+					}
+				}
+				return true
+			} catch (error) {
+				// The item is usually present by the time generation finishes; an
+				// early attempt can miss it. Log and retry, then give up quietly.
+				console.error(
+					`[applyGeneratedSessionTitle] attempt ${attempt}/${retries} failed for task ${taskId}:`,
+					error,
+				)
+				if (attempt < retries) {
+					await delay(retryDelayMs)
+				}
+			}
+		}
+		return false
+	}
+
 	/* Condenses a task's message history to use fewer tokens. */
 	async condenseTaskContext(taskId: string) {
 		const task = this.taskRegistry.getById(taskId)
