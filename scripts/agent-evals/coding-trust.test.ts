@@ -478,3 +478,22 @@ describe("container endpoint environment", () => {
 		assert.deepEqual(buildContainerCliEnvironment({ PATH: "/usr/bin" }), { PATH: "/usr/bin" })
 	})
 })
+
+it("preserves downloader network configuration across both boundaries without forwarding provider secrets", async () => {
+	const { buildDownloaderEnvironment } = await import("./coding-trust.ts")
+	const network = {
+		npm_config_proxy: "http://user:proxy-password@localhost:8080",
+		npm_config_https_proxy: "http://user:proxy-password@localhost:8443",
+		NODE_EXTRA_CA_CERTS: "/private/ca.pem",
+	}
+	const env = { ...network, SOLHEIM_API_KEY: "provider-secret", UNRELATED_SECRET: "unrelated" }
+	const side = buildSideEnvironment(env, "SOLHEIM_API_KEY", "candidate")
+	const child = buildDownloaderEnvironment(side)
+	for (const name of Object.keys(network)) {
+		assert.equal(buildWorktreeEnvironment(side)[name], undefined)
+		assert.equal(buildContainerCliEnvironment(side)[name], undefined)
+	}
+	assert.equal(child.SOLHEIM_API_KEY, undefined)
+	assert.equal(child.UNRELATED_SECRET, undefined)
+	assert.deepEqual(child, network)
+})
