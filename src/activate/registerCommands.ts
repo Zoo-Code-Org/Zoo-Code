@@ -40,7 +40,9 @@ let pendingTabPanelCreation: Promise<ClineProvider> | undefined
 /**
  * Get the currently active panel
  * @returns WebviewPanel或WebviewView
- * @internal Test-only seam: the extension host no longer reads this directly.
+ * @internal Test-only seam. Aside from the tab-view disposal check in ClineProvider.ts,
+ * which compares getPanel() with the disposing view before clearing the tab ref, nothing
+ * outside the test suite reads this.
  */
 export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined {
 	return tabPanel || sidebarPanel
@@ -342,17 +344,12 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 		return await creation
 	} finally {
 		// Clear once settled (success or failure) so the next call starts
-		// fresh: the reuse path in createTabPanelUnlocked then takes over
-		// for the tracked panel. Guard the clear so this settlement cannot
-		// clobber a replacement already stored in the slot. That clobber is
-		// unreachable in single-threaded settlement order: while the slot
-		// holds this in-flight creation, every other caller receives that
-		// same promise (guard above), so no replacement can be stored before
-		// this finally block runs — the equality check pins the invariant.
-		// Stryker disable next-line ConditionalExpression: defensive clobber guard, unreachable per the ordering argument above.
-		if (pendingTabPanelCreation === creation) {
-			pendingTabPanelCreation = undefined
-		}
+		// fresh: the reuse path in createTabPanelUnlocked then takes over for the
+		// tracked panel. The clear is unconditional because no other caller can
+		// store a replacement while this creation is in flight: the entry guard
+		// above hands every overlapping call this same promise, so this finally
+		// block is the only writer between storing the slot and settling it.
+		pendingTabPanelCreation = undefined
 	}
 }
 

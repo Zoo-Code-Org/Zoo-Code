@@ -480,7 +480,10 @@ describe("registerCommands handlers", () => {
 	it("focusInput does not post when no sidebar panel is tracked", async () => {
 		await handlers["zoo-code.focusInput"]()
 
+		// Silence is part of the contract here: with no panel tracked the command must exit
+		// quietly, so a focus attempt that fails and gets logged is a failure, not a pass.
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
 	})
 
 	it("focusInput posts to the tab provider when a tab panel is tracked alongside the sidebar", async () => {
@@ -515,6 +518,9 @@ describe("registerCommands handlers", () => {
 		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+		// And silent: focusPanel selected the tab, the target lookup found no live provider,
+		// and that is not an error worth a log line.
+		expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
 	})
 
 	it("setPanel keeps independent refs: clearing only the tab ref re-enables the sidebar post", async () => {
