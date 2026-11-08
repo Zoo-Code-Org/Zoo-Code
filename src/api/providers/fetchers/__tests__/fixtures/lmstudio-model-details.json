@@ -1,14 +1,61 @@
 {
-	"mistralai/devstral-small-2505": {
-		"type": "llm",
-		"modelKey": "mistralai/devstral-small-2505",
-		"format": "safetensors",
-		"displayName": "Devstral Small 2505",
-		"path": "mistralai/devstral-small-2505",
-		"sizeBytes": 13277565112,
-		"architecture": "mistral",
-		"vision": false,
-		"trainedForToolUse": false,
-		"maxContextLength": 131072
-	}
+	"models": [
+		{
+			"type": "llm",
+			"publisher": "lmstudio-community",
+			"key": "smollm2-135m-instruct@q8_0",
+			"display_name": "SmolLM2 135M Instruct",
+			"architecture": "llama",
+			"quantization": {
+				"name": "Q8_0",
+				"bits_per_weight": 8
+			},
+			"size_bytes": 144811072,
+			"params_string": "135M",
+			"loaded_instances": [
+				{
+					"id": "smollm2-135m-instruct",
+					"config": {
+						"context_length": 1024,
+						"eval_batch_size": 2048,
+						"physical_batch_size": 512,
+						"parallel": 4,
+						"flash_attention": false,
+						"lazy_mode": "auto",
+						"context_checkpoints": 32,
+						"reasoning_budget_message": "",
+						"speculative_draft_mtp": false,
+						"speculative_draft_simple": false,
+						"speculative_draft_model": "",
+						"speculative_draft_max_tokens": 3,
+						"speculative_draft_min_tokens": 0,
+						"speculative_draft_min_continue_probability": 0,
+						"offload_kv_cache_to_gpu": true
+					}
+				}
+			],
+			"max_context_length": 8192,
+			"format": "gguf",
+			"capabilities": {
+				"vision": false,
+				"trained_for_tool_use": false
+			},
+			"description": null
+		},
+		{
+			"type": "embedding",
+			"publisher": "nomic-ai",
+			"key": "text-embedding-nomic-embed-text-v1.5",
+			"display_name": "Nomic Embed Text v1.5",
+			"quantization": {
+				"name": "Q4_K_M",
+				"bits_per_weight": 4
+			},
+			"size_bytes": 84106624,
+			"params_string": null,
+			"loaded_instances": [],
+			"max_context_length": 2048,
+			"format": "gguf"
+		}
+	]
 }

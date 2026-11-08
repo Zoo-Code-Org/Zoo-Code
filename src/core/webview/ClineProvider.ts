@@ -660,7 +660,12 @@ export class ClineProvider
 		// size; we do it now since we're starting a task with that model selected.
 		if (cline.apiConfiguration && cline.apiConfiguration.apiProvider === providerIdentifiers.lmstudio) {
 			try {
-				if (!hasLoadedFullDetails(cline.apiConfiguration.lmStudioModelId!)) {
+				if (
+					!hasLoadedFullDetails(
+						cline.apiConfiguration.lmStudioModelId!,
+						cline.apiConfiguration.lmStudioBaseUrl,
+					)
+				) {
 					await forceFullModelDetailsLoad(
 						cline.apiConfiguration.lmStudioBaseUrl ?? "http://localhost:1234",
 						cline.apiConfiguration.lmStudioModelId!,
