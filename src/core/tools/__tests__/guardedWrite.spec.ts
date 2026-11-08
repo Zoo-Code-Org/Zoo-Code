@@ -1195,6 +1195,49 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b")
 		})
+		it("detaches a link that is still publishing so the next write starts immediately", async () => {
+			// The settled result of the row above cannot tell a detached chain from an
+			// emptied one, because nothing was in flight there. Here the first publish is
+			// still awaiting its gate when resetChain runs: if resetChain left the pending
+			// link as the path's tail, the second write would queue behind a publish that
+			// cannot finish until the second one is already waited on - the wedge the hook
+			// exists to undo.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("chain.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			let releaseGate: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			const entered: string[] = []
+			mockedSafeWriteText.mockImplementation(async (_target: string, content: string | Uint8Array) => {
+				entered.push(String(content))
+				if (content === "a") {
+					await gate
+				}
+			})
+
+			const firstWrite = guardedWrite(task, "chain.txt", "a", "update")
+			for (let tick = 0; tick < 200 && entered.length === 0; tick++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			// The first publish is in flight and unfinished.
+			expect(entered).toEqual(["a"])
+
+			resetChain()
+			const secondWrite = guardedWrite(task, "chain.txt", "b", "update")
+			for (let tick = 0; tick < 200 && entered.length < 2; tick++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			expect(entered).toEqual(["a", "b"])
+
+			releaseGate()
+			await Promise.all([firstWrite, secondWrite])
+			expect(entered).toEqual(["a", "b"])
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("chain.txt"), "b")
+		})
 	})
 
 	it("does not run a queued write once the owning task is cancelled", async () => {
