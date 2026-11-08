@@ -1050,6 +1050,25 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
+		it("fails the write outright when a staging write makes no progress", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// A zero-byte result means the filesystem stopped accepting progress;
+			// the loop must fail instead of spinning, so cleanup can run.
+			vi.mocked(fsSync.writeSync).mockImplementation(() => 0)
+
+			await expect(safeWriteText(targetPath, "0123456789", { platform: "linux" })).rejects.toThrow(
+				/made no progress/,
+			)
+
+			// One attempt only: no fsync, no publish, and the staged file is torn down.
+			expect(fsSync.writeSync).toHaveBeenCalledTimes(1)
+			expect(fsSync.fsyncSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
 		it("fsyncs the parent directory after the commit rename on POSIX", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

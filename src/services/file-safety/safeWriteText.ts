@@ -538,8 +538,15 @@ export async function safeWriteText(
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.
 				let offset = 0
+				// A zero-byte result means the filesystem stopped accepting progress;
+				// advancing nothing would spin here forever and the cleanup below would
+				// never run. Fail the write so the staged file is torn down instead.
 				while (offset < buffer.length) {
-					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
+					const written = fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
+					if (written <= 0) {
+						throw new Error(`Staging write made no progress at offset ${offset} of ${buffer.length} bytes`)
+					}
+					offset += written
 				}
 				fsSync.fsyncSync(fd)
 			} finally {

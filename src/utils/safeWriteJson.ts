@@ -668,7 +668,7 @@ async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<
 }
 
 /**
- * Syncs the directory that holds a freshly committed file.
+ * Flushes a staged file to storage before the commit rename.
  * Best effort: durability against power loss is a bonus here, process-crash
  * safety comes from the rename protocol itself, and a filesystem that
  * refuses fsync must not block the write.
