@@ -1,6 +1,7 @@
 // npx vitest run api/providers/__tests__/lm-studio.spec.ts
 
 import { LmStudioHandler } from "../lm-studio"
+import * as lmStudioFetcher from "../fetchers/lmstudio"
 import { ApiHandlerOptions } from "../../../shared/api"
 
 // Mock the timeout config utility
@@ -87,6 +88,75 @@ describe("LmStudioHandler abort wiring", () => {
 			lmStudioModelId: "llama2",
 			lmStudioBaseUrl: "http://localhost:1234",
 		}
+	})
+
+	it("resolves saved instance metadata separately from the dropdown catalog", () => {
+		const aliasInfo = { contextWindow: 4096, supportsImages: false, supportsPromptCache: true }
+		const aliasSpy = vitest.spyOn(lmStudioFetcher, "getLMStudioModelAlias").mockReturnValue(aliasInfo)
+		try {
+			const handler = new LmStudioHandler({ ...options, lmStudioModelId: "custom-instance" })
+			expect(handler.getModel()).toEqual({ id: "custom-instance", info: aliasInfo })
+			expect(aliasSpy).toHaveBeenCalledWith("custom-instance", options.lmStudioBaseUrl)
+		} finally {
+			aliasSpy.mockRestore()
+		}
+	})
+
+	it("preserves a saved path ID when catalog metadata is unavailable", () => {
+		const savedId = "lmstudio-community/SmolLM2/SmolLM2-Q8_0.gguf"
+		const handler = new LmStudioHandler({ ...options, lmStudioModelId: savedId })
+		expect(handler.getModel().id).toBe(savedId)
+		expect(handler.getModel().info).toBeDefined()
+	})
+
+	describe.each(["stream", "complete"] as const)("%s model selection errors", (mode) => {
+		it.each([
+			{ status: 404, message: "Model old/path.gguf not found", code: undefined, targeted: true },
+			{ status: 400, message: "No models found", code: undefined, targeted: true },
+			{ status: 404, message: "Unavailable", code: "model_not_found", targeted: true },
+			{ status: 401, message: "Unauthorized", code: undefined, targeted: false },
+			{ status: 400, message: "Context length exceeded", code: undefined, targeted: false },
+			{ status: 404, message: "Endpoint not found", code: undefined, targeted: false },
+		])(
+			"handles $status $message without rewriting the saved selection",
+			async ({ status, message, code, targeted }) => {
+				const handler = new LmStudioHandler(options)
+				vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+				lastCreate().mockRejectedValue(Object.assign(new Error(message), { status, error: { code } }))
+				const request =
+					mode === "stream"
+						? collectStream(handler.createMessage("system", []))
+						: handler.completePrompt("hello")
+				await expect(request).rejects.toThrow(
+					targeted ? "Reselect a model" : "Please check the LM Studio developer logs",
+				)
+				expect(options.lmStudioModelId).toBe("llama2")
+			},
+		)
+
+		it("tells the user to load a model when the server has none loaded", async () => {
+			const handler = new LmStudioHandler(options)
+			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			lastCreate().mockRejectedValue(Object.assign(new Error("No models loaded"), { status: 400 }))
+			const request =
+				mode === "stream" ? collectStream(handler.createMessage("system", [])) : handler.completePrompt("hello")
+			await expect(request).rejects.toThrow("Load a model in LM Studio")
+			expect(options.lmStudioModelId).toBe("llama2")
+		})
+
+		it("passes a saved path to successful chat requests unchanged", async () => {
+			const savedId = "lmstudio-community/SmolLM2/SmolLM2-Q8_0.gguf"
+			const handler = new LmStudioHandler({ ...options, lmStudioModelId: savedId })
+			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			lastCreate().mockResolvedValue(
+				mode === "stream"
+					? asyncStreamFrom([{ choices: [{ delta: { content: "hello" } }] }])
+					: { choices: [{ message: { content: "hello" } }] },
+			)
+			if (mode === "stream") await collectStream(handler.createMessage("system", []))
+			else expect(await handler.completePrompt("hello")).toBe("hello")
+			expect(lastCreate().mock.calls[0][0]).toMatchObject({ model: savedId })
+		})
 	})
 
 	describe("createMessage", () => {
