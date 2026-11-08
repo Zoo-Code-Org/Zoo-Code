@@ -1927,6 +1927,21 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
 		})
 
+		it("should use fetched metadata for the default model when the model ID is empty", () => {
+			const info = { maxTokens: 8192, contextWindow: 123_456, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ friendli: { [friendliDefaultModelId]: info } }),
+			)
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toBe(info)
+		})
+
 		it.each(["toString", "constructor", "__proto__", "vendor/unknown"])(
 			"should use sane defaults, not an inherited member, for %s missing from both catalogs",
 			(apiModelId) => {
