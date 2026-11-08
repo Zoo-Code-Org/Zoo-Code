@@ -470,6 +470,25 @@ export class DiffViewProvider {
 	}
 
 	/**
+	 * The open buffer that must be reconciled after a guarded publish.
+	 *
+	 * A diff editor keeps a virtual document whose fsPath is the file it compares, and
+	 * textDocuments can list that document before the real file buffer, so a first
+	 * match can land on the virtual side. The dirty file buffer then keeps its stale
+	 * bytes and its next save republishes them over the committed content - which is
+	 * what this reconciliation exists to prevent - while the reconciliation itself
+	 * reports success. Prefer the file document; keep the first path match as the
+	 * fallback so a document the host reports under another scheme is reconciled
+	 * rather than skipped.
+	 */
+	private findReconciliationDocument(absolutePath: string): vscode.TextDocument | undefined {
+		const matches = vscode.workspace.textDocuments.filter((document) =>
+			arePathsEqual(document.uri.fsPath, absolutePath),
+		)
+		return matches.find((document) => document.uri.scheme === "file") ?? matches[0]
+	}
+
+	/**
 	 * Revert one document through the workbench command. The command takes no
 	 * resource argument: when the Open Editors view has focus with a selection it
 	 * force-reverts every selected editor, otherwise the active editor. Activate
@@ -1808,9 +1827,7 @@ export class DiffViewProvider {
 		// reverting reloads the published bytes and clears the dirty flag - so no
 		// open buffer is left whose text differs from the publish. Reverting a
 		// document that already matches the disk is a no-op.
-		const openTarget = vscode.workspace.textDocuments.find((document) =>
-			arePathsEqual(document.uri.fsPath, absolutePath),
-		)
+		const openTarget = this.findReconciliationDocument(absolutePath)
 		if (openTarget !== undefined) {
 			// A dirty buffer holds edits the user has not saved. The guarded publish wrote the
 			// accepted content to disk, so reverting would discard those edits. Only a clean
@@ -1836,9 +1853,7 @@ export class DiffViewProvider {
 					// best-effort close: the reopened-document check below decides
 				}
 				await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
-				const reopened = vscode.workspace.textDocuments.find((document) =>
-					arePathsEqual(document.uri.fsPath, absolutePath),
-				)
+				const reopened = this.findReconciliationDocument(absolutePath)
 				if (reopened?.isDirty) {
 					throw new Error(
 						`saveDirectly: the open document at ${absolutePath} is still dirty after the guarded publish -- ` +

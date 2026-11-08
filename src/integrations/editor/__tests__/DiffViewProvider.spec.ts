@@ -1292,6 +1292,66 @@ describe("DiffViewProvider", () => {
 			}
 		})
 
+		it("reconciles the file document when a virtual document with the same fsPath is listed first", async () => {
+			// A diff editor lists its virtual side under the fsPath of the file it is
+			// comparing, and textDocuments can report that document before the real
+			// buffer. The reconciliation has to pick the file document: aimed at the
+			// virtual side it reverts a document that was never stale, leaves the dirty
+			// buffer holding the pre-publish bytes, and reports success - and the buffer's
+			// next save republishes those stale bytes over what the guard committed.
+			const virtualDoc = {
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "diff" },
+				isDirty: false,
+				getText: () => "virtual side of the diff",
+				save: vi.fn().mockResolvedValue(undefined),
+			}
+			const openDirtyDoc = {
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+				isDirty: true,
+				getText: () => "new content",
+				save: vi.fn().mockResolvedValue(undefined),
+			}
+			const virtualDouble = virtualDoc as unknown as vscode.TextDocument // Structural double
+			const fileDouble = openDirtyDoc as unknown as vscode.TextDocument // Structural double
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.push(virtualDouble, fileDouble)
+			try {
+				// The revert command has no resource argument, so the document the
+				// reconciliation activates is the document that gets reverted. Clearing the
+				// dirty flag only for the document that was activated is what makes an aimed
+				// -at-the-virtual-side reconciliation visible in the assertions below.
+				const activated: unknown[] = []
+				vi.mocked(vscode.window.showTextDocument).mockImplementation(async (document) => {
+					activated.push(document)
+					// Structural double: saveDirectly awaits the activation and never reads the
+					// returned editor, so the object carries only the document it activated.
+					return { document } as unknown as vscode.TextEditor
+				})
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command: unknown) => {
+					if (command === "workbench.action.files.revert" && activated[activated.length - 1] === fileDouble) {
+						openDirtyDoc.isDirty = false
+					}
+				})
+
+				await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+				expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
+					fileDouble,
+					expect.objectContaining({ preserveFocus: false }),
+				)
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
+				// The stale buffer is the one that was reconciled.
+				expect(openDirtyDoc.isDirty).toBe(false)
+				expect(virtualDoc.isDirty).toBe(false)
+				expect(virtualDoc.save).not.toHaveBeenCalled()
+				expect(openDirtyDoc.save).not.toHaveBeenCalled()
+			} finally {
+				documents.splice(documents.indexOf(virtualDouble), 1)
+				documents.splice(documents.indexOf(fileDouble), 1)
+				vi.mocked(vscode.window.showTextDocument).mockReset()
+				vi.mocked(vscode.commands.executeCommand).mockReset()
+			}
+		})
 		it("keeps a dirty buffer with different unsaved edits and reports the conflict", async () => {
 			// The user has unsaved edits in the open target that differ from what the guard
 			// published. Reverting would discard them, so the buffer is retained and the
