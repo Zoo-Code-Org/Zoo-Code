@@ -101,8 +101,13 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	let resolvedTargetPath: string | undefined
 
 	// An empty confineTo is a declared scope, not the absence of one: `""` resolves to the
-	// process working directory, so the three checks below test for presence. A truthiness
-	// test would silently drop the scope a caller declared as an empty string.
+	// process working directory, so the checks below test for presence, and the presence
+	// decision happens once, here. A truthiness test would silently drop a scope a caller
+	// declared as an empty string. No production call site passes confineTo at all - the
+	// option is read nowhere outside this module - so nothing in the tree changes behaviour
+	// under either reading. If a maintainer decides an empty string should mean "unset"
+	// instead, that is a one-line change to this presence test with a test row of its own,
+	// not a redesign.
 	const confineTo = options?.confineTo
 
 	// Confinement is checked before ANY filesystem side effect. mkdir -p through a
