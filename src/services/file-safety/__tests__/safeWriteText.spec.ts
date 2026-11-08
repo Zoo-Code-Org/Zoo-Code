@@ -501,6 +501,32 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
+		// Written before the fix: the seed open is where a taken backup name is discovered, and today
+		// the catch beside it removes the path whether or not this call created it.
+		it("leaves a backup name it did not create alone when the exclusive seed open finds it taken", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const eexist = Object.assign(new Error("EEXIST: file already exists"), { code: "EEXIST" })
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// The "wx" open on a .bak_ name is the seed, and it is the only place this flow can
+			// discover that the generated name is already owned by another write. Failing it there
+			// means this call created nothing, so it has no business removing anything.
+			vi.mocked(fsSync.openSync).mockImplementation(function (pathArg: unknown, flagArg?: unknown) {
+				if (flagArg === "wx" && String(pathArg).includes("safeWriteText.bak_")) {
+					throw eexist
+				}
+				return 1
+			})
+
+			await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toEqual(
+				expect.objectContaining({ code: "EEXIST" }),
+			)
+
+			// Not one unlink attempt against a backup path: three strikes would mean it treated a
+			// file it never made as its own to throw away.
+			expect(_backupUnlinkCalls()).toBe(0)
+			expect(fs.copyFile).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
 		it("hands a backup whose failure-path removal could not complete to a later write", async () => {
 			const targetPath = "/tmp/test-dir/verify-fail.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -973,6 +999,27 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.lstat).mockResolvedValue(_lstatLike(0o777, true))
 
 			await expect(safeWriteText(linkPath, "data", { platform: "linux" })).rejects.toThrow(/dangling symlink/)
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+		// Written before the fix: today lstat's failure is swallowed and read as "the name is
+		// absent", which is the one guess that must not be made here.
+		it("propagates a non-ENOENT lstat failure instead of treating the target as absent", async () => {
+			const linkPath = "/tmp/test-dir/link.txt"
+			// realpath answers ENOENT for an absent name and for a dangling link alike; lstat is
+			// what tells the two apart. If lstat itself cannot answer, the code does not know which
+			// world it is in, and guessing "absent" lets the commit rename replace a link with a
+			// regular file where a link used to stand. An unreadable target has to stop the write.
+			vi.mocked(fs.realpath).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.lstat).mockRejectedValue(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }))
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux" })).rejects.toEqual(
+				expect.objectContaining({ code: "EIO" }),
+			)
+
+			// Stopped before the write, not merely reported: nothing was created and nothing moved.
+			expect(fs.mkdir).not.toHaveBeenCalled()
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 		it("fixes the generated staging file's mode with fchmod so the umask cannot narrow it", async () => {

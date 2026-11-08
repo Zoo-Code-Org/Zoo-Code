@@ -214,7 +214,18 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 		// yet, and a symlink whose referent is gone. lstat tells them apart, and only the
 		// first may fall back to the link path - writing through the second would let the
 		// commit rename replace the link with a regular file where a link used to stand.
-		const linkState = await fs.lstat(absoluteFilePath).catch(() => null)
+		const linkState = await fs.lstat(absoluteFilePath).catch((error: unknown) => {
+			// ENOENT is the only lstat answer that means "this name does not exist yet" -
+			// the one world that may fall back to the link path. Any other failure leaves us
+			// unable to tell an absent name from a dangling link, and the guess that has to be
+			// avoided is the permissive one: writing on through the link path would let the
+			// commit rename replace a link with a regular file where a link used to stand.
+			// An unreadable target stops the write instead.
+			if (_errorCode(error) !== "ENOENT") {
+				throw error
+			}
+			return null
+		})
 		if (linkState?.isSymbolicLink()) {
 			throw new Error(`Cannot write through a dangling symlink at ${absoluteFilePath}: its target does not exist`)
 		}
@@ -338,6 +349,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		try {
+			// Ownership of the backup path is decided by the exclusive open below, not by picking a
+			// name: an open that throws EEXIST means the name already belongs to another write, and
+			// this attempt may then remove nothing. Declared outside that try so its catch can see it.
+			let backupSeeded = false
 			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {
@@ -354,6 +369,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 						// the chmod afterwards is what clears a copied read-only attribute on Windows
 						// and keeps a backup of a permissive file private.
 						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
+						// Ownership of the backup path begins here, at the moment this call
+						// creates the file - not at the moment it picks a name. An exclusive open
+						// that throws EEXIST means the name belongs to another write, and nothing
+						// below may treat that file as this attempt's to throw away.
+						backupSeeded = true
 						fsSync.closeSync(seedFd)
 						await fs.copyFile(targetPath, backupPath)
 						await fs.chmod(backupPath, 0o600)
@@ -371,8 +391,17 @@ export async function safeWriteText(filePath: string, content: string, options?:
 						// this is the only cleanup this path performs and nulling backupPath below would
 						// also hide the path from the rollback cleanup, so it goes through the same
 						// three-strike removal every other backup removal uses - which keeps the path in
-						// PENDING_BACKUP_REMOVALS for a later write to clear when this unlink fails.
-						await _removeBackupWithRetry(backupPath)
+						// Only a backup this call actually opened is ours to remove. If the exclusive
+						// seed open threw EEXIST the name was already another write's, and removing it
+						// here would throw away somebody else's restore source - which is the only
+						// cleanup this path performs, so nothing later would. A half-made copy still
+						// goes through the same three-strike removal every other backup removal uses,
+						// which keeps the path in PENDING_BACKUP_REMOVALS for a later write to clear
+						// when an unlink of our own copy fails.
+
+						if (backupSeeded) {
+							await _removeBackupWithRetry(backupPath)
+						}
 						backupPath = null
 						throw backupError
 					}
