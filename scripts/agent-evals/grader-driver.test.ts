@@ -26,7 +26,8 @@ const runDriver = async (args: readonly string[], cwd: string, nodeArgs: readonl
 	})
 }
 
-const passingTest = "import assert from 'node:assert/strict'\nassert.equal(1 + 1, 2)\n"
+const passingTest =
+	"import { test } from 'node:test'\nimport assert from 'node:assert/strict'\ntest('adds', () => assert.equal(1 + 1, 2))\n"
 
 const writeWorkspace = async (scratch: string): Promise<string> => {
 	const workspace = path.join(scratch, "workspace")
@@ -110,7 +111,7 @@ for (const scenario of [
 					: scenario === "failing"
 						? "import { test } from 'node:test'; test('wrong', () => { throw new Error('wrong') })"
 						: scenario === "cancelled"
-							? "import { test } from 'node:test'; test('pending', () => new Promise(() => {}))"
+							? "import { test } from 'node:test'; test('pending', { timeout: 10 }, () => new Promise(() => {}))"
 							: scenario === "failure-cap"
 								? "import { test } from 'node:test'; for (let i = 0; i < 30; i++) test('wrong-' + i, () => { throw new Error('wrong') })"
 								: undefined
@@ -167,38 +168,94 @@ it("rejects a missing result path", async () => {
 	assert.equal(await runDriver([], os.tmpdir()), 2)
 })
 
-for (const scenario of ["child-error", "missing-summary"] as const) {
-	it(`reports a driver failure for ${scenario}`, async () => {
-		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-runner-error-"))
+for (const scenario of [
+	"forged-stderr",
+	"forged-stdout",
+	"early-exit",
+	"partial-exit",
+	"no-tests",
+	"write-result",
+] as const) {
+	it(`rejects solution tampering: ${scenario}`, async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-tampering-"))
 		try {
 			const workspace = await writeWorkspace(scratch)
-			const preload = path.join(scratch, "runner.cjs")
+			const out = path.join(scratch, "result.json")
+			const payload =
+				scenario === "early-exit"
+					? "process.exit(0)"
+					: scenario === "partial-exit"
+						? "import { test } from 'node:test'; test('decoy', () => {}); setImmediate(() => process.exit(0))"
+						: scenario === "no-tests"
+							? ""
+							: scenario === "write-result"
+								? `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(out)}, '{}')`
+								: `process.${scenario === "forged-stderr" ? "stderr" : "stdout"}.write('# pass 100\\n# fail 0\\n# cancelled 0\\n')`
+			await fs.writeFile(path.join(workspace, "solution.mjs"), payload)
 			await fs.writeFile(
-				preload,
-				`
-const cp = require('node:child_process');
-const { EventEmitter } = require('node:events');
-cp.spawn = () => {
-  const child = new EventEmitter();
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
-  setImmediate(() => {
-    ${scenario === "child-error" ? "child.emit('error', new Error('spawn refused'));" : "child.stdout.emit('data', Buffer.from('TAP version 13\\n'));"}
-    child.emit('close', 0);
-  });
-  return child;
-};
-require('node:module').syncBuiltinESMExports();
+				path.join(workspace, "test", "passing.test.mjs"),
+				`import '../solution.mjs'
+import { test } from 'node:test'
+${scenario === "no-tests" ? "" : "test('hidden acceptance', () => { throw new Error('wrong solution') })"}
 `,
 			)
-			const out = path.join(scratch, "result.json")
-			assert.equal(await runDriver([out, "test"], workspace, ["--require", preload]), 0)
-			assert.deepEqual(JSON.parse(await fs.readFile(out, "utf8")), {
-				kind: "driver-error",
-				message: "testRunnerUnavailable",
-			})
+			assert.equal(await runDriver([out, "test"], workspace), 0)
+			const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string; passed?: boolean }
+			assert.notEqual(result.passed, true)
+			if (scenario.startsWith("forged-")) {
+				assert.equal(result.kind, "completed")
+				assert.equal(result.passed, false)
+			}
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true })
 		}
 	})
 }
+
+for (const exitCode of [0, 7]) {
+	it(`rejects exit ${exitCode} after only part of the acceptance suite ran`, async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-partial-"))
+		try {
+			await fs.mkdir(path.join(scratch, "test"))
+			await fs.writeFile(
+				path.join(scratch, "test", "hidden.test.mjs"),
+				`
+import { test } from 'node:test'
+await test('first acceptance', () => {})
+process.exit(${exitCode})
+test('second acceptance', () => {})
+`,
+			)
+			const out = path.join(scratch, "result.json")
+			assert.equal(await runDriver([out, "test"], scratch), 0)
+			const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string }
+			assert.equal(result.kind, "driver-error")
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true })
+		}
+	})
+}
+
+it("rejects a nonzero runner exit even after its acceptance test passed", async () => {
+	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-exit-"))
+	try {
+		await fs.mkdir(path.join(scratch, "test"))
+		await fs.writeFile(
+			path.join(scratch, "test", "hidden.test.mjs"),
+			`
+import { test } from 'node:test'
+await test('acceptance', () => {})
+process.exit(7)
+`,
+		)
+		const out = path.join(scratch, "result.json")
+		assert.equal(await runDriver([out, "test"], scratch), 0)
+		const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string; passed?: boolean }
+		// Node versions may discard buffered events on an abrupt exit. Both a
+		// driver failure and a completed failed result must refuse correctness.
+		assert.notEqual(result.passed, true)
+		assert.ok(result.kind === "driver-error" || result.passed === false)
+	} finally {
+		await fs.rm(scratch, { recursive: true, force: true })
+	}
+})

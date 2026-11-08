@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
+import { spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import { existsSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
-import { executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
+import { executeSideGeneration, executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
 import { buildRunMetrics } from "./coding-metrics.ts"
 import type { AgentTrace } from "./trace.ts"
@@ -420,4 +421,140 @@ for (const failedRemoval of ["side-results.json", "artifacts"] as const) {
 			await remove(dir, { recursive: true, force: true })
 		}
 	})
+}
+
+for (const interrupted of [false, true]) {
+	it(`locks standalone generations through cleanup (interrupted=${interrupted})`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-generation-lock-"))
+		const alias = `${dir}-alias`
+		let signal = false
+		let competed = false
+		const compete = () =>
+			executeSideGeneration({
+				out: alias,
+				isInterrupted: () => false,
+				run: async () => {
+					competed = true
+				},
+				cleanup: async () => {},
+			})
+		try {
+			await fs.symlink(dir, alias)
+			await fs.writeFile(path.join(dir, "side-results.json"), "stale")
+			await executeSideGeneration({
+				out: dir,
+				isInterrupted: () => signal,
+				run: async () => {
+					await assert.rejects(fs.access(path.join(dir, "side-results.json")))
+					await fs.mkdir(path.join(dir, "artifacts"))
+					await fs.writeFile(path.join(dir, "side-results.json"), "complete")
+					await assert.rejects(compete(), /cannot acquire side output lock/)
+					assert.equal(await fs.readFile(path.join(dir, "side-results.json"), "utf8"), "complete")
+				},
+				cleanup: async () => {
+					await assert.rejects(compete(), /cannot acquire side output lock/)
+					signal = interrupted
+				},
+			})
+			assert.equal(competed, false)
+			assert.equal(existsSync(path.join(dir, "side-results.json")), !interrupted)
+			assert.equal(existsSync(path.join(dir, "artifacts")), !interrupted)
+			// The owner released the lock after cleanup and rollback.
+			await compete()
+			assert.equal(competed, true)
+		} finally {
+			await fs.rm(alias, { force: true })
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+it("releases the side output lock when execution or cleanup throws", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-generation-failure-"))
+	try {
+		for (const boundary of ["run", "cleanup"]) {
+			await assert.rejects(
+				executeSideGeneration({
+					out: dir,
+					isInterrupted: () => false,
+					run: async () => {
+						if (boundary === "run") throw new Error("run failed")
+					},
+					cleanup: async () => {
+						if (boundary === "cleanup") throw new Error("cleanup failed")
+					},
+				}),
+				/failed/,
+			)
+		}
+	} finally {
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+	it(
+		`rolls back a published generation when ${signal} arrives during final cleanup`,
+		{ timeout: 10_000 },
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-cleanup-signal-"))
+			const { NODE_TEST_CONTEXT: _context, ...env } = process.env
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"--input-type=module",
+					"-e",
+					`
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { executeSideGeneration } from ${JSON.stringify(new URL("./coding-side-flow.ts", import.meta.url).href)}
+import { createInterruptFlag } from ${JSON.stringify(new URL("./side-process-guard.ts", import.meta.url).href)}
+const out = ${JSON.stringify(dir)}
+const interrupt = createInterruptFlag()
+let resume
+const received = new Promise(resolve => { resume = resolve })
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { interrupt.signal(signal); resume() })
+await executeSideGeneration({
+  out,
+  isInterrupted: interrupt.isInterrupted,
+  run: async () => {
+    await fs.mkdir(path.join(out, 'artifacts'))
+    await fs.writeFile(path.join(out, 'side-results.json'), 'complete')
+  },
+  cleanup: async () => {
+    // Keep the process alive until the signal reaches this final cleanup.
+    const keepAlive = setInterval(() => {}, 1000)
+    process.stdout.write('ready')
+    await received
+    clearInterval(keepAlive)
+  },
+})
+process.exit(interrupt.exitCode())
+`,
+				],
+				{ env, stdio: ["ignore", "pipe", "inherit"] },
+			)
+			const closed = new Promise<number | null>((resolve, reject) => {
+				child.once("error", reject)
+				child.once("close", resolve)
+			})
+			try {
+				await new Promise<void>((resolve, reject) => {
+					child.stdout.once("data", () => resolve())
+					child.once("error", reject)
+					child.once("exit", () => reject(new Error("side exited before cleanup")))
+				})
+				await fs.access(path.join(dir, "side-results.json"))
+				child.kill(signal)
+				assert.equal(await closed, signal === "SIGINT" ? 130 : 143)
+				assert.deepEqual(await fs.readdir(dir), [])
+			} finally {
+				child.kill("SIGKILL")
+				await closed
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		},
+	)
 }

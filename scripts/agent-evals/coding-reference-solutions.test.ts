@@ -66,7 +66,7 @@ describe("coding graders against reference solutions", () => {
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v5")
+		assert.equal(GRADER_VERSION, "coding-grader-v6")
 		assert.equal(CODING_GRADER_RESOURCES.image, "docker.io/library/node:22-bookworm")
 	})
 })
