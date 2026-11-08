@@ -1916,6 +1916,33 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("vendor/new-model")
 			expect(result.current.info).toEqual(info)
 		})
+
+		it.each(["toString", "constructor", "__proto__", "vendor/unknown"])(
+			"should use sane defaults, not an inherited member, for %s missing from both catalogs",
+			(apiModelId) => {
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe(apiModelId)
+				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+			},
+		)
+
+		it("should resolve a fetched model whose upstream ID is __proto__", () => {
+			const info = { contextWindow: 1000, supportsPromptCache: false }
+			const fetched: Record<string, ModelInfo> = Object.create(null)
+			fetched["__proto__"] = info
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: fetched }))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "__proto__" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info).toBe(info)
+		})
 	})
 
 	describe("OpenAI-compatible static catalog providers (fireworks, baseten, sambanova)", () => {

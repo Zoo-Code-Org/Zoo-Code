@@ -516,7 +516,13 @@ function getSelectedModel({
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = routerModels.friendli?.[id] ?? friendliModels[id as keyof typeof friendliModels]
+			// Mirror the backend getModel(): own-property reads only (an ID such as "toString" must
+			// not resolve to an inherited member), and sane defaults when neither catalog has the ID.
+			const fetched = routerModels.friendli
+			const info =
+				(fetched && Object.hasOwn(fetched, id) ? fetched[id] : undefined) ??
+				(Object.hasOwn(friendliModels, id) ? friendliModels[id as keyof typeof friendliModels] : undefined) ??
+				openAiModelInfoSaneDefaults
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {
