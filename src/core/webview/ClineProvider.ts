@@ -1201,7 +1201,11 @@ export class ClineProvider
 	): Promise<void> {
 		await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
 
-		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
+		// The saved value is rendered only up to a bound: view-local values span user-authored
+		// settings, and this diagnosability line must never dump arbitrary-length state.
+		this.log(
+			`[saveViewState] Saved ${String(key)}=${typeof value === "string" ? `${value.slice(0, 40)}${value.length > 40 ? "..." : ""}` : value === undefined ? "unset" : typeof value} for viewId ${this.viewId}`,
+		)
 	}
 
 	/**

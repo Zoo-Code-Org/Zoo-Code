@@ -4654,7 +4654,7 @@ describe("ClineProvider", () => {
 			await provider.saveViewState("currentApiConfigName", "profile-a")
 			const merged = states()["stable-sidebar-view"]
 			expect(merged).toMatchObject({ mode: "architect", currentApiConfigName: "profile-a" })
-			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Saved mode for viewId"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Saved mode=architect for viewId"))
 			await save("mode", undefined)
 			expect(states()["stable-sidebar-view"]).toStrictEqual({
 				currentApiConfigName: "profile-a",
