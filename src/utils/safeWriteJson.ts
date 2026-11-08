@@ -118,7 +118,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
 		// scope cannot be canonicalized at all, and continuing would build a partly
 		// lexical root that can disagree with the canonical target - the failure has to
 		// surface rather than decide the scope from a guess.
-		if (_scopeErrorCode(error) !== "ENOENT") {
+		if (getErrorCode(error) !== "ENOENT") {
 			throw error
 		}
 		const missing: string[] = []
@@ -134,7 +134,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
 				const real = await fs.realpath(ancestor)
 				return path.join(real, ...missing.reverse())
 			} catch (innerError: unknown) {
-				if (_scopeErrorCode(innerError) !== "ENOENT") {
+				if (getErrorCode(innerError) !== "ENOENT") {
 					throw innerError
 				}
 			}
@@ -153,12 +153,6 @@ function _assertWithinScope(requestedPath: string, candidatePath: string, scopeR
 	if (relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
 		throw new ConfinedPathEscapeError(requestedPath, candidatePath, scopeRoot)
 	}
-}
-
-function _scopeErrorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? (error as { code?: string }).code
-		: undefined
 }
 
 /**
