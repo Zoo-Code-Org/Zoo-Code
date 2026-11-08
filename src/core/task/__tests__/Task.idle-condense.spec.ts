@@ -984,27 +984,24 @@ describe("Task idle condensing — re-arm after API work discards the timer", ()
 	test.each([
 		["a different pending ask", () => "resume_task" as ClineAsk],
 		["a partial follow-up ask", () => "followup" as ClineAsk],
-	])(
-		"does not re-arm when the stream ends with %s",
-		async (_label, pickAsk) => {
-			const ask = pickAsk()
-			const { task, condense } = buildApiWorkTask(ask)
-			if (ask === "followup") {
-				// Only a complete follow-up counts as pending.
-				;(task["clineMessages"][0] as ClineMessage).partial = true
-			}
-			const endApiWork = await discardTimerDuringApiWork(task)
+	])("does not re-arm when the stream ends with %s", async (_label, pickAsk) => {
+		const ask = pickAsk()
+		const { task, condense } = buildApiWorkTask(ask)
+		if (ask === "followup") {
+			// Only a complete follow-up counts as pending.
+			;(task["clineMessages"][0] as ClineMessage).partial = true
+		}
+		const endApiWork = await discardTimerDuringApiWork(task)
 
-			endApiWork()
-			await vi.advanceTimersByTimeAsync(0)
+		endApiWork()
+		await vi.advanceTimersByTimeAsync(0)
 
-			expect(vi.getTimerCount()).toBe(0)
-			expect(task["idleCondenseRearmAfterApiWork"]).toBe(false)
+		expect(vi.getTimerCount()).toBe(0)
+		expect(task["idleCondenseRearmAfterApiWork"]).toBe(false)
 
-			await vi.advanceTimersByTimeAsync(60_000)
-			expect(condense).not.toHaveBeenCalled()
-		},
-	)
+		await vi.advanceTimersByTimeAsync(60_000)
+		expect(condense).not.toHaveBeenCalled()
+	})
 })
 
 describe("Task idle condensing — history barrier serializes ask responses", () => {

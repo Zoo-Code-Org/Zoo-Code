@@ -2817,13 +2817,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.idleCondenseTimeoutRef = setTimeout(armSlice, maxDelayMs)
 				return
 			}
-			this.idleCondenseTimeoutRef = setTimeout(
-				() => {
-					this.idleCondenseTimeoutRef = undefined
-					void this.onIdleCondenseTimerFired()
-				},
-				remainingMs,
-			)
+			this.idleCondenseTimeoutRef = setTimeout(() => {
+				this.idleCondenseTimeoutRef = undefined
+				void this.onIdleCondenseTimerFired()
+			}, remainingMs)
 		}
 		armSlice()
 	}
@@ -2899,10 +2896,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-		* True while the task is still waiting on a follow-up ask: no response has
-		* arrived and the last ask message is a complete follow-up at the current
-		* `lastMessageTs`. Mirrors the pending-ask check used when arming the timer.
-		*/
+	 * True while the task is still waiting on a follow-up ask: no response has
+	 * arrived and the last ask message is a complete follow-up at the current
+	 * `lastMessageTs`. Mirrors the pending-ask check used when arming the timer.
+	 */
 	private hasPendingFollowupAsk(): boolean {
 		if (this.askResponse !== undefined) {
 			return false

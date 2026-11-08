@@ -4689,7 +4689,9 @@ describe("ClineProvider", () => {
 
 			await getMessageHandler()({
 				type: "updateSettings",
-				updatedSettings: { profileIdleCondenseTimes: { inherited: -1, negative: -3.4, zero: 0, rounded: 10.4 } },
+				updatedSettings: {
+					profileIdleCondenseTimes: { inherited: -1, negative: -3.4, zero: 0, rounded: 10.4 },
+				},
 			})
 
 			// A negative delay keeps global inheritance instead of clamping into a
