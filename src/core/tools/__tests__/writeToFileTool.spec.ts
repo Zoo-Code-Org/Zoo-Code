@@ -1078,6 +1078,56 @@ describe("writeToFileTool", () => {
 			}
 		})
 
+		it("removes the adopted directories before resetting on the missing-parameter exit", async () => {
+			// releaseEarlyExitState() releases the directories no editor took over and only then
+			// resets the view, and reset() drops the recorded list without touching disk, so the order
+			// is the claim (WriteToFileTool.ts:225 before :226). The two missing-parameter tests
+			// above run with a session editing, where releaseEarlyDirectories returns early
+			// (:170-172) and the removal never runs; this drives the same exit with no session and
+			// a non-empty adopted list, the shape where a reversed order would leave the
+			// directories behind for a write that never happened.
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
+			mockCline.diffViewProvider.isEditing = false
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			// No diff view ever opened, so nothing else owns these directories.
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: "a.ts" },
+				nativeArgs: { path: "a.ts" },
+				partial: false,
+			} as ToolUse<"write_to_file">
+
+			try {
+				await writeToFileTool.handle(mockCline, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "test-tool-call-id",
+				})
+
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// Ordering, not mere occurrence: reversed, reset() would clear the list the removal reads.
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+					mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+				)
+				// Nothing was shown on this branch, so there is no unapproved preview to discard.
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+			} finally {
+				mockedCreateDirectoriesForFile.mockResolvedValue([])
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
 		it("tears the preview down when cancellation lands while update() is in flight", async () => {
 			// The abort handler can release this task's state while VS Code's edit application
 			// is still awaiting, and its own teardown may have checked isEditing before this
@@ -1085,6 +1135,8 @@ describe("writeToFileTool", () => {
 			// this delta must discard and reset what it streamed into - returning silently
 			// here left the preview active on the disposal path.
 			mockCline.diffViewProvider.isEditing = true
+			// Counted from here: a previous test's release must not leak into the assertion below.
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
 			mockCline.diffViewProvider.update = vi.fn().mockImplementation(async () => {
 				writeToFileTool["clearTaskState"](mockCline)
 			})
@@ -1100,6 +1152,12 @@ describe("writeToFileTool", () => {
 				expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// This teardown resets inside the isEditing branch (:197) and only then reaches the guarded
+				// release (:199). While the session edits the provider owns the directories and its own
+				// discard above already removed them, so the release has to stay a no-op here
+				// (WriteToFileTool.ts:170-172); running it after this reset would mean reaching past a live
+				// session for a list the reset had already dropped.
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).not.toHaveBeenCalled()
 				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			} finally {
 				writeToFileTool["taskPartialStreamState"].clear()
@@ -1116,6 +1174,7 @@ describe("writeToFileTool", () => {
 				writeToFileTool["clearTaskState"](mockCline)
 			})
 			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(new Error("restore failed"))
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
 
 			try {
 				await executeWriteFileTool({}, { isPartial: true })
@@ -1129,6 +1188,9 @@ describe("writeToFileTool", () => {
 				// Teardown completes despite the failed discard: reset still runs and the
 				// state stays released.
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// And it completes without removing anything: the session owns those directories while it
+				// edits (:170-172), and this path's reset (:197) sits ahead of the guarded release (:199).
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).not.toHaveBeenCalled()
 				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			} finally {
 				writeToFileTool["taskPartialStreamState"].clear()
@@ -1677,6 +1739,7 @@ describe("writeToFileTool", () => {
 				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
 			})
 			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
 			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
 				new Error("EPERM: operation not permitted"),
 			)
@@ -1693,6 +1756,10 @@ describe("writeToFileTool", () => {
 					"error",
 					expect.stringContaining("EPERM: operation not permitted"),
 				)
+				// The discard failed while a session was editing, so the directories are still the provider's
+				// to remove: the setup-window release (WriteToFileTool.ts:784) is guarded by :170-172 and must
+				// not clear the list that discard depended on.
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).not.toHaveBeenCalled()
 				const reported = mockHandleError.mock.calls.find(
 					([context]) => context === "handling partial write_to_file",
 				)?.[1] as Error
@@ -1716,6 +1783,7 @@ describe("writeToFileTool", () => {
 				new Error("EPERM: operation not permitted"),
 			)
 			mockCline.say.mockRejectedValue(new Error("task aborted"))
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			try {
@@ -1729,6 +1797,9 @@ describe("writeToFileTool", () => {
 					"error",
 					expect.stringContaining("could not discard the unapproved preview after the failed stream"),
 				)
+				// Same rule with the report itself undeliverable: the setup-window release at :784 stays a
+				// no-op while the session owns the directories.
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).not.toHaveBeenCalled()
 			} finally {
 				errorSpy.mockRestore()
 				mockCline.say.mockResolvedValue(undefined)
