@@ -1141,7 +1141,6 @@ describe("safeWriteJson", () => {
 			{
 				confineTo: projectDir,
 				merge: () => {
-
 					swapAncestorAfterTheCheck(ancestor, swappedIn)
 					return { written: "payload" }
 				},
@@ -1269,5 +1268,4 @@ describe("safeWriteJson", () => {
 		expect(stagingUnlinks).toHaveLength(0)
 		consoleWarnSpy.mockRestore()
 	})
-
 })

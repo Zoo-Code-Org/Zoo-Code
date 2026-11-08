@@ -102,14 +102,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// left to diverge on. (The chain's delegation resolved again inside safeWriteText and
 		// ran two staging-path lstat checks; this protocol resolves once under the lock, which
 		// is why two lstat entries and one resolve are gone rather than reordered.)
-		expect(order).toEqual([
-			"resolve-failed",
-			"lstat",
-			"resolve",
-			"resolve",
-			"lock",
-			"resolve",
-		])
+		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
