@@ -1319,6 +1319,43 @@ describe("safeWriteJson guarded-publish requirements carried by the guarded-writ
 		expect(await fileExists(target)).toBe(false)
 	})
 
+	test("does not take the EPERM two-step fallback when the pre-commit ancestry assertion rejects with EPERM", async () => {
+		const parent = path.join(tempDir, "ancestry-eperm-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "ancestry-eperm.json")
+		// A committed destination is what makes the fallback observable: it renames the
+		// target to a backup before the second rename, so a mistaken fallback moves a file
+		// the inspection had just refused to publish over.
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ committed: true }))
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		const failure = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		// The third destination look is the one the publication takes immediately before
+		// the commit rename, so this arms the ancestry assertion, not an earlier check.
+		let targetLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === target) {
+				targetLooks++
+				if (targetLooks >= 3) return Promise.reject(failure)
+				return Promise.resolve(asFile)
+			}
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+		const trace = vi.fn()
+
+		await expect(safeWriteJson(target, { fresh: true }, { refuseSymlinkTarget: true, trace })).rejects.toThrow(
+			"EPERM",
+		)
+
+		vi.restoreAllMocks()
+		// The inspection ran and refused. The committed destination is still there, byte for
+		// byte, which is only true if the two-step replacement never started: an EPERM from an
+		// inspection is not a rename collision and must not move anything.
+		expect(targetLooks).toBe(3)
+		expect(await readFileContent(target)).toEqual({ committed: true })
+		expect(trace).not.toHaveBeenCalledWith(expect.objectContaining({ stage: "backup-rename" }))
+	})
+
 	test("fails closed when an ancestor vanishes during the authorizing walk", async () => {
 		const parent = path.join(tempDir, "vanish-parent")
 		await fs.mkdir(parent, { recursive: true })

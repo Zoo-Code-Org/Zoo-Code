@@ -350,11 +350,16 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// committed target stays in place until this rename lands, so a
 		// process exit before or during the commit can no longer leave the
 		// canonical path absent.
+		if (options?.refuseSymlinkTarget) {
+			// Re-derive the refusal inside the publication, immediately before the commit rename, but
+			// outside the rename-fallback try: that handler tests only the error code, so an EPERM
+			// raised by this inspection would be mistaken for a rename collision and take the
+			// two-step replacement, moving the committed destination to a backup even though the
+			// refusal promises that nothing moves. Only rename failures reach the fallback now;
+			// the fallback and the crash-recovery pass at the start of the next write are unchanged.
+			await assertAncestryUnchangedBeforeCommit()
+		}
 		try {
-			if (options?.refuseSymlinkTarget) {
-				// Re-derive the refusal inside the publication, immediately before the commit rename: the authorizing walk and this call are separated by the whole staging sequence, and a path-based rename follows an ancestor swapped for a link during it. A rejection here moves nothing, so the target keeps its content.
-				await assertAncestryUnchangedBeforeCommit()
-			}
 			options?.trace?.({ stage: "replacement-rename" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 		} catch (renameError: unknown) {
