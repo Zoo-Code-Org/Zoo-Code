@@ -2184,6 +2184,183 @@ describe("parseCommand", () => {
 			expect(parseError).toBeNull()
 			expect(commands).toEqual(["cat <<E\nhi\nE $ ( ( ls ) ) #x", "( ls )", "rm y"])
 		})
+
+		it("extracts the substitution whose opener a line continuation forms inside a parameter expansion", () => {
+			// The shell removes backslash-newline pairs before tokenizing, so a
+			// `$` and the `(` or `{` on the other side of a continuation are
+			// adjacent to the shell: the expansions below really open, and the
+			// substitution inside each must be extracted as its own segment
+			// instead of vanishing into the expansion's verbatim host text.
+			const printf = parseCommand("echo ${x:-$\\\n(printf RAN > ran.marker)}\n")
+			expect(printf.parseError).toBeNull()
+			expect(printf.commands).toEqual(["echo ${x:-$\\\n(printf RAN > ran.marker)}", "printf RAN > ran.marker"])
+			const rm = parseCommand("echo ${x:-$\\\n(rm -rf /tmp/c25s1.marker)}\n")
+			expect(rm.parseError).toBeNull()
+			expect(rm.commands).toEqual(["echo ${x:-$\\\n(rm -rf /tmp/c25s1.marker)}", "rm -rf /tmp/c25s1.marker"])
+			const brace = parseCommand("echo a$\\\n{x:-$(printf RAN > ran.marker)}\n")
+			expect(brace.parseError).toBeNull()
+			expect(brace.commands).toEqual(["echo a$\\\n{x:-$(printf RAN > ran.marker)}", "printf RAN > ran.marker"])
+			const processSub = parseCommand("echo ${x:-<\\\n(printf RAN > ran.marker)}\n")
+			expect(processSub.parseError).toBeNull()
+			expect(processSub.commands).toEqual([
+				"echo ${x:-<\\\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const processTop = parseCommand("cat <\\\n(printf RAN > ran.marker)\n")
+			expect(processTop.parseError).toBeNull()
+			expect(processTop.commands).toEqual(["cat", "printf RAN > ran.marker"])
+		})
+
+		it("extracts through stacked and escaped-backslash continuation runs", () => {
+			// The shell removes each continuation pair independently, so a run of
+			// pairs still joins the opener bytes, and an `\\` escape pair consumes
+			// only itself: the `$` standing after it still joins across the
+			// continuation that follows. Each payload below is a command bash
+			// substitutes and executes, so each is extracted on its own.
+			const stacked = parseCommand("echo ${x:-$\\\n\\\n(printf RAN > ran.marker)}\n")
+			expect(stacked.parseError).toBeNull()
+			expect(stacked.commands).toEqual([
+				"echo ${x:-$\\\n\\\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const escaped = parseCommand("echo ${x:-\\\\$\\\n(printf RAN > ran.marker)}\n")
+			expect(escaped.parseError).toBeNull()
+			expect(escaped.commands).toEqual([
+				"echo ${x:-\\\\$\\\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const escapedTop = parseCommand("echo a\\\\$\\\n(printf RAN > ran.marker)\n")
+			expect(escapedTop.parseError).toBeNull()
+			expect(escapedTop.commands).toEqual(["echo a\\", "printf RAN > ran.marker"])
+		})
+
+		it("keeps a surviving byte unjoined and a join-formed ANSI-C word opaque", () => {
+			// Continuation removal deletes exactly the backslash and the newline,
+			// so a space between them keeps `$` and `(` apart for the shell: the
+			// word below is never substituted, and the parser must neither open a
+			// frame nor refuse it. A `$'` word joined the same way quotes its
+			// interior for the shell, and that interior stays unextracted.
+			const spaced = parseCommand("echo ${x:-$\\ (rm -rf /tmp/example)}\n")
+			expect(spaced.parseError).toBeNull()
+			expect(spaced.commands).toEqual(["echo ${x:-$\\ (rm -rf /tmp/example)}"])
+			const ansiC = parseCommand("echo ${x:-$\\\n'a$(printf RAN > ran.marker)'}\n")
+			expect(ansiC.parseError).toBeNull()
+			expect(ansiC.commands).toEqual(["echo ${x:-$\\\n'a$(printf RAN > ran.marker)'}"])
+		})
+
+		it("forms substitution openers across CRLF continuation runs", () => {
+			// On the reference shell a carriage return between the continuation
+			// backslash and the newline does not stop the join, so a `$` or `<`
+			// and the opener byte behind a backslash-CR-LF run are adjacent to
+			// that shell: each substitution below really executes, so the parser
+			// must open its frame and extract the payload instead of leaving it
+			// masked in the expansion's verbatim host text.
+			const inExpansion = parseCommand("echo ${x:-$\\\r\n(printf RAN > ran.marker)}\n")
+			expect(inExpansion.parseError).toBeNull()
+			expect(inExpansion.commands).toEqual([
+				"echo ${x:-$\\\r\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const topLevel = parseCommand("echo $\\\r\n(printf RAN > ran.marker)\n")
+			expect(topLevel.parseError).toBeNull()
+			expect(topLevel.commands).toEqual(["echo", "printf RAN > ran.marker"])
+			const brace = parseCommand("echo a$\\\r\n{x:-$(printf RAN > ran.marker)}\n")
+			expect(brace.parseError).toBeNull()
+			expect(brace.commands).toEqual(["echo a$\\\r\n{x:-$(printf RAN > ran.marker)}", "printf RAN > ran.marker"])
+			const processSub = parseCommand("echo ${x:-<\\\r\n(printf RAN > ran.marker)}\n")
+			expect(processSub.parseError).toBeNull()
+			expect(processSub.commands).toEqual([
+				"echo ${x:-<\\\r\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const processTop = parseCommand("cat <\\\r\n(printf RAN > ran.marker)\n")
+			expect(processTop.parseError).toBeNull()
+			expect(processTop.commands).toEqual(["cat", "printf RAN > ran.marker"])
+			const processOut = parseCommand("echo >\\\r\n(printf RAN > ran.marker)\n")
+			expect(processOut.parseError).toBeNull()
+			expect(processOut.commands).toEqual(["echo", "printf RAN > ran.marker"])
+		})
+
+		it("keeps a carriage return inside a delimiter word from joining a dollar to a quote byte", () => {
+			// The delimiter-word walk asks which bytes the tokenizer removes
+			// inside a word, and a carriage return is not one of them: the run
+			// stops at the CR, the CR stays inside the construct's region, and
+			// the heredoc fails closed. That strict reading is the reviewed
+			// delimiter-word invariant and the CR-tolerant opener reading must
+			// not reach it.
+			const input = "cat <<$\\\r\n'EOF'\nbody\nEOF\n"
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError?.quoteType).toBe("heredoc")
+		})
+
+		it("forms openers across continuation runs carrying several carriage returns", () => {
+			// On the reference shell a backslash line continuation still joins
+			// when several carriage returns sit before the newline, and when a
+			// stack mixes CRLF and LF pairs: every shape below substitutes and
+			// executes, so each opener must be recognized and its payload
+			// extracted.
+			const doubled = parseCommand("echo ${x:-$\\\r\r\n(printf RAN > ran.marker)}\n")
+			expect(doubled.parseError).toBeNull()
+			expect(doubled.commands).toEqual([
+				"echo ${x:-$\\\r\r\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const mixed = parseCommand("echo ${x:-$\\\n\\\r\n(printf RAN > ran.marker)}\n")
+			expect(mixed.parseError).toBeNull()
+			expect(mixed.commands).toEqual([
+				"echo ${x:-$\\\n\\\r\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+			const stacked = parseCommand("echo ${x:-$\\\r\n\\\r\n(printf RAN > ran.marker)}\n")
+			expect(stacked.parseError).toBeNull()
+			expect(stacked.commands).toEqual([
+				"echo ${x:-$\\\r\n\\\r\n(printf RAN > ran.marker)}",
+				"printf RAN > ran.marker",
+			])
+		})
+
+		it("routes payloads through frames opened inside joined substitution bodies", () => {
+			// The joins below open a frame nested inside another open frame, so
+			// each payload travels the region walk's closer and comment rules on
+			// its way out: a joined `>(` inside a substitution inside an
+			// expansion, an escaped byte that keeps a `#` word content inside a
+			// joined frame, a real comment that swallows the frame's own closer
+			// only after the line ends, and a joined `{` whose expansion must
+			// stay accounted inside its enclosing one. Every payload bash
+			// substitutes here must reach the segment list exactly once.
+			const outNested = parseCommand("echo ${x:-$(cat >\\\n(printf b > b.marker))}\n")
+			expect(outNested.parseError).toBeNull()
+			expect(outNested.commands).toEqual([
+				"echo ${x:-$(cat >\\\n(printf b > b.marker))}",
+				"printf b > b.marker",
+				"cat",
+				"printf b > b.marker",
+			])
+			const escapedTop = parseCommand("echo $(cat <\\\n(printf a\\ #c))\n")
+			expect(escapedTop.parseError).toBeNull()
+			expect(escapedTop.commands).toEqual(["echo", "cat", "printf a #c"])
+			const escapedArith = parseCommand("echo $(( $(cat <\\\n(printf a\\ #c)) ))\n")
+			expect(escapedArith.parseError).toBeNull()
+			expect(escapedArith.commands).toEqual(["echo $(( $(cat <\\\n(printf a\\ #c)) ))", "cat", "printf a #c"])
+			const comment = parseCommand("echo $(cat <\\\n(printf x # )y\n))\n")
+			expect(comment.parseError).toBeNull()
+			expect(comment.commands).toEqual(["echo", "cat", "printf x"])
+			const commentNested = parseCommand("echo ${x:-$(cat <\\\n(printf x # )y\n))}\n")
+			expect(commentNested.parseError).toBeNull()
+			expect(commentNested.commands).toEqual([
+				"echo ${x:-$(cat <\\\n(printf x # )y\n))}",
+				"printf x",
+				"cat",
+				"printf x",
+			])
+			const braceNested = parseCommand("echo ${x:-a$\\\n{y:-2}}")
+			expect(braceNested.parseError).toBeNull()
+			expect(braceNested.commands).toEqual(["echo ${x:-a$\\\n{y:-2}}"])
+			const bracePayload = parseCommand("echo ${x:-$\\\n{y:$(printf X > x.marker)}}")
+			expect(bracePayload.parseError).toBeNull()
+			expect(bracePayload.commands).toEqual(["echo ${x:-$\\\n{y:$(printf X > x.marker)}}", "printf X > x.marker"])
+		})
 	})
 
 	describe("heredoc opener-remainder walk and backslash-run guard", () => {

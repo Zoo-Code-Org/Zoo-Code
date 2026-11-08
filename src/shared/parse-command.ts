@@ -297,6 +297,54 @@ function logicalWordBoundaryBefore(text: string, i: number): boolean {
 }
 
 /**
+ * The first index at or past `from` that falls outside a run of
+ * backslash-newline line continuations -- the byte a standing unquoted byte is
+ * really adjacent to, because the shell removes each pair before tokenizing
+ * and every site that asks what follows a `$` or `<` opener shares this rule.
+ * With `acrossLineEndingCR` each pair may also carry the carriage returns that
+ * precede its newline: on the reference shell a CR between the backslash and
+ * the newline does not stop the join, so an opener read that crosses a line
+ * ending sees through those CR bytes.
+ */
+function continuationRunEndFrom(text: string, from: number, acrossLineEndingCR: boolean): number {
+	let j = from
+	while (text[j] === "\\") {
+		let k = j + 1
+		// Stryker disable next-line ConditionalExpression: the two named entries pass the flag's two values, so this flip makes both CR-tolerant, and the delimiter walk's only differing shape (`$\<CR><LF>` before a quote) returns the same heredoc malformed result either way.
+		if (acrossLineEndingCR) {
+			while (text[k] === "\r") {
+				k++
+			}
+		}
+		if (text[k] !== "\n") {
+			break
+		}
+		j = k + 1
+	}
+	return j
+}
+
+/**
+ * The strict entry, for the question of which bytes the tokenizer removes
+ * inside a word: a carriage return survives inside a word, so the run stops
+ * at the first CR it meets.
+ */
+function continuationRunEnd(text: string, from: number): number {
+	// Stryker disable next-line BooleanLiteral: this entry passing true instead of false is the same flip as the run's CR flag, and every shape where that differs is a heredoc malformed result under either reading.
+	return continuationRunEndFrom(text, from, false)
+}
+
+/**
+ * The opener entry, for the question of whether an unquoted `$`, `{`, or `(`
+ * can meet an opener byte across a line ending in the executing shell: the
+ * reference shell joins across the CR bytes that may sit in the pair, so the
+ * run steps over them.
+ */
+function openerContinuationRunEnd(text: string, from: number): number {
+	return continuationRunEndFrom(text, from, true)
+}
+
+/**
  * Trim only the blanks a shell reader drops at the edges of a word run. JS
  * `trim` also strips the exotic characters bash reads as ordinary word bytes;
  * dropping them would move a following `#` from mid-word to word start, where
@@ -1562,8 +1610,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 				continue
 			}
 			if (char === "$") {
-				if (text[i + 1] === "(") {
-					if (text[i + 2] === "(") {
+				const arm = openerContinuationRunEnd(text, i + 1)
+				if (text[arm] === "(") {
+					// skipArithmetic reads the `$((` bytes as adjacent, so the
+					// arithmetic arm stays at raw adjacency. A `$` the join
+					// brings to a `(` followed by another `(` takes the
+					// command-substitution push below instead, where the loop
+					// re-reads the second `(` as a group paren.
+					// Stryker disable next-line ConditionalExpression: the second operand can only hold when no pair was consumed, because every pair at i + 1 leaves its CR or newline at i + 2 — the first operand is implied, so the replacement emits the same bytes.
+					if (arm === i + 1 && text[i + 2] === "(") {
 						const arith = skipArithmetic(i)
 						if (arith.commandSubstitution) {
 							// bash reads this opener as `$(` plus a group, not
@@ -1601,26 +1656,27 @@ function scanShellSyntax(text: string): ScanOutcome {
 						kind: "command-substitution",
 						openIndex: i,
 						closer: ")",
-						contentStart: i + 2,
+						contentStart: arm + 1,
 						escaped: true,
 						groupDepth: 0,
 						payloads: null,
 					})
-					i += 2
+					i = arm + 1
 					continue
 				}
-				if (text[i + 1] === "{") {
+				if (text[arm] === "{") {
 					frames.push({
 						kind: "parameter-expansion",
 						openIndex: i,
 						closer: "}",
-						contentStart: i + 2,
+						// Stryker disable next-line ArithmeticOperator: a parameter-expansion frame's close routes payloads through its payload list and its host text slices from the opener, so this content start has no reader and no emitted byte can differ.
+						contentStart: arm + 1,
 						escaped: true,
 						groupDepth: 0,
 						payloads: [],
 					})
 					localParamOpen++
-					i += 2
+					i = arm + 1
 					continue
 				}
 				if (text[i + 1] === "[") {
@@ -1643,18 +1699,21 @@ function scanShellSyntax(text: string): ScanOutcome {
 				i++
 				continue
 			}
-			if ((char === "<" || char === ">") && text[i + 1] === "(") {
-				frames.push({
-					kind: "process-substitution",
-					openIndex: i,
-					closer: ")",
-					contentStart: i + 2,
-					escaped: true,
-					groupDepth: 0,
-					payloads: null,
-				})
-				i += 2
-				continue
+			if (char === "<" || char === ">") {
+				const psArm = openerContinuationRunEnd(text, i + 1)
+				if (text[psArm] === "(") {
+					frames.push({
+						kind: "process-substitution",
+						openIndex: i,
+						closer: ")",
+						contentStart: psArm + 1,
+						escaped: true,
+						groupDepth: 0,
+						payloads: null,
+					})
+					i = psArm + 1
+					continue
+				}
 			}
 			i++
 		}
@@ -2033,8 +2092,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 				continue
 			}
 			if (char === "$") {
-				if (text[i + 1] === "(") {
-					if (text[i + 2] === "(") {
+				const arm = openerContinuationRunEnd(text, i + 1)
+				if (text[arm] === "(") {
+					// skipArithmetic reads the `$((` bytes as adjacent, so the
+					// arithmetic arm stays at raw adjacency. A `$` the join
+					// brings to a `(` followed by another `(` takes the
+					// command-substitution push below instead, where the loop
+					// re-reads the second `(` as a group paren.
+					// Stryker disable next-line ConditionalExpression: the second operand can only hold when no pair was consumed, because every pair at i + 1 leaves its CR or newline at i + 2 — the first operand is implied, so the replacement emits the same bytes.
+					if (arm === i + 1 && text[i + 2] === "(") {
 						const arith = skipArithmetic(i)
 						if (arith.commandSubstitution) {
 							// bash reads this opener as `$(` plus a group, not
@@ -2078,26 +2144,27 @@ function scanShellSyntax(text: string): ScanOutcome {
 						kind: "command-substitution",
 						openIndex: i,
 						closer: ")",
-						contentStart: i + 2,
+						contentStart: arm + 1,
 						escaped: true,
 						groupDepth: 0,
 						payloads: null,
 					})
-					i += 2
+					i = arm + 1
 					continue
 				}
-				if (text[i + 1] === "{") {
+				if (text[arm] === "{") {
 					stack.push({
 						kind: "parameter-expansion",
 						openIndex: i,
 						closer: "}",
-						contentStart: i + 2,
+						// Stryker disable next-line ArithmeticOperator: a parameter-expansion frame's close routes payloads through its payload list and its host text slices from the opener, so this content start has no reader and no emitted byte can differ.
+						contentStart: arm + 1,
 						escaped: true,
 						groupDepth: 0,
 						payloads: [],
 					})
 					paramFramesOpen++
-					i += 2
+					i = arm + 1
 					continue
 				}
 				i++
@@ -2116,18 +2183,21 @@ function scanShellSyntax(text: string): ScanOutcome {
 				i++
 				continue
 			}
-			if ((char === "<" || char === ">") && text[i + 1] === "(") {
-				stack.push({
-					kind: "process-substitution",
-					openIndex: i,
-					closer: ")",
-					contentStart: i + 2,
-					escaped: true,
-					groupDepth: 0,
-					payloads: null,
-				})
-				i += 2
-				continue
+			if (char === "<" || char === ">") {
+				const psArm = openerContinuationRunEnd(text, i + 1)
+				if (text[psArm] === "(") {
+					stack.push({
+						kind: "process-substitution",
+						openIndex: i,
+						closer: ")",
+						contentStart: psArm + 1,
+						escaped: true,
+						groupDepth: 0,
+						payloads: null,
+					})
+					i = psArm + 1
+					continue
+				}
 			}
 			// Inside a parameter expansion, bash reads `<<` as an arithmetic
 			// shift, or as literal word text. It never reads it as a heredoc
@@ -2233,18 +2303,21 @@ function scanShellSyntax(text: string): ScanOutcome {
 			i = result.end
 			continue
 		}
-		if ((char === "<" || char === ">") && text[i + 1] === "(") {
-			stack.push({
-				kind: "process-substitution",
-				openIndex: i,
-				closer: ")",
-				contentStart: i + 2,
-				escaped: true,
-				groupDepth: 0,
-				payloads: null,
-			})
-			i += 2
-			continue
+		if (char === "<" || char === ">") {
+			const psArm = openerContinuationRunEnd(text, i + 1)
+			if (text[psArm] === "(") {
+				stack.push({
+					kind: "process-substitution",
+					openIndex: i,
+					closer: ")",
+					contentStart: psArm + 1,
+					escaped: true,
+					groupDepth: 0,
+					payloads: null,
+				})
+				i = psArm + 1
+				continue
+			}
 		}
 		if (char === "(") {
 			// A bare grouping or array-assignment paren is host text. It is
@@ -2310,8 +2383,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 				i = dollarQuote.contentStart
 				continue
 			}
-			if (text[i + 1] === "(") {
-				if (text[i + 2] === "(") {
+			const arm = openerContinuationRunEnd(text, i + 1)
+			if (text[arm] === "(") {
+				// skipArithmetic reads the `$((` bytes as adjacent, so the
+				// arithmetic arm stays at raw adjacency. A `$` the join brings
+				// to a `(` followed by another `(` takes the
+				// command-substitution push below instead, where the loop
+				// re-reads the second `(` as a group paren.
+				// Stryker disable next-line ConditionalExpression: the second operand can only hold when no pair was consumed, because every pair at i + 1 leaves its CR or newline at i + 2 — the first operand is implied, so the replacement emits the same bytes.
+				if (arm === i + 1 && text[i + 2] === "(") {
 					const arith = skipArithmetic(i)
 					if (arith.commandSubstitution) {
 						// bash reads this opener as `$(` plus a group, not
@@ -2356,26 +2436,27 @@ function scanShellSyntax(text: string): ScanOutcome {
 					kind: "command-substitution",
 					openIndex: i,
 					closer: ")",
-					contentStart: i + 2,
+					contentStart: arm + 1,
 					escaped: true,
 					groupDepth: 0,
 					payloads: null,
 				})
-				i += 2
+				i = arm + 1
 				continue
 			}
-			if (text[i + 1] === "{") {
+			if (text[arm] === "{") {
 				stack.push({
 					kind: "parameter-expansion",
 					openIndex: i,
 					closer: "}",
-					contentStart: i + 2,
+					// Stryker disable next-line ArithmeticOperator: a parameter-expansion frame's content start has no reader — its close routes payloads through the frame's payload list and its host text slices from the opener — so any value here emits identical bytes.
+					contentStart: arm + 1,
 					escaped: true,
 					groupDepth: 0,
 					payloads: [],
 				})
 				paramFramesOpen++
-				i += 2
+				i = arm + 1
 				continue
 			}
 			if (text[i + 1] === "[") {
@@ -2557,10 +2638,7 @@ function parseHeredocDelimiter(
 		// so the pair counts even when a run of line continuations separates
 		// the bytes.
 		if (char === "$") {
-			let j = i + 1
-			while (command[j] === "\\" && command[j + 1] === "\n") {
-				j += 2
-			}
+			const j = continuationRunEnd(command, i + 1)
 			if (command[j] === "'" || command[j] === '"') {
 				ansiCPrefix = true
 			}
