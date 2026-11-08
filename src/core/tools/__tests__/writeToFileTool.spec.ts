@@ -525,6 +525,58 @@ describe("writeToFileTool", () => {
 			}
 		})
 
+		it("forwards the canonical target to saveDirectly alongside the approval flag", async () => {
+			// The lexical target carries a linked directory component; the resolver removes
+			// it, so the identity the tool has to forward is a different string from the
+			// path it resolved out of task.cwd. The ninth saveDirectly parameter is that
+			// identity: guardedWrite refuses a publish that no longer resolves to it.
+			const aliasPath = process.platform === "win32" ? "C:\\test\\link\\file.txt" : "/test/link/file.txt"
+			const canonicalTarget = absoluteFilePath
+			const { realpath } = await import("fs/promises")
+			mockedPathResolve.mockReturnValue(aliasPath)
+			vi.mocked(realpath).mockImplementation(async () => canonicalTarget)
+			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+
+			try {
+				await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+				const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
+				expect(args[7]).toBe(true)
+				expect(args[8]).toBe(canonicalTarget)
+				expect(args[8]).not.toBe(aliasPath)
+				expect(args[8]).not.toBe(args[0])
+			} finally {
+				// Both doubles are module-level: a reset after the assertions only runs when
+				// they pass, and beforeEach clears calls but not implementations.
+				vi.mocked(realpath).mockImplementation(async (p) => String(p))
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+				mockedPathResolve.mockReturnValue(absoluteFilePath)
+			}
+		})
+
+		it("forwards the canonical target to saveChanges on the editor save path", async () => {
+			// The editor path saves through saveChanges, whose fifth parameter is the same
+			// identity. Checking only the focus-disruption path would let the approved target
+			// reach one save method and not the other.
+			const aliasPath = process.platform === "win32" ? "C:\\test\\link\\file.txt" : "/test/link/file.txt"
+			const canonicalTarget = absoluteFilePath
+			const { realpath } = await import("fs/promises")
+			mockedPathResolve.mockReturnValue(aliasPath)
+			vi.mocked(realpath).mockImplementation(async () => canonicalTarget)
+			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+
+			try {
+				await executeWriteFileTool({}, { fileExists: true })
+				const args = mockCline.diffViewProvider.saveChanges.mock.calls.at(-1)!
+				expect(args[3]).toBe(true)
+				expect(args[4]).toBe(canonicalTarget)
+				expect(args[4]).not.toBe(aliasPath)
+			} finally {
+				vi.mocked(realpath).mockImplementation(async (p) => String(p))
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+				mockedPathResolve.mockReturnValue(absoluteFilePath)
+			}
+		})
+
 		it("routes an outside-workspace target that cannot be resolved through the tool's error handling", async () => {
 			// The identity capture runs before the approval is asked, so a target whose
 			// resolution fails must not escape the write flow: it has to reach handleError and
