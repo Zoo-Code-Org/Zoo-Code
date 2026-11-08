@@ -62,14 +62,29 @@ interface MockTaskOptions {
 
 /**
  * Minimal structural Task: guardedWrite reads task.cwd, task.observationRegistry and
- * task.abort (the flag Task.dispose() sets). The real Task constructor needs the
- * full provider machinery, so a single documented double cast stands in for the class.
+ * task.abort. The real Task constructor needs the full provider machinery, so a single
+ * documented double cast stands in for the class.
+ *
+ * The double carries requestAbort rather than letting a test write the flag, because that
+ * is the surface Task uses to set it: requestAbort on this branch's Task.ts:3591, and on
+ * main's Task.ts:3594, where abort itself is a get-only accessor fed by the run-state
+ * kernel (run-state/runState.ts:188). Writing task.abort from a test still compiles
+ * against this branch's Task and stops compiling against main's, which is the difference
+ * the merged-tree typecheck sees; calling the same entry point production calls does not
+ * depend on which of the two shapes the tree carries. abandoned is carried only so the
+ * method matches the one it replaces - nothing here asserts it, and guardedWrite.ts:420
+ * reads only abort.
  */
 function createMockTask(options: MockTaskOptions = {}): Task {
 	const task = {
 		cwd: options.cwd ?? WORKSPACE,
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
 		abort: false,
+		abandoned: false,
+		requestAbort(isAbandoned: boolean): void {
+			this.abandoned = isAbandoned === true
+			this.abort = true
+		},
 	}
 	return task as unknown as Task
 }
@@ -737,12 +752,12 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const first = guardedWrite(task, "queued.txt", "first", "create")
 			const second = guardedWrite(task, "queued.txt", "second", "create")
 			// Let the first link enter the publish (the chain runs on microtasks) before the
-			// disposal lands: Task.dispose() sets task.abort while the second write is still
-			// queued behind it.
+			// cancellation lands: an aborted task carries the flag guardedWrite consults, and
+			// the second write is still queued behind the first at that point.
 			await new Promise(function (resolve) {
 				setImmediate(resolve)
 			})
-			task.abort = true
+			task.requestAbort(false)
 			releaseFirst()
 			await first
 			await expect(second).rejects.toThrow(/was cancelled/)
@@ -756,7 +771,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 		it("refuses an already-cancelled task's write before any I/O", async () => {
 			const task = createMockTask()
-			task.abort = true
+			task.requestAbort(false)
 			await expect(guardedWrite(task, "gone.txt", "x", "create")).rejects.toThrow(/was cancelled/)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 			expect(mockedFsAccess).not.toHaveBeenCalled()
