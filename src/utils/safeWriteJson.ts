@@ -382,16 +382,18 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// filesystems, and mixing the two spellings is how a publish ends up beside the link
 		// it meant to replace.
 
-		// The bytes this write is about to publish identify the file a post-commit escape
-		// undo may remove. They are only needed when confinement can trigger that undo, and
-		// reading them here keeps the comparison independent of serialization details.
+		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+
+		// The bytes this write publishes identify the file a post-commit escape undo may
+		// remove. They are read after the staged file is written - before it there is nothing
+		// to read, and reading early failed with ENOENT on every confined write that reached
+		// the publish - and before the mode copy below, so a restrictive target mode cannot
+		// turn this read into a failure. A read failure aborts the write: publishing without
+		// the bytes would leave the undo unable to verify (and remove) an escaped file.
 		if (confinementRoot !== undefined) {
-			// A read failure must abort the write: publishing without the bytes would make
-			// the post-commit escape undo unable to verify (and remove) an escaped file.
 			stagedBytes = await fs.readFile(actualTempNewFilePath)
 		}
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 		await _flushFileToDisk(actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
@@ -569,7 +571,7 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 }
 
 /**
- * Flushes a fully written temp file to storage before it is committed.
+ * Syncs the directory that holds a freshly committed file.
  * Best effort: durability against power loss is a bonus here, process-crash
  * safety comes from the rename protocol itself, and a filesystem that
  * refuses fsync must not block the write.
