@@ -511,10 +511,16 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
 			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
-					cleanupError,
-				)
+				// The staged file is often already gone: the commit rename consumed it, or an
+				// earlier teardown removed it. Finding it absent is the expected outcome of a
+				// failed publish, not a second failure, so it is not logged as one. Any other
+				// cleanup failure is still reported.
+				if (getErrorCode(cleanupError) !== "ENOENT") {
+					console.error(
+						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+						cleanupError,
+					)
+				}
 			}
 		}
 
