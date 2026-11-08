@@ -992,6 +992,43 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 		})
+		it("lets a write on another path publish while the first path's publish is blocked", async () => {
+			// The row is about progress during the blocked window, which a settled call
+			// count cannot show: with one chain shared by every path the second write would
+			// queue behind the first and this assertion would never see a publish at all.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("gate-a.txt"), "v1")
+			reg.observe(abs("gate-b.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			let releaseGateA: () => void = () => {}
+			const gateA = new Promise<void>((resolve) => {
+				releaseGateA = resolve
+			})
+			const publishOrder: string[] = []
+			mockedSafeWriteText.mockImplementation(async (target: string) => {
+				if (target === abs("gate-a.txt")) {
+					await gateA
+				}
+				publishOrder.push(target)
+			})
+
+			const writeA = guardedWrite(task, "gate-a.txt", "a", "update")
+			const writeB = guardedWrite(task, "gate-b.txt", "b", "update")
+
+			// Settle until b has published; a is still inside its own publish here.
+			for (let tick = 0; tick < 200 && publishOrder.length === 0; tick++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			expect(publishOrder).toEqual([abs("gate-b.txt")])
+
+			releaseGateA()
+			await Promise.all([writeA, writeB])
+
+			expect(publishOrder).toEqual([abs("gate-b.txt"), abs("gate-a.txt")])
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	describe("path resolution", () => {
