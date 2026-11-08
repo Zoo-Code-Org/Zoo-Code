@@ -220,6 +220,24 @@ test("build cache input contract", async (context) => {
 				assert.deepEqual(tasks[name].dependencies, ["@roo-code/types#build"], name)
 			}
 		})
+		await context.test("build tasks retain their scheduling dependencies", () => {
+			const tasks = hashes()
+			for (const name of typesConsumers.filter((name) => name.endsWith("#build"))) {
+				assert.ok(tasks[name].dependencies.includes("@roo-code/types#build"), `${name} must wait for types`)
+			}
+			for (const dependency of [
+				"@roo-code/build#build",
+				"@roo-code/cloud#build",
+				"@roo-code/core#build",
+				"@roo-code/ipc#build",
+				"@roo-code/telemetry#build",
+			]) {
+				assert.ok(
+					tasks["zoo-code#build"].dependencies.includes(dependency),
+					`zoo-code#build must wait for ${dependency}`,
+				)
+			}
+		})
 		await context.test("hashed input sets contain exact corrected paths", () => {
 			const tasks = hashes()
 			const required = {
