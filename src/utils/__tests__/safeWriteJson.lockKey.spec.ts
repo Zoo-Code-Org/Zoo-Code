@@ -19,13 +19,21 @@ vi.mock("../fileLock", async () => {
 
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-	return { ...actual, realpath: vi.fn(), lstat: vi.fn(), readlink: vi.fn() }
+	return {
+		...actual,
+		realpath: vi.fn(),
+		lstat: vi.fn(),
+		readlink: vi.fn(),
+		// stat stays a pass-through by default. The acceptance rows read the artefact identity back
+		// through it, and the one row that overrides it puts this back when it finishes.
+		stat: vi.fn(actual.stat),
+	}
 })
-
 const mockedRealpath = vi.mocked(fs.realpath)
 const mockedLstat = vi.mocked(fs.lstat)
 const mockedReadlink = vi.mocked(fs.readlink)
 const mockedAcquireFileLock = vi.mocked(acquireFileLock)
+const mockedStat = vi.mocked(fs.stat)
 
 const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
@@ -513,6 +521,20 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		const lower = path.join(dir, "settings.json")
 		const upper = path.join(dir, "SETTINGS.JSON")
 		const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		// fs.stat is overloaded - bigint stats are their own overload - so the pass-through and the
+		// injected variant are built from one rest signature here instead of being asserted at each
+		// use. Arguments and results go straight through in both directions.
+		const realStatPassThrough = async (
+			...args: Parameters<typeof fs.stat>
+		): Promise<Awaited<ReturnType<typeof real.stat>>> => await real.stat(...args)
+		const injectArtefactStat =
+			(fail: () => never) =>
+			async (...args: Parameters<typeof fs.stat>): Promise<Awaited<ReturnType<typeof real.stat>>> => {
+				if (String(args[0]).endsWith(".lock")) {
+					fail()
+				}
+				return await real.stat(...args)
+			}
 		const restatingRealpath = async (target: string): Promise<string> => {
 			const resolved = await real.realpath(target)
 			const parent = path.dirname(resolved)
@@ -533,58 +555,96 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		)
 		await real.rm(probeLower, { force: true })
 
-		// A promise re-import, so the failing stat does not leak into another row. Only stat
-		// fails, and only on a lock artefact: the write path's own stat calls (mode preservation)
-		// keep working, so the EACCES this row sees came from the guard's comparison and nowhere
-		// else.
+		// The instrument this row owes its reader. It used to install its own fs and fileLock mocks with
+		// vi.doMock and re-import safeWriteJson through vi.resetModules, and it was green on a
+		// case-folding filesystem while reporting zero artefact stats on a case-sensitive one. The
+		// reason was neither the guard nor the platform: asserted from inside the acquisition double it
+		// thought it had installed, the capture came back empty, which means the re-import never used
+		// that double and the row was being served by this file's module-level doubles - NTFS's own
+		// case restating supplying the divergence, and a real stat supplying the zeros. A row that
+		// injects a seam has to assert that the seam ran, because a green row that measures nothing is
+		// indistinguishable from a passing test, and that is what happened here. The doubles are the
+		// module-level ones now, re-armed for this row, with no resetModules and no re-import, and the
+		// capture is asserted first below so a scoping regression cannot go silent again.
+		const acquisitionFacts: Array<{ key: string; artefactBuilt: boolean }> = []
 		let statCalls = 0
-		vi.doMock("fs/promises", async () => {
-			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-			const refusal = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
-			return {
-				...actual,
-				realpath: vi.fn(async (p: string) => await restatingRealpath(String(p))),
-				lstat: vi.fn(async (p: string) => await actual.lstat(String(p), { bigint: true })),
-				readlink: vi.fn(async (p: string) => await actual.readlink(String(p))),
-				stat: vi.fn(async (p: string, options: unknown) => {
-					if (String(p).endsWith(".lock")) {
-						statCalls++
-						throw refusal
-					}
-					return await actual.stat(String(p), options as { bigint: true })
-				}),
+		const refusal = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+		mockedRealpath.mockImplementation(
+			async (target: Parameters<typeof fs.realpath>[0]) => await restatingRealpath(String(target)),
+		)
+		// lstat and readlink pass through for this row. resolvePublishTarget follows aliases through
+		// them, and an un-armed double would answer undefined where this row needs the real answer.
+		// They reject the way the filesystem rejects, which is the half the comment at the top of this
+		// module warns about.
+		mockedLstat.mockImplementation(
+			async (target: Parameters<typeof fs.lstat>[0]) => await real.lstat(String(target)),
+		)
+		mockedReadlink.mockImplementation(
+			async (target: Parameters<typeof fs.readlink>[0]) => await real.readlink(String(target)),
+		)
+		mockedAcquireFileLock.mockImplementation(async (file) => {
+			// The divergence the guard is asked about, reached the way a writer reaches it: this writer's
+			// key keeps the spelling it was computed from, the name the canonicalizer answers for the
+			// file appears under it while the lock is held, and the two artefact names are one object by
+			// hard link on either lane, so the stat below has a comparison to fail from on either lane.
+			// Hard link rather than symlink, for the reason given in the acceptance row above: one object
+			// under two names on NTFS and on ext4 alike, with no privilege asked for.
+			const ownArtefact = lockPathFor(String(file))
+			await real.writeFile(ownArtefact, "")
+			await real.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
+			if (!foldsCase) {
+				await real.link(lower, upper)
+				await real.link(ownArtefact, lockPathFor(lower))
 			}
+			acquisitionFacts.push({
+				key: String(file),
+				artefactBuilt: await real.stat(ownArtefact).then(
+					() => true,
+					() => false,
+				),
+			})
+			return async () => {}
 		})
-		vi.doMock("../fileLock", async () => {
-			const actual = await vi.importActual<typeof import("../fileLock")>("../fileLock")
-			return {
-				...actual,
-				acquireFileLock: vi.fn(async (file: string) => {
-					// The divergence the guard is asked about, reached the same way as in the row above:
-					// this writer's key keeps the spelling it was computed from, the name the canonicalizer
-					// answers for the file appears under it during acquisition, and the two artefact names
-					// are one object by hard link - on either lane, so the stat that fails below has
-					// somewhere to fail from on either lane.
-					const ownArtefact = actual.lockPathFor(String(file))
-					await fs.writeFile(ownArtefact, "")
-					await fs.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
-					if (!foldsCase) {
-						// Hard link rather than symlink, for the reason given in the acceptance row above:
-						// one object under two names on either hosted lane, with no privilege asked for.
-						await fs.link(lower, upper)
-						await fs.link(ownArtefact, actual.lockPathFor(lower))
-					}
-				}),
-			}
-		})
-		vi.resetModules()
-		const safeWriteJsonReimported = (await import("../safeWriteJson")).safeWriteJson
-
-		const error = await safeWriteJsonReimported(upper, { mcpServers: { mine: true } }).then(
-			() => undefined,
-			(caught: unknown) => caught as Error,
+		// Only a lock artefact fails, so the EACCES this row reports is the guard's comparison and
+		// nowhere else: the write path's own stat calls, which preserve the target mode, keep working.
+		mockedStat.mockImplementation(
+			injectArtefactStat(() => {
+				statCalls++
+				throw refusal
+			}),
 		)
 
+		let error: Error | undefined
+		try {
+			error = await safeWriteJson(upper, { mcpServers: { mine: true } }).then(
+				() => undefined,
+				(caught: unknown) => caught as Error,
+			)
+		} finally {
+			// Restored whatever the row concludes, so the injected failure cannot reach another row.
+			mockedStat.mockImplementation(realStatPassThrough)
+			mockedRealpath.mockReset()
+			mockedLstat.mockReset()
+			mockedReadlink.mockReset()
+			mockedAcquireFileLock.mockReset()
+		}
+
+		// The seam ran, and it was handed this writer's spelling. Both facts are about the fixture
+		// rather than about the guard, which is why they come before the guard's answer: if a later
+		// change stops this row from driving acquisition, it has to say so here instead of turning
+		// the count back into a zero that reads like a verdict about the code. On a case-folding
+		// filesystem the key arrives restated by the filesystem itself and the writer's spelling is the
+		// name the directory already stores; on a case-sensitive one the key keeps the spelling this
+		// writer asked in with, and the peer's file is what sits under the other name.
+		expect(
+			acquisitionFacts.length,
+			"the acquisition seam this row injects never ran, so nothing below it was driven by the fixture",
+		).toBe(1)
+		expect(acquisitionFacts[0].artefactBuilt).toBe(true)
+		expect(
+			acquisitionFacts.map((fact: { key: string }) => path.basename(fact.key)),
+			"acquisition was not asked to lock this writer's spelling, so no divergence reached the guard",
+		).toEqual([path.basename(upper)])
 		expect(
 			statCalls,
 			"the guard never put its identity question to the filesystem on this platform",
@@ -593,11 +653,8 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(String(error && error.name)).not.toBe("LockKeyDriftError")
 		// Fail closed: the writer published nothing, and the file it would have replaced still
 		// holds the peer's content.
-		expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
-		expect((await fs.readdir(dir)).length).toBe(foldsCase ? 2 : 4)
-		vi.doUnmock("fs/promises")
-		vi.doUnmock("../fileLock")
-		vi.resetModules()
+		expect(JSON.parse(await real.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
+		expect((await real.readdir(dir)).length).toBe(foldsCase ? 2 : 4)
 	})
 })
 
