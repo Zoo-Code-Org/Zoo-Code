@@ -1735,6 +1735,42 @@ describe("writeToFileTool", () => {
 			}
 		})
 
+		it("leaves an editing session's directories to the provider when the setup window fails", async () => {
+			// releaseEarlyDirectories() checks isEditing for a reason: once a session is editing, the
+			// provider owns those directories and its own discard or revert removes them, and an abandoned
+			// new-file view can leave them non-empty because the placeholder is still inside. Nothing
+			// asserted the check - with the guard deleted this suite still passed in full - so this drives
+			// the failure the guard exists for: a delta that dies in the pre-streaming setup while a
+			// session is open and a non-empty adopted list sits behind it.
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({ content: "" }, { fileExists: false, isPartial: true })
+			// The list the cleanup would remove really holds a directory: with only the first
+			// delta nothing is adopted and the assertion below cannot fail.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+				// The provider keeps them: the tool must not reach past a live session and clear a
+				// list its own discard still needs. The delta's own failure is still reported once.
+				expect(mockCline.diffViewProvider.removeAdoptedDirectories).not.toHaveBeenCalled()
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"handling partial write_to_file",
+					expect.objectContaining({ message: "provider state unavailable" }),
+				)
+			} finally {
+				mockCline.diffViewProvider.isEditing = false
+				mockedCreateDirectoriesForFile.mockResolvedValue([])
+			}
+		})
+
 		it("leaves a replacement stream state alone when the delta it replaced resumes", async () => {
 			// Liveness is object identity, not key presence: a test that only clears the entry
 			// passes for an implementation that checks the key. Here a new stream takes over the
