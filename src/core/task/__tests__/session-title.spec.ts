@@ -1,6 +1,6 @@
 // pnpm --filter roo-cline test core/task/__tests__/session-title.spec.ts
 
-import type { ApiHandler, CompletePromptOptions } from "../../../api"
+import type { ApiHandler, CompletePromptOptions, SingleCompletionHandler } from "../../../api"
 
 import {
 	SESSION_TITLE_FALLBACK_LENGTH,
@@ -12,8 +12,10 @@ import {
 } from "../session-title"
 
 /** A handler that only implements the single-shot completion path. */
-function makeSingleShotHandler(impl: (prompt: string, options?: CompletePromptOptions) => Promise<string>): ApiHandler {
-	return { completePrompt: vi.fn(impl) } as unknown as ApiHandler
+function makeSingleShotHandler(
+	impl: (prompt: string, options?: CompletePromptOptions) => Promise<string>,
+): ApiHandler & SingleCompletionHandler {
+	return { completePrompt: vi.fn(impl) } as unknown as ApiHandler & SingleCompletionHandler
 }
 
 /** A handler without `completePrompt`: the stream path is the only option. */

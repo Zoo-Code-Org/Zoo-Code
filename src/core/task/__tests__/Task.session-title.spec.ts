@@ -152,10 +152,18 @@ describe("Task session title generation", () => {
 		})
 	}
 
+	type TaskTestAccess = {
+		initiateTaskLoop: (userContent: unknown[]) => Promise<void>
+	}
+
+	function getTaskTestAccess(task: Task): TaskTestAccess {
+		return task as unknown as TaskTestAccess
+	}
+
 	it("starts title generation in the background when a new root task starts", async () => {
 		const mockProvider = makeMockProvider()
 		const task = makeTask(mockProvider)
-		vi.spyOn(task as never, "initiateTaskLoop").mockResolvedValue(undefined)
+		vi.spyOn(getTaskTestAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
 
 		await task["startTask"]("Fix the login bug")
 
