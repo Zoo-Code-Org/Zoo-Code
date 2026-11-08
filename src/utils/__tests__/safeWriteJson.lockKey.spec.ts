@@ -2,12 +2,13 @@
 
 import * as os from "os"
 import path from "path"
-import type { BigIntStats } from "fs"
+import { type BigIntStats, closeSync, mkdtempSync, openSync, readdirSync, rmSync, writeFileSync } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
 import { safeWriteJson } from "../safeWriteJson"
 import { lockPathFor } from "../fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { getErrorCode } from "../errorCode"
 
 vi.mock("../fileLock", async () => {
 	// The drift guard asks whether two keys name one lock, which is a question about the
@@ -37,8 +38,47 @@ const mockedStat = vi.mocked(fs.stat)
 
 const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
-// Each test creates a real temp directory so the real fs calls still work.
-// doubles between tests so an implementation from one test cannot carry over.
+// Whether this volume answers a name with a different spelling than the one its directory stores.
+// The gate further down needs the capability rather than the platform label, so it is measured
+// from a real directory: write one file, ask whether a differently-cased name opens, and require
+// the directory to list exactly one spelling of it. A failure that is not "not there" throws and
+// stops the file from collecting - a probe that defaulted on an unexpected error would report the
+// capability as absent and turn the gated row into a skip that reads like a pass. The row that
+// gates on this value re-measures the same property at run time through the promise surface and
+// compares, so a wrong answer here fails loudly rather than quietly reducing coverage.
+const CASE_FOLDING_VOLUME = (() => {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "lockkey-foldprobe-"))
+	try {
+		const stored = path.join(dir, "probe.json")
+		writeFileSync(stored, "{}")
+		// The probe's own easy question first: a volume that will not open the file under the name it
+		// was written with is not in a position to answer the hard one.
+		closeSync(openSync(stored, "r"))
+		const listed = readdirSync(dir)
+		if (listed.length !== 1) {
+			throw new Error("case-folding probe directory holds " + String(listed.length) + " entries, expected 1")
+		}
+		let opensUnderOtherCase = false
+		try {
+			closeSync(openSync(path.join(dir, "PROBE.JSON"), "r"))
+			opensUnderOtherCase = true
+		} catch (error: unknown) {
+			const code = getErrorCode(error)
+			// "Not there" is the verdict this gate wants: a volume that stores one spelling and does
+			// not find the other is case-sensitive. Anything else is a question the filesystem refused
+			// to answer, which is not an answer.
+			if (code !== "ENOENT") {
+				throw new Error("case-folding probe could not ask the filesystem: " + String(code ?? error))
+			}
+		}
+		return opensUnderOtherCase
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})()
+
+// Each test creates a real temp directory so the real fs calls still work,
+// and clears the module-level doubles between tests so an implementation from one test cannot carry over.
 const createdDirs: string[] = []
 async function makeDir(prefix: string): Promise<string> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
@@ -516,146 +556,199 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
-	it("propagates a lock-artefact stat that fails for a reason other than the artefact being absent", async () => {
-		const dir = await makeDir("lockkey-artefactstat-")
-		const lower = path.join(dir, "settings.json")
-		const upper = path.join(dir, "SETTINGS.JSON")
+	it("measures the same case-folding answer at run time that the collection-time probe reported", async () => {
+		// This row is the probe's control rather than another assertion about the writer. The gate on
+		// the row below skips work on the strength of a value computed while this file was collected,
+		// and a probe that reported the capability as absent would turn that row into a skip that
+		// reads like a pass. Re-measuring at run time, through the promise surface, in a directory
+		// this row creates, means a wrong probe answer shows up here as a failure instead of as an
+		// absence. Its own control is hard-coding CASE_FOLDING_VOLUME to false at collection time:
+		// on a folding volume this row reddens, which is the direction that could otherwise go quiet.
+		const dir = await makeDir("lockkey-foldcheck-")
 		const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-		// fs.stat is overloaded - bigint stats are their own overload - so the pass-through and the
-		// injected variant are built from one rest signature here instead of being asserted at each
-		// use. Arguments and results go straight through in both directions.
-		const realStatPassThrough = async (
-			...args: Parameters<typeof fs.stat>
-		): Promise<Awaited<ReturnType<typeof real.stat>>> => await real.stat(...args)
-		const injectArtefactStat =
-			(fail: () => never) =>
-			async (...args: Parameters<typeof fs.stat>): Promise<Awaited<ReturnType<typeof real.stat>>> => {
-				if (String(args[0]).endsWith(".lock")) {
-					fail()
+		const stored = path.join(dir, "probe.json")
+		await real.writeFile(stored, "{}")
+		const ownName = await real.open(stored, "r").catch(() => undefined)
+		await ownName?.close()
+		expect(ownName, "the file this row created did not open under its own name").not.toBeUndefined()
+		expect(await real.readdir(dir)).toHaveLength(1)
+		const otherCase = await real.open(path.join(dir, "PROBE.JSON"), "r").then(
+			async (opened: Awaited<ReturnType<typeof real.open>>) => {
+				await opened.close()
+				return true
+			},
+			(error: unknown) => {
+				const code = getErrorCode(error)
+				// Same rule the probe follows: absence is an answer, anything else is a measurement
+				// that did not happen and must not be recorded as one.
+				if (code !== "ENOENT") {
+					throw new Error(
+						"run-time case-folding check could not ask the filesystem: " + String(code ?? error),
+					)
 				}
-				return await real.stat(...args)
-			}
-		const restatingRealpath = async (target: string): Promise<string> => {
-			const resolved = await real.realpath(target)
-			const parent = path.dirname(resolved)
-			const name = path.basename(resolved)
-			const listed = await real.readdir(parent).catch(() => [] as string[])
-			// Prefer the entry whose name differs from the request in case alone. On a folding
-			// filesystem that is the one name the directory stores; on a case-sensitive one the
-			// directory holds both spellings and the match has to be pinned to the other one, or the
-			// divergence this row is built on would depend on readdir order.
-			const stored = listed.find((entry: string) => entry !== name && entry.toLowerCase() === name.toLowerCase())
-			return stored === undefined ? resolved : path.join(parent, stored)
-		}
-		const probeLower = path.join(dir, "probe.json")
-		await real.writeFile(probeLower, "{}")
-		const foldsCase = await restatingRealpath(path.join(dir, "PROBE.JSON")).then(
-			async (resolved: string) => path.basename(resolved) === path.basename(probeLower),
-			() => false,
+				return false
+			},
 		)
-		await real.rm(probeLower, { force: true })
-
-		// The instrument this row owes its reader. It used to install its own fs and fileLock mocks with
-		// vi.doMock and re-import safeWriteJson through vi.resetModules, and it was green on a
-		// case-folding filesystem while reporting zero artefact stats on a case-sensitive one. The
-		// reason was neither the guard nor the platform: asserted from inside the acquisition double it
-		// thought it had installed, the capture came back empty, which means the re-import never used
-		// that double and the row was being served by this file's module-level doubles - NTFS's own
-		// case restating supplying the divergence, and a real stat supplying the zeros. A row that
-		// injects a seam has to assert that the seam ran, because a green row that measures nothing is
-		// indistinguishable from a passing test, and that is what happened here. The doubles are the
-		// module-level ones now, re-armed for this row, with no resetModules and no re-import, and the
-		// capture is asserted first below so a scoping regression cannot go silent again.
-		const acquisitionFacts: Array<{ key: string; artefactBuilt: boolean }> = []
-		let statCalls = 0
-		const refusal = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
-		mockedRealpath.mockImplementation(
-			async (target: Parameters<typeof fs.realpath>[0]) => await restatingRealpath(String(target)),
+		expect(otherCase, "the run-time measurement and the collection-time probe disagree about this volume").toBe(
+			CASE_FOLDING_VOLUME,
 		)
-		// lstat and readlink pass through for this row. resolvePublishTarget follows aliases through
-		// them, and an un-armed double would answer undefined where this row needs the real answer.
-		// They reject the way the filesystem rejects, which is the half the comment at the top of this
-		// module warns about.
-		mockedLstat.mockImplementation(
-			async (target: Parameters<typeof fs.lstat>[0]) => await real.lstat(String(target)),
-		)
-		mockedReadlink.mockImplementation(
-			async (target: Parameters<typeof fs.readlink>[0]) => await real.readlink(String(target)),
-		)
-		mockedAcquireFileLock.mockImplementation(async (file) => {
-			// The divergence the guard is asked about, reached the way a writer reaches it: this writer's
-			// key keeps the spelling it was computed from, the name the canonicalizer answers for the
-			// file appears under it while the lock is held, and the two artefact names are one object by
-			// hard link on either lane, so the stat below has a comparison to fail from on either lane.
-			// Hard link rather than symlink, for the reason given in the acceptance row above: one object
-			// under two names on NTFS and on ext4 alike, with no privilege asked for.
-			const ownArtefact = lockPathFor(String(file))
-			await real.writeFile(ownArtefact, "")
-			await real.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
-			if (!foldsCase) {
-				await real.link(lower, upper)
-				await real.link(ownArtefact, lockPathFor(lower))
-			}
-			acquisitionFacts.push({
-				key: String(file),
-				artefactBuilt: await real.stat(ownArtefact).then(
-					() => true,
-					() => false,
-				),
-			})
-			return async () => {}
-		})
-		// Only a lock artefact fails, so the EACCES this row reports is the guard's comparison and
-		// nowhere else: the write path's own stat calls, which preserve the target mode, keep working.
-		mockedStat.mockImplementation(
-			injectArtefactStat(() => {
-				statCalls++
-				throw refusal
-			}),
-		)
-
-		let error: Error | undefined
-		try {
-			error = await safeWriteJson(upper, { mcpServers: { mine: true } }).then(
-				() => undefined,
-				(caught: unknown) => caught as Error,
-			)
-		} finally {
-			// Restored whatever the row concludes, so the injected failure cannot reach another row.
-			mockedStat.mockImplementation(realStatPassThrough)
-			mockedRealpath.mockReset()
-			mockedLstat.mockReset()
-			mockedReadlink.mockReset()
-			mockedAcquireFileLock.mockReset()
-		}
-
-		// The seam ran, and it was handed this writer's spelling. Both facts are about the fixture
-		// rather than about the guard, which is why they come before the guard's answer: if a later
-		// change stops this row from driving acquisition, it has to say so here instead of turning
-		// the count back into a zero that reads like a verdict about the code. On a case-folding
-		// filesystem the key arrives restated by the filesystem itself and the writer's spelling is the
-		// name the directory already stores; on a case-sensitive one the key keeps the spelling this
-		// writer asked in with, and the peer's file is what sits under the other name.
-		expect(
-			acquisitionFacts.length,
-			"the acquisition seam this row injects never ran, so nothing below it was driven by the fixture",
-		).toBe(1)
-		expect(acquisitionFacts[0].artefactBuilt).toBe(true)
-		expect(
-			acquisitionFacts.map((fact: { key: string }) => path.basename(fact.key)),
-			"acquisition was not asked to lock this writer's spelling, so no divergence reached the guard",
-		).toEqual([path.basename(upper)])
-		expect(
-			statCalls,
-			"the guard never put its identity question to the filesystem on this platform",
-		).toBeGreaterThan(0)
-		expect(String(error && (error as { code?: string }).code)).toBe("EACCES")
-		expect(String(error && error.name)).not.toBe("LockKeyDriftError")
-		// Fail closed: the writer published nothing, and the file it would have replaced still
-		// holds the peer's content.
-		expect(JSON.parse(await real.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
-		expect((await real.readdir(dir)).length).toBe(foldsCase ? 2 : 4)
 	})
+
+	// The gate below is a measured capability rather than a platform label: this row can only drive
+	// the guard's identity question on a volume where one file answers under two spellings, and
+	// that is a property of the volume, not of the runner's name. CASE_FOLDING_VOLUME is computed
+	// at collection time from a real directory and throws when the measurement cannot be trusted,
+	// instead of defaulting, because a probe that quietly answered "no" would make this row a skip
+	// that reads like a pass. What the gate does not claim: on a case-sensitive volume the artefact
+	// the acquisition builds and the artefact the guard computes from the key are one name, so
+	// there is no divergence for the guard to ask about and no artefact stat to fail. The gate
+	// skips a row that cannot drive the guard there; it does not skip a question about EACCES
+	// propagation, because on such a volume there is no such propagation to cover.
+	it.runIf(CASE_FOLDING_VOLUME)(
+		"propagates a lock-artefact stat that fails for a reason other than the artefact being absent",
+		async () => {
+			const dir = await makeDir("lockkey-artefactstat-")
+			const lower = path.join(dir, "settings.json")
+			const upper = path.join(dir, "SETTINGS.JSON")
+			const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			// fs.stat is overloaded - bigint stats are their own overload - so the pass-through and the
+			// injected variant are built from one rest signature here instead of being asserted at each
+			// use. Arguments and results go straight through in both directions.
+			const realStatPassThrough = async (
+				...args: Parameters<typeof fs.stat>
+			): Promise<Awaited<ReturnType<typeof real.stat>>> => await real.stat(...args)
+			const injectArtefactStat =
+				(fail: () => never) =>
+				async (...args: Parameters<typeof fs.stat>): Promise<Awaited<ReturnType<typeof real.stat>>> => {
+					if (String(args[0]).endsWith(".lock")) {
+						fail()
+					}
+					return await real.stat(...args)
+				}
+			const restatingRealpath = async (target: string): Promise<string> => {
+				const resolved = await real.realpath(target)
+				const parent = path.dirname(resolved)
+				const name = path.basename(resolved)
+				const listed = await real.readdir(parent).catch(() => [] as string[])
+				// Prefer the entry whose name differs from the request in case alone. On a folding
+				// filesystem that is the one name the directory stores; on a case-sensitive one the
+				// directory holds both spellings and the match has to be pinned to the other one, or the
+				// divergence this row is built on would depend on readdir order.
+				const stored = listed.find(
+					(entry: string) => entry !== name && entry.toLowerCase() === name.toLowerCase(),
+				)
+				return stored === undefined ? resolved : path.join(parent, stored)
+			}
+			const probeLower = path.join(dir, "probe.json")
+			await real.writeFile(probeLower, "{}")
+			const foldsCase = await restatingRealpath(path.join(dir, "PROBE.JSON")).then(
+				async (resolved: string) => path.basename(resolved) === path.basename(probeLower),
+				() => false,
+			)
+			await real.rm(probeLower, { force: true })
+
+			// The instrument this row owes its reader. It used to install its own fs and fileLock mocks with
+			// vi.doMock and re-import safeWriteJson through vi.resetModules, and it was green on a
+			// case-folding filesystem while reporting zero artefact stats on a case-sensitive one. The
+			// reason was neither the guard nor the platform: asserted from inside the acquisition double it
+			// thought it had installed, the capture came back empty, which means the re-import never used
+			// that double and the row was being served by this file's module-level doubles - NTFS's own
+			// case restating supplying the divergence, and a real stat supplying the zeros. A row that
+			// injects a seam has to assert that the seam ran, because a green row that measures nothing is
+			// indistinguishable from a passing test, and that is what happened here. The doubles are the
+			// module-level ones now, re-armed for this row, with no resetModules and no re-import, and the
+			// capture is asserted first below so a scoping regression cannot go silent again.
+			const acquisitionFacts: Array<{ key: string; artefactBuilt: boolean }> = []
+			let statCalls = 0
+			const refusal = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+			mockedRealpath.mockImplementation(
+				async (target: Parameters<typeof fs.realpath>[0]) => await restatingRealpath(String(target)),
+			)
+			// lstat and readlink pass through for this row. resolvePublishTarget follows aliases through
+			// them, and an un-armed double would answer undefined where this row needs the real answer.
+			// They reject the way the filesystem rejects, which is the half the comment at the top of this
+			// module warns about.
+			mockedLstat.mockImplementation(
+				async (target: Parameters<typeof fs.lstat>[0]) => await real.lstat(String(target)),
+			)
+			mockedReadlink.mockImplementation(
+				async (target: Parameters<typeof fs.readlink>[0]) => await real.readlink(String(target)),
+			)
+			mockedAcquireFileLock.mockImplementation(async (file) => {
+				// The divergence the guard is asked about, reached the way a writer reaches it: this writer's
+				// key keeps the spelling it was computed from, the name the canonicalizer answers for the
+				// file appears under it while the lock is held, and the two artefact names are one object by
+				// hard link on either lane, so the stat below has a comparison to fail from on either lane.
+				// Hard link rather than symlink, for the reason given in the acceptance row above: one object
+				// under two names on NTFS and on ext4 alike, with no privilege asked for.
+				const ownArtefact = lockPathFor(String(file))
+				await real.writeFile(ownArtefact, "")
+				await real.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
+				if (!foldsCase) {
+					await real.link(lower, upper)
+					await real.link(ownArtefact, lockPathFor(lower))
+				}
+				acquisitionFacts.push({
+					key: String(file),
+					artefactBuilt: await real.stat(ownArtefact).then(
+						() => true,
+						() => false,
+					),
+				})
+				return async () => {}
+			})
+			// Only a lock artefact fails, so the EACCES this row reports is the guard's comparison and
+			// nowhere else: the write path's own stat calls, which preserve the target mode, keep working.
+			mockedStat.mockImplementation(
+				injectArtefactStat(() => {
+					statCalls++
+					throw refusal
+				}),
+			)
+
+			let error: Error | undefined
+			try {
+				error = await safeWriteJson(upper, { mcpServers: { mine: true } }).then(
+					() => undefined,
+					(caught: unknown) => caught as Error,
+				)
+			} finally {
+				// Restored whatever the row concludes, so the injected failure cannot reach another row.
+				mockedStat.mockImplementation(realStatPassThrough)
+				mockedRealpath.mockReset()
+				mockedLstat.mockReset()
+				mockedReadlink.mockReset()
+				mockedAcquireFileLock.mockReset()
+			}
+
+			// The seam ran, and it was handed this writer's spelling. Both facts are about the fixture
+			// rather than about the guard, which is why they come before the guard's answer: if a later
+			// change stops this row from driving acquisition, it has to say so here instead of turning
+			// the count back into a zero that reads like a verdict about the code. On a case-folding
+			// filesystem the key arrives restated by the filesystem itself and the writer's spelling is the
+			// name the directory already stores; on a case-sensitive one the key keeps the spelling this
+			// writer asked in with, and the peer's file is what sits under the other name.
+			expect(
+				acquisitionFacts.length,
+				"the acquisition seam this row injects never ran, so nothing below it was driven by the fixture",
+			).toBe(1)
+			expect(acquisitionFacts[0].artefactBuilt).toBe(true)
+			expect(
+				acquisitionFacts.map((fact: { key: string }) => path.basename(fact.key)),
+				"acquisition was not asked to lock this writer's spelling, so no divergence reached the guard",
+			).toEqual([path.basename(upper)])
+			expect(
+				statCalls,
+				"the guard never put its identity question to the filesystem on this platform",
+			).toBeGreaterThan(0)
+			expect(String(error && (error as { code?: string }).code)).toBe("EACCES")
+			expect(String(error && error.name)).not.toBe("LockKeyDriftError")
+			// Fail closed: the writer published nothing, and the file it would have replaced still
+			// holds the peer's content.
+			expect(JSON.parse(await real.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
+			expect((await real.readdir(dir)).length).toBe(foldsCase ? 2 : 4)
+		},
+	)
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
