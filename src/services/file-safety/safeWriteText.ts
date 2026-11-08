@@ -389,6 +389,16 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+/**
+ * The publish primitive itself. Tagged @internal because nothing in the shipped
+ * extension reaches it yet: this unit lands the primitive and its evidence, and the
+ * writer that is meant to call it arrives with the guardedWrite migration. Without the
+ * tag the production Knip view reports this export as unused, which states the wrong
+ * reason - the export is deliberate, its consumer is later in the merge order - and the
+ * alternative is blanking this whole 973-line module in knip.json.
+ *
+ * @internal
+ */
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
