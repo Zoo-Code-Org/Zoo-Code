@@ -1781,10 +1781,12 @@ describe("caller-supplied staging path", () => {
 	// is beside the target. What that check protects is the opposite - a staging file that is NOT
 	// beside the target, which is what makes the commit rename cross-filesystem (EXDEV) or lets a
 	// caller publish an unrelated file onto the target. Identity is that property, so a textual
-	// mismatch is resolved by comparing the two directories' dev and ino. path.resolve cannot settle
-	// it (it preserves whichever spelling it is given) and neither can fs.realpath: measured on node
-	// 22.23.4, Node's JavaScript realpath preserves an NTFS 8.3 spelling, and only
-	// fs.realpathSync.native expands it. These two tests drive the identity branch directly because a
+	// mismatch is resolved by comparing the two directories' dev and ino. No text-producing call
+	// settles it: path.resolve and node's synchronous fs.realpathSync both preserve the spelling
+	// they are given, and node's asynchronous fs.realpath does expand an 8.3 alias - measured on
+	// node 22.23.4 against a created directory, where the alias came back expanded from async
+	// realpath and unchanged from realpathSync. Either way the answer comes from the directory
+	// identity, not from the string. These two tests drive the identity branch directly because a
 	// whole-file mock of fs/promises cannot present two spellings of a real directory.
 	it("accepts a caller-staged file whose directory is the target directory under another spelling", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
@@ -1792,8 +1794,8 @@ describe("caller-supplied staging path", () => {
 		const targetDir = path.dirname(path.resolve(targetPath))
 		// One directory under two spellings: each side hands back its own realpath, so only the pair's
 		// identity says they are the same directory.
-		// realpath here mirrors what node 22.23.4 does to an NTFS 8.3 name: it hands back the
-		// spelling it was given, so only the directory identity can tell an alias from another directory.
+		// realpath here is stubbed to hand each side back its own spelling - the worst case a writer
+		// can be put in - so the pair can only be told apart by the directory identity.
 		vi.mocked(fs.realpath).mockImplementation((p: unknown) => Promise.resolve(path.resolve(String(p))))
 		vi.mocked(fs.stat).mockImplementation((p: unknown) => {
 			const s = String(p)
@@ -1821,8 +1823,8 @@ describe("caller-supplied staging path", () => {
 		// Two directories that both resolve cleanly but are not the same directory: a staging file in
 		// one of them would publish an unrelated file onto the target, and across a mount the commit
 		// rename would fail with EXDEV.
-		// realpath here mirrors what node 22.23.4 does to an NTFS 8.3 name: it hands back the
-		// spelling it was given, so only the directory identity can tell an alias from another directory.
+		// realpath here is stubbed to hand each side back its own spelling - the worst case a writer
+		// can be put in - so the pair can only be told apart by the directory identity.
 		vi.mocked(fs.realpath).mockImplementation((p: unknown) => Promise.resolve(path.resolve(String(p))))
 		vi.mocked(fs.stat).mockImplementation((p: unknown) => {
 			const s = String(p)

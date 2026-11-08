@@ -436,11 +436,15 @@ export async function safeWriteText(
 			// directory answers to more than one spelling. NTFS hands out an 8.3 alias for every name
 			// longer than eight characters - the hosted Windows runner's temp directory arrives as
 			// RUNNER~1 under the profile while the writer's resolved target arrives in the long
-			// spelling - and a junction or link does the same thing on any box. path.resolve preserves
-			// whichever spelling it is handed, and fs.realpath (the JavaScript implementation Node 22
-			// uses) preserves it too; only realpathSync.native expands the 8.3 form, measured on
-			// node 22.23.4. So neither a textual nor a plain-realpath comparison can tell an alias of
-			// the target's own directory from a different directory. The property this guard protects -
+			// spelling - and a junction or link does the same thing on any box. Which spelling a comparison
+			// sees depends on which call produced it: path.resolve preserves what it is handed, node's
+			// synchronous fs.realpathSync preserves it too and only realpathSync.native expands the 8.3
+			// form, while node's asynchronous fs.realpath - the call resolvePublishTarget uses - does
+			// expand it. All four were measured on node 22.23.4 against a directory created for the
+			// purpose: the alias C:\work\ZOO-CO~1\TMP-AL~2\LONG-D~1 came back expanded from async
+			// realpath, unchanged from realpathSync, and both spellings statted to one inode
+			// 673102249:562949965815680. A text match therefore proves nothing about whether two
+			// strings name one directory. The property this guard protects -
 			// no cross-filesystem commit rename (EXDEV) and no publishing of an unrelated file onto the
 			// target - is a property of the directory's identity, so compare identity: dev and ino, read
 			// as bigint for the same reason as the file check below. A directory that cannot be stat'd
