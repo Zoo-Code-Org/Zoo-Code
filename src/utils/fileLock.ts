@@ -1,3 +1,4 @@
+import * as fs from "fs"
 import * as path from "path"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
@@ -26,8 +27,59 @@ export interface FileLockOptions {
  * returned function exactly once and must not acquire the same lock again
  * while holding it.
  */
+function statIdentity(target: string): string | null {
+	try {
+		const stats = fs.statSync(target)
+		return String(stats.dev) + ":" + String(stats.ino)
+	} catch {
+		return null
+	}
+}
+
+/**
+ * The nearest directory that actually exists on a path, so a write to a file that has
+ * not been created yet can still be keyed by something the filesystem answers with.
+ */
+function nearestExistingDirectory(absolutePath: string): { directory: string; relative: string[] } {
+	const relative: string[] = []
+	let current = absolutePath
+	while (path.dirname(current) !== current) {
+		relative.unshift(path.basename(current))
+		current = path.dirname(current)
+		if (statIdentity(current) !== null) {
+			return { directory: current, relative }
+		}
+	}
+	return { directory: current, relative }
+}
+
+/**
+ * The spelling a lock artefact should be created under: the canonical spelling of the
+ * nearest existing directory, re-joined with the components that do not exist yet. This is
+ * what makes an 8.3 alias and its long form take one lock, and it stays a spelling - the key
+ * above is the identity, and callers that compare locks compare that.
+ */
+export function canonicalLockPath(filePath: string): string {
+	const absolute = path.resolve(filePath)
+	if (statIdentity(absolute) !== null) {
+		try {
+			return fs.realpathSync.native(absolute)
+		} catch {
+			return absolute
+		}
+	}
+	const { directory, relative } = nearestExistingDirectory(absolute)
+	let canonicalDirectory = directory
+	try {
+		canonicalDirectory = fs.realpathSync.native(directory)
+	} catch {
+		canonicalDirectory = directory
+	}
+	return relative.length === 0 ? canonicalDirectory : path.join(canonicalDirectory, ...relative)
+}
+
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
-	const absoluteFilePath = path.resolve(filePath)
+	const absoluteFilePath = canonicalLockPath(filePath)
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
@@ -72,7 +124,7 @@ export async function withFileLock<T>(
 	operation: (absoluteFilePath: string) => Promise<T>,
 	options?: FileLockOptions,
 ): Promise<T> {
-	const absoluteFilePath = path.resolve(filePath)
+	const absoluteFilePath = canonicalLockPath(filePath)
 	const releaseLock = await acquireFileLock(absoluteFilePath, options)
 
 	let result: T
