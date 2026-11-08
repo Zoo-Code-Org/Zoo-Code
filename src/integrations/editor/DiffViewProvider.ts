@@ -1172,6 +1172,9 @@ export class DiffViewProvider {
 			// mid-edit if that pass turns out not to finalize it.
 			this.teardownCancellationRequested = true
 			await this.teardownInFlight
+			// A rejection here is the owning pass telling this caller its cleanup failed: the
+			// content it was waiting behind may still be dirty and its tab still open, so this
+			// caller must not claim the close as though the session had been tidied.
 			// Not ours: the caller that started this teardown owns everything that
 			// belongs to it, including the steps that follow the callback.
 			return false
@@ -1181,20 +1184,40 @@ export class DiffViewProvider {
 		// A pass starts clean: a cancellation recorded for an earlier pass must not leak into
 		// this one.
 		this.teardownCancellationRequested = false
+		// The gate carries the pass's outcome, not only its completion. A caller that joined a
+		// pass whose cleanup threw has to learn that the buffer may still be dirty and the tab
+		// still open, instead of resuming as though the session had been tidied and claiming the
+		// close of a session it never tidied.
 		let release!: () => void
-		const tracked = new Promise<void>((resolve) => {
+		let failGate!: (error: unknown) => void
+		const tracked = new Promise<void>((resolve, reject) => {
 			release = resolve
+			failGate = reject
 		})
+		// The pass that owns the gate never awaits it, so a failed pass with no waiter would
+		// leave this rejection unhandled. Attaching a handler here does not change what a
+		// waiter sees: they await `tracked` itself, and it still rejects for them.
+		tracked.catch(() => {})
 		this.teardownInFlight = tracked
 		this.teardownPasses++
+		let failure: unknown
+		let cleanedUp = false
 		try {
 			await cleanup()
 			if (finalize) {
 				await finalize()
 			}
+			cleanedUp = true
+		} catch (error) {
+			failure = error
+			throw error
 		} finally {
 			this.teardownInFlight = undefined
-			release()
+			if (cleanedUp) {
+				release()
+			} else {
+				failGate(failure)
+			}
 		}
 		return true
 	}

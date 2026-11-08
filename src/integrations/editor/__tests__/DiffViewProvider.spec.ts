@@ -4219,6 +4219,45 @@ describe("DiffViewProvider", () => {
 
 			expect(diffViewProvider["userTouchedDocument"]).toBe(true)
 		})
+		// A cancellation that joins a teardown waits behind a pass it does not own. When that
+		// pass's cleanup throws, the buffer can still be dirty and this provider's tab still
+		// open, so the waiter has to hear about the failure instead of resuming as though the
+		// session had been tidied - and it must not close a session it never tidied.
+		it("revertChanges() carries a failed cleanup to the caller that joined the pass", async () => {
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const cleanupFailure = new Error("tab close rejected mid-teardown")
+			// The owning pass fails partway through its cleanup: the tab is still open and the
+			// document still holds the edit when the pass ends.
+			diffViewProvider["closeOwnDiffView"] = vi.fn().mockRejectedValue(cleanupFailure)
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["reset"] = reset
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			const owner = diffViewProvider.revertChanges()
+			const joiner = diffViewProvider.revertChanges()
+
+			await expect(owner).rejects.toThrow("tab close rejected mid-teardown")
+			// The gate carries the pass's outcome, so the waiter receives the same failure the
+			// owner received instead of a clean resume.
+			await expect(joiner).rejects.toThrow(cleanupFailure)
+			// Resetting here would clear the state of a session that is still mid-edit: the pass
+			// that owns the session has to answer for it, which it does through its own caller.
+			expect(reset).not.toHaveBeenCalled()
+			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(false)
+		})
 	})
 
 	describe("userTouchedDiffEditor keep/close behavior", () => {
