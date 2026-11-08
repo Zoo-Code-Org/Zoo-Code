@@ -74,7 +74,13 @@ describe("API.setConfiguration", () => {
 		// Exact side-effect counts: a regression that repeats any of these operations
 		// (duplicate settings write, duplicate profile save, duplicate webview post) fails.
 		expect(provider.setValues).toHaveBeenCalledTimes(1)
-		expect(provider.setValues).toHaveBeenCalledWith(configuration, { savedProfileName: "default" })
+		// The second argument carries the profile record that actually landed in the
+		// cross-instance section - what the store reports after saving, here the
+		// record minus its name/id pair - rather than a reconstruction from the payload.
+		expect(provider.setValues).toHaveBeenCalledWith(configuration, {
+			savedProfileName: "default",
+			savedProfileSettings: { apiProvider: providerIdentifiers.bedrock },
+		})
 		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledTimes(1)
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
