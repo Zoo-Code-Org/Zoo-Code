@@ -1022,6 +1022,29 @@ describe("safeWriteText", () => {
 			expect(fs.mkdir).not.toHaveBeenCalled()
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
+		it("hands a caller-staged temp file back when target resolution refuses to guess", async () => {
+			const linkPath = "/tmp/test-dir/link.txt"
+			const callerTemp = "/tmp/test-dir/.staging/caller-staged.tmp"
+			// safeWriteJson stages its temp file beside the resolved path before calling this
+			// function. A refusal before the guarded region must hand that file back: step 8 of
+			// the documented contract says a failed write cleans up temp + dump, and resolution
+			// sits above the region that owns the staged file.
+			vi.mocked(fs.realpath).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.lstat).mockRejectedValue(Object.assign(new Error("EIO: i/o error"), { code: "EIO" }))
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux", tempPath: callerTemp })).rejects.toEqual(
+				expect.objectContaining({ code: "EIO" }),
+			)
+
+			// The caller's staged file is the only temp this call could have leaked, and it is
+			// removed; nothing was created and nothing moved.
+			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
+			expect(_backupUnlinkCalls()).toBe(0)
+			expect(fs.mkdir).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
 		it("fixes the generated staging file's mode with fchmod so the umask cannot narrow it", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

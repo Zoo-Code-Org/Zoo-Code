@@ -241,7 +241,19 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	await flushPendingBackupRemovals()
 
 	// Resolve the symlink referent (see resolvePublishTarget).
-	const targetPath = await resolvePublishTarget(absoluteFilePath)
+	let targetPath: string
+	try {
+		targetPath = await resolvePublishTarget(absoluteFilePath)
+	} catch (error) {
+		// A caller that staged its own temp file (safeWriteJson) owns it until the guarded
+		// region below takes over. Resolution sits above that region, so a refusal here never
+		// reaches the rollback unlink: without this the staged file is left on disk, against
+		// the documented cleanup contract (step 8: on failure clean up temp + dump).
+		if (options?.tempPath) {
+			await fs.unlink(options.tempPath).catch(() => {})
+		}
+		throw error
+	}
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
