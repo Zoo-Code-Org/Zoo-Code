@@ -25,7 +25,7 @@ const friendliModelSchema = z.object({
 		})
 		.optional(),
 	input_modalities: z.array(z.string()).optional(),
-	reasoning_options: z.array(z.object({ type: z.string(), values: z.array(z.string()).optional() })).optional(),
+	reasoning_options: z.array(z.object({ type: z.string(), values: z.array(z.string()).optional() })).nullish(),
 })
 
 type FriendliModel = z.infer<typeof friendliModelSchema>

@@ -29,6 +29,7 @@ describe("getFriendliModels", () => {
 						mode: "chat",
 						pricing: { input: "0.00000014", output: "0.0000004" },
 					},
+					{ id: "zai-org/GLM-5.2", mode: "chat", input_modalities: ["text"] },
 					{ id: "some/embedding", mode: "embedding" },
 				],
 			},
@@ -38,7 +39,7 @@ describe("getFriendliModels", () => {
 		const models = await getFriendliModels({ signal })
 
 		expect(axios.get).toHaveBeenCalledWith("https://api.friendli.ai/serverless/v1/models", { signal })
-		expect(Object.keys(models)).toEqual(["zai-org/GLM-5.3", "google/gemma-4-31B-it"])
+		expect(Object.keys(models)).toEqual(["zai-org/GLM-5.3", "google/gemma-4-31B-it", "zai-org/GLM-5.2"])
 		expect(models["zai-org/GLM-5.3"]).toEqual({
 			maxTokens: 131_072,
 			contextWindow: 1_048_576,
@@ -54,6 +55,26 @@ describe("getFriendliModels", () => {
 		})
 		expect(models["google/gemma-4-31B-it"].supportsReasoningEffort).toBeUndefined()
 		expect(models["google/gemma-4-31B-it"].supportsPromptCache).toBe(false)
+		// Missing input_modalities and a text-only list both mean no image input.
+		expect(models["google/gemma-4-31B-it"].supportsImages).toBe(false)
+		expect(models["zai-org/GLM-5.2"].supportsImages).toBe(false)
+	})
+
+	it("accepts null reasoning_options and keeps the catalog", async () => {
+		vi.mocked(axios.get).mockResolvedValueOnce({
+			data: {
+				data: [
+					{ id: "vendor/fetched-only", reasoning_options: null },
+					{ id: "zai-org/GLM-5.1", reasoning_options: [{ type: "toggle" }] },
+				],
+			},
+		})
+
+		const models = await getFriendliModels()
+
+		expect(Object.keys(models)).toEqual(["vendor/fetched-only", "zai-org/GLM-5.1"])
+		expect(models["vendor/fetched-only"].supportsReasoningEffort).toBeUndefined()
+		expect(models["vendor/fetched-only"].supportsReasoningBinary).toBeUndefined()
 	})
 
 	it("maps toggle-only reasoning to supportsReasoningBinary without inventing an effort", async () => {

@@ -416,6 +416,21 @@ describe("ModelSelector", () => {
 			expect(openPicker()).toEqual(staticIds)
 			expect(screen.queryByText("chat:modelSelector.loading")).not.toBeInTheDocument()
 		})
+
+		test("replaces the static list with the fetched catalog in the same mounted picker", () => {
+			const listed = () => screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
+			const { rerender } = render(<ModelSelector apiConfiguration={friendliConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+			expect(listed()).toEqual(staticIds)
+
+			routerModelsResult.value = {
+				isLoading: false,
+				data: { friendli: { "zai-org/GLM-5.3": base, "vendor/fetched-only": base } },
+			}
+			rerender(<ModelSelector apiConfiguration={friendliConfig} title="Select model" />)
+
+			expect(listed()).toEqual(["vendor/fetched-only", "zai-org/GLM-5.3"])
+		})
 	})
 
 	test("falls back to a degraded trigger for providers without a simple model list, and jumps to Settings on click", () => {

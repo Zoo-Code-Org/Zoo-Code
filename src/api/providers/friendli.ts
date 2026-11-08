@@ -18,7 +18,15 @@ import { getModelParams } from "../transform/model-params"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
-import { hasUsableTimeout, settleOnAbort, toSdkTimeoutMs } from "./utils/abort-signal"
+import {
+	createAbortError,
+	createTimeoutError,
+	hasUsableTimeout,
+	isRequestAborted,
+	isTimeoutAbort,
+	mergeAbortSignalAndTimeout,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { getFriendliModels } from "./fetchers/friendli"
@@ -67,7 +75,6 @@ type FriendliChatCompletionNonStreamingParams = Omit<
  */
 export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelId> {
 	private models: ModelRecord = Object.create(null)
-	private modelsLoad?: Promise<void>
 
 	constructor(options: ApiHandlerOptions) {
 		super({
@@ -81,11 +88,28 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		})
 	}
 
-	private loadModels(): Promise<void> {
-		this.modelsLoad ??= getModels({ provider: providerIdentifiers.friendli }, this)
-			.then((models) => void (this.models = models))
-			.catch(() => {}) // static friendliModels remain the fallback
-		return this.modelsLoad
+	/** Loads the fetched catalog so task preparation reads its context window before any request. */
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		await this.ensureCatalogLoaded(async () => {
+			this.models = await getModels({ provider: providerIdentifiers.friendli }, this)
+			// getModels() does not cache an empty response, so keep it retryable.
+			return Object.keys(this.models).length > 0
+		}, signal)
+	}
+
+	/**
+	 * Waits for the catalog before a request. A failed load keeps the static `friendliModels`
+	 * fallback; a cancelled or timed-out wait rejects so no request starts.
+	 */
+	private async waitForCatalog(abortSignal?: AbortSignal, timeoutMs?: number): Promise<void> {
+		const signal = mergeAbortSignalAndTimeout(abortSignal, timeoutMs)
+		try {
+			await this.ensureModelFetched(signal)
+		} catch {
+			// Classified below: only a cut-short wait is fatal.
+		}
+		if (isTimeoutAbort(signal)) throw createTimeoutError(this.providerName)
+		if (signal?.aborted) throw createAbortError(this.providerName)
 	}
 
 	override async *createMessage(
@@ -93,8 +117,15 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		await settleOnAbort(this.loadModels(), metadata?.abortSignal, this.providerName)
-		yield* super.createMessage(systemPrompt, messages, metadata)
+		const signal = metadata?.abortSignal
+		await this.waitForCatalog(signal)
+		try {
+			yield* super.createMessage(systemPrompt, messages, metadata)
+		} catch (error) {
+			// The SDK's abort error is not the AbortError contract callers check for.
+			if (isRequestAborted(error, signal)) throw createAbortError(this.providerName)
+			throw error
+		}
 	}
 
 	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
@@ -219,10 +250,11 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			...friendliExtra,
 		}
 
+		const signal = metadata?.abortSignal
 		try {
 			return this.client.chat.completions.create(
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
-				requestOptions,
+				requestOptions ?? (signal ? { signal } : undefined),
 			)
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
@@ -230,7 +262,12 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	}
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		await settleOnAbort(this.loadModels(), options?.abortSignal, this.providerName)
+		// The catalog wait and the completion share one deadline, started before the wait.
+		const timeoutMs = options?.timeoutMs
+		const deadline = hasUsableTimeout(timeoutMs) ? Date.now() + timeoutMs : undefined
+		await this.waitForCatalog(options?.abortSignal, timeoutMs)
+		const remainingMs = deadline === undefined ? undefined : deadline - Date.now()
+		if (remainingMs !== undefined && remainingMs <= 0) throw createTimeoutError(this.providerName)
 		const { id: modelId } = this.getModel()
 		const friendliExtra = this.buildFriendliReasoningParams()
 
@@ -247,9 +284,8 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			if (options?.abortSignal !== undefined) {
 				requestOptions.signal = options.abortSignal
 			}
-			const timeoutMs = options?.timeoutMs
-			if (hasUsableTimeout(timeoutMs)) {
-				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
+			if (remainingMs !== undefined) {
+				requestOptions.timeout = toSdkTimeoutMs(remainingMs)
 			}
 			const response = (await this.client.chat.completions.create(
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParams,

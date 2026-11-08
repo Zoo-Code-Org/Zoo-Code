@@ -126,6 +126,88 @@ describe("FriendliHandler", () => {
 		expect(mockCreate).not.toHaveBeenCalled()
 	})
 
+	it("ensureModelFetched should expose the fetched context window before any request", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "k" })
+
+		await handlerWithModel.ensureModelFetched()
+		expect(handlerWithModel.getModel().info.contextWindow).toBe(100_000)
+
+		await handlerWithModel.completePrompt("a")
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+	})
+
+	it("completePrompt should not start a chat request when cancelled during catalog loading", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+		const controller = new AbortController()
+		const pending = handler.completePrompt("a", { abortSignal: controller.signal })
+
+		controller.abort()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		{
+			entry: "createMessage",
+			run: (h: FriendliHandler, signal: AbortSignal) =>
+				h.createMessage("system", [], { taskId: "t", abortSignal: signal }).next(),
+		},
+		{
+			entry: "completePrompt",
+			run: (h: FriendliHandler, signal: AbortSignal) => h.completePrompt("a", { abortSignal: signal }),
+		},
+	])("$entry should not start a chat request when cancelled as the catalog settles", async ({ run }) => {
+		const controller = new AbortController()
+		mockGetModels.mockImplementationOnce(async () => {
+			controller.abort()
+			return { "vendor/new-model": { contextWindow: 100_000, supportsPromptCache: false } }
+		})
+
+		await expect(run(handler, controller.signal)).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it("createMessage should forward the abort signal and normalize a mid-stream abort", async () => {
+		const controller = new AbortController()
+		mockCreate.mockImplementationOnce(async function* () {
+			yield { choices: [{ delta: { content: "partial" }, index: 0 }] }
+			controller.abort()
+			throw new Error("Request was aborted.")
+		})
+
+		const stream = handler.createMessage("system", [], { taskId: "t", abortSignal: controller.signal })
+
+		await expect(collectStream(stream)).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The Friendli request was aborted",
+		})
+		expect(mockCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+	})
+
+	it("completePrompt should give the completion only the time left after the catalog wait", async () => {
+		let now = 1_000
+		vi.spyOn(Date, "now").mockImplementation(() => now)
+		mockGetModels.mockImplementationOnce(async () => {
+			now += 1_000
+			return {}
+		})
+		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+
+		await handler.completePrompt("a", { timeoutMs: 3000 })
+
+		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { timeout: 2000 })
+	})
+
+	it("completePrompt should time out without a chat request when the catalog wait uses the deadline", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+
+		await expect(handler.completePrompt("a", { timeoutMs: 20 })).rejects.toMatchObject({ name: "TimeoutError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
 	it("should fall back to static models when the catalog is empty", async () => {
 		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 		await handler.completePrompt("a")
@@ -263,6 +345,7 @@ describe("FriendliHandler", () => {
 		{ label: "a fractional", input: 12.5, forwarded: 13 },
 		{ label: "an over-cap", input: 2_147_483_648, forwarded: 2_147_483_647 },
 	])("completePrompt should forward $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+		vi.spyOn(Date, "now").mockReturnValue(1_000) // no time passes during the catalog wait
 		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
 		await handler.completePrompt("test prompt", { timeoutMs: input })
 		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { timeout: forwarded })
