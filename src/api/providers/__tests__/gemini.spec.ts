@@ -21,6 +21,8 @@ import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { GeminiHandler } from "../gemini"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
+import { flushMacrotasks } from "../../../test-utils/timers"
+import { withSettleGuard } from "../../../test-utils/settle-guard"
 
 const GEMINI_MODEL_NAME = geminiDefaultModelId
 
@@ -1540,18 +1542,12 @@ describe("GeminiHandler", () => {
 			)
 
 			const collector = collectStream(stream).catch((e: unknown) => e)
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await flushMacrotasks()
 			controller.abort()
 
 			// Bound the wait so a broken abort bridge fails this test fast (and fails
 			// the Stryker mutant) instead of hanging until the runner timeout.
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
-				collector.then((result) => {
-					clearTimeout(deadline)
-					resolve(result)
-				})
-			})
+			const error = await withSettleGuard(collector, 3000)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The Gemini request was aborted")

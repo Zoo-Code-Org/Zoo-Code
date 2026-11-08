@@ -112,7 +112,7 @@ import { type AssistantMessageContent, presentAssistantMessage } from "../assist
 import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { manageContext, willManageContext } from "../context-management"
+import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -155,6 +155,9 @@ import {
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+// Streamed deltas arrive far faster than the webview can usefully re-render a growing message
+// (tables and code fences reflow on nearly every update), so partial updates post at most this often.
+const PARTIAL_MESSAGE_UPDATE_INTERVAL_MS = 120
 // Upper bound on awaiting lazily loaded model metadata. Some model-catalog
 // fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
 // hung endpoint must not stall streaming, condense, or context-window
@@ -1752,6 +1755,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates a Cline message in the webview and emits an event.
 	 * Non-partial messages are synced to cloud telemetry if not already synced.
 	 */
+	private lastPartialMessagePostTs = 0
+	private pendingPartialMessageTimer: ReturnType<typeof setTimeout> | undefined
+	private pendingPartialMessage: ClineMessage | undefined
+
+	/**
+	 * Posts a streaming (partial) message update, at most once per
+	 * `PARTIAL_MESSAGE_UPDATE_INTERVAL_MS`. The message object is always kept current by the
+	 * caller; a trailing post makes sure the latest text is delivered once the burst ends.
+	 */
+	private postPartialMessageUpdate(message: ClineMessage, source: "ask" | "say"): void {
+		const post = (target: ClineMessage) => {
+			this.lastPartialMessagePostTs = Date.now()
+			// Fire-and-forget: the `RooCodeEventName.Message` emit can synchronously throw via a
+			// consumer-attached listener. Surface that as a log, not an unhandled rejection.
+			this.updateClineMessage(target).catch((error) => {
+				console.error(`[Task#${source}] updateClineMessage failed:`, error)
+			})
+		}
+
+		// A queued update for a different message (e.g. reasoning followed by text) must not be
+		// overwritten by this one, so deliver it now.
+		const queued = this.pendingPartialMessage
+		if (queued && queued.ts !== message.ts) {
+			this.cancelPendingPartialMessageUpdate()
+			post(queued)
+		}
+
+		// Clamp: a backward wall-clock step makes the difference negative, which would schedule
+		// the trailing post later than the interval.
+		const elapsed = Math.max(0, Date.now() - this.lastPartialMessagePostTs)
+		if (elapsed >= PARTIAL_MESSAGE_UPDATE_INTERVAL_MS) {
+			this.cancelPendingPartialMessageUpdate()
+			post(message)
+			return
+		}
+
+		this.pendingPartialMessage = message
+		if (this.pendingPartialMessageTimer) {
+			return
+		}
+
+		this.pendingPartialMessageTimer = setTimeout(() => {
+			const pending = this.pendingPartialMessage
+			this.pendingPartialMessageTimer = undefined
+			this.pendingPartialMessage = undefined
+
+			if (pending?.partial && !this.abort && !this.abandoned) {
+				post(pending)
+			}
+		}, PARTIAL_MESSAGE_UPDATE_INTERVAL_MS - elapsed)
+	}
+
+	/** Drops a queued trailing partial post, e.g. because the message was finalized or the task is ending. */
+	private cancelPendingPartialMessageUpdate(): void {
+		if (this.pendingPartialMessageTimer) {
+			clearTimeout(this.pendingPartialMessageTimer)
+		}
+		this.pendingPartialMessageTimer = undefined
+		this.pendingPartialMessage = undefined
+	}
+
 	private async updateClineMessage(message: ClineMessage) {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
@@ -1959,13 +2023,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// data or one whole message at a time so ignore partial for
 					// saves, and only post parts of partial message instead of
 					// whole array in new listener.
-					// Fire-and-forget: the webview post is internally guarded, but
-					// the `RooCodeEventName.Message` emit can synchronously throw
-					// if any consumer-attached listener does, which would surface
-					// here as an unhandled rejection. Log it instead.
-					this.updateClineMessage(lastMessage).catch((error) => {
-						console.error("[Task#ask] updateClineMessage failed:", error)
-					})
+					this.postPartialMessageUpdate(lastMessage, "ask")
 					// console.log("Task#ask: current ask promise was ignored (#1)")
 					throw new AskIgnoredError("updating existing partial")
 				} else {
@@ -2006,9 +2064,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						lastMessage.isAnswered = true
 						lastMessage.autoApprovalDecision = autoApprovalDecision
 					}
+					this.cancelPendingPartialMessageUpdate()
 					await this.saveClineMessages()
-					// Fire-and-forget: see updateClineMessage call above for the
-					// rationale on the .catch arm.
+					// Fire-and-forget: see postPartialMessageUpdate for the rationale on the .catch arm.
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#ask] updateClineMessage failed:", error)
 					})
@@ -2797,13 +2855,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.images = images
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
-					// Fire-and-forget: webview post is internally guarded, but the
-					// `RooCodeEventName.Message` emit can synchronously throw via a
-					// consumer-attached listener. Surface that as a log, not an
-					// unhandled rejection.
-					this.updateClineMessage(lastMessage).catch((error) => {
-						console.error("[Task#say] updateClineMessage failed:", error)
-					})
+					this.postPartialMessageUpdate(lastMessage, "say")
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -2839,6 +2891,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
+					this.cancelPendingPartialMessageUpdate()
 					await this.saveClineMessages()
 
 					// More performant than an entire `postStateToWebview`.
@@ -3641,6 +3694,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+		this.cancelPendingPartialMessageUpdate()
 
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
@@ -4038,6 +4092,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			try {
 				let cacheWriteTokens = 0
+				let cacheWrite1hTokens = 0
+				let cacheWrite12hTokens = 0
 				let cacheReadTokens = 0
 				let inputTokens = 0
 				let outputTokens = 0
@@ -4073,6 +4129,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 							: calculateApiCostOpenAI(
 									streamModelInfo,
@@ -4080,6 +4138,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									undefined,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 
 					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
@@ -4227,6 +4288,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens += chunk.inputTokens
 								outputTokens += chunk.outputTokens
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
+								cacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+								cacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
 								break
@@ -4467,6 +4530,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						input: inputTokens,
 						output: outputTokens,
 						cacheWrite: cacheWriteTokens,
+						cacheWrite1h: cacheWrite1hTokens,
+						cacheWrite12h: cacheWrite12hTokens,
 						cacheRead: cacheReadTokens,
 						total: totalCost,
 					}
@@ -4483,6 +4548,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						let bgInputTokens = currentTokens.input
 						let bgOutputTokens = currentTokens.output
 						let bgCacheWriteTokens = currentTokens.cacheWrite
+						let bgCacheWrite1hTokens = currentTokens.cacheWrite1h
+						let bgCacheWrite12hTokens = currentTokens.cacheWrite12h
 						let bgCacheReadTokens = currentTokens.cacheRead
 						let bgTotalCost = currentTokens.total
 
@@ -4492,6 +4559,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								input: number
 								output: number
 								cacheWrite: number
+								cacheWrite1h: number
+								cacheWrite12h: number
 								cacheRead: number
 								total?: number
 							},
@@ -4508,6 +4577,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens = tokens.input
 								outputTokens = tokens.output
 								cacheWriteTokens = tokens.cacheWrite
+								cacheWrite1hTokens = tokens.cacheWrite1h
+								cacheWrite12hTokens = tokens.cacheWrite12h
 								cacheReadTokens = tokens.cacheRead
 								totalCost = tokens.total
 
@@ -4529,7 +4600,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									modelId,
 								)
 
-								// Use the appropriate cost function based on the API protocol
+								// Use the appropriate cost function based on the API protocol.
+								// The per-TTL split must be passed here too: without it this
+								// telemetry recompute bills every write at the short-TTL rate,
+								// which is exactly the under-report this PR exists to fix.
 								const costResult =
 									apiProtocol === "anthropic"
 										? calculateApiCostAnthropic(
@@ -4538,6 +4612,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 										: calculateApiCostOpenAI(
 												streamModelInfo,
@@ -4545,6 +4621,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												undefined,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 
 								TelemetryService.instance.captureLlmCompletion(this.taskId, {
@@ -4585,6 +4664,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgInputTokens += chunk.inputTokens
 									bgOutputTokens += chunk.outputTokens
 									bgCacheWriteTokens += chunk.cacheWriteTokens ?? 0
+									bgCacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+									bgCacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 									bgCacheReadTokens += chunk.cacheReadTokens ?? 0
 									bgTotalCost = chunk.totalCost
 								}
@@ -4603,6 +4684,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -4628,6 +4711,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -5399,6 +5484,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this.api.getModel().info
 	}
 
+	/**
+	 * Report a manageContext result to the webview. Shared by the automatic and emergency
+	 * condense paths so both emit the same events: a surfaced error, and a condense event
+	 * carrying the condenseId that rewind cleanup uses to remove the matching summary.
+	 */
+	private async reportContextManagementResult(result: ContextManagementResult): Promise<void> {
+		if (result.error) {
+			await this.say("condense_context_error", result.error)
+		}
+		if (result.summary) {
+			const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = result
+			const contextCondense: ContextCondense = {
+				summary,
+				cost,
+				newContextTokens,
+				prevContextTokens,
+				condenseId,
+			}
+			await this.say(
+				"condense_context",
+				undefined /* text */,
+				undefined /* images */,
+				false /* partial */,
+				undefined /* checkpoint */,
+				undefined /* progressStatus */,
+				{ isNonInteractive: true } /* options */,
+				contextCondense,
+			)
+		} else if (result.truncationId) {
+			// Sliding window truncation occurred (fallback when condensing fails or is disabled)
+			const contextTruncation: ContextTruncation = {
+				truncationId: result.truncationId,
+				messagesRemoved: result.messagesRemoved ?? 0,
+				prevContextTokens: result.prevContextTokens,
+				newContextTokens: result.newContextTokensAfterTruncation ?? 0,
+			}
+			await this.say(
+				"sliding_window_truncation",
+				undefined /* text */,
+				undefined /* images */,
+				false /* partial */,
+				undefined /* checkpoint */,
+				undefined /* progressStatus */,
+				{ isNonInteractive: true } /* options */,
+				undefined /* contextCondense */,
+				contextTruncation,
+			)
+		}
+	}
+
 	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
@@ -5475,6 +5610,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// Generate environment details to include in the condensed summary
 			const environmentDetails = await getEnvironmentDetails(this, true)
+			const filesReadByRoo = await this.getFilesReadByRooSafely("handleContextWindowExceededError")
 
 			// Force aggressive truncation by keeping only 75% of the conversation history
 			const truncateResult = await manageContext({
@@ -5487,50 +5623,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
 				systemPrompt: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
+				// Recovery must summarize like the automatic path: same prompt and folded file context.
+				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
 				profileThresholds,
 				currentProfileId,
 				metadata,
 				environmentDetails,
+				filesReadByRoo,
+				cwd: this.cwd,
+				rooIgnoreController: this.rooIgnoreController,
 				useAvailableInputForContextPercent,
 			})
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
-
-			if (truncateResult.summary) {
-				const { summary, cost, prevContextTokens, newContextTokens = 0 } = truncateResult
-				const contextCondense: ContextCondense = { summary, cost, newContextTokens, prevContextTokens }
-				await this.say(
-					"condense_context",
-					undefined /* text */,
-					undefined /* images */,
-					false /* partial */,
-					undefined /* checkpoint */,
-					undefined /* progressStatus */,
-					{ isNonInteractive: true } /* options */,
-					contextCondense,
-				)
-			} else if (truncateResult.truncationId) {
-				// Sliding window truncation occurred (fallback when condensing fails or is disabled)
-				const contextTruncation: ContextTruncation = {
-					truncationId: truncateResult.truncationId,
-					messagesRemoved: truncateResult.messagesRemoved ?? 0,
-					prevContextTokens: truncateResult.prevContextTokens,
-					newContextTokens: truncateResult.newContextTokensAfterTruncation ?? 0,
-				}
-				await this.say(
-					"sliding_window_truncation",
-					undefined /* text */,
-					undefined /* images */,
-					false /* partial */,
-					undefined /* checkpoint */,
-					undefined /* progressStatus */,
-					{ isNonInteractive: true } /* options */,
-					undefined /* contextCondense */,
-					contextTruncation,
-				)
-			}
+			await this.reportContextManagementResult(truncateResult)
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
 			// IMPORTANT: Must always be sent to dismiss the spinner, even on error
@@ -5787,48 +5895,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
-				if (truncateResult.error) {
-					await this.say("condense_context_error", truncateResult.error)
-				}
-				if (truncateResult.summary) {
-					const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = truncateResult
-					const contextCondense: ContextCondense = {
-						summary,
-						cost,
-						newContextTokens,
-						prevContextTokens,
-						condenseId,
-					}
-					await this.say(
-						"condense_context",
-						undefined /* text */,
-						undefined /* images */,
-						false /* partial */,
-						undefined /* checkpoint */,
-						undefined /* progressStatus */,
-						{ isNonInteractive: true } /* options */,
-						contextCondense,
-					)
-				} else if (truncateResult.truncationId) {
-					// Sliding window truncation occurred (fallback when condensing fails or is disabled)
-					const contextTruncation: ContextTruncation = {
-						truncationId: truncateResult.truncationId,
-						messagesRemoved: truncateResult.messagesRemoved ?? 0,
-						prevContextTokens: truncateResult.prevContextTokens,
-						newContextTokens: truncateResult.newContextTokensAfterTruncation ?? 0,
-					}
-					await this.say(
-						"sliding_window_truncation",
-						undefined /* text */,
-						undefined /* images */,
-						false /* partial */,
-						undefined /* checkpoint */,
-						undefined /* progressStatus */,
-						{ isNonInteractive: true } /* options */,
-						undefined /* contextCondense */,
-						contextTruncation,
-					)
-				}
+				await this.reportContextManagementResult(truncateResult)
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show

@@ -3,14 +3,26 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import { getErrorCode } from "./errorCode"
 import { acquireFileLock } from "./fileLock"
+import { recoverInterruptedReplacement } from "./jsonFileRecovery"
 import {
 	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
-	type SafeWriteTextOptions,
 } from "../services/file-safety/safeWriteText"
+
+/**
+ * Stages reported through the optional `trace` callback. They mark the
+ * replacement-protocol steps that matter when diagnosing interrupted or
+ * failing writes: the recovery pass, the temp-file write, the backup rename
+ * of the EPERM fallback, the commit rename, and completion.
+ */
+export type SafeWriteJsonTraceStage =
+	"recover" | "write-start" | "backup-rename" | "replacement-rename" | "write-complete"
+
+export type SafeWriteJsonTrace = (event: { stage: SafeWriteJsonTraceStage; detail?: string }) => void
 
 /**
  * Options for safeWriteJson function
@@ -33,14 +45,49 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * When provided, receives one event per replacement-protocol step (see
+	 * SafeWriteJsonTraceStage). Callers such as the task-message save use it
+	 * to emit diagnostic trace lines; it never influences the write itself.
+	 */
+	trace?: SafeWriteJsonTrace
+}
+
+/**
+ * Staging path for the replacement, created beside the target it will be renamed onto.
+ *
+ * The name has to satisfy two contracts at once. safeWriteText only publishes a
+ * caller-supplied staging path whose basename matches `.new_*.tmp` (a plain file
+ * beside the target would have its content published and its own name deleted),
+ * and jsonFileRecovery only garbage-collects leftovers whose name is scoped to
+ * this file, so it can never unlink another target's in-flight staging file in
+ * the same directory. `.new_<basename>_<ts>_<rand>.tmp` is the one shape that
+ * satisfies both.
+ */
+function createStagingFilePath(absoluteFilePath: string): string {
+	return path.join(
+		path.dirname(absoluteFilePath),
+		`.new_${path.basename(absoluteFilePath)}_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+	)
+}
+
+function createBackupFilePath(absoluteFilePath: string): string {
+	return path.join(
+		path.dirname(absoluteFilePath),
+		`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+	)
 }
 
 /**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
- * - Writes to a temporary file first via JsonStreamStringify streaming.
- * - If the target file exists, it's backed up before being replaced.
+ *   The lock is keyed on the symlink referent, so an alias and its referent share one lock.
+ * - Recovers an interrupted previous write before touching the file: restores an orphaned backup when the canonical path is absent, and removes leftover temp files.
+ * - Writes to a temporary file first via JsonStreamStringify streaming, then commits it through safeWriteText's single atomic rename, so the committed target stays readable through an interrupted write.
+ * - When that rename fails with EPERM (a reader holds the file open on Windows), re-stages and falls back to the two-step replacement that backs the target up before replacing it.
+ * - Delegates the commit, the Windows DACL capture, the target mode and the post-commit fsync to safeWriteText, which is the same primitive the guarded text writes use.
  * - Attempts to roll back and clean up in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
@@ -71,24 +118,43 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 
 	// Lock key: the symlink referent when the path is an existing symlink, so a
 	// symlink alias and its referent share one lock. The key must be computable
-	// while a peer writer is mid-commit (backup mode renames the referent away and
-	// back), so the walk tolerates a dangling link instead of rejecting it here.
+	// while a peer writer is mid-commit (a publish renames the staged file onto the
+	// referent and back), so the walk tolerates a dangling link instead of rejecting
+	// it here.
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Acquire the lock before any file operations. If acquisition fails it throws
 	// immediately, and releaseLock stays a no-op so the finally block does not try
-	// to release an unacquired lock.
+	// to release an unacquired lock. Callers that lock the same key with acquireFileLock
+	// (for example task-history deletion) serialize with this write.
 	releaseLock = await acquireFileLock(lockKey)
 
-	// Variables to hold the actual path of the temp file if it is created.
+	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
+	// The backup copy taken by the EPERM fallback, if that fallback runs.
+	let actualTempBackupFilePath: string | null = null
 
 	try {
-		// Resolve the publish target under the lock: the peer has committed by now, so
-		// the strict dangling-link rejection still applies to a real dangling link. It
-		// must stay inside the protected block, otherwise a rejection here leaves the
-		// advisory lock held until the stale timeout for every other writer.
+		// Resolve the publish target under the lock: a peer that held the lock has
+		// committed by now, so the strict dangling-link rejection still applies to a
+		// real dangling link. It must stay inside the protected block, otherwise a
+		// rejection here leaves the advisory lock held until the stale timeout for
+		// every other writer.
 		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+
+		// Heal any state an interrupted previous write left behind: an absent
+		// canonical path with an orphaned backup, or leftover replacement
+		// files. Runs on the resolved target, because that is the directory the
+		// staging and backup names live in, and runs before the merge callback so
+		// the callback reads the restored content.
+		const recovery = await recoverInterruptedReplacement(resolvedTargetPath).catch((error: unknown) => {
+			const code = getErrorCode(error) ?? "unknown"
+			options?.trace?.({ stage: "recover", detail: `failed:${code}` })
+			throw error
+		})
+		if (recovery.foundLeftovers) {
+			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
+		}
 
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally
@@ -98,8 +164,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			try {
 				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
 			} catch (error: unknown) {
-				const code =
-					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				const code = getErrorCode(error)
 				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
 					throw error
 				}
@@ -107,33 +172,67 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file via JSON streaming.
-		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
-		// onto that referent, and a rename across filesystems would fail with EXDEV.
-		actualTempNewFilePath = path.join(
-			path.dirname(resolvedTargetPath),
-			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
-		)
+		// Step 1: Write data to a new temporary file and flush it to storage,
+		// making a best-effort flush before committing the replacement.
+		// Staged beside the RESOLVED target (the symlink referent when the path is a
+		// symlink): the commit is a rename onto that referent, and a rename across
+		// filesystems would fail with EXDEV. The name is the staging convention the
+		// commit primitive requires and is scoped to this file, so the recovery pass
+		// above can still recognise it. See createStagingFilePath.
+		options?.trace?.({ stage: "write-start" })
+		actualTempNewFilePath = createStagingFilePath(resolvedTargetPath)
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		await _flushFileToDisk(actualTempNewFilePath)
 
-		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson
-		// semantics (target -> backup before commit, rollback on failure) and
-		// keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before its own backup rename and
-		// restores it onto the directory after the commit rename).
-		const textOptions: SafeWriteTextOptions = {
-			tempPath: actualTempNewFilePath,
-			backup: true,
+		// Step 2: Commit through safeWriteText with the pre-written temp path (backup:false
+		// is its single atomic rename), so the committed target stays in place until the
+		// rename lands and a process exit before or during the commit cannot leave the
+		// canonical path absent. safeWriteText carries the Windows DACL across the
+		// replacement, preserves the target's mode, fsyncs the staged file and, off
+		// Windows, fsyncs the parent directory - which is why this file no longer renames
+		// onto the path itself.
+		try {
+			options?.trace?.({ stage: "replacement-rename" })
+			await safeWriteText(resolvedTargetPath, "", { tempPath: actualTempNewFilePath, backup: false })
+		} catch (commitError: unknown) {
+			if (getErrorCode(commitError) !== "EPERM") {
+				throw commitError
+			}
+			// A rename over a file that a reader holds open fails with EPERM on
+			// Windows, so fall back to the two-step replacement: move the committed file
+			// aside, then rename the replacement into place. safeWriteText removed the
+			// staging path when its commit failed, so the data is re-staged under a fresh
+			// name. The recovery pass at the start of the next write repairs a crash
+			// between these two renames, so this sequence needs no pre-backup fsync here.
+			options?.trace?.({ stage: "backup-rename", detail: "eperm-fallback" })
+			// The backup keeps this file's `.basename.bak_*` convention: that is the name
+			// the recovery pass restores from when a crash lands between the two renames.
+			actualTempBackupFilePath = createBackupFilePath(resolvedTargetPath)
+			await fs.rename(resolvedTargetPath, actualTempBackupFilePath)
+			actualTempNewFilePath = createStagingFilePath(resolvedTargetPath)
+			await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+			await _flushFileToDisk(actualTempNewFilePath)
+			options?.trace?.({ stage: "replacement-rename", detail: "eperm-fallback" })
+			await safeWriteText(resolvedTargetPath, "", { tempPath: actualTempNewFilePath, backup: false })
+		}
+		// Step 3: Delete the backup file taken by the EPERM fallback (the single-rename
+		// path never takes one). Failure here must not undo or fail the write, because the
+		// new content is already committed; it is logged and the write still resolves.
+		if (actualTempBackupFilePath) {
+			try {
+				await fs.unlink(actualTempBackupFilePath)
+			} catch (cleanupError) {
+				console.error(
+					`Successfully wrote ${resolvedTargetPath} but failed to delete backup ${actualTempBackupFilePath}:`,
+					cleanupError,
+				)
+			}
+			actualTempBackupFilePath = null
 		}
 
-		await safeWriteText(resolvedTargetPath, "", textOptions)
-
-		// If we reach here, the new file is successfully in place and any
-		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null
+		options?.trace?.({ stage: "write-complete" })
 	} catch (originalError) {
 		console.error(
 			`Operation failed for ${resolvedTargetPath ?? absoluteFilePath}: [Original Error Caught]`,
@@ -150,12 +249,28 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			actualTempNewFilePath = null
 		}
 
+		// If the EPERM fallback had moved the committed file to the backup path, restore it
+		// so the target keeps its previous content. A failed restore leaves the backup as
+		// the only committed copy - it is preserved for recovery by a later writer rather
+		// than unlinked, and the error from the failed replacement is the one rethrown.
+		if (actualTempBackupFilePath) {
+			try {
+				await fs.rename(actualTempBackupFilePath, resolvedTargetPath ?? absoluteFilePath)
+			} catch (rollbackError) {
+				console.error(
+					`Failed to restore backup ${actualTempBackupFilePath} to ${resolvedTargetPath ?? absoluteFilePath}:`,
+					rollbackError,
+				)
+			}
+			actualTempBackupFilePath = null
+		}
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
+		// Clean up the .new file if it still exists (safeWriteText removes its own
+		// staging path on a failed commit, so this is a safety net for the paths that
+		// never reach it, such as a failure inside the EPERM fallback's re-stage).
+		// The fallback's backup is handled above: it is either restored to the target
+		// or preserved for a later recovery pass, never dropped here.
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
@@ -214,6 +329,25 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 		fileWriteStream.on("finish", resolve)
 		stringifyStream.pipe(fileWriteStream)
 	})
+}
+
+/**
+ * Flushes a fully written temp file to storage before it is committed.
+ * Best effort: durability against power loss is a bonus here, process-crash
+ * safety comes from the rename protocol itself, and a filesystem that
+ * refuses fsync must not block the write.
+ */
+async function _flushFileToDisk(targetPath: string): Promise<void> {
+	try {
+		const handle = await fs.open(targetPath, "r+")
+		try {
+			await handle.sync()
+		} finally {
+			await handle.close()
+		}
+	} catch (flushError) {
+		console.error(`Failed to flush ${targetPath} to storage before commit:`, flushError)
+	}
 }
 
 export { safeWriteJson }
