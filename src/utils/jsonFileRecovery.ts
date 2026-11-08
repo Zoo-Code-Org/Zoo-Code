@@ -5,6 +5,7 @@ import { getErrorCode } from "./errorCode"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 
 import { withFileLock } from "./fileLock"
+import { resolveLockKey } from "../services/file-safety/safeWriteText"
 
 function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): string {
 	return `.${path.basename(absoluteFilePath)}.${kind}_`
@@ -75,9 +76,23 @@ export async function recoverMissingJsonFile(
  * Delete recoverable leftovers before the canonical file under the writer's
  * lock. Failure preserves the canonical copy, rather than authorizing recovery
  * of a stale backup after a successful deletion. Missing files are harmless.
+ *
+ * The lock is taken on the key `safeWriteJson` publishes under - `resolveLockKey`,
+ * which follows an existing symlink to the file it refers to - so a delete asked for
+ * through an alias contends with the writer that holds the referent's lock, and what
+ * the unlink removes is the referent: the link the caller named survives as a dangling
+ * symlink, and a caller that wants its own spelling removed has to remove it itself.
+ * Computing that key is fail-closed. If the filesystem will not answer what the path
+ * refers to, the delete does not happen at all and the caller receives that error
+ * rather than an unlocked deletion under a key that names something else.
  */
 export async function deleteJsonFile(filePath: string): Promise<void> {
-	await withFileLock(filePath, async (absoluteFilePath) => {
+	// Resolved before the lock is taken, the way guardedWrite.ts:192 and DiffViewProvider.ts:722
+	// resolve for a write. The key below is the one the writer holds, so the contention is real,
+	// and everything the loop unlinks is named from it: for an alias that is the referent, its
+	// leftovers, and the backup prefix built from the referent's basename rather than the
+	// spelling the caller passed in.
+	await withFileLock(await resolveLockKey(path.resolve(filePath)), async (absoluteFilePath) => {
 		let entries: string[]
 		try {
 			entries = await fs.readdir(path.dirname(absoluteFilePath))

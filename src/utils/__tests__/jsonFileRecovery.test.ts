@@ -152,6 +152,72 @@ describe("reader recovery", () => {
 		await expect(fs.access(backup)).resolves.toBeUndefined()
 	})
 
+	// The three rows below need a file symlink. `fs.symlink` on a file answers EPERM on the Windows
+	// lane, which has neither privilege nor Developer Mode, and no other Windows spelling carries the
+	// meaning: a hard link has no referent for resolveLockKey to follow, and a junction links
+	// directories. So these run on the non-Windows lanes - executed there by the ubuntu coverage run,
+	// not verified locally - and the claim they pin is a POSIX claim about what an alias delete does.
+	const itPosix = it.runIf(process.platform !== "win32")
+
+	itPosix("contends with the writer holding the referent lock when asked for through an alias", async () => {
+		const alias = path.join(dir, "history_item_alias.json")
+		await fs.writeFile(target, JSON.stringify({ committed: true }))
+		await fs.symlink(target, alias)
+		// The row is only about the key. If the two spellings did not resolve to the same lock, the
+		// delete below would be contending for a name no writer ever takes, and the refusal would
+		// prove nothing about the alignment.
+		expect(await resolveLockKey(alias)).toBe(await resolveLockKey(target))
+		const release = await acquireFileLock(target)
+		try {
+			await expect(deleteJsonFile(alias)).rejects.toMatchObject({ code: "ELOCKED" })
+			// Refused, so it touched nothing: not the referent, and not the backup beside it.
+			expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+			expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual({ committed: true })
+			expect((await fs.lstat(alias)).isSymbolicLink()).toBe(true)
+		} finally {
+			await release()
+		}
+		// Once the writer is gone the same call goes through, and it removes the referent.
+		await deleteJsonFile(alias)
+		await expect(fs.stat(target)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	itPosix("removes the referent an alias names, leaving the link standing and unreadable", async () => {
+		const alias = path.join(dir, "history_item_alias.json")
+		await fs.writeFile(target, JSON.stringify({ committed: true }))
+		await fs.symlink(target, alias)
+		await deleteJsonFile(alias)
+		// This is what the alignment costs, and it is a change from unlinking the name the caller
+		// passed: the spelling the caller asked about is still there, and reading through it now
+		// answers ENOENT because what it pointed at is gone. The leftover prefixes come from the
+		// referent's basename too, so the backup is removed under either spelling.
+		expect((await fs.lstat(alias)).isSymbolicLink()).toBe(true)
+		await expect(fs.stat(alias)).rejects.toMatchObject({ code: "ENOENT" })
+		await expect(fs.readFile(alias, "utf8")).rejects.toMatchObject({ code: "ENOENT" })
+		await expect(fs.access(backup)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	itPosix("asks the referent-side delete for the same lock it asked for before", async () => {
+		const alias = path.join(dir, "history_item_alias.json")
+		await fs.writeFile(target, JSON.stringify({ committed: true }))
+		await fs.symlink(target, alias)
+		// Asked for by the referent's own name nothing here is new: that delete already contended
+		// with the referent lock, because its key was always the referent. The alignment is only
+		// visible from the alias side, which is why the row asserts both halves - the contention that
+		// was already there, and the outcome that is unchanged by the change.
+		const release = await acquireFileLock(target)
+		try {
+			await expect(deleteJsonFile(target)).rejects.toMatchObject({ code: "ELOCKED" })
+			expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+		} finally {
+			await release()
+		}
+		await deleteJsonFile(target)
+		await expect(fs.stat(target)).rejects.toMatchObject({ code: "ENOENT" })
+		expect((await fs.lstat(alias)).isSymbolicLink()).toBe(true)
+		await expect(fs.readFile(alias, "utf8")).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
 	it("does not create a missing task directory", async () => {
 		await fs.rm(dir, { recursive: true })
 		await expect(recoverMissingJsonFile(target)).resolves.toBe(false)
