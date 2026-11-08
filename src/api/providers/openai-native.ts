@@ -35,7 +35,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
-import { createTimeoutError } from "./utils/request-timeout"
+import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
 import { hasNumericHttpStatus } from "./utils/error-handler"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
@@ -1871,6 +1871,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Make the non-streaming request
 			const response = await (this.client as any).responses.create(requestBody, {
 				signal: requestSignal,
+				timeout: getRequestTimeoutMs(options?.timeoutMs),
 			})
 
 			// Extract text from the response

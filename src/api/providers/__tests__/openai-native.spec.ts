@@ -1892,27 +1892,35 @@ describe("OpenAiNativeHandler", () => {
 			// Node's AbortSignal.timeout() uses internal timers that vi.useFakeTimers() does not
 			// intercept, so this relies on a short real timeout instead of fake timers.
 			let requestSignal: AbortSignal | undefined
-			mockResponsesCreate.mockImplementationOnce(async (_body: unknown, options: { signal?: AbortSignal }) => {
-				requestSignal = options.signal
-				// Stay pending until the merged timeout signal aborts the request
-				await new Promise<void>((resolve) => {
-					options.signal?.addEventListener("abort", () => resolve(), { once: true })
-				})
-				return {
-					output: [
-						{
-							type: "message",
-							content: [{ type: "output_text", text: "response" }],
-						},
-					],
-				}
-			})
+			let requestTimeoutOption: number | undefined
+			mockResponsesCreate.mockImplementationOnce(
+				async (_body: unknown, options: { signal?: AbortSignal; timeout?: number }) => {
+					requestSignal = options.signal
+					requestTimeoutOption = options.timeout
+					// Stay pending until the merged timeout signal aborts the request
+					await new Promise<void>((resolve) => {
+						options.signal?.addEventListener("abort", () => resolve(), { once: true })
+					})
+					return {
+						output: [
+							{
+								type: "message",
+								content: [{ type: "output_text", text: "response" }],
+							},
+						],
+					}
+				},
+			)
 
 			const result = await handler.completePrompt("Test prompt", { timeoutMs: 50 })
 
 			expect(result).toBe("response")
 			expect(requestSignal).toBeInstanceOf(AbortSignal)
 			expect(requestSignal?.aborted).toBe(true)
+			// The SDK must receive the requested deadline as its own per-request timeout
+			// option too: without it the SDK aborts each attempt at the client default and
+			// a completion that needs longer fails before the caller’s deadline.
+			expect(requestTimeoutOption).toBe(50)
 		})
 
 		it("completePrompt should report a deadline as TimeoutError rather than AbortError", async () => {
