@@ -17,6 +17,7 @@ import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { withFileLock } from "../../../utils/fileLock"
 import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
+import { arePathsEqual } from "../../../utils/path"
 import type { Task } from "../../../core/task/Task"
 
 // Mock delay
@@ -1006,6 +1007,84 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
 
 			expect(closedTabs).toEqual([ownTab])
+		})
+
+		// The closer has to recognise the tab the opener handed it. openDiffEditor() reuses a diff tab
+		// through arePathsEqual while closeOwnDiffView() compared spellings, so on Windows the opener
+		// could pick up a tab the closure then missed, leaving it open after reset() cleared the
+		// provider state. Which two spellings count as one file is a property of the platform's path
+		// comparison, so the expectation states agreement with that comparison rather than hard-coding
+		// what Windows does: the Windows lane requires the fold, a case-sensitive lane requires the
+		// closer not to be more eager than the opener.
+		const targetOf = (): string => path.resolve(path.join(mockCwd, "test.ts"))
+		const otherCasingOf = (p: string): string => p.replace(/([^\\/]+)$/, (last) => last.toUpperCase())
+		const makeOwnDiffTabForClosure = (modifiedFsPath: string) => {
+			const tab = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: DIFF_VIEW_URI_SCHEME },
+					modified: { fsPath: modifiedFsPath },
+				},
+				isDirty: false,
+			}
+			Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+			return tab
+		}
+
+		it("closes its own tab whichever casing of the target that tab carries", async () => {
+			const target = targetOf()
+			const sameSpellingTab = makeOwnDiffTabForClosure(target)
+			const otherSpellingTab = makeOwnDiffTabForClosure(otherCasingOf(target))
+			const otherTaskTab = makeOwnDiffTabForClosure(path.join(path.dirname(target), "other-task.ts"))
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [sameSpellingTab, otherSpellingTab, otherTaskTab] }],
+				configurable: true,
+			})
+			const closedTabs: unknown[] = []
+			vi.mocked(vscode.window.tabGroups.close).mockImplementation((closed) => {
+				closedTabs.push(closed)
+				return Promise.resolve(true)
+			})
+
+			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
+
+			expect(closedTabs).toContain(sameSpellingTab)
+			// Another task's file is still another task's file, casing or no casing.
+			expect(closedTabs).not.toContain(otherTaskTab)
+			expect(closedTabs.includes(otherSpellingTab)).toBe(
+				arePathsEqual(otherSpellingTab.input.modified.fsPath, target),
+			)
+		})
+
+		it("recognises the label-identified tab through the same comparison it uses for scheme tabs", async () => {
+			const target = targetOf()
+			const ownLabel = `${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`
+			const labelTab = {
+				input: { uri: { fsPath: path.join(otherCasingOf(path.dirname(target)), path.basename(target)) } },
+				label: ownLabel,
+				isDirty: false,
+			}
+			const otherTaskLabelTab = {
+				input: { uri: { fsPath: target } },
+				label: `other-task.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+				isDirty: false,
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [labelTab, otherTaskLabelTab] }],
+				configurable: true,
+			})
+			const closedTabs: unknown[] = []
+			vi.mocked(vscode.window.tabGroups.close).mockImplementation((closed) => {
+				closedTabs.push(closed)
+				return Promise.resolve(true)
+			})
+
+			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
+
+			expect(closedTabs.includes(labelTab)).toBe(arePathsEqual(labelTab.input.uri.fsPath, target))
+			// The label still gates: sharing the comparison does not turn every tab that points at the
+			// target into this provider's tab.
+			expect(closedTabs).not.toContain(otherTaskLabelTab)
 		})
 	})
 

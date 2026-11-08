@@ -1120,8 +1120,11 @@ export class DiffViewProvider {
 					// Only Zoo's own diff tabs, not a Source Control diff the user has open
 					// for the same file.
 					return (
+						// The comparison is the shared one, not a spelling compare: openDiffEditor() reuses a
+						// tab through arePathsEqual, so a tab it handed this provider can come back under the
+						// other casing on Windows and still have to be found here.
 						tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
-						path.resolve(tab.input.modified.fsPath) === target
+						arePathsEqual(tab.input.modified.fsPath, target)
 					)
 				}
 				// A diff tab for a file that was already open is identified by its label
@@ -1130,8 +1133,12 @@ export class DiffViewProvider {
 				// URI points at this provider's target.
 				const uri = (tab.input as { uri?: { fsPath?: string } })?.uri
 				return (
+					// The tab's own URI decides, through the same comparison the opener used to pick this
+					// tab up: arePathsEqual normalizes and, on Windows, folds case - which is how a tab
+					// ends up carrying a different spelling of the file the provider is tracking. The
+					// closer gets no independent case rule: it may not be more eager than the opener.
 					typeof uri?.fsPath === "string" &&
-					path.resolve(uri.fsPath) === target &&
+					arePathsEqual(uri.fsPath, target) &&
 					typeof tab.label === "string" &&
 					tab.label.startsWith(`${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES}`)
 				)
