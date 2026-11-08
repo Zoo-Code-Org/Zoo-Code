@@ -253,14 +253,13 @@ function escapeSummaryCell(value) {
 }
 
 function escapeSummaryPath(value) {
-	return String(value)
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll("`", "&#96;")
-		.replaceAll("|", "&#124;")
-		.replaceAll("\r", "&#13;")
-		.replaceAll("\n", "&#10;")
+	const characters = Array.from(String(value))
+	// Encode punctuation before Markdown parsing; cap individual paths in summaries.
+	const text = characters.slice(0, 500).join("")
+	return (
+		text.replace(/[^\p{L}\p{N} /-]/gu, (character) => `&#${character.codePointAt(0)};`) +
+		(characters.length > 500 ? "…" : "")
+	)
 }
 
 export function formatSummary(result, { eventName, mergeBase, headSha } = {}) {

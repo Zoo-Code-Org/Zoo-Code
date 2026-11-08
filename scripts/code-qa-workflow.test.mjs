@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { parse } from "yaml"
 import fs from "node:fs"
 import path from "node:path"
 import { describe, it } from "node:test"
@@ -9,26 +10,33 @@ const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/co
 const extensionTurbo = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "src/turbo.json"), "utf8"))
 const coreTurbo = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "packages/core/turbo.json"), "utf8"))
 
+const workflowDocument = parse(workflow)
 const workflowStep = (name) => {
-	const match = workflow.match(new RegExp(`- name: ${name}\\n(?<body>(?:\\s{14,}.*\\n?)*)`))
-	assert.ok(match?.groups?.body, `missing workflow step: ${name}`)
-	return match.groups.body
+	const step = Object.values(workflowDocument.jobs)
+		.flatMap((job) => job.steps ?? [])
+		.find((step) => step.name === name)
+	assert.ok(step, `missing workflow step: ${name}`)
+	return step
 }
-
 const parseWorkflowStep = (name) => {
-	const body = workflowStep(name)
-	const field = (key) => {
-		const line = body.split("\n").find((line) => line.trimStart().startsWith(`${key}:`))
-		assert.ok(line, `missing ${key} field in workflow step: ${name}`)
-		return line.slice(line.indexOf(":") + 1).trim()
-	}
-	return { if: field("if"), run: field("run") }
+	const step = workflowStep(name)
+	return { if: step.if, run: step.run }
 }
 
 describe("platform unit-test workflow", () => {
 	it("keeps coverage authoritative on Ubuntu and runs equivalent uninstrumented Windows tests", () => {
-		assert.match(workflow, /name: ubuntu-latest[\s\S]*?collect-coverage: true/)
-		assert.match(workflow, /name: windows-latest[\s\S]*?collect-coverage: false/)
+		assert.equal(
+			workflowDocument.jobs["unit-test"].strategy.matrix.include.find((entry) => entry.name === "ubuntu-latest")[
+				"collect-coverage"
+			],
+			true,
+		)
+		assert.equal(
+			workflowDocument.jobs["unit-test"].strategy.matrix.include.find((entry) => entry.name === "windows-latest")[
+				"collect-coverage"
+			],
+			false,
+		)
 		assert.ok(!workflow.includes("matrix.upload-coverage"))
 
 		assert.deepEqual(parseWorkflowStep("Run extension coverage lanes"), {
@@ -71,7 +79,7 @@ describe("platform unit-test workflow", () => {
 			assert.ok(!plainStep.run.includes("--coverage"), `${plainStepName} must not collect coverage on Windows`)
 		}
 
-		assert.match(workflowStep("Run extension dist smoke test"), /if: env.RUN_VALIDATION == 'true'/)
+		assert.equal(parseWorkflowStep("Run extension dist smoke test").if, "env.RUN_VALIDATION == 'true'")
 	})
 
 	it("does not run coverage verification or uploads on Windows", () => {
@@ -86,10 +94,7 @@ describe("platform unit-test workflow", () => {
 			"Upload core integration coverage to Codecov",
 			"Upload coverage reports to GitHub",
 		]) {
-			assert.match(
-				workflowStep(stepName),
-				/if: \$\{\{ env.RUN_VALIDATION == 'true' && \(matrix\.collect-coverage\) \}\}/,
-			)
+			assert.equal(workflowStep(stepName).if, "${{ env.RUN_VALIDATION == 'true' && (matrix.collect-coverage) }}")
 		}
 	})
 
@@ -131,23 +136,22 @@ describe("Knip quality gate", () => {
 			["Run knip checks", "pnpm knip"],
 			["Run production Knip checks", "pnpm knip:production"],
 		]) {
-			assert.match(workflowStep(stepName), new RegExp(`run: ${command}\\s*$`))
-			assert.doesNotMatch(workflowStep(stepName), /continue-on-error|if:/)
+			const step = workflowStep(stepName)
+			assert.equal(step.run, command)
+			assert.equal(step.if, undefined)
+			assert.equal(step["continue-on-error"], undefined)
 		}
-		const job = workflow.match(/\n    knip:\n(?<body>[\s\S]*?)\n    compile:/)?.groups?.body
-		assert.ok(job, "missing knip job")
-		assert.doesNotMatch(job, /continue-on-error|if:/)
+		assert.equal(workflowDocument.jobs.knip.if, undefined)
+		assert.equal(workflowDocument.jobs.knip["continue-on-error"], undefined)
 	})
 })
 
 describe("Code QA dependency install", () => {
 	it("installs every job with a frozen lockfile", () => {
-		const setups = workflow.match(/uses: \.\/\.github\/actions\/setup-node-pnpm\n/g) ?? []
-		const frozen =
-			workflow.match(
-				/uses: \.\/\.github\/actions\/setup-node-pnpm\n\s+with:\n\s+install-args: "--frozen-lockfile"\n/g,
-			) ?? []
+		const setups = Object.values(workflowDocument.jobs)
+			.flatMap((job) => job.steps ?? [])
+			.filter((step) => step.uses === "./.github/actions/setup-node-pnpm")
 		assert.ok(setups.length > 0, "missing setup-node-pnpm steps")
-		assert.equal(frozen.length, setups.length)
+		for (const step of setups) assert.equal(step.with["install-args"], "--frozen-lockfile")
 	})
 })

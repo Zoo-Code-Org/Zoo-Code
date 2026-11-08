@@ -1,4 +1,4 @@
-# Change-based validation with a required gate
+# Change-based validation with an audit gate
 
 Every pull request update previously ran the full validation suite even when the
 change could not affect product behavior. This document describes the
@@ -18,10 +18,13 @@ their `needs` graph:
   `pull_request`, and the category is exactly `docs-only`. The job-level
   condition reports `skipped`, and GitHub treats a skipped required check as
   successful. The required unit-test matrix jobs start both platform checks
-  and gate their steps instead, so both required contexts are reported.
+  and gate their steps instead, because GitHub evaluates job conditions before
+  expanding a matrix. Skipping the matrix job itself may leave its named
+  required contexts unreported.
   The required `compile` job also starts every time and fails unless the
   always-running formatting and validation-policy tests passed; only its
-  expensive steps are gated. No ruleset change is needed for these checks.
+  expensive steps are gated. This preserves the existing check names without a ruleset change; live
+  verification is still pending.
 - Every other outcome runs the job unchanged: category `full`, a failed
   classification, a missing classification, or any non-`pull_request` event
   (merge queue, pushes, scheduled runs).
@@ -78,6 +81,28 @@ The allowlist is deliberately narrow:
   never gated by classification but stays pull-request-only. Knip is
   deliberately unconditional because a repository invariant test requires
   the knip job to run without conditions or allowed failure.
+
+## Documentation input audit
+
+The audit at `687f8489d` checked references to the allowlisted paths and their
+file names across tracked source, tests, build scripts, and CI configuration.
+It also checked package build entry points, test discovery, asset copying,
+Turbo inputs, and VSIX packaging rules.
+
+| Surface                    | Evidence                                                                                                                                      | Result                                                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extension bundling         | `src/esbuild.mjs` calls `copyPaths()` with an explicit source list. `packages/build/src/esbuild.ts` copies only those configured paths.       | Root `README.md` and `CHANGELOG.md` are package inputs and remain outside the allowlist. No allowlisted documentation is copied.                                |
+| VSIX packaging             | `src/.vscodeignore` excludes everything, then includes the built extension, webview, assets, and release metadata.                            | Root `docs/`, `.github/`, and the four allowlisted root files are not packaged.                                                                                 |
+| Webview and package builds | `webview-ui/vite.config.ts`, `apps/cli/tsup.config.ts`, and `packages/types/tsup.config.ts` select code entry points and assets.              | No imports, raw-file loads, or asset rules select allowlisted documentation.                                                                                    |
+| Tests and models           | Vitest configurations select code tests. Searches covered `docs/`, current documentation basenames, Markdown imports, and filesystem readers. | Documentation references are comments, temporary repository files, mocked paths, or workspace examples. Tests do not read the checked-in allowlisted documents. |
+| Turbo and Knip             | Root and package Turbo files define package-local inputs. `knip.json` selects code entry points and projects.                                 | No explicit input reaches the root documentation tree. Default package inputs can include package-local Markdown, which remains outside the allowlist.          |
+| Release validation         | `.github/workflows/release-validation.yml` builds the extension and compares root `README.md` with the copied package README.                 | Release inputs retain full validation. The release workflow is unchanged.                                                                                       |
+
+Generic runtime tools can read Markdown in a user's workspace. This does not
+make repository documentation a build or test input. The audit found no reason
+to narrow the current allowlist further. This is source-level evidence for the
+current tree, not a guarantee about future consumers. A new documentation
+reader must update the classification policy and its regression tests.
 
 ## Fail-safe behavior
 
@@ -182,3 +207,20 @@ through the existing required `compile` context.
 
 The repeated gate jobs remain explicit to keep workflow needs and check names
 visible. Extracting a shared gate action is deferred to a separate refactor.
+
+## Current verification and open work
+
+No live docs-only PR run has confirmed the two platform check contexts yet.
+Local workflow tests verify their names and wiring; this does not establish
+GitHub's live check-reporting behavior.
+
+`format-check` and all `validation-gate` jobs are not required checks in the
+current ruleset. Formatting and policy-test failures block via required
+`compile`. Making audit-gate failures block directly still requires a separate
+ruleset update. The gate reads job results and cannot observe step-level gating
+inside `compile` or `unit-test`; workflow tests pin those step conditions.
+
+All label changes currently start all five workflows and may cancel in-flight
+PR validation, including mutation testing. This runner-time cost is accepted
+for now to keep override event handling simple and consistent. A shared gate
+action and broader Stryker integration remain follow-ups.

@@ -311,7 +311,7 @@ describe("ci command", () => {
 			assert.equal(outputs.get("changed-files"), "1")
 			const summary = fs.readFileSync(stepSummary, "utf8")
 			assert.match(summary, /docs-only/)
-			assert.ok(summary.includes("docs/pr.md"))
+			assert.ok(summary.includes("docs/pr&#46;md"))
 		} finally {
 			fs.rmSync(tempRepo, { recursive: true, force: true })
 		}
@@ -483,7 +483,7 @@ describe("validation policy changes", () => {
 it("escapes filenames in classification summaries", () => {
 	const filename = "docs/`<details>|\nforged.md"
 	const summary = formatSummary(classifyEntries([{ status: "M", path: filename }]))
-	assert.ok(summary.includes("docs/&#96;&lt;details&gt;&#124;&#10;forged.md"))
+	assert.ok(summary.includes("docs/&#96;&#60;details&#62;&#124;&#10;forged&#46;md"))
 	assert.ok(!summary.includes(filename))
 })
 
@@ -513,18 +513,61 @@ it("runs the gate CLI against a docs-only repository and writes its summary", ()
 		git(tempRepo, ["add", "."])
 		git(tempRepo, ["commit", "-m", "docs"])
 		const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
-		for (const [actual, status] of [
-			["skipped", 0],
-			["success", 1],
-		]) {
-			const summary = path.join(tempRepo, `summary-${actual}.md`)
+		const cases = [
+			{ name: "docs skip", actual: "skipped", status: 0 },
+			{ name: "unexpected run", actual: "success", status: 1 },
+			{ name: "label", actual: "success", category: "full", reason: "override-label", label: "true", status: 0 },
+			{
+				name: "variable",
+				actual: "success",
+				category: "full",
+				reason: "override-variable",
+				variable: "true",
+				status: 0,
+			},
+			{
+				name: "label wins",
+				actual: "success",
+				category: "full",
+				reason: "override-label",
+				label: "true",
+				variable: "true",
+				status: 0,
+			},
+			{
+				name: "draft",
+				actual: "skipped",
+				rule: "pr-non-draft",
+				draft: "true",
+				category: "full",
+				reason: "override-label",
+				label: "true",
+				status: 0,
+			},
+			{
+				name: "ready",
+				actual: "success",
+				rule: "pr-non-draft",
+				category: "full",
+				reason: "override-label",
+				label: "true",
+				status: 0,
+			},
+			{ name: "missing event", actual: "skipped", event: "", error: /EVENT_NAME is required/, status: 1 },
+			{ name: "missing watches", actual: "skipped", watch: "", error: /WATCHED_JOBS is empty/, status: 1 },
+			{ name: "missing needs", actual: "skipped", needs: "{}", error: /missing/, status: 1 },
+			{ name: "missing base", actual: "skipped", base: "", error: /--base and --head are required/, status: 1 },
+		]
+		for (const testCase of cases) {
+			const { actual, status } = testCase
+			const summary = path.join(tempRepo, `summary-${testCase.name}.md`)
 			const result = spawnSync(
 				process.execPath,
 				[
 					path.join(tempRepo, "scripts/change-gate.mjs"),
 					"ci",
 					"--base",
-					base,
+					testCase.base ?? base,
 					"--head",
 					head,
 					"--skip-metrics",
@@ -533,22 +576,32 @@ it("runs the gate CLI against a docs-only repository and writes its summary", ()
 					encoding: "utf8",
 					env: {
 						...process.env,
-						EVENT_NAME: "pull_request",
-						WATCHED_JOBS: "expensive:always:gated",
-						NEEDS_JSON: JSON.stringify({
-							classify: {
-								result: "success",
-								outputs: { category: "docs-only", "reason-code": "allowlisted-documentation" },
-							},
-							expensive: { result: actual },
-						}),
+						EVENT_NAME: testCase.event ?? "pull_request",
+						WATCHED_JOBS: testCase.watch ?? `expensive:${testCase.rule ?? "always"}:gated`,
+						NEEDS_JSON:
+							testCase.needs ??
+							JSON.stringify({
+								classify: {
+									result: "success",
+									outputs: {
+										category: testCase.category ?? "docs-only",
+										"reason-code": testCase.reason ?? "allowlisted-documentation",
+									},
+								},
+								expensive: { result: actual },
+							}),
 						GITHUB_STEP_SUMMARY: summary,
-						FORCE_FULL_LABEL: "false",
-						FORCE_FULL_VARIABLE: "false",
+						FORCE_FULL_LABEL: testCase.label ?? "false",
+						PR_DRAFT: testCase.draft ?? "false",
+						FORCE_FULL_VARIABLE: testCase.variable ?? "false",
 					},
 				},
 			)
-			assert.equal(result.status, status, result.stderr)
+			assert.equal(result.status, status, `${testCase.name}: ${result.stderr}`)
+			if (testCase.error) {
+				assert.match(result.stderr, testCase.error)
+				continue
+			}
 			assert.match(fs.readFileSync(summary, "utf8"), /Validation gate/)
 			assert.match(fs.readFileSync(summary, "utf8"), /Runner-minute metrics were unavailable/)
 		}
@@ -595,4 +648,74 @@ it("uses the PR merge base and detects documentation renames", () => {
 	} finally {
 		fs.rmSync(tempRepo, { recursive: true, force: true })
 	}
+})
+
+for (const filename of ["docs/space name.md", "docs/日本語.md", "docs/line\nbreak.md", "docs/UPPER.MD"]) {
+	it(`classifies the real git path ${JSON.stringify(filename)}`, () => {
+		const tempRepo = createTempRepository()
+		try {
+			const base = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+			fs.writeFileSync(path.join(tempRepo, filename), "# documentation")
+			git(tempRepo, ["add", "."])
+			git(tempRepo, ["commit", "-m", "add unusual path"])
+			const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+			const { entries } = changedEntries(tempRepo, base, head)
+			assert.deepEqual(entries, [{ status: "A", path: filename }])
+			assert.equal(classifyEntries(entries).category, filename.endsWith(".MD") ? "full" : "docs-only")
+		} finally {
+			fs.rmSync(tempRepo, { recursive: true, force: true })
+		}
+	})
+}
+
+it("requires full validation for a real documentation-to-source rename", () => {
+	const tempRepo = createTempRepository()
+	try {
+		const base = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		fs.mkdirSync(path.join(tempRepo, "src"))
+		git(tempRepo, ["mv", "docs/base.md", "src/source.md"])
+		git(tempRepo, ["commit", "-m", "move documentation into source"])
+		const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		const { entries } = changedEntries(tempRepo, base, head)
+		assert.deepEqual(entries, [{ status: "R", oldPath: "docs/base.md", path: "src/source.md" }])
+		assert.equal(classifyEntries(entries).category, "full")
+	} finally {
+		fs.rmSync(tempRepo, { recursive: true, force: true })
+	}
+})
+
+it("fails closed when a shallow clone lacks the base commit", () => {
+	const tempRepo = createTempRepository()
+	const clone = fs.mkdtempSync(path.join(os.tmpdir(), "classification-shallow-"))
+	try {
+		const base = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		fs.writeFileSync(path.join(tempRepo, "docs/base.md"), "updated")
+		git(tempRepo, ["add", "."])
+		git(tempRepo, ["commit", "-m", "docs"])
+		const head = git(tempRepo, ["rev-parse", "HEAD"]).trim()
+		git(tempRepo, ["clone", "--depth=1", `file://${tempRepo}`, clone])
+		assert.equal(git(clone, ["rev-parse", "--is-shallow-repository"]).trim(), "true")
+		assert.throws(() => changedEntries(clone, base, head), /Could not resolve base commit/)
+		assert.equal(validationPolicyChanged(clone, base, head), true)
+	} finally {
+		fs.rmSync(tempRepo, { recursive: true, force: true })
+		fs.rmSync(clone, { recursive: true, force: true })
+	}
+})
+
+it("renders formatting and autolink punctuation as literal filename characters", () => {
+	const filename = "docs/[link](https://example.com)*_~#@!\\.md"
+	const summary = formatSummary(classifyEntries([{ status: "M", path: filename }]))
+	const line = summary.split("\n").find((line) => line.startsWith("- docs/"))
+	assert.equal(
+		line,
+		"- docs/&#91;link&#93;&#40;https&#58;//example&#46;com&#41;&#42;&#95;&#126;&#35;&#64;&#33;&#92;&#46;md",
+	)
+})
+
+it("caps long filename summaries", () => {
+	const filename = `docs/${"a".repeat(600)}.md`
+	const summary = formatSummary(classifyEntries([{ status: "M", path: filename }]))
+	const line = summary.split("\n").find((line) => line.startsWith("- docs/"))
+	assert.equal(line, `- docs/${"a".repeat(495)}…`)
 })

@@ -429,6 +429,10 @@ describe("change-based validation workflow wiring", () => {
 			assert.equal(workflow.on.pull_request["paths-ignore"], undefined)
 			assert.equal(Boolean(workflow.on.merge_group), expectation.hasMergeGroup)
 			const jobs = workflow.jobs
+			assert.deepEqual(
+				Object.keys(jobs).sort(),
+				["classify", "validation-gate", ...expectation.jobs.map((job) => job.id)].sort(),
+			)
 			const gate = jobs["validation-gate"]
 			assert.equal(gate.if, "always()")
 			assert.deepEqual([...gate.needs].sort(), ["classify", ...expectation.jobs.map((job) => job.id)].sort())
@@ -471,6 +475,8 @@ describe("change-based validation workflow wiring", () => {
 	}
 	it("keeps required compile and matrix checks while gating expensive steps", () => {
 		const { jobs } = parse(fs.readFileSync(path.join(repositoryRoot, ".github/workflows/code-qa.yml"), "utf8"))
+		assert.equal(jobs.compile.name, undefined)
+		assert.equal(jobs["unit-test"].name, "platform-unit-test (${{ matrix.name }})")
 		assert.deepEqual(jobs.compile.needs, ["classify", "format-check"])
 		assert.equal(jobs.compile.steps[0].env.FORMAT_RESULT, "${{ needs.format-check.result }}")
 		assert.equal(jobs.compile.steps[0].run, 'test "$FORMAT_RESULT" = success')
@@ -478,7 +484,10 @@ describe("change-based validation workflow wiring", () => {
 		assert.ok(jobs["format-check"].steps.some((step) => step.run === "pnpm test:change-gate"))
 		for (const id of ["compile", "unit-test"]) {
 			assert.equal(jobs[id].if, "${{ !cancelled() }}")
-			for (const term of GATING_TERMS.slice(1)) assert.ok(jobs[id].env.RUN_VALIDATION.includes(term))
+			assert.equal(
+				jobs[id].env.RUN_VALIDATION,
+				"${{ needs.classify.result != 'success' || github.event_name != 'pull_request' || needs.classify.outputs.category != 'docs-only' }}",
+			)
 			for (const step of jobs[id].steps.slice(1))
 				assert.ok(step.if.includes("env.RUN_VALIDATION == 'true'"), step.name)
 		}

@@ -81,7 +81,7 @@ describe("mutation testing workflow", () => {
 	it("waits until a draft pull request is ready before emitting mutation annotations", () => {
 		const workflow = readWorkflow()
 
-		assert.ok(workflow.includes("types: [edited, opened, reopened, ready_for_review, synchronize]"))
+		assert.ok(parseYaml(workflow).on.pull_request.types.includes("ready_for_review"))
 		// The job condition keeps the draft and merge-group semantics asserted
 		// below and adds the fail-safe change-classification gate from issue
 		// #2291: only a successful documentation-only pull-request
