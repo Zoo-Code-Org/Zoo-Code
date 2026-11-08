@@ -1231,6 +1231,70 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
+		// Row 4507851715: the guidance this error gives - do not re-issue the write - is only
+		// checkable against a version, so the error has to name the version it committed.
+		it("carries the version the commit landed so the caller can say what is on disk", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync)
+				.mockReturnValueOnce(1)
+				.mockImplementationOnce(() => {
+					throw new Error("EBADF")
+				})
+			// A BigIntStats stand-in carrying the five fields the version token renders.
+			// Double assertion: the runtime value is the stand-in, the type is the bigint variant.
+			const committed = Object.create(fsSync.Stats.prototype) as unknown as fsSync.BigIntStats
+			committed.dev = 7n
+			committed.ino = 8n
+			committed.size = 4n
+			committed.mtimeNs = 9n
+			committed.ctimeNs = 10n
+			vi.mocked(fs.stat).mockResolvedValue(committed)
+
+			let thrown: unknown
+			try {
+				await safeWriteText(targetPath, "data", { platform: "linux" })
+			} catch (error: unknown) {
+				thrown = error
+			}
+
+			expect(thrown).toBeInstanceOf(PostCommitDurabilityError)
+			const failure = thrown as PostCommitDurabilityError
+			// dev:ino:size:mtimeNs:ctimeNs, the same derivation every guard compares against.
+			expect(failure.committedVersion).toBe("7:8:4:9:10")
+			expect(failure.message).toContain("version 7:8:4:9:10")
+			expect(failure.message).toContain("committed, not durable")
+			expect(failure.message).toContain("do not re-issue the write")
+			expect(failure.targetPath).toBe(targetPath)
+		})
+
+		it("still says not to re-issue when the committed version cannot be read", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync)
+				.mockReturnValueOnce(1)
+				.mockImplementationOnce(() => {
+					throw new Error("EBADF")
+				})
+			// fs.stat defaults to ENOENT here, which is the shape of a target that vanished
+			// between the commit and the version read.
+
+			let thrown: unknown
+			try {
+				await safeWriteText(targetPath, "data", { platform: "linux" })
+			} catch (error: unknown) {
+				thrown = error
+			}
+
+			expect(thrown).toBeInstanceOf(PostCommitDurabilityError)
+			const failure = thrown as PostCommitDurabilityError
+			expect(failure.committedVersion).toBeUndefined()
+			expect(failure.message).toContain("committed, not durable: do not re-issue it")
+			expect(failure.message).not.toContain("undefined")
+			// The commit is not undone by the failed read: the content is still at the target.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		})
+
 		it("propagates realpath errors (EACCES and code-less) instead of the fallback path", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })

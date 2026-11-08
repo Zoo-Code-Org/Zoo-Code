@@ -24,7 +24,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { safeWriteText } from "../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, safeWriteText } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
@@ -591,72 +591,95 @@ export async function guardedWrite(
 		// this write published rather than a peer writer's.
 		let publishedToken: string | undefined
 
-		if (kind === "edit") {
-			// Edit-style writes require a prior read: no observation, no write.
-			// A targeted edit only authorizes the view the model saw, so a
-			// partial observation is valid for the edit itself; the version
-			// check still rejects a file that moved since the read.
-			if (obs === undefined) {
-				await unobservedEditGuard(absolutePath, displayPath)
+		// Set when the commit landed and only the durability step failed: the publish is
+		// kept, the observation is refreshed at the token the error carries, and the
+		// failure is reported after that refresh so the caller sees both facts.
+		let committedButNotDurable: PostCommitDurabilityError | undefined
+		try {
+			if (kind === "edit") {
+				// Edit-style writes require a prior read: no observation, no write.
+				// A targeted edit only authorizes the view the model saw, so a
+				// partial observation is valid for the edit itself; the version
+				// check still rejects a file that moved since the read.
+				if (obs === undefined) {
+					await unobservedEditGuard(absolutePath, displayPath)
+				} else {
+					publishedToken = await replaceIfVersion(
+						absolutePath,
+						obs.version,
+						content,
+						displayPath,
+						() => task.abort,
+						verifyTarget,
+					)
+					staysPartial = obs.complete === false
+				}
 			} else {
-				publishedToken = await replaceIfVersion(
-					absolutePath,
-					obs.version,
-					content,
-					displayPath,
-					() => task.abort,
-					verifyTarget,
-				)
-				staysPartial = obs.complete === false
-			}
-		} else {
-			// "create" or "update" publish a full file built on the model's
-			// content. A replacement of an existing target -- an "update", or a
-			// "create" whose target is still on disk -- therefore requires a
-			// complete observation: a slice, range, truncated, or
-			// indentation-block read only authorizes the view the model saw, and
-			// publishing over the existing file would silently drop everything
-			// the model never read, so the guard fails closed with a
-			// re-read-the-whole-file remediation. A fresh create (absent target)
-			// needs no prior read and stays allowed.
-			const absent = kind === "create" && (await fileIsAbsent(absolutePath))
-			if (!absent && obs !== undefined && obs.complete === false) {
-				throw new GuardRejectedError(
-					"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
-						"a full-file replacement needs the complete content; re-read the whole file, then retry.",
-					displayPath,
-				)
-			}
+				// "create" or "update" publish a full file built on the model's
+				// content. A replacement of an existing target -- an "update", or a
+				// "create" whose target is still on disk -- therefore requires a
+				// complete observation: a slice, range, truncated, or
+				// indentation-block read only authorizes the view the model saw, and
+				// publishing over the existing file would silently drop everything
+				// the model never read, so the guard fails closed with a
+				// re-read-the-whole-file remediation. A fresh create (absent target)
+				// needs no prior read and stays allowed.
+				const absent = kind === "create" && (await fileIsAbsent(absolutePath))
+				if (!absent && obs !== undefined && obs.complete === false) {
+					throw new GuardRejectedError(
+						"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+							"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+						displayPath,
+					)
+				}
 
-			if (obs === undefined) {
-				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(
-					absolutePath,
-					content,
-					displayPath,
-					() => task.abort,
-					verifyTarget,
-				)
-			} else if (absent) {
-				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(
-					absolutePath,
-					content,
-					displayPath,
-					() => task.abort,
-					verifyTarget,
-				)
+				if (obs === undefined) {
+					// Never read: only an absent target may be created.
+					publishedToken = await createIfAbsent(
+						absolutePath,
+						content,
+						displayPath,
+						() => task.abort,
+						verifyTarget,
+					)
+				} else if (absent) {
+					// A "create" on a file that vanished after the read recreates it.
+					publishedToken = await createIfAbsent(
+						absolutePath,
+						content,
+						displayPath,
+						() => task.abort,
+						verifyTarget,
+					)
+				} else {
+					// The version recorded at read time must still match the on-disk
+					// token.
+					publishedToken = await replaceIfVersion(
+						absolutePath,
+						obs.version,
+						content,
+						displayPath,
+						() => task.abort,
+						verifyTarget,
+					)
+				}
+			}
+		} catch (error: unknown) {
+			// The rename committed; only the parent-directory fsync failed. The content on disk
+			// is the content this write published, so the token the error carries authorizes the
+			// same refresh any successful publish gets below, and the durability failure is
+			// rethrown after it. Withdrawing the observation here would leave the caller holding
+			// a token for bytes that are no longer on disk and refusing the next edit of a file
+			// this very write changed. Anything else - a guard refusal, a pre-commit I/O failure -
+			// unwinds untouched, because there is nothing committed to record.
+			if (error instanceof PostCommitDurabilityError && typeof error.committedVersion === "string") {
+				publishedToken = error.committedVersion
+				committedButNotDurable = error
+				// The branch that would have set this never ran: an edit built on a partial
+				// observation stays partial even when the publish is remembered.
+				staysPartial = kind === "edit" && obs?.complete === false
 			} else {
-				// The version recorded at read time must still match the on-disk
-				// token.
-				publishedToken = await replaceIfVersion(
-					absolutePath,
-					obs.version,
-					content,
-					displayPath,
-					() => task.abort,
-					verifyTarget,
-				)
+				throw error
 			}
 		}
 
@@ -672,6 +695,12 @@ export async function guardedWrite(
 			// must stay partial, otherwise a later full-file replacement would
 			// publish content built from the slice alone.
 			task.observationRegistry.observe(absolutePath, publishedToken, completeOverride ?? !staysPartial)
+		}
+
+		// The refresh above is what keeps the committed content authorized; the durability
+		// caveat is not swallowed by it.
+		if (committedButNotDurable !== undefined) {
+			throw committedButNotDurable
 		}
 	})
 }

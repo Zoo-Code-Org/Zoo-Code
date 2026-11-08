@@ -15,7 +15,7 @@ import * as path from "path"
 import { describe, expect, it, beforeEach, vi } from "vitest"
 
 import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain, GuardRejectedError } from "../guardedWrite"
-import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { withFileLock } from "../../../utils/fileLock"
 import { resolveLockKey } from "../../../services/file-safety/safeWriteText"
@@ -35,10 +35,17 @@ vi.mock("../../../utils/versionToken", () => ({
 	computeVersionToken: vi.fn(),
 }))
 
-vi.mock("../../../services/file-safety/safeWriteText", () => ({
-	safeWriteText: vi.fn(),
-	resolveLockKey: vi.fn(async (p: string) => p),
-}))
+vi.mock("../../../services/file-safety/safeWriteText", async (importOriginal) => {
+	// The durability branch is matched by name, so the class has to be the real one - a
+	// local stand-in would let the rows below pass against a shape production does not
+	// build. The publish primitive stays a stub.
+	const actual = await importOriginal<typeof import("../../../services/file-safety/safeWriteText")>()
+	return {
+		safeWriteText: vi.fn(),
+		resolveLockKey: vi.fn(async (p: string) => p),
+		PostCommitDurabilityError: actual.PostCommitDurabilityError,
+	}
+})
 
 vi.mock("../../../utils/fileLock", () => ({
 	withFileLock: vi.fn(),
@@ -1331,5 +1338,87 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		)
 		expect(staleError?.path).toBe("src/thing.ts")
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	describe("post-commit durability failure", () => {
+		// Row 4507764645 / 4507851715: the rename is the point of no return for the
+		// observation as well as for the content. A write whose commit landed but whose
+		// parent-directory fsync did not has to leave the caller authorized against the bytes
+		// that are actually on disk, while the durability failure is still reported.
+		const durabilityError = (target: string, committedVersion?: string): PostCommitDurabilityError =>
+			new PostCommitDurabilityError(target, new Error("EBADF: bad file descriptor"), null, committedVersion)
+
+		it("keeps the observation on the committed version and still reports the failure", async () => {
+			const target = abs("durability.txt")
+			const task = createMockTask()
+			task.observationRegistry.observe(target, "v1", true)
+			mockedComputeVersionToken.mockResolvedValue("v1") // the version check passes
+			const failure = durabilityError(target, "v2")
+			mockedSafeWriteText.mockRejectedValueOnce(failure)
+
+			await expect(guardedWrite(task, "durability.txt", "new", "update")).rejects.toBe(failure)
+
+			// The content on disk is v2's bytes; recording v1 would refuse the next edit of a
+			// file this very write changed, and recording nothing would withdraw authority the
+			// tool earned by writing the content itself.
+			expect(task.observationRegistry.get(target)?.version).toBe("v2")
+			expect(failure.message).toContain("committed, not durable")
+			expect(failure.committedVersion).toBe("v2")
+		})
+
+		it("accepts a later write that matches the committed version", async () => {
+			const target = abs("second-write.txt")
+			const task = createMockTask()
+			task.observationRegistry.observe(target, "v1", true)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedSafeWriteText.mockRejectedValueOnce(durabilityError(target, "v2"))
+
+			const first = await guardedWrite(task, "second-write.txt", "first", "update").catch(
+				(error: unknown) => error,
+			)
+			expect(first).toBeInstanceOf(PostCommitDurabilityError)
+
+			// The second write compares against the recorded version, which the refresh moved
+			// to the committed token: it runs, and its own publish is not refused as stale.
+			mockedComputeVersionToken.mockResolvedValue("v2")
+			mockedSafeWriteText.mockResolvedValue(undefined)
+			await guardedWrite(task, "second-write.txt", "second", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(task.observationRegistry.get(target)?.version).toBe("v2")
+		})
+
+		it("leaves the observation at the read version when nothing was committed", async () => {
+			const target = abs("pre-commit.txt")
+			const task = createMockTask()
+			task.observationRegistry.observe(target, "v1", true)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const enospc = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" })
+			mockedSafeWriteText.mockRejectedValueOnce(enospc)
+
+			await expect(guardedWrite(task, "pre-commit.txt", "new", "update")).rejects.toBe(enospc)
+
+			// The other half of the rule: only a commit re-records. A failure before the rename
+			// leaves the read's version as the only true one.
+			expect(task.observationRegistry.get(target)?.version).toBe("v1")
+		})
+
+		it("keeps a partial observation partial when the publish is remembered", async () => {
+			const target = abs("partial-durability.txt")
+			const task = createMockTask()
+			task.observationRegistry.observe(target, "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedSafeWriteText.mockRejectedValueOnce(durabilityError(target, "v2"))
+
+			await expect(guardedWrite(task, "partial-durability.txt", "new", "edit")).rejects.toBeInstanceOf(
+				PostCommitDurabilityError,
+			)
+
+			// The branch that sets this never ran on the durability path: an edit authorized by
+			// a slice must not become authority for a full-file replacement of content the model
+			// never read.
+			expect(task.observationRegistry.get(target)?.complete).toBe(false)
+			expect(task.observationRegistry.get(target)?.version).toBe("v2")
+		})
 	})
 })

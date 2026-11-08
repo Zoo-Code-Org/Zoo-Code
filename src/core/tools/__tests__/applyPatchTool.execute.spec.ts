@@ -11,6 +11,7 @@ import { ObservationRegistry } from "../../task/observationRegistry"
 import { guardedWrite } from "../guardedWrite"
 import { ApplyPatchTool } from "../ApplyPatchTool"
 import { CommittedWriteBufferConflictError } from "../../../integrations/editor/committedWriteBufferConflictError"
+import { PostCommitDurabilityError } from "../../../services/file-safety/safeWriteText"
 
 // The vi.mock factory exposes the fs/promises functions under a `default`
 // property (matching the SUT's default import), which the static module type
@@ -310,6 +311,40 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
+	// Row 4507764645: the finally sweep withdraws the read behind a publish that never
+	// landed. When the guarded commit landed and only the durability step failed, the guard
+	// re-records at the committed token, and the sweep must leave that entry alone - the
+	// stored entry is no longer the one the tool recorded, so the withdrawal does not fit.
+	it("update: a publish that committed without durability keeps the re-recorded observation", async () => {
+		const targetKey = path.resolve("/workspace/project", "src/thing.ts")
+		const reg = mockTask.observationRegistry
+		// The double stands in for the guard's own pair of actions - re-record at the
+		// committed token, then report the durability failure - so this row tests the sweep's
+		// identity key, which is ApplyPatchTool's half of the rule.
+		mockSaveDirectly.mockImplementationOnce(async () => {
+			reg.observe(targetKey, "committed-token", false)
+			throw new PostCommitDurabilityError(
+				targetKey,
+				new Error("EBADF: bad file descriptor"),
+				null,
+				"committed-token",
+			)
+		})
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith(
+			"apply patch",
+			expect.objectContaining({ name: "PostCommitDurabilityError" }),
+		)
+		expect(reg.get(targetKey)?.version).toBe("committed-token")
+		expect(mockPushToolResult).not.toHaveBeenCalled()
+	})
 	it("update: keeps a partial observation partial so a later full-file write is still rejected", async () => {
 		// The hunk read is the tool's own read, not a model read. Upgrading the
 		// model's partial view to complete here would let a later write_to_file

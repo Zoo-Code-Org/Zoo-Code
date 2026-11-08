@@ -44,10 +44,17 @@ vi.mock("fs/promises", () => ({
 }))
 
 // Mock safeWriteText (used by saveDirectly)
-vi.mock("../../../services/file-safety/safeWriteText", () => ({
-	safeWriteText: vi.fn().mockResolvedValue(undefined),
-	resolveLockKey: vi.fn(async (p: string) => p),
-}))
+vi.mock("../../../services/file-safety/safeWriteText", async (importOriginal) => {
+	// guardedWrite matches the durability branch by name, so the class has to come from
+	// the real module: a stand-in would let rows pass against a shape production does not
+	// build. The publish primitive stays a stub.
+	const actual = await importOriginal<typeof import("../../../services/file-safety/safeWriteText")>()
+	return {
+		...actual,
+		safeWriteText: vi.fn(),
+		resolveLockKey: vi.fn(async (p: string) => p),
+	}
+})
 
 // Mock the S1 version token (used by the S4 guarded write); the real
 // computeVersionToken needs fs.stat, which is not part of the fs/promises mock above.

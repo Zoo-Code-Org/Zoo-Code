@@ -1,6 +1,8 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
+
+import { computeVersionToken } from "../../utils/versionToken"
 import { execFile } from "child_process"
 
 export interface SafeWriteTextOptions {
@@ -65,6 +67,11 @@ export class StagingPathError extends Error {
  * directory entry is not known to be durable. The content is at the target; the
  * caller cannot assume it survives a crash. Reported as its own error so a
  * successful return never claims durability the filesystem did not grant.
+ *
+ * It also carries the version token the commit landed. The guidance this error gives
+ * - do not re-issue the write - is only checkable against a version, and a guarded
+ * write that wants to keep authorizing the content it just published has to record
+ * the version that is on disk rather than the one its read observed.
  */
 export class PostCommitDurabilityError extends Error {
 	readonly targetPath: string
@@ -75,15 +82,26 @@ export class PostCommitDurabilityError extends Error {
 	 * deliberately keeps.
 	 */
 	readonly backupPath: string | null
+	/**
+	 * The version token of the content the commit landed, derived the way every guard
+	 * derives one (`computeVersionToken`), read best-effort after the commit. Undefined
+	 * when the post-commit stat failed: the commit stands either way, and a caller that
+	 * cannot name the version says so rather than guessing.
+	 */
+	readonly committedVersion: string | undefined
 
-	constructor(targetPath: string, cause: unknown, backupPath: string | null = null) {
+	constructor(targetPath: string, cause: unknown, backupPath: string | null = null, committedVersion?: string) {
 		super(
-			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
+			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable. " +
+				(committedVersion !== undefined
+					? `The content this write committed is version ${committedVersion} -- committed, not durable: do not re-issue the write; read the file again before editing it.`
+					: "This write is committed, not durable: do not re-issue it; read the file again before editing it."),
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
 		this.backupPath = backupPath
+		this.committedVersion = committedVersion
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -690,7 +708,16 @@ export async function safeWriteText(
 					// The catch block keeps the backup on this path, so hand the caller the
 					// path of the copy it is keeping - it is a hidden random name and is
 					// otherwise unrecoverable.
-					throw new PostCommitDurabilityError(targetPath, error, releaseBackupOnSuccess ? backupPath : null)
+					// Read the version the commit landed, the same derivation every guard compares
+					// against, so a caller can record which content is on disk and a later write can
+					// be authorized against it. Best-effort: a failed stat does not undo the commit.
+					const committedVersion = await computeVersionToken(targetPath).catch(() => undefined)
+					throw new PostCommitDurabilityError(
+						targetPath,
+						error,
+						releaseBackupOnSuccess ? backupPath : null,
+						committedVersion,
+					)
 				}
 			}
 
