@@ -225,6 +225,28 @@ async function _statDirectoryForContainment(
 }
 
 /**
+/**
+ * Whether the two stats name DIFFERENT files, judged the way the compares around it judge
+ * one directory: as bigints, because on NTFS and ReFS a file identity can exceed
+ * Number.MAX_SAFE_INTEGER and a rounded value makes two files look alike or two spellings of
+ * one file look different. The helper reports a swap only when both stats actually carry a
+ * bigint identity - production asks for { bigint: true } at every call site that feeds it, so
+ * a stat without one is a double that was never asked to answer identity, and calling that a
+ * swap would refuse every staged write for a shape no real filesystem produces. A stat that
+ * fails outright is handled by its call site, not here: this helper only ever answers
+ * "different" or "not shown to be different".
+ */
+function _stagingIdentityDiffers(checked: fsSync.BigIntStats, current: fsSync.BigIntStats): boolean {
+	return (
+		typeof checked.ino === "bigint" &&
+		typeof current.ino === "bigint" &&
+		typeof checked.dev === "bigint" &&
+		typeof current.dev === "bigint" &&
+		(checked.ino !== current.ino || checked.dev !== current.dev)
+	)
+}
+
+/**
  * Distinguish "the target does not exist" from a real I/O failure (EACCES,
  * EIO, ...). The mode-preservation path may only fall back to the fresh-file
  * default on ENOENT; any other failure is propagated, otherwise a restrictive
@@ -319,6 +341,10 @@ export async function safeWriteText(
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
 	let tempPath: string
+	// Non-null only for a caller-supplied staging file: the identity the validation above
+	// reported, plus the spelling a refusal should quote back. The open and the commit rename
+	// each re-confirm the path against it, because validation is a statement about one moment.
+	let validatedStaging: { stats: fsSync.BigIntStats; supplied: string } | null = null
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -390,6 +416,9 @@ export async function safeWriteText(
 			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
 		// The caller's own path is used as given; only the check is canonical.
+		// Everything above is a statement about the path at one moment. Keep the identity that
+		// was checked so the open and the commit rename can each re-confirm it.
+		validatedStaging = { stats: stagingStat, supplied }
 		tempPath = options.tempPath
 	} else {
 		// The staging directory lives inside the target's own parent, so the parent has to exist
@@ -481,6 +510,21 @@ export async function safeWriteText(
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
+				if (validatedStaging) {
+					// Re-confirm the file the open actually landed on, BEFORE the chmod below: an fd
+					// opened on a path that was swapped for a link in the meantime would change the
+					// permissions of somebody else's file, and a swap to a different file would let the
+					// commit publish that file instead of the content staged here. A fstatSync that
+					// fails propagates: the fd is ours, and a stat we cannot take is not evidence that
+					// the path still names our file.
+					const opened = fsSync.fstatSync(fd, { bigint: true })
+					if (_stagingIdentityDiffers(validatedStaging.stats, opened)) {
+						throw new StagingPathError(
+							"Staging file was replaced between validation and open",
+							validatedStaging.supplied,
+						)
+					}
+				}
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
@@ -601,6 +645,28 @@ export async function safeWriteText(
 			}
 
 			// -- Step 4: atomic rename temp -> target ---------------------
+			// The rename publishes whatever the staging path names at the moment it runs. One step
+			// before it, confirm the path still names the file this write staged and chmodded: a
+			// path swapped for a link or for another file in the meantime would otherwise be
+			// published in place of the content written here. A stat that fails - the file gone, or
+			// a failure that is not about it being gone - is a refusal, because the rename cannot
+			// then be shown to be publishing our content. The window between this look and the
+			// rename is narrowed, not closed: a rename has no handle to go through, so this is the
+			// last look, not a lock.
+			if (validatedStaging) {
+				const beforeCommit = await fs.lstat(tempPath, { bigint: true }).catch((error: unknown) => {
+					throw new StagingPathError(
+						`Staging file could not be re-checked before the commit (${errorCode(error) ?? "unknown error"}): ${tempPath}`,
+						validatedStaging.supplied,
+					)
+				})
+				if (_stagingIdentityDiffers(validatedStaging.stats, beforeCommit)) {
+					throw new StagingPathError(
+						"Staging file was replaced between validation and the commit",
+						validatedStaging.supplied,
+					)
+				}
+			}
 			await fs.rename(tempPath, targetPath)
 			committed = true
 

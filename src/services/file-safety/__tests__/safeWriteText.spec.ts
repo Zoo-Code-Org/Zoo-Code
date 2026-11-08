@@ -34,6 +34,7 @@ vi.mock("fs", () => ({
 	fsyncSync: vi.fn(),
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
+	fstatSync: vi.fn(),
 	statSync: vi.fn(),
 	Stats: class Stats {},
 }))
@@ -89,6 +90,12 @@ function mockDefaults(): void {
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+	// The caller-staged branch re-confirms the file its fd landed on through fs.fstatSync. The
+	// default carries no bigint identity, which is the shape production never hands this compare
+	// (it asks for { bigint: true }), so the guard declines to read it as a swap and the rows below
+	// keep the meaning they had before the re-confirm existed. Rows that care about identity say so
+	// by handing both sides one.
+	vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStats(false))
 	vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("no such directory"), { code: "ENOENT" }))
 }
 function _stats(mode: number): fsSync.Stats {
@@ -1603,5 +1610,134 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 		})
 
 		await expect(resolveLockKey(target)).rejects.toThrow("EACCES")
+	})
+})
+describe("caller-staged file protected through publication", () => {
+	beforeEach(() => mockDefaults())
+
+	// After validation the guard reads the staging path twice more: through the fd it just opened,
+	// and immediately before the commit rename. Reporting a different identity at one of those
+	// looks is how these rows say "the path was replaced after that check" - a real filesystem
+	// offers no way to schedule a swap between two calls inside one function, and replacing the
+	// whole call would not show which look the refusal came from.
+	function _staged(
+		customTempPath: string,
+		targetPath: string,
+		looks: { open?: fsSync.BigIntStats; commit?: fsSync.BigIntStats | Error },
+	): void {
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(5)
+		const stagingIdentity = _fileStatsWithIdentity(8n, 3n)
+		const targetIdentity = _fileStatsWithIdentity(11n, 3n)
+		let stagingLooks = 0
+		vi.mocked(fs.lstat).mockImplementation(async (p) => {
+			const s = String(p)
+			if (s.endsWith("target.txt")) {
+				return targetIdentity
+			}
+			// The first look is the validation; the second is the one right before the rename. The
+			// two arrive under different spellings (the resolved one and the caller's own), which is
+			// why the match is on the basename and not on a path prefix.
+			stagingLooks += 1
+			if (stagingLooks === 1) {
+				return stagingIdentity
+			}
+			const next = looks.commit
+			if (next instanceof Error) {
+				throw next
+			}
+			return next ?? stagingIdentity
+		})
+		vi.mocked(fsSync.fstatSync).mockReturnValue(looks.open ?? stagingIdentity)
+	}
+
+	it("refuses when the fd names a different file than the one validation checked", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+		// Validation saw (8,3); the fd came back naming (9,3) - the path was swapped for a link or
+		// another file in between. openSync on a link follows it, so the fchmod below would change
+		// the permissions of a file this write never staged, and the rename would publish it.
+		_staged(customTempPath, targetPath, { open: _fileStatsWithIdentity(9n, 3n) })
+		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: customTempPath, platform: "linux" }),
+		).rejects.toThrow(/replaced between validation and open/)
+		// The refusal came before fchmodSync, so no permission was changed on the substituted file.
+		expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+		// Nothing was published.
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The fd read asked for bigint stats: on NTFS/ReFS an identity can exceed
+		// Number.MAX_SAFE_INTEGER and a rounded number makes two files look alike.
+		const fdLooks = vi.mocked(fsSync.fstatSync).mock.calls
+		expect(fdLooks).toHaveLength(1)
+		expect(fdLooks[0]?.[1]).toEqual({ bigint: true })
+	})
+
+	it("accepts a staging file the open confirmed, and still publishes it", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+		// The ordinary case: the same file at every look. A guard that refused this one would stop
+		// every caller-staged write.
+		_staged(customTempPath, targetPath, {})
+		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
+
+		await safeWriteText(targetPath, "data", { tempPath: customTempPath, platform: "linux" })
+
+		expect(fsSync.fchmodSync).toHaveBeenCalledWith(5, 0o600)
+		expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
+		// Two bigint reads of the staging path: the validation and the one immediately before the
+		// commit. The second is what this commit adds, so it is asserted as a call, not only as a
+		// decision.
+		const stagingLooks = vi
+			.mocked(fs.lstat)
+			.mock.calls.filter((c) => String(c[0]).endsWith("custom-temp.tmp") && c[1] !== undefined)
+		expect(stagingLooks).toHaveLength(2)
+		for (const c of stagingLooks) {
+			expect(c[1]).toEqual({ bigint: true })
+		}
+	})
+
+	it("refuses when the staging path was replaced after the file was opened", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+		// The open confirmed (8,3); the look immediately before the rename reports (9,3). Without
+		// that look the rename publishes whatever the path came to name, not the content staged
+		// here.
+		_staged(customTempPath, targetPath, { commit: _fileStatsWithIdentity(9n, 3n) })
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: customTempPath, platform: "linux" }),
+		).rejects.toThrow(/replaced between validation and the commit/)
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The failure handler still unlinks the path it was given. Whether that is the right
+		// cleanup for a path someone else replaced is a separate question from publishing it, and
+		// this commit does not change the answer.
+		expect(fs.unlink).toHaveBeenCalledWith(customTempPath)
+	})
+
+	it("refuses when the pre-commit look fails with something other than the file being gone", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+		_staged(customTempPath, targetPath, { commit: Object.assign(new Error("EACCES"), { code: "EACCES" }) })
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: customTempPath, platform: "linux" }),
+		).rejects.toThrow(/could not be re-checked before the commit \(EACCES\)/)
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("refuses when the staging file is gone by the time the commit would run", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+		// Missing is the one answer a stat can give that means "do not publish": there is nothing
+		// at the path this write staged its content into. The spelling would be the fallback for a
+		// directory comparison; here it would be a rename that cannot happen.
+		_staged(customTempPath, targetPath, { commit: Object.assign(new Error("ENOENT"), { code: "ENOENT" }) })
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: customTempPath, platform: "linux" }),
+		).rejects.toThrow(/could not be re-checked before the commit \(ENOENT\)/)
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 })
