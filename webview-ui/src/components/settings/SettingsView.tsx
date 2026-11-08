@@ -273,33 +273,48 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// confirmed live value stand in the cache. Without this, an experiment this view edited and
 	// saved stays in the change set, so a later unrelated Save compares this view's cached copy
 	// against a newer live value written elsewhere and posts the older copy back over it.
-	// Experiments that are still being edited, or submitted and not yet confirmed, keep their
-	// cached value, so a newer unsaved edit is never dropped.
+	// A confirmation retires the session only while the cache still holds the submitted value:
+	// a toggle made after the save is a newer intent than the host's answer, so it keeps its own
+	// cache copy and its change-set entry, and the next Save posts it.
 	useEffect(() => {
 		const live = extensionState.experiments ?? experimentDefault
-		const confirmed = new Map<ExperimentId, boolean>()
-		for (const [id, value] of submittedExperiments.current) {
+		const confirmations: { id: ExperimentId; submitted: boolean; liveValue: boolean }[] = []
+		for (const [id, submitted] of submittedExperiments.current) {
 			const liveValue = live[id] ?? experimentDefault[id]
-			if (liveValue !== value) {
+			if (liveValue !== submitted) {
 				continue
 			}
-			submittedExperiments.current.delete(id)
-			changedExperiments.current.delete(id)
-			confirmed.set(id, liveValue)
+			confirmations.push({ id, submitted, liveValue })
 		}
+		const adopted = new Map<ExperimentId, boolean>()
 		for (const [id, liveValue] of Object.entries(live)) {
 			const experimentId = id as ExperimentId
 			if (submittedExperiments.current.has(experimentId) || changedExperiments.current.has(experimentId)) {
 				continue
 			}
-			confirmed.set(experimentId, liveValue)
+			adopted.set(experimentId, liveValue)
 		}
-		if (confirmed.size === 0) {
+		if (confirmations.length === 0 && adopted.size === 0) {
 			return
 		}
 		setCachedState((prevState) => {
+			// The cached copy is only readable here, and both ref deletes are idempotent, so React
+			// invoking this updater twice retires the same entries it would retire once.
 			const experiments = { ...prevState.experiments } as Record<ExperimentId, boolean>
-			for (const [id, liveValue] of confirmed) {
+			for (const confirmation of confirmations) {
+				const cached = experiments[confirmation.id] ?? experimentDefault[confirmation.id]
+				submittedExperiments.current.delete(confirmation.id)
+				if (cached !== confirmation.submitted) {
+					// Newer than what was submitted: keep the user's copy and keep the entry in the
+					// change set, so the next Save still posts it instead of the host's older answer.
+					continue
+				}
+				changedExperiments.current.delete(confirmation.id)
+				if (experiments[confirmation.id] !== confirmation.liveValue) {
+					experiments[confirmation.id] = confirmation.liveValue
+				}
+			}
+			for (const [id, liveValue] of adopted) {
 				if (experiments[id] !== liveValue) {
 					experiments[id] = liveValue
 				}

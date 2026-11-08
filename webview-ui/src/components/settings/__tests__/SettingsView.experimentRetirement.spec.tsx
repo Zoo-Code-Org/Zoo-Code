@@ -183,4 +183,39 @@ describe("SettingsView - experiment edits after the host confirms them", () => {
 		expect(experiments).not.toHaveProperty(String(IMAGE_ID))
 		expect(experiments).toEqual({ [FOCUS_ID]: false })
 	}, 20000)
+
+	it("keeps a toggle made after the save when the host confirms the earlier value", async () => {
+		await openExperimentalTab()
+
+		// Save posts the experiment on, and the user toggles it back off before the host answers.
+		await toggleExperiment(IMAGE_LABEL)
+		await clickSave()
+		const firstSave = posted("updateSettings").at(-1)
+		expect(firstSave?.updatedSettings?.experiments).toEqual({ [IMAGE_ID]: true })
+		await toggleExperiment(IMAGE_LABEL)
+		expect(requireCheckbox(IMAGE_LABEL).checked).toBe(false)
+
+		// The answer to the earlier save arrives: it confirms the value that was submitted, not the
+		// value the user wants now, so it may neither flip the checkbox nor retire the edit.
+		await act(async () => {
+			hostApi?.setExperimentEnabled(IMAGE_ID, true)
+		})
+		await waitFor(() => expect(requireCheckbox(IMAGE_LABEL).checked).toBe(false))
+
+		// The newer intent is still an edit this view owes the host, so the next save posts it.
+		await clickSave()
+		const secondSave = posted("updateSettings").at(-1)
+		expect(secondSave?.updatedSettings?.experiments).toEqual({ [IMAGE_ID]: false })
+
+		// Once the host confirms that value, the session is retired and a later save leaves the
+		// experiment out of the payload entirely.
+		await act(async () => {
+			hostApi?.setExperimentEnabled(IMAGE_ID, false)
+		})
+		await toggleExperiment(FOCUS_LABEL)
+		await clickSave()
+		const thirdExperiments = posted("updateSettings").at(-1)?.updatedSettings?.experiments ?? {}
+		expect(thirdExperiments).not.toHaveProperty(String(IMAGE_ID))
+		expect(thirdExperiments).toEqual({ [FOCUS_ID]: false })
+	}, 20000)
 })
