@@ -89,4 +89,42 @@ describe("file lock protocol", () => {
 			await fsp.rm(base, { recursive: true, force: true })
 		}
 	})
+
+	// The contract that exists on the release path, pinned rather than assumed. A cancellation that surfaces as
+	// a rejection after acquisition does release the lock (fileLock.ts:181-:186), and the caller keeps their
+	// own error even when the release behind it fails: :183-:185 logs the release failure and rethrows the
+	// operation's, which is the half a well-meaning fix flips by accident. The directory chain this call
+	// made stays, because it belongs to the artefact rather than to the outcome - :153-:155 owns created
+	// directories only when acquisition itself failed - and the next acquisition reuses them instead of
+	// paying for them twice. The window nothing in this module observes is an abort between lockfile.lock
+	// resolving and the caller observing the returned release function; that one is covered by the
+	// staleness contract, and no row here should pretend the release path closes it.
+	it("releases the lock after a cancelled operation, keeps the cancellation as the caller's error, and leaves the chain the lock owned", async () => {
+		const base = await fsp.mkdtemp(path.join(os.tmpdir(), "filelock-cancel-"))
+		const target = path.join(base, "missing", "nested", "history.json")
+		const releaseFailure = Object.assign(new Error("EPERM: operation not permitted, unlock"), { code: "EPERM" })
+		const release = vi.fn(async () => {
+			throw releaseFailure
+		})
+		vi.mocked(lockfile.lock).mockResolvedValue(release)
+		const cancellation = Object.assign(new Error("The task was cancelled"), { name: "AbortError" })
+		// A failed release is reported, not rethrown. Captured so the row can say which of the two it is.
+		// Restored inline: this file has no afterEach to do it, and a leaked spy would mute the next row's
+		// real logging.
+		const reported = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			await expect(
+				withFileLock(target, async () => {
+					throw cancellation
+				}),
+			).rejects.toBe(cancellation)
+			expect(release).toHaveBeenCalledOnce()
+			expect(reported).toHaveBeenCalledWith(expect.stringContaining("Failed to release lock for"), releaseFailure)
+			// The chain the lock was taken for is still there, including the level the artefact needed.
+			expect((await fsp.stat(path.join(base, "missing", "nested"))).isDirectory()).toBe(true)
+		} finally {
+			reported.mockRestore()
+			await fsp.rm(base, { recursive: true, force: true })
+		}
+	})
 })
