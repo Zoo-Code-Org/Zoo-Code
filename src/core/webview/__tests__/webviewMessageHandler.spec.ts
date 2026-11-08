@@ -3199,6 +3199,49 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 
+	it("renames when the source profile exists and the target name is free", async () => {
+		// Both managers the other cases use answer the same way for every name, so neither
+		// can show which name the collision guard asked about, and none of them has a source
+		// that actually resolves. A per-name manager shows both: the accept path running with
+		// an existing source, and the guard aimed at the target.
+		const hasConfig = vi.fn(async (name: string) => name === "old-profile")
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			hasConfig,
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The guard is about the target only: the source is supposed to exist, and a check
+		// aimed at it would reject every rename that works.
+		expect(hasConfig).toHaveBeenCalledWith("new-profile")
+		expect(hasConfig).not.toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("new-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		expect(repoint).toHaveBeenCalledWith("old-profile", "new-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		// Exactly one delete, under the old name: a rename that worked ran no compensation.
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledTimes(1)
+		expect(provider.activateProviderProfile).toHaveBeenCalledWith({ name: "new-profile" })
+		expect(mockClineProvider.log).not.toHaveBeenCalledWith(
+			expect.stringContaining("Error rename api configuration"),
+		)
+	})
 	it("removes the new profile when the normalized read-back fails", async () => {
 		provider.providerSettingsManager = {
 			runExclusiveAcrossInstances,
