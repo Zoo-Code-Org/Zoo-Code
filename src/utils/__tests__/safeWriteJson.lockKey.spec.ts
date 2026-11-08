@@ -189,14 +189,23 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The reviewer's case turns on realpath handing back the name a directory stores rather
 		// than the spelling it was given - which is what NTFS's GetFinalPathNameByHandle does.
 		// This double models exactly that, and is the identity function wherever the two already
-		// agree, so the row drives the guard on a filesystem that restates case and on one that
-		// cannot restate it at all.
+		// agree. Where the filesystem does the restating and where the double does it is what the
+		// probe below measures, because the subject of this row is a pair that differs by basename
+		// case inside one directory, and _locksAreOneLock (safeWriteJson.ts:119-:124) puts its
+		// question to no other pair. A case-only pair is something only a case-folding filesystem
+		// produces on its own; on ext4 the two spellings are two entries and the guard is inert
+		// there by design, so the double supplies the restating and the row asserts the identity
+		// and propagation half of what the code promises on that platform.
 		const restatingRealpath = async (target: string): Promise<string> => {
 			const resolved = await real.realpath(target)
 			const parent = path.dirname(resolved)
 			const name = path.basename(resolved)
 			const listed = await real.readdir(parent).catch(() => [] as string[])
-			const stored = listed.find((entry: string) => entry.toLowerCase() === name.toLowerCase())
+			// Prefer the entry whose name differs from the request in case alone. On a folding
+			// filesystem that is the one name the directory stores; on a case-sensitive one the
+			// directory holds both spellings and the match has to be pinned to the other one, or the
+			// divergence this row is built on would depend on readdir order.
+			const stored = listed.find((entry: string) => entry !== name && entry.toLowerCase() === name.toLowerCase())
 			return stored === undefined ? resolved : path.join(parent, stored)
 		}
 		const probeLower = path.join(dir, "probe.json")
@@ -218,11 +227,13 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			await fs.writeFile(ownArtefact, "")
 			await fs.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
 			if (!foldsCase) {
-				// A case-sensitive filesystem cannot produce this divergence on its own - two
-				// spellings there are two names - so the same pair of facts is built by hand: the
-				// writer's name linked onto the peer's file, and the two artefact names joined by a
-				// hard link, which is one artefact under two names.
-				await fs.symlink(lower, upper)
+				// A case-sensitive filesystem cannot produce the name pair on its own, so the entry in
+				// the writer's spelling is made here and the two artefact names are joined by a hard
+				// link. Hard link rather than symlink, deliberately: a hard link is one object under
+				// two names on NTFS and on ext4 alike, it asks for no privilege on either hosted lane,
+				// and the thing the guard answers from is object identity, which a hard link supplies
+				// and a link that resolves somewhere else only imitates.
+				await fs.link(lower, upper)
 				await fs.link(ownArtefact, lockPathFor(lower))
 			}
 			return async () => {}
@@ -232,10 +243,19 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			() => undefined,
 			(caught: unknown) => caught as Error,
 		)
-		// The claim is the guard's answer: the two names reach one artefact and one file, so this
-		// writer holds the lock the other spelling would take and the write is not refused.
+		// The claim is the guard's answer, and it is the same claim on either filesystem: the two
+		// names reach one artefact, so this writer holds the lock the other spelling would take and
+		// the write is not refused. Where the two platforms differ is in how many names exist, which
+		// is a property of the directory and not of the guard, so only the counts branch.
 		expect(String(error && error.name)).toBe("undefined")
-		expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { mine: true } })
+		expect(JSON.parse(await fs.readFile(upper, "utf8"))).toEqual({ mcpServers: { mine: true } })
+		if (!foldsCase) {
+			// The commit rename lands on the path the caller was given (safeWriteJson.ts:483), and on
+			// a case-sensitive filesystem that names the other entry: the referent keeps the peer's
+			// content and the writer's own spelling becomes a regular file. That is what the shipped
+			// order does, so the row states it instead of asserting a result the platform never gives.
+			expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
+		}
 		const entries = await fs.readdir(dir)
 		// A case-folding filesystem holds one file and one artefact under the two spellings, so it
 		// lists two entries; a case-sensitive one holds two distinct files and two distinct
@@ -247,6 +267,12 @@ describe("safeWriteJson lock key under a peer commit", () => {
 				: ["settings.json", "settings.json.lock", "settings.json", "settings.json.lock"],
 		)
 		expect(entries.length).toBe(foldsCase ? 2 : 4)
+		// The guard answered from object identity, so the identity is read back off the filesystem
+		// rather than taken on trust from the fixture: two names, one artefact, on either platform.
+		const ownArtefactRead = await fs.stat(lockPathFor(upper))
+		const peerArtefactRead = await fs.stat(lockPathFor(lower))
+		expect(peerArtefactRead.dev).toBe(ownArtefactRead.dev)
+		expect(peerArtefactRead.ino).toBe(ownArtefactRead.ino)
 	})
 
 	it("does not stage or publish while the lock acquisition has not returned", async () => {
@@ -468,7 +494,11 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			const parent = path.dirname(resolved)
 			const name = path.basename(resolved)
 			const listed = await real.readdir(parent).catch(() => [] as string[])
-			const stored = listed.find((entry: string) => entry.toLowerCase() === name.toLowerCase())
+			// Prefer the entry whose name differs from the request in case alone. On a folding
+			// filesystem that is the one name the directory stores; on a case-sensitive one the
+			// directory holds both spellings and the match has to be pinned to the other one, or the
+			// divergence this row is built on would depend on readdir order.
+			const stored = listed.find((entry: string) => entry !== name && entry.toLowerCase() === name.toLowerCase())
 			return stored === undefined ? resolved : path.join(parent, stored)
 		}
 		const probeLower = path.join(dir, "probe.json")
@@ -506,14 +536,18 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			return {
 				...actual,
 				acquireFileLock: vi.fn(async (file: string) => {
-					// The divergence the guard is asked about, reached the same way as in the row
-					// above: this writer's key keeps the spelling it was computed from, and the name
-					// the filesystem reports for the file appears under it during acquisition.
+					// The divergence the guard is asked about, reached the same way as in the row above:
+					// this writer's key keeps the spelling it was computed from, the name the canonicalizer
+					// answers for the file appears under it during acquisition, and the two artefact names
+					// are one object by hard link - on either lane, so the stat that fails below has
+					// somewhere to fail from on either lane.
 					const ownArtefact = actual.lockPathFor(String(file))
 					await fs.writeFile(ownArtefact, "")
 					await fs.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
 					if (!foldsCase) {
-						await fs.symlink(lower, upper)
+						// Hard link rather than symlink, for the reason given in the acceptance row above:
+						// one object under two names on either hosted lane, with no privilege asked for.
+						await fs.link(lower, upper)
 						await fs.link(ownArtefact, actual.lockPathFor(lower))
 					}
 					return async () => {}
