@@ -49,6 +49,9 @@ vi.mock("fs/promises", () => {
 		realpath: vi.fn(async (p: string) => String(p)),
 		// safeWriteText creates the backup directory before publishing.
 		mkdir: vi.fn().mockResolvedValue(undefined),
+		// The flag-off move branch (ApplyPatchTool.ts:610-:612) publishes with a raw
+		// fs.writeFile, so the double set needs writeFile as well as mkdir.
+		writeFile: vi.fn().mockResolvedValue(undefined),
 	}
 	return { default: doubles, ...doubles }
 })
@@ -883,5 +886,66 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "create", false, undefined)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+	// The two rows below pin the flag-off move branch as it ships: a raw fs.mkdir plus
+	// fs.writeFile, with no guard, no completeness carry and no compare-and-swap. They
+	// document current behaviour - main's ApplyPatchTool (blob 2713e08ffe8d) writes the
+	// flag-off move with `await fs.writeFile(moveAbsolutePath, newContent, "utf8")` at
+	// :422 - and they are not a claim that this is the contract the branch should keep.
+	// Routing this branch through the guarded publish is a deliberate improvement and
+	// should turn these rows red; reading them as endorsement of the raw write would
+	// make that improvement look like a regression.
+	it("flag-off move: publishes through fs.mkdir then fs.writeFile, with no guard and no completeness carry", async () => {
+		mockGetState.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} })
+		// The cast above declares access/stat/unlink only because nothing else on the
+		// mocked module was reached before this branch was exercised; writeFile is read
+		// through its own narrow view of the doubles.
+		const writeDoubles = vi.mocked(
+			fsPromises as unknown as {
+				default: { writeFile: ReturnType<typeof vi.fn>; mkdir: ReturnType<typeof vi.fn> }
+			},
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "flag-off-move-plain-write",
+		})
+
+		expect(writeDoubles.default.mkdir).toHaveBeenCalledWith(
+			path.dirname(path.resolve("/workspace/project", "src/new.ts")),
+			{ recursive: true },
+		)
+		expect(writeDoubles.default.writeFile).toHaveBeenCalledWith(
+			path.resolve("/workspace/project", "src/new.ts"),
+			"modified file content\n",
+			"utf8",
+		)
+		// No guard runs here: the guarded publish lives behind saveDirectly, and this
+		// shape reaches neither the guarded save nor the diff-view save.
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockSaveChanges).not.toHaveBeenCalled()
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(mockPushToolResult).toHaveBeenCalled()
+	})
+
+	it("flag-off move: an existing destination is never consulted before the write", async () => {
+		mockGetState.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} })
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "flag-off-move-destination-present",
+		})
+
+		// The access double resolves, so the destination reads as present on disk, yet
+		// nothing asks: the branch does not read it, stat it, or guard against publishing
+		// over content the model never saw.
+		expect(mockedFsPromises.default.access).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(mockPushToolResult).toHaveBeenCalled()
 	})
 })
