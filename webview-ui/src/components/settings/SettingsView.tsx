@@ -268,12 +268,44 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	}, [currentApiConfigName, mode, extensionState])
 
 	// Drop a submitted baseline once the extension state confirms that value.
+	// Retire a submitted baseline once the extension state confirms that value, and retire the
+	// edit session for that experiment with it: drop the id from the change set and let the
+	// confirmed live value stand in the cache. Without this, an experiment this view edited and
+	// saved stays in the change set, so a later unrelated Save compares this view's cached copy
+	// against a newer live value written elsewhere and posts the older copy back over it.
+	// Experiments that are still being edited, or submitted and not yet confirmed, keep their
+	// cached value, so a newer unsaved edit is never dropped.
 	useEffect(() => {
+		const live = extensionState.experiments ?? experimentDefault
+		const confirmed = new Map<ExperimentId, boolean>()
 		for (const [id, value] of submittedExperiments.current) {
-			if ((extensionState.experiments?.[id] ?? experimentDefault[id]) === value) {
-				submittedExperiments.current.delete(id)
+			const liveValue = live[id] ?? experimentDefault[id]
+			if (liveValue !== value) {
+				continue
 			}
+			submittedExperiments.current.delete(id)
+			changedExperiments.current.delete(id)
+			confirmed.set(id, liveValue)
 		}
+		for (const [id, liveValue] of Object.entries(live)) {
+			const experimentId = id as ExperimentId
+			if (submittedExperiments.current.has(experimentId) || changedExperiments.current.has(experimentId)) {
+				continue
+			}
+			confirmed.set(experimentId, liveValue)
+		}
+		if (confirmed.size === 0) {
+			return
+		}
+		setCachedState((prevState) => {
+			const experiments = { ...prevState.experiments } as Record<ExperimentId, boolean>
+			for (const [id, liveValue] of confirmed) {
+				if (experiments[id] !== liveValue) {
+					experiments[id] = liveValue
+				}
+			}
+			return { ...prevState, experiments }
+		})
 	}, [extensionState.experiments])
 
 	// Bust the cache when settings are imported.
