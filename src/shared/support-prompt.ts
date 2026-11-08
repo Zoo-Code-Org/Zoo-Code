@@ -50,8 +50,14 @@ type SupportPromptType =
 	| "TERMINAL_FIX"
 	| "TERMINAL_EXPLAIN"
 	| "NEW_TASK"
+	| "TASK_TITLE"
 
 const supportPromptConfigs: Record<SupportPromptType, SupportPromptConfig> = {
+	TASK_TITLE: {
+		template: `Generate a concise title summarizing the following user prompt. The title should be in the same language as the prompt, 3 to 8 words long (maximum 50 characters). Reply with ONLY the title itself, with no quotation marks, no ending punctuation, and no explanations:
+
+\${userInput}`,
+	},
 	ENHANCE: {
 		template: `Generate an enhanced version of this prompt (reply with only the enhanced prompt - no conversation, explanations, lead-in, bullet points, placeholders, or surrounding quotes):
 

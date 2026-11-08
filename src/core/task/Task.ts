@@ -143,6 +143,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
+import { generateTaskTitle } from "./taskTitleGenerator"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
@@ -241,6 +242,9 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+
+// Literal, not the vscode enum: specs that mock "vscode" without ExtensionMode would throw on the read.
+const EXTENSION_MODE_TEST = 3
 
 export interface ToolExecutionContext {
 	toolCallId: string
@@ -393,6 +397,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
 	currentRequestAbortController?: AbortController
+	/**
+	 * Controller for background title summarization of the initial user prompt.
+	 * Aborted when the task is cancelled, disposed, or explicitly aborted.
+	 */
+	titleAbortController?: AbortController
 	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
 	 * safeEnsureModelFetched). Aborting it detaches this task from the provider-side
@@ -3108,6 +3117,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			await this.say("text", task, images)
 
+			// Generate a concise task title in the background for new top-level tasks.
+			if (task && !this.parentTask) {
+				void this.generateTitleInBackground(task)
+			}
+
 			// Check for too many MCP tools and warn the user
 			const { enabledToolCount, enabledServerCount } = await this.getEnabledMcpToolsCount()
 			if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
@@ -3178,6 +3192,66 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return
 			}
 			throw error
+		}
+	}
+
+	/**
+	 * Generates a concise title for the task in the background using the initial prompt.
+	 * If the user cancels the task, or if generation fails/times out, the title is left
+	 * unchanged so the original prompt remains the task title.
+	 */
+	private async generateTitleInBackground(taskText: string): Promise<void> {
+		if (this.abort || this.abandoned) {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider || provider.context?.extensionMode === EXTENSION_MODE_TEST) {
+			return
+		}
+
+		const controller = new AbortController()
+		this.titleAbortController = controller
+
+		try {
+			const title = await generateTaskTitle(taskText, this.apiConfiguration, {
+				abortSignal: controller.signal,
+				timeoutMs: 10000,
+				taskId: this.taskId,
+			})
+
+			if (controller.signal.aborted || this.abort || this.abandoned || !title) {
+				return
+			}
+
+			// In tests or fast completion paths, wait briefly until the task is recorded in the store
+			for (let i = 0; i < 20; i++) {
+				if (controller.signal.aborted || this.abort || this.abandoned) {
+					return
+				}
+				if (provider.taskHistoryStore.get(this.taskId)) {
+					break
+				}
+				await delay(50)
+			}
+
+			// If the task already has a custom title set (e.g. user manually renamed it), do not overwrite
+			const existing = provider.taskHistoryStore.get(this.taskId)
+			if (existing?.title) {
+				return
+			}
+
+			if (controller.signal.aborted || this.abort || this.abandoned) {
+				return
+			}
+
+			await provider.renameTaskWithId(this.taskId, title)
+		} catch (error) {
+			console.error(`[Task#generateTitleInBackground] Failed for ${this.taskId}:`, error)
+		} finally {
+			if (this.titleAbortController === controller) {
+				this.titleAbortController = undefined
+			}
 		}
 	}
 
@@ -3534,6 +3608,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.metadataFetchAbortController.abort()
 			this.metadataFetchAbortController = undefined
 		}
+		if (this.titleAbortController) {
+			this.titleAbortController.abort()
+			this.titleAbortController = undefined
+		}
 	}
 
 	/**
@@ -3594,6 +3672,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	requestAbort(isAbandoned: boolean): void {
 		if (isAbandoned) {
 			this.abandoned = true
+		}
+		if (this.titleAbortController) {
+			this.titleAbortController.abort()
+			this.titleAbortController = undefined
 		}
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}

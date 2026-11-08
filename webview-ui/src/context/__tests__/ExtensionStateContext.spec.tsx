@@ -174,6 +174,35 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("current-task-item").textContent!)).toEqual(updated)
 	})
 
+	it("updates currentTaskItem on taskHistoryItemUpdated when currentTaskId matches even if currentTaskItem was unset", () => {
+		const item = {
+			id: "task-live",
+			number: 1,
+			ts: 100,
+			task: "Live prompt",
+			title: "Summarized Title",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		render(
+			<ExtensionStateContextProvider
+				initialState={{ currentTaskId: "task-live", clineMessages: [], currentTaskItem: undefined }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "taskHistoryItemUpdated", taskHistoryItem: item },
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("current-task-item").textContent!)).toEqual(item)
+	})
+
 	it("does not restore a key dropped by a snapshot message", () => {
 		const payload: ClineMessage = { ts: 1, type: "say", say: "text", text: "seed", partial: false }
 		const internSpy = vi.spyOn(StringCache.prototype, "intern")
