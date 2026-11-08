@@ -1629,28 +1629,19 @@ describe("ChatTextArea", () => {
 			expect(idleSignals()).toHaveLength(1)
 		})
 
-		it("throttles repeated typing to one signal per second", () => {
-			let now = 10_000
-			const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now)
-			try {
-				const { container } = render(<ChatTextArea {...defaultProps} />)
-				const textarea = getTextarea(container)
+		it("signals on every edit, including edits within the former throttle window", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} />)
+			const textarea = getTextarea(container)
 
-				fireEvent.change(textarea, { target: { value: "h", selectionStart: 1 } })
-				expect(idleSignals()).toHaveLength(1)
+			fireEvent.change(textarea, { target: { value: "h", selectionStart: 1 } })
+			expect(idleSignals()).toHaveLength(1)
 
-				// Typing within the throttle window does not re-signal.
-				now += 500
-				fireEvent.change(textarea, { target: { value: "he", selectionStart: 2 } })
-				expect(idleSignals()).toHaveLength(1)
-
-				// Once the throttle window elapses, the next keystroke signals again.
-				now += 600
-				fireEvent.change(textarea, { target: { value: "hel", selectionStart: 3 } })
-				expect(idleSignals()).toHaveLength(2)
-			} finally {
-				nowSpy.mockRestore()
-			}
+			// Every keystroke must restart the idle countdown. A keystroke
+			// suppressed by the old one-second throttle could let condensing
+			// start less than one idle window after the user last typed.
+			fireEvent.change(textarea, { target: { value: "he", selectionStart: 2 } })
+			fireEvent.change(textarea, { target: { value: "hel", selectionStart: 3 } })
+			expect(idleSignals()).toHaveLength(3)
 		})
 	})
 })

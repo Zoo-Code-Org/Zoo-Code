@@ -336,6 +336,98 @@ describe("Task idle condensing — arming the timer", () => {
 
 		expect(vi.getTimerCount()).toBe(0)
 	})
+
+	// The tests above call the scheduler directly; these drive the real ask()
+	// so the two-second status-transition hooks — the only places a waiting
+	// ask schedules idle condensing — are covered end to end.
+	function buildAskTask() {
+		const built = buildTask()
+		const { task } = built
+
+		task["emit"] = vi.fn()
+		task["saveClineMessages"] = vi.fn(async () => true)
+		// The status-timer callbacks resolve the pending ask via
+		// findMessageByTimestamp, so the stub has to land the message.
+		task["addToClineMessages"] = vi.fn(async (message: ClineMessage) => {
+			task["clineMessages"].push(message)
+		})
+		// Empty, never-claimable queue: the ask stays pending for the user.
+		// defineProperty because messageQueueService is readonly on the class.
+		Object.defineProperty(task, "messageQueueService", {
+			value: {
+				isEmpty: () => true,
+				hasUnclaimed: () => false,
+				claimNextMessage: () => undefined,
+				releaseMessage: () => {},
+			},
+		})
+
+		return built
+	}
+
+	// Starts a blocking ask and advances the fake clock just past the
+	// two-second status transition, asserting nothing is scheduled before it.
+	async function startAskAcrossStatusTransition(askType: ClineAsk) {
+		const { task } = buildAskTask()
+		const askPromise = task.ask(askType, "waiting on the user", false)
+
+		await vi.advanceTimersByTimeAsync(1_999)
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+		// Cross the boundary by 11ms — short enough to skip a pWaitFor poll tick.
+		await vi.advanceTimersByTimeAsync(11)
+
+		return { task, askPromise }
+	}
+
+	async function resolveAsk(task: Task, askPromise: ReturnType<Task["ask"]>) {
+		// Deliberately not handleWebviewAskResponse: it cancels the idle timer,
+		// which is the very thing the assertions above depend on.
+		task["askResponse"] = "yesButtonClicked"
+		await vi.advanceTimersByTimeAsync(100)
+		await expect(askPromise).resolves.toMatchObject({ response: "yesButtonClicked" })
+	}
+
+	test("a pending followup ask schedules idle condensing on the interactive transition", async () => {
+		const { task, askPromise } = await startAskAcrossStatusTransition("followup")
+
+		expect(task["interactiveAsk"]).toBeDefined()
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+
+		await resolveAsk(task, askPromise)
+	})
+
+	test("a pending resume_task ask schedules idle condensing on the resumable transition", async () => {
+		const { task, askPromise } = await startAskAcrossStatusTransition("resume_task")
+
+		expect(task["resumableAsk"]).toBeDefined()
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+
+		await resolveAsk(task, askPromise)
+	})
+
+	test("a pending idle ask schedules idle condensing on the idle transition", async () => {
+		const { task, askPromise } = await startAskAcrossStatusTransition("completion_result")
+
+		expect(task["idleAsk"]).toBeDefined()
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+
+		await resolveAsk(task, askPromise)
+	})
+
+	// Tool and command asks are interactive, so they take the same two-second
+	// transition — but they are mid-response, so only the status change fires
+	// and idle condensing stays unscheduled.
+	test.each(["tool", "command"] as const)(
+		"a pending %s ask crosses the interactive transition without scheduling idle condensing",
+		async (askType) => {
+			const { task, askPromise } = await startAskAcrossStatusTransition(askType)
+
+			expect(task["interactiveAsk"]).toBeDefined()
+			expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+
+			await resolveAsk(task, askPromise)
+		},
+	)
 })
 
 describe("Task idle condensing — reset and cancel", () => {
@@ -540,6 +632,37 @@ describe("Task idle condensing — timer expiry", () => {
 			"condenseTaskContextStarted",
 			"condenseTaskContextResponse",
 		])
+	})
+
+	test("an idle wait beyond the maximum timer delay waits the full duration", async () => {
+		const { task, condense } = buildTask({
+			state: baseState({ idleCondenseTimeInSeconds: 2_147_484 }),
+		})
+		// Node silently clamps setTimeout delays above 2,147,483,647 ms to
+		// 1 ms, so a raw delay for 2,147,484 s would condense a task that just
+		// went idle. Fake timers do not emulate that clamp, so pin the exact
+		// scheduled delays as well as the elapsed behavior.
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+		const scheduledDelays = () =>
+			setTimeoutSpy.mock.calls
+				.map((call) => call[1])
+				.filter((delay): delay is number => typeof delay === "number")
+
+		try {
+			await task["maybeStartIdleCondenseTimer"]()
+			// The first slice never exceeds the maximum Node supports.
+			expect(scheduledDelays()).toEqual([2_147_483_647])
+
+			await vi.advanceTimersByTimeAsync(2_147_483_647)
+			expect(condense).not.toHaveBeenCalled()
+			// The remainder is 2,147,484,000 - 2,147,483,647 = 353 ms.
+			expect(scheduledDelays()).toEqual([2_147_483_647, 353])
+
+			await vi.advanceTimersByTimeAsync(353)
+			expect(condense).toHaveBeenCalledTimes(1)
+		} finally {
+			setTimeoutSpy.mockRestore()
+		}
 	})
 })
 

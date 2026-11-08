@@ -2803,13 +2803,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private armIdleCondenseTimeout(seconds: number): void {
 		this.cancelIdleCondenseTimer()
-		this.idleCondenseTimeoutRef = setTimeout(
-			() => {
-				this.idleCondenseTimeoutRef = undefined
-				void this.onIdleCondenseTimerFired()
-			},
-			Math.max(0, seconds) * 1000,
-		)
+		// Node clamps setTimeout delays above the int32 maximum to 1ms, so an
+		// idle wait of 2,147,484 s or more would fire almost immediately and
+		// condense a task that just went idle. Chain maximum-length slices so
+		// the callback still runs only after the full requested duration.
+		// idleCondenseTimeoutRef always points at the slice in flight, so
+		// cancelIdleCondenseTimer and resetIdleCondenseTimer keep working.
+		const maxDelayMs = 2_147_483_647
+		let remainingMs = Math.max(0, seconds) * 1000
+		const armSlice = (): void => {
+			if (remainingMs > maxDelayMs) {
+				remainingMs -= maxDelayMs
+				this.idleCondenseTimeoutRef = setTimeout(armSlice, maxDelayMs)
+				return
+			}
+			this.idleCondenseTimeoutRef = setTimeout(
+				() => {
+					this.idleCondenseTimeoutRef = undefined
+					void this.onIdleCondenseTimerFired()
+				},
+				remainingMs,
+			)
+		}
+		armSlice()
 	}
 
 	/**

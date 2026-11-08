@@ -610,10 +610,6 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		// Ref to store the search timeout.
 		const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-		// Throttles the idle-condense reset signal so typing doesn't spam the
-		// extension host; the host ignores the signal unless a timer is armed.
-		const lastIdleCondenseResetRef = useRef(0)
-
 		const handleInputChange = useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 				const newValue = e.target.value
@@ -623,11 +619,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				resetOnInputChange()
 
 				// Typing in the prompt area resets the idle-condense timer.
-				const now = Date.now()
-				if (now - lastIdleCondenseResetRef.current >= 1000) {
-					lastIdleCondenseResetRef.current = now
-					vscode.postMessage({ type: "idleCondenseReset" })
-				}
+				// Signal on every edit: a throttled signal can let condensing
+				// start less than one idle window after a suppressed keystroke.
+				// The host ignores the signal unless a timer is armed.
+				vscode.postMessage({ type: "idleCondenseReset" })
 
 				const newCursorPosition = e.target.selectionStart
 				setCursorPosition(newCursorPosition)

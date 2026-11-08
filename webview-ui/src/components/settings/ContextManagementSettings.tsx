@@ -661,7 +661,11 @@ export const ContextManagementSettings = ({
 									setSelectedThresholdProfile(value)
 								}}
 								data-testid="threshold-profile-select">
-								<SelectTrigger className="w-full">
+								{/* At narrow editor widths the selected-profile text must wrap
+									instead of one-line clamping, so it is never clipped. Radix
+									drops SelectValue classNames, so the override has to target
+									the clamping child rule from the trigger itself. */}
+								<SelectTrigger className="w-full max-[380px]:h-auto max-[380px]:whitespace-normal max-[380px]:*:data-[slot=select-value]:line-clamp-none!">
 									<SelectValue
 										placeholder={
 											t("settings:contextManagement.condensingThreshold.selectProfile") ||
@@ -751,7 +755,8 @@ export const ContextManagementSettings = ({
 											setSelectedIdleProfile(value)
 										}}
 										data-testid="idle-threshold-profile-select">
-										<SelectTrigger className="w-full">
+										{/* Same narrow-width wrap fix as the main threshold select. */}
+										<SelectTrigger className="w-full max-[380px]:h-auto max-[380px]:whitespace-normal max-[380px]:*:data-[slot=select-value]:line-clamp-none!">
 											<SelectValue
 												placeholder={
 													t("settings:contextManagement.condensingThreshold.selectProfile") ||
