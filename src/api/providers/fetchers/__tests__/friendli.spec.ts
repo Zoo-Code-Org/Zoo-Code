@@ -103,6 +103,24 @@ describe("getFriendliModels", () => {
 		expect(models["zai-org/GLM-5.2"].supportsReasoningEffort).toEqual(["high", "max"])
 	})
 
+	it("defaults to the first supported effort when high is not offered", async () => {
+		vi.mocked(axios.get).mockResolvedValueOnce({
+			data: {
+				data: [
+					{
+						id: "vendor/no-high",
+						reasoning_options: [{ type: "effort", values: ["ultracode", "low", "medium", "max"] }],
+					},
+				],
+			},
+		})
+
+		const models = await getFriendliModels()
+
+		expect(models["vendor/no-high"].supportsReasoningEffort).toEqual(["low", "medium", "max"])
+		expect(models["vendor/no-high"].reasoningEffort).toBe("low")
+	})
+
 	it("keeps reserved upstream IDs as own keys", async () => {
 		vi.mocked(axios.get).mockResolvedValueOnce({
 			data: {

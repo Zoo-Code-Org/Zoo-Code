@@ -282,12 +282,14 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			...friendliExtra,
 		}
 
+		// Per-request signal: the SDK never removes its listener (see createMessage).
+		const { signal, dispose } = bridgeExternalAbortSignal(options?.abortSignal)
 		try {
 			// The OpenAI SDK rejects a present-but-undefined or unusable `timeout`, so
 			// only forward a real value, rounded and capped like mergeAbortSignalAndTimeout.
 			const requestOptions: OpenAI.RequestOptions = {}
-			if (options?.abortSignal !== undefined) {
-				requestOptions.signal = options.abortSignal
+			if (signal !== undefined) {
+				requestOptions.signal = signal
 			}
 			if (remainingMs !== undefined) {
 				requestOptions.timeout = toSdkTimeoutMs(remainingMs)
@@ -299,6 +301,8 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
+		} finally {
+			dispose()
 		}
 	}
 }

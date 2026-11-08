@@ -254,6 +254,36 @@ describe("FriendliHandler", () => {
 
 			expect(live.size).toBe(0)
 		})
+
+		it("completePrompt detaches from a signal reused across keyless calls that succeed and fail", async () => {
+			const keyless = new FriendliHandler({})
+			let calls = 0
+			mockCreate.mockImplementation(async (_params: unknown, opts?: { signal?: AbortSignal }) => {
+				opts?.signal?.addEventListener("abort", () => {})
+				if (++calls === 3) throw new Error("boom")
+				if (calls === 4) {
+					// In flight until the forwarded signal aborts.
+					await new Promise((resolve) => opts?.signal?.addEventListener("abort", resolve))
+					throw new Error("Request was aborted.")
+				}
+				return { choices: [{ message: { content: "ok" } }] }
+			})
+			const controller = new AbortController()
+			const live = trackListeners(controller.signal)
+
+			await keyless.completePrompt("a", { abortSignal: controller.signal })
+			await keyless.completePrompt("b", { abortSignal: controller.signal })
+			await expect(keyless.completePrompt("c", { abortSignal: controller.signal })).rejects.toThrow("boom")
+
+			expect(mockCreate).toHaveBeenCalledTimes(3)
+			expect(live.size).toBe(0)
+			// The bridge still follows the caller after earlier calls detached.
+			const pending = keyless.completePrompt("d", { abortSignal: controller.signal })
+			await vi.waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(4))
+			controller.abort()
+			await expect(pending).rejects.toThrow()
+			expect((mockCreate.mock.lastCall?.[1] as { signal: AbortSignal }).signal.aborted).toBe(true)
+		})
 	})
 
 	it("should retry an empty catalog and keep the next nonempty one", async () => {
@@ -418,11 +448,13 @@ describe("FriendliHandler", () => {
 		expect(result).toBe(expectedResponse)
 	})
 
-	it("completePrompt should forward the abort signal", async () => {
+	it("completePrompt should forward a per-request signal instead of the caller's", async () => {
 		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
-		const { signal } = new AbortController()
-		await handler.completePrompt("test prompt", { abortSignal: signal })
-		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal })
+		const controller = new AbortController()
+		await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		const forwarded = (mockCreate.mock.lastCall?.[1] as { signal: AbortSignal }).signal
+		expect(forwarded).not.toBe(controller.signal)
+		expect(forwarded.aborted).toBe(false)
 	})
 
 	it.each([
