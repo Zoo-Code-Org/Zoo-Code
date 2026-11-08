@@ -4621,15 +4621,50 @@ describe("ClineProvider", () => {
 			await getMessageHandler()({
 				type: "updateSettings",
 				updatedSettings: {
-					profileIdleThresholds: { inherited: -1, capped: 90, floored: 1 },
+					profileIdleThresholds: { inherited: -1, capped: 90, belowMin: 1, aboveMax: 150 },
 					autoCondenseContextPercent: 80,
 				},
 			})
 
+			// 90 clamps to the global main threshold; out-of-bounds values keep global
+			// inheritance instead of becoming valid overrides through clamping.
 			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", {
 				inherited: -1,
 				capped: 80,
-				floored: 5,
+				belowMin: -1,
+				aboveMax: -1,
+			})
+		})
+
+		test("clamps profileIdleThresholds against each profile's own main threshold", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					// Global main is 40; "raised" opts into 90 and "inherited" inherits via -1.
+					autoCondenseContextPercent: 40,
+					profileThresholds: { raised: 90, lowered: 60, inherited: -1 },
+					profileIdleThresholds: {
+						raised: 70,
+						lowered: 70,
+						inherited: 70,
+						fallback: 70,
+						idleInherited: -1,
+					},
+				},
+			})
+
+			// "raised" is clamped against its profile threshold (90) and stays 70 instead of
+			// being lowered to the global 40; "lowered" is capped at its profile threshold (60);
+			// "inherited" has a -1 profile threshold so it falls back to the global 40, as does
+			// "fallback" which has no profile threshold entry at all; an idle -1 entry is kept.
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", {
+				raised: 70,
+				lowered: 60,
+				inherited: 40,
+				fallback: 40,
+				idleInherited: -1,
 			})
 		})
 
@@ -4654,12 +4689,15 @@ describe("ClineProvider", () => {
 
 			await getMessageHandler()({
 				type: "updateSettings",
-				updatedSettings: { profileIdleCondenseTimes: { inherited: -1, zeroed: -3.4, rounded: 10.4 } },
+				updatedSettings: { profileIdleCondenseTimes: { inherited: -1, negative: -3.4, zero: 0, rounded: 10.4 } },
 			})
 
+			// A negative delay keeps global inheritance instead of clamping into a
+			// valid (immediate) 0s override; 0 remains a legitimate explicit override.
 			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleCondenseTimes", {
 				inherited: -1,
-				zeroed: 0,
+				negative: -1,
+				zero: 0,
 				rounded: 10,
 			})
 		})
@@ -4680,6 +4718,60 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
 
 			await expect(getMessageHandler()({ type: "idleCondenseReset" })).resolves.toBeUndefined()
+		})
+
+		test("saving an idle-condense setting re-evaluates the active task", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			// Double only provides the member the re-evaluation call touches.
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContext: true } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
+		})
+
+		test.each([
+			["idleCondenseContextPercent", 60],
+			["idleCondenseTimeInSeconds", 60],
+			["profileIdleThresholds", { a: 60 }],
+			["profileIdleCondenseTimes", { a: 60 }],
+			["autoCondenseContext", true],
+			["autoCondenseContextPercent", 90],
+			["profileThresholds", { a: 90 }],
+		])("saving the related key %s also re-evaluates the active task", async (key, value) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { [key]: value } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
+		})
+
+		test("saving an unrelated setting does not re-evaluate the active task", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { soundEnabled: true } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).not.toHaveBeenCalled()
+		})
+
+		test("saving an idle-condense setting without an active task does not throw", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+
+			await expect(
+				getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContext: true } }),
+			).resolves.toBeUndefined()
 		})
 	})
 

@@ -1844,11 +1844,24 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 					ts: Date.now() - 1000,
 					text: JSON.stringify({ apiProtocol: "anthropic", cost: 0.05, tokensIn: 100, tokensOut: 50 }),
 				},
+				{
+					type: "say",
+					say: "api_req_finished",
+					ts: Date.now() - 500,
+					text: JSON.stringify({ cost: 0.05, tokensIn: 100, tokensOut: 50 }),
+				},
 			],
 		})
 
 		await waitFor(() => {
 			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+
+		// Pin the precondition: sending is enabled and not streaming, so the
+		// only reason for queueing below is isCondensing.
+		await waitFor(() => {
+			const input = getByTestId("chat-textarea").querySelector("input")!
+			expect(input.getAttribute("data-sending-disabled")).toBe("false")
 		})
 
 		// Put ChatView into the condensing state the way the extension does

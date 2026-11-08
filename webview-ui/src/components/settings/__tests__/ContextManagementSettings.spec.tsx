@@ -763,5 +763,53 @@ describe("ContextManagementSettings", () => {
 			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleThresholds", { "config-1": 51 })
 			expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
 		})
+
+		it("displays an inherited idle threshold capped at the profile main threshold", () => {
+			// Runtime resolves idlePercent = Math.min(idlePercentSetting, mainPercent)
+			// per profile, so a profile inheriting the 50% global idle threshold
+			// while capping at a 30% main threshold must display 30%, not 50%.
+			render(
+				<ContextManagementSettings
+					{...idleProps}
+					idleCondenseContextPercent={50}
+					profileThresholds={{ "config-1": 30 }}
+				/>,
+			)
+
+			selectIdleProfile("config-1")
+
+			expect(screen.getByTestId("idle-condense-threshold-slider")).toHaveValue("30")
+			expect(screen.getByText("30%")).toBeInTheDocument()
+		})
+
+		it("displays a profile idle override above its main threshold as capped", () => {
+			render(
+				<ContextManagementSettings
+					{...idleProps}
+					profileThresholds={{ "config-1": 40 }}
+					profileIdleThresholds={{ "config-1": 70 }}
+				/>,
+			)
+
+			selectIdleProfile("config-1")
+
+			expect(screen.getByTestId("idle-condense-threshold-slider")).toHaveValue("40")
+			expect(screen.getByText("40%")).toBeInTheDocument()
+		})
+
+		it("leaves a profile idle override below its main threshold uncapped", () => {
+			render(
+				<ContextManagementSettings
+					{...idleProps}
+					profileThresholds={{ "config-1": 40 }}
+					profileIdleThresholds={{ "config-1": 20 }}
+				/>,
+			)
+
+			selectIdleProfile("config-1")
+
+			expect(screen.getByTestId("idle-condense-threshold-slider")).toHaveValue("20")
+			expect(screen.getByText("20%")).toBeInTheDocument()
+		})
 	})
 })

@@ -208,16 +208,19 @@ export const ContextManagementSettings = ({
 		return profileThreshold
 	}
 
-	// Helper function to get the current idle threshold value based on selected profile
+	// Helper function to get the current idle threshold value based on selected profile.
+	// The displayed value is capped at the profile's effective main threshold to match
+	// the runtime behavior (Task.ts resolves idlePercent = Math.min(idlePercentSetting,
+	// mainPercent)); the inherited setting itself is left unchanged.
 	const getCurrentIdleThresholdValue = () => {
 		if (selectedIdleProfile === "default") {
 			return idleCondenseContextPercent
 		}
 		const profileThreshold = profileIdleThresholds[selectedIdleProfile]
 		if (profileThreshold === undefined || profileThreshold === -1) {
-			return idleCondenseContextPercent
+			return Math.min(idleCondenseContextPercent, getMainThresholdForIdleProfile())
 		}
-		return profileThreshold
+		return Math.min(profileThreshold, getMainThresholdForIdleProfile())
 	}
 
 	// Helper function to handle idle threshold changes (value clamped to the main threshold)

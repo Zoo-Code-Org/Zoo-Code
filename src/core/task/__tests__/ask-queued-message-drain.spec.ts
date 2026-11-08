@@ -48,6 +48,71 @@ describe("Task.ask queued message drain", () => {
 		expect(result.text).toBe("picked answer")
 	})
 
+	// Mirrors the release protocol in condenseContextWithLease's finally: clear
+	// the field, then settle the promise it handed to waiters.
+	function installCondenseBarrier(task: Task): () => void {
+		let settle!: () => void
+		task["condenseHistoryBarrier"] = new Promise<void>((resolve) => {
+			settle = resolve
+		})
+		return () => {
+			task["condenseHistoryBarrier"] = undefined
+			settle()
+		}
+	}
+
+	it("holds the queued-message drain while a condense holds the history", async () => {
+		const task = await createTask()
+
+		// Stand in for condenseContextWithLease summarizing: it replaces the API
+		// history from a pre-condense snapshot, so the drain must not claim a
+		// queued message whose follow-up request would append turns the summary
+		// overwrites.
+		const releaseBarrier = installCondenseBarrier(task)
+		task.messageQueueService.addMessage("picked answer")
+
+		const askPromise = task.ask("followup", "Q?", false)
+
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		// Not even claimed: the message is intact for the post-settle drain.
+		expect(task.messageQueueService.messages[0]?.text).toBe("picked answer")
+
+		releaseBarrier()
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "messageResponse", text: "picked answer" })
+	})
+
+	it("holds a direct ask response while a condense holds the history", async () => {
+		const task = await createTask()
+
+		const releaseBarrier = installCondenseBarrier(task)
+
+		const askPromise = task.ask("followup", "Q?", false)
+
+		// The user resumes mid-summarize once the ask is waiting (the same
+		// deferred-delivery timing the other tests use). The response lands but
+		// stays pending: delivering it would let the follow-up request append
+		// turns the in-flight summary then overwrites.
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		task.handleWebviewAskResponse("messageResponse", "answered mid-condense")
+
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		// The response did land — only its delivery is held.
+		expect(task["askResponse"]).toBe("messageResponse")
+
+		releaseBarrier()
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "messageResponse", text: "answered mid-condense" })
+	})
+
 	it("does not consume queued messages for command_output asks", async () => {
 		const task = await createTask()
 
