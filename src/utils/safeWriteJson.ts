@@ -100,14 +100,19 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// the target when the resolution itself rejects.
 	let resolvedTargetPath: string | undefined
 
+	// An empty confineTo is a declared scope, not the absence of one: `""` resolves to the
+	// process working directory, so the three checks below test for presence. A truthiness
+	// test would silently drop the scope a caller declared as an empty string.
+	const confineTo = options?.confineTo
+
 	// Confinement is checked before ANY filesystem side effect. mkdir -p through a
 	// planted symlinked ancestor (projectDir/.roo -> /elsewhere) would create
 	// directories outside the declared scope, and an unwritable referent would surface
 	// the mkdir error instead of the ConfinedPathEscapeError the caller is entitled to.
 	// _resolveScopeRoot resolves a not-yet-existing path through its nearest existing
 	// ancestor, so this works for the target's missing parents too.
-	if (options?.confineTo) {
-		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+	if (confineTo !== undefined) {
+		const scopeRoot = await _resolveScopeRoot(confineTo)
 		const requested = await _resolveScopeRoot(absoluteFilePath)
 		if (_escapesScope(scopeRoot, requested)) {
 			throw new ConfinedPathEscapeError(absoluteFilePath, requested, scopeRoot)
@@ -139,8 +144,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// it is entitled to. The key is the symlink referent, so this check sees the same
 	// destination the lock would be taken on. The under-lock check stays: it covers the
 	// target re-resolved after a peer commits.
-	if (options?.confineTo) {
-		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+	if (confineTo !== undefined) {
+		const scopeRoot = await _resolveScopeRoot(confineTo)
 		if (_escapesScope(scopeRoot, await _resolveScopeRoot(lockKey))) {
 			throw new ConfinedPathEscapeError(absoluteFilePath, lockKey, scopeRoot)
 		}
@@ -183,8 +188,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// does not exist yet still carries the alias components of the path it was
 		// given. This runs before the merge read and before anything is staged, so a
 		// rejected write leaves nothing behind.
-		if (options?.confineTo) {
-			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (confineTo !== undefined) {
+			const scopeRoot = await _resolveScopeRoot(confineTo)
 			if (_escapesScope(scopeRoot, await _resolveScopeRoot(resolvedTargetPath))) {
 				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
 			}
