@@ -288,6 +288,14 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+/**
+ * Publish text by staging beside the resolved target and committing with a rename.
+ *
+ * @internal Production callers of this file use resolvePublishTarget and
+ * resolveLockKey; the write entry point itself has no production caller while #2350
+ * decides which primitive main keeps, so it is tagged internal instead of being
+ * reported as an unused export.
+ */
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
