@@ -1069,7 +1069,20 @@ describe("safeWriteJson", () => {
 		await safeWriteJson(currentTestFilePath, { after: true })
 
 		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
-		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(currentTestFilePath), expect.anything())
+		// The log must name the target it could not read; it must not be compared against
+		// the caller's spelling. The writer resolves the target before logging, and on
+		// Windows a path whose components carry 8.3 aliases resolves to a different
+		// spelling than the one the caller handed it - measured on this row: a temp under
+		// C:\work\ZOO-CO~1\TMP-AL~2 logged its target as ...\Zoo-Code-fork\.tmp-alias-vps2f\
+		// on the same run. The mkdtemp directory name and the file's own name are the parts
+		// that survive resolution, so the log is pinned to those.
+		const loggedTargets = consoleErrorSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n")
+		expect(loggedTargets).toContain(path.basename(path.dirname(currentTestFilePath)))
+		expect(loggedTargets).toContain(path.basename(currentTestFilePath))
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining(path.basename(currentTestFilePath)),
+			expect.anything(),
+		)
 		consoleErrorSpy.mockRestore()
 	}, 20_000)
 
