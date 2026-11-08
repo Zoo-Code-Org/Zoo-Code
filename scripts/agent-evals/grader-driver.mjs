@@ -3,7 +3,8 @@
 // codes: the driver exits 0 after writing any completed result. A nonzero exit
 // or a missing result file means the grader itself failed, not the solution.
 // The driver receives no credential and needs no network.
-import { spawn } from "node:child_process"
+import process from "node:process"
+import { run } from "node:test"
 import { randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
@@ -55,46 +56,57 @@ const discoverTestFiles = (dir) => {
 	return files.sort()
 }
 
-const readCounts = (tap) => {
-	const read = (name) => {
-		const match = tap.match(new RegExp(`^# ${name} (\\d+)\\s*$`, "m"))
-		return match ? Number(match[1]) : undefined
-	}
-	return { passed: read("pass"), failed: read("fail"), cancelled: read("cancelled") }
-}
-
-const readFailureNames = (tap) => {
-	const matches = [...tap.matchAll(/^(\s*)not ok \d+ - (.+)$/gm)].map((match) => ({
-		indented: match[1].length > 0,
-		name: match[2],
-	}))
-	// Prefer indented entries: they name the failing tests inside the files.
-	// Top-level entries name the files and only appear when the whole file
-	// failed.
-	const specific = matches.filter((match) => match.indented)
-	const chosen = specific.length > 0 ? specific : matches
-	return chosen.slice(0, 50).map((match) => match.name)
-}
-
-// One child per test file. Failure names stay attributable to their file,
-// which is how the grader separates hidden-test failures from visible-test
-// failures.
-const runOneFile = (file) =>
-	new Promise((resolve) => {
-		const child = spawn(process.execPath, ["--test", "--test-reporter", "tap", file], {
-			cwd: process.cwd(),
-			stdio: ["ignore", "pipe", "pipe"],
-		})
-		let tap = ""
-		child.stdout.on("data", (chunk) => {
-			tap += String(chunk)
-		})
-		child.stderr.on("data", (chunk) => {
-			tap += String(chunk)
-		})
-		child.once("error", () => resolve({ ok: false, tap: "" }))
-		child.once("close", () => resolve({ ok: true, tap }))
+// Consume the runner's structured events in this trusted process. stdout and
+// stderr are diagnostic events only; neither can supply verdict counts. The
+// child permission policy also prevents solution code writing the result file
+// or launching another process to do so.
+const runOneFile = async (file) => {
+	const expected = [...fs.readFileSync(file, "utf8").matchAll(/\btest\(["']([^"']+)["'],/g)].map((match) => match[1])
+	const observed = []
+	let passed = 0
+	let failed = 0
+	let cancelled = 0
+	let fileFailed = false
+	const failures = []
+	const stream = run({
+		files: [path.resolve(file)],
+		execArgv: [
+			process.allowedNodeEnvironmentFlags.has("--permission") ? "--permission" : "--experimental-permission",
+			`--allow-fs-read=${process.cwd()}`,
+		],
 	})
+	for await (const event of stream) {
+		if (event.type !== "test:pass" && event.type !== "test:fail") continue
+		const data = event.data
+		// File-level success is not evidence that any acceptance test ran.
+		if (data.name === path.resolve(file)) {
+			if (event.type === "test:fail") fileFailed = true
+			continue
+		}
+		if (data.details?.type !== "test") continue
+		observed.push(data.name)
+		if (event.type === "test:pass" && !data.skip && !data.todo) passed++
+		else if (
+			["cancelledByParent", "testTimeoutFailure"].includes(data.details?.error?.failureType) ||
+			data.skip ||
+			data.todo
+		)
+			cancelled++
+		else {
+			failed++
+			failures.push({ name: data.name, file })
+		}
+	}
+	// Frozen acceptance files use literal, top-level test declarations. Fail
+	// closed if any declaration did not finish, including an import that calls
+	// process.exit(0) before tests register. Visible files must also run tests.
+	if (fileFailed && failed === 0 && cancelled === 0) {
+		failed++
+		failures.push({ name: "test process failed", file })
+	}
+	const complete = observed.length > 0 && expected.every((name) => observed.includes(name))
+	return { passed, failed, cancelled, failures, complete }
+}
 
 try {
 	const files = fs.existsSync(testDir) ? discoverTestFiles(testDir) : []
@@ -122,22 +134,14 @@ try {
 	const failures = []
 	for (const file of files) {
 		const outcome = await runOneFile(file)
-		if (!outcome.ok) {
+		if (!outcome.complete) {
 			runnerBroke = true
 			break
 		}
-		const counts = readCounts(outcome.tap)
-		if (counts.passed === undefined || counts.failed === undefined) {
-			// A file without a TAP summary means the runner never reported.
-			runnerBroke = true
-			break
-		}
-		passedCount += counts.passed
-		failedCount += counts.failed
-		cancelledCount += counts.cancelled ?? 0
-		if (counts.failed > 0 && failures.length < 50)
-			for (const name of readFailureNames(outcome.tap).slice(0, 50 - failures.length))
-				failures.push({ name, file })
+		passedCount += outcome.passed
+		failedCount += outcome.failed
+		cancelledCount += outcome.cancelled
+		failures.push(...outcome.failures.slice(0, 50 - failures.length))
 	}
 	if (runnerBroke) {
 		writeResult({ kind: "driver-error", message: "testRunnerUnavailable" })

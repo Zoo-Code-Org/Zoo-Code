@@ -9,6 +9,8 @@ import type { SideResultFile } from "./coding-compare.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
 import { classifyRunOutcome } from "./coding-outcomes.ts"
 import { buildRunMetrics } from "./coding-metrics.ts"
+import { acquireSideOutputLock } from "./output-lock.ts"
+import { invalidateSideArtifacts } from "./coding-compare.ts"
 import { writeJsonAtomic } from "./fs-atomic.ts"
 
 export interface SideRepetition {
@@ -131,5 +133,32 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 			throw new AggregateError([error, cleanupError], "publication failed and cleanup failed")
 		}
 		throw error
+	}
+}
+
+// Own the entire standalone side generation, including preparation and final
+// cleanup. A competing writer fails before it can invalidate any artifacts.
+export async function executeSideGeneration(inputs: {
+	out: string
+	isInterrupted: () => boolean
+	run: () => Promise<void>
+	cleanup: () => Promise<void>
+}): Promise<void> {
+	const release = await acquireSideOutputLock(inputs.out)
+	try {
+		await invalidateSideArtifacts(inputs.out)
+		try {
+			await inputs.run()
+		} finally {
+			try {
+				await inputs.cleanup()
+			} finally {
+				// Signals during final worktree cleanup invalidate a published
+				// generation too. Keep the lock until rollback has finished.
+				if (inputs.isInterrupted()) await invalidateSideArtifacts(inputs.out)
+			}
+		}
+	} finally {
+		release()
 	}
 }

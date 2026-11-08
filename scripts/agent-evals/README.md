@@ -136,6 +136,7 @@ release process: a maintainer runs it locally or on demand.
 - Each fixture ships two reference solutions. The known-correct solution must pass. The deliberately incorrect one passes the visible tests and must fail. Unit tests enforce both on every fixture.
 - `createLocalSubprocessGradingRuntime` runs the same driver directly on the host. It does not give container isolation. It exists for unit tests and explicit local checks only and must never back a recorded comparison.
 - The live `coding-evals:side` and `coding-evals:compare` entry points reject `--allow-unisolated-grading` instead of ignoring it. A recorded comparison always grades in the container runtime.
+- The driver consumes structured Node test events. stdout and stderr never supply verdict counts. Every literal test declaration in the frozen acceptance files must finish; a file-level pass or early successful exit is insufficient. Test children can read the grading workspace but cannot write files or launch processes.
 - The driver publishes its result file atomically: the content lands in a unique same-directory temp file and is renamed into place. A failed write or rename removes the temp file, and the host treats a missing or invalid result as a grading failure.
 
 ### Comparisons
@@ -165,6 +166,8 @@ Every driver child, the side included, runs detached in its own process group an
 ### Output publication contract
 
 Artifacts are published atomically: content lands in a same-directory temp file and is renamed into place. A reader never sees a partial file.
+
+A side run acquires an exclusive lock for its canonical output directory before invalidation and holds it through execution, publication, and final cleanup. An overlapping standalone side, including a symlink alias, fails before touching results. An interrupt during final cleanup removes the published result and artifacts before releasing the lock. Side locks live in the system temporary directory; remove a stale lock after a hard crash only after verifying no side owns that output.
 
 A side run invalidates its output directory first. Before the first repetition executes, the side removes any previous `side-results.json` and then the whole `artifacts` tree, so stale results from an earlier rerun can never survive. The authoritative result goes first, so an error or an interruption during invalidation leaves the generation incomplete, and consumers fail closed until the new atomic publication. A repetition that throws has its partial artifact directory removed before the next repetition starts. If that cleanup fails, the side removes its completion marker and artifact tree and fails without publishing. `side-results.json` is the completion marker: it appears only after every repetition of the current invocation finished, and consumers must require it and treat its absence as a failed side. A side rerun that cannot remove a stale artifact fails before any repetition runs.
 
