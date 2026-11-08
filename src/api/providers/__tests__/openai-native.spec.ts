@@ -1937,6 +1937,10 @@ describe("OpenAiNativeHandler", () => {
 
 			await expect(handler.completePrompt("Test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
 				name: "TimeoutError",
+				// Assert the full message too: name-only passes even if the phase is
+				// wrong, and the phase is what separates a completion deadline from a
+				// discovery deadline for callers.
+				message: "The OpenAI Native completion request timed out",
 			})
 		})
 		it("completePrompt should merge the external signal and timeoutMs together", async () => {
@@ -1958,6 +1962,22 @@ describe("OpenAiNativeHandler", () => {
 			// Aborting the external signal must abort the merged signal synchronously
 			controller.abort()
 			expect(mergedSignal.aborted).toBe(true)
+		})
+
+		it("completePrompt should normalize an SDK AbortError when no options are passed", async () => {
+			// With no options the request signal is a fresh controller whose reason is
+			// undefined: the optional guard on the reason read must hold, and the SDK’s
+			// own AbortError must still normalize to the contract error.
+			mockResponsesCreate.mockImplementationOnce(async () => {
+				const abortError = new Error("socket closed by abort")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The OpenAI Native request was aborted",
+			})
 		})
 
 		it("completePrompt should reject with AbortError when the abortSignal is already aborted", async () => {
