@@ -1276,6 +1276,13 @@ export class DiffViewProvider {
 			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 
+			// The settings read is an await too, so disposal can land inside it and the
+			// await still returns normally. Stopping here keeps a gone task from paying for
+			// the formatting pass before the emit guard below.
+			if (controller.signal.aborted) {
+				return
+			}
+
 			const newProblems = await diagnosticsToProblemsString(
 				getNewDiagnostics(preDiagnostics, postDiagnostics),
 				[vscode.DiagnosticSeverity.Error],

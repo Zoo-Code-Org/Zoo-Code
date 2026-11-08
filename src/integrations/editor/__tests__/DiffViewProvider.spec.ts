@@ -936,6 +936,9 @@ describe("DiffViewProvider", () => {
 			// Only the interactivity flag differs: the channel and the text are unchanged.
 			expect(mockTask.say.mock.calls[0]?.[0]).toBe("error")
 			expect(mockTask.say.mock.calls[0]?.[1]).toContain("New problems detected after saving file: test.ts")
+			// The tail releases its controller when it completes - including the failing tail
+			// below: without the finally cleanup, completed tails accumulate until disposal.
+			expect(diffViewProvider["postSaveTails"].size).toBe(0)
 		})
 
 		it("does not start a tail when cancellation lands while the save is awaiting the write", async () => {
@@ -1078,7 +1081,43 @@ describe("DiffViewProvider", () => {
 
 			expect(mockTask.say).toHaveBeenCalledTimes(1)
 			expect(mockTask.say.mock.calls[0]?.[1]).toContain("own-problem")
-			expect(mockTask.say.mock.calls[0]?.[1]).not.toContain("other-file-problem")
+		})
+
+		it("narrows the tail payload to Error-severity diagnostics", async () => {
+			// The tail formats with an explicit Error-only severity list. Mixed fixtures
+			// are what make a widened severity list fail this test instead of passing silently.
+			const ownWarning: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Warning,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "own-warning",
+			}
+			const ownError: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "own-error",
+			}
+			const mixedDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [
+				[makeUri(`${mockCwd}/test.ts`), [ownWarning, ownError]],
+			]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(mixedDiagnostics)
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).toHaveBeenCalledTimes(1)
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("own-error")
+			expect(mockTask.say.mock.calls[0]?.[1]).not.toContain("own-warning")
+			expect(diffViewProvider["postSaveTails"].size).toBe(0)
+
+			// Warning-only diagnostics must not emit at all.
+			mockTask.say.mockClear()
+			const warningOnly: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/test.ts`), [ownWarning]]]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(warningOnly)
+
+			await diffViewProvider.saveDirectly("test.ts", "more content", true, true, 100)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).not.toHaveBeenCalled()
 		})
 
 		it("stops a post-save tail that is cancelled while the diagnostic settings are read", async () => {
@@ -1146,14 +1185,19 @@ describe("DiffViewProvider", () => {
 			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/Test.ts`), [newDiag]]]
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
 
-			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
 
-			// Flush the fire-and-forget tail.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+				// Flush the fire-and-forget tail.
+				await new Promise((resolve) => setTimeout(resolve, 0))
 
-			expect(mockTask.say).toHaveBeenCalledTimes(1)
-			expect(mockTask.say.mock.calls[0]?.[1]).toContain("case-mismatch-problem")
-			platformSpy.mockRestore()
+				expect(mockTask.say).toHaveBeenCalledTimes(1)
+				expect(mockTask.say.mock.calls[0]?.[1]).toContain("case-mismatch-problem")
+			} finally {
+				// Restore on assertion failure too: a leaked win32 override would apply Windows
+				// path rules to later tests' comparisons.
+				platformSpy.mockRestore()
+			}
 		})
 
 		it("does not block the save on a diagnostics settle delay when diagnostics are disabled", async () => {
@@ -1214,14 +1258,21 @@ describe("DiffViewProvider", () => {
 			// The task is aborted while the diagnostics tail is emitting: say() rejects.
 			mockTask.say.mockRejectedValueOnce(new Error("aborted"))
 
-			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 0)
-			// Flush the fire-and-forget tail.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 0)
+				// Flush the fire-and-forget tail.
+				await new Promise((resolve) => setTimeout(resolve, 0))
 
-			// The method's outer catch swallows the rejection with a warning.
-			expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Post-save diagnostics emit failed:"))
-
-			consoleWarnSpy.mockRestore()
+				// The method's outer catch swallows the rejection with a warning.
+				expect(consoleWarnSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Post-save diagnostics emit failed:"),
+				)
+				// Even the failing tail releases its controller.
+				expect(diffViewProvider["postSaveTails"].size).toBe(0)
+			} finally {
+				// Restore on assertion failure too: a leaked spy would swallow later tests' warnings.
+				consoleWarnSpy.mockRestore()
+			}
 		})
 	})
 
