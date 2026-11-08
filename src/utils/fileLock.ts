@@ -10,6 +10,18 @@ import * as lockfile from "proper-lockfile"
 export const LOCK_STALE_MS = 31_000
 
 const RECOVERY_RETRY_MS = 1000
+
+/**
+ * The advisory lock for a path is the filesystem artefact at this location.
+ * proper-lockfile's default is `<filePath>.lock`; `acquireFileLock` below passes the
+ * value explicitly so the two cannot drift apart, and `safeWriteJson`'s lock-key drift
+ * guard answers "is this the same lock?" by comparing two artefacts. A caller that
+ * derived the location on its own would be comparing something other than what this
+ * module actually locks.
+ */
+export function lockPathFor(filePath: string): string {
+	return path.resolve(filePath) + ".lock"
+}
 const RECOVERY_GRACE_MS = 4000
 
 export interface FileLockOptions {
@@ -33,6 +45,7 @@ export async function acquireFileLock(filePath: string, options?: FileLockOption
 		return await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
+			lockfilePath: lockPathFor(absoluteFilePath),
 			realpath: false, // the file may not exist yet, which is acceptable
 			retries: options?.immediate
 				? 0

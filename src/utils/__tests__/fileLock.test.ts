@@ -1,5 +1,5 @@
 import * as lockfile from "proper-lockfile"
-import { acquireFileLock, LOCK_STALE_MS, withFileLock } from "../fileLock"
+import { acquireFileLock, LOCK_STALE_MS, lockPathFor, withFileLock } from "../fileLock"
 
 vi.mock("proper-lockfile", () => ({ lock: vi.fn() }))
 
@@ -15,6 +15,10 @@ describe("file lock protocol", () => {
 				stale: LOCK_STALE_MS,
 				update: 10000,
 				realpath: false,
+				// The drift guard in safeWriteJson answers "is this the same lock?" by comparing
+				// the two artefacts lockPathFor names, which is only sound while this module
+				// locks exactly that location.
+				lockfilePath: lockPathFor("history.json"),
 				retries: { retries: 35, factor: 1, minTimeout: 1000, maxTimeout: 1000 },
 			}),
 		)

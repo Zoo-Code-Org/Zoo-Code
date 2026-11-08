@@ -6,11 +6,16 @@ import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
 import { safeWriteJson } from "../safeWriteJson"
+import { lockPathFor } from "../fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 
-vi.mock("../fileLock", () => ({
-	acquireFileLock: vi.fn(async () => async () => {}),
-}))
+vi.mock("../fileLock", async () => {
+	// The drift guard asks whether two keys name one lock, which is a question about the
+	// artefact location lockPathFor describes. Mocking this module must not replace that
+	// one pure function, or a row would be comparing a location of its own invention.
+	const actual = await vi.importActual<typeof import("../fileLock")>("../fileLock")
+	return { ...actual, acquireFileLock: vi.fn(async () => async () => {}) }
+})
 
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
@@ -128,6 +133,120 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"lstat",
 		])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
+	})
+
+	it("refuses a resolution that lands in another directory even when its lock artefact is reachable", async () => {
+		const dir = await makeDir("lockkey-diralias-")
+		const referent = await makeDir("lockkey-referent-")
+		const alias = path.join(dir, "alias")
+		const peerFile = path.join(referent, "settings.json")
+		await fs.mkdir(alias)
+		const target = path.join(alias, "settings.json")
+
+		// realpath and lstat delegate to the real filesystem: the two directories below are
+		// directories the operating system created, which is the only way to show the guard
+		// refusing a destination that is genuinely elsewhere.
+		const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		mockedRealpath.mockImplementation(async (p) => await real.realpath(String(p)))
+		mockedLstat.mockImplementation(async (p) => await real.lstat(String(p), { bigint: true }))
+		mockedReadlink.mockRejectedValue(enoent)
+
+		let acquiredKey: string | undefined
+		mockedAcquireFileLock.mockImplementation(async (file) => {
+			acquiredKey = String(file)
+			// This writer holds the lock for the key it computed, at the artefact
+			// acquireFileLock creates for it. The peer publishes the file under its own lock in
+			// another directory, moves the directory this writer's key names out of the way, and
+			// re-keys that name onto the peer's directory. The writer's artefact spelling now
+			// resolves through the alias onto the PEER's artefact: an identity match there would
+			// name a lock this writer never took.
+			await fs.mkdir(lockPathFor(String(file)), { recursive: true })
+			await fs.writeFile(peerFile, JSON.stringify({ mcpServers: { peer: true } }))
+			await fs.mkdir(lockPathFor(peerFile), { recursive: true })
+			await fs.rename(alias, path.join(dir, "stale"))
+			await fs.symlink(referent, alias, process.platform === "win32" ? "junction" : "dir")
+			return async () => {}
+		})
+
+		const error = await safeWriteJson(target, { mcpServers: { mine: true } }).then(
+			() => undefined,
+			(caught: unknown) => caught as Error,
+		)
+		expect(String(error && error.name)).toBe("LockKeyDriftError")
+		expect(String(acquiredKey)).toContain(path.join("alias", "settings.json"))
+		// Nothing staged or published: the referent directory holds only the peer's file and
+		// its own artefact, and the moved-aside directory holds only this writer's.
+		expect((await fs.readdir(referent)).sort()).toEqual(["settings.json", "settings.json.lock"])
+		expect(JSON.parse(await fs.readFile(peerFile, "utf8"))).toEqual({ mcpServers: { peer: true } })
+		expect((await fs.readdir(path.join(dir, "stale"))).sort()).toEqual(["settings.json.lock"])
+	})
+
+	it("accepts the name the filesystem itself answers for the spelling the key was computed from", async () => {
+		const dir = await makeDir("lockkey-casefold-")
+		const lower = path.join(dir, "settings.json")
+		const upper = path.join(dir, "SETTINGS.JSON")
+		const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		// The reviewer's case turns on realpath handing back the name a directory stores rather
+		// than the spelling it was given - which is what NTFS's GetFinalPathNameByHandle does.
+		// This double models exactly that, and is the identity function wherever the two already
+		// agree, so the row drives the guard on a filesystem that restates case and on one that
+		// cannot restate it at all.
+		const restatingRealpath = async (target: string): Promise<string> => {
+			const resolved = await real.realpath(target)
+			const parent = path.dirname(resolved)
+			const name = path.basename(resolved)
+			const listed = await real.readdir(parent).catch(() => [] as string[])
+			const stored = listed.find((entry: string) => entry.toLowerCase() === name.toLowerCase())
+			return stored === undefined ? resolved : path.join(parent, stored)
+		}
+		const probeLower = path.join(dir, "probe.json")
+		await real.writeFile(probeLower, "{}")
+		const foldsCase = await restatingRealpath(path.join(dir, "PROBE.JSON")).then(
+			async (resolved: string) => path.basename(resolved) === path.basename(probeLower),
+			() => false,
+		)
+		await real.rm(probeLower, { force: true })
+		mockedRealpath.mockImplementation(async (p) => await restatingRealpath(String(p)))
+		mockedLstat.mockImplementation(async (p) => await real.lstat(String(p), { bigint: true }))
+		mockedReadlink.mockImplementation(async (p) => await real.readlink(String(p)))
+
+		mockedAcquireFileLock.mockImplementation(async (file) => {
+			// The key was computed from the upper-case spelling while nothing of that name existed,
+			// so it kept the literal spelling. The file this write publishes to appears during
+			// acquisition, under the name the filesystem reports.
+			const ownArtefact = lockPathFor(String(file))
+			await fs.writeFile(ownArtefact, "")
+			await fs.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
+			if (!foldsCase) {
+				// A case-sensitive filesystem cannot produce this divergence on its own - two
+				// spellings there are two names - so the same pair of facts is built by hand: the
+				// writer's name linked onto the peer's file, and the two artefact names joined by a
+				// hard link, which is one artefact under two names.
+				await fs.symlink(lower, upper)
+				await fs.link(ownArtefact, lockPathFor(lower))
+			}
+			return async () => {}
+		})
+
+		const error = await safeWriteJson(upper, { mcpServers: { mine: true } }).then(
+			() => undefined,
+			(caught: unknown) => caught as Error,
+		)
+		// The claim is the guard's answer: the two names reach one artefact and one file, so this
+		// writer holds the lock the other spelling would take and the write is not refused.
+		expect(String(error && error.name)).toBe("undefined")
+		expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { mine: true } })
+		const entries = await fs.readdir(dir)
+		// A case-folding filesystem holds one file and one artefact under the two spellings, so it
+		// lists two entries; a case-sensitive one holds two distinct files and two distinct
+		// artefacts, and lists four. Names are compared case-insensitively because on a folding
+		// filesystem the commit rename itself restates which spelling the file carries.
+		expect(entries.map((name: string) => name.toLowerCase()).sort()).toEqual(
+			foldsCase
+				? ["settings.json", "settings.json.lock"]
+				: ["settings.json", "settings.json.lock", "settings.json", "settings.json.lock"],
+		)
+		expect(entries.length).toBe(foldsCase ? 2 : 4)
 	})
 
 	it("does not stage or publish while the lock acquisition has not returned", async () => {
@@ -338,6 +457,87 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		)
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
+	})
+	it("propagates a lock-artefact stat that fails for a reason other than the artefact being absent", async () => {
+		const dir = await makeDir("lockkey-artefactstat-")
+		const lower = path.join(dir, "settings.json")
+		const upper = path.join(dir, "SETTINGS.JSON")
+		const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		const restatingRealpath = async (target: string): Promise<string> => {
+			const resolved = await real.realpath(target)
+			const parent = path.dirname(resolved)
+			const name = path.basename(resolved)
+			const listed = await real.readdir(parent).catch(() => [] as string[])
+			const stored = listed.find((entry: string) => entry.toLowerCase() === name.toLowerCase())
+			return stored === undefined ? resolved : path.join(parent, stored)
+		}
+		const probeLower = path.join(dir, "probe.json")
+		await real.writeFile(probeLower, "{}")
+		const foldsCase = await restatingRealpath(path.join(dir, "PROBE.JSON")).then(
+			async (resolved: string) => path.basename(resolved) === path.basename(probeLower),
+			() => false,
+		)
+		await real.rm(probeLower, { force: true })
+
+		// A promise re-import, so the failing stat does not leak into another row. Only stat
+		// fails, and only on a lock artefact: the write path's own stat calls (mode preservation)
+		// keep working, so the EACCES this row sees came from the guard's comparison and nowhere
+		// else.
+		let statCalls = 0
+		vi.doMock("fs/promises", async () => {
+			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			const refusal = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+			return {
+				...actual,
+				realpath: vi.fn(async (p: string) => await restatingRealpath(String(p))),
+				lstat: vi.fn(async (p: string) => await actual.lstat(String(p), { bigint: true })),
+				readlink: vi.fn(async (p: string) => await actual.readlink(String(p))),
+				stat: vi.fn(async (p: string, options: unknown) => {
+					if (String(p).endsWith(".lock")) {
+						statCalls++
+						throw refusal
+					}
+					return await actual.stat(String(p), options as { bigint: true })
+				}),
+			}
+		})
+		vi.doMock("../fileLock", async () => {
+			const actual = await vi.importActual<typeof import("../fileLock")>("../fileLock")
+			return {
+				...actual,
+				acquireFileLock: vi.fn(async (file: string) => {
+					// The divergence the guard is asked about, reached the same way as in the row
+					// above: this writer's key keeps the spelling it was computed from, and the name
+					// the filesystem reports for the file appears under it during acquisition.
+					const ownArtefact = actual.lockPathFor(String(file))
+					await fs.writeFile(ownArtefact, "")
+					await fs.writeFile(lower, JSON.stringify({ mcpServers: { peer: true } }))
+					if (!foldsCase) {
+						await fs.symlink(lower, upper)
+						await fs.link(ownArtefact, actual.lockPathFor(lower))
+					}
+					return async () => {}
+				}),
+			}
+		})
+		vi.resetModules()
+		const safeWriteJsonReimported = (await import("../safeWriteJson")).safeWriteJson
+
+		const error = await safeWriteJsonReimported(upper, { mcpServers: { mine: true } }).then(
+			() => undefined,
+			(caught: unknown) => caught as Error,
+		)
+
+		expect(statCalls).toBeGreaterThan(0)
+		expect(String(error && (error as { code?: string }).code)).toBe("EACCES")
+		expect(String(error && error.name)).not.toBe("LockKeyDriftError")
+		// Fail closed: the writer published nothing, and the file it would have replaced still
+		// holds the peer's content.
+		expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
+		expect((await fs.readdir(dir)).length).toBe(foldsCase ? 2 : 4)
+		vi.doUnmock("fs/promises")
+		vi.doUnmock("../fileLock")
+		vi.resetModules()
 	})
 })
 

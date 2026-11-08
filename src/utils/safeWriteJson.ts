@@ -179,7 +179,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// the lock of the one it is about to publish, which is two commits onto one file each
 		// believing it owned it. Nothing has been staged or merged yet, so rejecting here leaves
 		// every file untouched and the caller can retry against the key it resolves to now.
-		if ((await resolveLockKey(resolvedTargetPath)) !== lockKey) {
+		const underLockKey = await resolveLockKey(resolvedTargetPath)
+		// Different spellings are not yet evidence of a different lock: the pair is refused
+		// only when the two lock artefacts are not the same filesystem object.
+		if (underLockKey !== lockKey && !(await _locksAreOneLock(lockKey, underLockKey))) {
 			throw new LockKeyDriftError(absoluteFilePath, lockKey, resolvedTargetPath)
 		}
 
