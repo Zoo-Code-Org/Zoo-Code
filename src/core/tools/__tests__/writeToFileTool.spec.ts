@@ -294,6 +294,25 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.editType).toBe("create")
 		})
 
+		// The two tests above are gated off on win32, and that gate belongs to their
+		// absolute-path assertion, not to the decision they name: the mocked harness already
+		// runs this same branch on Windows in the directory-creation tests below. These two
+		// assert only the edit type the existence probe installs at WriteToFileTool.ts:437 -
+		// modify for a target that exists, create for one that does not - so they run on
+		// every platform a mutation run runs on, and each names the value it expects rather
+		// than a weaker check that an empty-string mutant of either literal would satisfy.
+		it("installs modify as the edit type for a target that already exists", async () => {
+			await executeWriteFileTool({}, { fileExists: true })
+
+			expect(mockCline.diffViewProvider.editType).toBe("modify")
+		})
+
+		it("installs create as the edit type for a target that does not exist yet", async () => {
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockCline.diffViewProvider.editType).toBe("create")
+		})
+
 		it("uses cached editType without filesystem check", async () => {
 			mockCline.diffViewProvider.editType = "modify"
 
