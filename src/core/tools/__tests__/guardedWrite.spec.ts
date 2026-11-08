@@ -130,7 +130,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "new-file.txt", "hello", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { backup: true })
 		})
 
 		it("publishes caller-supplied bytes unchanged", async () => {
@@ -143,7 +143,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "bytes.txt", Buffer.from([0x00, 0x68]), "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bytes.txt"), Buffer.from([0x00, 0x68]), {
-				retainedTarget: true,
+				backup: true,
 			})
 		})
 
@@ -162,7 +162,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await replaceIfVersion(alias, "v1", "bytes", "foo.ts")
 
 			expect(mockedComputeVersionToken).toHaveBeenCalledWith(referent)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "bytes", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "bytes", { backup: true })
 		})
 
 		it("records an unobserved create as complete so a later full-file update is allowed", async () => {
@@ -248,7 +248,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "new-file.txt", "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { backup: true })
 		})
 
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
@@ -275,7 +275,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "gone.txt", "back", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back", { backup: true })
 		})
 
 		it("goes through the version guard when the file still exists", async () => {
@@ -287,7 +287,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "kept.txt", "rewritten", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten", { backup: true })
 		})
 
 		it("fails with the stale remediation suffix when the version moved", async () => {
@@ -327,7 +327,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "doc.txt", "new content", "update")
 
 			expect(mockedComputeVersionToken).toHaveBeenCalledWith(abs("doc.txt"))
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", { backup: true })
 		})
 
 		it("fails with the stale remediation suffix when the version moved - nothing published", async () => {
@@ -367,7 +367,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "new content", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", { backup: true })
 		})
 
 		it("leaves edit-kind publishes unaffected by a partial observation - the model saw the edited region", async () => {
@@ -378,7 +378,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "patched", "edit")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", { backup: true })
 		})
 
 		it("keeps a partial observation partial after an edit so a later full replacement is rejected", async () => {
@@ -426,7 +426,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "created", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", { backup: true })
 		})
 
 		it("publishes a create-kind overwrite of an existing file when the observation is complete", async () => {
@@ -438,7 +438,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "created", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", { backup: true })
 		})
 	})
 
@@ -456,7 +456,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("doc.txt"), "second edit", {
-				retainedTarget: true,
+				backup: true,
 			})
 			// the observation now carries the post-publish token, complete
 			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
@@ -654,7 +654,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "patched", "edit")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", { backup: true })
 		})
 
 		it("fails with the stale remediation suffix when the version moved", async () => {
@@ -693,9 +693,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first", { backup: true })
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("shared.txt"), "second", {
-				retainedTarget: true,
+				backup: true,
 			})
 		})
 
@@ -725,9 +725,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(publishes).toBe(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first", { backup: true })
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("absent.txt"), "second", {
-				retainedTarget: true,
+				backup: true,
 			})
 		})
 
@@ -748,7 +748,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await expect(p2).resolves.toBe("v2")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second", { backup: true })
 		})
 
 		it("evicts settled chain entries - a later write still serializes in order", async () => {
@@ -802,7 +802,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "sub/dir.txt", "content", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content", { backup: true })
 		})
 
 		it("normalizes an already-absolute input (trailing separator) to the observation key", async () => {
@@ -819,7 +819,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, canonical + "/", "content", "update")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content", { backup: true })
 		})
 
 		it("serializes two spellings of one file through a single chain key", async () => {
@@ -845,8 +845,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, canonical, "first", { retainedTarget: true })
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, canonical, "second", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, canonical, "first", { backup: true })
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, canonical, "second", { backup: true })
 		})
 	})
 
@@ -955,7 +955,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			resetChain()
 			await guardedWrite(task, "x.txt", "b", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b", { backup: true })
 		})
 	})
 
@@ -1085,7 +1085,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await replaceIfVersion(abs("alias.txt"), "v1", "hello", "alias.txt", undefined, authorize)
 
 			expect(authorize).toHaveBeenCalledWith(abs("alias.txt"))
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("alias.txt"), "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("alias.txt"), "hello", { backup: true })
 		})
 
 		it("createIfAbsent stops when the retained target fails the allowlist", async () => {
@@ -1129,7 +1129,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "ok.txt", "hello", "create")
 
 			expect(validateAccess).toHaveBeenCalledWith(abs("ok.txt"))
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello", { backup: true })
 		})
 
 		it.each(["edit", "update"] as const)(
@@ -1172,7 +1172,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				await guardedWrite(task, "alias.txt", "hello", kind)
 
 				expect(validateAccess).toHaveBeenCalledWith(abs("ok.txt"))
-				expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello", { retainedTarget: true })
+				expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello", { backup: true })
 			},
 		)
 
@@ -1273,7 +1273,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, rel, "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(retained, "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(retained, "hello", { backup: true })
 		})
 
 		it("guardedWrite fails closed on a relative alias that canonicalizes outside the workspace", async () => {
@@ -1358,7 +1358,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, outsideAlias, "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "hello", { backup: true })
 		})
 
 		it.each([path.resolve("/test/workspace-evil/secret.txt"), path.resolve("./workspace", "../escape.txt")])(
@@ -1393,7 +1393,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, outsideAlias, "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(outsideAlias, "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(outsideAlias, "hello", { backup: true })
 		})
 
 		it("guardedWrite publishes a retained target inside the workspace", async () => {
@@ -1406,7 +1406,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "inside.txt", "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "hello", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "hello", { backup: true })
 		})
 
 		it("takes both the alias and the referent lock in sorted order when they differ", async () => {
@@ -1459,7 +1459,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// ...and the write that published did so holding the CURRENT referent's lock.
 			expect(lockedKeys).toContain(currentReferent)
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(currentReferent, "bytes", { retainedTarget: true })
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(currentReferent, "bytes", { backup: true })
 			// The version comparison ran on the same target the publish wrote.
 			expect(mockedComputeVersionToken).toHaveBeenCalledWith(currentReferent)
 		})

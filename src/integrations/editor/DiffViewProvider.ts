@@ -1563,7 +1563,7 @@ export class DiffViewProvider {
 					// still finalizing - starts a second rollback pass over a session that is already being
 					// closed, and that second pass reports a conflict this session never caused.
 					await this.restorePreviewTabs()
-					await this.reset()
+					await this.finalizeSessionFromTeardownTail()
 				},
 			)
 		} catch (error) {
@@ -2068,9 +2068,10 @@ export class DiffViewProvider {
 					() => {
 						// Command executed successfully, now wait for the editor to appear
 					},
-					(err: any) => {
+					(err: unknown) => {
 						cleanup()
-						reject(new Error(`Failed to execute diff command for ${uri.fsPath}: ${err.message}`))
+						const message = err instanceof Error ? err.message : String(err)
+						reject(new Error(`Failed to execute diff command for ${uri.fsPath}: ${message}`))
 					},
 				)
 		})
@@ -2213,6 +2214,35 @@ export class DiffViewProvider {
 		const starting = this.sessionStartInFlight
 		if (starting !== undefined) {
 			await starting.catch(() => {})
+		}
+		if (this.finalizationInFlight) {
+			// Join the attempt already running instead of starting a second teardown.
+			await this.finalizationInFlight
+			return
+		}
+		const inFlight = this.performFinalReset()
+		this.finalizationInFlight = inFlight
+		try {
+			await inFlight
+			this.sessionFinalizationClaimed = true
+		} finally {
+			this.finalizationInFlight = undefined
+		}
+	}
+
+	/**
+	 * Finalization invoked from inside a teardown pass (revertChanges' tail). It must
+	 * NOT join a session-start reservation that began during the pass: that reservation
+	 * settles only once open()'s transition returns, and that transition is waiting on
+	 * this very teardown pass. Joining it would close the cycle reset -> reservation ->
+	 * open -> teardownInFlight -> this tail -> reset, hanging both callers. The old
+	 * session's finalization is owed regardless of what open() has meanwhile claimed;
+	 * the join in reset() exists so a late finalization sees the NEW session's fields,
+	 * which does not apply to the pass that is itself blocking that new session.
+	 */
+	private async finalizeSessionFromTeardownTail(): Promise<void> {
+		if (this.sessionFinalizationClaimed) {
+			return
 		}
 		if (this.finalizationInFlight) {
 			// Join the attempt already running instead of starting a second teardown.

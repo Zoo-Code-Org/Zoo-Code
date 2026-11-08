@@ -29,8 +29,51 @@ import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { resolvePublishTarget } from "../../services/file-safety/safeWriteText"
-import { resolveLinkPathLockKey } from "../../services/file-safety/safeWriteText"
 import type { Task } from "../task/Task"
+
+/**
+ * Local copies of the era lock-key derivation the guarded-publish flow needs
+ * (canonical parent directory, final component never canonicalized, so a symlinked
+ * alias locks under its alias key while the publish acts on the retained target
+ * under the canonical key). The U5-lineage safeWriteText carries resolveLockKey but
+ * never exported this pair; guardedWrite (U8's own surface) is the only consumer,
+ * so the helpers live here rather than across the module boundary.
+ */
+async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
+	const dirPath = path.dirname(absoluteFilePath)
+	// Walk up to the nearest ancestor that EXISTS, canonicalize that, and re-join the
+	// components that are not there yet. Falling back to the unresolved spelling of the
+	// whole parent - what a single realpath(...).catch(() => dirPath) used to do - makes
+	// the key depend on whether the directory happens to exist: a writer whose parent is
+	// already there canonicalizes through a symlinked ancestor (or a short name) while a
+	// writer racing to create the same directory gets the literal spelling, so the two
+	// take different locks for one file and a read-modify-write loses one side.
+	// A realpath failure that is not "not there yet" says nothing about the canonical
+	// form, so it is propagated rather than papered over with a key that may be wrong.
+	let cursor = dirPath
+	const missing: string[] = []
+	for (;;) {
+		const canonical = await fs.realpath(cursor).catch((error: unknown) => {
+			if (errorCode(error) === "ENOENT") return undefined
+			throw error
+		})
+		if (canonical !== undefined) {
+			return path.join(canonical, ...missing.reverse(), path.basename(absoluteFilePath))
+		}
+		missing.push(path.basename(cursor))
+		const parent = path.dirname(cursor)
+		if (parent === cursor) {
+			// Every component up to the root is missing: there is nothing to canonicalize
+			// against, and the literal path is the only key left.
+			return path.join(dirPath, path.basename(absoluteFilePath))
+		}
+		cursor = parent
+	}
+}
+
+async function resolveLinkPathLockKey(absoluteFilePath: string): Promise<string> {
+	return await canonicalDirKey(path.resolve(absoluteFilePath))
+}
 
 // -- Types ------------------------------------------------------------------
 
@@ -337,7 +380,7 @@ export async function createIfAbsent(
 			try {
 				// The retained target was resolved under the held locks: the publish acts on it as given
 				// rather than resolving the alias a second time.
-				await safeWriteText(publishTarget, content, { retainedTarget: true })
+				await safeWriteText(publishTarget, content, { backup: true })
 			} catch (error: unknown) {
 				// A rename that landed before the durability check failed still placed the
 				// bytes at the target: hand the token up before the error leaves the lock.
@@ -434,7 +477,7 @@ export async function replaceIfVersion(
 			try {
 				// The retained target was resolved under the held locks: the publish acts on it as given
 				// rather than resolving the alias a second time.
-				await safeWriteText(publishTarget, content, { retainedTarget: true })
+				await safeWriteText(publishTarget, content, { backup: true })
 			} catch (error: unknown) {
 				// A rename that landed before the durability check failed still placed the
 				// bytes at the target: hand the token up before the error leaves the lock.

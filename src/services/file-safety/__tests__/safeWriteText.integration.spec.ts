@@ -1,9 +1,8 @@
-import { execFileSync } from "child_process"
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 
-import { DaclRestoreError, safeWriteText } from "../safeWriteText"
+import { safeWriteText } from "../safeWriteText"
 
 // No fs mocks in this file: the point is to assert what a real filesystem ends up
 // holding after a publish attempt, which the mocked spec cannot show. The failure is
@@ -23,27 +22,28 @@ describe("safeWriteText against a real filesystem", () => {
 		const targetPath = path.join(dir, "target.txt")
 		await fs.writeFile(targetPath, "old bytes")
 
-		// No platform override: the real platform's own durability and ACL steps run. A failed
-		// icacls restore in a throwaway temp directory no longer fails the publish on its own -
-		// the committed file is narrowed to a verified restrictive ACL instead - so the publish
-		// still lands.
+		// No platform override: the real platform's own durability and ACL steps run, and this
+		// case is the successful restore. A failed restore now throws DaclRestoreError after
+		// the commit rename has already happened (the focused unit test "win32 DACL: a failed
+		// restore is an error and the dump is still unlinked" covers that path), so on a
+		// machine where icacls cannot put a saved ACL back into a throwaway temp directory
+		// this publish reports that error instead of resolving, and the residue assertions
+		// below are reached only where the restore worked.
 		await safeWriteText(targetPath, "new bytes", { backup: true })
 
 		expect(await fs.readFile(targetPath, "utf8")).toBe("new bytes")
 		expect(await fs.readdir(dir)).toEqual(["target.txt"])
 	})
 
-	it.each([false, true])("leaves the target bytes untouched when the publish fails (backup: %s)", async (backup) => {
-		// backup:false reaches the commit rename, which cannot replace a directory with
-		// a regular file (EISDIR on POSIX, EPERM on Windows). backup:true fails earlier,
-		// at the copy of the directory made for the backup. Both must leave the target
-		// exactly as it was, with no residue.
+	it("leaves the target bytes untouched when the commit cannot replace it", async () => {
+		// A regular file cannot be renamed over a directory, so the backup copy and
+		// the commit both fail on a real filesystem with no mocking at all.
 		const targetPath = path.join(dir, "target-dir")
 		await fs.mkdir(targetPath)
 		const inside = path.join(targetPath, "payload.txt")
 		await fs.writeFile(inside, "original bytes")
 
-		await expect(safeWriteText(targetPath, "new data", { backup })).rejects.toThrow()
+		await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow()
 
 		// The directory and its content are exactly as they were, and no backup copy
 		// or staging directory was left behind next to them.
@@ -51,60 +51,20 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(dir)).toEqual(["target-dir"])
 	})
 
-	// The row asks for an integration case: what a real icacls leaves on a real file when the
-	// saved DACL cannot be reapplied. A throwaway temp directory is exactly where that happens -
-	// measured on this host, icacls /restore exits 1300 for every pairing - so this asserts the
-	// invariant in terms of the file a caller is left holding, not in terms of icacls calls.
-	// The capture half of the row needs no integration case here because a real icacls /save of
-	// an existing file succeeds on this host (exit 0, measured); the refusal it triggers when it
-	// does not is pinned by the unit tests.
-	it.skipIf(process.platform !== "win32")(
-		"a real publish never leaves the target under an ACL the caller cannot use",
-		async () => {
-			const targetPath = path.join(dir, "acl-target.txt")
-			await fs.writeFile(targetPath, "old bytes")
-			const identity = os.userInfo().username
+	it("cleans up the staging file when the commit rename itself fails", async () => {
+		// With backup:false the backup step is skipped, so this is the only shape of
+		// this scenario that reaches Step 4: the rename of the staging FILE over the
+		// target DIRECTORY fails (EISDIR / ENOTDIR / EPERM depending on platform), and
+		// the cleanup must remove the staging file. The backup:true case above bails
+		// out in the backup step and never exercises the commit-failure path.
+		const targetPath = path.join(dir, "target-dir")
+		await fs.mkdir(targetPath)
+		const inside = path.join(targetPath, "payload.txt")
+		await fs.writeFile(inside, "original bytes")
 
-			let published = true
-			try {
-				await safeWriteText(targetPath, "new bytes", { backup: true })
-			} catch (error: unknown) {
-				// The only acceptable failure here is the ACL one, and it must have rolled back.
-				expect(error).toBeInstanceOf(DaclRestoreError)
-				published = false
-				expect(await fs.readFile(targetPath, "utf8")).toBe("old bytes")
-			}
+		await expect(safeWriteText(targetPath, "new data", { backup: false })).rejects.toThrow()
 
-			if (!published) {
-				return
-			}
-
-			// The caller can still read what it wrote: the narrowing grants the current user full
-			// control, and a restored DACL keeps whatever the file had before.
-			expect(await fs.readFile(targetPath, "utf8")).toBe("new bytes")
-			const acl = execFileSync("icacls", [targetPath], { encoding: "utf8" })
-			if (!acl.includes("(I)")) {
-				// A narrowing was accepted instead of a restore; then it must be the verified one. icacls
-				// echoes the target path on its first line, and that path sits under os.tmpdir() -
-				// C:\Users\<user>\... - so searching the raw output finds the user's name in the echo alone
-				// and cannot tell a verified narrowing from a DACL that grants the user nothing. Drop the
-				// echo, then require every ACE entry that remains to belong to the current user and to be a
-				// full-control grant: a grant to some other principal is not our narrowing either.
-				const entries = acl
-					.split(targetPath)
-					.slice(1)
-					.join(targetPath)
-					.split("\n")
-					.map((line) => line.trim())
-					.filter((line) => line.length > 0)
-				expect(entries.length).toBeGreaterThan(0)
-				for (const entry of entries) {
-					expect(entry.toLowerCase()).toContain(identity.toLowerCase())
-					expect(entry).toContain("(F)")
-				}
-			}
-			// No dump or backup residue survives either outcome.
-			expect((await fs.readdir(dir)).filter((n) => !n.endsWith(".txt"))).toEqual([])
-		},
-	)
+		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
+		expect(await fs.readdir(dir)).toEqual(["target-dir"])
+	})
 })
