@@ -81,7 +81,9 @@ function buildTask({
 	const getCurrentTask = vi.fn(() => (isCurrentTask ? { taskId: "task-1" } : undefined))
 	const provider = { getState, getCurrentTask, postMessageToWebview }
 
-	task["abort"] = false
+	// `abort` may be a prototype accessor, so assign defines an own writable
+	// data property that shadows it instead of throwing on a getter-only set.
+	Object.defineProperty(task, "abort", { value: false, configurable: true, writable: true })
 	task["abandoned"] = false
 	task["activeApiWork"] = 0
 	// Object.create skips constructor field initialisers; mirror the default.
