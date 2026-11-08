@@ -10,6 +10,7 @@ import type { Task } from "../../task/Task"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { guardedWrite } from "../guardedWrite"
 import { ApplyPatchTool } from "../ApplyPatchTool"
+import { CommittedWriteBufferConflictError } from "../../../integrations/editor/committedWriteBufferConflictError"
 
 // The vi.mock factory exposes the fs/promises functions under a `default`
 // property (matching the SUT's default import), which the static module type
@@ -736,6 +737,44 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 		expect(reg.get(destKey)?.complete).toBe(true)
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+	// Row 4507855182 (measured): the destination commits and the source unlink below never runs,
+	// so a move that hits a buffer conflict is half-applied. The report has to name both paths
+	// and keep the shared error's no-retry guidance, because the model's next instinct is to
+	// re-apply the patch - which would duplicate the change at the destination.
+	it("move: a committed destination with the source still on disk names both paths", async () => {
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		mockSaveDirectly.mockRejectedValueOnce(
+			new CommittedWriteBufferConflictError(
+				destKey,
+				"saveDirectly: the buffer held unsaved edits that differ from the content the guard published.",
+			),
+		)
+		mockedFsPromises.default.unlink.mockClear()
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith(
+			"apply patch",
+			expect.objectContaining({ name: "CommittedWriteBufferConflictError" }),
+		)
+		const reported = (mockHandleError.mock.calls[0]?.[1] ?? new Error("")) as Error
+		expect(reported.message).toContain("src/new.ts committed but")
+		expect(reported.message).toContain("src/old.ts was not removed")
+		expect(reported.message).toContain("do not retry")
+		// The half-applied state is stated, not implied: the source was never unlinked, and the
+		// destination's tool-recorded observation is withdrawn by the finally sweep, so it cannot
+		// authorize a later edit of content the model never read.
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+		expect(reg.get(destKey)).toBeUndefined()
 	})
 
 	it("move: the destination cannot claim completeness when the source was never observed", async () => {

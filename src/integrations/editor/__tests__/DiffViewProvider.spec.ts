@@ -2111,7 +2111,9 @@ describe("DiffViewProvider", () => {
 			const placeholderToken = versionTokenOfStat(previewStats)
 			// the placeholder is written, stat-matched, observed (replacing the
 			// vanished file's stale token), and remembered for cleanup
-			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "")
+			// Created exclusively (#new row 4507851689): a plain write would truncate a file another
+			// process created after the absence was classified.
+			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "", { flag: "wx" })
 			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
 			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe(placeholderToken)
 			expect(diffViewProvider["placeholderVersion"]).toBe(placeholderToken)
@@ -2138,7 +2140,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.open("t3-dead-task.ts")
 
-			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-dead-task.ts`, "")
+			// Created exclusively (#new row 4507851689): a plain write would truncate a file another
+			// process created after the absence was classified.
+			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-dead-task.ts`, "", { flag: "wx" })
 			// no live task: nothing observed, but the cleanup token is still
 			// captured (provider state) so the fail-closed save rejection can
 			// remove the placeholder instead of leaking it
@@ -2169,10 +2173,43 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.open("contested.ts")
 
-			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/contested.ts`, "")
+			// Created exclusively (#new row 4507851689): a plain write would truncate a file another
+			// process created after the absence was classified.
+			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/contested.ts`, "", { flag: "wx" })
 			// nothing recorded, and the vanished file's prior observation was
 			// not replaced with the writer's token
 			expect(mockTask.observationRegistry.get(`${mockCwd}/contested.ts`)?.version).toBe("model-token")
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+		})
+
+		// Row 4507851689 (measured): the placeholder is a create, and the absence above is a
+		// classification, not a reservation. A plain write would truncate a file that won the race,
+		// and the stat-matched observation below would then describe content open() never wrote.
+		it("open() creates the placeholder exclusively and reports a lost create race", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/race.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/race.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			const write = vi.mocked(fs.writeFile)
+			write.mockRejectedValueOnce(
+				Object.assign(new Error(`EEXIST: file already exists, open '${mockCwd}/race.ts'`), { code: "EEXIST" }),
+			)
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+
+			const failure = await diffViewProvider.open("race.ts").catch((error: unknown) => error)
+			expect(write).toHaveBeenCalledWith(`${mockCwd}/race.ts`, "", { flag: "wx" })
+			expect(failure).toBeInstanceOf(Error)
+			expect((failure as Error).message).toContain("another create won the race")
+			// Nothing was observed and no cleanup token was taken, so a later rejected save cannot
+			// unlink the winner's file.
+			expect(mockTask.observationRegistry.get(`${mockCwd}/race.ts`)).toBeUndefined()
 			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
 		})
 
@@ -3676,7 +3713,13 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).not.toHaveBeenCalled()
 
 			release()
-			await Promise.all([save, revert])
+			// The publish had already committed when this cancellation arrived, so the revert now
+			// reports the committed-write conflict instead of restoring originalContent. Held rather
+			// than swallowed: the serialization property below is about who touched the tabs.
+			const settled = await Promise.allSettled([save, revert])
+			expect(settled[0].status).toBe("fulfilled")
+			expect(settled[1].status).toBe("rejected")
+			expect((settled[1] as PromiseRejectedResult).reason).toBeInstanceOf(CommittedWriteBufferConflictError)
 
 			// One pass over the tabs, and the cancellation did not repeat the document revert.
 			// Only this provider's tab is touched, by either caller.
@@ -3722,7 +3765,11 @@ describe("DiffViewProvider", () => {
 			const revert = diffViewProvider.revertChanges()
 			await new Promise((resolve) => setImmediate(resolve))
 			release()
-			await Promise.all([save, revert])
+			// Same post-commit cancellation as the row above: the conflict report is awaited, not
+			// swallowed, so this row keeps testing tab and reset counts on its own.
+			const settled = await Promise.allSettled([save, revert])
+			expect(settled[0].status).toBe("fulfilled")
+			expect((settled[1] as PromiseRejectedResult).reason).toBeInstanceOf(CommittedWriteBufferConflictError)
 
 			// The owning pass restored the preview tabs exactly once, and the waiting caller
 			// finalized the session exactly once - the pass that ran the tabs does not reset, so
@@ -3774,7 +3821,10 @@ describe("DiffViewProvider", () => {
 			const revert = diffViewProvider.revertChanges()
 			await new Promise((resolve) => setImmediate(resolve))
 			release()
-			const [saveResult] = await Promise.all([save, revert])
+			// The publish committed before Task.disposeOnce() reached revertChanges(), so the
+			// cancellation closes the session and reports the committed-write conflict instead of
+			// writing originalContent back over it.
+			const settled = await Promise.allSettled([save, revert])
 
 			// The session is closed: no edit flag, no retained editor, listeners and timer gone.
 			expect(diffViewProvider.isEditing).toBe(false)
@@ -3794,11 +3844,146 @@ describe("DiffViewProvider", () => {
 
 			// A session a cancellation is closing reports no completed save, so no caller can present
 			// diagnostics or user-edit output for provider state that is already gone.
-			expect(saveResult).toEqual({
+			expect(settled[0].status).toBe("fulfilled")
+			expect(
+				(settled[0] as PromiseFulfilledResult<Awaited<ReturnType<DiffViewProvider["saveChanges"]>>>).value,
+			).toEqual({
 				newProblemsMessage: undefined,
 				userEdits: undefined,
 				finalContent: undefined,
 			})
+			// The caller that asked for the undo is told which of the two it got.
+			expect(settled[1].status).toBe("rejected")
+			expect((settled[1] as PromiseRejectedResult).reason).toBeInstanceOf(CommittedWriteBufferConflictError)
+		})
+
+		// Row 4507760734 (measured): the guarded path treats the commit as the point of no return,
+		// which is why CommittedWriteBufferConflictError exists at all. The modify branch's
+		// updatedDocument.save() is the one writer left that republishes through VS Code's unguarded
+		// file service - the call the comment above saveChanges says every other path avoids - so a
+		// cancellation that lands after the publish has to leave the published bytes and say so.
+		it("revertChanges() after a committed publish leaves the published content and reports the conflict", async () => {
+			const saveDoc = vi.fn().mockResolvedValue(undefined)
+			const document = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: saveDoc,
+			})
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			await diffViewProvider.saveChanges(false)
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			applyEdit.mockClear()
+			vi.mocked(fs.unlink).mockClear()
+
+			const outcome = await diffViewProvider.revertChanges().catch((error: unknown) => error)
+			expect(outcome).toBeInstanceOf(CommittedWriteBufferConflictError)
+			// No originalContent write, and no unguarded document.save() over the commit.
+			expect(applyEdit).not.toHaveBeenCalled()
+			expect(saveDoc).not.toHaveBeenCalled()
+			expect(diffViewProvider.isEditing).toBe(false)
+			expect(diffViewProvider["committedPublish"]).toBeUndefined()
+		})
+
+		// The other direction, without which the fix above could quietly delete the restore:
+		// a cancellation that lands before any publish still puts the file back.
+		it("revertChanges() before any publish still restores the original content", async () => {
+			const saveDoc = vi.fn().mockResolvedValue(undefined)
+			const document = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: saveDoc,
+			})
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+			expect(diffViewProvider["committedPublish"]).toBeUndefined()
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			expect(applyEdit).toHaveBeenCalledTimes(1)
+			expect(saveDoc).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider.isEditing).toBe(false)
+		})
+
+		// Row 4507851696 (measured): the create branch's fs.unlink is the delete that can take a
+		// newly published file with it - including whatever another writer built on that path in
+		// the meantime, since the unlink is not version-checked.
+		it("revertChanges() after a committed create does not unlink the published file", async () => {
+			const document = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+			})
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			await diffViewProvider.saveChanges(false)
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			vi.mocked(fs.unlink).mockClear()
+
+			const outcome = await diffViewProvider.revertChanges().catch((error: unknown) => error)
+			expect(outcome).toBeInstanceOf(CommittedWriteBufferConflictError)
+			expect(fs.unlink).not.toHaveBeenCalledWith(mockTargetPath)
+			expect(diffViewProvider.isEditing).toBe(false)
+		})
+
+		// Row 4507764622 (measured): the post-publish cleanup discarded revertDocument's verdict.
+		// A buffer that stays dirty after the reopen still holds the bytes the guard published, so
+		// the save reports the committed-write conflict instead of proceeding into the save-over
+		// and returning ordinary success - the same name the no-diff path uses for the same state.
+		it("saveChanges() reports the committed-write conflict when it cannot clear the buffer it published", async () => {
+			const document = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: true,
+				save: vi.fn().mockResolvedValue(undefined),
+			})
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.length = 0
+			documents.push(document)
+			diffViewProvider["revertDocument"] = vi.fn().mockResolvedValue(false)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			const failure = await diffViewProvider.saveChanges(false).catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(CommittedWriteBufferConflictError)
+			// The detail names this window; the guidance is the shared one, not a new vocabulary.
+			expect((failure as Error).message).toContain("saveChanges: the diff-view save committed its content")
+			expect((failure as Error).message).toContain("do not retry")
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			expect(diffViewProvider["closeFileTab"]).toHaveBeenCalledTimes(1)
+			documents.length = 0
 		})
 
 		// The same gap on the other teardown owner: a rejected publish's discard cleanup never resets

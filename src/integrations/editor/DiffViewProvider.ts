@@ -26,7 +26,7 @@ import type { FileObservation } from "../../core/task/observationRegistry"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
-import { guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
+import { errorCode, guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -128,6 +128,15 @@ export class DiffViewProvider {
 	 * never unlinked.
 	 */
 	private placeholderVersion: string | undefined = undefined
+	/**
+	 * The publish this session committed: the target and the exact text that landed. A
+	 * cancellation that reaches revertChanges() after a commit must not resurrect
+	 * originalContent through an unguarded document.save(), and must not unlink a file the
+	 * save had already published: the commit is the point of no return, which is what
+	 * CommittedWriteBufferConflictError already names for the no-diff path. Cleared by
+	 * reset(), so a later session cannot inherit it.
+	 */
+	private committedPublish: { path: string; content: string } | undefined
 	/**
 	 * The observation this path had BEFORE open() recorded the preview's own
 	 * version token: null when there was none, undefined when this provider never
@@ -237,7 +246,23 @@ export class DiffViewProvider {
 
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
-			await fs.writeFile(absolutePath, "")
+			// Created exclusively. Absence was classified above, and a plain write would silently
+			// truncate whatever another process created in that window: the placeholder token
+			// recorded below would then describe the other writer's file, and the guard would
+			// accept a truncated baseline as the version this edit was built on. A lost race is
+			// reported, not absorbed.
+			try {
+				await fs.writeFile(absolutePath, "", { flag: "wx" })
+			} catch (error: unknown) {
+				if (errorCode(error) === "EEXIST") {
+					throw new Error(
+						`Cannot open ${absolutePath} for editing: the file already exists. ` +
+							"It was absent when this session classified it and another create won the race; " +
+							"read the file before editing it.",
+					)
+				}
+				throw error
+			}
 			// S4b follow-up (#44 / epic #1375): the empty placeholder is fully
 			// known (empty), but verify it with the same S2 stat-matched contract
 			// as the modify branch above: a stat-mismatched or non-empty read
@@ -637,6 +662,9 @@ export class DiffViewProvider {
 				approvedCanonicalTarget,
 				additionalRoots: this.additionalWorkspaceRoots(),
 			})
+			// From here the session holds a committed write. A cancellation arriving after this
+			// point reverts the session, not the publish - see revertChanges.
+			this.committedPublish = { path: absolutePath, content: editedContent }
 		} catch (error) {
 			// Autosave can publish the modified side of the diff before the user
 			// accepts, so the bytes on disk may already be exactly what this save
@@ -778,7 +806,25 @@ export class DiffViewProvider {
 			// buffer that moved on stays dirty: the close helpers skip dirty tabs and
 			// the user's text survives in the editor.
 			if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
-				await this.revertDocument(updatedDocument)
+				const reconciled = await this.revertDocument(updatedDocument)
+				if (!reconciled) {
+					// The verdict is load-bearing here for the same reason it is in saveDirectly below:
+					// a buffer that stays dirty holds the bytes the guard just published, and an ordinary
+					// save - VS Code's own file service, or a later write - can put them back over a newer
+					// file. Close and reopen from the published bytes; if that still leaves the buffer
+					// dirty, report the committed-write conflict instead of proceeding into the save-over
+					// and returning ordinary success, so the caller cannot treat a committed publish as an
+					// edit it is free to re-apply.
+					await this.closeFileTab(absolutePath)
+					await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+					const reopened = this.findReconciliationDocument(absolutePath)
+					if (reopened?.isDirty) {
+						throw new CommittedWriteBufferConflictError(
+							absolutePath,
+							"saveChanges: the diff-view save committed its content but could not clear the open buffer.",
+						)
+					}
+				}
 			}
 
 			// A save belongs to one task, so its post-publish cleanup closes only this provider's
@@ -976,8 +1022,37 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
+		// A publish that already committed is not undone by a cancellation. The modify branch below
+		// would put originalContent back through an unguarded document.save() - the one writer left
+		// using the call the comment above saveChanges says every other path avoids - and the create
+		// branch would unlink a file the save had just published, which also discards whatever a
+		// third party built on it. Same name for the same state as the no-diff path uses: the commit
+		// is the point of no return, and the caller that asked for the undo is told so.
+		const committedAfterPublish =
+			this.committedPublish !== undefined && arePathsEqual(this.committedPublish.path, absolutePath)
+		const committedContent = this.committedPublish?.content
 		const ownedTeardown = await this.runTeardown(
 			async () => {
+				if (committedAfterPublish) {
+					// Clear the dirty flag from the published bytes rather than writing over them, and only
+					// while the buffer still holds exactly what landed: text typed after the accept survives.
+					if (updatedDocument.isDirty && updatedDocument.getText() === committedContent) {
+						await this.revertDocument(updatedDocument)
+					}
+					await this.closeOwnDiffView(absolutePath)
+					// The tab rules are the modify branch's, because the tab situation is the same: a
+					// committed file the user may or may not have touched.
+					const committedState = await this.taskRef.deref()?.providerRef.deref()?.getState()
+					await this.keepOrCloseEditedFile(
+						absolutePath,
+						false,
+						committedState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+						committedState?.autoCloseZooOpenedFilesAfterUserEdited ??
+							DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+						committedState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+					)
+					return
+				}
 				if (!fileExists) {
 					if (updatedDocument.isDirty) {
 						await updatedDocument.save()
@@ -1057,6 +1132,16 @@ export class DiffViewProvider {
 			// handling owns that reset may never come back after a cancellation or disposal. Whoever
 			// gets here first claims it; a second waiter joins the claim instead of resetting again.
 			await this.finalizeSession(() => this.reset())
+		}
+		if (committedAfterPublish) {
+			// Reported after the pass so the tab work, the preview restore and the reset all still
+			// happen: a cancellation that lands on a committed publish closes the session, it just
+			// cannot roll the content back. Both the owner and any caller that joined the pass see the
+			// same signal, because both were waiting on this outcome.
+			throw new CommittedWriteBufferConflictError(
+				absolutePath,
+				"revertChanges: a cancellation arrived after the guarded publish had committed.",
+			)
 		}
 	}
 
@@ -1788,6 +1873,7 @@ export class DiffViewProvider {
 		this.snapshotPreviewTabs = []
 		this.placeholderVersion = undefined
 		this.preOpenObservation = undefined
+		this.committedPublish = undefined
 	}
 
 	/**
@@ -1848,6 +1934,9 @@ export class DiffViewProvider {
 			approvedCanonicalTarget,
 			additionalRoots: this.additionalWorkspaceRoots(),
 		})
+		// The publish committed: a later revertChanges on this session reports the committed-write
+		// conflict instead of rolling the content back.
+		this.committedPublish = { path: absolutePath, content }
 
 		// The guarded publish wrote the bytes to disk directly. If the target
 		// document is already open, its buffer still holds the pre-publish text:
@@ -1867,7 +1956,10 @@ export class DiffViewProvider {
 				// The publish already committed: report the committed-write buffer conflict.
 				// A generic error would tell the model to retry a non-idempotent edit
 				// (SearchReplaceTool/EditTool would re-read and duplicate the change).
-				throw new CommittedWriteBufferConflictError(absolutePath)
+				throw new CommittedWriteBufferConflictError(
+					absolutePath,
+					"saveDirectly: the buffer held unsaved edits that differ from the content the guard published.",
+				)
 			}
 			const reconciled = await this.revertDocument(openTarget).catch(() => false)
 			if (!reconciled) {
@@ -1885,10 +1977,14 @@ export class DiffViewProvider {
 				await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 				const reopened = this.findReconciliationDocument(absolutePath)
 				if (reopened?.isDirty) {
-					throw new Error(
+					// Same error the branch above uses: the publish committed, so what the caller must not
+					// do is re-apply the edit. The stale-bytes hazard is named in the detail line, and the
+					// no-retry guidance comes from the shared error.
+					throw new CommittedWriteBufferConflictError(
+						absolutePath,
 						`saveDirectly: the open document at ${absolutePath} is still dirty after the guarded publish -- ` +
 							"reverting and reopening it did not reconcile the buffer, so its stale bytes could overwrite " +
-							"the published content on the next save; the write is reported as failed.",
+							"the published content on the next save.",
 					)
 				}
 			}

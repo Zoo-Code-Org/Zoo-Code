@@ -14,6 +14,7 @@ import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { canonicalizeForApproval, GuardRejectedError, errorCode } from "./guardedWrite"
+import { CommittedWriteBufferConflictError } from "../../integrations/editor/committedWriteBufferConflictError"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { ApplyPatchError, parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -623,19 +624,35 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						}
 					}
 				}
-				await task.diffViewProvider.saveDirectly(
-					change.movePath,
-					newContent,
-					false,
-					diagnosticsEnabled,
-					writeDelayMs,
-					"create",
-					sourceComplete,
-					// Guaranteed by the refusal above: this destination is inside a workspace root,
-					// so the guard's own containment check is what applies and no approval is claimed.
-					false,
-					undefined,
-				)
+				try {
+					await task.diffViewProvider.saveDirectly(
+						change.movePath,
+						newContent,
+						false,
+						diagnosticsEnabled,
+						writeDelayMs,
+						"create",
+						sourceComplete,
+						// Guaranteed by the refusal above: this destination is inside a workspace root,
+						// so the guard's own containment check is what applies and no approval is claimed.
+						false,
+						undefined,
+					)
+				} catch (error) {
+					if (error instanceof CommittedWriteBufferConflictError) {
+						// The destination committed and the source unlink below never runs, so the move is
+						// half-applied: the content is at the new path and the source is still on disk. A model
+						// that re-applies the patch duplicates the change at the destination while a third path
+						// still holds the pre-move bytes, so both paths are named and the shared error keeps its
+						// no-retry guidance.
+						throw new CommittedWriteBufferConflictError(
+							moveAbsolutePath,
+							`apply_patch move: ${change.movePath} committed but ${change.path} was not removed, so the move ` +
+								"is incomplete: read both paths before continuing.",
+						)
+					}
+					throw error
+				}
 			} else {
 				// Write to new path and delete old file
 				const parentDir = path.dirname(moveAbsolutePath)
