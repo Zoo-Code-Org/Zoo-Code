@@ -34,6 +34,16 @@ import * as fs from "fs/promises"
  * lexical path for a target that does not exist yet, and realpath reports the long name for that
  * very same directory.
  */
+/**
+ * safeWriteJson stages as .<basename>.new_<timestamp>_<random>.tmp - createTempFilePath at
+ * safeWriteJson.ts:192-197, the template main carries at its :54 - so a staged leftover never
+ * starts with ".new_": it starts with the target's own name. Matching the infix is what lets
+ * the "nothing left staged" assertions below see a leak at all; the startsWith form matches
+ * only safeWriteText's own ".new_<ts>_<rand>.tmp" names (safeWriteText.ts:92-94), which this
+ * file never stages. safeWriteJson.interruption.test.ts:196 already filters by infix.
+ */
+const stagedFile = (name: string): boolean => name.includes(".new_")
+
 describe("safeWriteJson staging directory drift", () => {
 	let tmpRoot = ""
 
@@ -91,8 +101,8 @@ describe("safeWriteJson staging directory drift", () => {
 		const written = await fs.readFile(path.join(referent, "settings.json"), "utf8")
 		expect(JSON.parse(written)).toEqual({ preserved: true })
 		// Nothing may be left staged on either spelling of the same directory.
-		expect((await fs.readdir(referent)).filter((name) => name.startsWith(".new_"))).toEqual([])
-		expect((await fs.readdir(alias)).filter((name) => name.startsWith(".new_"))).toEqual([])
+		expect((await fs.readdir(referent)).filter(stagedFile)).toEqual([])
+		expect((await fs.readdir(alias)).filter(stagedFile)).toEqual([])
 	})
 
 	it("stages anyway when the guard's probe cannot answer", async () => {
@@ -119,7 +129,7 @@ describe("safeWriteJson staging directory drift", () => {
 		expect(acted()).toBe(true) // the guard really asked, and really was not answered
 		const written = await fs.readFile(path.join(referent, "settings.json"), "utf8")
 		expect(JSON.parse(written)).toEqual({ preserved: true })
-		expect((await fs.readdir(referent)).filter((name) => name.startsWith(".new_"))).toEqual([])
+		expect((await fs.readdir(referent)).filter(stagedFile)).toEqual([])
 	})
 
 	it("stages anyway under the task persistence suite's blanket missing stat", async () => {
@@ -209,9 +219,7 @@ describe("safeWriteJson staging directory drift", () => {
 		// target. (Its advisory lock directory is still there: the lock lives beside the target, and the
 		// plant moved the target out from under the held lock, which is the state this case creates.)
 		expect(await fs.readdir(elsewhere)).toEqual([])
-		expect(
-			(await fs.readdir(moved)).filter((name) => name === "settings.json" || name.startsWith(".new_")),
-		).toEqual([])
+		expect((await fs.readdir(moved)).filter((name) => name === "settings.json" || stagedFile(name))).toEqual([])
 	})
 
 	it("fails as a failed write when the approved directory is really gone", async () => {
@@ -291,9 +299,7 @@ describe("safeWriteJson staging directory drift", () => {
 		expect(JSON.parse(written)).toEqual({ preserved: true })
 		// Nothing stranded: the renamed directory holds only the advisory lock directory that lives
 		// beside the target, and neither spelling of it nor the new location holds a staged file.
-		expect(
-			(await fs.readdir(moved)).filter((name) => name === "settings.json" || name.startsWith(".new_")),
-		).toEqual([])
-		expect((await fs.readdir(elsewhere)).filter((name) => name.startsWith(".new_"))).toEqual([])
+		expect((await fs.readdir(moved)).filter((name) => name === "settings.json" || stagedFile(name))).toEqual([])
+		expect((await fs.readdir(elsewhere)).filter(stagedFile)).toEqual([])
 	})
 })

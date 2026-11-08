@@ -59,6 +59,16 @@ const symlinkStat = (target: unknown) =>
 	}) as unknown as BigIntStats
 let currentLink = ""
 
+/**
+ * safeWriteJson stages as .<basename>.new_<timestamp>_<random>.tmp - createTempFilePath at
+ * safeWriteJson.ts:192-197, the template main carries at its :54 - so a staged leftover never
+ * starts with ".new_": it starts with the target's own name. Matching the infix is what lets
+ * the "nothing left staged" assertions below see a leak at all; the startsWith form matches
+ * only safeWriteText's own ".new_<ts>_<rand>.tmp" names (safeWriteText.ts:92-94), which this
+ * file never stages. safeWriteJson.interruption.test.ts:196 already filters by infix.
+ */
+const stagedFile = (name: string): boolean => name.includes(".new_")
+
 describe("safeWriteJson lock key under a peer commit", () => {
 	it("waits for the peer instead of rejecting, and locks the referent", async () => {
 		const order: string[] = []
@@ -246,7 +256,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(released).toBe(true)
 		// Nothing was staged: no target, and no .new_*.tmp left behind in the directory.
 		await expect(fs.readFile(target, "utf8")).rejects.toThrow()
-		expect((await fs.readdir(dir)).filter((name) => name.startsWith(".new_"))).toEqual([])
+		expect((await fs.readdir(dir)).filter(stagedFile)).toEqual([])
 		consoleError.mockRestore()
 	})
 
