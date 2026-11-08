@@ -2023,6 +2023,75 @@ describe("ReadFileTool", () => {
 				expect(regA.get("/shared.ts")!.version).toBe("v1")
 				expect(regB.get("/shared.ts")!.version).toBe("v2")
 			})
+			it("reads from the same path land in each task's own registry, not the other task's", async () => {
+				// The row above proves two ObservationRegistry instances hold separate entries; it never calls the
+				// tool, so a read that reported its observation into another task's registry would still pass every
+				// line of it. This row drives ReadFileTool.execute twice, once per task, at one path, and asserts the
+				// observation lands in the registry of the task that made the call.
+				const regA = new ObservationRegistry()
+				const regB = new ObservationRegistry()
+				const taskA = createMockTask({ observationRegistry: regA })
+				const taskB = createMockTask({ observationRegistry: regB })
+				const callbacksA = createMockCallbacks()
+				const callbacksB = createMockCallbacks()
+				const observeA = vi.spyOn(regA, "observe")
+				const observeB = vi.spyOn(regB, "observe")
+
+				const statForFirstRead = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat.mockResolvedValue(statForFirstRead)
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("isolated\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | isolated",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "isolated.ts" }, taskA as unknown as Task, callbacksA)
+
+				// A's registry received the observation and B's was not reached at all.
+				expect(observeA).toHaveBeenCalledTimes(1)
+				expect(observeB).not.toHaveBeenCalled()
+				const [keyA, versionA] = observeA.mock.calls[0]
+				expect(regA.get(keyA)!.version).toBe(versionA)
+				expect(regB.get(keyA)).toBeUndefined()
+
+				// The same path read by B under a different stat, so B's version token is distinguishable from
+				// A's. Both halves are pinned to entries rather than to call counts: B holds its own observation
+				// at the same key and A still holds the one its own read wrote.
+				const statForSecondRead = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(7),
+					size: BigInt(300),
+					mtimeNs: BigInt(9_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat.mockResolvedValue(statForSecondRead)
+
+				await readFileTool.execute({ path: "isolated.ts" }, taskB as unknown as Task, callbacksB)
+
+				expect(observeB).toHaveBeenCalledTimes(1)
+				const [keyB, versionB] = observeB.mock.calls[0]
+				expect(keyB).toBe(keyA)
+				expect(versionB).not.toBe(versionA)
+				expect(regB.get(keyB)!.version).toBe(versionB)
+				expect(regA.get(keyA)!.version).toBe(versionA)
+				expect(regA.size).toBe(1)
+				expect(regB.size).toBe(1)
+			})
 		})
 
 		describe("read completeness scope (S4b follow-up #46)", () => {
