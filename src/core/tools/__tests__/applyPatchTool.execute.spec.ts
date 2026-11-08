@@ -18,6 +18,7 @@ const mockedFsPromises = vi.mocked(
 	fsPromises as unknown as {
 		default: {
 			access: MockedFunction<typeof fsPromises.access>
+			readFile: ReturnType<typeof vi.fn>
 			stat: ReturnType<typeof vi.fn>
 			unlink: MockedFunction<typeof fsPromises.unlink>
 		}
@@ -31,7 +32,9 @@ vi.mock("fs/promises", () => {
 		// The target exists on disk, so the completeness gate applies to the
 		// follow-up guarded write in the partial-observation test.
 		access: vi.fn().mockResolvedValue(undefined),
-		readFile: vi.fn().mockResolvedValue("original file content\n"),
+		// Raw bytes: the SUT reads without an encoding so a strict decoder can see the file as
+		// the file is, and this double has to answer the same way the real readFile() does.
+		readFile: vi.fn().mockResolvedValue(Buffer.from("original file content\n")),
 		// Stable on-disk version for the S2 self-read observation (the hunk
 		// read now stats before and after; equal tokens record the observe).
 		stat: vi.fn().mockResolvedValue({
@@ -947,5 +950,98 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockHandleError).not.toHaveBeenCalled()
 		expect(mockPushToolResult).toHaveBeenCalled()
+	})
+
+	// The hunk read is the content the guarded publish republishes. An ASCII hunk can match a
+	// file whose bytes somewhere else cannot be decoded, and reading those bytes as UTF-8
+	// substitutes them, so the write would change bytes the patch never mentioned. The refusal has
+	// to land before the read is recorded as an observation, or the substituted version becomes
+	// the version a later full-file write is allowed to publish.
+	const undecodableTail = (): Buffer =>
+		Buffer.concat([Buffer.from("original file content\n"), Buffer.from([0xc3, 0x28])])
+	const undecodableUpdatePatch = `*** Begin Patch
+*** Update File: src/thing.ts
+@@
+-original file content
++modified file content
+*** End Patch`
+	const deleteThingPatch = `*** Begin Patch
+*** Delete File: src/thing.ts
+*** End Patch`
+	const runPatch = async (patch: string): Promise<void> => {
+		await tool.execute({ patch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+	}
+
+	it("update: refuses a file it cannot decode rather than publishing replacement characters", async () => {
+		mockedFsPromises.default.readFile.mockResolvedValue(undecodableTail())
+
+		await runPatch(undecodableUpdatePatch)
+
+		const pushed = String(mockPushToolResult.mock.calls[0]?.[0] ?? "")
+		expect(pushed).toContain("not valid UTF-8")
+		// 0xC3 0x28 is not a valid sequence and it sits at byte 22 - past the line the hunk
+		// matched. The hunk is ASCII and matched fine, which is the case the row is about: the
+		// bytes at fault are ones the patch never mentions.
+		expect(pushed).toContain("byte 22")
+		expect(pushed).toContain("src/thing.ts")
+		// Nothing published and nothing asked: the refusal happens while the hunks are still
+		// being processed, before any publish prompt exists.
+		expect(mockAskApproval).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockSaveChanges).not.toHaveBeenCalled()
+		// The read must not survive as an observation: the version it saw is the version a
+		// later full-file write would be permitted to publish.
+		expect(mockTask.observationRegistry.get(path.resolve("/workspace/project", "src/thing.ts"))).toBeUndefined()
+		expect(mockTask.consecutiveMistakeCount).toBe(1)
+		expect(mockTask.didEditFile).toBe(false)
+	})
+
+	it("update: a file that legitimately contains a replacement character still publishes", async () => {
+		// U+FFFD written as EF BF BD is valid UTF-8. The refusal is about bytes that cannot be
+		// decoded, not about a character appearing in the text - a check on the decoded string
+		// would refuse this file for no reason.
+		// EF BF BD is U+FFFD written as bytes: the file legitimately contains the character, and
+		// those bytes are valid UTF-8. (A \uFFFD... escape here would be ambiguous - FFFE is a
+		// legal 4-digit escape - so the sequence is spelled in bytes on purpose.)
+		const replacementCharacterIsLegitimate = Buffer.concat([
+			Buffer.from("original file content\n"),
+			Buffer.from([0xef, 0xbf, 0xbd]),
+			Buffer.from("end\n"),
+		])
+		mockedFsPromises.default.readFile.mockResolvedValue(replacementCharacterIsLegitimate)
+
+		await runPatch(undecodableUpdatePatch)
+
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n\uFFFDend\n",
+			// The tail the patch never mentioned travels through the publish unchanged:
+			// that is what a file that legitimately contains a replacement character looks like.
+			false,
+			true,
+			1000,
+			"edit",
+			undefined,
+			false,
+			undefined,
+		)
+		expect(mockTask.consecutiveMistakeCount).toBe(0)
+	})
+
+	it("delete: an undecodable file is still deleted, because nothing republishes its bytes", async () => {
+		// Narrowing, not blanket refusal: the delete publishes by unlinking, so the reading is a
+		// snapshot and the bytes nobody can name are not rewritten by anything this tool does.
+		mockedFsPromises.default.readFile.mockResolvedValue(undecodableTail())
+
+		await runPatch(deleteThingPatch)
+
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(path.resolve("/workspace/project", "src/thing.ts"))
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully deleted"))
+		expect(mockTask.consecutiveMistakeCount).toBe(0)
 	})
 })

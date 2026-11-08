@@ -16,8 +16,8 @@ import { versionTokenOfStat } from "../../utils/versionToken"
 import { canonicalizeForApproval, GuardRejectedError, errorCode } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
-import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
-import type { ApplyPatchFileChange } from "./apply-patch"
+import { ApplyPatchError, parsePatch, ParseError, processAllHunks } from "./apply-patch"
+import type { ApplyPatchFileChange, PatchReadIntent } from "./apply-patch"
 
 interface ApplyPatchParams {
 	patch: string
@@ -114,10 +114,41 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// write and the composed chat-diff default rejects it ("File already
 			// exists ... and was not read before this write") even though this tool
 			// just read the exact content the patch was applied to.
-			const readFile = async (filePath: string): Promise<string> => {
+			const readFile = async (filePath: string, intent: PatchReadIntent): Promise<string> => {
 				const absolutePath = path.resolve(task.cwd, filePath)
 				const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-				const content: string = await fs.readFile(absolutePath, "utf8")
+				// Read the bytes, not a string: readFile with "utf8" has already substituted
+				// the sequences a strict decoder would refuse on, so the check below could not
+				// tell a file that contains a real replacement character from one whose bytes
+				// were replaced on the way in.
+				const raw = await fs.readFile(absolutePath)
+				let content: string
+				try {
+					content = new TextDecoder("utf-8", { fatal: true }).decode(raw)
+				} catch {
+					if (intent !== "publish") {
+						// Nothing is republished from this reading - a delete publishes by unlinking -
+						// so a file whose bytes nobody can name may still be deleted. The snapshot
+						// stays the lossy reading it always was.
+						content = raw.toString("utf8")
+					} else {
+						// Refuse before any observation is recorded: the version observed here is the
+						// version a later full-file write would be allowed to publish, and publishing
+						// it means rewriting the bytes this read could not name.
+						// The lossy reading substitutes from exactly the byte the strict decoder
+						// refused on, so re-encoding the text before its first replacement lands on
+						// the offending sequence.
+						const lossy = raw.toString("utf8")
+						const firstSubstitution = lossy.indexOf("\uFFFD")
+						const offset =
+							firstSubstitution < 0
+								? raw.length
+								: Buffer.byteLength(lossy.slice(0, firstSubstitution), "utf8")
+						throw new ApplyPatchError(
+							`Cannot apply patch to ${filePath}: the file is not valid UTF-8 (byte ${offset} cannot be decoded). apply_patch refuses rather than rewriting bytes the patch never touched.`,
+						)
+					}
+				}
 				const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 				if (preReadStats && postReadStats) {
 					const preReadToken = versionTokenOfStat(preReadStats)
