@@ -8,6 +8,7 @@ import { friendliDefaultModelId, friendliModels, openAiModelInfoSaneDefaults } f
 import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
 import { FriendliHandler } from "../friendli"
+import { NOT_PROVIDED } from "../constants"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -90,6 +91,18 @@ describe("FriendliHandler", () => {
 	it("should construct without an API key and without fetching the catalog", () => {
 		expect(() => new FriendliHandler({})).not.toThrow()
 		expect(mockGetModels).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		{ entry: "createMessage", run: (h: FriendliHandler) => h.createMessage("system", []).next() },
+		{ entry: "completePrompt", run: (h: FriendliHandler) => h.completePrompt("a") },
+	])("keyless $entry sends the placeholder key and surfaces a 401 to the caller", async ({ run }) => {
+		const unauthorized = Object.assign(new Error("Incorrect API key provided"), { status: 401 })
+		mockCreate.mockRejectedValueOnce(unauthorized)
+		const keyless = new FriendliHandler({})
+
+		await expect(run(keyless)).rejects.toMatchObject({ status: 401 })
+		expect(vi.mocked(OpenAI).mock.lastCall?.[0]).toEqual(expect.objectContaining({ apiKey: NOT_PROVIDED }))
 	})
 
 	it("should load the catalog once before building requests for fetched-only models", async () => {

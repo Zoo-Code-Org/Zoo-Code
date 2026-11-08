@@ -515,7 +515,7 @@ function getSelectedModel({
 		case providerIdentifiers.fireworks:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const id = apiConfiguration.apiModelId || defaultModelId
 			// Mirror the backend getModel(): own-property reads only (an ID such as "toString" must
 			// not resolve to an inherited member), and sane defaults when neither catalog has the ID.
 			const fetched = routerModels.friendli

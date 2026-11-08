@@ -1917,6 +1917,16 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(info)
 		})
 
+		it("should use the default model for an empty model ID", () => {
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
 		it.each(["toString", "constructor", "__proto__", "vendor/unknown"])(
 			"should use sane defaults, not an inherited member, for %s missing from both catalogs",
 			(apiModelId) => {
