@@ -66,6 +66,5 @@ export default defineConfig({
 		reuseExistingServer: !process.env.CI,
 	},
 	retries: 3,
-	retryStrategy: "isolated",
 	failOnFlakyTests: true,
 })
