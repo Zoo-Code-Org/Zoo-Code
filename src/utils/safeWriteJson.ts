@@ -403,7 +403,32 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 	// target's own mode, so the inode that replaces it is not created more openly than the file it
 	// replaces; on Windows the creation mode carries only the read-only bit and per-user rights come
 	// from directory inheritance, which is why the end-to-end mode assertion is POSIX-shaped.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", mode })
+	// The mode cannot ride on the create call alone. createWriteStream opens the file, and an
+	// open's creation mode is narrowed by the process umask, so an existing 0o664 target would be
+	// published as 0o644 under a 0o022 umask - the group write it had would go missing with the
+	// rename. One fchmod on the descriptor states the mode exactly. It is bound to the descriptor
+	// rather than to the path, as safeWriteText.ts:499-:503 and :529-:547 do for text writes: the
+	// staging name is this writer's own, and an fd-bound chmod cannot be retargeted by another
+	// writer moving a path underneath it. A missing mode means there was no publish target to
+	// copy from, and the creation default is left to stand, un-enforced as before.
+	let stagingFd: number | undefined
+	try {
+		stagingFd = fsSync.openSync(targetPath, "w", mode)
+		if (mode !== undefined) {
+			fsSync.fchmodSync(stagingFd, mode)
+		}
+	} catch (stageError: unknown) {
+		// An fchmod that fails leaves a descriptor behind, and a write that is going to report a
+		// failure should not also leak the handle it opened to make it.
+		if (stagingFd !== undefined) {
+			fsSync.closeSync(stagingFd)
+		}
+		throw stageError
+	}
+	// The descriptor is already open, so the stream takes it and closes it when the write ends,
+	// as it did when it opened the file itself. Passing the path alongside the fd is for the
+	// error message Node attaches to a stream failure; Node ignores the path once an fd is given.
+	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", fd: stagingFd })
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass
 	// Convert undefined to null for valid JSON serialization (undefined is not valid JSON)

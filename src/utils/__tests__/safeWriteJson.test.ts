@@ -18,6 +18,8 @@ const fsPromisesActuals = vi.hoisted(() => ({
 // replace the mock for one call and still let the write reach the real filesystem.
 const fsSyncActuals = vi.hoisted(() => ({
 	createWriteStream: undefined as (typeof import("fs"))["createWriteStream"] | undefined,
+	openSync: undefined as (typeof import("fs"))["openSync"] | undefined,
+	fchmodSync: undefined as (typeof import("fs"))["fchmodSync"] | undefined,
 }))
 
 vi.mock("fs/promises", async () => {
@@ -49,9 +51,16 @@ vi.mock("fs/promises", async () => {
 vi.mock("fs", async () => {
 	const actualFs = await vi.importActual<typeof import("fs")>("fs")
 	fsSyncActuals.createWriteStream = actualFs.createWriteStream
+	// openSync and fchmodSync are doubled for the same reason createWriteStream is: the mode rows
+	// below read what production passed, and the default delegates to the real call so the write
+	// still lands on disk.
+	fsSyncActuals.openSync = actualFs.openSync
+	fsSyncActuals.fchmodSync = actualFs.fchmodSync
 	return {
 		...actualFs, // Spread actual implementations
 		createWriteStream: vi.fn(actualFs.createWriteStream), // Default to actual, but mockable
+		openSync: vi.fn(actualFs.openSync),
+		fchmodSync: vi.fn(actualFs.fchmodSync),
 	}
 })
 
@@ -151,48 +160,74 @@ describe("safeWriteJson", () => {
 	// created with becomes the target's mode. These rows pin that the staging file is created as
 	// open or as private as the file it replaces, instead of with the process default.
 	describe("staging file mode", () => {
-		// Node's WriteStream fills a missing mode in on the options object it is handed, so reading the
-		// call log afterwards shows a normalized object rather than what was passed. Record the mode at
-		// the moment production passes it, then hand the call to the real stream writer so the write
-		// still lands on disk. -1 in the recording stands for "no mode was passed".
-		function captureStagingModes(): number[] {
-			const modes: number[] = []
-			const realCreateWriteStream = fsSyncActuals.createWriteStream!
-			vi.mocked(fsSyncActual.createWriteStream).mockImplementation(function (filePath, options) {
-				const passed: unknown = options
-				const mode: unknown =
-					passed !== null && typeof passed === "object" ? (passed as { mode?: unknown }).mode : undefined
-				modes.push(mode === undefined ? -1 : Number(mode))
-				return realCreateWriteStream(filePath, options)
+		// Production states the mode twice, in the two places it has to be stated: the open, whose
+		// creation mode the process umask narrows, and one fchmod on the descriptor, which is what
+		// lands the mode exactly. Node's WriteStream also fills a missing mode in on the options
+		// object it is handed, so a call log read afterwards shows a normalized object rather than
+		// what was passed; both arguments here are recorded at the moment production passes them and
+		// then handed to the real call, so the write still lands on disk. -1 in the open recording
+		// stands for "no mode was passed"; no entry in the fchmod recording stands for "there was
+		// no publish target to copy a mode from".
+		type StagingModeCalls = { openedWith: number[]; chmoddedTo: number[] }
+		function captureStagingModeCalls(): StagingModeCalls {
+			const openedWith: number[] = []
+			const chmoddedTo: number[] = []
+			const realOpenSync = fsSyncActuals.openSync!
+			const realFchmodSync = fsSyncActuals.fchmodSync!
+			vi.mocked(fsSyncActual.openSync).mockImplementation(function (filePath, flags, mode) {
+				const passed: unknown = mode
+				openedWith.push(
+					passed === undefined
+						? -1
+						: typeof passed === "string"
+							? Number.parseInt(passed, 8)
+							: Number(passed),
+				)
+				return realOpenSync(
+					filePath as Parameters<typeof realOpenSync>[0],
+					flags as Parameters<typeof realOpenSync>[1],
+					mode,
+				)
 			})
-			return modes
+			vi.mocked(fsSyncActual.fchmodSync).mockImplementation(function (filePath, mode) {
+				chmoddedTo.push(Number(mode))
+				return realFchmodSync(filePath, mode)
+			})
+			return { openedWith, chmoddedTo }
 		}
 
-		it("creates the staging stream with the publish target's mode", async () => {
+		it("opens the staging file at the publish target's mode and chmods it to exactly that", async () => {
 			await fs.chmod(currentTestFilePath, 0o600)
 			// Read back the mode the filesystem reports for the target instead of asserting a literal:
 			// Windows carries per-user rights in the DACL and reports a coarse mode, and the claim under
-			// test is that the staging file is created to match the target, on every platform.
+			// test is that the staging file is brought to the target's mode, on every platform.
 			const targetMode = (await fs.stat(currentTestFilePath)).mode & 0o777
-			const modes = captureStagingModes()
+			const modeCalls = captureStagingModeCalls()
 
 			await safeWriteJson(currentTestFilePath, { updated: "content" })
 
-			expect(modes.length).toBe(1)
-			expect(modes[0]).toBe(targetMode)
+			expect(modeCalls.openedWith.length).toBe(1)
+			expect(modeCalls.openedWith[0]).toBe(targetMode)
+			// The fchmod is the half that survives the umask: the open alone can only ask for this
+			// mode, and the filesystem answers at most what the mask leaves. One call, on the
+			// descriptor the write is about to use.
+			expect(modeCalls.chmoddedTo).toEqual([targetMode])
 			expect(await readFileContent(currentTestFilePath)).toEqual({ updated: "content" })
 		})
 
-		it("creates the staging stream with the creation default when the target does not exist yet", async () => {
+		it("opens the staging file with the creation default when the target does not exist yet", async () => {
 			const missingTarget = path.join(tempDir, "not-written-yet.json")
-			const modes = captureStagingModes()
+			const modeCalls = captureStagingModeCalls()
 
 			await safeWriteJson(missingTarget, { created: "content" })
 
 			// Nothing is being replaced, so there is no mode to carry over, and a mode invented here
-			// would be this write deciding how private a file it has not created yet should be.
-			expect(modes.length).toBe(1)
-			expect(modes[0]).toBe(-1)
+			// would be this write deciding how private a file it has not created yet should be. No
+			// publish target means no fchmod either, which is the same rule safeWriteText applies to a
+			// fresh target.
+			expect(modeCalls.openedWith.length).toBe(1)
+			expect(modeCalls.openedWith[0]).toBe(-1)
+			expect(modeCalls.chmoddedTo).toEqual([])
 			expect(await fileExists(missingTarget)).toBe(true)
 		})
 
@@ -298,6 +333,29 @@ describe("safeWriteJson", () => {
 			expect(published.mode & 0o777).toBe(0o600)
 			expect(await readFileContent(currentTestFilePath)).toEqual({ updated: "content" })
 		})
+		// Row 4507851727. The direction the row above cannot see: a mask only takes bits away, so a
+		// restrictive target lands unchanged whether or not the mode was applied exactly, and the
+		// assertion that separates the two shapes is a group-writable target under a narrowing mask.
+		// The mask is set for the row rather than relied on, because the value that narrows 0o664 to
+		// 0o644 is the process's own and not something this row should inherit from a runner.
+		// Executed by the ubuntu coverage lane, not verified locally: on Windows the creation mode
+		// carries only the read-only bit, so 0o664 is not a mode a landed file can report and the
+		// row answers as skipped there.
+		it.runIf(process.platform !== "win32")(
+			"keeps a 0o664 target group-writable through an update under a 0o022 umask",
+			async () => {
+				await fs.chmod(currentTestFilePath, 0o664)
+				const umaskBefore = process.umask(0o022)
+				try {
+					await safeWriteJson(currentTestFilePath, { updated: "content" })
+					const published = await fs.stat(currentTestFilePath)
+					expect(published.mode & 0o777).toBe(0o664)
+					expect(await readFileContent(currentTestFilePath)).toEqual({ updated: "content" })
+				} finally {
+					process.umask(umaskBefore)
+				}
+			},
+		)
 	})
 
 	// Failure Scenarios
