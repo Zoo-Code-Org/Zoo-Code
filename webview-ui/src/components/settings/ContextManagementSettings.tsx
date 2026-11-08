@@ -1,4 +1,4 @@
-import { HTMLAttributes } from "react"
+import { FormEvent, HTMLAttributes } from "react"
 import React from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox, VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
@@ -74,6 +74,13 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "maxGitStatusFiles"
 	>
 }
+
+// The toolkit checkbox delivers change events retargeted to its custom-element host, which mirrors
+// `checked` without being an HTMLInputElement; a directly rendered input is one. Match on the
+// property so both target shapes update the setting, and decline targets that carry no boolean
+// `checked` rather than writing `undefined` through the guard.
+const isCheckboxTarget = (target: EventTarget | null): target is EventTarget & { checked: boolean } =>
+	target !== null && "checked" in target && typeof target.checked === "boolean"
 
 export const ContextManagementSettings = ({
 	autoCondenseContext,
@@ -720,7 +727,12 @@ export const ContextManagementSettings = ({
 							label={t("settings:contextManagement.idleCondensing.name")}>
 							<VSCodeCheckbox
 								checked={idleCondenseContext}
-								onChange={(e: any) => setCachedStateField("idleCondenseContext", e.target.checked)}
+								onChange={(e: Event | FormEvent<HTMLElement>) => {
+									if (!isCheckboxTarget(e.target)) {
+										return
+									}
+									setCachedStateField("idleCondenseContext", e.target.checked)
+								}}
 								data-testid="idle-condense-context-checkbox">
 								<span className="font-medium">
 									{t("settings:contextManagement.idleCondensing.name")}
