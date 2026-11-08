@@ -183,6 +183,12 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 	it("accepts the name the filesystem itself answers for the spelling the key was computed from", async () => {
 		const dir = await makeDir("lockkey-casefold-")
+		// The fixture's own geometry, recorded during acquisition rather than assumed: the key the product
+		// hands to acquireFileLock is the spelling its pre-lock resolution answered with, and whether the
+		// writer's own spelling exists by the time acquisition returns is the far half of the divergence the
+		// guard is then asked about. Both rows assert these before asserting anything about the guard, so a
+		// platform that stops building the pair fails here instead of somewhere harder to read.
+		const acquisitionFacts: Array<{ key: string; spellingPresentDuringAcquisition: boolean }> = []
 		const lower = path.join(dir, "settings.json")
 		const upper = path.join(dir, "SETTINGS.JSON")
 		const real = await vi.importActual<typeof import("fs/promises")>("fs/promises")
@@ -236,6 +242,13 @@ describe("safeWriteJson lock key under a peer commit", () => {
 				await fs.link(lower, upper)
 				await fs.link(ownArtefact, lockPathFor(lower))
 			}
+			acquisitionFacts.push({
+				key: String(file),
+				spellingPresentDuringAcquisition: await fs.lstat(upper).then(
+					() => true,
+					() => false,
+				),
+			})
 			return async () => {}
 		})
 
@@ -247,6 +260,17 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// names reach one artefact, so this writer holds the lock the other spelling would take and
 		// the write is not refused. Where the two platforms differ is in how many names exist, which
 		// is a property of the directory and not of the guard, so only the counts branch.
+		// Geometry before verdict.
+		expect(
+			acquisitionFacts.map((fact: { key: string }) => path.basename(fact.key)),
+			"the lock key handed to acquisition was not this writer's spelling, so no divergence reached the guard",
+		).toEqual(["SETTINGS.JSON"])
+		expect(
+			acquisitionFacts.map(
+				(fact: { spellingPresentDuringAcquisition: boolean }) => fact.spellingPresentDuringAcquisition,
+			),
+			"the writer's spelling never appeared during acquisition, so the under-lock resolution had nothing to restate",
+		).toEqual([true])
 		expect(String(error && error.name)).toBe("undefined")
 		expect(JSON.parse(await fs.readFile(upper, "utf8"))).toEqual({ mcpServers: { mine: true } })
 		if (!foldsCase) {
@@ -264,7 +288,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(entries.map((name: string) => name.toLowerCase()).sort()).toEqual(
 			foldsCase
 				? ["settings.json", "settings.json.lock"]
-				: ["settings.json", "settings.json.lock", "settings.json", "settings.json.lock"],
+				: ["settings.json", "settings.json", "settings.json.lock", "settings.json.lock"],
 		)
 		expect(entries.length).toBe(foldsCase ? 2 : 4)
 		// The guard answered from object identity, so the identity is read back off the filesystem
@@ -550,7 +574,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 						await fs.link(lower, upper)
 						await fs.link(ownArtefact, actual.lockPathFor(lower))
 					}
-					return async () => {}
 				}),
 			}
 		})
@@ -562,7 +585,10 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			(caught: unknown) => caught as Error,
 		)
 
-		expect(statCalls).toBeGreaterThan(0)
+		expect(
+			statCalls,
+			"the guard never put its identity question to the filesystem on this platform",
+		).toBeGreaterThan(0)
 		expect(String(error && (error as { code?: string }).code)).toBe("EACCES")
 		expect(String(error && error.name)).not.toBe("LockKeyDriftError")
 		// Fail closed: the writer published nothing, and the file it would have replaced still
