@@ -130,6 +130,47 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
+	it("does not stage or publish while the lock acquisition has not returned", async () => {
+		const dir = await makeDir("lockkey-pending-")
+		const target = path.join(dir, "settings.json")
+
+		// Staging uses the .<name>.new_<ts>_<rand>.tmp infix and the publish renames
+		// onto the target, both inside this directory, so the directory listing taken
+		// while acquisition is pending is the whole proof.
+		// .<name>.new_<ts>_<rand>.tmp infix and the publish renames onto the target,
+		// both inside this directory, so an empty directory is the whole proof.
+		mockedRealpath.mockImplementation(async (t) => String(t))
+		mockedLstat.mockRejectedValue(enoent)
+		mockedReadlink.mockRejectedValue(new Error("not a link"))
+
+		let acquiredKey: string | undefined
+		let duringAcquisition: string[] | undefined
+		let releaseAcquisition: () => void = () => {}
+		const acquisition = new Promise<void>((resolve) => {
+			releaseAcquisition = resolve
+		})
+		mockedAcquireFileLock.mockImplementation(async (file) => {
+			acquiredKey = String(file)
+			// The acquisition has been called and has not returned. Let the caller run
+			// in that window: if it stages or publishes before holding the lock, that
+			// work lands in this directory and the snapshot below catches it. A caller
+			// that waits for the lock has nothing to do here but wait.
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			duringAcquisition = await fs.readdir(dir)
+			await acquisition
+			return async () => {}
+		})
+
+		const write = safeWriteJson(target, { mcpServers: {} })
+		releaseAcquisition()
+		await write
+
+		expect(acquiredKey).toBe(target)
+		expect(duringAcquisition).toEqual([])
+		expect(await fs.readdir(dir)).toEqual(["settings.json"])
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ mcpServers: {} })
+	})
+
 	it("releases the lock when the resolution under the lock rejects", async () => {
 		const order: string[] = []
 		let released = false
