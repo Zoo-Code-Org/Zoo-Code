@@ -8,9 +8,15 @@ import { getErrorCode } from "../../utils/errorCode"
 export interface SafeWriteTextOptions {
 	/**
 	 * When true, preserve the old-file semantics: rename target -> backup first,
-	 * after commit rename delete the backup; on failure roll the backup back to
-	 * the target path.  When false (default) the atomic rename simply replaces
-	 * the target -- crash-safe window is zero.
+	 * then stage and commit; after a successful commit delete the backup copy.
+	 * On failure the backup is never rolled back to the target: it is a copy taken
+	 * before staging began, not a restore source - the teardown discards it and the
+	 * original error propagates. What the target holds after a rejected write
+	 * depends on where the failure landed: the original file, the staged
+	 * replacement, or - if the process died between the two renames - nothing,
+	 * until a later writer's recovery pass restores the orphaned backup.
+	 * When false (default) the atomic rename simply replaces the target --
+	 * crash-safe window is zero.
 	 */
 	backup?: boolean
 
@@ -464,6 +470,16 @@ export async function safeWriteText(
 		if (path.dirname(supplied) !== path.resolve(dirPath)) {
 			throw new StagingPathError(
 				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
+				supplied,
+			)
+		}
+		// Naming the target is not staging it: a staging file that resolves onto
+		// the publish target would let the commit rename move the target file
+		// onto itself, and the fsync and permission steps below would then act on
+		// the target as if it were the staged bytes.
+		if (supplied === targetPath) {
+			throw new StagingPathError(
+				`Staging file must not name the publish target (${targetPath}), got ${supplied}`,
 				supplied,
 			)
 		}

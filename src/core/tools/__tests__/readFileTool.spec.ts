@@ -1803,13 +1803,27 @@ describe("ReadFileTool", () => {
 				const callbacks = createMockCallbacks()
 
 				// Override the beforeEach default stat mock with proper BigIntStats.
-				mockedFsStat.mockResolvedValue({
-					isDirectory: () => false,
+				const statFields = {
 					dev: BigInt(1),
 					ino: BigInt(2),
 					size: BigInt(300),
 					mtimeNs: BigInt(4_000_000_000n),
 					ctimeNs: BigInt(5_000_000_000n),
+				}
+				// The expected token is computed from the same fixture the mock returns,
+				// so a stored "0:0:0:0:0" cannot pass this assertion.
+				const expectedVersionToken = [
+					statFields.dev,
+					statFields.ino,
+					statFields.size,
+					statFields.mtimeNs,
+					statFields.ctimeNs,
+				]
+					.map((value) => value.toString())
+					.join(":")
+				mockedFsStat.mockResolvedValue({
+					isDirectory: () => false,
+					...statFields,
 					// Cast: the mock only implements the members the tool and versionToken read.
 				} as unknown as Stats)
 				mockedIsBinaryFile.mockResolvedValue(false)
@@ -1825,7 +1839,7 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
 				expect(calledPath).toContain("existing.ts")
-				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				expect(calledVersion).toBe(expectedVersionToken)
 
 				// Verify get() returns the same data using the spy-captured key.
 				const obs = reg.get(calledPath)
@@ -1869,13 +1883,27 @@ describe("ReadFileTool", () => {
 				})
 				const callbacks = createMockCallbacks()
 
-				mockedFsStat.mockResolvedValue({
-					isDirectory: () => false,
+				const statFields = {
 					dev: BigInt(1),
 					ino: BigInt(2),
 					size: BigInt(300),
 					mtimeNs: BigInt(4_000_000_000n),
 					ctimeNs: BigInt(5_000_000_000n),
+				}
+				// The expected token is computed from the same fixture the mock returns,
+				// so a stored "0:0:0:0:0" cannot pass this assertion.
+				const expectedVersionToken = [
+					statFields.dev,
+					statFields.ino,
+					statFields.size,
+					statFields.mtimeNs,
+					statFields.ctimeNs,
+				]
+					.map((value) => value.toString())
+					.join(":")
+				mockedFsStat.mockResolvedValue({
+					isDirectory: () => false,
+					...statFields,
 					// Cast: the mock only implements the members the tool and versionToken read.
 				} as unknown as Stats)
 				mockedIsBinaryFile.mockResolvedValue(false)
@@ -1896,7 +1924,7 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
 				expect(calledPath).toContain("legacy.ts")
-				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				expect(calledVersion).toBe(expectedVersionToken)
 				// Regression evidence, same contract on the legacy path: count the
 				// matching calls (correct path AND { bigint: true }) instead of
 				// asserting membership, which the directory-check stat alone satisfies.
@@ -2295,16 +2323,26 @@ describe("ReadFileTool", () => {
 		})
 
 		describe("read completeness scope (S4b follow-up #46)", () => {
+			const statFields = {
+				dev: BigInt(1),
+				ino: BigInt(2),
+				size: BigInt(300),
+				mtimeNs: BigInt(4_000_000_000n),
+				ctimeNs: BigInt(5_000_000_000n),
+			}
+			// Computed from the fixture, not a regex shape: a stored all-zero token
+			// must not satisfy this.
+			const expectedVersionToken = [
+				statFields.dev,
+				statFields.ino,
+				statFields.size,
+				statFields.mtimeNs,
+				statFields.ctimeNs,
+			]
+				.map((value) => value.toString())
+				.join(":")
 			// The stat mock only implements the members the tool and versionToken read.
-			const bigintStats = (): Stats =>
-				({
-					isDirectory: () => false,
-					dev: BigInt(1),
-					ino: BigInt(2),
-					size: BigInt(300),
-					mtimeNs: BigInt(4_000_000_000n),
-					ctimeNs: BigInt(5_000_000_000n),
-				}) as unknown as Stats
+			const bigintStats = (): Stats => ({ isDirectory: () => false, ...statFields }) as unknown as Stats
 
 			it("native: a full, untruncated slice read from line 1 records a complete observation", async () => {
 				const mockTask = createMockTask({
@@ -2331,7 +2369,7 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion, calledComplete] = observeSpy.mock.calls[0]
 				expect(calledPath).toContain("full.ts")
-				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				expect(calledVersion).toBe(expectedVersionToken)
 				expect(calledComplete).toBe(true)
 				expect(reg.get(calledPath)!.complete).toBe(true)
 			})

@@ -4770,10 +4770,11 @@ describe("Cline", () => {
 
 		it("advances the cancellation generation on each cancellation and keeps it advanced across a resume", async () => {
 			// The S4a write guard compares the cancellation generation a queued write
-			// captured against the generation at publish time. The abort FLAG cannot do that
-			// on its own: resumeAfterDelegation() clears it, and a write that belongs to the
-			// cancelled run would then publish as if nothing had been cancelled. Only the
-			// generation keeps the two runs apart, so it must never go backwards.
+			// captured against the generation at publish time. The abort FLAG cannot do
+			// that on its own: it is set on cancellation and no resume path clears it,
+			// so on a resumed task it says only that some cancellation happened, not
+			// which run a queued write belongs to. Only the generation keeps the two
+			// runs apart, so it must never go backwards.
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,

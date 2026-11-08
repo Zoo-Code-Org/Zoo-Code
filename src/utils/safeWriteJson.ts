@@ -64,12 +64,19 @@ export interface SafeWriteJsonOptions {
 	 * checks decide from the final component as it resolves at their own instant,
 	 * and publication is path based - the parent-directory creation and the commit
 	 * rename both take a path - so an ancestor swapped after the check redirects the
-	 * publish. What happens then depends on what sits at the swapped-in path: if it
-	 * already has a file at the target name the publish fails in the staging
-	 * identity guard (StagingPathError) and nothing is written; if it does not, the
-	 * write follows the swapped ancestor and lands OUTSIDE the declared scope. This
-	 * option claims neither outcome: it confines the target it resolved, not the
-	 * directory tree above it. Making the claim cover that window needs a publish
+	 * publish. Two outcomes are possible, and both are REPORTED: if the swapped-in
+	 * path already has a file at the target name, the commit rename replaces it and
+	 * the post-commit re-check undoes the publication - the escape comes back as
+	 * ConfinedPathEscapeError, and the file that was already sitting outside is not
+	 * restored; if it does not, the write follows the swapped ancestor, lands
+	 * OUTSIDE the declared scope, and the same re-check removes the bytes this write
+	 * published there. A confinement root that is itself replaced during the window
+	 * is caught by the root-identity re-check after the commit, though a physically
+	 * moved tree leaves the bytes where they are. This option claims that every
+	 * escape is detected and that its own bytes do not stay outside; it claims no
+	 * outcome that preserves a file outside the scope, and it confines the target it
+	 * resolved, not the directory tree above it. Making the claim cover that window
+	 * needs a publish
 	 * that walks from an already-open directory handle with no-follow semantics
 	 * (openat/renameat over a directory fd); this runtime exposes neither, so the
 	 * claim is narrowed here instead of being made true. A caller that needs
@@ -241,6 +248,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// before any directory is created, and before anything is staged.
 	const confinementRoot = _declaredScopeRoot(options?.confineTo, absoluteFilePath)
 
+	// The scope root the pre-lock check will authorize, captured with its identity:
+	// a directory renamed out from under a confined write and replaced at the same
+	// spelling is a different directory, and only an identity comparison can tell
+	// that the published bytes no longer sit in the directory the caller named.
+	let authorizedScopeRoot: { root: string; dev: bigint; ino: bigint } | undefined
+
 	// Lock key: the symlink referent when the path is an existing symlink, so a
 	// symlink alias and its referent share one lock. The key must be computable
 	// while a peer writer is mid-commit (backup mode renames the referent away and
@@ -259,6 +272,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	if (confinementRoot !== undefined) {
 		const scopeRoot = await _resolveScopeRoot(confinementRoot)
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
+		const rootIdentity = await fs.stat(scopeRoot, { bigint: true })
+		authorizedScopeRoot = { root: scopeRoot, dev: rootIdentity.dev, ino: rootIdentity.ino }
 	}
 
 	// Ensure directory structure exists with improved reliability
@@ -286,6 +301,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// publish left behind; the assignment below stays where our copy put it.
 	let stagedBytes: Buffer | undefined
 
+	// Set once the commit rename has landed; the rollback below may only restore the
+	// backup while the committed replacement has not been published yet.
+	let committedBeforeTeardown = false
+
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
 	let actualTempBackupFilePath: string | null = null
@@ -295,7 +314,24 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// the strict dangling-link rejection still applies to a real dangling link. It
 		// must stay inside the protected block, otherwise a rejection here leaves the
 		// advisory lock held until the stale timeout for every other writer.
-		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		try {
+			resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		} catch (targetError: unknown) {
+			// A dangling alias is not always an absent file: an interrupted EPERM-
+			// fallback commit renamed the canonical referent to its backup and died
+			// before the replacement rename, which leaves every write through the
+			// alias rejected while the content sits recoverable beside the lock key.
+			// The recovery pass runs first: an orphaned backup next to an absent
+			// canonical path is restored, and only a still-unresolvable target keeps
+			// the strict rejection. A dangling link with no recoverable backup gets
+			// the same rejection it always got.
+			const recovery = await recoverInterruptedReplacement(lockKey).catch(() => undefined)
+			if (!recovery?.foundLeftovers) {
+				throw targetError
+			}
+			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
+			resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		}
 
 		// The key was computed before the lock was taken, but the publish target is resolved
 		// under it: a symlink retargeted in between means this writer holds the OLD referent's
@@ -394,9 +430,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// #1912 head (085fbf85e) carries this step for the same function; the blob main
 		// brought in does not, and without it the two resolutions differ on a permission
 		// property and the row that pins it can only pass on one platform.
-		await _copyTargetMode(resolvedTargetPath, actualTempNewFilePath)
-
+		// The flush opens the staged file with r+; it runs before the copied mode lands,
+		// because a restrictive target mode (0444/0400) applied first would deny that
+		// descriptor and silently skip the flush the publish depends on.
 		await _flushFileToDisk(actualTempNewFilePath)
+
+		await _copyTargetMode(resolvedTargetPath, actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a
@@ -427,6 +466,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
 		// Mark as "used" or "committed"
 		actualTempNewFilePath = null
+		// The commit has landed: from here the backup is a copy of superseded content,
+		// never a restore source. Renaming it back after this point would put the older
+		// bytes where a reader may already have consumed the committed ones.
+		committedBeforeTeardown = true
 		options?.trace?.({ stage: "write-complete" })
 
 		// Fail-closed confinement re-check. The check above decides the target as it
@@ -442,9 +485,20 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// from leaving our bytes in place of somebody else's.)
 		if (confinementRoot !== undefined) {
 			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
-			const scopeRoot = await _resolveScopeRoot(confinementRoot)
+			const scopeRoot = authorizedScopeRoot?.root ?? (await _resolveScopeRoot(confinementRoot))
 			try {
 				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
+				// Spelling is not containment: compare the authorized root's identity with
+				// what sits at that spelling now. A rename-away plus a new directory of the
+				// same name keeps every relative check passing while the committed bytes sit
+				// in a different directory than the one this write authorized under its lock.
+				const authorized = authorizedScopeRoot
+				if (authorized) {
+					const liveRoot = await fs.stat(authorized.root, { bigint: true }).catch(() => undefined)
+					if (!liveRoot || liveRoot.dev !== authorized.dev || liveRoot.ino !== authorized.ino) {
+						throw new ConfinedPathEscapeError(absoluteFilePath, publishedPath, authorized.root)
+					}
+				}
 			} catch (escapeError) {
 				// Undo only the file this write published, never a same-named file a peer
 				// placed there after the commit.
@@ -479,21 +533,32 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// peer's file at the same name - including a backup this rollback just restored -
 		// is left alone. Errors that are not an escape keep their own type.
 		if (confinementRoot !== undefined && resolvedTargetPath !== undefined) {
-			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
-			const scopeRoot = await _resolveScopeRoot(confinementRoot)
+			let publishedPath: string | undefined
 			try {
-				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
-			} catch (escapeError) {
-				await undoEscapedPublish(publishedPath, stagedBytes)
-				throw escapeError
+				publishedPath = await _resolveScopeRoot(resolvedTargetPath)
+				_assertWithinScope(absoluteFilePath, publishedPath, await _resolveScopeRoot(confinementRoot))
+			} catch (checkError: unknown) {
+				if (checkError instanceof ConfinedPathEscapeError && publishedPath !== undefined) {
+					await undoEscapedPublish(publishedPath, stagedBytes)
+					throw checkError
+				}
+				// A probe that could not complete is not an escape verdict: it must neither skip
+				// the teardown below nor replace the error the caller already earned.
+				if (!(checkError instanceof ConfinedPathEscapeError)) {
+					console.error(`Confinement re-check failed for ${resolvedTargetPath}:`, checkError)
+				}
 			}
 		}
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
 
-		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
+		// Attempt rollback if a backup was made - and only while the commit has not
+		// landed. After the commit rename the backup is superseded content: a rename-back
+		// would replace committed bytes a reader may already have consumed. The orphaned
+		// backup stays for the next writer's recovery pass, which cleans leftovers beside
+		// an existing canonical file without restoring them.
+		if (backupFileToRollbackOrCleanupWithinCatch && !committedBeforeTeardown) {
 			try {
 				// A backup only ever exists once the resolved target is fixed, so the fallback is
 				// for the type, not for a reachable case; naming it here keeps the rollback and the
@@ -553,7 +618,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
  */
 async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
+	// 0o600 from creation: the staged bytes are the new content, and until the mode
+	// copy retargets them they would otherwise sit world-readable under the umask -
+	// a wider window than a restrictive target ever granted its own bytes.
+	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", mode: 0o600 })
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass
@@ -576,8 +644,9 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
  * Copies the existing target's permission mode onto the staged file so the publish
  * does not silently widen it. A missing target has no mode to copy; a stat or chmod
  * that fails for another reason is logged and the write proceeds with the staged
- * file's own mode, because the replacement protocol - not the mode - is what makes the
- * write atomic.
+ * file's own mode - 0o600 as staged, so a failed copy can leave the published file
+ * narrower than the target had it, never wider - because the replacement protocol,
+ * not the mode, is what makes the publish atomic.
  */
 async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<void> {
 	let mode: number

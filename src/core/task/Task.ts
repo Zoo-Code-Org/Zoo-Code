@@ -3602,9 +3602,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.abort = true
 		// The S4a write guard compares this counter with the value a queued write
-		// captured when it started, so every cancellation must advance it; it must
-		// never go backwards because resumeAfterDelegation() clears `abort` (the
-		// flag alone cannot keep the cancelled run and the resumed run apart).
+		// captured when it started, so every cancellation must advance it and it
+		// must never go backwards: the abort flag is set here and no resume path
+		// clears it, so on a resumed task it only says that some cancellation
+		// happened - never WHICH cancellation a queued write belongs to. Only the
+		// generation keeps a cancelled run's queued writes apart from the
+		// resumed run's, and only if it advances monotonically.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}

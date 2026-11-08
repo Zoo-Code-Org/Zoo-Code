@@ -34,6 +34,7 @@ vi.mock("fs/promises", async () => {
 		rm: vi.fn(actual.rm),
 		readdir: vi.fn(actual.readdir),
 		mkdir: vi.fn(actual.mkdir),
+		realpath: vi.fn(actual.realpath),
 	}
 	// fs.lstat is available via { ...actual }
 
@@ -1071,6 +1072,131 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
+	// 2242: a dangling alias is not always an absent file. This row drives the
+	// interrupted-EPERM-fallback state directly instead of crashing a process.
+	// Needs symlinks, which are unprivileged on the Windows CI lane.
+	test.skipIf(process.platform === "win32")(
+		"restores an interrupted backup rename so a write through the dangling alias succeeds",
+		async () => {
+			const dir = path.join(tempDir, "alias-recovery")
+			await fs.mkdir(dir)
+			const canonical = path.join(dir, "t.json")
+			const alias = path.join(dir, "alias.json")
+			// The state left between the EPERM fallback's two renames when the process
+			// dies after the backup rename: the canonical referent is gone, its backup
+			// sits beside it, and every write through the alias rejects as dangling.
+			const backup = path.join(dir, ".t.json.bak_1700000000000_interrupted.tmp")
+			await fsPromisesActuals.writeFile!(backup, JSON.stringify({ old: 1 }))
+			await fs.symlink("t.json", alias)
+
+			await safeWriteJson(alias, { after: true }, { confineTo: dir })
+
+			const published = JSON.parse(await fs.readFile(canonical, "utf8"))
+			expect(published).toEqual({ after: true })
+			expect(JSON.parse(await fs.readFile(alias, "utf8"))).toEqual({ after: true })
+			const entries = await fs.readdir(dir)
+			expect(entries).not.toContain(path.basename(backup))
+		},
+	)
+
+	// 2247: the flush opens the staged file with r+. It must run while the
+	// staged file is still in its creation mode, before a restrictive copied
+	// mode can deny that descriptor and silently skip the sync.
+	test.skipIf(process.platform === "win32")(
+		"flushes the staged file before the copied target mode can deny the sync descriptor",
+		async () => {
+			await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+			fsSyncActual.chmodSync(currentTestFilePath, 0o444)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await safeWriteJson(currentTestFilePath, { after: true })
+
+			expect(consoleErrorSpy).not.toHaveBeenCalledWith(expect.stringContaining("Failed to flush"))
+			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+			expect(fsSyncActual.statSync(currentTestFilePath).mode & 0o777).toBe(0o444)
+			consoleErrorSpy.mockRestore()
+		},
+	)
+
+	// 2228: spelling is not containment. The root swap happens between the
+	// commit rename and the post-commit re-check - the exact window the
+	// confineTo doc says the checks cannot prevent - and must still report.
+	test("reports the escape when the confinement root is replaced after the commit rename", async () => {
+		const scope = path.join(tempDir, "swap-root")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "mcp.json")
+		const moved = path.join(tempDir, "moved-root")
+
+		await expect(
+			safeWriteJson(
+				target,
+				{ mcpServers: {} },
+				{
+					confineTo: scope,
+					trace: (event) => {
+						// Synchronously, inside the trace hook fired after the commit rename:
+						// move the authorized directory out and drop a fresh empty one at
+						// the same spelling. Every relative check still passes; only the
+						// authorized root's identity can tell the two directories apart.
+						if (event.stage === "write-complete") {
+							fsSyncActual.renameSync(scope, moved)
+							fsSyncActual.mkdirSync(scope)
+						}
+					},
+				},
+			),
+		).rejects.toThrow(ConfinedPathEscapeError)
+
+		// The committed bytes travelled with the moved directory - that is the
+		// physically-moved variant the option doc names: detection holds, the
+		// undo cannot address the moved file, and the write still fails closed.
+		const movedContent = JSON.parse(fsSyncActual.readFileSync(path.join(moved, "mcp.json"), "utf8"))
+		expect(movedContent).toEqual({ mcpServers: {} })
+		expect(fsSyncActual.existsSync(target)).toBe(false)
+	})
+
+	// 2220: after the commit rename the backup is superseded content. A transient
+	// failure of the post-commit re-check must not rename it back over bytes
+	// that are already published.
+	test("keeps committed content when a transient post-commit failure reaches the rollback path", async () => {
+		const scope = path.join(tempDir, "committed-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "x.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ old: 1 }))
+		// Force the EPERM fallback so a backup of the old content exists when the
+		// post-commit check fails: the first commit rename rejects and the
+		// fallback's two renames (the pass-through defaults) land the new content
+		// and keep the backup beside it.
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
+		const escapee = path.join(tempDir, "fake-escape.json")
+		await expect(
+			safeWriteJson(
+				target,
+				{ new: 2 },
+				{
+					confineTo: scope,
+					trace: (event) => {
+						// The first scope resolution after the commit rename is shown an
+						// escaped spelling that never existed; the target itself stayed in
+						// place the whole time, so this is the transient-failure shape.
+						if (event.stage === "write-complete") {
+							vi.mocked(fs.realpath).mockImplementationOnce(async () => escapee)
+						}
+					},
+				},
+			),
+		).rejects.toThrow(ConfinedPathEscapeError)
+		// The escaped spelling never existed, so the undo removed nothing - and
+		// the rollback must not resurrect {old:1} where {new:2} already committed.
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ new: 2 })
+		expect(fsSyncActual.existsSync(escapee)).toBe(false)
+		// The orphaned backup is kept for the next writer's recovery pass, which
+		// cleans leftovers beside an existing canonical file without restoring them.
+		const entries = await fs.readdir(scope)
+		expect(entries.some((entry) => entry.includes(".x.json.bak_"))).toBe(true)
+	})
 	// The two failure paths of _copyTargetMode: a target whose mode cannot be read, and a staged
 	// file whose mode cannot be set. Both have to log and let the write finish, because the
 	// replacement protocol - not the mode - is what makes the publish atomic. They are driven
@@ -1123,6 +1249,12 @@ describe("safeWriteJson", () => {
 		await safeWriteJson(currentTestFilePath, { after: true })
 
 		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+		// The staged file is created 0o600, so the mode that survives a failed chmod
+		// is the private staging mode - never the umask-derived default a 0o600
+		// target used to be published with when the copy failed.
+		if (process.platform !== "win32") {
+			expect(fsSyncActual.statSync(currentTestFilePath).mode & 0o777).toBe(0o600)
+		}
 		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to copy mode"), expect.anything())
 		consoleErrorSpy.mockRestore()
 	}, 20_000)

@@ -289,6 +289,24 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
 			expect(fs.rmdir).not.toHaveBeenCalled()
 		})
+
+		it("rejects a supplied staging path that names the publish target", async () => {
+			// resolvePublishTarget realpaths the target (identity here) and compares
+			// the supplied staging path against that resolved target, so both sides
+			// must use this platform's path module rather than a posix literal.
+			vi.mocked(fs.realpath).mockImplementation(async (p) => p.toString())
+			const targetPath = path.resolve("/tmp/test-dir/target.txt")
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await expect(
+				safeWriteText(targetPath, "hello", { platform: "linux", tempPath: targetPath }),
+			).rejects.toThrow(StagingPathError)
+
+			// Rejected before staging touches anything: the target file stays the
+			// target's own, never a staging candidate that could rename onto itself.
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
 	})
 
 	// ── Test 2: fsync ordering ───────────────────────────────────────────────
