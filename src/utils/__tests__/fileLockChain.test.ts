@@ -39,7 +39,7 @@ describe("what a failed lock acquisition gives back", () => {
 	// both fixed.
 	it("leaves a created directory another writer populated and still reports the lock refusal", async () => {
 		const refusal = lockRefused()
-		const createdLevel = path.join("C:", "tree", "one")
+		const createdLevel = path.resolve(path.join("tree", "one"))
 		vi.mocked(fsp.mkdir).mockResolvedValue("\\\\?\\" + createdLevel)
 		vi.mocked(lockfile.lock).mockRejectedValue(refusal)
 		// The directory this call created is not empty by the time the rollback looks: another writer
@@ -57,7 +57,11 @@ describe("what a failed lock acquisition gives back", () => {
 
 	it("gives back only the levels the create reported, deepest first", async () => {
 		const refusal = lockRefused()
-		const firstLevel = path.join("C:", "tree", "one")
+		// Resolved rather than spelled out: the fixture has to be an absolute path on every lane, and
+		// "C:" is absolute only on Windows. The report below is still prefixed, which is the half of
+		// the row that is about Windows - normalising it has to land back on the absolute path the call
+		// already knows, on either platform.
+		const firstLevel = path.resolve(path.join("tree", "one"))
 		// Node's answer on Windows arrives prefixed; the module normalises it before comparing.
 		vi.mocked(fsp.mkdir).mockResolvedValue("\\\\?\\" + firstLevel)
 		vi.mocked(lockfile.lock).mockRejectedValue(refusal)
