@@ -1129,8 +1129,10 @@ export class DiffViewProvider {
 	 * existing-file rollback reads it. A save that reports false never landed: the buffer is still
 	 * dirty, so the close would hand content the user never approved to the editor and the failure
 	 * the rollback reported would name the close rather than the save that failed. Reporting it
-	 * here leaves the tab open on the restored-but-unsaved buffer and stops the rollback before it
-	 * unlinks the file underneath that tab. A save that rejects still propagates as before.
+	 * here stops this attempt before the close is tried: the tab is still open on the
+	 * restored-but-unsaved buffer when the error is raised, the rollback does not unlink the file
+	 * underneath it, and a later attempt may still close that tab. A save that rejects still
+	 * propagates as before.
 	 */
 	private async saveBufferClean(absolutePath: string): Promise<void> {
 		const document = vscode.workspace.textDocuments.find(
@@ -1140,7 +1142,7 @@ export class DiffViewProvider {
 			const saved = await document.save()
 			if (!saved) {
 				throw new Error(
-					`Rollback could not save the restored buffer for ${absolutePath}: the document save reported failure, so the buffer is still dirty and the tab is left open rather than closed on content the user never approved.`,
+					`Rollback could not save the restored buffer for ${absolutePath}: the document save reported failure, so this attempt stopped before closing the tab, rather than closing on content the user never approved.`,
 				)
 			}
 		}
