@@ -29,6 +29,10 @@ const mockedFsPromises = vi.mocked(
 			// Typed loosely because fsPromises.writeFile carries an overload set that MockedFunction
 			// would collapse to one arbitrary member; the rows only ever ask whether it was called.
 			writeFile: ReturnType<typeof vi.fn>
+			// Added for the flag-off move rows: the raw branch mkdirs the destination's parent before
+			// writing, and the rows ask whether that mkdir ran. Typed loosely for the same reason as
+			// writeFile above - fsPromises.mkdir is overloaded and the rows only ever ask about calls.
+			mkdir: ReturnType<typeof vi.fn>
 		}
 	},
 )
@@ -897,6 +901,109 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
 		expect(mockTask.didEditFile).toBe(false)
+	})
+
+	it("move: refuses a same-file destination on the raw write path too, not only the guarded one", async () => {
+		// The refusal sits above the isPreventFocusDisruptionEnabled split (:646 vs. :727), so a
+		// flag-off run refuses for the same reason a flag-on run does. Until this row every test in
+		// this file ran with the flag on, which made that symmetry a claim about line numbers rather
+		// than something anyone had checked. The flag-off branch publishes with a raw mkdir plus
+		// fs.writeFile rather than through the diff view, so those are the calls this row expects not
+		// to see.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		// The harness arms preventFocusDisruption on for every row. The binding holds the function
+		// object the provider stub captured, so a row has to change what that function resolves
+		// to rather than re-point the binding.
+		mockGetState.mockResolvedValue({
+			diagnosticsEnabled: true,
+			writeDelayMs: 1000,
+			experiments: { preventFocusDisruption: false },
+		})
+
+		mockedFsPromises.default.stat.mockImplementation(() => Promise.resolve(_identityOf(sourceKey)))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "flag-off-move-destination-is-the-source",
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("the two paths name the same file"))
+		expect(mockedFsPromises.default.writeFile).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.mkdir).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockTask.didEditFile).toBe(false)
+		// Both spellings went to the filesystem before the refusal, here as on the other path.
+		expect(mockedFsPromises.default.stat).toHaveBeenCalledWith(sourceKey, { bigint: true })
+		expect(mockedFsPromises.default.stat).toHaveBeenCalledWith(destKey, { bigint: true })
+	})
+
+	it("move: publishes through the raw write path when the flag is off and the two spellings name different files", async () => {
+		// The other half of the coverage, and the half that says the refusal did not become a ban:
+		// with different inodes this is an ordinary move, and the branch that answers for it is the
+		// mkdir + fs.writeFile one. The saveDirectly double staying unused is what pins the branch.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		// The harness arms preventFocusDisruption on for every row. The binding holds the function
+		// object the provider stub captured, so a row has to change what that function resolves
+		// to rather than re-point the binding.
+		mockGetState.mockResolvedValue({
+			diagnosticsEnabled: true,
+			writeDelayMs: 1000,
+			experiments: { preventFocusDisruption: false },
+		})
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "flag-off-move-between-different-files",
+		})
+
+		expect(mockedFsPromises.default.mkdir).toHaveBeenCalledWith(path.dirname(destKey), { recursive: true })
+		expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(destKey, "modified file content\n", "utf8")
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(sourceKey)
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Saved file"))
+		expect(mockTask.didEditFile).toBe(true)
+	})
+
+	it("move: treats a destination that is not there as not-the-source on the raw write path", async () => {
+		// Absence is answered the same way on both paths: a destination that is not there is not the
+		// source, so the identity read returns "absent" and the move proceeds. The row that arms an
+		// EACCES destination pins the other answer the filesystem can give.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory, stat '" + destKey + "'"), {
+			code: "ENOENT",
+		})
+		// The harness arms preventFocusDisruption on for every row. The binding holds the function
+		// object the provider stub captured, so a row has to change what that function resolves
+		// to rather than re-point the binding.
+		mockGetState.mockResolvedValue({
+			diagnosticsEnabled: true,
+			writeDelayMs: 1000,
+			experiments: { preventFocusDisruption: false },
+		})
+
+		mockedFsPromises.default.stat.mockImplementation((target: unknown) =>
+			String(target) === destKey ? Promise.reject(enoent) : Promise.resolve(_identityOf(String(target))),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "flag-off-move-destination-absent",
+		})
+
+		expect(mockTask.recordToolError).not.toHaveBeenCalled()
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(destKey, "modified file content\n", "utf8")
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(sourceKey)
 	})
 
 	it("move: rejects a partial source onto an observed destination before changing any state", async () => {
