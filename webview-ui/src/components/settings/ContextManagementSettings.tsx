@@ -798,6 +798,7 @@ export const ContextManagementSettings = ({
 											{t("settings:contextManagement.idleCondensing.idleTime.label")}
 										</span>
 										<Input
+											aria-label={t("settings:contextManagement.idleCondensing.idleTime.label")}
 											type="number"
 											min={0}
 											step={1}
