@@ -254,6 +254,9 @@ export class KimiCodeOAuthManager {
 			}
 			return false
 		}
+		// Install under a new generation: a delayed invalid_grant from an older refresh
+		// (whose captured generation is now stale) can no longer clear what this save put in.
+		this.credentialsGeneration++
 		this.credentials = credentials
 		this.state = { status: "authenticated" }
 		return true
@@ -299,7 +302,14 @@ export class KimiCodeOAuthManager {
 				return next.accessToken
 			})
 			.catch(async (error) => {
-				if (error instanceof KimiCodeOAuthError && error.code === "invalid_grant") {
+				// A stale refresh must not clear credentials a newer sign-in installed: the
+				// generation only changes when a save lands or credentials are cleared, so a
+				// mismatch here means this POST's verdict belongs to superseded credentials.
+				if (
+					error instanceof KimiCodeOAuthError &&
+					error.code === "invalid_grant" &&
+					generation === this.credentialsGeneration
+				) {
 					this.credentialsGeneration++
 					await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
 					this.credentials = null

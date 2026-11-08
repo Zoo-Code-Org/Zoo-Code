@@ -699,7 +699,56 @@ describe("KimiCodeOAuthManager", () => {
 		const controller = new AbortController()
 		const result = manager.getAccessToken(false, controller.signal)
 		controller.abort(new Error("cancelled by the caller"))
-
 		await expect(result).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("a delayed invalid_grant from a stale refresh keeps credentials a newer sign-in saved", async () => {
+		const { context, values } = createContext()
+		const key = "kimi-code-oauth-credentials"
+		values.set(
+			key,
+			JSON.stringify({
+				type: "kimi-code",
+				accessToken: "old",
+				refreshToken: "old-rotating",
+				expiresAt: 0,
+				tokenType: "Bearer",
+			}),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		// The refresh POST is parked: its invalid_grant verdict - and the credential
+		// clearing that follows it - lands only after the newer sign-in below.
+		let releaseRefresh: (response: Response) => void = () => {}
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementationOnce(
+			() =>
+				new Promise<Response>((resolve) => {
+					releaseRefresh = resolve
+				}),
+		)
+		const stale = manager.getAccessToken(false)
+		// Let the refresh POST actually start first: it captures its generation at POST start,
+		// and the interleaving under test is the stale verdict arriving after a newer install.
+		await new Promise((resolve) => setImmediate(resolve))
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(manager["refreshPromise"] !== null, "refresh started before the sign-in").toBe(true)
+		// A newer sign-in installs fresh credentials while the old POST is still in flight.
+		await manager["saveCredentials"]({
+			type: "kimi-code",
+			accessToken: "new",
+			refreshToken: "new-rotating",
+			expiresAt: Date.now() + 3_600_000,
+			tokenType: "Bearer",
+		})
+		releaseRefresh(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }))
+		// The stale refresh's own caller still settles (null: its generation lost the save
+		// race), but the verdict must not touch what the newer save installed.
+		await expect(stale).resolves.toBeNull()
+		expect(manager["credentials"]?.accessToken).toBe("new")
+		expect(manager.getState().status).toBe("authenticated")
+		expect(values.has(key)).toBe(true)
+		// The fresh token is served without a new POST: the newer credentials survived.
+		await expect(manager.getAccessToken(false)).resolves.toBe("new")
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
 	})
 })
