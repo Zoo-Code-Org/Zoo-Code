@@ -92,4 +92,30 @@ describe("acquireFileLock", () => {
 			await acquiredRelease?.()
 		}
 	}, 15_000)
+
+	it("hands the operation the caller's own spelling rather than the canonical one", async () => {
+		const root = await makeTemporaryDirectory()
+		const realDirectory = path.join(root, "real")
+		const aliasDirectory = path.join(root, "alias")
+		await fs.mkdir(realDirectory)
+		await fs.symlink(realDirectory, aliasDirectory, process.platform === "win32" ? "junction" : "dir")
+		const aliasPath = path.join(aliasDirectory, "settings.json")
+		const referentPath = path.join(realDirectory, "settings.json")
+
+		// The lock is keyed on the canonical path above, so an alias and its referent contend. The
+		// operation must still see the spelling it was called with: the delete path compares what it
+		// receives against names it built from its own string (the backup guard, the leftover
+		// prefix), and an alias makes the canonical spelling a different string for one file.
+		const seen: string[] = []
+		await withFileLock(aliasPath, async (lockedPath) => {
+			seen.push(lockedPath)
+			return undefined
+		})
+		await withFileLock(referentPath, async (lockedPath) => {
+			seen.push(lockedPath)
+			return undefined
+		})
+
+		expect(seen).toEqual([path.resolve(aliasPath), path.resolve(referentPath)])
+	})
 })
