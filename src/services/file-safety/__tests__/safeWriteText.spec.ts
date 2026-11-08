@@ -1083,5 +1083,43 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.unlink).mockResolvedValue(undefined)
 			await expect(flushPendingBackupRemovals()).resolves.toBe(1)
 		})
+		it("hands a caller-staged temp file back when the parent directory cannot be prepared", async () => {
+			const callerTemp = "/tmp/caller-staged-dir.tmp"
+			vi.mocked(fs.realpath).mockImplementation(async (p: unknown) => String(p))
+			vi.mocked(fs.lstat).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.mkdir).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/tmp/test-dir'"), { code: "EACCES" }),
+			)
+
+			await expect(
+				safeWriteText("/tmp/test-dir/target.txt", "payload", { tempPath: callerTemp, platform: "linux" }),
+			).rejects.toThrow("EACCES")
+
+			// Directory setup sits above the guarded region, same as target resolution: the
+			// rollback unlink cannot be reached from here, so the staged file has to be handed
+			// back by the same cleanup the refusal path uses.
+			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
+			expect(_backupUnlinkCalls()).toBe(0)
+		})
+
+		it("hands a caller-staged temp file back when the prepared directory fails access check", async () => {
+			const callerTemp = "/tmp/caller-staged-access.tmp"
+			vi.mocked(fs.realpath).mockImplementation(async (p: unknown) => String(p))
+			vi.mocked(fs.lstat).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied, access '/tmp/test-dir'"), { code: "EACCES" }),
+			)
+
+			await expect(
+				safeWriteText("/tmp/test-dir/target.txt", "payload", { tempPath: callerTemp, platform: "linux" }),
+			).rejects.toThrow("EACCES")
+
+			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
+			expect(_backupUnlinkCalls()).toBe(0)
+		})
 	})
 })

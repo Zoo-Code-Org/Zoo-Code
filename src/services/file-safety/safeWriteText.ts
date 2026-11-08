@@ -256,9 +256,19 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	}
 	const dirPath = path.dirname(targetPath)
 
-	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
-	await fs.mkdir(dirPath, { recursive: true })
-	await fs.access(dirPath)
+	// Ensure parent directory exists (mirrors safeWriteJson behaviour). Setup sits above the
+	// guarded region just like target resolution, so a failure here has to hand a
+	// caller-staged temp file back the same way: the rollback unlink inside the region is
+	// unreachable from a mkdir or access refusal.
+	try {
+		await fs.mkdir(dirPath, { recursive: true })
+		await fs.access(dirPath)
+	} catch (error) {
+		if (options?.tempPath) {
+			await fs.unlink(options.tempPath).catch(() => {})
+		}
+		throw error
+	}
 
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
