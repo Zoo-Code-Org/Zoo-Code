@@ -118,8 +118,14 @@ describe("caller-supplied staging path through a directory alias (" + ALIAS_TYPE
 			}
 			expect(failure).toBeInstanceOf(StagingPathError)
 			// The message quotes the referent spelling, which is the directory the write resolves to -
-			// the reason the old compare read an alias as containment failure.
-			expect(String(failure?.message)).toContain(fixture.referent)
+			// the reason the old compare read an alias as containment failure. The directory is
+			// canonicalized before it is compared, because the row is about which directory the
+			// message names, not about which spelling the operating system handed the test: on the
+			// hosted Windows runner os.tmpdir() is an 8.3 short name (C:\Users\RUNNER~1\AppData\
+			// Local\Temp) while canonicalDirKey reports the long spelling through realpath, and the
+			// two spellings name one directory. Comparing the raw mkdtemp output against the message
+			// made that row fail on a spelling.
+			expect(String(failure?.message)).toContain(await fs.realpath(fixture.referent))
 			expect(failure?.stagingPath).toBe(path.resolve(stagingPath))
 		} finally {
 			disposeFixture(fixture)
