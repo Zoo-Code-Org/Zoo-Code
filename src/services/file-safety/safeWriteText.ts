@@ -199,6 +199,31 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 		return absoluteFilePath
 	})
 }
+
+/**
+ * Stat a directory for the staging-containment comparison. undefined means the directory is not
+ * there, which is the one failure that carries information about containment: a supplied staging
+ * file cannot sit in a directory that does not exist, and the caller's spelling comparison decides.
+ * Any other failure is the guard losing its ability to decide, so it is reported as its own refusal
+ * rather than being read as containment.
+ */
+async function _statDirectoryForContainment(
+	directoryPath: string,
+	supplied: string,
+): Promise<fsSync.BigIntStats | undefined> {
+	try {
+		return await fs.stat(directoryPath, { bigint: true })
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") {
+			return undefined
+		}
+		throw new StagingPathError(
+			`Staging directory could not be compared with the target's directory (${directoryPath})`,
+			supplied,
+		)
+	}
+}
+
 /**
  * Distinguish "the target does not exist" from a real I/O failure (EACCES,
  * EIO, ...). The mode-preservation path may only fall back to the fresh-file
@@ -304,11 +329,32 @@ export async function safeWriteText(
 		// link points at, which is the same trust problem as writing through a
 		// dangling symlink in resolvePublishTarget.
 		const supplied = path.resolve(options.tempPath)
-		if (path.dirname(supplied) !== path.resolve(dirPath)) {
-			throw new StagingPathError(
-				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
-				supplied,
-			)
+		const suppliedDir = path.dirname(supplied)
+		const targetDir = path.resolve(dirPath)
+		// Containment is a claim about directories, not about strings. An alias root - a junction on
+		// Windows, a symlinked directory on POSIX - makes canonicalDirKey hand dirPath in the referent's
+		// spelling while the caller still holds its own, and a string compare of the two then refuses a
+		// staging file that sits physically inside the target's directory. Compare the directories by
+		// identity, through fs.stat with bigint: true for the same reason the two lstats below use it:
+		// on NTFS and ReFS a file identity can exceed Number.MAX_SAFE_INTEGER, and a rounded number makes
+		// two directories look different or two different directories look alike. The spelling compare is
+		// kept as the fast path in front of it and as the answer when a stat cannot be made; a stat that
+		// fails for any reason other than the directory not being there propagates, because a guard that
+		// reads "could not tell" as "contained" has stopped guarding.
+		if (suppliedDir !== targetDir) {
+			const suppliedDirStat = await _statDirectoryForContainment(suppliedDir, supplied)
+			const targetDirStat = await _statDirectoryForContainment(targetDir, supplied)
+			const sameDirectory =
+				suppliedDirStat !== undefined &&
+				targetDirStat !== undefined &&
+				suppliedDirStat.dev === targetDirStat.dev &&
+				suppliedDirStat.ino === targetDirStat.ino
+			if (!sameDirectory) {
+				throw new StagingPathError(
+					`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
+					supplied,
+				)
+			}
 		}
 		// BigInt stats: on NTFS/ReFS the file identity can exceed Number.MAX_SAFE_INTEGER, and
 		// a rounded number makes two different files look identical (rejecting a valid staging

@@ -18,6 +18,10 @@ vi.mock("fs/promises", () => ({
 	realpath: vi.fn(),
 	lstat: vi.fn(),
 	readlink: vi.fn(),
+	// Production reads the two directories through fs.stat (bigint) when the caller's directory spelling
+	// differs from the target's, so the mock has to carry the method. The default reports "not there", which
+	// is what a mocked path outside the target's directory already meant for these rows.
+	stat: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -85,6 +89,7 @@ function mockDefaults(): void {
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+	vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("no such directory"), { code: "ENOENT" }))
 }
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -1364,6 +1369,42 @@ describe("caller-supplied staging path", () => {
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
+	it("accepts a staging file spelled through an alias of the target's directory", async () => {
+		const aliasTarget = "/srv/alias/target.txt"
+		// An alias root: canonicalDirKey canonicalizes through realpath, so the write resolves to
+		// the referent while the caller still holds the alias spelling of the same directory.
+		vi.mocked(fs.realpath).mockResolvedValue("/srv/referent/target.txt")
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		const directoryStats = _fileStatsWithIdentity(1234n, 9n)
+		vi.mocked(fs.stat).mockResolvedValue(directoryStats)
+
+		await safeWriteText(aliasTarget, "data", { tempPath: "/srv/alias/x.tmp", platform: "linux" })
+
+		// The staging file was published, not refused: containment is about which directory it
+		// sits in, and these two spellings name one directory.
+		expect(fs.rename).toHaveBeenCalledWith("/srv/alias/x.tmp", "/srv/referent/target.txt")
+		// Both directories are read by identity, bigint for the same reason as the file stats.
+		const directoryLookups = vi.mocked(fs.stat).mock.calls.filter((c) => c[1] !== undefined)
+		expect(directoryLookups.length).toBe(2)
+		for (const c of directoryLookups) {
+			expect(c[1]).toEqual({ bigint: true })
+		}
+	})
+
+	it("rejects when a staging directory stat fails for a reason other than it being absent", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The spelling comparison is the fallback for a directory that is not there. An EACCES says
+		// nothing about containment, so it is reported instead of being read as a match or a
+		// mismatch: a guard that decides from an error it could not interpret has stopped guarding.
+		vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/other-dir/x.tmp", platform: "linux" }),
+		).rejects.toThrow(/could not be compared/)
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
 	it("creates no directory when a supplied staging path is rejected", async () => {
 		const targetPath = "/tmp/test-dir/nested-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
