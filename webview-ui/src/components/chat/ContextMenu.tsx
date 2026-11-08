@@ -290,6 +290,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
 	return (
 		<div
+			data-testid="context-menu"
 			style={{
 				position: "absolute",
 				bottom: "calc(100% - 10px)",

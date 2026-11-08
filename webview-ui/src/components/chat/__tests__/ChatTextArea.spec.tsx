@@ -715,6 +715,7 @@ describe("ChatTextArea", () => {
 
 				// Newest prompt first.
 				expect(container.textContent).toContain("Third prompt")
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
 
 				fireEvent.keyDown(textarea, { key: "Enter" })
 
@@ -928,7 +929,11 @@ describe("ChatTextArea", () => {
 				const textarea = container.querySelector("textarea")!
 
 				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
-				expect(container.textContent).not.toContain("Third prompt")
+
+				// The fixture has no prompts, so asserting on prompt text would pass
+				// even if the picker opened on a "No results" row. Assert the picker
+				// itself is absent.
+				expect(container.querySelector('[data-testid="context-menu"]')).toBeNull()
 
 				fireEvent.keyDown(textarea, { key: "Enter" })
 
