@@ -3,6 +3,8 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { execFile } from "child_process"
 
+import { getErrorCode } from "../../utils/errorCode"
+
 export interface SafeWriteTextOptions {
 	/**
 	 * When true, keep the old-file semantics without ever removing the target: the
@@ -142,10 +144,6 @@ function _stagingDir(dir: string): string {
 	return sd
 }
 
-function _fsyncFile(fd: number): void {
-	fsSync.fsyncSync(fd)
-}
-
 /** Save the DACL of *srcPath* to a dump file on Windows.
  * Returns true when the dump was written successfully; false otherwise.
  * Never throws — callers treat failure as "skip DACL handling". */
@@ -196,30 +194,19 @@ async function _restoreDaclWindows(
  */
 export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
 	return fs.realpath(absoluteFilePath).catch(async (error: unknown) => {
-		if (errorCode(error) !== "ENOENT") throw error
+		if (getErrorCode(error) !== "ENOENT") throw error
 		// ENOENT also covers a dangling symlink, which must never be written through.
 		// Only a lstat that also reports the path as absent may fall back to the
 		// given path; a real lstat failure (EACCES, EIO) says nothing about whether
 		// the path is a link, so falling back would write through a link we were
 		// simply not allowed to inspect.
 		const linkStat = await fs.lstat(absoluteFilePath).catch((lstatError: unknown) => {
-			if (errorCode(lstatError) === "ENOENT") return undefined
+			if (getErrorCode(lstatError) === "ENOENT") return undefined
 			throw lstatError
 		})
 		if (linkStat?.isSymbolicLink()) throw error
 		return absoluteFilePath
 	})
-}
-/**
- * Distinguish "the target does not exist" from a real I/O failure (EACCES,
- * EIO, ...). The mode-preservation path may only fall back to the fresh-file
- * default on ENOENT; any other failure is propagated, otherwise a restrictive
- * target (0o600) would be published with the default 0o644 through the rename.
- */
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as { code: unknown }).code)
-		: undefined
 }
 
 /**
@@ -245,7 +232,7 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const missing: string[] = []
 	for (;;) {
 		const canonical = await fs.realpath(cursor).catch((error: unknown) => {
-			if (errorCode(error) === "ENOENT") return undefined
+			if (getErrorCode(error) === "ENOENT") return undefined
 			throw error
 		})
 		if (canonical !== undefined) {
@@ -352,7 +339,7 @@ export async function safeWriteText(
 		// staging alias reach the commit and let cleanup delete the file it was meant to
 		// protect.
 		const targetStat = await fs.lstat(targetPath, { bigint: true }).catch((error: unknown) => {
-			if (errorCode(error) !== "ENOENT") {
+			if (getErrorCode(error) !== "ENOENT") {
 				throw new StagingPathError("Staging file could not be compared with the target", supplied)
 			}
 			return null
@@ -426,7 +413,7 @@ export async function safeWriteText(
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
 				targetExists = true
 			} catch (error: unknown) {
-				if (errorCode(error) !== "ENOENT") throw error
+				if (getErrorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the default
 			}
 			// openSync's creation mode is narrowed by the process umask, so an
@@ -445,7 +432,7 @@ export async function safeWriteText(
 				while (offset < buffer.length) {
 					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
 				}
-				_fsyncFile(fd)
+				fsSync.fsyncSync(fd)
 			} finally {
 				fsSync.closeSync(fd)
 			}
@@ -460,7 +447,7 @@ export async function safeWriteText(
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
 			} catch (error: unknown) {
-				if (errorCode(error) !== "ENOENT") throw error
+				if (getErrorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the temp's default mode
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
@@ -468,7 +455,7 @@ export async function safeWriteText(
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
-				_fsyncFile(fd)
+				fsSync.fsyncSync(fd)
 			} finally {
 				fsSync.closeSync(fd)
 			}
@@ -505,7 +492,7 @@ export async function safeWriteText(
 					// staging directory - so a refused publish strands neither.
 					throw new DaclInspectionError(targetPath, "save", null)
 				}
-			} else if (errorCode(accessError) !== "ENOENT") {
+			} else if (getErrorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but its access rights could not be read
 				// (EACCES, ...), so publishing would replace a file whose rights this call never
 				// learned. Same rule as the failed save above: refuse before anything is committed.
@@ -541,7 +528,7 @@ export async function safeWriteText(
 						// flag the staged temp file uses above.
 						const backupFd = fsSync.openSync(backupPath, "r+")
 						try {
-							_fsyncFile(backupFd)
+							fsSync.fsyncSync(backupFd)
 						} finally {
 							fsSync.closeSync(backupFd)
 						}
@@ -554,7 +541,7 @@ export async function safeWriteText(
 					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
-					if (errorCode(err) !== "ENOENT") throw err
+					if (getErrorCode(err) !== "ENOENT") throw err
 				}
 			}
 
@@ -567,7 +554,7 @@ export async function safeWriteText(
 				try {
 					const dirFd = fsSync.openSync(dirPath, "r")
 					try {
-						_fsyncFile(dirFd)
+						fsSync.fsyncSync(dirFd)
 					} finally {
 						fsSync.closeSync(dirFd)
 					}
