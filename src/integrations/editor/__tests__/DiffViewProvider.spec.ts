@@ -4011,6 +4011,222 @@ describe("DiffViewProvider", () => {
 			documents.length = 0
 		})
 
+		// The same verdict on the other teardown owner. This branch called revertDocument and threw the
+		// answer away: a buffer that stays dirty after the revert still holds the bytes the guard
+		// published, and the row below is the save teardown's version of the same state. The teardown
+		// now gives the buffer the same second chance the save teardown gives - close, reopen from the
+		// bytes) and reports which of the two outcomes it ended in, because the caller's next step
+		// differs: settled content with a live buffer still needs the buffer saved or discarded.
+		it("revertChanges() after a committed create reports the buffer it could not clear", async () => {
+			// A structural double: the buffer holds exactly the bytes the guard published, and the rows
+			// below make it dirty the way the state they describe does. The factory's object carries a
+			// mutable isDirty; the interface declares it read-only, so the double is held under the one
+			// property the rows write and cast to the interface once, at the boundary.
+			const buffer: { isDirty: boolean } = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+			})
+			const document = buffer as unknown as vscode.TextDocument // Structural double: the teardown reads getText, isDirty and save only.
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.length = 0
+			documents.push(document)
+			// The revert command ran and the buffer came back dirty: the double answers with the verdict
+			// revertDocument reads off isDirty, and the fixture keeps isDirty true so the two agree.
+			diffViewProvider["revertDocument"] = vi.fn().mockResolvedValue(false)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const reopen = vi.mocked(vscode.workspace.openTextDocument)
+			reopen.mockClear()
+			reopen.mockResolvedValue(document)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			await diffViewProvider.saveChanges(false)
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			// The save met a clean buffer; the cancellation meets the published bytes in a dirty one, which
+			// is the state this branch is entered with.
+			buffer.isDirty = true
+			vi.mocked(fs.unlink).mockClear()
+
+			const failure = await diffViewProvider.revertChanges().catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(CommittedWriteBufferConflictError)
+			// The detail names the state this teardown ended in; the guidance stays the shared one.
+			expect((failure as Error).message).toContain("could not be cleared")
+			expect((failure as Error).message).toContain("do not retry")
+			// The reconciliation ran: the buffer was closed and reopened from the published bytes
+			// before the teardown decided what to report.
+			expect(reopen).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider["closeFileTab"]).toHaveBeenCalled()
+			// The published file survives the cancellation, and the session still finalizes.
+			expect(fs.unlink).not.toHaveBeenCalledWith(mockTargetPath)
+			expect(diffViewProvider.isEditing).toBe(false)
+			documents.length = 0
+		})
+
+		// The other answer the verdict can produce. The reopen came back clean, so the buffer is no
+		// longer live over the published bytes and the only thing left to say is what the cancellation
+		// always means after a commit: the content is on disk and the edit must not be reapplied.
+		it("revertChanges() after a committed create reports the late cancellation when the reopen came back clean", async () => {
+			// A structural double: the buffer holds exactly the bytes the guard published, and the rows
+			// below make it dirty the way the state they describe does. The factory's object carries a
+			// mutable isDirty; the interface declares it read-only, so the double is held under the one
+			// property the rows write and cast to the interface once, at the boundary.
+			const buffer: { isDirty: boolean } = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+			})
+			const document = buffer as unknown as vscode.TextDocument // Structural double: the teardown reads getText, isDirty and save only.
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.length = 0
+			documents.push(document)
+			diffViewProvider["revertDocument"] = vi.fn().mockResolvedValue(false)
+			// Closing the tab discards the buffer, so the reopened document is the file's own clean
+			// buffer. This is the case the reconciliation exists to produce.
+			const closeFileTab = vi.fn().mockImplementation(async () => {
+				buffer.isDirty = false
+			})
+			diffViewProvider["closeFileTab"] = closeFileTab
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const reopen = vi.mocked(vscode.workspace.openTextDocument)
+			reopen.mockClear()
+			reopen.mockResolvedValue(document)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			await diffViewProvider.saveChanges(false)
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			// The save met a clean buffer; the cancellation meets the published bytes in a dirty one.
+			buffer.isDirty = true
+
+			const failure = await diffViewProvider.revertChanges().catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(CommittedWriteBufferConflictError)
+			expect((failure as Error).message).toContain(
+				"a cancellation arrived after the guarded publish had committed",
+			)
+			expect((failure as Error).message).not.toContain("could not be cleared")
+			expect(reopen).toHaveBeenCalledTimes(1)
+			documents.length = 0
+		})
+
+		// And the case where the verdict says the buffer is already clear. The second chance is a
+		// response to a refusal, not a step every cancellation takes: nothing was closed and reopened
+		// here, and the report is the ordinary one.
+		it("revertChanges() does not reopen the buffer the revert already cleared", async () => {
+			// A structural double: the buffer holds exactly the bytes the guard published, and the rows
+			// below make it dirty the way the state they describe does. The factory's object carries a
+			// mutable isDirty; the interface declares it read-only, so the double is held under the one
+			// property the rows write and cast to the interface once, at the boundary.
+			const buffer: { isDirty: boolean } = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+			})
+			const document = buffer as unknown as vscode.TextDocument // Structural double: the teardown reads getText, isDirty and save only.
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.length = 0
+			documents.push(document)
+			// The revert succeeded, which in revertDocument's terms means the buffer is no longer dirty.
+			diffViewProvider["revertDocument"] = vi.fn().mockImplementation(async () => {
+				buffer.isDirty = false
+				return true
+			})
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const reopen = vi.mocked(vscode.workspace.openTextDocument)
+			reopen.mockClear()
+			reopen.mockResolvedValue(document)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			await diffViewProvider.saveChanges(false)
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			// The save met a clean buffer; the cancellation meets the published bytes in a dirty one.
+			buffer.isDirty = true
+
+			const failure = await diffViewProvider.revertChanges().catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(CommittedWriteBufferConflictError)
+			expect(reopen).not.toHaveBeenCalled()
+			expect((failure as Error).message).toContain(
+				"a cancellation arrived after the guarded publish had committed",
+			)
+			expect((failure as Error).message).not.toContain("could not be cleared")
+			documents.length = 0
+		})
+
+		// The second chance failing on its own. This is a VS Code call inside a teardown whose whole
+		// job is to leave the session finalized, so a refusal here must not abort the pass. The flag is
+		// set before the attempt rather than only after it: a second chance that could not run left the
+		// buffer uncleared just as surely as one that ran and came back dirty.
+		it("revertChanges() reports the buffer it could not clear when the reopen itself is refused", async () => {
+			const buffer: { isDirty: boolean } = makeTextDocument({
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+			})
+			const document = buffer as unknown as vscode.TextDocument // Structural double: the teardown reads getText, isDirty and save only.
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.length = 0
+			documents.push(document)
+			diffViewProvider["revertDocument"] = vi.fn().mockResolvedValue(false)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			const reopen = vi.mocked(vscode.workspace.openTextDocument)
+			reopen.mockClear()
+			// Once, so the module double's own default is what the rest of the file keeps getting.
+			reopen.mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied, open 'mock-target-file.ts'"), { code: "EACCES" }),
+			)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "create"
+			diffViewProvider["originalContent"] = ""
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({ document })
+
+			await diffViewProvider.saveChanges(false)
+			expect(diffViewProvider["committedPublish"]?.content).toBe("content")
+			// The save met a clean buffer; the cancellation meets the published bytes in a dirty one.
+			buffer.isDirty = true
+			// saveChanges ran its own teardown on the way in, so the counts below are taken from the
+			// point the cancellation pass starts at.
+			closeFileTab.mockClear()
+			restorePreviewTabs.mockClear()
+			reopen.mockClear()
+
+			const failure = await diffViewProvider.revertChanges().catch((error: unknown) => error)
+			// The report is the committed-write conflict, not the reopen's refusal: the pass survived its
+			// own reconciliation and still told the caller what it knows.
+			expect(failure).toBeInstanceOf(CommittedWriteBufferConflictError)
+			expect((failure as Error).message).toContain("could not be cleared")
+			expect((failure as Error).message).not.toContain("EACCES")
+			expect(reopen).toHaveBeenCalledTimes(1)
+			expect(closeFileTab).toHaveBeenCalled()
+			// The tab work and the finalization still ran rather than being abandoned mid-pass.
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider.isEditing).toBe(false)
+			documents.length = 0
+		})
+
 		// The same gap on the other teardown owner: a rejected publish's discard cleanup never resets
 		// (the tool caller's error handling owns that), so a cancellation that only waited for it left
 		// the session mid-edit with nobody finalizing it.

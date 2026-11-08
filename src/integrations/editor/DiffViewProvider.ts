@@ -1031,13 +1031,44 @@ export class DiffViewProvider {
 		const committedAfterPublish =
 			this.committedPublish !== undefined && arePathsEqual(this.committedPublish.path, absolutePath)
 		const committedContent = this.committedPublish?.content
+
+		// Set inside the pass when the committed buffer survives every attempt to clear it; read by the
+		// report after the pass. A local, because only this cancellation's teardown can establish it.
+		let committedBufferUncleared = false
 		const ownedTeardown = await this.runTeardown(
 			async () => {
 				if (committedAfterPublish) {
 					// Clear the dirty flag from the published bytes rather than writing over them, and only
 					// while the buffer still holds exactly what landed: text typed after the accept survives.
 					if (updatedDocument.isDirty && updatedDocument.getText() === committedContent) {
-						await this.revertDocument(updatedDocument)
+						const reconciled = await this.revertDocument(updatedDocument)
+						if (!reconciled) {
+							// The verdict is load-bearing here for the same reason it is in the save teardown above
+							// (:811-:826): a buffer that stays dirty holds the bytes the guard published, and an
+							// ordinary save - VS Code's own file service, or a later write - can put them back over a
+							// newer file. Close and reopen from the published bytes, which is the same second chance
+							// that path gives, and remember whether it left the buffer dirty.
+							//
+							// The reason is recorded rather than thrown here: the tab work, the preview restore and
+							// the reset still have to run, and the report below is already placed after the pass for
+							// that reason. Throwing from inside the pass would leave a cancellation waiting on a
+							// teardown that had stopped half-way through the tabs.
+							// Fail-closed on the reopen itself. A second chance that could not run left the buffer
+							// uncleared just as surely as one that ran and came back dirty, and nothing here can
+							// prove otherwise, so the flag is set before the attempt rather than only after it.
+							committedBufferUncleared = true
+							try {
+								await this.closeFileTab(absolutePath)
+								await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+								committedBufferUncleared =
+									this.findReconciliationDocument(absolutePath)?.isDirty === true
+							} catch {
+								// best-effort: the flag already says the only thing the failure proves, and the pass
+								// has to go on to the tab work, the preview restore and the reset. A teardown that
+								// stopped at its own reconciliation would abandon a session whose caller is waiting
+								// for it to finalize.
+							}
+						}
 					}
 					await this.closeOwnDiffView(absolutePath)
 					// The tab rules are the modify branch's, because the tab situation is the same: a
@@ -1140,7 +1171,13 @@ export class DiffViewProvider {
 			// same signal, because both were waiting on this outcome.
 			throw new CommittedWriteBufferConflictError(
 				absolutePath,
-				"revertChanges: a cancellation arrived after the guarded publish had committed.",
+				// The detail says which of the two things happened: the cancellation arriving late, or the
+				// buffer surviving the attempt to clear it. They are different states and the caller's next
+				// step differs - one is settled content the caller must not reapply, the other is settled
+				// content with a live buffer that can still be saved over it.
+				committedBufferUncleared
+					? "revertChanges: the publish committed and the open buffer could not be cleared from its content."
+					: "revertChanges: a cancellation arrived after the guarded publish had committed.",
 			)
 		}
 	}
