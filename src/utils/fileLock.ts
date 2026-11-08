@@ -54,35 +54,44 @@ function nearestExistingDirectory(absolutePath: string): { directory: string; re
 }
 
 /**
- * The spelling a lock artefact should be created under: the canonical spelling of the
- * nearest existing directory, re-joined with the components that do not exist yet. This is
- * what makes an 8.3 alias and its long form take one lock, and it stays a spelling - the key
- * above is the identity, and callers that compare locks compare that.
+ * The identity a lock is keyed on: the device and inode of the nearest directory that actually
+ * exists, plus the components below it that do not exist yet. An 8.3 alias and its long form, a
+ * link and its target, and a case variant on a case-insensitive volume all arrive at the same
+ * identity, whether or not the leaf has been created. That is the case a canonical spelling
+ * cannot serve: a leaf that does not exist yet has no canonical spelling, which is what the
+ * `realpath: false` in `acquireFileLock` is there for. And nothing here rewrites a caller's
+ * path - the key is for comparing locks, never for opening files - so the strings callers hand
+ * to unlink and readFile stay the strings those callers built.
  */
-export function canonicalLockPath(filePath: string): string {
+export function canonicalLockKey(filePath: string): string {
 	const absolute = path.resolve(filePath)
-	if (statIdentity(absolute) !== null) {
-		try {
-			return fs.realpathSync.native(absolute)
-		} catch {
-			return absolute
-		}
-	}
 	const { directory, relative } = nearestExistingDirectory(absolute)
-	let canonicalDirectory = directory
-	try {
-		canonicalDirectory = fs.realpathSync.native(directory)
-	} catch {
-		canonicalDirectory = directory
+	const identity = statIdentity(directory)
+	if (identity === null) {
+		// Not even a root of the path exists yet, so there is no identity to key on and the
+		// resolved path is the one thing every caller of it computes alike.
+		return absolute
 	}
-	return relative.length === 0 ? canonicalDirectory : path.join(canonicalDirectory, ...relative)
+	return identity + ":" + relative.join("/")
+}
+
+/**
+ * Where the artefact lives: beside the file in the caller's own spelling. The key above is the
+ * identity, and the artefact stays a path, because `safeWriteJson` and the interruption tests
+ * address `<file>.lock` directly - moving it is what made a green suite red, so the location is
+ * pinned by a test rather than left to taste.
+ */
+function lockArtefactPath(absolutePath: string): string {
+	return absolutePath + ".lock"
 }
 
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
-	const absoluteFilePath = canonicalLockPath(filePath)
+	const absoluteFilePath = path.resolve(filePath)
+	const lockfilePath = lockArtefactPath(absoluteFilePath)
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
-		return await lockfile.lock(absoluteFilePath, {
+		return await lockfile.lock(canonicalLockKey(absoluteFilePath), {
+			lockfilePath,
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
@@ -124,7 +133,7 @@ export async function withFileLock<T>(
 	operation: (absoluteFilePath: string) => Promise<T>,
 	options?: FileLockOptions,
 ): Promise<T> {
-	const absoluteFilePath = canonicalLockPath(filePath)
+	const absoluteFilePath = path.resolve(filePath)
 	const releaseLock = await acquireFileLock(absoluteFilePath, options)
 
 	let result: T
