@@ -1044,6 +1044,9 @@ describe("safeWriteText", () => {
 			expect(_backupUnlinkCalls()).toBe(0)
 			expect(fs.mkdir).not.toHaveBeenCalled()
 			expect(fs.rename).not.toHaveBeenCalled()
+			// Same convention as the two directory-setup tests below, extended to the sync write step:
+			// this refusal happens before any of the write work.
+			expect(fsSync.openSync).not.toHaveBeenCalled()
 		})
 		it("fixes the generated staging file's mode with fchmod so the umask cannot narrow it", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -1102,6 +1105,13 @@ describe("safeWriteText", () => {
 			// back by the same cleanup the refusal path uses.
 			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
 			expect(_backupUnlinkCalls()).toBe(0)
+			// Directory setup sits above the guarded region, so a refusal here has to stop before any
+			// write work: a failure that fell through into the write would still hand the staged file
+			// back and still throw EACCES, and only the absence of the write tells those two shapes
+			// apart.
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("hands a caller-staged temp file back when the prepared directory fails access check", async () => {
@@ -1120,6 +1130,13 @@ describe("safeWriteText", () => {
 
 			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
 			expect(_backupUnlinkCalls()).toBe(0)
+			// Directory setup sits above the guarded region, so a refusal here has to stop before any
+			// write work: a failure that fell through into the write would still hand the staged file
+			// back and still throw EACCES, and only the absence of the write tells those two shapes
+			// apart.
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
 })
