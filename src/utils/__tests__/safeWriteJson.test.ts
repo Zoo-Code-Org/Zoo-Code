@@ -1060,6 +1060,22 @@ describe("safeWriteJson", () => {
 		},
 	)
 
+	// The same shape with no symlink involved, so it runs on every lane including the Windows one:
+	// the confined scope directory does not exist yet, and safeWriteJson creates the missing
+	// parent itself, below the confinement check. The identity captured for the post-commit
+	// re-check therefore cannot come from the re-joined scope path, which no name occupies
+	// yet, so it is taken from the nearest directory that does exist.
+	test("confines a write whose scope directory does not exist yet, with no symlink involved", async () => {
+		const base = path.join(tempDir, "first-run-project")
+		await fs.mkdir(base)
+		const scope = path.join(base, "nested")
+		const target = path.join(scope, "mcp.json")
+
+		await safeWriteJson(target, { mcpServers: {} }, { confineTo: scope })
+
+		expect(await readFileContent(target)).toEqual({ mcpServers: {} })
+	})
+
 	test.skipIf(process.platform === "win32")(
 		"preserves a restrictive 0o600 target mode through the atomic publish",
 		async () => {

@@ -114,12 +114,18 @@ function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): stri
  * scope path that itself runs through a symlink (macOS /var -> /private/var is the
  * common case) would compare lexically against a resolved target and reject every
  * legitimate in-scope write. When the scope does not exist yet, the nearest
- * existing ancestor is resolved and the remainder re-appended.
+ * existing ancestor is resolved and the remainder re-appended. The existing ancestor
+ * is returned alongside the re-joined root because the re-joined remainder has no
+ * on-disk identity yet - the write creates it below the confinement check - so a
+ * caller that needs an identity must take it from the prefix that does exist.
  */
-async function _resolveScopeRoot(confineTo: string): Promise<string> {
+type ResolvedScopeRoot = { root: string; existingAncestor: string }
+
+async function _resolveScopeRoot(confineTo: string): Promise<ResolvedScopeRoot> {
 	const lexical = path.resolve(confineTo)
 	try {
-		return await fs.realpath(lexical)
+		const real = await fs.realpath(lexical)
+		return { root: real, existingAncestor: real }
 	} catch (error: unknown) {
 		// Only a missing path means "walk up and re-join". EACCES or ELOOP means the
 		// scope cannot be canonicalized at all, and continuing would build a partly
@@ -133,13 +139,13 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
 		while (true) {
 			const parent = path.dirname(ancestor)
 			if (parent === ancestor) {
-				return lexical
+				return { root: lexical, existingAncestor: lexical }
 			}
 			missing.push(path.basename(ancestor))
 			ancestor = parent
 			try {
 				const real = await fs.realpath(ancestor)
-				return path.join(real, ...missing.reverse())
+				return { root: path.join(real, ...missing.reverse()), existingAncestor: real }
 			} catch (innerError: unknown) {
 				if (getErrorCode(innerError) !== "ENOENT") {
 					throw innerError
@@ -252,7 +258,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// a directory renamed out from under a confined write and replaced at the same
 	// spelling is a different directory, and only an identity comparison can tell
 	// that the published bytes no longer sit in the directory the caller named.
-	let authorizedScopeRoot: { root: string; dev: bigint; ino: bigint } | undefined
+	let authorizedScopeRoot: { root: string; identityOf: string; dev: bigint; ino: bigint } | undefined
 
 	// Lock key: the symlink referent when the path is an existing symlink, so a
 	// symlink alias and its referent share one lock. The key must be computable
@@ -270,10 +276,24 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// ConfinedPathEscapeError). Repeated on the resolved publish target inside the
 	// lock, since a peer writer may move the referent in between.
 	if (confinementRoot !== undefined) {
-		const scopeRoot = await _resolveScopeRoot(confinementRoot)
-		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
-		const rootIdentity = await fs.stat(scopeRoot, { bigint: true })
-		authorizedScopeRoot = { root: scopeRoot, dev: rootIdentity.dev, ino: rootIdentity.ino }
+		const resolvedScope = await _resolveScopeRoot(confinementRoot)
+		const scopeRoot = resolvedScope.root
+		_assertWithinScope(absoluteFilePath, (await _resolveScopeRoot(lockKey)).root, scopeRoot)
+		// The identity is taken from the deepest directory that actually exists, not from the
+		// re-joined scope root: _resolveScopeRoot resolves the nearest existing ancestor on
+		// purpose and the parent-directory creation below is what brings the remainder into
+		// being, so a confined first-run write - a scope the caller declared but nobody has
+		// created yet - had no name to stat here and threw a raw ENOENT instead of writing.
+		// Containment of the remainder is still decided by name on the resolved publish
+		// target, at the commit point and in the teardown check below.
+		const identityOf = resolvedScope.existingAncestor
+		const rootIdentity = await fs
+			.stat(identityOf, { bigint: true })
+			.catch((error: unknown) => (getErrorCode(error) === "ENOENT" ? undefined : Promise.reject(error)))
+		authorizedScopeRoot =
+			rootIdentity === undefined
+				? undefined
+				: { root: scopeRoot, identityOf, dev: rootIdentity.dev, ino: rootIdentity.ino }
 	}
 
 	// Ensure directory structure exists with improved reliability
@@ -343,8 +363,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 				break
 			}
 			if (confinementRoot !== undefined) {
-				const scopeRoot = await _resolveScopeRoot(confinementRoot)
-				_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(recomputedLockKey), scopeRoot)
+				const scopeRoot = (await _resolveScopeRoot(confinementRoot)).root
+				_assertWithinScope(absoluteFilePath, (await _resolveScopeRoot(recomputedLockKey)).root, scopeRoot)
 			}
 			await releaseLock()
 			releaseLock = async () => {}
@@ -369,8 +389,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// re-resolves the tree at rename time. See the confineTo option doc for what the
 		// two outcomes of that window are and why neither is claimed by this option.
 		if (confinementRoot !== undefined) {
-			const scopeRoot = await _resolveScopeRoot(confinementRoot)
-			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
+			const scopeRoot = (await _resolveScopeRoot(confinementRoot)).root
+			_assertWithinScope(absoluteFilePath, (await _resolveScopeRoot(resolvedTargetPath)).root, scopeRoot)
 		}
 
 		// Heal any state an interrupted previous write left behind: an absent
@@ -484,8 +504,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// replaces the file it lands on, so the undo below is what keeps the escaped publish
 		// from leaving our bytes in place of somebody else's.)
 		if (confinementRoot !== undefined) {
-			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
-			const scopeRoot = authorizedScopeRoot?.root ?? (await _resolveScopeRoot(confinementRoot))
+			const publishedPath = (await _resolveScopeRoot(resolvedTargetPath)).root
+			const scopeRoot = authorizedScopeRoot?.root ?? (await _resolveScopeRoot(confinementRoot)).root
 			try {
 				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
 				// Spelling is not containment: compare the authorized root's identity with
@@ -494,7 +514,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 				// in a different directory than the one this write authorized under its lock.
 				const authorized = authorizedScopeRoot
 				if (authorized) {
-					const liveRoot = await fs.stat(authorized.root, { bigint: true }).catch(() => undefined)
+					const liveRoot = await fs.stat(authorized.identityOf, { bigint: true }).catch(() => undefined)
 					if (!liveRoot || liveRoot.dev !== authorized.dev || liveRoot.ino !== authorized.ino) {
 						throw new ConfinedPathEscapeError(absoluteFilePath, publishedPath, authorized.root)
 					}
@@ -535,8 +555,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		if (confinementRoot !== undefined && resolvedTargetPath !== undefined) {
 			let publishedPath: string | undefined
 			try {
-				publishedPath = await _resolveScopeRoot(resolvedTargetPath)
-				_assertWithinScope(absoluteFilePath, publishedPath, await _resolveScopeRoot(confinementRoot))
+				publishedPath = (await _resolveScopeRoot(resolvedTargetPath)).root
+				_assertWithinScope(absoluteFilePath, publishedPath, (await _resolveScopeRoot(confinementRoot)).root)
 			} catch (checkError: unknown) {
 				if (checkError instanceof ConfinedPathEscapeError && publishedPath !== undefined) {
 					await undoEscapedPublish(publishedPath, stagedBytes)
