@@ -181,12 +181,12 @@ function calculateStats(durations: number[]) {
 }
 
 // Run performance test for a specific function
-function runPerformanceTest(
+function runPerformanceTest<T extends unknown[]>(
 	name: string,
-	fn: (input: string, ...args: any[]) => string,
+	fn: (input: string, ...args: T) => string,
 	input: string,
 	iterations: number,
-	args: any[] = [],
+	...args: T
 ) {
 	console.log(`\nTesting ${name}...`)
 
@@ -360,7 +360,7 @@ function runBenchmark() {
 		runPerformanceTest("applyRunLengthEncoding", applyRunLengthEncoding, testData, iterations)
 
 		console.log("\n--- Function 3: truncateOutput ---")
-		runPerformanceTest("truncateOutput", truncateOutput, testData, iterations, [lineLimit])
+		runPerformanceTest("truncateOutput", truncateOutput, testData, iterations, lineLimit)
 
 		// Run baseline test to measure variance between identical runs
 		runBaselineTest(testData, Math.max(5, Math.floor(iterations / 4)))

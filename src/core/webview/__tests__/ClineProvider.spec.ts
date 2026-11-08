@@ -15,6 +15,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type RooCodeSettings,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -783,6 +784,44 @@ describe("ClineProvider", () => {
 			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
 			expect(tab.postMessage).not.toHaveBeenCalled()
 		})
+
+		it.each([
+			{
+				message: {
+					type: "diagnosticsResponse",
+					requestId: "request-1",
+					diagnostics: { capturedAt: "2026-11-01T00:00:00.000Z" },
+				},
+				routed: true,
+			},
+			{
+				message: { type: "diagnosticsResponse", diagnostics: { capturedAt: "2026-11-01T00:00:00.000Z" } },
+				routed: false,
+			},
+			{ message: { type: "themeFixtureProbeResponse", requestId: "request-1" }, routed: false },
+		] satisfies { message: WebviewMessage; routed: boolean }[])(
+			"routes $message to the diagnostics broker only when addressed",
+			async ({ message, routed }) => {
+				const handler = vi
+					.spyOn(await import("../webviewMessageHandler"), "webviewMessageHandler")
+					.mockResolvedValue(undefined)
+				const resolve = vi.spyOn(provider["diagnosticsRequestBroker"], "resolve")
+				try {
+					sidebar.messages.fire(message)
+					if (routed) {
+						expect(resolve).toHaveBeenCalledExactlyOnceWith("request-1", message.diagnostics)
+						expect(handler).not.toHaveBeenCalled()
+					} else {
+						expect(resolve).not.toHaveBeenCalled()
+						expect(handler).toHaveBeenCalledOnce()
+						expect(handler.mock.calls[0].slice(0, 2)).toEqual([provider, message])
+					}
+				} finally {
+					handler.mockRestore()
+					resolve.mockRestore()
+				}
+			},
+		)
 
 		test("background messages reach the provider handler without changing the last focused chat", async () => {
 			sidebar.messages.fire({ type: "webviewDidFocus" })
@@ -4001,6 +4040,39 @@ describe("ClineProvider", () => {
 		},
 	)
 
+	describe("display settings written through setValues and a task's configuration", () => {
+		const hand = (values: Record<string, unknown>) => values as unknown as RooCodeSettings
+
+		it("stores valid values as they are", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+
+			await provider.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+
+			expect(setValues).toHaveBeenCalledWith({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+		})
+
+		it("ignores an invalid value, keeps the others, and logs which", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			const log = vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider.setValues(hand({ timeFormat: "13h", dateFormat: "dmy", mode: "code" }))
+
+			expect(setValues).toHaveBeenCalledWith({ dateFormat: "dmy", mode: "code" })
+			expect(log).toHaveBeenCalledWith("[setValues] Ignored an invalid value for timeFormat")
+		})
+
+		it("applies the same check to the configuration of a new task", async () => {
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			await provider
+				.createTask("hello", undefined, undefined, {}, hand({ showRelativeTimes: "yes", mode: "code" }))
+				.catch(() => undefined) // what happens after the configuration is written is not under test
+
+			expect(setValues).toHaveBeenCalledWith({ mode: "code" })
+		})
+	})
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 
@@ -4046,12 +4118,146 @@ describe("ClineProvider", () => {
 		expect(state.allowedReadFiles).toEqual(["notes.md"])
 	})
 
+	describe("prompt cache TTL round trip", () => {
+		// The provider-settings route: the knob rides `apiConfiguration`, so the
+		// round trip is the profile write plus the state post, with no dedicated
+		// message type and no settings-specific branch in the message handler.
+		test("a saved 1h survives a fresh getStateToPostToWebview payload", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.upsertProviderProfile("ttl-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+				apiKey: "test-key",
+				promptCacheTtl: "1h",
+			})
+
+			// A fresh read, not the in-memory value the save path just wrote: this is
+			// the "saved control reverts visually" case the checklist calls out.
+			const posted = await provider.getStateToPostToWebview()
+
+			expect(posted.apiConfiguration.promptCacheTtl).toBe("1h")
+			expect((await provider.getState()).apiConfiguration.promptCacheTtl).toBe("1h")
+		})
+
+		test("an unset knob stays absent rather than becoming an explicit 5m", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.upsertProviderProfile("default-ttl-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+				apiKey: "test-key",
+			})
+
+			const posted = await provider.getStateToPostToWebview()
+
+			// Consumers apply the vendor default, so the stored value must be absent
+			// rather than a literal "5m" that would look like a user choice.
+			expect(posted.apiConfiguration.promptCacheTtl).toBeUndefined()
+			expect(posted.apiConfiguration).not.toHaveProperty("promptCacheTtl", "5m")
+		})
+
+		test("a hand-edited 1h for a model without the capability is stored, not silently rewritten", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// MiniMax caches prompts but advertises no TTL class. The profile can only
+			// have been written by hand or imported, and the save path must keep what
+			// the user stored: capability is enforced where the request is built (the
+			// emitter fails closed), so a save-time rewrite would be a second, silent
+			// source of truth for the same rule.
+			await provider.upsertProviderProfile("hand-edited-profile", {
+				apiProvider: providerIdentifiers.minimax,
+				apiKey: "test-key",
+				promptCacheTtl: "1h",
+			})
+
+			const posted = await provider.getStateToPostToWebview()
+
+			expect(posted.apiConfiguration.promptCacheTtl).toBe("1h")
+		})
+	})
+
 	test("getStateToPostToWebview defaults allowed read files to an empty list", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	describe("date and time display settings", () => {
+		const defaults = { timeFormat: "auto", dateFormat: "auto", showRelativeTimes: true }
+
+		/** Saves through the real `updateSettings` handler, as the settings view does. */
+		const save = async (updatedSettings: Record<string, unknown>) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls[0][0]
+			await messageHandler({ type: "updateSettings", updatedSettings })
+		}
+
+		test.each(Object.entries(defaults))("%s is %j when it was never saved", async (key, expected) => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(await provider.getState()).toMatchObject({ [key]: expected })
+			expect(await provider.getStateToPostToWebview()).toMatchObject({ [key]: expected })
+		})
+
+		test.each([
+			["timeFormat", "12h"],
+			["timeFormat", "24h"],
+			["timeFormat", "auto"],
+			["dateFormat", "mdy"],
+			["dateFormat", "dmy"],
+			["dateFormat", "ymd"],
+			["dateFormat", "auto"],
+			["showRelativeTimes", true],
+			["showRelativeTimes", false],
+		])("a saved %s of %j is stored and returned to the webview", async (key, value) => {
+			mockPostMessage.mockClear()
+			await save({ [key]: value })
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(key, value)
+			expect(await provider.getState()).toMatchObject({ [key]: value })
+			expect(await provider.getStateToPostToWebview()).toMatchObject({ [key]: value })
+			// The open webview is told, so the saved value does not revert on screen.
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state", state: expect.objectContaining({ [key]: value }) }),
+			)
+		})
+
+		test("the state refresh after a save reaches the active webview with the saved time format", async () => {
+			mockPostMessage.mockClear()
+
+			await save({ timeFormat: "24h" })
+
+			const posted: unknown[][] = mockPostMessage.mock.calls
+			const states = posted
+				.map(([message]) => message as { type?: string; state?: { timeFormat?: string } })
+				.filter((message) => message.type === "state")
+			expect(states.length).toBeGreaterThan(0)
+			expect(states.at(-1)?.state?.timeFormat).toBe("24h")
+		})
+
+		test("an explicit false is kept, not replaced by the default of true", async () => {
+			await save({ showRelativeTimes: false })
+
+			expect((await provider.getState()).showRelativeTimes).toBe(false)
+			expect((await provider.getStateToPostToWebview()).showRelativeTimes).toBe(false)
+		})
+
+		test("all three are saved together and returned together", async () => {
+			await save({ timeFormat: "24h", dateFormat: "dmy", showRelativeTimes: false })
+
+			const expected = { timeFormat: "24h", dateFormat: "dmy", showRelativeTimes: false }
+			expect(await provider.getState()).toMatchObject(expected)
+			expect(await provider.getStateToPostToWebview()).toMatchObject(expected)
+		})
+
+		test("saving one setting leaves the others at their defaults", async () => {
+			await save({ timeFormat: "12h" })
+
+			expect(await provider.getStateToPostToWebview()).toMatchObject({ ...defaults, timeFormat: "12h" })
+		})
 	})
 
 	test("getState returns the saved allowed write files", async () => {
@@ -7740,6 +7946,82 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("retries a transiently missing API history before returning an empty conversation", async () => {
+			const historyItem = {
+				id: "retry-api-history",
+				task: "test task",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			let reads = 0
+			vi.mocked(fsp.readFile).mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				if (++reads === 1) throw Object.assign(new Error("Replacement in progress"), { code: "ENOENT" })
+				return JSON.stringify([{ role: "assistant", content: "committed" }])
+			})
+
+			const result = await provider.getTaskWithId(historyItem.id)
+
+			expect(result.apiConversationHistory).toEqual([{ role: "assistant", content: "committed" }])
+		})
+
+		it.each(["ENOENT", "EACCES"])("returns empty history after %s without removing the task", async (code) => {
+			const item = {
+				id: "failed-api-read",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			const read = vi.mocked(fsp.readFile)
+			let reads = 0
+			read.mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				reads++
+				throw Object.assign(new Error("read failed"), { code })
+			})
+			const result = await provider.getTaskWithId(item.id)
+			expect(result.apiConversationHistory).toEqual([])
+			expect(provider.taskHistoryStore.get(item.id)).toEqual(item)
+			expect(reads).toBe(code === "ENOENT" ? 2 : 1)
+		})
+
+		it("aggregates parent and child costs without reading API history", async () => {
+			const parent = {
+				id: "cost-parent",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 2,
+				childIds: ["cost-child"],
+			}
+			provider.taskHistoryStore["cache"].set(parent.id, parent)
+			provider.taskHistoryStore["cache"].set("cost-child", {
+				...parent,
+				id: "cost-child",
+				totalCost: 3,
+				childIds: [],
+			})
+			provider["taskHistoryStoreInitialized"] = true
+			const read = vi.spyOn(provider, "getTaskWithId")
+			const result = await provider.getTaskWithAggregatedCosts(parent.id)
+			expect(result.aggregatedCosts.totalCost).toBe(5)
+			expect(read).not.toHaveBeenCalled()
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",

@@ -1,6 +1,7 @@
 import * as path from "path"
-import * as lockfile from "proper-lockfile"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import { resolveLockKey } from "../services/file-safety/safeWriteText"
+import * as lockfile from "proper-lockfile"
 
 /**
  * Shared staleness window for per-file advisory locks. This module owns the
@@ -9,6 +10,16 @@ import { resolveLockKey } from "../services/file-safety/safeWriteText"
  */
 export const LOCK_STALE_MS = 31_000
 
+const RECOVERY_RETRY_MS = 1000
+const RECOVERY_GRACE_MS = 4000
+
+export interface FileLockOptions {
+	/** Recovery may wait out a crashed writer's staleness window without stealing a live lock. */
+	waitForStaleLock?: boolean
+	/** Startup scans defer locked files instead of waiting under the store mutex. */
+	immediate?: boolean
+}
+
 /**
  * Acquire the advisory lock for one file path using the exact protocol
  * `safeWriteJson` uses, so operations that hold this lock serialize with
@@ -16,20 +27,30 @@ export const LOCK_STALE_MS = 31_000
  * returned function exactly once and must not acquire the same lock again
  * while holding it.
  */
-export async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
+export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
 	const absoluteFilePath = path.resolve(filePath)
+	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
+			retries: options?.immediate
+				? 0
+				: options?.waitForStaleLock
+					? {
+							retries: Math.ceil((LOCK_STALE_MS + RECOVERY_GRACE_MS) / RECOVERY_RETRY_MS),
+							factor: 1,
+							minTimeout: RECOVERY_RETRY_MS,
+							maxTimeout: RECOVERY_RETRY_MS,
+						}
+					: {
+							// Configuration for retrying lock acquisition
+							retries: 5, // Number of retries after the initial attempt
+							factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
+							minTimeout: 100, // Minimum time to wait before the first retry (in ms)
+							maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
+						},
 			onCompromised: (err) => {
 				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
 				throw err
@@ -50,6 +71,7 @@ export async function acquireFileLock(filePath: string): Promise<() => Promise<v
 export async function withFileLock<T>(
 	filePath: string,
 	operation: (absoluteFilePath: string) => Promise<T>,
+	options?: FileLockOptions,
 ): Promise<T> {
 	const absoluteFilePath = path.resolve(filePath)
 	// Lock the canonical key - the same one safeWriteJson computes - so a symlink
@@ -62,7 +84,7 @@ export async function withFileLock<T>(
 	// semantics - unlinking the referent instead of the alias would delete a
 	// different directory entry.
 	const lockKey = await resolveLockKey(absoluteFilePath)
-	const releaseLock = await acquireFileLock(lockKey)
+	const releaseLock = await acquireFileLock(lockKey, options)
 
 	let result: T
 	try {

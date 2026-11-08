@@ -3,15 +3,22 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import { resolveLockKey, resolvePublishTarget } from "../services/file-safety/safeWriteText"
+
+import { getErrorCode } from "./errorCode"
 import { acquireFileLock } from "./fileLock"
-import {
-	DaclRestoreError,
-	PostCommitDurabilityError,
-	resolveLockKey,
-	resolvePublishTarget,
-	safeWriteText,
-	type SafeWriteTextOptions,
-} from "../services/file-safety/safeWriteText"
+import { recoverInterruptedReplacement } from "./jsonFileRecovery"
+
+/**
+ * Stages reported through the optional `trace` callback. They mark the
+ * replacement-protocol steps that matter when diagnosing interrupted or
+ * failing writes: the recovery pass, the temp-file write, the backup rename
+ * of the EPERM fallback, the commit rename, and completion.
+ */
+export type SafeWriteJsonTraceStage =
+	"recover" | "write-start" | "backup-rename" | "replacement-rename" | "write-complete"
+
+export type SafeWriteJsonTrace = (event: { stage: SafeWriteJsonTraceStage; detail?: string }) => void
 
 /**
  * Options for safeWriteJson function
@@ -35,6 +42,12 @@ export interface SafeWriteJsonOptions {
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
 
+	/**
+	 * When provided, receives one event per replacement-protocol step (see
+	 * SafeWriteJsonTraceStage). Callers such as the task-message save use it
+	 * to emit diagnostic trace lines; it never influences the write itself.
+	 */
+	trace?: SafeWriteJsonTrace
 	/**
 	 * Restrict the write to a directory. The publish target is resolved through
 	 * symlinks before this check runs, so a caller that picked the path from a
@@ -79,6 +92,13 @@ export class ConfinedPathEscapeError extends Error {
 		)
 		this.name = "ConfinedPathEscapeError"
 	}
+}
+
+function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): string {
+	return path.join(
+		path.dirname(absoluteFilePath),
+		`.${path.basename(absoluteFilePath)}.${kind}_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+	)
 }
 
 /**
@@ -151,6 +171,16 @@ function _scopeErrorCode(error: unknown): string | undefined {
  * this single decision, so they can never disagree about whether a scope is
  * active.
  */
+function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string): string | undefined {
+	if (confineTo === undefined) {
+		return undefined
+	}
+	if (confineTo.trim() === "") {
+		throw new ConfinedPathEscapeError(requestedPath, requestedPath, confineTo)
+	}
+	return confineTo
+}
+
 /**
  * Undo exactly the file this write published at the escaped location.
  *
@@ -182,22 +212,14 @@ export async function undoEscapedPublish(publishedPath: string, expectedBytes: B
 	await fs.unlink(publishedPath).catch(() => {})
 }
 
-function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string): string | undefined {
-	if (confineTo === undefined) {
-		return undefined
-	}
-	if (confineTo.trim() === "") {
-		throw new ConfinedPathEscapeError(requestedPath, requestedPath, confineTo)
-	}
-	return confineTo
-}
-
 /**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
- * - Writes to a temporary file first via JsonStreamStringify streaming.
- * - If the target file exists, it's backed up before being replaced.
+ * - Recovers an interrupted previous write before touching the file: restores an orphaned backup when the canonical path is absent, and removes leftover temp files.
+ * - Writes to a temporary file first, then commits it with a single atomic rename, so the committed target stays readable through an interrupted write.
+ * - When a single rename over the target fails with EPERM (a reader holds the file open on Windows), falls back to backing the target up before replacing it.
+ * - With confineTo declared, refuses a publish whose resolved target lands outside that directory, before the lock and again under it.
  * - Attempts to roll back and clean up in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
@@ -245,20 +267,34 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
 	}
 
+	// Ensure directory structure exists with improved reliability
 	try {
+		// Create directory with recursive option
 		await fs.mkdir(dirPath, { recursive: true })
+
+		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
 	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
 
-	// immediately, and releaseLock stays a no-op so the finally block does not try
-	// to release an unacquired lock.
+	// Acquire the lock before any file operations. `acquireFileLock` owns the
+	// shared advisory lock protocol, so callers that lock the same path with
+	// it (for example task-history deletion) serialize with this write.
+	// If lock acquisition fails, it throws immediately. The releaseLock
+	// remains a no-op, so the finally block in the main file operations
+	// try-catch-finally won't try to release an unacquired lock if this
+	// path is taken.
 	releaseLock = await acquireFileLock(lockKey)
 
-	// Variables to hold the actual path of the temp file if it is created.
+	// Declared before the protected block so the catch can name the bytes an escaped
+	// publish left behind; the assignment below stays where our copy put it.
+	let stagedBytes: Buffer | undefined
+
+	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
+	let actualTempBackupFilePath: string | null = null
 
 	try {
 		// Resolve the publish target under the lock: the peer has committed by now, so
@@ -307,6 +343,18 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
 		}
 
+		// Heal any state an interrupted previous write left behind: an absent
+		// canonical path with an orphaned backup, or leftover replacement
+		// files. Runs first so a merge callback reads the restored content.
+		const recovery = await recoverInterruptedReplacement(resolvedTargetPath).catch((error: unknown) => {
+			const code = getErrorCode(error) ?? "unknown"
+			options?.trace?.({ stage: "recover", detail: `failed:${code}` })
+			throw error
+		})
+		if (recovery.foundLeftovers) {
+			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
+		}
+
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally
 		// so a throwing merge still releases the lock.
@@ -315,8 +363,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			try {
 				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
 			} catch (error: unknown) {
-				const code =
-					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				const code = getErrorCode(error)
 				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
 					throw error
 				}
@@ -324,57 +371,59 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file via JSON streaming.
-		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
-		// onto that referent, and a rename across filesystems would fail with EXDEV.
-		actualTempNewFilePath = path.join(
-			path.dirname(resolvedTargetPath),
-			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
-		)
+		// Step 1: Write data to a new temporary file and flush it to storage,
+		// making a best-effort flush before committing the replacement.
+		options?.trace?.({ stage: "write-start" })
+		actualTempNewFilePath = createTempFilePath(resolvedTargetPath, "new")
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		// Staging, the commit rename, the EPERM fallback's two renames and the rollback all take
+		// resolvedTargetPath - one resolved string for the whole publication. Staging beside the
+		// raw path when the target is a link's referent would make the commit rename cross
+		// filesystems, and mixing the two spellings is how a publish ends up beside the link
+		// it meant to replace.
+
 		// The bytes this write is about to publish identify the file a post-commit escape
 		// undo may remove. They are only needed when confinement can trigger that undo, and
 		// reading them here keeps the comparison independent of serialization details.
-		let stagedBytes: Buffer | undefined
 		if (confinementRoot !== undefined) {
 			// A read failure must abort the write: publishing without the bytes would make
 			// the post-commit escape undo unable to verify (and remove) an escaped file.
 			stagedBytes = await fs.readFile(actualTempNewFilePath)
 		}
 
-		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson
-		// semantics (target -> backup before commit, rollback on failure) and
-		// keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before its own backup rename and
-		// restores it onto the directory after the commit rename).
-		const textOptions: SafeWriteTextOptions = {
-			tempPath: actualTempNewFilePath,
-			backup: true,
+		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		await _flushFileToDisk(actualTempNewFilePath)
+
+		// Step 2: Commit the replacement with a single atomic rename. The
+		// committed target stays in place until this rename lands, so a
+		// process exit before or during the commit can no longer leave the
+		// canonical path absent.
+		try {
+			options?.trace?.({ stage: "replacement-rename" })
+			await fs.rename(actualTempNewFilePath, resolvedTargetPath)
+		} catch (renameError: unknown) {
+			if (getErrorCode(renameError) !== "EPERM") {
+				throw renameError
+			}
+
+			// A single rename over a file that a reader holds open fails with
+			// EPERM on Windows, so fall back to the two-step replacement:
+			// rename the target to a backup, then the replacement into place.
+			// The rollback in the catch below restores the backup when the
+			// second rename fails, and the recovery pass at the start of the
+			// next write repairs a crash between the two renames.
+			options?.trace?.({ stage: "backup-rename", detail: "eperm-fallback" })
+			actualTempBackupFilePath = createTempFilePath(resolvedTargetPath, "bak")
+			await fs.rename(resolvedTargetPath, actualTempBackupFilePath)
+			options?.trace?.({ stage: "replacement-rename", detail: "eperm-fallback" })
+			await fs.rename(actualTempNewFilePath, resolvedTargetPath)
 		}
 
-		try {
-			await safeWriteText(resolvedTargetPath, "", textOptions)
-		} catch (committedWriteError) {
-			// Only the post-commit teardown errors published the staged file. Other failures
-			// (e.g. StagingPathError) never renamed, and must keep their own error type.
-			const isPostCommit =
-				committedWriteError instanceof DaclRestoreError ||
-				committedWriteError instanceof PostCommitDurabilityError
-			if (isPostCommit && confinementRoot !== undefined) {
-				const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
-				const scopeRoot = await _resolveScopeRoot(confinementRoot)
-				try {
-					_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
-				} catch (escapeError) {
-					await undoEscapedPublish(publishedPath, stagedBytes)
-					throw escapeError
-				}
-			}
-			throw committedWriteError
-		}
+		// If we reach here, the new file is successfully in place.
+		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
+		// Mark as "used" or "committed"
+		actualTempNewFilePath = null
+		options?.trace?.({ stage: "write-complete" })
 
 		// Fail-closed confinement re-check. The check above decides the target as it
 		// resolves at check time; publication takes a path and re-resolves the tree
@@ -384,8 +433,9 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// this write published at the escaped location (never a same-named file a peer
 		// placed there after the commit) and report the escape. The peer's swap itself is
 		// left as the peer made it. (A swapped-in directory
-		// that already carried a target file is stopped earlier, by the staging
-		// identity guard inside safeWriteText, so this undo never races a backup.)
+		// that already carried a target file is not stopped earlier here: the commit rename
+		// replaces the file it lands on, so the undo below is what keeps the escaped publish
+		// from leaving our bytes in place of somebody else's.)
 		if (confinementRoot !== undefined) {
 			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
 			const scopeRoot = await _resolveScopeRoot(confinementRoot)
@@ -399,48 +449,86 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			}
 		}
 
-		// If we reach here, the new file is successfully in place and any
-		// backup has already been handled by safeWriteText.
-		actualTempNewFilePath = null
+		// Step 3: If a backup was created, attempt to delete it.
+		if (actualTempBackupFilePath) {
+			try {
+				await fs.unlink(actualTempBackupFilePath)
+				// Mark backup as handled
+				actualTempBackupFilePath = null
+			} catch (unlinkBackupError) {
+				// Log this error, but do not re-throw. The main operation was successful.
+				// actualTempBackupFilePath remains set, indicating an orphaned backup.
+				console.error(
+					`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
+					unlinkBackupError,
+				)
+			}
+		}
 	} catch (originalError) {
 		console.error(
 			`Operation failed for ${resolvedTargetPath ?? absoluteFilePath}: [Original Error Caught]`,
 			originalError,
-		)
-
-		const newFileToCleanupWithinCatch = actualTempNewFilePath
-
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
-		if (newFileToCleanupWithinCatch) {
+		) // A confinement escape is reported as the escape, not as whatever the teardown
+		// surfaced: re-resolve the publish target, and if the committed bytes landed outside
+		// the declared scope, remove exactly the file this write published there and report
+		// ConfinedPathEscapeError. undoEscapedPublish compares the staged bytes first, so a
+		// peer's file at the same name - including a backup this rollback just restored -
+		// is left alone. Errors that are not an escape keep their own type.
+		if (confinementRoot !== undefined && resolvedTargetPath !== undefined) {
+			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
+			const scopeRoot = await _resolveScopeRoot(confinementRoot)
 			try {
-				await fs.unlink(newFileToCleanupWithinCatch)
-			} catch (cleanupError: unknown) {
-				// The expected case: safeWriteText already removed its own temp file, so a
-				// missing file here is not a cleanup failure worth logging. Returning would
-				// also swallow the original error the caller needs.
-				const isAbsent =
-					typeof cleanupError === "object" &&
-					cleanupError !== null &&
-					"code" in cleanupError &&
-					cleanupError.code === "ENOENT"
-				if (!isAbsent) {
-					console.error(
-						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
-						cleanupError,
-					)
-				}
+				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
+			} catch (escapeError) {
+				await undoEscapedPublish(publishedPath, stagedBytes)
+				throw escapeError
 			}
 		}
 
+		const newFileToCleanupWithinCatch = actualTempNewFilePath
+		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
+
+		// Attempt rollback if a backup was made
+		if (backupFileToRollbackOrCleanupWithinCatch) {
+			try {
+				// A backup only ever exists once the resolved target is fixed, so the fallback is
+				// for the type, not for a reachable case; naming it here keeps the rollback and the
+				// commit rename on the same resolved string.
+				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, resolvedTargetPath ?? absoluteFilePath)
+				// Mark as handled, prevent later unlink of this path
+				actualTempBackupFilePath = null
+			} catch (rollbackError) {
+				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
+				console.error(
+					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
+					rollbackError,
+				)
+			}
+		}
+
+		// Cleanup the .new file if it exists
+		if (newFileToCleanupWithinCatch) {
+			try {
+				await fs.unlink(newFileToCleanupWithinCatch)
+			} catch (cleanupError) {
+				console.error(
+					`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+					cleanupError,
+				)
+			}
+		}
+
+		// A failed rollback leaves the backup as the only committed copy.
+		// Preserve it for recovery by a later writer.
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
 		try {
+			// releaseLock will be the actual unlock function if lock was acquired,
+			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
+			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
 			console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
 		}
 	}
@@ -472,6 +560,25 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 		fileWriteStream.on("finish", resolve)
 		stringifyStream.pipe(fileWriteStream)
 	})
+}
+
+/**
+ * Flushes a fully written temp file to storage before it is committed.
+ * Best effort: durability against power loss is a bonus here, process-crash
+ * safety comes from the rename protocol itself, and a filesystem that
+ * refuses fsync must not block the write.
+ */
+async function _flushFileToDisk(targetPath: string): Promise<void> {
+	try {
+		const handle = await fs.open(targetPath, "r+")
+		try {
+			await handle.sync()
+		} finally {
+			await handle.close()
+		}
+	} catch (flushError) {
+		console.error(`Failed to flush ${targetPath} to storage before commit:`, flushError)
+	}
 }
 
 export { safeWriteJson }
