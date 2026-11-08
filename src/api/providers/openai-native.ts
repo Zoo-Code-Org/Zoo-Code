@@ -801,7 +801,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					errorMessage += ` - ${errorDetails}`
 				}
 
-				throw new Error(errorMessage)
+				// A synthesized non-2xx failure must carry the numeric status too:
+				// retry, backoff and the UI read the status, not the message text, and the
+				// catch below captures it once before rethrowing it unchanged.
+				throw Object.assign(new Error(errorMessage), { status: response.status })
 			}
 
 			if (!response.body) {

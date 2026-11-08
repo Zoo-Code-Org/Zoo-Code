@@ -1713,6 +1713,34 @@ describe("OpenAiNativeHandler", () => {
 				expect(cancelCalls[0]).toBe(true)
 				expect(fetchCall).toBe(2)
 			})
+
+			it("should carry the numeric status on a synthesized non-2xx fallback error", async () => {
+				// The fallback used to throw a plain Error for non-2xx responses, so retry,
+				// backoff and the UI — which read the numeric status, not the message text —
+				// saw a generic failure for every provider error.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				const mockFetch = vitest.fn().mockResolvedValue({
+					ok: false,
+					status: 418,
+					text: async () => "teapot body",
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const error = await collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+					),
+				).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ status: 418 })
+				expect((error as Error).message).toContain("418")
+				// Captured exactly once through the provider telemetry path.
+				expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			})
 		})
 	})
 
