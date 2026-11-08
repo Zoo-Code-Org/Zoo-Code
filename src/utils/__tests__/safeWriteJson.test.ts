@@ -158,19 +158,13 @@ describe("safeWriteJson", () => {
 		function captureStagingModes(): number[] {
 			const modes: number[] = []
 			const realCreateWriteStream = fsSyncActuals.createWriteStream!
-			vi.mocked(fsSyncActual.createWriteStream).mockImplementation(function (
-				filePath: string | number | URL,
-				options?: string | Record<string, unknown> | null,
-			) {
+			vi.mocked(fsSyncActual.createWriteStream).mockImplementation(function (filePath, options) {
 				const passed: unknown = options
 				const mode: unknown =
 					passed !== null && typeof passed === "object" ? (passed as { mode?: unknown }).mode : undefined
 				modes.push(mode === undefined ? -1 : Number(mode))
-				const streamOptions: Parameters<typeof realCreateWriteStream>[1] = options as Parameters<
-					typeof realCreateWriteStream
-				>[1]
-				return realCreateWriteStream(filePath, streamOptions)
-			} as typeof fsSyncActual.createWriteStream)
+				return realCreateWriteStream(filePath, options)
+			})
 			return modes
 		}
 

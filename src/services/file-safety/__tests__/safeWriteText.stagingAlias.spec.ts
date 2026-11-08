@@ -108,14 +108,19 @@ describe("caller-supplied staging path through a directory alias (" + ALIAS_TYPE
 			fsSync.mkdirSync(elsewhere)
 			const stagingPath = path.join(elsewhere, "unrelated.json")
 			await fs.writeFile(stagingPath, "unrelated payload", "utf8")
-			const failure = await safeWriteText(fixture.target, "new content", {
-				tempPath: stagingPath,
-			}).catch((error: unknown) => error as StagingPathError)
+			// A resolved write is the failure this row is about, so the error is collected rather than
+			// awaited into a union of "nothing" and "the guard's error".
+			let failure: StagingPathError | undefined
+			try {
+				await safeWriteText(fixture.target, "new content", { tempPath: stagingPath })
+			} catch (error: unknown) {
+				failure = error as StagingPathError
+			}
 			expect(failure).toBeInstanceOf(StagingPathError)
 			// The message quotes the referent spelling, which is the directory the write resolves to -
 			// the reason the old compare read an alias as containment failure.
-			expect(String(failure.message)).toContain(fixture.referent)
-			expect(failure.stagingPath).toBe(path.resolve(stagingPath))
+			expect(String(failure?.message)).toContain(fixture.referent)
+			expect(failure?.stagingPath).toBe(path.resolve(stagingPath))
 		} finally {
 			disposeFixture(fixture)
 		}
