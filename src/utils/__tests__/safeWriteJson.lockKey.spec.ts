@@ -97,10 +97,11 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// The two trailing lstat calls are safeWriteText's staging-path checks: the
-		// regular-file check on the temp file this write created, and the identity check
-		// that the staging path is not the target. Both run after the key was resolved
-		// and the lock was taken, so neither changes which lock the caller queued behind.
+		// The one resolve after the lock is the publish target, and staging plus every
+		// rename site then name that same resolved string, so there is no second resolution
+		// left to diverge on. (The chain's delegation resolved again inside safeWriteText and
+		// ran two staging-path lstat checks; this protocol resolves once under the lock, which
+		// is why two lstat entries and one resolve are gone rather than reordered.)
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
@@ -108,9 +109,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"resolve",
 			"lock",
 			"resolve",
-			"resolve",
-			"lstat",
-			"lstat",
 		])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
