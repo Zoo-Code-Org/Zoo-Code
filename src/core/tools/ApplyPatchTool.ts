@@ -1,4 +1,5 @@
 import fs from "fs/promises"
+import type { BigIntStats } from "fs"
 import path from "path"
 
 import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
@@ -22,6 +23,25 @@ import type { ApplyPatchFileChange, PatchReadIntent } from "./apply-patch"
 
 interface ApplyPatchParams {
 	patch: string
+}
+
+/**
+ * Whether two stats name one file, judged the way the compares around this handler judge it: as
+ * bigints, because on NTFS and ReFS a file identity can exceed Number.MAX_SAFE_INTEGER and a
+ * rounded value makes two files look alike or two spellings of one file look different. Both sides
+ * have to actually carry a bigint identity - a stat that does not is a double that was never asked
+ * to answer identity, and reading it as "the same file" would refuse ordinary moves for a shape no
+ * real filesystem produces.
+ */
+function _sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+	return (
+		typeof left.ino === "bigint" &&
+		typeof right.ino === "bigint" &&
+		typeof left.dev === "bigint" &&
+		typeof right.dev === "bigint" &&
+		left.ino === right.ino &&
+		left.dev === right.dev
+	)
 }
 
 export class ApplyPatchTool extends BaseTool<"apply_patch"> {
@@ -565,6 +585,57 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				task.consecutiveMistakeCount++
 				task.recordToolError("apply_patch")
 				const errorMessage = `Cannot move file to path outside workspace: ${change.movePath}`
+				await task.say("error", errorMessage)
+				pushToolResult(formatResponse.toolError(errorMessage))
+				await task.diffViewProvider.reset()
+				return
+			}
+
+			// A move whose destination names the same file as its source publishes onto that file and
+			// then unlinks it: the write lands, the unlink at the end of this branch removes what was
+			// just written, and the bookkeeping below counts both paths as published. No reading of a
+			// move patch makes deleting the file you just wrote a correct outcome, so the pair is refused
+			// here - before the save, before the unlink, before the tracker call - which leaves every file
+			// exactly as it was found.
+			//
+			// Sameness is asked of the filesystem rather than of the two strings. Under an alias two
+			// spellings name one file, and across an alias one spelling names two files, so a string
+			// compare is wrong in both directions: it would refuse the alias-spelled move that ought to
+			// happen and allow the two-names-one-file move that ought not. The identity is read as bigints
+			// for the reason the compare beside it gives (safeWriteText.ts:247-:265): on NTFS and ReFS a
+			// file identity can exceed Number.MAX_SAFE_INTEGER, and a rounded value makes two files look
+			// alike or one file look like two.
+			//
+			// Both stats are taken on the spellings the patch named, resolved against the workspace and
+			// deliberately not canonicalized: canonicalizing first would fold an alias's two spellings
+			// into one string here and leave the identity question unasked.
+			//
+			// A refusal to answer is not read as "different files". Neither stat is allowed to throw
+			// through this handler: an exception here would replace the tool error the user should get,
+			// which is the mistake the note above the outside-workspace refusal records for canonicalising
+			// a destination that was about to be refused. Absence is read as what it means - a destination
+			// that is not there is not the same file as the source - and a refusal refuses the move.
+			const identityOf = async (target: string): Promise<BigIntStats | "absent" | "refused"> => {
+				try {
+					return await fs.stat(target, { bigint: true })
+				} catch (error: unknown) {
+					return errorCode(error) === "ENOENT" ? "absent" : "refused"
+				}
+			}
+			const sourceIdentity = await identityOf(absolutePath)
+			const destinationIdentity = await identityOf(moveAbsolutePath)
+			const moveRefusal =
+				sourceIdentity === "refused" || destinationIdentity === "refused"
+					? "the filesystem would not say what either path refers to, so the tool cannot tell whether the two names are one file"
+					: sourceIdentity !== "absent" &&
+						  destinationIdentity !== "absent" &&
+						  _sameFileIdentity(sourceIdentity, destinationIdentity)
+						? `the two paths name the same file (dev ${String(sourceIdentity.dev)}, ino ${String(sourceIdentity.ino)}), so the move would publish onto it and then unlink what it just published`
+						: undefined
+			if (moveRefusal !== undefined) {
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_patch")
+				const errorMessage = `Cannot move ${change.path} onto ${change.movePath}: ${moveRefusal}`
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()

@@ -25,6 +25,10 @@ const mockedFsPromises = vi.mocked(
 			unlink: MockedFunction<typeof fsPromises.unlink>
 			// Added for the outside-workspace refusal row: the refused destination must not be canonicalised.
 			realpath: ReturnType<typeof vi.fn>
+			// Added for the same-file move rows, which ask whether any write landed at the destination.
+			// Typed loosely because fsPromises.writeFile carries an overload set that MockedFunction
+			// would collapse to one arbitrary member; the rows only ever ask whether it was called.
+			writeFile: ReturnType<typeof vi.fn>
 		}
 	},
 )
@@ -39,15 +43,10 @@ vi.mock("fs/promises", () => {
 		// Raw bytes: the SUT reads without an encoding so a strict decoder can see the file as
 		// the file is, and this double has to answer the same way the real readFile() does.
 		readFile: vi.fn().mockResolvedValue(Buffer.from("original file content\n")),
-		// Stable on-disk version for the S2 self-read observation (the hunk
-		// read now stats before and after; equal tokens record the observe).
-		stat: vi.fn().mockResolvedValue({
-			dev: 7n,
-			ino: 4242n,
-			size: 1234n,
-			mtimeNs: 1_700_000_000_123_456_789n,
-			ctimeNs: 1_700_000_000_789_999_999n,
-		}),
+		// On-disk identity for the S2 self-read observation (the hunk read stats before and after;
+		// equal tokens record the observe) and for the move handler's same-file check. Answered per
+		// path by _identityOf below.
+		stat: vi.fn((target: unknown) => Promise.resolve(_identityOf(String(target)))),
 		unlink: vi.fn().mockResolvedValue(undefined),
 		// resolveLockKey canonicalizes the lock key, so the guard needs these
 		// even when no symlink is involved.
@@ -76,6 +75,43 @@ vi.mock("../../../utils/fs", () => ({
 vi.mock("../../../utils/pathUtils", () => ({
 	isPathOutsideWorkspace: vi.fn().mockReturnValue(false),
 }))
+
+// The identity a path answers with. It used to be ONE identity for every path (ino 4242
+// everywhere), which was harmless only because nothing asked the question: two names on a
+// filesystem are two files unless something links them, and the move handler now asks which of the
+// two its source and its destination are. The double distinguishes exactly the pair the move rows
+// publish onto - src/new.ts, and the same basename reached through a link of its directory - and
+// leaves every other path the identity the registry token strings below spell out. A row that wants
+// two names for one file re-arms stat and says so in its own comment.
+const _MOVE_SOURCE_INO = 4242n
+const _MOVE_DESTINATION_INO = 4343n
+const _MOVE_ALIAS_DESTINATION_INO = 4444n
+
+interface FileIdentity {
+	dev: bigint
+	ino: bigint
+	size: bigint
+	mtimeNs: bigint
+	ctimeNs: bigint
+}
+
+function _identityOf(target: string): FileIdentity {
+	const resolvedNew = path.resolve("/workspace/project", "src/new.ts")
+	const resolvedAliasNew = path.resolve("/workspace/project", "src/aliasDir/new.ts")
+	const ino =
+		target === resolvedNew
+			? _MOVE_DESTINATION_INO
+			: target === resolvedAliasNew
+				? _MOVE_ALIAS_DESTINATION_INO
+				: _MOVE_SOURCE_INO
+	return {
+		dev: 7n,
+		ino,
+		size: 1234n,
+		mtimeNs: 1_700_000_000_123_456_789n,
+		ctimeNs: 1_700_000_000_789_999_999n,
+	}
+}
 
 describe("ApplyPatchTool.execute - delete file success path", () => {
 	const mockedFileExistsAtPath = fileExistsAtPath as MockedFunction<typeof fileExistsAtPath>
@@ -199,6 +235,16 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 -original file content
 +modified file content
 *** End Patch`
+	// The destination spelled through a link of the same directory, naming its own file: the other
+	// direction of the pair the same-file rows pin below.
+	const moveThroughAliasPatch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/aliasDir/new.ts
+@@
+-original file content
++modified file content
+*** End Patch`
+
 	const mismatchedSecondPatch = `*** Begin Patch
 *** Update File: src/first.ts
 @@
@@ -230,6 +276,12 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		// so a row that flips it has to find it back at false. Restored here rather than per row so the
 		// next row does not have to know a neighbour changed it.
 		vi.mocked(isPathOutsideWorkspace).mockReturnValue(false)
+		// vi.clearAllMocks() keeps implementations, and rows below re-arm stat with a one-file-two-
+		// names answer. Restoring the default here means a row does not have to know what a neighbour
+		// installed.
+		mockedFsPromises.default.stat.mockImplementation((target: unknown) =>
+			Promise.resolve(_identityOf(String(target))),
+		)
 		mockSaveDirectly = vi.fn().mockResolvedValue({
 			newProblemsMessage: "",
 			userEdits: undefined,
@@ -670,6 +722,183 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
+	it("move: refuses a destination that names the same file as its source, and writes nothing to it", async () => {
+		// One file under two names: on a real filesystem that is a hard link, or the destination
+		// spelled through a link of the source's own directory. The filesystem in this spec is its
+		// doubles, so the row states the geometry outright - one identity armed for both spellings -
+		// and the row below pins the opposite geometry, a destination spelled through an alias that
+		// is its own file. Which of the two it is cannot be read off the strings.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		mockedFsPromises.default.stat.mockImplementation(() => Promise.resolve(_identityOf(sourceKey)))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-destination-is-the-source",
+		})
+
+		// Consequence one, the file at the shared path: the patched content never lands there. The
+		// save is what would have written it and the refusal runs before the save, so the file keeps
+		// the bytes it had before the patch and the tool claims no edit.
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockSaveChanges).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.writeFile).not.toHaveBeenCalled()
+		expect(mockTask.didEditFile).toBe(false)
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("the two paths name the same file"))
+		expect(mockHandleError).not.toHaveBeenCalled()
+		// Both spellings were put to the filesystem: the check asks about the pair, not about one of
+		// them while taking the strings' word for the other.
+		expect(mockedFsPromises.default.stat).toHaveBeenCalledWith(sourceKey, { bigint: true })
+		expect(mockedFsPromises.default.stat).toHaveBeenCalledWith(destKey, { bigint: true })
+	})
+
+	it("move: does not unlink the source when the destination names the same file", async () => {
+		// Consequence two. The unlink at the end of this branch is the statement that deleted what
+		// the publish had just written to the same inode; with the pair refused before the publish,
+		// the file is still where both names point and nothing has been removed.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		mockedFsPromises.default.stat.mockImplementation(() => Promise.resolve(_identityOf(sourceKey)))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-destination-is-the-source-no-unlink",
+		})
+
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+		// The opened diff view is discarded rather than left open over an un-published file.
+		expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
+	})
+
+	it("move: reports one refusal rather than two published files for one changed file", async () => {
+		// Consequence three, and the half a reviewer can check without a filesystem: the tool's own
+		// report. pushToolWriteResult builds the published-files message and trackFileContext is what
+		// records each published path as edited, so a move that published onto the source and then
+		// unlinked it would have reported two files for the one file the patch changed.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		mockedFsPromises.default.stat.mockImplementation(() => Promise.resolve(_identityOf(sourceKey)))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-destination-is-the-source-report",
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+		expect(mockPushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("Cannot move src/old.ts onto src/new.ts"),
+		)
+		expect(mockTask.diffViewProvider.pushToolWriteResult).not.toHaveBeenCalled()
+		expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalled()
+		expect(mockTask.didEditFile).toBe(false)
+		// The mistake counter is deliberately not asserted. This refusal raises it and the end-of-
+		// loop statement at ApplyPatchTool.ts:242 clears it again inside the same call, so reading
+		// the counter after the call would pin :242 rather than the refusal.
+	})
+
+	it("move: two files whose identities differ above the safe-integer range are not treated as one", async () => {
+		// Why the identity is read as bigints rather than numbers. An NTFS or ReFS file identity can
+		// sit above Number.MAX_SAFE_INTEGER, and two such files one apart round to the same
+		// Number: 2^53 and 2^53 + 1 are one double. A compare that goes through Number would call these
+		// two files one file and refuse this move; the compare beside this row keeps them apart.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const BASE_INO = 2n ** 53n
+		const NEIGHBOUR_INO = BASE_INO + 1n
+		mockedFsPromises.default.stat.mockImplementation((target: unknown) =>
+			Promise.resolve(
+				String(target) === destKey
+					? { ..._identityOf(destKey), ino: NEIGHBOUR_INO }
+					: { ..._identityOf(sourceKey), ino: BASE_INO },
+			),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-identities-above-safe-integer-range",
+		})
+
+		expect(Number(BASE_INO), "the fixture no longer demonstrates a rounded collision").toBe(Number(NEIGHBOUR_INO))
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/new.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"create",
+			false,
+			false,
+			undefined,
+		)
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(sourceKey)
+	})
+
+	it("move: publishes a destination spelled through a link of the source's directory when it is its own file", async () => {
+		// The other direction of the same rule, and the one a string compare gets wrong:
+		// src/aliasDir/new.ts is its own file even though its spelling runs through a link of the
+		// source's directory, so the move has to happen: content published at the destination, the
+		// source unlinked, a report produced. Refusing this pair would be the spelling-instead-of-
+		// identity bug in reverse, and it is why the check asks the filesystem.
+		await tool.execute({ patch: moveThroughAliasPatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-destination-through-directory-alias",
+		})
+
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/aliasDir/new.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"create",
+			false,
+			false,
+			undefined,
+		)
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(path.resolve("/workspace/project", "src/old.ts"))
+		expect(mockTask.didEditFile).toBe(true)
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Saved file"))
+		expect(mockTask.fileContextTracker.trackFileContext).toHaveBeenCalledWith("src/aliasDir/new.ts", "roo_edited")
+	})
+
+	it("move: refuses with a tool error when the filesystem will not say what the destination refers to", async () => {
+		// The failure surface the identity check adds, pinned where it is visible. A destination
+		// whose identity the filesystem withholds used to be moved blindly; now the move is refused,
+		// and refused as a tool error - the shape the note above the outside-workspace refusal says a
+		// destination read failure should produce, rather than an exception reaching handleError.
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const eacces = Object.assign(new Error("EACCES: permission denied, stat '" + destKey + "'"), {
+			code: "EACCES",
+		})
+		mockedFsPromises.default.stat.mockImplementation((target: unknown) =>
+			String(target) === destKey ? Promise.reject(eacces) : Promise.resolve(_identityOf(String(target))),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-destination-identity-refused",
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("the filesystem would not say what either path refers to"),
+		)
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+		expect(mockTask.didEditFile).toBe(false)
+	})
+
 	it("move: rejects a partial source onto an observed destination before changing any state", async () => {
 		// The destination content is the source file plus one hunk, so it can only be
 		// as complete as the view the model had of the source. Rejecting before the
@@ -680,7 +909,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
-		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		reg.observe(destKey, "7:4343:1234:1700000000123456789:1700000000789999999", true)
 
 		await tool.execute({ patch: movePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -710,7 +939,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
-		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		reg.observe(destKey, "7:4343:1234:1700000000123456789:1700000000789999999", true)
 		mockedFsPromises.default.access.mockRejectedValueOnce(
 			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
 		)
@@ -739,7 +968,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
-		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		reg.observe(destKey, "7:4343:1234:1700000000123456789:1700000000789999999", true)
 		mockedFsPromises.default.access.mockRejectedValueOnce(
 			Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" }),
 		)
@@ -800,7 +1029,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
 		mockSaveDirectly.mockImplementationOnce(async () => {
-			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+			reg.observe(destKey, "7:4343:1234:1700000000123456789:1700000000789999999", true)
 			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
 		})
 
@@ -851,7 +1080,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
-		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		reg.observe(destKey, "7:4343:1234:1700000000123456789:1700000000789999999", true)
 		mockedFsPromises.default.access.mockRejectedValueOnce(
 			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
 		)
