@@ -394,6 +394,14 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			stagedBytes = await fs.readFile(actualTempNewFilePath)
 		}
 
+		// CWE-732: the commit rename below lands the staged file onto the target, so the
+		// file that survives carries the staged file's mode, not the target's. A 0o600
+		// target would otherwise be published 0o644 from the umask-derived default. The
+		// #1912 head (085fbf85e) carries this step for the same function; the blob main
+		// brought in does not, and without it the two resolutions differ on a permission
+		// property and the row that pins it can only pass on one platform.
+		await _copyTargetMode(resolvedTargetPath, actualTempNewFilePath)
+
 		await _flushFileToDisk(actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
@@ -568,6 +576,32 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 		fileWriteStream.on("finish", resolve)
 		stringifyStream.pipe(fileWriteStream)
 	})
+}
+
+/**
+ * Copies the existing target's permission mode onto the staged file so the publish
+ * does not silently widen it. A missing target has no mode to copy; a stat or chmod
+ * that fails for another reason is logged and the write proceeds with the staged
+ * file's own mode, because the replacement protocol - not the mode - is what makes the
+ * write atomic.
+ */
+async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<void> {
+	let mode: number
+	try {
+		const stats = await fs.stat(targetPath)
+		mode = stats.mode & 0o777
+	} catch (statError: unknown) {
+		const code = getErrorCode(statError)
+		if (code && code !== "ENOENT" && code !== "ENOTDIR") {
+			console.error(`Could not read the mode of ${targetPath} before publishing onto it:`, statError)
+		}
+		return
+	}
+	try {
+		await fs.chmod(stagedPath, mode)
+	} catch (chmodError: unknown) {
+		console.error(`Failed to copy mode ${mode.toString(8)} from ${targetPath} onto ${stagedPath}:`, chmodError)
+	}
 }
 
 /**

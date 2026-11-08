@@ -28,6 +28,7 @@ vi.mock("fs/promises", async () => {
 		unlink: vi.fn(actual.unlink),
 		access: vi.fn(actual.access),
 		stat: vi.fn(actual.stat),
+		chmod: vi.fn(actual.chmod),
 		open: vi.fn(actual.open),
 		mkdtemp: vi.fn(actual.mkdtemp),
 		rm: vi.fn(actual.rm),
@@ -1048,6 +1049,48 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
+	// The two failure paths of _copyTargetMode: a target whose mode cannot be read, and a staged
+	// file whose mode cannot be set. Both have to log and let the write finish, because the
+	// replacement protocol - not the mode - is what makes the publish atomic. They are driven
+	// through the fs/promises mocks rather than a real EACCES/EPERM, because forcing either one
+	// for real needs privileges a developer box and a CI runner neither have. That is also why
+	// these two run on every platform while the symlink and mode rows above skip windows.
+	test("logs and still publishes when the target's mode cannot be read", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// fs.stat is already vi.fn() in the factory above - vi.mocked keeps the real
+		// implementation reachable once this single call is done.
+		await vi.mocked(fs.stat).mockImplementationOnce(async () => {
+			const error: NodeJS.ErrnoException = new Error(`EACCES: permission denied, stat '${currentTestFilePath}'`)
+			error.code = "EACCES"
+			throw error
+		})
+
+		await safeWriteJson(currentTestFilePath, { after: true })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(currentTestFilePath), expect.anything())
+		consoleErrorSpy.mockRestore()
+	}, 20_000)
+
+	test("logs and still publishes when the staged file's mode cannot be set", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// chmod is a vi.fn() in the factory above for the same reason.
+		await vi.mocked(fs.chmod).mockImplementationOnce(async () => {
+			const error: NodeJS.ErrnoException = new Error(
+				`EPERM: operation not permitted, chmod '${currentTestFilePath}'`,
+			)
+			error.code = "EPERM"
+			throw error
+		})
+
+		await safeWriteJson(currentTestFilePath, { after: true })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to copy mode"), expect.anything())
+		consoleErrorSpy.mockRestore()
+	}, 20_000)
 
 	// Ordering matters for the security guarantee: proper-lockfile creates
 	// ${lockKey}.lock beside the lock key, and the key is the symlink referent. If
