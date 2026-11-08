@@ -358,10 +358,36 @@ export async function safeWriteText(
 		// dangling symlink in resolvePublishTarget.
 		const supplied = path.resolve(options.tempPath)
 		if (path.dirname(supplied) !== path.resolve(dirPath)) {
-			throw new StagingPathError(
-				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
-				supplied,
-			)
+			// A textual mismatch is not yet evidence that the staging file sits elsewhere, because one
+			// directory answers to more than one spelling. NTFS hands out an 8.3 alias for every name
+			// longer than eight characters - the hosted Windows runner's temp directory arrives as
+			// RUNNER~1 under the profile while the writer's resolved target arrives in the long
+			// spelling - and a junction or link does the same thing on any box. path.resolve preserves
+			// whichever spelling it is handed, and fs.realpath (the JavaScript implementation Node 22
+			// uses) preserves it too; only realpathSync.native expands the 8.3 form, measured on
+			// node 22.23.4. So neither a textual nor a plain-realpath comparison can tell an alias of
+			// the target's own directory from a different directory. The property this guard protects -
+			// no cross-filesystem commit rename (EXDEV) and no publishing of an unrelated file onto the
+			// target - is a property of the directory's identity, so compare identity: dev and ino, read
+			// as bigint for the same reason as the file check below. A directory that cannot be stat'd
+			// keeps the rejection, so this only ever accepts what the textual check would have accepted
+			// had the spelling been canonical on both sides.
+			const suppliedDir = path.dirname(supplied)
+			const [suppliedDirStat, targetDirStat] = await Promise.all([
+				fs.stat(suppliedDir, { bigint: true }).catch(() => undefined),
+				fs.stat(dirPath, { bigint: true }).catch(() => undefined),
+			])
+			const sameDirectory =
+				suppliedDirStat !== undefined &&
+				targetDirStat !== undefined &&
+				suppliedDirStat.dev === targetDirStat.dev &&
+				suppliedDirStat.ino === targetDirStat.ino
+			if (!sameDirectory) {
+				throw new StagingPathError(
+					`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
+					supplied,
+				)
+			}
 		}
 		// BigInt stats: on NTFS/ReFS the file identity can exceed Number.MAX_SAFE_INTEGER, and
 		// a rounded number makes two different files look identical (rejecting a valid staging

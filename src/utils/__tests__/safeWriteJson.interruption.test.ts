@@ -29,15 +29,43 @@ const fs = require("fs")
 const path = require("path")
 
 const targetPath = path.resolve(process.env.INTERRUPTION_TARGET_PATH)
+// The commit goes through safeWriteText, which renames onto the publish target it resolved
+// itself. One directory answers to two spellings on NTFS - every component longer than eight
+// characters also has an 8.3 alias, so the CI runner's temp directory arrives short-named
+// (RUNNER~1 under the user profile) while realpath hands back the long spelling of the same
+// directory - and a junction or a link does the same thing on any box. The writer's canonical
+// handed to this child can therefore name the same file as different text, and a textual
+// comparison would then let the commit land unnoticed. Canonicalise this side the same way,
+// and fall back to the textual form for a target that does not exist yet and cannot be
+// canonicalised.
+let canonicalTargetPath = targetPath
+try {
+	canonicalTargetPath = fs.realpathSync(targetPath)
+} catch {
+	// A target that is not on disk yet has no canonical spelling; the textual form is then
+	// the only comparison available, and it is the one the writer would use anyway.
+}
+const isCommitRename = (newPath) => {
+	const resolved = path.resolve(String(newPath))
+	if (resolved === targetPath || resolved === canonicalTargetPath) {
+		return true
+	}
+	try {
+		return fs.realpathSync(resolved) === canonicalTargetPath
+	} catch {
+		// A destination that cannot be canonicalised is not the canonical target.
+		return false
+	}
+}
 const fsPromises = require("fs/promises")
 const actualRename = fsPromises.rename
 
 // Fault injection: hard-kill before the replacement lands. Any rename
-// whose destination is the canonical path is the commit step, whatever
+// whose destination is the canonical path (or an alias of it) is the commit step, whatever
 // replacement protocol the writer uses; exit before performing it.
 let commitAttempts = 0
 fsPromises.rename = async function interruptionRename(oldPath, newPath) {
-	if (path.resolve(String(newPath)) === targetPath) {
+	if (isCommitRename(newPath)) {
 		commitAttempts++
 		if (process.env.INTERRUPTION_MODE === "fallback" && commitAttempts === 1) {
 			return Promise.reject(Object.assign(new Error("Injected EPERM"), { code: "EPERM" }))
@@ -231,6 +259,85 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 				},
 			})
 
+			expect(JSON.parse(await readFileWithMissingRetry(targetPath))).toEqual(recovered)
+			const leftovers = (await fs.readdir(storageDir)).filter(
+				(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+			)
+			expect(leftovers).toEqual([])
+		},
+		45_000,
+	)
+
+	// The child intercepts the commit rename by comparing the rename's destination with
+	// INTERRUPTION_TARGET_PATH. The commit now goes through safeWriteText, which renames onto the
+	// publish target it resolved itself, so the destination is not necessarily the spelling the
+	// parent passed down. On NTFS one directory answers to two spellings: every component longer
+	// than eight characters also has an 8.3 alias, and the Windows CI runner's temp directory
+	// arrives as C:\Users\RUNNER~1\... while realpath hands back C:\Users\runneradmin\... The
+	// interception has to survive that. A junction gives any Windows box the same shape without
+	// needing privileges: this case spells the target through an alias of the directory the
+	// writer resolves to, so the parent's spelling and the writer's canonical spelling of the same
+	// directory differ as text on a box that has no 8.3 alias on its own temp path.
+	it.runIf(process.platform === "win32")(
+		"intercepts the commit rename when the target path is spelled through a directory alias",
+		async () => {
+			const fileName = "ui_messages.json"
+			const message = {
+				ts: 1,
+				type: "say",
+				say: "text",
+				text: "RESTART_PERSISTENCE_MARKER",
+				role: "assistant",
+				content: "RESTART_PERSISTENCE_MARKER",
+			}
+			const committed = [message]
+			const replacement = [{ ...message, ts: 2, text: "ALIASED_WRITE", content: "ALIASED_WRITE" }]
+			await safeWriteJson(targetPath, committed)
+
+			const aliasDir = path.join(tempDir, "storage-alias")
+			try {
+				await fs.symlink(storageDir, aliasDir, "junction")
+			} catch (error: unknown) {
+				const code = typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined
+				// A box that cannot create a junction cannot present a second spelling of the
+				// directory; there is nothing to intercept differently and no alias to reject.
+				if (code === "EPERM" || code === "ENOSYS" || code === "EEXIST") {
+					return
+				}
+				throw error
+			}
+			const aliasTargetPath = path.join(aliasDir, fileName)
+			expect(path.resolve(aliasTargetPath)).not.toBe(path.resolve(targetPath))
+
+			const child = spawn(process.execPath, [childScriptPath], {
+				env: {
+					...process.env,
+					INTERRUPTION_TARGET_PATH: aliasTargetPath,
+					INTERRUPTION_MODE: "atomic",
+					INTERRUPTION_BOUNDARY: "before-commit",
+					INTERRUPTION_PAYLOAD: JSON.stringify(replacement),
+					ESBUILD_PATH: esbuildPath,
+					SAFE_WRITE_JSON_ENTRY: safeWriteJsonEntryPath,
+					INTERRUPTION_BUNDLE_PATH: childBundlePath,
+				},
+				stdio: ["ignore", "pipe", "pipe"],
+			})
+			const exit = await waitForChildExit(child)
+
+			expect(exit.stderr).not.toContain("WRITE_FAILED")
+			expect(exit.stdout).toContain("EXIT_AT_REPLACEMENT_RENAME")
+			expect(exit.stdout).not.toContain("WRITE_COMPLETED")
+			expect(exit.code).toBe(1)
+			// The canonical target is untouched by an interrupted commit, spelled through either name.
+			expect(JSON.parse(await readFileWithMissingRetry(targetPath))).toEqual(committed)
+			expect(JSON.parse(await readFileWithMissingRetry(aliasTargetPath))).toEqual(committed)
+			const interruptedFiles = await fs.readdir(storageDir)
+			expect(interruptedFiles.filter((entry) => entry.includes(".new_"))).toHaveLength(1)
+
+			const staleTime = new Date(Date.now() - 60_000)
+			await fs.utimes(`${targetPath}.lock`, staleTime, staleTime)
+			const recovered = { ui_messages: [{ ts: 3, type: "say", text: "RECOVERED_AFTER_RESTART" }] }
+			await safeWriteJson(aliasTargetPath, recovered)
 			expect(JSON.parse(await readFileWithMissingRetry(targetPath))).toEqual(recovered)
 			const leftovers = (await fs.readdir(storageDir)).filter(
 				(entry) => entry.includes(".new_") || entry.includes(".bak_"),
