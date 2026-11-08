@@ -145,7 +145,7 @@ import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
-import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 import {
 	divergenceKey,
@@ -397,7 +397,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
-	abort: boolean = false
 	// Monotonic cancellation counter. `requestAbort()` and `requestDispose()` advance
 	// this fence, and the guarded-write path compares the value it captured when the
 	// write was queued with the value at publish time, so a queued write cannot publish
@@ -420,7 +419,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	didFinishAbortingStream = false
 	abandoned = false
-	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
 
 	runState: RunState = initialRunState
@@ -3591,8 +3589,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.driveRunEvent({ tag: "completionAccepted", askTs })
 	}
 
+	get abort(): boolean {
+		return abort(this.runState)
+	}
+
+	get abortReason(): ClineApiReqCancelReason | undefined {
+		return abortReason(this.runState)
+	}
+
 	setAbortReason(reason: ClineApiReqCancelReason): void {
-		this.abortReason ??= reason
 		this.driveRunEvent({ tag: "reasonSet", reason })
 	}
 
@@ -3600,14 +3605,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (isAbandoned) {
 			this.abandoned = true
 		}
-		this.abort = true
 		// The S4a write guard compares this counter with the value a queued write
 		// captured when it started, so every cancellation must advance it and it
-		// must never go backwards: the abort flag is set here and no resume path
-		// clears it, so on a resumed task it only says that some cancellation
-		// happened - never WHICH cancellation a queued write belongs to. Only the
-		// generation keeps a cancelled run's queued writes apart from the
-		// resumed run's, and only if it advances monotonically.
+		// must never go backwards. Main moved the abort flag into the run-state
+		// reducer (see the abort(this.runState) getter above), so this counter is
+		// the only thing left that separates a cancelled run's queued writes from
+		// the resumed run's, and only if it advances monotonically.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}
@@ -3618,7 +3621,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	requestDispose(): void {
-		this.abort = true
 		// A host teardown never calls abortTask(): disposal has to raise the same
 		// counter, or a write still parked on its path chain publishes after the
 		// task is gone.

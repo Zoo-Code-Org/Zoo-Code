@@ -74,9 +74,10 @@ interface MockTaskOptions {
 }
 
 /**
- * Minimal structural Task: guardedWrite only reads task.cwd and
- * task.observationRegistry. The real Task constructor needs the full provider
- * machinery, so a single documented double cast stands in for the class.
+ * Minimal structural Task: guardedWrite reads task.cwd, task.observationRegistry,
+ * task.abort and task.cancellationGeneration (guardedWrite.ts lines 518-519, 567 and
+ * 594-645). The real Task constructor needs the full provider machinery, so a single
+ * documented double cast stands in for the class.
  */
 /**
  * BigIntStats double for the ancestor-identity pin. BigIntStats is class-backed with no
@@ -95,6 +96,21 @@ function createMockTask(options: MockTaskOptions = {}): Task {
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
 	}
 	return task as unknown as Task
+}
+
+/**
+ * Park the cancellation pair on the double.
+ *
+ * Main's Task exposes abort as a getter that reads the run-state reducer, so a call site
+ * cannot assign it; the mock declares it as a plain property, and these tests need the
+ * pair the real class reaches - abort true while the generation advances, then abort false
+ * again on a resumed run - which is only expressible by writing the property directly.
+ * The write is test-local: on a real Task nothing but the reducer sets it.
+ */
+function setCancellationState(task: Task, generationDelta: number, abort: boolean): void {
+	const writable = task as unknown as { abort: boolean; cancellationGeneration: number }
+	writable.abort = abort
+	writable.cancellationGeneration += generationDelta
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -531,9 +547,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				if (s === path.resolve(WORKSPACE)) return s
 				targetLookups++
 				if (targetLookups === 1) {
-					task.abort = true
-					task.cancellationGeneration++
-					task.abort = false
+					setCancellationState(task, 1, true)
+					setCancellationState(task, 0, false)
 					await gate
 				}
 				return s
@@ -1207,9 +1222,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0))
 		expect(accessCalls).toBe(1)
 
-		cancelled.abort = true
-		cancelled.cancellationGeneration++
-		cancelled.abort = false
+		setCancellationState(cancelled, 1, true)
+		setCancellationState(cancelled, 0, false)
 
 		releaseCheck()
 		await first
@@ -1232,7 +1246,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// is already gone.
 		const task = createMockTask()
 		mockedWithFileLock.mockImplementation(function (filePath, operation) {
-			task.abort = true
+			setCancellationState(task, 0, true)
 			return operation(path.resolve(filePath))
 		})
 		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
@@ -1248,7 +1262,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// The abort lands while the version token is being computed. The guard has to
 		// refuse on the way to the publish, not write for a task that is already gone.
 		mockedComputeVersionToken.mockImplementation(async () => {
-			task.abort = true
+			setCancellationState(task, 0, true)
 			return "v1"
 		})
 		const reg = new ObservationRegistry()
