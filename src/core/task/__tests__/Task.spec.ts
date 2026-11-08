@@ -4725,7 +4725,7 @@ describe("Cline", () => {
 				expect(abortSpy).toHaveBeenCalled()
 
 				// Verify the controller was cleared
-				expect(task.currentRequestAbortController).toBeUndefined()
+				expect(task["currentRequestAbortController"]).toBeUndefined()
 
 				// Verify logging
 				expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Aborting current HTTP request"))
@@ -5036,12 +5036,58 @@ describe("Cline", () => {
 							"function" in tool ? [tool.function.name] : [],
 						)
 						expect(names.filter((name) => name.startsWith("mcp--"))).toHaveLength(expected)
+						if (historyCall) expect(names).toContain("mcp--catalog--tool_99")
 						expect(names).toContain("read_file")
 						expect(names).not.toContain("mcp_load")
 						if (provider === providerIdentifiers.gemini)
 							expect(
 								metadata?.allowedFunctionNames?.filter((name) => name.startsWith("mcp--")),
 							).toHaveLength(expected)
+					},
+				)
+
+				it.each(["abort", "abandoned"] as const)(
+					"stops a request canceled during tool building: %s",
+					async (flag) => {
+						const task = new Task({
+							provider: mockProvider,
+							apiConfiguration: mockApiConfig,
+							task: "search tickets",
+							startTask: false,
+						})
+						vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock prompt")
+						vi.spyOn(task.api, "getModel").mockReturnValue({
+							id: "test-model",
+							info: { contextWindow: 200000, maxTokens: 4096, supportsPromptCache: false },
+						})
+						const createMessage = vi.spyOn(task.api, "createMessage")
+						let release = () => {}
+						const gate = new Promise<void>((resolve) => {
+							release = resolve
+						})
+						let entered = () => {}
+						const building = new Promise<void>((resolve) => {
+							entered = resolve
+						})
+						const build = vi
+							.spyOn(buildTools, "buildNativeToolsArrayWithRestrictions")
+							.mockImplementation(async () => {
+								entered()
+								await gate
+								return { tools: [] }
+							})
+						try {
+							const request = task.attemptApiRequest(0).next()
+							await building
+							task[flag] = true
+							release()
+							await expect(request).rejects.toThrow("aborted during request construction")
+							expect(createMessage).not.toHaveBeenCalled()
+							expect(task["currentRequestAbortController"]).toBeUndefined()
+						} finally {
+							release()
+							build.mockRestore()
+						}
 					},
 				)
 
@@ -5121,7 +5167,7 @@ describe("Cline", () => {
 					task.cancelCurrentRequest()
 
 					expect(abortSpy).toHaveBeenCalledTimes(1)
-					expect(task.currentRequestAbortController).toBeUndefined()
+					expect(task["currentRequestAbortController"]).toBeUndefined()
 				})
 
 				it("should reject streaming consumption when aborted between chunks", async () => {
@@ -5330,7 +5376,7 @@ describe("Cline", () => {
 						},
 					]
 
-					expect(task.currentRequestAbortController).toBeUndefined()
+					expect(task["currentRequestAbortController"]).toBeUndefined()
 
 					const iterator = task.attemptApiRequest(0)
 					await iterator.next()
@@ -6066,7 +6112,7 @@ describe("Cline", () => {
 				expect(createMessageSpy).not.toHaveBeenCalled()
 				// The per-request controller is only created once the request is
 				// committed, so a cancelled construction never reaches it.
-				expect(task.currentRequestAbortController).toBeUndefined()
+				expect(task["currentRequestAbortController"]).toBeUndefined()
 				await cancelling
 			} finally {
 				vi.useRealTimers()
@@ -6126,7 +6172,7 @@ describe("Cline", () => {
 				expect(createMessageSpy).not.toHaveBeenCalled()
 				// The per-request controller is only created once the request is
 				// committed, so a disposed construction never reaches it.
-				expect(task.currentRequestAbortController).toBeUndefined()
+				expect(task["currentRequestAbortController"]).toBeUndefined()
 				await disposal
 			} finally {
 				vi.useRealTimers()

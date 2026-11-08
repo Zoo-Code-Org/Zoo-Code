@@ -38,6 +38,13 @@ export function mergeHistoryDelta(existing: unknown, incoming: HistoryItem, delt
 		normalizedDelta.status = attemptedStatus
 	}
 	const merged = { ...disk, ...normalizedDelta }
+	// Attachments accumulate for history compatibility. Merge under the disk lock
+	// so a delayed metadata snapshot cannot remove a newer historical name.
+	if (normalizedDelta.attachedMcpToolNames && disk.attachedMcpToolNames) {
+		merged.attachedMcpToolNames = [
+			...new Set([...disk.attachedMcpToolNames, ...normalizedDelta.attachedMcpToolNames]),
+		]
+	}
 	if (normalizedDelta.childIds && disk.childIds) {
 		merged.childIds = [...new Set([...disk.childIds, ...normalizedDelta.childIds])]
 	}

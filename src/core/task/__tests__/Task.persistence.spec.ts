@@ -326,31 +326,32 @@ describe("Task persistence", () => {
 			},
 		)
 
-		it.each([{ names: [] }, { names: ["mcp--github--issues"] }])(
-			"restores initialized selections without reranking: $names",
-			async ({ names }) => {
-				const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial")
-				const task = new Task({
-					provider: mockProvider,
-					apiConfiguration: mockApiConfig,
-					startTask: false,
-					historyItem: {
-						id: "restored",
-						number: 1,
-						ts: 1,
-						task: "find tickets",
-						tokensIn: 0,
-						tokensOut: 0,
-						totalCost: 0,
-						attachedMcpToolNames: names,
-					},
-				})
-				await task.initializeAttachedMcpTools([], 30)
-				expect([...task.attachedMcpToolNames]).toEqual(names)
-				expect(rank).not.toHaveBeenCalled()
-				rank.mockRestore()
-			},
-		)
+		it.each([
+			{ names: [], savedNames: [] },
+			{ names: ["mcp--github--issues"], savedNames: ["mcp--github--issues"] },
+			{ names: ["mcp--github--issues"], savedNames: ["mcp--github--issues", "mcp--missing--tool"] },
+		])("restores initialized selections without reranking: $names", async ({ names, savedNames }) => {
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial")
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				historyItem: {
+					id: "restored",
+					number: 1,
+					ts: 1,
+					task: "find tickets",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					attachedMcpToolNames: savedNames,
+				},
+			})
+			await task.initializeAttachedMcpTools([{ serverName: "github", toolName: "issues", description: "" }], 30)
+			expect([...task.attachedMcpToolNames]).toEqual(names)
+			expect(rank).not.toHaveBeenCalled()
+			rank.mockRestore()
+		})
 
 		it.each(["history", "messages", "provider"] as const)(
 			"keeps selection without retrying on a %s save failure",
@@ -409,7 +410,7 @@ describe("Task persistence", () => {
 			}
 		}
 
-		it.each([undefined, null, "abc", 12, {}, [12]])(
+		it.each([undefined, null, "abc", 12, {}, [12], ["invalid"], ["mcp__github__issues"], ["mcp--missing--tool"]])(
 			"treats invalid or absent persisted selection %j as uninitialized",
 			async (value) => {
 				const historyItem = legacyHistory()
@@ -496,7 +497,7 @@ describe("Task persistence", () => {
 					],
 				},
 			]
-			await task.initializeAttachedMcpTools([], 1)
+			await task.initializeAttachedMcpTools([{ serverName: "catalog", toolName: "top", description: "" }], 1)
 			expect(task.attachedMcpToolNames).toEqual(new Set(["mcp--catalog--previous", "mcp--catalog--top"]))
 			expect(rank).toHaveBeenCalledTimes(initialized ? 0 : 1)
 			expect(mockTaskMetadata).toHaveBeenLastCalledWith(

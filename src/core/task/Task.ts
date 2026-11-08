@@ -297,6 +297,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly metadata: TaskMetadata
 	readonly attachedMcpToolNames = new Set<string>()
 	private mcpToolsInitialized = false
+	private restoredMcpToolsNeedValidation = false
 	private mcpToolsInitialization?: Promise<void>
 
 	todoList?: TodoItem[]
@@ -757,6 +758,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (savedMcpToolNames !== undefined) {
 			for (const name of savedMcpToolNames) this.attachedMcpToolNames.add(name)
 			this.mcpToolsInitialized = true
+			this.restoredMcpToolsNeedValidation = savedMcpToolNames.length > 0
 		}
 
 		// Normal use-case is usually retry similar history task with new workspace.
@@ -3033,6 +3035,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (this.mcpToolsInitialization) return this.mcpToolsInitialization
 
 		this.mcpToolsInitialization = (async () => {
+			if (this.restoredMcpToolsNeedValidation) {
+				const available = new Set(scopedTools.map((tool) => buildMcpToolName(tool.serverName, tool.toolName)))
+				for (const name of this.attachedMcpToolNames) {
+					if (!available.has(name)) this.attachedMcpToolNames.delete(name)
+				}
+				this.mcpToolsInitialized = this.attachedMcpToolNames.size > 0
+				this.restoredMcpToolsNeedValidation = false
+			}
+
 			const historicalNames = new Set<string>()
 			for (const message of this.apiConversationHistory) {
 				if (message.role !== "assistant" || !Array.isArray(message.content)) continue
@@ -5966,6 +5977,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 			allTools = toolsResult.tools
 			allowedFunctionNames = toolsResult.allowedFunctionNames
+		}
+
+		if (this.abort || this.abandoned) {
+			throw new Error(
+				`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during request construction`,
+			)
 		}
 
 		const shouldIncludeTools = allTools.length > 0

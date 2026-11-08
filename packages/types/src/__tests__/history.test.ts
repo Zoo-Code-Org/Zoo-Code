@@ -72,6 +72,8 @@ describe("historyItemSchema", () => {
 		{ value: {}, expected: undefined },
 		{ value: [42], expected: undefined },
 		{ value: [], expected: [] },
+		{ value: ["invalid"], expected: undefined },
+		{ value: ["mcp__a__b"], expected: undefined },
 		{ value: ["mcp--a--b", null, 42], expected: ["mcp--a--b"] },
 	])("normalizes persisted attachments $value without losing the task", ({ value, expected }) => {
 		const parsed = historyItemSchema.parse({ ...baseItem, attachedMcpToolNames: value })

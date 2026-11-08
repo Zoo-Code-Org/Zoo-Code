@@ -7,7 +7,9 @@ allowed by the current mode and tool policy exceed `mcp.dynamicLoad.threshold`
 tools because there is no initial text to rank.
 
 The selection is stored in task history. Missing or invalid selections are
-initialized on demand; a valid empty selection remains initialized. MCP names
+initialized on demand; a valid empty selection remains initialized. Restored
+nonempty selections are checked against scoped definitions before use; selections
+with no available names are ranked again. MCP names
 already used in conversation history are retained for provider compatibility,
 so resumed tasks can require more than `initialK` declarations. This is an
 initial selection limit, not a lifetime cap. Historical names accumulate during
@@ -16,7 +18,9 @@ to reject conversation history. Current server, mode, and tool-policy
 restrictions still apply.
 
 If saving fails, the task retains its in-memory selection and continues. Later
-normal history saves retry persistence. Storage errors do not trigger API
+normal history saves retry persistence. History writes union attached names under
+the disk lock, preserving newer historical names when an older save arrives late.
+Storage errors do not trigger API
 stream retries.
 
 The gate limits advertised definitions; it does not add an execution permission
