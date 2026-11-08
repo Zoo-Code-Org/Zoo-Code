@@ -660,22 +660,44 @@ describe("safeWriteJson", () => {
 			await fs.writeFile(unreadableBackup, JSON.stringify({ stale: true }))
 			await fs.writeFile(readableBackup, JSON.stringify({ committed: true }))
 			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			// The injection is keyed on the leftover's inode, not on the spelling of its path:
+			// the writer stats the canonical form of the same file, which realpath can spell
+			// differently from os.tmpdir() on the machine running the test. Production cannot tell
+			// the two spellings apart - they are one file - so the double matches the inode.
+			const injectedInode = await actual.stat(unreadableBackup)
+			const isInjectedInode = async (candidate: Parameters<typeof actual.stat>[0]) => {
+				try {
+					const inode = await actual.stat(candidate)
+					return inode.dev === injectedInode.dev && inode.ino === injectedInode.ino
+				} catch {
+					return false // a candidate that cannot be stat-ed is not the injected leftover
+				}
+			}
+			// The double is installed for this test only. vi.restoreAllMocks() in afterEach does not
+			// clear implementations set on the fs/promises factory mocks, and the operating system
+			// recycles inodes, so a matcher left installed rejects a later test's unrelated file the
+			// moment that file is handed the inode this row captured.
+			const previousStat = vi.mocked(fs.stat).getMockImplementation()
 			vi.mocked(fs.stat).mockImplementation(async (backupPath) => {
-				if (backupPath === unreadableBackup) {
+				if (await isInjectedInode(backupPath)) {
 					throw Object.assign(new Error("Backup stat failed"), { code })
 				}
 				return actual.stat(backupPath)
 			})
 			const merge = vi.fn((existing: unknown) => existing)
 
-			if (code === "ENOENT") {
-				await safeWriteJson(currentTestFilePath, {}, { merge })
-				expect(merge).toHaveBeenCalledWith({ committed: true }, {})
-			} else {
-				await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toMatchObject({ code })
-				expect(merge).not.toHaveBeenCalled()
-				expect(await readFileContent(unreadableBackup)).toEqual({ stale: true })
-				expect(await readFileContent(readableBackup)).toEqual({ committed: true })
+			try {
+				if (code === "ENOENT") {
+					await safeWriteJson(currentTestFilePath, {}, { merge })
+					expect(merge).toHaveBeenCalledWith({ committed: true }, {})
+				} else {
+					await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toMatchObject({ code })
+					expect(merge).not.toHaveBeenCalled()
+					expect(await readFileContent(unreadableBackup)).toEqual({ stale: true })
+					expect(await readFileContent(readableBackup)).toEqual({ committed: true })
+				}
+			} finally {
+				vi.mocked(fs.stat).mockImplementation(previousStat ?? actual.stat)
 			}
 		},
 	)
