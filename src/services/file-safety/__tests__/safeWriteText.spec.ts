@@ -4,7 +4,13 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { PostCommitDurabilityError, resolveLockKey, safeWriteText, StagingPathError } from "../safeWriteText"
+import {
+	LockKeyWalkIncompleteError,
+	PostCommitDurabilityError,
+	resolveLockKey,
+	safeWriteText,
+	StagingPathError,
+} from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
@@ -1409,17 +1415,29 @@ describe("resolveLockKey", () => {
 		expect(fs.readlink).toHaveBeenCalledTimes(2)
 	})
 
-	it("terminates on a two-link cycle instead of walking forever", async () => {
+	it("refuses a two-link cycle instead of handing back the key the walk stopped at", async () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		// Every readlink answers with the same link, so an unbounded walk would
-		// never end; the bounded walk returns the key it actually reached.
+		// Every readlink answers with another link, so an unbounded walk would never end and the
+		// bound is what stops it. What the bound must not do is hand back the spelling it stopped at
+		// as if it were the answer: that key comes from the caller's own path after the filesystem
+		// stopped answering about it, which is the divergence a lock key exists to remove.
 		vi.mocked(fs.readlink).mockImplementation(async () => "a.json")
 
-		await expect(resolveLockKey("/tmp/linkdir/a.json")).resolves.toBe(
-			path.resolve(path.join("/tmp/linkdir", "a.json")),
+		const failure = await resolveLockKey("/tmp/linkdir/a.json").then(
+			() => undefined,
+			(error: unknown) => error as Error,
 		)
+		expect(failure).toBeInstanceOf(LockKeyWalkIncompleteError)
+		if (!(failure instanceof LockKeyWalkIncompleteError)) {
+			throw new Error("the cycle must reject with LockKeyWalkIncompleteError, not " + String(failure))
+		}
+		// The bound and the spelling the walk stopped at travel with the refusal, so a caller can
+		// report which chain gave up without re-walking it.
+		expect(failure.bound).toBe(8)
+		expect(failure.absoluteFilePath).toBe("/tmp/linkdir/a.json")
+		expect(failure.lastKey).toBe(path.resolve(path.join("/tmp/linkdir", "a.json")))
 		expect(fs.readlink).toHaveBeenCalledTimes(8)
 	})
 })

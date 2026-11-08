@@ -1,6 +1,7 @@
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
+import * as fsSync from "fs"
 
 import { acquireFileLock } from "../fileLock"
 import { setPersistenceTraceSink } from "../../core/task-persistence/persistenceTrace"
@@ -150,6 +151,106 @@ describe("reader recovery", () => {
 		await expect(deleteJsonFile(target)).rejects.toBe(error)
 		expect(await fs.readFile(target, "utf8")).toBe("committed")
 		await expect(fs.access(backup)).resolves.toBeUndefined()
+	})
+
+	// The three rows below put resolveLockKey's fail-closed rule in front of a caller rather than
+	// asserting it at the function: this file's own delete, which computes the key before it takes
+	// the lock and so is the operation that either refuses or proceeds on a key nobody agreed to.
+	// The link geometry they need - a referent that is not there, a readlink that is refused, a
+	// chain that never answers - is supplied by spies, because this lane cannot build a file symlink
+	// for real (fs.symlink answers EPERM here, and the alias rows above say so). Everything else
+	// runs on the real filesystem: the lock machinery, the canonicalization inside the walk, and
+	// the files the rows assert on.
+	it("refuses the delete when the filesystem will not say what the path refers to", async () => {
+		await fs.writeFile(target, JSON.stringify({ committed: true }))
+		// This spec's unlink double is a vi.fn shared across rows and afterEach restores spies without
+		// resetting vi.fn history, so the row clears it before asking whether the delete touched a file.
+		vi.mocked(fs.unlink).mockClear()
+		const refusal = Object.assign(new Error("EACCES: permission denied, realpath '" + target + "'"), {
+			code: "EACCES",
+		})
+		const realpathSpy = vi.spyOn(fs, "realpath").mockRejectedValueOnce(refusal)
+		try {
+			await expect(deleteJsonFile(target)).rejects.toBe(refusal)
+			// The refusal was the first question the resolution asked, and it is the error the caller
+			// receives rather than a wrapped one, so a caller that logs the code still sees EACCES.
+			// A restored spy keeps no call history, so the count is read while it is installed.
+			expect(realpathSpy).toHaveBeenCalledTimes(1)
+		} finally {
+			realpathSpy.mockRestore()
+		}
+		// The key is computed before the lock is taken, so the delete stops before it starts instead
+		// of locking a key derived from the caller's own spelling. Nothing was unlinked.
+		expect(fs.unlink).not.toHaveBeenCalled()
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+		expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual({ committed: true })
+	})
+
+	it("refuses the delete when reading the link itself is refused", async () => {
+		await fs.writeFile(target, JSON.stringify({ committed: true }))
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.unlink).mockClear()
+		// The referent is not there - the window a peer's commit rename opens - so the resolution
+		// falls to the walk, and the walk's first readlink is refused. The refusal used to be read as
+		// "not a link", which ends the walk and hands back whatever spelling it reached.
+		const linkStats = Object.assign(Object.create(fsSync.Stats.prototype) as fsSync.Stats, {
+			isSymbolicLink: () => true,
+		})
+		const refusal = Object.assign(new Error("EACCES: permission denied, readlink '" + target + "'"), {
+			code: "EACCES",
+		})
+		const realpathSpy = vi.spyOn(fs, "realpath").mockRejectedValueOnce(enoent)
+		const lstatSpy = vi.spyOn(fs, "lstat").mockResolvedValueOnce(linkStats)
+		const readlinkSpy = vi.spyOn(fs, "readlink").mockRejectedValueOnce(refusal)
+		try {
+			await expect(deleteJsonFile(target)).rejects.toBe(refusal)
+			// One readlink, and it is the one that was refused: the walk stopped because the filesystem
+			// refused to answer, not because it decided the answer was "not a link". Read while the
+			// spy is still installed - restoring it clears the call history.
+			expect(readlinkSpy).toHaveBeenCalledTimes(1)
+		} finally {
+			readlinkSpy.mockRestore()
+			lstatSpy.mockRestore()
+			realpathSpy.mockRestore()
+		}
+		expect(fs.unlink).not.toHaveBeenCalled()
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+	})
+
+	it("refuses the delete when the link chain stops at the walk's depth bound", async () => {
+		await fs.writeFile(target, JSON.stringify({ committed: true }))
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		const linkStats = Object.assign(Object.create(fsSync.Stats.prototype) as fsSync.Stats, {
+			isSymbolicLink: () => true,
+		})
+		vi.mocked(fs.unlink).mockClear()
+		const realpathSpy = vi.spyOn(fs, "realpath").mockRejectedValueOnce(enoent)
+		const lstatSpy = vi.spyOn(fs, "lstat").mockResolvedValueOnce(linkStats)
+		const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async () => "alias.json")
+		let failure: unknown
+		try {
+			failure = await deleteJsonFile(target).then(
+				() => undefined,
+				(error: unknown) => error,
+			)
+			// Eight links answered and none of them was an answer. The count is the seam running: a
+			// shorter count would mean the row never reached the bound it names. Read before the
+			// restores below, which clear the spy's call history.
+			expect(readlinkSpy).toHaveBeenCalledTimes(8)
+		} finally {
+			readlinkSpy.mockRestore()
+			lstatSpy.mockRestore()
+			realpathSpy.mockRestore()
+		}
+		expect(failure).toBeInstanceOf(LockKeyWalkIncompleteError)
+		if (!(failure instanceof LockKeyWalkIncompleteError)) {
+			throw new Error("the depth bound must reject, not resolve :: " + String(failure))
+		}
+		expect(failure.bound).toBe(8)
+		expect(failure.absoluteFilePath).toBe(path.resolve(target))
+		expect(path.basename(failure.lastKey)).toBe("alias.json")
+		expect(fs.unlink).not.toHaveBeenCalled()
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
 	})
 
 	// The three rows below need a file symlink. `fs.symlink` on a file answers EPERM on the Windows

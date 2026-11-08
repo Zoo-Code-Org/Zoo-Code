@@ -104,6 +104,31 @@ export class PostCommitDurabilityError extends Error {
 		this.committedVersion = committedVersion
 	}
 }
+
+/**
+ * The lock-key walk followed links as far as it was allowed to and never received an answer:
+ * every step reported another link, so the chain was either longer than the bound or circular.
+ * Reported as its own error because the operation has not been refused by a guard - it never got
+ * as far as a guard - and because the caller's spelling is not a lock key: the writer that would
+ * have taken this lock is the one whose key the filesystem refused to name.
+ */
+export class LockKeyWalkIncompleteError extends Error {
+	readonly absoluteFilePath: string
+	readonly bound: number
+	/** The last key the walk reached before it stopped. Carried because the caller can report which
+	 * spelling it stopped at without re-walking the chain. */
+	readonly lastKey: string
+
+	constructor(absoluteFilePath: string, bound: number, lastKey: string) {
+		super(
+			`Lock key for ${absoluteFilePath} did not resolve within ${bound} symlink steps (last key ${lastKey}); refusing to take a lock derived from the spelling the walk stopped at.`,
+		)
+		this.name = "LockKeyWalkIncompleteError"
+		this.absoluteFilePath = absoluteFilePath
+		this.bound = bound
+		this.lastKey = lastKey
+	}
+}
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -145,6 +170,10 @@ function _fsyncFile(fd: number): void {
  * the warning - and it stays below LOCK_STALE_MS (31_000) so a hung helper cannot outlive the
  * staleness window the lock protocol is written around.
  */
+// How far resolveLockKey will follow links when the path is not there yet. Two links that
+// point at each other never answer "not there" or "not a link", so the walk needs a bound; it is
+// a limit on the work, not a claim about how deep a real chain goes.
+const LOCK_KEY_WALK_BOUND = 8
 const DACL_COMMAND_TIMEOUT_MS = 20_000
 
 /** Save the DACL of *srcPath* to a dump file on Windows.
@@ -243,7 +272,6 @@ async function _statDirectoryForContainment(
 }
 
 /**
-/**
  * Whether the two stats name DIFFERENT files, judged the way the compares around it judge
  * one directory: as bigints, because on NTFS and ReFS a file identity can exceed
  * Number.MAX_SAFE_INTEGER and a rounded value makes two files look alike or two spellings of
@@ -322,23 +350,49 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * tolerates a dangling link, because the lock key has to be computable while a
  * peer writer is mid-commit (a publish renames the staged file onto the referent,
  * and backup mode keeps a copy beside it).
- * The walk is bounded so a two-link cycle terminates, and every key it returns is
- * canonicalized through canonicalDirKey.
+ *
+ * It is fail-closed about the other reason a resolution can end without an answer.
+ * The fallback walk runs only for ENOENT - the path is not there yet, which is also
+ * what a dangling link reports - because that is the one case where a key can still
+ * be derived without guessing. A failure that says the filesystem refused to answer
+ * (EACCES on a link the caller may not read, ENOTDIR, EIO, or the ELOOP that
+ * resolvePublishTarget reports for a cycle) propagates: a key built from the caller's
+ * own spelling after a refusal is the same divergence class this function exists to
+ * remove, and locking the wrong file is worse than refusing the operation. Reaching
+ * the walk's depth bound is the third way an answer fails to arrive - the chain went
+ * as far as it was allowed to and stopped - so it rejects rather than returning the
+ * prefix the walk happened to stop at.
+ * Every key this function returns is canonicalized through canonicalDirKey.
  */
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
 		return await canonicalDirKey(await resolvePublishTarget(absoluteFilePath))
-	} catch {
-		// A real readlink throws for anything that is not a link, so a normal chain
-		// ends the walk. Two links that point at each other never would, so the
-		// walk is bounded and callers use the key they actually reached.
+	} catch (error: unknown) {
+		// Only a missing path falls back. Everything else is a refusal, and a refusal is not
+		// evidence about what the path refers to - see the note above.
+		if (errorCode(error) !== "ENOENT") {
+			throw error
+		}
+		// A real readlink also answers for cases that are not failures: "not there" and "not a
+		// link" (EINVAL, which is what a plain file and a Windows junction report) end the walk
+		// at the key it reached, which is the answer for a dangling link and for an alias that
+		// lands on a real file. Two links that point at each other answer neither, so the walk is
+		// bounded, and the bound is a refusal rather than an answer.
 		let key = absoluteFilePath
-		for (let depth = 0; depth < 8; depth++) {
-			const target = await fs.readlink(key).catch(() => undefined)
-			if (target === undefined) return await canonicalDirKey(key)
+		for (let depth = 0; depth < LOCK_KEY_WALK_BOUND; depth++) {
+			const target = await fs.readlink(key).catch((readlinkError: unknown) => {
+				const code = errorCode(readlinkError)
+				if (code === "ENOENT" || code === "EINVAL") {
+					return undefined
+				}
+				throw readlinkError
+			})
+			if (target === undefined) {
+				return await canonicalDirKey(key)
+			}
 			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
 		}
-		return await canonicalDirKey(key)
+		throw new LockKeyWalkIncompleteError(absoluteFilePath, LOCK_KEY_WALK_BOUND, key)
 	}
 }
 

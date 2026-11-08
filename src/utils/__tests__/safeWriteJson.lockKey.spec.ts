@@ -38,6 +38,12 @@ const mockedStat = vi.mocked(fs.stat)
 
 const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
+// "Not a link" is not a bare error. readlink reports it as EINVAL, and the lock-key walk now has
+// to tell that answer apart from a refusal, so the double carries the code the real call carries.
+// It used not to, and nothing noticed: the walk swallowed every readlink failure, so a codeless
+// rejection read the same as the answer "this is not a link".
+const notALink = (): Error => Object.assign(new Error("EINVAL: invalid argument, not a symlink"), { code: "EINVAL" })
+
 // Whether this volume answers a name with a different spelling than the one its directory stores.
 // The gate further down needs the capability rather than the platform label, so it is measured
 // from a real directory: write one file, ask whether a differently-cased name opens, and require
@@ -148,7 +154,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			return symlinkStat(target)
 		})
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(notALink()),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -358,7 +364,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// both inside this directory, so an empty directory is the whole proof.
 		mockedRealpath.mockImplementation(async (t) => String(t))
 		mockedLstat.mockRejectedValue(enoent)
-		mockedReadlink.mockRejectedValue(new Error("not a link"))
+		mockedReadlink.mockRejectedValue(notALink())
 
 		let acquiredKey: string | undefined
 		let duringAcquisition: string[] | undefined
@@ -407,7 +413,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			return symlinkStat(target)
 		})
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(notALink()),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -440,7 +446,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
 		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(notALink()),
 		)
 		mockedAcquireFileLock.mockImplementation(async (lockedPath) => {
 			order.push("lock:" + path.basename(lockedPath))
