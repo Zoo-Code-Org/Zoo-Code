@@ -62,6 +62,8 @@ import type {
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { mistralModels } from "@roo-code/types"
 import { calculateApiCostOpenAI } from "../../../shared/cost"
+import { flushMacrotasks } from "../../../test-utils/timers"
+import { withSettleGuard } from "../../../test-utils/settle-guard"
 
 describe("MistralHandler", () => {
 	let handler: MistralHandler
@@ -1085,6 +1087,7 @@ describe("MistralHandler", () => {
 			// timers so the test is deterministic and does not wait in real time.
 			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms = 0) => {
 				const controller = new AbortController()
+				// eslint-disable-next-line no-restricted-globals -- vi.useFakeTimers drives this timer
 				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
 				return controller.signal
 			})
@@ -1124,6 +1127,7 @@ describe("MistralHandler", () => {
 			vi.useFakeTimers()
 			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms = 0) => {
 				const controller = new AbortController()
+				// eslint-disable-next-line no-restricted-globals -- vi.useFakeTimers drives this timer
 				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
 				return controller.signal
 			})
@@ -1162,6 +1166,7 @@ describe("MistralHandler", () => {
 			vi.useFakeTimers()
 			const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms = 0) => {
 				const controller = new AbortController()
+				// eslint-disable-next-line no-restricted-globals -- vi.useFakeTimers drives this timer
 				setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms)
 				return controller.signal
 			})
@@ -1297,18 +1302,12 @@ describe("MistralHandler", () => {
 			)
 
 			const collector = collectStream(stream).catch((e: unknown) => e)
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await flushMacrotasks()
 			controller.abort()
 
 			// Bound the wait so a broken abort bridge fails this test fast (and fails
 			// the Stryker mutant) instead of hanging until the runner timeout.
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
-				collector.then((result) => {
-					clearTimeout(deadline)
-					resolve(result)
-				})
-			})
+			const error = await withSettleGuard(collector, 3000)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The Mistral request was aborted")

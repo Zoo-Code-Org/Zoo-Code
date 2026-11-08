@@ -415,6 +415,25 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"chat-row-timestamps": async () => {
+		const { ChatRowTimestampsStory } = await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
+		return <ChatRowTimestampsStory />
+	},
+	"task-header-timestamp": async () => {
+		const { TaskHeaderTimestampStory } =
+			await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
+		return <TaskHeaderTimestampStory />
+	},
+	"task-item-footer-absolute": async () => {
+		const { TaskItemFooterAbsoluteStory } =
+			await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
+		return <TaskItemFooterAbsoluteStory />
+	},
+	"language-settings": async () => {
+		const { LanguageSettingsStory } =
+			await import("@/components/settings/__tests__/LanguageSettings.visual.fixture")
+		return <LanguageSettingsStory />
+	},
 	"anthropic-settings": async () => {
 		const [{ AppProviders }, { Anthropic }, { providerIdentifiers }] = await Promise.all([
 			import("../AppProviders"),
