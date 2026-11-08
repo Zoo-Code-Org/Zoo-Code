@@ -2202,6 +2202,40 @@ describe("ReadFileTool", () => {
 				expect(pushed).toContain("1 | a")
 			})
 
+			it("native: the clipped notice leaves the first numbered line at column 0", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[1, 2]],
+				})
+
+				await readFileTool.execute({ path: "clipped-cols.ts" }, mockTask as unknown as Task, callbacks)
+
+				const pushed = String(callbacks.pushToolResult.mock.calls[0][0])
+				const responseLines = pushed.split("\n")
+				const noticeLine = responseLines.findIndex((line) => line.includes("clipped in this view"))
+				expect(noticeLine).toBeGreaterThanOrEqual(0)
+				// The read follows the notice on the very next line, at column 0. The
+				// previous shape joined the two with a template continuation line, which
+				// put this function's own indentation into the response: the first numbered
+				// line arrived indented, and an exact-match edit against a line number the
+				// model can see has to reproduce tabs it was never shown.
+				expect(responseLines[noticeLine + 1]).toBe("1 | a")
+				expect(responseLines[noticeLine + 2]).toBe("2 | b")
+				expect(pushed).not.toContain("\n\t")
+			})
+
 			it("native: a clipped slice that started past line 1 reports the range it covered", async () => {
 				// Not truncated does not mean complete: a slice that begins at offset 4 and
 				// stops at the last line returned the tail only. Claiming "read in full" here
