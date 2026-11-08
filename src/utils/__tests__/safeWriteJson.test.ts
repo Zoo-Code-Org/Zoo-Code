@@ -14,6 +14,12 @@ const fsPromisesActuals = vi.hoisted(() => ({
 	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
 }))
 
+// The fs mock delegates createWriteStream to the implementation captured here, so a test can
+// replace the mock for one call and still let the write reach the real filesystem.
+const fsSyncActuals = vi.hoisted(() => ({
+	createWriteStream: undefined as (typeof import("fs"))["createWriteStream"] | undefined,
+}))
+
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
 	fsPromisesActuals.rename = actual.rename
@@ -42,6 +48,7 @@ vi.mock("fs/promises", async () => {
 // Mock the 'fs' module for fsSync.createWriteStream
 vi.mock("fs", async () => {
 	const actualFs = await vi.importActual<typeof import("fs")>("fs")
+	fsSyncActuals.createWriteStream = actualFs.createWriteStream
 	return {
 		...actualFs, // Spread actual implementations
 		createWriteStream: vi.fn(actualFs.createWriteStream), // Default to actual, but mockable
@@ -139,6 +146,72 @@ describe("safeWriteJson", () => {
 
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(newData)
+	})
+	// Row 4507642592: the commit rename publishes the staging inode, so the mode the staging file is
+	// created with becomes the target's mode. These rows pin that the staging file is created as
+	// open or as private as the file it replaces, instead of with the process default.
+	describe("staging file mode", () => {
+		// Node's WriteStream fills a missing mode in on the options object it is handed, so reading the
+		// call log afterwards shows a normalized object rather than what was passed. Record the mode at
+		// the moment production passes it, then hand the call to the real stream writer so the write
+		// still lands on disk. -1 in the recording stands for "no mode was passed".
+		function captureStagingModes(): number[] {
+			const modes: number[] = []
+			const realCreateWriteStream = fsSyncActuals.createWriteStream!
+			vi.mocked(fsSyncActual.createWriteStream).mockImplementation(function (
+				filePath: string | number | URL,
+				options?: string | Record<string, unknown> | null,
+			) {
+				const passed: unknown = options
+				const mode: unknown =
+					passed !== null && typeof passed === "object" ? (passed as { mode?: unknown }).mode : undefined
+				modes.push(mode === undefined ? -1 : Number(mode))
+				const streamOptions: Parameters<typeof realCreateWriteStream>[1] = options as Parameters<
+					typeof realCreateWriteStream
+				>[1]
+				return realCreateWriteStream(filePath, streamOptions)
+			} as typeof fsSyncActual.createWriteStream)
+			return modes
+		}
+
+		it("creates the staging stream with the publish target's mode", async () => {
+			await fs.chmod(currentTestFilePath, 0o600)
+			// Read back the mode the filesystem reports for the target instead of asserting a literal:
+			// Windows carries per-user rights in the DACL and reports a coarse mode, and the claim under
+			// test is that the staging file is created to match the target, on every platform.
+			const targetMode = (await fs.stat(currentTestFilePath)).mode & 0o777
+			const modes = captureStagingModes()
+
+			await safeWriteJson(currentTestFilePath, { updated: "content" })
+
+			expect(modes.length).toBe(1)
+			expect(modes[0]).toBe(targetMode)
+			expect(await readFileContent(currentTestFilePath)).toEqual({ updated: "content" })
+		})
+
+		it("creates the staging stream with the creation default when the target does not exist yet", async () => {
+			const missingTarget = path.join(tempDir, "not-written-yet.json")
+			const modes = captureStagingModes()
+
+			await safeWriteJson(missingTarget, { created: "content" })
+
+			// Nothing is being replaced, so there is no mode to carry over, and a mode invented here
+			// would be this write deciding how private a file it has not created yet should be.
+			expect(modes.length).toBe(1)
+			expect(modes[0]).toBe(-1)
+			expect(await fileExists(missingTarget)).toBe(true)
+		})
+
+		// The end-to-end mode assertion is made where modes mean what the assertion says they mean.
+		it.runIf(process.platform !== "win32")("keeps a 0o600 file private through an update", async () => {
+			await fs.chmod(currentTestFilePath, 0o600)
+
+			await safeWriteJson(currentTestFilePath, { updated: "content" })
+
+			const published = await fs.stat(currentTestFilePath)
+			expect(published.mode & 0o777).toBe(0o600)
+			expect(await readFileContent(currentTestFilePath)).toEqual({ updated: "content" })
+		})
 	})
 
 	// Failure Scenarios

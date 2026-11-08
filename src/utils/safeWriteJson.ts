@@ -210,7 +210,15 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// making a best-effort flush before committing the replacement.
 		options?.trace?.({ stage: "write-start" })
 		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
-
+		// The commit rename publishes the staging inode, so the file that lands at the target carries
+		// the staging file's mode rather than the target's: on POSIX a rename does not carry the
+		// replaced file's permissions over. A staging file created with the process default (0o666 &
+		// ~umask, normally 0o644) therefore turns an update of a 0o600 file into a world-readable one
+		// sitting in a traversable directory. Read the publish target's mode before staging and create
+		// the staging file with it. A target that is not there yet has no mode to carry over, and the
+		// creation default stands; any other stat failure is propagated, because the mode a private
+		// file is published with is not something this write gets to guess.
+		const publishTargetMode = await _readPublishTargetMode(resolvedTargetPath ?? absoluteFilePath)
 		// The staging location was chosen from the parent directory resolved under the lock. Re-verify
 		// that directory against itself before writing anything into it: a resolved pathname is not an
 		// identity, and a parent that was replaced with a link pointing elsewhere in the meantime would
@@ -257,7 +265,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			)
 		}
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint, publishTargetMode)
 		await _flushFileToDisk(actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
@@ -352,16 +360,37 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 }
 
 /**
+ * The mode the staging file has to be created with, taken from the file it is about to replace.
+ * undefined means there is no such file yet and the creation default stands; a failure that is
+ * not "not there" is propagated, because guessing the mode of a private file is how a 0o600
+ * settings file becomes 0o644 without anyone deciding it.
+ */
+async function _readPublishTargetMode(publishTargetPath: string): Promise<number | undefined> {
+	let mode: number
+	try {
+		mode = (await fs.stat(publishTargetPath)).mode
+	} catch (error: unknown) {
+		if (getErrorCode(error) === "ENOENT") {
+			return undefined
+		}
+		throw error
+	}
+	return mode & 0o777
+}
+
+/**
  * Helper function to stream JSON data to a file.
  * @param targetPath The path to write the stream to.
  * @param data The data to stream.
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
-	// Stream data to avoid high memory usage for large JSON objects.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
-
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false, mode?: number): Promise<void> {
+	// Stream data to avoid high memory usage for large JSON objects. The mode is the publish
+	// target's own mode, so the inode that replaces it is not created more openly than the file it
+	// replaces; on Windows the creation mode carries only the read-only bit and per-user rights come
+	// from directory inheritance, which is why the end-to-end mode assertion is POSIX-shaped.
+	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", mode })
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass
 	// Convert undefined to null for valid JSON serialization (undefined is not valid JSON)

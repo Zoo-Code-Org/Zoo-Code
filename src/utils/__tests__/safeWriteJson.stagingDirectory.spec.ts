@@ -140,13 +140,14 @@ describe("safeWriteJson staging directory drift", () => {
 		// resolutions returned it and the unmocked fs.statSync reported the same inode. Measured on
 		// the old guard, exactly one fs.stat call was enough to reject that write as drift. Here the
 		// same blanket double sits over a write whose directory really is there: the guard must not
-		// consult it at all, and this case reddens if it ever starts to.
+		// consult it about the directory, and this case reddens if it ever starts to; the one stat call
+		// the write is allowed to make is its own publish-target mode read, counted below.
 		const referent = path.join(tmpRoot, "referent-dir")
 		await fs.mkdir(referent, { recursive: true })
 		const alias = path.join(tmpRoot, "alias-dir")
 		await fs.symlink(referent, alias, process.platform === "win32" ? "junction" : "dir")
 		const target = path.join(alias, "settings.json")
-		let statCalls = 0
+		let statPaths: string[] = []
 		const statSpy = vi.spyOn(fs, "stat").mockRejectedValue({ code: "ENOENT" })
 		let failure: unknown
 		try {
@@ -154,11 +155,18 @@ describe("safeWriteJson staging directory drift", () => {
 		} catch (error) {
 			failure = error
 		} finally {
-			statCalls = statSpy.mock.calls.length
+			statPaths = statSpy.mock.calls.map((call) => String(call[0]))
 			statSpy.mockRestore()
 		}
 		expect(failure).toBeUndefined()
-		expect(statCalls).toBe(0) // nothing on this path asks fs.stat about the approved directory
+		// Nothing asked fs.stat about the approved directory, which is the question this row pins. The
+		// one call that was made named the publish target: it is the mode read (_readPublishTargetMode
+		// in safeWriteJson.ts) that row 4507642592 added, and the same blanket double answers it here
+		// with "not there", which the mode read reads as "no mode to carry over" rather than as a
+		// reason to refuse the write.
+		const directoryQuestions = statPaths.filter((p) => path.basename(p) !== "settings.json")
+		expect(directoryQuestions.length).toBe(0)
+		expect(statPaths.length).toBe(1)
 		const written = await fs.readFile(path.join(referent, "settings.json"), "utf8")
 		expect(JSON.parse(written)).toEqual({ preserved: true })
 	})
