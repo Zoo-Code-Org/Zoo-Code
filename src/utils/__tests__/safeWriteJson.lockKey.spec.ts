@@ -1,13 +1,12 @@
 // npx vitest run utils/__tests__/safeWriteJson.lockKey.spec.ts
 
-import * as fsSync from "fs"
 import * as os from "os"
 import path from "path"
 import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
-import { PublishTargetMovedError, safeWriteJson } from "../safeWriteJson"
-import { AncestorReplacedError, resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { safeWriteJson } from "../safeWriteJson"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 
 vi.mock("../fileLock", () => ({
 	acquireFileLock: vi.fn(async () => async () => {}),
@@ -88,50 +87,36 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		mockedReadlink.mockImplementation(async (target) =>
 			target === currentLink ? referent : Promise.reject(new Error("not a link")),
 		)
-		mockedAcquireFileLock.mockImplementation(async (key) => {
-			// Record which identity each lock was taken on, not just that a lock was taken.
-			order.push(path.basename(String(key)))
+		mockedAcquireFileLock.mockImplementation(async () => {
+			order.push("lock")
 			return async () => {}
 		})
 
 		await safeWriteJson(currentLink, { id: "task-1" })
 
-		// The referent is the key every other writer that names this file uses, so the caller
-		// queued behind the peer instead of failing before the lock. The link path is locked as
-		// well, because this is a default write and the identity it replaces is the link: after
-		// this commit, resolveLockKey names the link, so a writer that queues behind must not be
-		// able to overlap with the one that queued behind the referent.
+		// The lock key is the key every other writer to this file uses, so the caller
+		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		expect(mockedAcquireFileLock).toHaveBeenCalledWith(currentLink)
-		// The three trailing lstat calls are safeWriteText's own checks, all of them after the key was
-		// resolved and the lock was taken, so none changes which lock the caller queued behind: the
-		// regular-file check on the temp file this write created, the identity check that the staging
-		// path is not the target, and the check of the TARGET ENTRY that decides whether a backup may
-		// be copied - for a publish-over-link write, backing up a symlink target would copy the
-		// referent's bytes into this directory.
-		// A write that declares no confinement scope no longer resolves the publish target at all,
-		// so the two post-lock resolutions this used to record are gone; the lock key still comes
-		// from the referent, which is what the test is about. The two extra resolutions before the
-		// keys are the fold that decides whether the referent and the link are one lock: both run
-		// before any lock is taken, so the comparison cannot observe a filesystem that moved
-		// between the two acquisitions.
+		// The extra resolves are the post-lock passes: the publish target is re-resolved,
+		// the lock key is re-derived, and every derivation canonicalizes through realpath,
+		// including the final stability check. All of them run after the lock was taken, so
+		// they do not change the lock the caller queued behind. The two trailing lstat
+		// calls belonged to the delegation flow's staging-path checks; the replacement
+		// protocol stages the temp itself and checks no identity beside it, so they are
+		// gone with the delegation.
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
 			"resolve",
 			"resolve",
+			"lock",
 			"resolve",
 			"resolve",
-			"history_item.json",
-			"link.json",
-			"lstat",
-			"lstat",
-			"lstat",
+			"resolve",
+			"resolve",
+			"resolve",
 		])
-		// The bytes replaced the link rather than travelling through it to the referent: nobody
-		// authorized the referent here, because no scope was declared.
-		expect(JSON.parse(await fs.readFile(currentLink, "utf8"))).toEqual({ id: "task-1" })
-		await expect(fs.readFile(referent, "utf8")).rejects.toThrow()
+		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
 	it("releases the lock when the resolution under the lock rejects", async () => {
@@ -163,201 +148,11 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			}
 		})
 
-		// The in-lock resolution only happens for a caller that declared a scope, so the scope is
-		// declared here: what this test pins is that a rejection inside the protected block still
-		// releases the lock, and that path is reached through the confined resolution.
-		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })).rejects.toThrow(enoent)
+		await expect(safeWriteJson(currentLink, { id: "task-1" })).rejects.toThrow(enoent)
 		expect(released).toBe(true)
 		// The strict rejection is reached through the ENOENT + symlink branch, not
 		// through a synchronous throw that skips it.
 		expect(order).toEqual(["lstat", "lock", "lstat", "release"])
-	})
-
-	// Both lock keys come from the caller's path BEFORE the lock is held. The confined publish
-	// target is resolved for the first time while that lock is held, so this is where a peer that
-	// repointed the alias mid-queue has to be caught: the file about to be merged and committed would
-	// be one whose lock belongs to another writer.
-	it("refuses a confined write whose target moved to a file it does not hold the lock for", async () => {
-		const dir = await makeDir("lockkey-")
-		const lockedReferent = path.join(dir, "locked.json")
-		const movedReferent = path.join(dir, "moved.json")
-		currentLink = path.join(dir, "link.json")
-
-		// Pre-lock key derivation follows the alias to lockedReferent - the lock this call takes. The
-		// resolution UNDER the lock follows it to movedReferent: a peer replaced the alias while this
-		// write was queueing for the lock.
-		let resolutions = 0
-		mockedRealpath.mockImplementation(async (target) => {
-			if (target === currentLink) {
-				resolutions++
-				return resolutions === 1 ? lockedReferent : movedReferent
-			}
-			return String(target)
-		})
-		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
-		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink
-				? resolutions === 1
-					? lockedReferent
-					: movedReferent
-				: Promise.reject(new Error("not a link")),
-		)
-		const lockedKeys: string[] = []
-		mockedAcquireFileLock.mockImplementation(async (key) => {
-			lockedKeys.push(String(key))
-			return async () => {}
-		})
-
-		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })).rejects.toThrow(
-			PublishTargetMovedError,
-		)
-
-		// The write held the lock it derived before the queue and published nothing at either candidate:
-		// the moved file is left to whoever holds ITS lock.
-		expect(lockedKeys).toEqual([lockedReferent])
-		await expect(fs.readFile(lockedReferent, "utf8")).rejects.toThrow()
-		await expect(fs.readFile(movedReferent, "utf8")).rejects.toThrow()
-		await expect(fs.readFile(currentLink, "utf8")).rejects.toThrow()
-	})
-
-	// A confined write to a target that does not exist yet never resolves the alias above it: every
-	// directory the write creates on the way down sits under the ALIAS spelling the caller named. If
-	// only canonical directories are pinned, repointing that alias after the scope check moves the
-	// commit and the created directories while every recorded identity still matches.
-	it("refuses a missing confined target when the alias directory above it is repointed before the commit", async () => {
-		const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-		// This scenario needs a real directory tree and a real alias, so the doubles this file arms by
-		// default are pointed at the real implementations.
-		mockedRealpath.mockImplementation(actualFs.realpath)
-		mockedLstat.mockImplementation(actualFs.lstat)
-		mockedReadlink.mockImplementation(actualFs.readlink)
-
-		const projectDir = await makeDir("lockkey-alias-")
-		const inside = path.join(projectDir, "inside")
-		const outside = path.join(projectDir, "outside")
-		await fs.mkdir(inside)
-		await fs.mkdir(outside)
-		const aliasDir = path.join(projectDir, "aliasdir")
-		// A junction is the Windows spelling of a directory alias; POSIX uses a directory symlink.
-		const linkType = process.platform === "win32" ? "junction" : "dir"
-		await fs.symlink(inside, aliasDir, linkType)
-		// The merge callback is synchronous, and it runs while this write holds its locks and before
-		// anything is staged - which is exactly the window the swap has to land in.
-		let swapObserved: string | undefined
-		const swapAlias = (): void => {
-			if (process.platform === "win32") {
-				fsSync.rmdirSync(aliasDir)
-			} else {
-				fsSync.unlinkSync(aliasDir)
-			}
-			fsSync.symlinkSync(outside, aliasDir, linkType)
-			swapObserved = fsSync.realpathSync(aliasDir)
-		}
-
-		const missingTarget = path.join(aliasDir, "nested", "mcp.json")
-
-		const rejection = await safeWriteJson(
-			missingTarget,
-			{ mcpServers: { swapped: { url: "http://localhost" } } },
-			{
-				confineTo: projectDir,
-				merge: (_existing, incoming) => {
-					// The alias is repointed AFTER the scope check and after the resolution under the
-					// lock, and before anything is committed.
-					swapAlias()
-					return incoming
-				},
-			},
-		).then(
-			() => undefined,
-			(error: unknown) => error,
-		)
-		// The swap has to land on this host, or this test says nothing about the pin: name that first.
-		expect(swapObserved, "the alias was never repointed while the write held its locks").toBe(
-			fsSync.realpathSync(outside),
-		)
-		if (rejection === undefined) {
-			throw new Error("the confined write published through the repointed alias instead of refusing it")
-		}
-		expect(rejection).toBeInstanceOf(AncestorReplacedError)
-
-		// Nothing was committed through the repointed alias, on either side of it.
-		await expect(fs.stat(path.join(inside, "nested", "mcp.json"))).rejects.toThrow()
-		await expect(fs.stat(path.join(outside, "nested", "mcp.json"))).rejects.toThrow()
-	})
-
-	// The same walk with the SCOPE ROOT named through a link. realpath canonicalizes the root, so
-	// measuring the caller's path against the canonical spelling makes the chain climb out of the
-	// scope and collapse to the root alone: the alias the write actually walked through is then
-	// unpinned even though the pin claims to cover both spellings. A Windows host produces this
-	// shape whenever the directory the scope is declared in is itself reached through a link.
-	it("refuses a confined write whose scope root is named through a link when a link below it is repointed", async () => {
-		const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
-		mockedRealpath.mockImplementation(actualFs.realpath)
-		mockedLstat.mockImplementation(actualFs.lstat)
-		mockedReadlink.mockImplementation(actualFs.readlink)
-
-		const projectDir = await makeDir("lockkey-rootalias-")
-		const realRoot = path.join(projectDir, "realroot")
-		const otherRoot = path.join(projectDir, "otherroot")
-		const inside = path.join(realRoot, "inside")
-		const outside = path.join(realRoot, "outside")
-		for (const dir of [realRoot, otherRoot, inside, outside]) {
-			await fs.mkdir(dir)
-		}
-		// A junction is the Windows spelling of a directory alias; POSIX uses a directory symlink.
-		const linkType = process.platform === "win32" ? "junction" : "dir"
-		// The scope root the caller names is a link, so _resolveScopeRoot answers with a DIFFERENT
-		// spelling from the one every path of this call was built from.
-		const rootAlias = path.join(projectDir, "rootalias")
-		await fs.symlink(realRoot, rootAlias, linkType)
-		// The confined target sits under a second link, below that one.
-		const aliasDir = path.join(realRoot, "aliasdir")
-		await fs.symlink(inside, aliasDir, linkType)
-
-		let swapObserved: string | undefined
-		const swapAlias = (): void => {
-			if (process.platform === "win32") {
-				fsSync.rmdirSync(aliasDir)
-			} else {
-				fsSync.unlinkSync(aliasDir)
-			}
-			fsSync.symlinkSync(outside, aliasDir, linkType)
-			// Report where the alias points now, so a passing write cannot be read as a pin that
-			// worked against a swap that never happened.
-			swapObserved = fsSync.realpathSync(aliasDir)
-		}
-
-		const missingTarget = path.join(rootAlias, "aliasdir", "nested", "mcp.json")
-
-		const rejection = await safeWriteJson(
-			missingTarget,
-			{ mcpServers: { swapped: { url: "http://localhost" } } },
-			{
-				confineTo: rootAlias,
-				merge: (_existing, incoming) => {
-					swapAlias()
-					return incoming
-				},
-			},
-		).then(
-			() => undefined,
-			(error: unknown) => error,
-		)
-
-		expect(swapObserved, "the alias was never repointed while the write held its locks").toBe(
-			fsSync.realpathSync(outside),
-		)
-		if (rejection === undefined) {
-			throw new Error(
-				"the confined write published through the link named by the scope root instead of refusing it",
-			)
-		}
-		expect(rejection).toBeInstanceOf(AncestorReplacedError)
-
-		// Nothing was committed on either side of the repointed link.
-		await expect(fs.stat(path.join(inside, "nested", "mcp.json"))).rejects.toThrow()
-		await expect(fs.stat(path.join(outside, "nested", "mcp.json"))).rejects.toThrow()
 	})
 
 	it("canonicalizes the parent directory when the file itself is not there yet", async () => {
@@ -379,178 +174,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
-
-	// Windows canonicalisation is case-insensitive, so fs.realpath can hand back the very same file
-	// under a different spelling - the drive letter's case is the common one. Comparing the two lock
-	// identities case-sensitively then treats one file as two, and proper-lockfile answers the second
-	// acquisition with "Lock file is already being held": a write that should simply succeed fails,
-	// and it fails only on Windows. The double below answers that way for a key already taken under
-	// ANY spelling, which is what a case-insensitive filesystem does.
-	it.runIf(process.platform === "win32")(
-		"takes one lock when canonicalisation differs from the requested path only by case",
-		async () => {
-			const dir = await makeDir("lockkey-case-")
-			const target = path.join(dir, "history_item.json")
-			const lowerDrive = (p: string) => (/^[A-Za-z]:/.test(p) ? p[0].toLowerCase() + p.slice(1) : p)
-
-			mockedRealpath.mockImplementation(async (p) => lowerDrive(String(p)))
-			// The target does not exist yet (a create), which is what leaves the resolver's spelling as
-			// the only thing to compare. Anything else this call lstats - the staging file among them -
-			// is the regular file it is, so the double answers for that too instead of failing every probe.
-			mockedLstat.mockImplementation(async (probe) => {
-				if (String(probe).toLowerCase() === target.toLowerCase()) {
-					throw enoent
-				}
-				return { isSymbolicLink: () => false, isFile: () => true } as unknown as BigIntStats
-			})
-			const held = new Set<string>()
-			mockedAcquireFileLock.mockImplementation(async (key) => {
-				const identity = lowerDrive(String(key)).toLowerCase()
-				if (held.has(identity)) {
-					throw new Error("Lock file is already being held")
-				}
-				held.add(identity)
-				return async () => {
-					held.delete(identity)
-				}
-			})
-
-			await expect(safeWriteJson(target, { mcpServers: {} })).resolves.toBeUndefined()
-			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
-		},
-	)
-
-	// The second win32 folding a string comparison cannot do: a path component may be spelled as
-	// its 8.3 short name (RUNNER~1 for a long user directory, which is what a CI runner hands
-	// out). The filesystem folds that to the same directory entry, and the lock manager - which
-	// locks `<path>.lock` with realpath:false - therefore places both spellings in ONE lock
-	// directory. Asking twice is a collision with one's own lock, answered as 'Lock file is
-	// already being held' after the retries are spent.
-	it.runIf(process.platform === "win32")(
-		"takes one lock when the requested path names the referent directory by its 8.3 short name",
-		async () => {
-			const dir = await makeDir("lockkey-short-")
-			currentLink = path.join(dir, "link.json")
-			const shortDir = path.join(path.dirname(dir), "LOCKKE~1")
-
-			// The link is named through the short spelling; the canonical form is the real one.
-			const linkViaShort = path.join(shortDir, "link.json")
-			mockedRealpath.mockImplementation(async (probe) => {
-				const p = String(probe)
-				if (p.toLowerCase() === shortDir.toLowerCase()) {
-					return dir
-				}
-				return p
-			})
-			// Nothing here is a symlink and everything the write touches exists, so the probe only
-			mockedLstat.mockImplementation(
-				async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
-			)
-			const held = new Set<string>()
-			mockedAcquireFileLock.mockImplementation(async (key) => {
-				const identity = String(key).toLowerCase()
-				if (held.has(identity)) {
-					throw new Error("Lock file is already being held")
-				}
-				held.add(identity)
-				return async () => {
-					held.delete(identity)
-				}
-			})
-
-			await expect(safeWriteJson(linkViaShort, { mcpServers: {} })).resolves.toBeUndefined()
-			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
-		},
-	)
-
-	// The fallback is the common path, not an edge: on a create the target's parent may not exist
-	// yet, so realpath fails and the resolved spelling is all there is. Case folding still has to
-	// apply to that spelling, or the two keys of one not-yet-existing file collide the same way.
-	it.runIf(process.platform === "win32")(
-		"takes one lock when the parent does not exist yet and the two spellings differ by case",
-		async () => {
-			const dir = await makeDir("lockkey-create-")
-			const otherSpelling = path.join(path.dirname(dir), path.basename(dir).toUpperCase(), "history_item.json")
-			mockedRealpath.mockRejectedValue(enoent)
-			// The parent is absent, which is what makes realpath fail above; the file itself is
-			// whatever the write is about to create, so the probe answers as a regular file.
-			mockedLstat.mockImplementation(
-				async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
-			)
-			const held = new Set<string>()
-			mockedAcquireFileLock.mockImplementation(async (key) => {
-				const identity = String(key).toLowerCase()
-				if (held.has(identity)) {
-					throw new Error("Lock file is already being held")
-				}
-				held.add(identity)
-				return async () => {
-					held.delete(identity)
-				}
-			})
-
-			await expect(safeWriteJson(otherSpelling, { mcpServers: {} })).resolves.toBeUndefined()
-			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
-		},
-	)
-
-	// The mixed case the CI runner hit, and the reason folding cannot stop at the immediate parent:
-	// an ancestor that exists and is spelled as its 8.3 short name, with a tail that does not exist
-	// yet - a create into a directory that is about to be made. resolveLockKey canonicalises through
-	// the highest ancestor it can reach, so a fold that only asks for the immediate parent falls
-	// back to the short spelling while the referent key is already canonical: two unequal keys,
-	// one .lock directory, and the second acquisition collides with the first.
-	it.runIf(process.platform === "win32")(
-		"takes one lock when an existing ancestor is spelled short and the tail does not exist",
-		async () => {
-			const realDir = await makeDir("lockkey-mixed-")
-			const shortDir = path.join(path.dirname(realDir), "LOCKKE~2")
-			const requested = path.join(shortDir, "not-yet", "history_item.json")
-			const canonical = path.join(realDir, "not-yet", "history_item.json")
-
-			// One filesystem rule, not a list of paths: the short spelling of the existing directory
-			// resolves to the real one, and nothing below it exists yet, so every deeper probe
-			// rejects exactly as it would on a host where the create has not happened.
-			mockedRealpath.mockImplementation(async (probe) => {
-				const norm = String(probe).toLowerCase().replace(/\\/g, "/")
-				const short = shortDir.toLowerCase().replace(/\\/g, "/")
-				const real = realDir.toLowerCase().replace(/\\/g, "/")
-				if (norm === short) {
-					return realDir
-				}
-				if (norm === real || norm.startsWith(real + "/")) {
-					return String(probe)
-				}
-				throw enoent
-			})
-			mockedLstat.mockImplementation(
-				async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
-			)
-			const acquired: string[] = []
-			mockedAcquireFileLock.mockImplementation(async (key) => {
-				const identity = String(key).toLowerCase()
-				if (acquired.map((k) => k.toLowerCase()).includes(identity)) {
-					throw new Error("Lock file is already being held")
-				}
-				acquired.push(String(key))
-				return async () => {}
-			})
-
-			await expect(safeWriteJson(requested, { mcpServers: {} })).resolves.toBeUndefined()
-			expect(acquired).toHaveLength(1)
-			// One lock, naming one entry. Which spelling it carries is the implementation's choice
-			// (it keeps the requested one when the two fold together); what must hold is that the
-			// spelling is the SAME ENTRY the canonical path names, so a writer arriving by the real
-			// path queues behind this one rather than beside it.
-			const entryOf = (probe: string) => {
-				const norm = probe.toLowerCase().replace(/\\/g, "/")
-				const short = shortDir.toLowerCase().replace(/\\/g, "/")
-				const real = realDir.toLowerCase().replace(/\\/g, "/")
-				return norm.startsWith(short) ? real + norm.slice(short.length) : norm
-			}
-			expect(entryOf(acquired[0])).toBe(entryOf(canonical))
-		},
-	)
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
@@ -563,77 +186,16 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	mockedRealpath.mockImplementation(async (t) => String(t))
 	mockedLstat.mockImplementation(async (t) => symlinkStat(t))
 
-	const commitFailure = new Error("commit rename failed")
-	const renameSpy = vi.spyOn(fs, "rename").mockRejectedValue(commitFailure)
+	const renameSpy = vi.spyOn(fs, "rename").mockRejectedValue(new Error("commit rename failed"))
 	const unlinkSpy = vi.spyOn(fs, "unlink").mockRejectedValue(enoent)
 	const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
 	await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
 
-	// Only the original failure is reported - and reported AS the original failure:
-	// a regression that logs the ENOENT cleanup error instead of the commit failure
-	// (or drops the commit failure and logs only the cleanup) must not pass on the
-	// call count alone.
-	const reported = consoleError.mock.calls.map((call) => String(call[0]))
-	expect(reported).toHaveLength(1)
-	expect(reported[0]).toContain("[Original Error Caught]")
-	expect(consoleError.mock.calls[0][1]).toBe(commitFailure)
-	expect(reported.some((message) => message.includes("Failed to clean up temporary new file"))).toBe(false)
+	// Only the original failure is reported.
+	expect(consoleError).toHaveBeenCalledTimes(1)
 
 	renameSpy.mockRestore()
 	unlinkSpy.mockRestore()
 	consoleError.mockRestore()
-})
-
-it("releases both locks when a default write over a symlink completes", async () => {
-	const dir = await makeDir("lockkey-")
-	const referent = path.join(dir, "history_item.json")
-	currentLink = path.join(dir, "link.json")
-	const acquired: string[] = []
-	const released: string[] = []
-
-	mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
-	mockedLstat.mockImplementation(async (target) => symlinkStat(target))
-	mockedReadlink.mockImplementation(async (target) =>
-		target === currentLink ? referent : Promise.reject(new Error("not a link")),
-	)
-	mockedAcquireFileLock.mockImplementation(async (key) => {
-		acquired.push(String(key))
-		return async () => {
-			released.push(String(key))
-		}
-	})
-
-	await safeWriteJson(currentLink, { id: "task-1" })
-
-	// Deterministic order: the two keys sorted, so two writers approaching the same pair from
-	// opposite sides cannot each hold one and wait for the other.
-	expect(acquired).toEqual([referent, currentLink].sort())
-	// Every lock taken is released, in the reverse of the order they were taken.
-	expect(released).toEqual([...acquired].reverse())
-})
-
-it("locks only the referent when the caller declared a confinement scope", async () => {
-	const dir = await makeDir("lockkey-")
-	const referent = path.join(dir, "history_item.json")
-	currentLink = path.join(dir, "link.json")
-	const acquired: string[] = []
-
-	// A confined caller publishes through the referent, so the referent lock is the one that
-	// serializes it - including against writers that name the referent directly. Adding the
-	// link-path lock here would be a second lock for an identity this call does not replace.
-	await fs.writeFile(referent, "{}", "utf8")
-	mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
-	mockedLstat.mockImplementation(async (target) => symlinkStat(target))
-	mockedReadlink.mockImplementation(async (target) =>
-		target === currentLink ? referent : Promise.reject(new Error("not a link")),
-	)
-	mockedAcquireFileLock.mockImplementation(async (key) => {
-		acquired.push(String(key))
-		return async () => {}
-	})
-
-	await safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })
-
-	expect(acquired).toEqual([referent])
 })

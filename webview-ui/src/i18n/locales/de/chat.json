@@ -322,10 +322,10 @@
 		"title": "Zoo Code {{version}} veröffentlicht",
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
-			"heading": "Was ist neu in Zoo Code v3.94.0",
-			"highlight1": "✨ Breitere Modell- und Providerunterstützung: Nutze Claude Haiku 5.5 über Anthropic, schicke Bilder an kompatible VS Code LM-Modelle, stelle die Temperatur für OpenCode Go Responses-Modelle ein und brich Anfragen sauber bei mehr Providern ab.",
-			"highlight2": "🔐 Flexibleres MCP OAuth: Konfiguriere statische OAuth-Client-Einstellungen, nutze eigene Callback-Pfade, ermittle Authentifizierungsdetails aus WWW-Authenticate und sieh Callback-Fehler, bevor du es erneut versuchst.",
-			"highlight3": "🧭 Flüssigere Chats und lange Sessions: Benenne Aufgaben im Verlauf um, ziehe Dateien per Drag-and-drop in den Chat, ohne Shift gedrückt zu halten, reduziere den Speicherbedarf bei langen Sessions und halte Subtask-Links und ausgetauschte Webviews stabil."
+			"heading": "Was ist neu in Zoo Code v3.96.0",
+			"highlight1": "✨ Neue Chat-Einstellungen und Diagnose: Zeige Nachrichten-Zeitstempel mit konfigurierbaren Zeit- und Datumsformaten, stimme die Prompt-Cache-TTL für Anthropic-Profile ab und erstelle datenschutzfreundliche Diagnoseberichte.",
+			"highlight2": "💸 Genauere Anbieterkosten und Caching: Anthropic-Ergebnisse bleiben intakt, kumulative Output-Tokens fließen in Anthropic- und MiniMax-Kosten ein, DeepSeek-Prompt-Cache-Zähler werden ausgelesen, der xAI-Responses-Cache wird gezielt angesprochen und Mistral-Cache-Lesungen werden mit 0,1x abgerechnet.",
+			"highlight3": "🧭 Zuverlässigere und schnellere Chats: Setze abgeschlossene Aufgaben nach einem Neustart fort, stelle Checkpoints wieder her, wenn der gespeicherte Commit fehlt, lade einen toten Webview-Renderer automatisch neu, drossle Streaming-Updates und lade Sprachen bei Bedarf."
 		}
 	},
 	"costs": {
