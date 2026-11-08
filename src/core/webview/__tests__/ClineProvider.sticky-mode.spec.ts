@@ -690,6 +690,141 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(persisted.mode).toBe("ask")
 		})
 
+		it("re-derives and rewrites the profile list on the next state assembly after the tail write rejects", async () => {
+			// The failure under test is the derived refresh, not the mutation: the mode write and the
+			// task-side commits land first, so the fresh list exists in memory and only the cache write
+			// is dropped. The promise being repaired is that the cache eventually reflects disk.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "cache-repair-task",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "cache-repair-task",
+				ts: Date.now(),
+				task: "cache repair",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item: HistoryItem) => {
+				historyItem.mode = item.mode
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			const fresh = [{ id: "fresh-id", name: "fresh-profile" }]
+			const listConfig = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(fresh)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			// updateGlobalState is protected, so the failure is forced one layer down at the durable
+			// write it awaits, keyed to this key only so the mode write and every other write proceed.
+			const proxy = provider.contextProxy
+			const originalSetValue = proxy.setValue.bind(proxy)
+			const write = vi.spyOn(proxy, "setValue").mockImplementation((key, value) => {
+				if (key === "listApiConfigMeta") {
+					return Promise.reject(new Error("cache write rejected"))
+				}
+				return originalSetValue(key, value)
+			})
+
+			await provider["handleModeSwitchUnlocked"]("ask", mockTask).catch(() => {})
+			expect(provider["profileListCacheDirty"]).toBe(true)
+			// The switch rejects and the cache still holds the old value: the mixture the flag exists to end.
+			expect(provider.getValue("listApiConfigMeta")).not.toEqual(fresh)
+			write.mockRestore()
+
+			await provider.getStateToPostToWebview()
+			expect(provider.getValue("listApiConfigMeta")).toEqual(fresh)
+			expect(provider["profileListCacheDirty"]).toBe(false)
+			// Once for the switch tail, once for the recovery: no unbounded retry.
+			expect(listConfig).toHaveBeenCalledTimes(2)
+		})
+
+		it("keeps the dirty flag set when the re-derive itself rejects", async () => {
+			// A flag cleared before its write lands is the same bug wearing a fix: a recovery that clears
+			// the flag and then fails leaves the cache stale with nothing marking it stale.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "cache-redirty-task",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "cache-redirty-task",
+				ts: Date.now(),
+				task: "cache redirty",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item: HistoryItem) => {
+				historyItem.mode = item.mode
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			const fresh = [{ id: "fresh-id", name: "fresh-profile" }]
+			const listConfig = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(fresh)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			const proxy = provider.contextProxy
+			const originalSetValue = proxy.setValue.bind(proxy)
+			let rejected = false
+			const write = vi.spyOn(proxy, "setValue").mockImplementation((key, value) => {
+				if (key === "listApiConfigMeta" && !rejected) {
+					rejected = true
+					return Promise.reject(new Error("cache write rejected"))
+				}
+				return originalSetValue(key, value)
+			})
+
+			await provider["handleModeSwitchUnlocked"]("ask", mockTask).catch(() => {})
+			write.mockRestore()
+			// The disk read behind the recovery now fails.
+			listConfig.mockRejectedValue(new Error("re-derive failed"))
+			// The recovery swallows its own failure: a state post must not become a failing call.
+			await provider.getStateToPostToWebview()
+			expect(provider["profileListCacheDirty"]).toBe(true)
+			expect(provider.getValue("listApiConfigMeta")).not.toEqual(fresh)
+		})
+
+		it("does not re-derive when nothing is dirty", async () => {
+			// The flag is the only trigger: without it the recovery would turn every state post into a disk
+			// read, a worse contract than the stale cache it repairs.
+			const listConfig = vi
+				.spyOn(provider.providerSettingsManager, "listConfig")
+				.mockResolvedValue([{ id: "clean", name: "clean" }])
+			const before = listConfig.mock.calls.length
+			await provider.getStateToPostToWebview()
+			await provider.getStateToPostToWebview()
+			// No switch ran, so nothing is dirty and no listConfig call is owed.
+			expect(listConfig).toHaveBeenCalledTimes(before)
+		})
+
 		// The listener-failure case above rethrows before handleModeSwitchUnlocked reaches
 		// setValue("mode", newMode), so it cannot reach the rollback branch. This case fails
 		// the durable mode write inside that call, from a view that already had a pin, so the
@@ -741,7 +876,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.saveViewState("mode", "architect")
 
 			const originalUpdate = mockContext.globalState.update
-			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+			mockContext.globalState.update = vi.fn().mockImplementation((key, value) => {
 				if (key === "mode") {
 					return Promise.reject(new Error("storage unavailable"))
 				}

@@ -2831,6 +2831,29 @@ export class ClineProvider
 		return this.enqueueProviderProfileMutation(() => this.handleModeSwitchUnlocked(newMode, targetTask))
 	}
 
+	// One re-derive attempt per state assembly: the profile list cache is re-read from disk
+	// and written back, and the flag is cleared only after BOTH succeed, so a failed re-derive
+	// cannot clear it (a flag cleared before its write lands is the same bug wearing a fix) and a
+	// persistently failing listConfig cannot turn every state post into a failing call.
+	private profileListCacheDirty = false
+
+	private async refreshProfileListCacheIfDirty(): Promise<void> {
+		if (!this.profileListCacheDirty) {
+			return
+		}
+		try {
+			const listApiConfig = await this.providerSettingsManager.listConfig()
+			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+			this.profileListCacheDirty = false
+		} catch (error) {
+			this.log(
+				`[ClineProvider] profile-list cache re-derive failed; flag kept set: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
 	private async handleModeSwitchUnlocked(newMode: Mode, targetTask: Task | null | undefined): Promise<void> {
 		const task = targetTask
 		// Captured before any write so the persistence failure below can undo the task-side
@@ -2936,7 +2959,18 @@ export class ClineProvider
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
-		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+		// The profile list is a derived cache: listConfig() is re-run by the resume restores, the
+		// profile writes and the activation rollback, so a dropped write here normally heals on the next
+		// such event. It does not heal on a read - getProviderProfileEntries returns the cached value - so
+		// a failure here used to leave the durable list behind the profiles on disk with no recovery path of
+		// its own. The rejection still propagates (unchanged contract); the flag only adds one more
+		// producer of the same write, at the next awaited state assembly.
+		try {
+			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+		} catch (error) {
+			this.profileListCacheDirty = true
+			throw error
+		}
 
 		// If this mode has a saved config, use it.
 		if (savedConfigId) {
@@ -5272,6 +5306,10 @@ export class ClineProvider
 	}
 
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
+		// Re-derive the profile list cache first, so the state about to be posted reflects disk and
+		// the dropped write has a recovery path that is not another user event.
+		await this.refreshProfileListCacheIfDirty()
+
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
 
