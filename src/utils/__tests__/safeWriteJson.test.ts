@@ -196,6 +196,95 @@ describe("safeWriteJson", () => {
 			expect(await fileExists(missingTarget)).toBe(true)
 		})
 
+		// Row 4507855186. The target-mode read is the one stat in this writer whose failure has to stop the
+		// write. A target that is not there yet has no mode to carry over, so absence is a verdict; any other
+		// failure means the mode of the file being replaced is unknown, and defaulting on it publishes a
+		// private target with the creation default. These rows inject the two non-absence codes at the
+		// publish target itself - the writer stats the resolved path, so the match is made against both
+		// spellings - and delegate every other stat to the real filesystem.
+		async function blockTargetModeRead(code: string): Promise<{
+			failure: Error
+			statPaths: string[]
+			restore: () => void
+		}> {
+			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			const statPaths: string[] = []
+			const spellings = new Set<string>([currentTestFilePath])
+			try {
+				spellings.add(await actual.realpath(currentTestFilePath))
+			} catch {
+				// A target that cannot be realpath'd is matched by its own spelling only.
+			}
+			const failure = Object.assign(new Error(code + ": the target-mode stat could not read the mode"), {
+				code,
+			}) as Error
+			const realStat = actual.stat
+			vi.mocked(fs.stat).mockImplementation(async (...args: Parameters<typeof fs.stat>) => {
+				const keyed = String(args[0])
+				statPaths.push(keyed)
+				if (spellings.has(keyed)) {
+					throw failure
+				}
+				return (realStat as typeof fs.stat)(...args)
+			})
+			// restoreAllMocks does not bring back an implementation that a test installed over a factory
+			// double, so the delegation back to the real stat is put back here rather than left to the hook.
+			return {
+				failure,
+				statPaths,
+				restore: () => {
+					vi.mocked(fs.stat).mockImplementation(((...args: Parameters<typeof fs.stat>) =>
+						Reflect.apply(actual.stat, actual, args)) as typeof fs.stat)
+				},
+			}
+		}
+
+		async function runAgainstUnreadableMode(code: string): Promise<void> {
+			const injected = await blockTargetModeRead(code)
+			// Call counts are read as a delta: this suite restores mock implementations between rows but
+			// the doubles keep the history of earlier rows, so an absolute not-to-have-been-called would be a
+			// claim about the whole file rather than about this write.
+			const streamsBefore = vi.mocked(fsSyncActual.createWriteStream).mock.calls.length
+			const renamesBefore = vi.mocked(fs.rename).mock.calls.length
+			const before = await readFileContent(currentTestFilePath)
+			const stages: string[] = []
+			let failure: unknown
+			try {
+				await safeWriteJson(
+					currentTestFilePath,
+					{ updated: "content" },
+					{
+						trace: (event: { stage: string }) => {
+							stages.push(event.stage)
+						},
+					},
+				)
+			} catch (error: unknown) {
+				failure = error
+			} finally {
+				injected.restore()
+			}
+			expect(failure).toBe(injected.failure)
+			// The stage list records where the writer stopped. It announces the write before reading the mode,
+			// so write-start is present; the load-bearing facts are that the staging stream is never opened
+			// and the target is never renamed onto. The stat list is the proof that the injected failure landed
+			// on the target-mode read and not on some other stat: that read is the only one this writer makes
+			// before it fails.
+			expect(stages).toEqual(["write-start"])
+			expect(injected.statPaths).toEqual([currentTestFilePath])
+			expect(vi.mocked(fsSyncActual.createWriteStream).mock.calls.length).toBe(streamsBefore)
+			expect(vi.mocked(fs.rename).mock.calls.length).toBe(renamesBefore)
+			expect(await readFileContent(currentTestFilePath)).toEqual(before)
+		}
+
+		it("propagates an EACCES on the target-mode stat and publishes nothing", async () => {
+			await runAgainstUnreadableMode("EACCES")
+		})
+
+		it("propagates an EIO on the target-mode stat and publishes nothing", async () => {
+			await runAgainstUnreadableMode("EIO")
+		})
+
 		// The end-to-end mode assertion is made where modes mean what the assertion says they mean.
 		it.runIf(process.platform !== "win32")("keeps a 0o600 file private through an update", async () => {
 			await fs.chmod(currentTestFilePath, 0o600)

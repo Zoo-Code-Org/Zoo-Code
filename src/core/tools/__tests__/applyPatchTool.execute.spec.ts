@@ -23,6 +23,8 @@ const mockedFsPromises = vi.mocked(
 			readFile: ReturnType<typeof vi.fn>
 			stat: ReturnType<typeof vi.fn>
 			unlink: MockedFunction<typeof fsPromises.unlink>
+			// Added for the outside-workspace refusal row: the refused destination must not be canonicalised.
+			realpath: ReturnType<typeof vi.fn>
 		}
 	},
 )
@@ -224,6 +226,10 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 		mockedFileExistsAtPath.mockResolvedValue(true)
 
+		// The outside-workspace double is module-level, and vi.clearAllMocks() keeps implementations,
+		// so a row that flips it has to find it back at false. Restored here rather than per row so the
+		// next row does not have to know a neighbour changed it.
+		vi.mocked(isPathOutsideWorkspace).mockReturnValue(false)
 		mockSaveDirectly = vi.fn().mockResolvedValue({
 			newProblemsMessage: "",
 			userEdits: undefined,
@@ -753,6 +759,41 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
+	it("move: refuses a destination outside every workspace root without canonicalising or publishing it", async () => {
+		// Row 4507855163. The refusal at ApplyPatchTool.ts:564 sits above the experiment-flag branch at :575,
+		// so both modes share one code path and the flag-off twin below is the other half of that claim.
+		// Only the destination reads as outside a root: leaving the source inside means a canonicalisation
+		// of the source cannot stand in for the destination being canonicalised.
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const outside = vi.mocked(isPathOutsideWorkspace)
+		outside.mockImplementation((candidate: string) => candidate === destKey)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-outside-workspace-destination",
+		})
+
+		expect(outside).toHaveBeenCalledWith(destKey)
+		expect(mockPushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("Cannot move file to path outside workspace: src/new.ts"),
+		)
+		// The refused destination is never canonicalised. realpathNearest used to run at this point, so a
+		// destination whose name could not be resolved surfaced an exception where the user should get the
+		// tool error above.
+		expect(mockedFsPromises.default.realpath).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockSaveChanges).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+		expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
+		// The mistake counter is deliberately not asserted here. The refusal raises it at :565 and the
+		// end-of-loop statement at :242 clears it again inside the same call, so reading the counter
+		// after this call would pin :242 rather than the refusal.
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
 	it("move: a complete source read keeps the destination complete", async () => {
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
@@ -773,6 +814,62 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(reg.get(destKey)?.complete).toBe(true)
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
+	// Rows 4507760687 follow-up (4507979054): the rows above pin what the registry holds at publish time.
+	// These two pin the value the tool hands the guard as its completeness authorization - the seventh
+	// argument - which the registry rows cannot see because a mocked save does not consult it. That is
+	// the whole case for keeping both: one row reads the state, these read the argument that state came
+	// from, and the false case below is the only situation where production passes false at all.
+	it("move: authorizes the destination publish as complete when the source was read in full", async () => {
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		mockTask.observationRegistry.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-complete-source-argument",
+		})
+
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/new.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"create",
+			true,
+			false,
+			undefined,
+		)
+	})
+
+	it("move: authorizes the destination publish as partial when the source view was partial and the destination was absent", async () => {
+		// The create guard permits publishing onto an absent path, so the partial source view has to travel
+		// with the publish instead of being refused: this is the case the argument exists to express, and
+		// it is the one case in which the shipped code passes false (ApplyPatchTool.ts:584, :635).
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
+		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		mockedFsPromises.default.access.mockRejectedValueOnce(
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "move-partial-source-absent-destination-argument",
+		})
+
+		// The destination's own stale completeness is not what authorizes the publish - the source view is -
+		// so the argument is false even though the destination had been read as complete before it vanished.
+		expect(mockSaveDirectly.mock.calls[0]?.[6]).toBe(false)
+		expect(mockSaveDirectly.mock.calls[0]?.[5]).toBe("create")
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
 	// Row 4507855182 (measured): the destination commits and the source unlink below never runs,
 	// so a move that hits a buffer conflict is half-applied. The report has to name both paths
 	// and keep the shared error's no-retry guidance, because the model's next instinct is to
@@ -1024,6 +1121,37 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockHandleError).not.toHaveBeenCalled()
 		expect(mockPushToolResult).toHaveBeenCalled()
+	})
+
+	it("flag-off move: refuses a destination outside every workspace root before mkdir or writeFile", async () => {
+		// The twin of the guarded row above. The refusal is above the experiment-flag branch, so the raw
+		// publish path never sees an outside-workspace destination either: no directory is created, nothing
+		// is written, and the source is left where it was.
+		mockGetState.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} })
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		vi.mocked(isPathOutsideWorkspace).mockImplementation((candidate: string) => candidate === destKey)
+		const writeDoubles = vi.mocked(
+			fsPromises as unknown as {
+				default: { writeFile: ReturnType<typeof vi.fn>; mkdir: ReturnType<typeof vi.fn> }
+			},
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "flag-off-move-outside-workspace-destination",
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("Cannot move file to path outside workspace: src/new.ts"),
+		)
+		expect(writeDoubles.default.mkdir).not.toHaveBeenCalled()
+		expect(writeDoubles.default.writeFile).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
+		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
 	// The hunk read is the content the guarded publish republishes. An ASCII hunk can match a

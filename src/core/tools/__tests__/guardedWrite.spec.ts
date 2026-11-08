@@ -940,6 +940,47 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("absent.txt"), "second")
 		})
 
+		it("the second publication does not start while the first is still running", async () => {
+			// Row 4507855167. Call order and non-overlap are different claims: NthCalledWith says which
+			// publish ran first, and a second publish that began while the first was still inside the publish
+			// primitive satisfies it. The first publish is held open on a promise this row controls, the
+			// invocation list is read while that hold is open, and only then is the hold released.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("overlap.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			const started: string[] = []
+			let releaseFirst: () => void = () => {}
+			const firstHold = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			mockedSafeWriteText
+				.mockImplementationOnce(async () => {
+					started.push("first")
+					await firstHold
+				})
+				.mockImplementationOnce(async () => {
+					started.push("second")
+				})
+
+			const p1 = guardedWrite(task, "overlap.txt", "first", "update")
+			const p2 = guardedWrite(task, "overlap.txt", "second", "update")
+
+			// One macrotask tick is enough for every microtask-only step ahead of a publish to run for both
+			// writes, so a second link that was not waiting on the first would already have published here.
+			await new Promise((resolve) => {
+				setTimeout(resolve, 0)
+			})
+			expect(started).toEqual(["first"])
+
+			releaseFirst()
+			const [r1, r2] = await Promise.allSettled([p1, p2])
+			expect(r1.status).toBe("fulfilled")
+			expect(r2.status).toBe("fulfilled")
+			expect(started).toEqual(["first", "second"])
+		})
+
 		it("the chain settles after a rejection - a later matching write still runs", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("settle.txt"), "v1")

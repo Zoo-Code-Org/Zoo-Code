@@ -31,6 +31,30 @@ describe("what a failed lock acquisition gives back", () => {
 		expect(fsp.rmdir).not.toHaveBeenCalled()
 	})
 
+	// Row 4507646158 follow-up. The real-filesystem rows cannot pin this: whether the writer that
+	// created the directory is also the writer that loses the lock is a race, and a populated
+	// directory is protected by ENOTEMPTY whichever way the rollback asks for it. So the claim - a
+	// rollback that cannot remove a directory leaves it, and does not report its own refusal over
+	// the failure that caused it - is made here, where the create answer and the rmdir answer are
+	// both fixed.
+	it("leaves a created directory another writer populated and still reports the lock refusal", async () => {
+		const refusal = lockRefused()
+		const createdLevel = path.join("C:", "tree", "one")
+		vi.mocked(fsp.mkdir).mockResolvedValue("\\\\?\\" + createdLevel)
+		vi.mocked(lockfile.lock).mockRejectedValue(refusal)
+		// The directory this call created is not empty by the time the rollback looks: another writer
+		// has put something in it, and rmdir refuses a directory in use.
+		vi.mocked(fsp.rmdir).mockRejectedValue(
+			Object.assign(new Error("ENOTEMPTY: directory not empty, " + createdLevel), { code: "ENOTEMPTY" }),
+		)
+		const target = path.join(createdLevel, "state.json")
+		// The caller gets the lock refusal it asked about. A rollback failure on the way out must not
+		// arrive dressed as the error that caused the rollback.
+		await expect(acquireFileLock(target)).rejects.toBe(refusal)
+		// The populated directory is asked for once and left there, not retried into its parent.
+		expect(vi.mocked(fsp.rmdir).mock.calls.map((call) => String(call[0]))).toEqual([createdLevel])
+	})
+
 	it("gives back only the levels the create reported, deepest first", async () => {
 		const refusal = lockRefused()
 		const firstLevel = path.join("C:", "tree", "one")

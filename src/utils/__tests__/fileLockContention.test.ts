@@ -46,7 +46,11 @@ describe("file lock contention where the directory has to be created first", () 
 			expect((refused[0] as PromiseRejectedResult).reason).toBeInstanceOf(Error)
 			expect(String((refused[0] as PromiseRejectedResult).reason)).toMatch(/already being held/)
 			// One artefact, held by one writer: the refused attempt creates no lock of its own
-			// and leaks nothing behind.
+			// and leaks nothing behind. The refused attempt has already run its rollback here, and one of
+			// the two created the directory the artefact stands in: the directory and the live artefact
+			// both have to outlive that rollback, and the holder has to be able to release. (Row
+			// 4507646158 follow-up: this is the window the reviewer's rollback claim is about.)
+			expect((await fsp.stat(path.dirname(target))).isDirectory()).toBe(true)
 			expect((await fsp.stat(lockPathFor(target))).isDirectory()).toBe(true)
 			await holding[0]!.value()
 			await expect(fsp.stat(lockPathFor(target))).rejects.toMatchObject({ code: "ENOENT" })
