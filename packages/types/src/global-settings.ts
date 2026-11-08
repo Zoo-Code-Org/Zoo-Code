@@ -15,6 +15,7 @@ import { toolNamesSchema } from "./tool.js"
 import { type Keys } from "./type-fu.js"
 import { languagesSchema } from "./vscode.js"
 import { providerIdentifiers } from "./provider-identifiers.js"
+import { mcpDynamicLoadThresholdSchema, mcpDynamicLoadInitialKSchema } from "./mcp.js"
 
 /**
  * Default delay in milliseconds after writes to allow diagnostics to detect potential problems.
@@ -265,6 +266,8 @@ export const globalSettingsSchema = z.object({
 	telemetrySetting: telemetrySettingsSchema.optional(),
 
 	mcpEnabled: z.boolean().optional(),
+	"mcp.dynamicLoad.threshold": mcpDynamicLoadThresholdSchema.optional(),
+	"mcp.dynamicLoad.initialK": mcpDynamicLoadInitialKSchema.optional(),
 
 	mode: z.string().optional(),
 	modeApiConfigs: z.record(z.string(), z.string()).optional(),

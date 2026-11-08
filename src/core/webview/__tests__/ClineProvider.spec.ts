@@ -4291,6 +4291,25 @@ describe("ClineProvider", () => {
 		expect(state.allowedWriteFiles).toEqual([])
 	})
 
+	test.each([
+		{ threshold: undefined, initialK: undefined, expectedThreshold: 50, expectedK: 30 },
+		{ threshold: 0, initialK: 7, expectedThreshold: 0, expectedK: 7 },
+		{ threshold: 100, initialK: 20, expectedThreshold: 100, expectedK: 20 },
+		{ threshold: -1, initialK: NaN, expectedThreshold: 50, expectedK: 30 },
+		{ threshold: Infinity, initialK: 0, expectedThreshold: 50, expectedK: 30 },
+	])(
+		"round-trips MCP routing settings ($threshold, $initialK)",
+		async ({ threshold, initialK, expectedThreshold, expectedK }) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("mcp.dynamicLoad.threshold", threshold)
+			await provider.contextProxy.setValue("mcp.dynamicLoad.initialK", initialK)
+			for (const state of [await provider.getState(), await provider.getStateToPostToWebview()]) {
+				expect(state["mcp.dynamicLoad.threshold"]).toBe(expectedThreshold)
+				expect(state["mcp.dynamicLoad.initialK"]).toBe(expectedK)
+			}
+		},
+	)
+
 	test("getStateToPostToWebview returns the saved destructive command guard setting", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)

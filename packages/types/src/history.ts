@@ -26,6 +26,16 @@ export const pendingTaskActionSchema = z.discriminatedUnion("kind", [
 
 export type PendingTaskAction = z.infer<typeof pendingTaskActionSchema>
 
+// Older or hand-edited history can contain an invalid attachment field. Do not
+// discard the task record or mark a non-array value as an initialized selection.
+export const attachedMcpToolNamesSchema = z.preprocess((value) => {
+	if (!Array.isArray(value)) return undefined
+	const names = value.filter(
+		(name): name is string => typeof name === "string" && /^mcp--[A-Za-z_][\w-]*--[A-Za-z_][\w-]*$/.test(name),
+	)
+	return value.length > 0 && names.length === 0 ? undefined : names
+}, z.array(z.string()).optional())
+
 export const historyItemSchema = z.object({
 	id: z.string(),
 	rootTaskId: z.string().optional(),
@@ -50,6 +60,8 @@ export const historyItemSchema = z.object({
 	completedByChildId: z.string().optional(), // Child that completed and resumed this parent
 	completionResultSummary: z.string().optional(), // Summary from completed child
 	pendingAction: pendingTaskActionSchema.optional(),
+	// Absent means routing has not run; an empty array is an initialized selection.
+	attachedMcpToolNames: attachedMcpToolNamesSchema,
 })
 
 export type HistoryItem = z.infer<typeof historyItemSchema>

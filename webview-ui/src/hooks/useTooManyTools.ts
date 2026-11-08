@@ -21,6 +21,8 @@ export interface TooManyToolsInfo {
 /**
  * Hook that calculates tool counts and provides localized warning messages.
  * Used by MCP settings views to summarize enabled tool counts.
+ * This legacy catalog advisory is separate from the task-scoped routing gate.
+ * Its replacement with routing status and controls is deferred to #581.
  *
  * @returns Tool count information and localized messages
  *
