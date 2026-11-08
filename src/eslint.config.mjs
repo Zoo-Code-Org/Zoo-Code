@@ -2,6 +2,7 @@ import { config } from "@roo-code/config-eslint/base"
 import {
 	apiProviderHygieneConfig,
 	apiProviderTestSelectors,
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 } from "@roo-code/config-eslint/api-provider-hygiene"
 import { createI18nDotKeyConfig, getI18nDotKeySelectors } from "@roo-code/config-eslint/i18n-keys"
@@ -66,6 +67,7 @@ export default [
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
 	},
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 	{
 		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.

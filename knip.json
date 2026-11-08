@@ -7,7 +7,6 @@
 		"packages/core/src/custom-tools/__tests__/fixtures-override/**",
 		"src/integrations/misc/__tests__/performance/**",
 		"src/integrations/terminal/__tests__/setupTerminalTests.ts",
-		"src/integrations/terminal/__tests__/streamUtils/index.ts",
 		"src/services/tree-sitter/__tests__/helpers.ts"
 	],
 	"ignoreDependencies": ["lint-staged"],
@@ -27,6 +26,8 @@
 				"!utils/WorkspacePathResolver.ts!",
 				"!test-utils/**!",
 				"!utils/versionToken.ts!",
+				"!services/tools/Bm25Ranker.ts!",
+				"!services/tools/types.ts!",
 				"!core/tools/helpers/toolResultFormatting.ts!"
 			],
 			"ignoreDependencies": [
@@ -45,6 +46,7 @@
 				"src/**/*.{ts,tsx}!",
 				"../src/shared/*.ts!",
 				"!src/utils/test-utils.tsx!",
+				"!src/**/__tests__/**!",
 				"!src/vite-plugins/**!",
 				"!src/**/*.visual.tsx!",
 				"!src/**/*.visual.{fixture,i18n}.{ts,tsx}!"
