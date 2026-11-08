@@ -515,7 +515,11 @@ describe("OpenAiNativeHandler", () => {
 			)
 
 			const collected = collectStream(stream)
-			setTimeout(() => controller.abort(), 10)
+			// The abort must land mid-request, so poll the observable that the request
+			// exists - the fetch double having been called - instead of a wall-clock delay.
+			// The explicit timeout is what makes a condition that never fires fail the test.
+			await vi.waitFor(() => mockFetch.mock.calls.length > 0, { timeout: 2000, interval: 25 })
+			controller.abort()
 
 			await expect(collected).rejects.toMatchObject({ name: "AbortError" })
 		})
@@ -540,7 +544,9 @@ describe("OpenAiNativeHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: firstController.signal }),
 			)
 			const firstCollected = collectStream(firstStream)
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// Observable: the first request has registered an in-flight stream. The
+			// explicit timeout keeps a condition that never fires from idling to green.
+			await vi.waitFor(() => openStreams.length >= 1, { timeout: 2000, interval: 25 })
 			requireController(0).enqueue(
 				new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
 			)
@@ -557,7 +563,9 @@ describe("OpenAiNativeHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: secondController.signal }),
 			)
 			const secondCollected = collectStream(secondStream)
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// Observable: both requests are in flight; the length assertion stays because
+			// polling replaces the sleep, not the assertion.
+			await vi.waitFor(() => openStreams.length >= 2, { timeout: 2000, interval: 25 })
 			expect(openStreams).toHaveLength(2)
 
 			// Aborting the FIRST request's signal must not leak into the second request.
