@@ -812,6 +812,94 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider.getValue("listApiConfigMeta")).not.toEqual(fresh)
 		})
 
+		// The two rows above cover a re-derive that fails at the disk read and a re-derive that
+		// succeeds all the way through. Neither reaches the middle case the guard in
+		// ClineProvider.ts:2844-2847 is written for: the re-read from disk succeeds and the write
+		// that follows it rejects. The flag is cleared only after both halves land, so this is the
+		// case that fails when the clear moves above the write - a flag cleared before its write
+		// lands is the dropped write again with a fix written around it. The rejection used for the
+		// switch tail is not the rejection used for the recovery: the row arms them separately so
+		// the failure can only have arrived on the recovery's own write.
+		it("keeps the dirty flag set when the re-derive reads disk but its write rejects", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "recovery-write-rejected-task",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "recovery-write-rejected-task",
+				ts: Date.now(),
+				task: "recovery write rejected",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item: HistoryItem) => {
+				historyItem.mode = item.mode
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			const fresh = [{ id: "fresh-id", name: "fresh-profile" }]
+			const listConfig = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(fresh)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			const proxy = provider.contextProxy
+			const originalSetValue = proxy.setValue.bind(proxy)
+			let phase: "switch" | "recovery" | "restored" = "switch"
+			let switchWriteRejected = false
+			let recoveryWriteRejected = false
+			const write = vi.spyOn(proxy, "setValue").mockImplementation((key, value) => {
+				if (key === "listApiConfigMeta") {
+					if (phase === "switch" && !switchWriteRejected) {
+						switchWriteRejected = true
+						return Promise.reject(new Error("switch tail cache write rejected"))
+					}
+					if (phase === "recovery" && !recoveryWriteRejected) {
+						recoveryWriteRejected = true
+						return Promise.reject(new Error("recovery cache write rejected"))
+					}
+				}
+				return originalSetValue(key, value)
+			})
+
+			// The rejected switch tail is what sets the flag; ClineProvider.ts:2968-2973 keeps
+			// propagating that rejection, so the switch is awaited through a catch.
+			await provider["handleModeSwitchUnlocked"]("ask", mockTask).catch(() => {})
+			expect(provider["profileListCacheDirty"]).toBe(true)
+
+			phase = "recovery"
+			const assembliesBefore = listConfig.mock.calls.length
+			// The re-read succeeds - listConfig is still resolving - and the state post survives the
+			// rejected write, because the recovery swallows its own failure rather than turning every
+			// state assembly into a failing call.
+			await provider.getStateToPostToWebview()
+			expect(recoveryWriteRejected).toBe(true)
+			expect(listConfig).toHaveBeenCalledTimes(assembliesBefore + 1)
+			expect(provider["profileListCacheDirty"]).toBe(true)
+			expect(provider.getValue("listApiConfigMeta")).not.toEqual(fresh)
+
+			write.mockRestore()
+			phase = "restored"
+			// A flag that stays set is only worth having if a later assembly retries and heals it.
+			await provider.getStateToPostToWebview()
+			expect(provider["profileListCacheDirty"]).toBe(false)
+			expect(provider.getValue("listApiConfigMeta")).toEqual(fresh)
+			expect(listConfig).toHaveBeenCalledTimes(assembliesBefore + 2)
+		})
+
 		it("does not re-derive when nothing is dirty", async () => {
 			// The flag is the only trigger: without it the recovery would turn every state post into a disk
 			// read, a worse contract than the stale cache it repairs.
