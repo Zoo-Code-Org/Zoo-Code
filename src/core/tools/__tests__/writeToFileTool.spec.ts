@@ -534,16 +534,20 @@ describe("writeToFileTool", () => {
 			vi.mocked(realpath).mockRejectedValue({ code: "EPERM" })
 			mockedIsPathOutsideWorkspace.mockReturnValue(true)
 
-			await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+			try {
+				await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
 
-			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
-
-			// Reset both doubles: later tests in this file assume an in-workspace target that
-			// resolves to itself.
-			vi.mocked(realpath).mockImplementation(async (p) => String(p))
-			mockedIsPathOutsideWorkspace.mockReturnValue(false)
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			} finally {
+				// Reset both doubles: later tests in this file assume an in-workspace target that
+				// resolves to itself. A reset after the assertions only runs when they pass, and
+				// beforeEach clears calls but not implementations, so a failing assertion here
+				// would leave realpath rejecting for every later test in the file.
+				vi.mocked(realpath).mockImplementation(async (p) => String(p))
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+			}
 		})
 
 		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {
