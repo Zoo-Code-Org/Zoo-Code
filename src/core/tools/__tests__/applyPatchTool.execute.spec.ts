@@ -323,8 +323,12 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 *** Delete File: src/obsolete.ts
 *** Delete File: src/locked.ts
 *** End Patch`
-			// The first delete succeeds; the second fails.
-			mockedFsPromises.default.unlink.mockRejectedValueOnce(new Error("EPERM: operation not permitted"))
+			// The first delete succeeds; the second fails. unlink is one shared double and
+			// mockRejectedValueOnce orders by call, not by path, so the rejection has to be
+			// armed after a resolved first call - otherwise this case exercises the wrong delete.
+			mockedFsPromises.default.unlink
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(new Error("EPERM: operation not permitted"))
 
 			await tool.execute({ patch }, mockTask as Task, {
 				askApproval: mockAskApproval,
@@ -338,7 +342,17 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
 			const checkpointAt = mockedCheckpointSave.mock.invocationCallOrder[0] ?? Infinity
 			const handoffAt = vi.mocked(mockTask.processQueuedMessages).mock.invocationCallOrder[0] ?? Infinity
+			// A handoff that never happened used to be the strongest pass in the file: the
+			// ?? Infinity default makes any checkpoint order beat an absent handoff, so the
+			// count is asserted before the order is compared.
+			expect(vi.mocked(mockTask.processQueuedMessages).mock.calls.length).toBeGreaterThan(0)
 			expect(checkpointAt).toBeLessThan(handoffAt)
+			// Which delete ran is what the mock ordering is for: both paths were attempted
+			// and exactly two unlinks happened - a first-delete failure would have stopped
+			// the loop before the second path was reached.
+			expect(mockedFsPromises.default.unlink).toHaveBeenCalledTimes(2)
+			expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(expect.stringMatching(/[\\/]obsolete\.ts$/))
+			expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(expect.stringMatching(/[\\/]locked\.ts$/))
 		})
 		it("persists a partial-state checkpoint when a later handler rejects outright after an earlier write", async () => {
 			const patch = `*** Begin Patch
@@ -362,6 +376,8 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
 			const checkpointAt = mockedCheckpointSave.mock.invocationCallOrder[0] ?? Infinity
 			const handoffAt = vi.mocked(mockTask.processQueuedMessages).mock.invocationCallOrder[0] ?? Infinity
+			// Same vacuity as the case above: assert the handoff happened, then its order.
+			expect(vi.mocked(mockTask.processQueuedMessages).mock.calls.length).toBeGreaterThan(0)
 			expect(checkpointAt).toBeLessThan(handoffAt)
 			expect(mockHandleError).toHaveBeenCalled()
 		})

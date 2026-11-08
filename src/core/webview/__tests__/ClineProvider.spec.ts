@@ -4404,6 +4404,23 @@ describe("ClineProvider", () => {
 		expect(state.perWriteCheckpoints).toBe(true)
 	})
 
+	test("persists per-write checkpoints sent through updateSettings to the message handler", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		// No cast: this file is already at its suppressed no-explicit-any budget (195), and
+		// the double's call list is untyped, so the handler comes out of it directly.
+		const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0]
+
+		await messageHandler({ type: "updateSettings", updatedSettings: { perWriteCheckpoints: false } })
+
+		// Through the handler rather than straight into the proxy: every other per-write
+		// assertion in this file drives contextProxy directly, so a handler that dropped
+		// this key would have left all of them green.
+		expect(updateGlobalStateSpy).toHaveBeenCalledWith("perWriteCheckpoints", false)
+		expect(mockContext.globalState.update).toHaveBeenCalledWith("perWriteCheckpoints", false)
+		const state = await provider.getState()
+		expect(state.perWriteCheckpoints).toBe(false)
+	})
+
 	test("getStateToPostToWebview returns the saved per-write checkpoints setting", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("perWriteCheckpoints", true)

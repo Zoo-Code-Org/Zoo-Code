@@ -642,7 +642,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// the only thing that could be lost: persist it under a recovery name.
 						const recoveryCandidate = path.join(moveDir, `${moveBase}.zoo-recovery-${moveStamp}`)
 						try {
-							await fs.writeFile(recoveryCandidate, newContent, "utf8")
+							// Same owner-only creation as the staging write above, and O_EXCL rather than
+							// truncation: a recovery copy holds private content, and silently overwriting
+							// whatever already stands at that name would destroy a file instead of preserving one.
+							await fs.writeFile(recoveryCandidate, newContent, {
+								encoding: "utf8",
+								mode: 0o600,
+								flag: "wx",
+							})
 							recoveryPath = recoveryCandidate
 							console.error(
 								`Failed to restore pre-move state: ${restoreFailure instanceof Error ? restoreFailure.message : String(restoreFailure)}; kept the approved content at ${recoveryCandidate}`,
