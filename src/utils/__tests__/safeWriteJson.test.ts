@@ -1289,6 +1289,36 @@ describe("safeWriteJson guarded-publish requirements carried by the guarded-writ
 		expect(await fileExists(target)).toBe(false)
 	})
 
+	test("fails closed when the pre-commit publication inspection fails with a non-ENOENT error", async () => {
+		const parent = path.join(tempDir, "publication-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "publication-eacces.json")
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		// The first two looks are the pre-staging destination checks; the third is the one the
+		// publication takes immediately before the commit rename. Rejecting the second, as the
+		// case above does, cannot show that a publication-time inspection error is honoured, so
+		// this case rejects the third and keeps the earlier case standing beside it.
+		let targetLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === target) {
+				targetLooks++
+				if (targetLooks >= 3) return Promise.reject(failure)
+				return Promise.resolve(asFile)
+			}
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })).rejects.toThrow("EACCES")
+
+		vi.restoreAllMocks()
+		// Three destination looks happened, so the failure came from the publication-time
+		// inspection rather than an earlier check, and the commit never landed.
+		expect(targetLooks).toBe(3)
+		expect(await fileExists(target)).toBe(false)
+	})
+
 	test("fails closed when an ancestor vanishes during the authorizing walk", async () => {
 		const parent = path.join(tempDir, "vanish-parent")
 		await fs.mkdir(parent, { recursive: true })
