@@ -1362,6 +1362,10 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// file this very write changed, and recording nothing would withdraw authority the
 			// tool earned by writing the content itself.
 			expect(task.observationRegistry.get(target)?.version).toBe("v2")
+			// The other direction of the same state: this publish replaced a complete file the
+			// model had read, so a caveat about durability must not report the write as
+			// half-applied - a consumer has to tell 'landed, not durable' from 'half-applied'.
+			expect(task.observationRegistry.get(target)?.complete).toBe(true)
 			expect(failure.message).toContain("committed, not durable")
 			expect(failure.committedVersion).toBe("v2")
 		})

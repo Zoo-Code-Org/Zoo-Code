@@ -3726,7 +3726,13 @@ describe("DiffViewProvider", () => {
 			const settled = await Promise.allSettled([save, revert])
 			expect(settled[0].status).toBe("fulfilled")
 			expect(settled[1].status).toBe("rejected")
-			expect((settled[1] as PromiseRejectedResult).reason).toBeInstanceOf(CommittedWriteBufferConflictError)
+			const rejection = (settled[1] as PromiseRejectedResult).reason as CommittedWriteBufferConflictError
+			expect(rejection).toBeInstanceOf(CommittedWriteBufferConflictError)
+			// Not merely that something rejected: this is the window the row describes - a
+			// cancellation that arrived after the guarded publish had committed.
+			expect(rejection.message).toContain(
+				"revertChanges: a cancellation arrived after the guarded publish had committed.",
+			)
 
 			// One pass over the tabs, and the cancellation did not repeat the document revert.
 			// Only this provider's tab is touched, by either caller.
@@ -3776,7 +3782,13 @@ describe("DiffViewProvider", () => {
 			// swallowed, so this row keeps testing tab and reset counts on its own.
 			const settled = await Promise.allSettled([save, revert])
 			expect(settled[0].status).toBe("fulfilled")
-			expect((settled[1] as PromiseRejectedResult).reason).toBeInstanceOf(CommittedWriteBufferConflictError)
+			const rejection = (settled[1] as PromiseRejectedResult).reason as CommittedWriteBufferConflictError
+			expect(rejection).toBeInstanceOf(CommittedWriteBufferConflictError)
+			// Not merely that something rejected: this is the window the row describes - a
+			// cancellation that arrived after the guarded publish had committed.
+			expect(rejection.message).toContain(
+				"revertChanges: a cancellation arrived after the guarded publish had committed.",
+			)
 
 			// The owning pass restored the preview tabs exactly once, and the waiting caller
 			// finalized the session exactly once - the pass that ran the tabs does not reset, so
@@ -3861,7 +3873,13 @@ describe("DiffViewProvider", () => {
 			})
 			// The caller that asked for the undo is told which of the two it got.
 			expect(settled[1].status).toBe("rejected")
-			expect((settled[1] as PromiseRejectedResult).reason).toBeInstanceOf(CommittedWriteBufferConflictError)
+			const rejection = (settled[1] as PromiseRejectedResult).reason as CommittedWriteBufferConflictError
+			expect(rejection).toBeInstanceOf(CommittedWriteBufferConflictError)
+			// Not merely that something rejected: this is the window the row describes - a
+			// cancellation that arrived after the guarded publish had committed.
+			expect(rejection.message).toContain(
+				"revertChanges: a cancellation arrived after the guarded publish had committed.",
+			)
 		})
 
 		// Row 4507760734 (measured): the guarded path treats the commit as the point of no return,
