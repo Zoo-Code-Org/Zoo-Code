@@ -3206,12 +3206,13 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// an existing source, and the guard aimed at the target.
 		const hasConfig = vi.fn(async (name: string) => name === "old-profile")
 		const getProfile = vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic })
+		const saveConfig = vi.fn().mockResolvedValue(undefined)
 		const repoint = vi.fn().mockResolvedValue(undefined)
 		provider.providerSettingsManager = {
 			runExclusiveAcrossInstances,
 			hasConfig,
 			getProfile,
-			saveConfig: vi.fn().mockResolvedValue(undefined),
+			saveConfig,
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
 		provider.repointViewLocalStateAfterProfileRename = repoint
@@ -3233,6 +3234,14 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// lines existed (measured by mutating the source lookup in the handler).
 		expect(getProfile).toHaveBeenNthCalledWith(1, { name: "old-profile" })
 		expect(getProfile).toHaveBeenNthCalledWith(2, { name: "new-profile" })
+		// Order by name is not order in time: a target read that happened before the save
+		// would still be the second call with the second name, and the real manager rejects
+		// a lookup of a profile that has not been written yet. Pin the position against the
+		// save itself, not only against the other lookup.
+		expect(getProfile).toHaveBeenCalledTimes(2)
+		const saveAt = vi.mocked(provider.providerSettingsManager.saveConfig).mock.invocationCallOrder[0]
+		const targetReadAt = getProfile.mock.invocationCallOrder[1]
+		expect(targetReadAt).toBeGreaterThan(saveAt)
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("new-profile", {
 			apiProvider: providerIdentifiers.anthropic,
 			id: "profile-id",
