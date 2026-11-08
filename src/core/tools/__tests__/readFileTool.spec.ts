@@ -23,6 +23,7 @@ import type { Task, ToolExecutionContext } from "../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
+import { MAX_LINE_LENGTH } from "../../prompts/tools/native-tools/read_file"
 import { readFileTool } from "../ReadFileTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { formatResponse } from "../../prompts/responses"
@@ -140,13 +141,22 @@ interface MockTaskOptions {
 	maxImageFileSize?: number
 	maxTotalImageSize?: number
 	observationRegistry?: ObservationRegistry
+	aborted?: boolean
 }
 
 function createMockTask(options: MockTaskOptions = {}) {
-	const { supportsImages = false, rooIgnoreAllowed = true, maxImageFileSize = 5, maxTotalImageSize = 20 } = options
+	const {
+		supportsImages = false,
+		rooIgnoreAllowed = true,
+		maxImageFileSize = 5,
+		maxTotalImageSize = 20,
+		aborted = false,
+	} = options
 
 	return {
 		cwd: "/test/workspace",
+		// Mirror Task.abort: disposal and cancellation both set it before the loop resumes.
+		abort: aborted,
 		// Mirror Task: every task always owns an observation registry (A2, #1375).
 		// Tests asserting on observations pass their own instance via options.
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
@@ -1366,6 +1376,64 @@ describe("ReadFileTool", () => {
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("To read more"))
 		})
 
+		it("should show a clipping notice in indentation mode separately from the omission notice", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "1 | block",
+				returnedLines: 10,
+				totalLines: 100,
+				wasTruncated: false,
+				hasClippedLines: true,
+				includedRanges: [[1, 10]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 1 },
+				},
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			const pushed = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(pushed).toContain("clipped in this view")
+			expect(pushed).not.toContain("File content truncated")
+		})
+
+		it("should report clipping alongside truncation in indentation mode", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "1 | block",
+				returnedLines: 50,
+				totalLines: 200,
+				wasTruncated: true,
+				hasClippedLines: true,
+				includedRanges: [[1, 50]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 1 },
+				},
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			const pushed = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(pushed).toContain("File content truncated")
+			expect(pushed).toContain("clipped in this view")
+		})
+
 		it("should include range information in indentation mode when not truncated", async () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()
@@ -1709,6 +1777,25 @@ describe("ReadFileTool", () => {
 		})
 
 		describe("observation registry", () => {
+			// Indices of fs.stat calls against a path ending in fileName, filtered by
+			// whether the call passed { bigint: true }. Counting matching calls is
+			// the load-bearing form here: toHaveBeenCalledWith asserts membership,
+			// which the directory-check stat alone satisfies, and it cannot tell a
+			// skipped stat from one that ran.
+			const usesBigintOptions = (options: unknown): boolean =>
+				typeof options === "object" && options !== null && (options as { bigint?: unknown }).bigint === true
+			const statCallsMatching = (fileName: string, bigint: boolean): number[] =>
+				mockedFsStat.mock.calls
+					.map((_, index) => index)
+					.filter((index) => {
+						const [statPath, options] = mockedFsStat.mock.calls[index]
+						return String(statPath).endsWith(fileName) && usesBigintOptions(options) === bigint
+					})
+			// Vitest records invocationCallOrder parallel to mock.calls; comparing it
+			// against the readFile call tells the pre-read observation stat from the
+			// post-read one instead of trusting positional order by eye.
+			const statOrderBeforeRead = (statIndex: number): boolean =>
+				mockedFsStat.mock.invocationCallOrder[statIndex] < mockedFsReadFile.mock.invocationCallOrder[0]
 			it("records an observation on successful read of an existing file", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
@@ -1744,6 +1831,19 @@ describe("ReadFileTool", () => {
 				const obs = reg.get(calledPath)
 				expect(obs).toBeDefined()
 				expect(obs!.version).toBe(calledVersion)
+				// Regression evidence: both observation stats must be bigint stats.
+				// Count the calls that match - correct path AND { bigint: true } -
+				// because a membership assertion passes on its own: the read path
+				// also stats the same path without options for the directory check.
+				const bigintStatIndexes = statCallsMatching("existing.ts", true)
+				expect(bigintStatIndexes).toHaveLength(2)
+				// Neither observation stat is a plain stat: the directory check stays
+				// the only stat without options...
+				expect(statCallsMatching("existing.ts", false)).toHaveLength(1)
+				// ...and the two bigint stats bracket the read: exactly one before it
+				// (pre-read observation) and exactly one after (post-read observation).
+				expect(bigintStatIndexes.filter((index) => statOrderBeforeRead(index))).toHaveLength(1)
+				expect(bigintStatIndexes.filter((index) => !statOrderBeforeRead(index))).toHaveLength(1)
 			})
 
 			it("a failed read (absent path) leaves the registry size 0 and does not throw", async () => {
@@ -1797,6 +1897,15 @@ describe("ReadFileTool", () => {
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
 				expect(calledPath).toContain("legacy.ts")
 				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				// Regression evidence, same contract on the legacy path: count the
+				// matching calls (correct path AND { bigint: true }) instead of
+				// asserting membership, which the directory-check stat alone satisfies.
+				const bigintStatIndexes = statCallsMatching("legacy.ts", true)
+				expect(bigintStatIndexes).toHaveLength(2)
+				expect(statCallsMatching("legacy.ts", false)).toHaveLength(1)
+				// The two bigint stats bracket the read: pre-read before it, post-read after.
+				expect(bigintStatIndexes.filter((index) => statOrderBeforeRead(index))).toHaveLength(1)
+				expect(bigintStatIndexes.filter((index) => !statOrderBeforeRead(index))).toHaveLength(1)
 			})
 
 			it("does not observe when the file mutates between the pre-read and post-read stats", async () => {
@@ -1835,6 +1944,166 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).not.toHaveBeenCalled()
 				expect(reg.size).toBe(0)
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+			})
+
+			it("records nothing when the task is aborted before the post-read stat (native path)", async () => {
+				// Task.disposeOnce() sets abort before an awaited read resumes, and abortTask()
+				// sets it on cancellation. The read still answers the model, but the observation -
+				// and the post-read stat work behind it - must not repopulate a retired registry.
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+					aborted: true,
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue({
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats)
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.size).toBe(0)
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				// The abort must skip only the post-read observation: the pre-read
+				// observation stat is still issued, and no bigint stat follows the
+				// read. Counted by matching calls (correct path AND { bigint: true }):
+				// a membership assertion cannot tell "post-stat skipped" from
+				// "post-stat ran".
+				const bigintStatIndexes = statCallsMatching("existing.ts", true)
+				expect(bigintStatIndexes).toHaveLength(1)
+				// The single bigint stat ran before the read: it is the pre-read one.
+				expect(statOrderBeforeRead(bigintStatIndexes[0])).toBe(true)
+				// The directory-check stat is untouched: still exactly one plain stat.
+				expect(statCallsMatching("existing.ts", false)).toHaveLength(1)
+			})
+
+			it("records nothing when the task is aborted before the post-read stat (legacy path)", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+					aborted: true,
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue({
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats)
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.size).toBe(0)
+				// Same contract on the legacy path: the pre-read observation stat is
+				// still issued and the post-read one is skipped - counted by matching
+				// calls, not by membership.
+				const bigintStatIndexes = statCallsMatching("legacy.ts", true)
+				expect(bigintStatIndexes).toHaveLength(1)
+				expect(statOrderBeforeRead(bigintStatIndexes[0])).toBe(true)
+				expect(statCallsMatching("legacy.ts", false)).toHaveLength(1)
+			})
+
+			it("records nothing when the task is cancelled while the post-read stat is in flight (native path)", async () => {
+				// The guard before the stat cannot see a cancellation that lands DURING the
+				// stat. The re-check before observe() is what keeps a read that belongs to a
+				// cancelled run out of the registry - and out of a registry that disposal has
+				// already retired.
+				const mockTask = createMockTask({ observationRegistry: new ObservationRegistry() })
+				const callbacks = createMockCallbacks()
+
+				const stats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats) // directory check
+					.mockResolvedValueOnce(stats) // pre-read
+					.mockImplementationOnce(async () => {
+						// The cancel lands while this await is pending.
+						mockTask.abort = true
+						return stats
+					}) // post-read
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.size).toBe(0)
+				// The read itself still answered the model; only the observation is withheld.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+			})
+
+			it("records nothing when the task is cancelled while the post-read stat is in flight (legacy path)", async () => {
+				const mockTask = createMockTask({ observationRegistry: new ObservationRegistry() })
+				const callbacks = createMockCallbacks()
+
+				const stats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats) // directory check
+					.mockResolvedValueOnce(stats) // pre-read
+					.mockImplementationOnce(async () => {
+						// The cancel lands while this await is pending.
+						mockTask.abort = true
+						return stats
+					}) // post-read
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.size).toBe(0)
 			})
 
 			it("leaves the target unobserved without failing the read when the pre-read stat fails", async () => {
@@ -2132,7 +2401,12 @@ describe("ReadFileTool", () => {
 				// The notice is added on top of the read, it does not replace it.
 				expect(pushed).toContain("1 | a")
 			})
-			it("native: a clipped slice that starts past line 1 does not claim the file was read in full", async () => {
+
+			it("native: a clipped full read joins the notice and the read with the exact separator", async () => {
+				// Review row 4202836427: in the clipped-but-not-truncated branch the two
+				// sentences and the read are joined by a specific separator, and that join is
+				// what tells the model every line was returned but some were cut. Assert the
+				// separator and both ends of the response rather than a loose substring.
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
 				})
@@ -2142,33 +2416,75 @@ describe("ReadFileTool", () => {
 				mockedIsBinaryFile.mockResolvedValue(false)
 				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\n"))
 				mockedReadWithSlice.mockReturnValue({
-					content: "2 | b",
-					returnedLines: 1,
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
 					totalLines: 2,
 					wasTruncated: false,
 					hasClippedLines: true,
-					includedRanges: [[2, 2]],
+					includedRanges: [[1, 2]],
 				})
 
 				const reg = mockTask.observationRegistry!
 				const observeSpy = vi.spyOn(reg, "observe")
 
-				await readFileTool.execute({ path: "clipped.ts", offset: 2 }, mockTask as unknown as Task, callbacks)
+				await readFileTool.execute(
+					{ path: "clipped-full.ts", offset: 1 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
 
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				// The header line and the notice are adjacent: the notice is the first thing
+				// after the file identity, and the character cap it names is the one the tool
+				// actually applied.
+				expect(
+					pushed.startsWith(
+						`File: clipped-full.ts\nIMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`,
+					),
+				).toBe(true)
+				expect(pushed).toContain(
+					"were clipped in this view. The file was read in full, but the clipped lines were not shown in full.",
+				)
+				expect(pushed.endsWith("were not shown in full.\n1 | a\n2 | b")).toBe(true)
+				expect(pushed).toContain("The file was read in full")
+				// Every line was returned, so the notice must not advertise a next offset.
+				expect(pushed).not.toContain("To read more")
+				// The read stays incomplete: the clipped tails were never shown, so a
+				// full-file replacement must not be built from this view.
 				const [, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(false)
+			})
+			it("native: a clipped slice that starts after line 1 names the slice instead of claiming a full read", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\nc\nd\ne\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "3 | c\n4 | d",
+					returnedLines: 2,
+					totalLines: 5,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[3, 4]],
+				})
+
+				await readFileTool.execute(
+					{ path: "clipped-slice.ts", offset: 3 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
 
 				const pushed = callbacks.pushToolResult.mock.calls[0][0]
 				expect(pushed).toContain("clipped in this view")
-				// The notice has to agree with the recorded completeness: the view
-				// started past line 1, so it cannot claim a full read.
+				// Lines 1-2 were omitted, so the notice must describe the slice that was
+				// returned rather than claim the whole file was read.
+				expect(pushed).toContain("starts at line 3")
 				expect(pushed).not.toContain("The file was read in full")
-				expect(pushed).toContain("The view starts at line 2, so lines 1-1 were not shown")
-				// The content must not inherit the source indentation: the template literal's
-				// leading tabs would reach the model as part of the first line of the view.
-				// This branch uses the same single tab as the truncated branch above.
-				expect(pushed).toContain("\n\t2 | b")
-				expect(pushed).not.toContain("\n\t\t2 | b")
+				expect(pushed).toContain("3 | c")
 			})
 
 			it("native: a truncated slice that also clipped a line reports both notices", async () => {

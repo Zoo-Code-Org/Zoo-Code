@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.94.0
+## Yang Baru di v3.96.0
 
-- ✨ **Dukungan model dan provider lebih luas:** Gunakan Claude Haiku 5.5 lewat Anthropic, kirim gambar ke model VS Code LM yang kompatibel, atur temperature untuk model OpenCode Go Responses, dan batalkan permintaan dengan rapi di lebih banyak provider.
-- 🔐 **OAuth MCP lebih fleksibel:** Atur pengaturan klien OAuth statis, gunakan jalur callback khusus, temukan detail autentikasi dari `WWW-Authenticate`, dan lihat kegagalan callback sebelum mencoba ulang.
-- 🧭 **Chat dan sesi panjang yang lebih lancar:** Ubah nama task di riwayat, seret file ke chat tanpa menahan Shift, kurangi memori yang disimpan selama sesi panjang, dan jaga tautan subtask serta webview yang diganti tetap stabil.
+- ✨ **Setelan obrolan dan diagnostik baru:** Tampilkan stempel waktu pesan dengan format waktu dan tanggal yang bisa dikonfigurasi, atur TTL prompt-cache untuk profil Anthropic, dan buat laporan diagnostik yang menjaga privasi.
+- 💸 **Biaya dan cache penyedia yang lebih akurat:** Jaga hasil tool Anthropic tetap utuh, pakai token keluaran kumulatif dalam biaya Anthropic dan MiniMax, baca penghitung prompt-cache DeepSeek, arahkan ke cache Responses xAI, dan tagih pembacaan cache Mistral pada 0,1x.
+- 🧭 **Obrolan yang lebih andal dan cepat:** Lanjutkan tugas yang selesai setelah mulai ulang, pulihkan checkpoint saat commit yang tersimpan hilang, muat ulang otomatis renderer webview yang mati, batasi pembaruan streaming, dan muat bahasa sesuai permintaan.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

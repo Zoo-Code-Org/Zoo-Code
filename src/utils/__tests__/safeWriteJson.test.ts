@@ -3,7 +3,7 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { safeWriteJson } from "../safeWriteJson"
+import { ConfinedPathEscapeError, safeWriteJson, undoEscapedPublish } from "../safeWriteJson"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -27,12 +27,15 @@ vi.mock("fs/promises", async () => {
 		rename: vi.fn(actual.rename),
 		unlink: vi.fn(actual.unlink),
 		access: vi.fn(actual.access),
+		stat: vi.fn(actual.stat),
+		chmod: vi.fn(actual.chmod),
+		open: vi.fn(actual.open),
 		mkdtemp: vi.fn(actual.mkdtemp),
 		rm: vi.fn(actual.rm),
 		readdir: vi.fn(actual.readdir),
 		mkdir: vi.fn(actual.mkdir),
 	}
-	// fs.stat and fs.lstat are available via { ...actual }
+	// fs.lstat is available via { ...actual }
 
 	return mockedFs
 })
@@ -160,26 +163,33 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ initial: "content" })
 	})
 
-	test("should handle failure when the commit rename fails (filePath exists)", async () => {
-		const initialData = { message: "Initial content, should remain" }
-		const newData = { message: "New content, should not be written" }
+	test("should fall back to the two-step replacement when the commit rename fails with EPERM", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "Windows-style EPERM replacement" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		// First call: the single-rename commit fails with the Windows-style EPERM
+		// (a reader holds the target open). The fallback then renames the target
+		// to a backup and the replacement into place, using real renames.
 		vi.mocked(fs.rename).mockImplementationOnce(async () => {
-			throw new Error("Rename to backup failed")
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename to backup failed")
+		await safeWriteJson(currentTestFilePath, newData)
 
-		// Verify the original file still exists with initial content
+		// Verify the new content was committed by the fallback
 		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(initialData)
+		expect(content).toEqual(newData)
+
+		// Verify the fallback backup was cleaned up
+		const leftovers = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(leftovers).toEqual([])
 	})
 
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup copy taken)", async () => {
+	test("should restore the committed file when the EPERM fallback's replacement rename fails", async () => {
 		const initialData = { message: "Initial content, should be restored" }
 		const newData = { message: "New content" }
 
@@ -193,14 +203,21 @@ describe("safeWriteJson", () => {
 		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 1) {
-				// The commit rename is the only rename in this flow: it fails.
-				throw new Error("Rename from temp to final failed")
+				// First call: the single-rename commit fails with EPERM, which
+				// triggers the two-step fallback.
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			} else if (renameCallCount === 2) {
+				// Second call: filePath -> tempBackupFilePath (fallback backup, succeeds)
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			} else if (renameCallCount === 3) {
+				// Third call: tempNewFilePath -> filePath (fallback replacement, fails)
+				throw new Error("Fallback replacement rename failed")
 			}
-			// Default: use original implementation
+			// Fourth call: tempBackupFilePath -> filePath (rollback, succeeds)
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Fallback replacement rename failed")
 
 		// Verify the file was restored to initial content
 		const content = await readFileContent(currentTestFilePath)
@@ -287,12 +304,17 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(data)
 	})
 
-	test("should handle failure when deleting tempBackupFilePath (filePath exists, all renames succeed)", async () => {
+	test("should handle failure when deleting tempBackupFilePath (EPERM fallback, all renames succeed)", async () => {
 		const initialData = { message: "Initial content" }
 		const newData = { message: "Successfully written new content" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// Force the two-step fallback so a backup exists, then let its deletion fail
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
 
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.unlink).mockImplementationOnce(async () => {
@@ -307,53 +329,53 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(newData)
 	})
 
-	// Test for best-effort backup deletion (the backup lifecycle now lives in safeWriteText)
-	test("does not fail the write when backup deletion fails (orphaned backup is acceptable)", async () => {
+	// Test for console error suppression during backup deletion
+	test("should suppress console.error when backup deletion fails", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
 		const initialData = { message: "Initial" }
 		const newData = { message: "New" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
+		// Force the two-step fallback so a backup exists, then fail its deletion
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
+
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
-			if (filePath.toString().includes("safeWriteText.bak_")) {
+			if (filePath.toString().includes(".bak_")) {
 				throw new Error("Backup deletion failed")
 			}
 			return fsPromisesActuals.unlink!(filePath)
 		})
 
-		// The write must still succeed: backup cleanup is best-effort inside
-		// safeWriteText and never masks the committed content.
 		await safeWriteJson(currentTestFilePath, newData)
 
-		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(newData)
+		// Verify console.error was called with the expected message
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Successfully wrote"), expect.any(Error))
 
-		// The orphaned backup is still on disk because its deletion failed.
-		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
-
+		consoleErrorSpy.mockRestore()
 		vi.mocked(fs.unlink).mockRestore()
 	})
 
 	// The expected error message might need to change if the mock behaves differently.
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath initially exists)", async () => {
+	test("should keep the committed file when the commit rename fails with a non-EPERM error", async () => {
 		// currentTestFilePath exists due to beforeEach.
 		const initialData = { message: "Initial content" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn.
-		// Once-only so the override does not leak into later tests: the commit rename is
-		// the only rename in this flow.
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.rename).mockImplementationOnce(async () => {
 			throw new Error("Rename failed")
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename failed")
 
-		// The file should be restored to its initial content
+		// No backup is made on the single-rename path, and the committed file
+		// keeps its previous content
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(initialData)
 	})
@@ -416,9 +438,9 @@ describe("safeWriteJson", () => {
 		expect(vi.mocked(fs.access)).toHaveBeenCalled()
 	})
 
-	// Test for rollback failure scenario (the rollback rename now lives in safeWriteText)
-	test("a failed commit keeps the previous content at the target and removes the backup copy", async () => {
-		const initialData = { message: "Initial, must survive a failed commit" }
+	// Test for rollback failure scenario
+	test("should log error and re-throw original if rollback fails", async () => {
+		const initialData = { message: "Initial, preserved if rollback fails" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -430,23 +452,41 @@ describe("safeWriteJson", () => {
 		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 1) {
-				// The commit rename fails; there is no rollback rename to fail.
-				throw new Error("Primary rename failed")
+				// First call: the single-rename commit fails with EPERM, which
+				// triggers the two-step fallback.
+				throw Object.assign(new Error("Primary rename failed"), { code: "EPERM" })
+			} else if (renameCallCount === 2) {
+				// Second call: filePath -> tempBackupFilePath (fallback backup, succeeds)
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			} else if (renameCallCount === 3) {
+				// Third call: tempNewFilePath -> filePath (fallback replacement, fails)
+				throw new Error("Fallback replacement rename failed")
+			} else if (renameCallCount === 4) {
+				// Fourth call: tempBackupFilePath -> filePath (rollback, also fails)
+				throw new Error("Rollback rename failed")
 			}
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
+		// The fallback's replacement error rejects the write; the rollback error
+		// is only logged.
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Fallback replacement rename failed")
 
-		// Exactly one rename was attempted, and it was the commit.
-		expect(renameCallCount).toBe(1)
+		const backups = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(backups).toHaveLength(1)
+		expect(await readFileContent(path.join(tempDir, backups[0]))).toEqual(initialData)
+		await safeWriteJson(currentTestFilePath, newData, {
+			merge: (existing) => {
+				expect(existing).toEqual(initialData)
+				return newData
+			},
+		})
 
-		// The target never left its path, so the previous content is still what a
-		// reader sees, and no orphaned backup copy is left behind either.
-		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(initialData)
-		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(false)
+		// Verify console.error was called for the rollback failure
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to restore backup"),
+			expect.objectContaining({ message: "Rollback rename failed" }),
+		)
 
 		consoleErrorSpy.mockRestore()
 	})
@@ -523,6 +563,261 @@ describe("safeWriteJson", () => {
 
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual({ c: 3 })
+	})
+
+	// Interrupted-write recovery tests
+	it.each(["EMFILE", "EIO"])(
+		"should preserve committed history when the recovery scan fails with %s",
+		async (code) => {
+			await fs.unlink(currentTestFilePath)
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_saved.tmp`)
+			const committed = { history: ["saved"] }
+			await fs.writeFile(backupPath, JSON.stringify(committed))
+			const error = Object.assign(new Error("Recovery scan failed"), { code })
+			vi.mocked(fs.readdir).mockRejectedValueOnce(error)
+			const merge = vi.fn((existing: unknown) => existing)
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(merge).not.toHaveBeenCalled()
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: `failed:${code}` })
+			expect(await readFileContent(backupPath)).toEqual(committed)
+			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
+			// Once the fault clears, a later merge still sees the committed state.
+			await safeWriteJson(currentTestFilePath, {}, { merge })
+			expect(merge).toHaveBeenCalledExactlyOnceWith(committed, {})
+			expect(await readFileContent(currentTestFilePath)).toEqual(committed)
+		},
+	)
+
+	test("should allow a write when the recovery directory scan reports ENOENT", async () => {
+		vi.mocked(fs.readdir).mockRejectedValueOnce(Object.assign(new Error("Directory missing"), { code: "ENOENT" }))
+		await safeWriteJson(currentTestFilePath, { saved: true })
+		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
+	})
+
+	test("should restore an orphaned backup when the canonical path is missing after an interrupted write", async () => {
+		const committedData = { message: "Committed before the interruption" }
+
+		// Simulate the crash state of the two-step replacement: the target was
+		// renamed to a backup, the replacement never landed, and the
+		// replacement temp file was left behind. The canonical path is absent.
+		await fsPromisesActuals.unlink!(currentTestFilePath)
+		const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_abc.tmp`)
+		const orphanedNewPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.new_1_def.tmp`)
+		await fsPromisesActuals.writeFile!(backupPath, JSON.stringify(committedData))
+		await fsPromisesActuals.writeFile!(orphanedNewPath, "{}")
+
+		// A merge write must observe the restored committed content, not null.
+		const incoming = { message: "New content" }
+		let mergedWith: unknown
+		await safeWriteJson(currentTestFilePath, incoming, {
+			merge: (existing) => {
+				mergedWith = existing
+				return incoming
+			},
+		})
+
+		expect(mergedWith).toEqual(committedData)
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(incoming)
+
+		// The restored backup is consumed and the leftover replacement file is
+		// garbage collected.
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+	})
+
+	it.each(["EACCES", "EIO", "EPERM", undefined])(
+		"should preserve committed content when canonical access fails with %s",
+		async (code) => {
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_stale.tmp`)
+			await fs.writeFile(backupPath, JSON.stringify({ stale: true }))
+			// Directory access succeeds; only the canonical-path check fails.
+			const error = Object.assign(new Error("Canonical access failed"), { code })
+			vi.mocked(fs.access).mockResolvedValueOnce(undefined).mockRejectedValueOnce(error)
+			const merge = vi.fn((existing: unknown) => existing)
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: `failed:${code ?? "unknown"}` })
+			expect(merge).not.toHaveBeenCalled()
+			expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+			expect(await readFileContent(backupPath)).toEqual({ stale: true })
+		},
+	)
+
+	it.each(["ENOENT", "EACCES", "EIO"])(
+		"should preserve backups when another backup stat fails with %s",
+		async (code) => {
+			await fs.unlink(currentTestFilePath)
+			const unreadableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_bad.tmp`)
+			const readableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_2_good.tmp`)
+			await fs.writeFile(unreadableBackup, JSON.stringify({ stale: true }))
+			await fs.writeFile(readableBackup, JSON.stringify({ committed: true }))
+			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			vi.mocked(fs.stat).mockImplementation(async (backupPath) => {
+				if (backupPath === unreadableBackup) {
+					throw Object.assign(new Error("Backup stat failed"), { code })
+				}
+				return actual.stat(backupPath)
+			})
+			const merge = vi.fn((existing: unknown) => existing)
+
+			if (code === "ENOENT") {
+				await safeWriteJson(currentTestFilePath, {}, { merge })
+				expect(merge).toHaveBeenCalledWith({ committed: true }, {})
+			} else {
+				await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toMatchObject({ code })
+				expect(merge).not.toHaveBeenCalled()
+				expect(await readFileContent(unreadableBackup)).toEqual({ stale: true })
+				expect(await readFileContent(readableBackup)).toEqual({ committed: true })
+			}
+		},
+	)
+
+	it.each(["rename", "stat"] as const)(
+		"should abort recovery and preserve history when backup %s fails",
+		async (operation) => {
+			await fs.unlink(currentTestFilePath)
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_saved.tmp`)
+			const committed = { history: ["saved"] }
+			await fs.writeFile(backupPath, JSON.stringify(committed))
+			const error = Object.assign(new Error("Recovery failed"), { code: "EACCES" })
+			vi.mocked(fs[operation]).mockRejectedValueOnce(error)
+			const merge = vi.fn()
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: "failed:EACCES" })
+			expect(merge).not.toHaveBeenCalled()
+			expect(await readFileContent(backupPath)).toEqual(committed)
+			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
+			await safeWriteJson(currentTestFilePath, {}, { merge: (existing) => existing })
+			expect(await readFileContent(currentTestFilePath)).toEqual(committed)
+		},
+	)
+
+	test("should restore by mtime and preserve unrelated siblings", async () => {
+		await fs.unlink(currentTestFilePath)
+		const prefix = `.${path.basename(currentTestFilePath)}`
+		const newest = path.join(tempDir, `${prefix}.bak_1_newest.tmp`)
+		const older = path.join(tempDir, `${prefix}.bak_9_older.tmp`)
+		const unrelated = path.join(tempDir, ".other.json.bak_1_saved.tmp")
+		const wrongSuffix = path.join(tempDir, `${prefix}.bak_1_saved.txt`)
+		await fs.writeFile(newest, JSON.stringify({ newest: true }))
+		await fs.writeFile(older, JSON.stringify({ older: true }))
+		await fs.writeFile(unrelated, "keep")
+		await fs.writeFile(wrongSuffix, "keep")
+		await fs.utimes(older, new Date(1000), new Date(1000))
+		await fs.utimes(newest, new Date(2000), new Date(2000))
+
+		await safeWriteJson(currentTestFilePath, {}, { merge: (existing) => existing })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ newest: true })
+		expect(await fs.readFile(unrelated, "utf8")).toBe("keep")
+		expect(await fs.readFile(wrongSuffix, "utf8")).toBe("keep")
+	})
+
+	test("should open the replacement with write access for flushing", async () => {
+		const open = vi.mocked(fs.open)
+		open.mockClear()
+
+		await safeWriteJson(currentTestFilePath, { flushed: true })
+
+		expect(open).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(".new_"), "r+")
+		expect(await readFileContent(currentTestFilePath)).toEqual({ flushed: true })
+	})
+
+	it.each([false, true])("should close the flush handle before commit when sync fails: %s", async (failSync) => {
+		const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		const steps: string[] = []
+		vi.mocked(fs.open).mockImplementation(async (filePath, flags) => {
+			const handle = await actual.open(filePath, flags)
+			const sync = handle.sync.bind(handle)
+			const close = handle.close.bind(handle)
+			vi.spyOn(handle, "sync").mockImplementation(async () => {
+				steps.push("sync")
+				if (failSync) throw Object.assign(new Error("Flush failed"), { code: "EIO" })
+				await sync()
+			})
+			vi.spyOn(handle, "close").mockImplementation(async () => {
+				steps.push("close")
+				await close()
+			})
+			return handle
+		})
+		await safeWriteJson(currentTestFilePath, { saved: true }, { trace: ({ stage }) => steps.push(stage) })
+		expect(steps).toEqual(["write-start", "sync", "close", "replacement-rename", "write-complete"])
+		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
+	})
+
+	test("should garbage collect orphaned replacement files when the canonical path exists", async () => {
+		const initialData = { message: "Initial content" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// Leftovers from an interrupted write whose commit rename never ran.
+		const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_abc.tmp`)
+		const orphanedNewPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.new_1_def.tmp`)
+		await fsPromisesActuals.writeFile!(backupPath, JSON.stringify({ message: "stale backup" }))
+		await fsPromisesActuals.writeFile!(orphanedNewPath, "{}")
+
+		const newData = { message: "New content" }
+		await safeWriteJson(currentTestFilePath, newData)
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
+
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+	})
+
+	test("should report replacement-protocol trace events when a trace callback is provided", async () => {
+		const traceEvents: Array<{ stage: string; detail?: string }> = []
+		const newData = { message: "traced write" }
+
+		await safeWriteJson(currentTestFilePath, newData, {
+			trace: (event) => traceEvents.push(event),
+		})
+
+		expect(traceEvents.map((event) => event.stage)).toEqual(["write-start", "replacement-rename", "write-complete"])
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
+	})
+
+	test("should trace the EPERM fallback backup rename", async () => {
+		const traceEvents: Array<{ stage: string; detail?: string }> = []
+		const initialData = { message: "Initial content" }
+		const newData = { message: "Traced fallback write" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
+
+		await safeWriteJson(currentTestFilePath, newData, {
+			trace: (event) => traceEvents.push(event),
+		})
+
+		expect(traceEvents.map((event) => event.stage)).toEqual([
+			"write-start",
+			"replacement-rename",
+			"backup-rename",
+			"replacement-rename",
+			"write-complete",
+		])
+		expect(traceEvents.find((event) => event.stage === "backup-rename")?.detail).toBe("eperm-fallback")
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
 	})
 
 	// The commit rename targets the symlink referent. The staged temp file must
@@ -638,20 +933,110 @@ describe("safeWriteJson", () => {
 				expect.any(Error),
 			)
 		} finally {
-			// Cleanup must run even when an assertion fails: a leaked mock
-			// registration or console spy changes later tests, and vi.unmock
-			// alone does not reset a module that already imported the mock.
+			// Cleanup must run even when an assertion fails: a leaked mock registration
+			// or console spy changes later tests. vi.doUnmock is the non-hoisted counterpart
+			// of the vi.doMock above; vi.unmock is hoisted to the top of the file, so it would
+			// not undo this registration from here.
 			realpathSpy.mockRestore()
-			vi.unmock("proper-lockfile")
+			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
 			consoleErrorSpy.mockRestore()
 		}
 	})
 
-	// CWE-732 regression: safeWriteJson stages the temp itself and passes it
-	// via tempPath, so safeWriteText must apply the existing target's mode to
-	// the staged temp before the atomic rename — otherwise a 0o600 target is
-	// published as 0o644. POSIX-only assertion (Windows ignores POSIX modes).
+	test("rejects a confined write whose target is outside the confined directory", async () => {
+		const scope = path.join(tempDir, "project")
+		await fs.mkdir(scope)
+		const outside = path.join(tempDir, "elsewhere.json")
+
+		// No symlink needed: the check runs on the resolved publish target, so an
+		// out-of-scope path is rejected on every platform, and it is rejected before the
+		// lock is taken and before anything is staged.
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		const left = await fs.readdir(tempDir)
+		expect(left).not.toContain("elsewhere.json")
+		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+
+	test.skipIf(process.platform === "win32")(
+		"rejects a confined write whose symlink resolves outside the confined directory",
+		async () => {
+			const projectDir = path.join(tempDir, "project")
+			await fs.mkdir(projectDir)
+			const outside = path.join(tempDir, "outside.json")
+			await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+			// A repository that plants its project settings file as a link to somewhere else
+			// must not receive the settings write at the linked path. The caller picked
+			// projectDir/mcp.json from the workspace, so it declares that scope.
+			const projectConfig = path.join(projectDir, "mcp.json")
+			await fs.symlink(outside, projectConfig)
+
+			await expect(safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ConfinedPathEscapeError,
+			)
+
+			// The linked file is untouched and nothing was staged beside it.
+			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
+			const entries = await fs.readdir(tempDir)
+			expect(entries).toContain("outside.json")
+			expect(
+				entries.filter(
+					(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+				),
+			).toEqual([])
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"confines a write whose symlink referent stays inside the confined directory",
+		async () => {
+			const projectDir = path.join(tempDir, "project-in")
+			await fs.mkdir(projectDir)
+			const referent = path.join(projectDir, "real-mcp.json")
+			await fsSyncActual.promises.writeFile(referent, JSON.stringify({ mcpServers: {} }), "utf8")
+			const alias = path.join(projectDir, "mcp.json")
+			await fs.symlink(referent, alias)
+
+			// Confining is about the scope, not about forbidding links: a link that stays
+			// inside the project still publishes to its referent.
+			await safeWriteJson(
+				alias,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{ confineTo: projectDir },
+			)
+
+			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
+				mcpServers: { local: { url: "http://localhost" } },
+			})
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"confines a scope path that itself runs through a symlink and does not exist yet",
+		async () => {
+			const real = path.join(tempDir, "real-project")
+			await fs.mkdir(real)
+			const alias = path.join(tempDir, "alias-project")
+			await fs.symlink(real, alias)
+			// The scope is declared through the alias, and the directory it names does not
+			// exist yet. Resolving it lexically would compare an unresolved scope against a
+			// fully resolved target and reject a write that is in fact inside the project -
+			// the macOS /var -> /private/var shape. The nearest existing ancestor is resolved
+			// and the remainder re-joined instead.
+			const nested = path.join(alias, "nested")
+			const target = path.join(nested, "mcp.json")
+
+			await safeWriteJson(target, { mcpServers: {} }, { confineTo: nested })
+
+			expect(
+				JSON.parse(await fsSyncActual.promises.readFile(path.join(real, "nested", "mcp.json"), "utf8")),
+			).toEqual({ mcpServers: {} })
+		},
+	)
+
 	test.skipIf(process.platform === "win32")(
 		"preserves a restrictive 0o600 target mode through the atomic publish",
 		async () => {
@@ -664,4 +1049,235 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
+	// The two failure paths of _copyTargetMode: a target whose mode cannot be read, and a staged
+	// file whose mode cannot be set. Both have to log and let the write finish, because the
+	// replacement protocol - not the mode - is what makes the publish atomic. They are driven
+	// through the fs/promises mocks rather than a real EACCES/EPERM, because forcing either one
+	// for real needs privileges a developer box and a CI runner neither have. That is also why
+	// these two run on every platform while the symlink and mode rows above skip windows.
+	test("logs and still publishes when the target's mode cannot be read", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// fs.stat is already vi.fn() in the factory above - vi.mocked keeps the real
+		// implementation reachable once this single call is done.
+		await vi.mocked(fs.stat).mockImplementationOnce(async () => {
+			const error: NodeJS.ErrnoException = new Error(`EACCES: permission denied, stat '${currentTestFilePath}'`)
+			error.code = "EACCES"
+			throw error
+		})
+
+		await safeWriteJson(currentTestFilePath, { after: true })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(currentTestFilePath), expect.anything())
+		consoleErrorSpy.mockRestore()
+	}, 20_000)
+
+	test("logs and still publishes when the staged file's mode cannot be set", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// chmod is a vi.fn() in the factory above for the same reason.
+		await vi.mocked(fs.chmod).mockImplementationOnce(async () => {
+			const error: NodeJS.ErrnoException = new Error(
+				`EPERM: operation not permitted, chmod '${currentTestFilePath}'`,
+			)
+			error.code = "EPERM"
+			throw error
+		})
+
+		await safeWriteJson(currentTestFilePath, { after: true })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to copy mode"), expect.anything())
+		consoleErrorSpy.mockRestore()
+	}, 20_000)
+
+	// Ordering matters for the security guarantee: proper-lockfile creates
+	// ${lockKey}.lock beside the lock key, and the key is the symlink referent. If
+	// confinement were checked only after the lock, an out-of-scope target would first
+	// create a lock directory outside the scope. A lock mock that throws if reached
+	// proves the check runs first. Written without symlinks so it runs on every lane.
+	test("rejects an out-of-scope target before the advisory lock is taken", async () => {
+		vi.resetModules()
+		const projectDir = path.join(tempDir, "order-project-plain")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "order-outside-plain.json")
+
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(async () => {
+			throw new Error("lock taken for an out-of-scope target (test)")
+		})
+		vi.doMock("proper-lockfile", () => ({ ...realLockfile, lock: lockMockFn }))
+		const { safeWriteJson: lockedSafeWriteJson } = await import("../safeWriteJson")
+
+		try {
+			await expect(lockedSafeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				/resolves outside the confined directory/,
+			)
+			expect(lockMockFn).not.toHaveBeenCalled()
+			const entries = await fs.readdir(tempDir)
+			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+		} finally {
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
+
+	test("does not create the parent directory of an out-of-scope confined target", async () => {
+		const projectDir = path.join(tempDir, "scope-dir-project")
+		await fs.mkdir(projectDir)
+		// The parent does not exist yet: the mkdir in safeWriteJson would create it -
+		// a filesystem change outside confineTo - before the confinement check rejected
+		// the write.
+		const outside = path.join(tempDir, "scope-missing-parent", "nested.json")
+
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+			/resolves outside the confined directory/,
+		)
+
+		const entries = await fs.readdir(tempDir)
+		expect(entries).not.toContain("scope-missing-parent")
+		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+	})
+
+	// A caller that declares a scope must never get the unconstrained path: an
+	// empty confineTo is a declared scope, not an absent one. This value occurs in
+	// practice - McpHub.confineForMcpWrite returns getWorkspacePath(), which is ""
+	// while no workspace folder is open. The truthiness checks skipped both
+	// confinement gates for "", so the write followed any symlink with no scope
+	// check at all.
+	test("rejects a declared-but-empty confineTo instead of writing unconstrained", async () => {
+		const error = await safeWriteJson(currentTestFilePath, { mcpServers: {} }, { confineTo: "" }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			// The rejection must name the declared empty root: a substituted root
+			// (path.resolve("") is the process cwd) would mean confining the write
+			// to a directory nobody declared.
+			expect(error.confineTo).toBe("")
+		}
+		// The write did not proceed: the target keeps its pre-existing content.
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+	})
+
+	test("rejects an empty confineTo before creating the target parent directory", async () => {
+		// The same fail-closed decision pinned at the ordering the pre-lock check
+		// guarantees: a rejected confined write must not create the missing parent
+		// directory of the target.
+		const outside = path.join(tempDir, "empty-scope-missing-parent", "nested.json")
+
+		const error = await safeWriteJson(outside, { mcpServers: {} }, { confineTo: "" }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			expect(error.confineTo).toBe("")
+		}
+
+		const entries = await fs.readdir(tempDir)
+		expect(entries).not.toContain("empty-scope-missing-parent")
+		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+	})
+
+	test("rejects a whitespace-only confineTo and names the declared root", async () => {
+		// path.resolve("   ") is a directory named "   " under the process cwd - a
+		// scope nobody declared. Whitespace-only fails closed with the declared
+		// root, the same decision as the empty string.
+		const error = await safeWriteJson(currentTestFilePath, { mcpServers: {} }, { confineTo: "   " }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			expect(error.confineTo).toBe("   ")
+		}
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+	})
+
+	// The confinement option decides from the resolved publish target and stops at its final
+	// component. An ancestor DIRECTORY replaced by a link in the window between that
+	// decision and the commit rename is caught fail-closed: publication takes a path and
+	// re-resolves the tree at rename time, so the confinement option re-resolves the
+	// published path after the commit and undoes an escaped write. These two tests are
+	// that contract as an executable pair - one per outcome of the window. The swap is driven from the merge
+	// callback, which safeWriteJson invokes after the in-lock confinement check and before
+	// anything is staged, so the ancestor moves inside the window rather than hopefully so.
+	// A directory link needs no privilege on win32 as a junction; "dir" is the POSIX
+	// spelling. Both make the ancestor itself the link, which is the shape under test.
+	const ancestorLinkKind = process.platform === "win32" ? ("junction" as const) : ("dir" as const)
+
+	function swapAncestorAfterTheCheck(ancestor: string, pointsAt: string): void {
+		fsSyncActual.renameSync(ancestor, ancestor + "-moved-aside")
+		fsSyncActual.symlinkSync(pointsAt, ancestor, ancestorLinkKind)
+	}
+
+	test("refuses and undoes the publish when an ancestor is swapped after the final check", async () => {
+		const projectDir = path.join(tempDir, "swap-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		await fs.writeFile(target, JSON.stringify({ inside: true }))
+		// The swapped-in directory has no file at the target name yet: this is the half of the
+		// window in which the commit itself succeeds and only the post-commit re-check sees
+		// the escape.
+		const swappedIn = path.join(tempDir, "elsewhere", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+
+		// The confinement option now fails closed on the swapped ancestor: the
+		// post-commit re-check re-resolves the published path, sees it outside the
+		// declared scope, removes the escaped file, and reports the escape.
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					merge: () => {
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+
+		// The escaped publication was undone: nothing remains outside the scope...
+		expect(fsSyncActual.existsSync(path.join(swappedIn, "mcp.json"))).toBe(false)
+		// ...and the file that was inside the scope keeps its pre-write bytes - the
+		// publish did not reach it under the moved-aside name either.
+		expect(JSON.parse(fsSyncActual.readFileSync(path.join(ancestor + "-moved-aside", "mcp.json"), "utf8"))).toEqual(
+			{ inside: true },
+		)
+		// The scope was declared and active in this very fixture: with the ancestor left
+		// alone, the same option refuses an out-of-scope target. Without this contrast the
+		// escape above would also be the outcome of a confinement check that never ran.
+		await expect(
+			safeWriteJson(path.join(tempDir, "elsewhere", "other.json"), { other: true }, { confineTo: projectDir }),
+		).rejects.toThrow(ConfinedPathEscapeError)
+	})
+
+	test("undoes an escaped publish only when the bytes on disk are still this write's bytes", async () => {
+		const outside = path.join(tempDir, "undo-escaped")
+		await fs.mkdir(outside, { recursive: true })
+		const escaped = path.join(outside, "mcp.json")
+		// A peer wrote its own file at the escaped name after our commit published ours and
+		// before the post-commit re-check ran. Removing it on the name alone would delete the
+		// peer's file; the byte comparison must leave it in place.
+		fsSyncActual.writeFileSync(escaped, JSON.stringify({ peer: true }))
+
+		await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ ours: true })))
+
+		expect(fsSyncActual.existsSync(escaped)).toBe(true)
+		expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ peer: true })
+
+		// The bytes are still ours: the escaped publish is undone.
+		await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ peer: true })))
+		expect(fsSyncActual.existsSync(escaped)).toBe(false)
+
+		// A missing file and an unreadable byte record are both no-ops, never a throw.
+		await undoEscapedPublish(escaped, Buffer.from("{}"))
+		await undoEscapedPublish(path.join(outside, "absent.json"), undefined)
+	})
 })

@@ -1,4 +1,5 @@
 import * as path from "path"
+import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
 import * as fs from "fs/promises"
 
@@ -8,6 +9,16 @@ import * as fs from "fs/promises"
  * must serialize with it, such as task-history deletion.
  */
 export const LOCK_STALE_MS = 31_000
+
+const RECOVERY_RETRY_MS = 1000
+const RECOVERY_GRACE_MS = 4000
+
+export interface FileLockOptions {
+	/** Recovery may wait out a crashed writer's staleness window without stealing a live lock. */
+	waitForStaleLock?: boolean
+	/** Startup scans defer locked files instead of waiting under the store mutex. */
+	immediate?: boolean
+}
 
 /**
  * Canonical lock key for a path.
@@ -29,8 +40,8 @@ export const LOCK_STALE_MS = 31_000
  * per-frame walk bound alone does not terminate: a cycle whose length does not
  * divide that bound (a 3-link cycle a -> b -> c -> a against a bound of 8)
  * makes every frame land on a different cycle member, so the recursion below
- * restarts its budget forever. This runs on the lock path - resolveLockKey
- * hands a cycle member to withFileLock - so an unbounded walk hangs
+ * restarts its budget forever. This runs on the lock path - withFileLock and every
+ * direct acquireFileLock caller hands it a cycle member - so an unbounded walk hangs
  * guardedWrite and safeWriteJson, not just the walker.
  */
 const MAX_TOTAL_LINK_HOPS = 64
@@ -88,20 +99,30 @@ async function canonicalLockPath(filePath: string, remainingLinkHops = MAX_TOTAL
  * returned function exactly once and must not acquire the same lock again
  * while holding it.
  */
-export async function acquireFileLock(filePath: string): Promise<() => Promise<void>> {
+export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
 	const absoluteFilePath = await canonicalLockPath(filePath)
+	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
+			retries: options?.immediate
+				? 0
+				: options?.waitForStaleLock
+					? {
+							retries: Math.ceil((LOCK_STALE_MS + RECOVERY_GRACE_MS) / RECOVERY_RETRY_MS),
+							factor: 1,
+							minTimeout: RECOVERY_RETRY_MS,
+							maxTimeout: RECOVERY_RETRY_MS,
+						}
+					: {
+							// Configuration for retrying lock acquisition
+							retries: 5, // Number of retries after the initial attempt
+							factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
+							minTimeout: 100, // Minimum time to wait before the first retry (in ms)
+							maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
+						},
 			onCompromised: (err) => {
 				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
 				throw err
@@ -122,15 +143,23 @@ export async function acquireFileLock(filePath: string): Promise<() => Promise<v
 export async function withFileLock<T>(
 	filePath: string,
 	operation: (absoluteFilePath: string) => Promise<T>,
+	options?: FileLockOptions,
 ): Promise<T> {
-	// The LOCK key is canonical, so a caller that reaches the file through a symlinked
-	// directory and one that reaches it lexically contend for the same lock file. The
-	// operation still receives the caller's own absolute path: on Windows realpath can
-	// answer with the 8.3 short form (C:\Users\RUNNER~1\... for a temp dir under
-	// C:\Users\runneradmin\...), and rewriting the path a caller unlinks or compares
-	// would change behavior for every caller while adding nothing to the mutex.
+	// The operation receives the caller's own resolved path. On Windows realpath can answer
+	// with the 8.3 short form (C:\Users\RUNNER~1\... for a temp dir under
+	// C:\Users\runneradmin\...), and the operation's own file calls (e.g. the task-history
+	// unlink) must keep the caller's alias semantics: unlinking the referent instead of the
+	// alias would delete a different directory entry.
 	const operationPath = path.resolve(filePath)
-	const releaseLock = await acquireFileLock(operationPath)
+	// The LOCK key is canonical - the same one safeWriteJson computes - so a caller that
+	// reaches the file through a symlinked directory and one that reaches it lexically
+	// contend for ONE lock file. Locking the raw path here would let a deletion through this
+	// helper run concurrently with a safeWriteJson read-modify-write on the referent, breaking
+	// the compound atomicity the deletion contract promises. The canonicalization runs inside
+	// acquireFileLock, so the walk happens once and direct acquireFileLock callers (safeWriteJson
+	// passes an already-canonical key, jsonFileRecovery and the specs pass raw paths) are all
+	// covered by the same rule.
+	const releaseLock = await acquireFileLock(operationPath, options)
 
 	let result: T
 	try {
