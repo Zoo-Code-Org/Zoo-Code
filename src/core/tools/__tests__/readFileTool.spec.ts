@@ -23,6 +23,7 @@ import type { Task, ToolExecutionContext } from "../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
+import { MAX_LINE_LENGTH } from "../../prompts/tools/native-tools/read_file"
 import { readFileTool } from "../ReadFileTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { formatResponse } from "../../prompts/responses"
@@ -2399,6 +2400,59 @@ describe("ReadFileTool", () => {
 				expect(pushed).not.toContain("To read more")
 				// The notice is added on top of the read, it does not replace it.
 				expect(pushed).toContain("1 | a")
+			})
+
+			it("native: a clipped full read joins the notice and the read with the exact separator", async () => {
+				// Review row 4202836427: in the clipped-but-not-truncated branch the two
+				// sentences and the read are joined by a specific separator, and that join is
+				// what tells the model every line was returned but some were cut. Assert the
+				// separator and both ends of the response rather than a loose substring.
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[1, 2]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute(
+					{ path: "clipped-full.ts", offset: 1 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				// The header line and the notice are adjacent: the notice is the first thing
+				// after the file identity, and the character cap it names is the one the tool
+				// actually applied.
+				expect(
+					pushed.startsWith(
+						`File: clipped-full.ts\nIMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`,
+					),
+				).toBe(true)
+				expect(pushed).toContain(
+					"were clipped in this view. The file was read in full, but the clipped lines were not shown in full.",
+				)
+				expect(pushed.endsWith("were not shown in full.\n1 | a\n2 | b")).toBe(true)
+				expect(pushed).toContain("The file was read in full")
+				// Every line was returned, so the notice must not advertise a next offset.
+				expect(pushed).not.toContain("To read more")
+				// The read stays incomplete: the clipped tails were never shown, so a
+				// full-file replacement must not be built from this view.
+				const [, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
 			})
 			it("native: a clipped slice that starts after line 1 names the slice instead of claiming a full read", async () => {
 				const mockTask = createMockTask({
