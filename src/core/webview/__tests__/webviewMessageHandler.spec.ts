@@ -3205,11 +3205,12 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// that actually resolves. A per-name manager shows both: the accept path running with
 		// an existing source, and the guard aimed at the target.
 		const hasConfig = vi.fn(async (name: string) => name === "old-profile")
+		const getProfile = vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic })
 		const repoint = vi.fn().mockResolvedValue(undefined)
 		provider.providerSettingsManager = {
 			runExclusiveAcrossInstances,
 			hasConfig,
-			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
+			getProfile,
 			saveConfig: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
@@ -3226,6 +3227,12 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// aimed at it would reject every rename that works.
 		expect(hasConfig).toHaveBeenCalledWith("new-profile")
 		expect(hasConfig).not.toHaveBeenCalledWith("old-profile")
+		// Which name each lookup asked about is the one thing a name-agnostic double cannot
+		// show: the handler reads the source before the commit and the target after it, and
+		// swapping the two kept every other assertion in this case green until these two
+		// lines existed (measured by mutating the source lookup in the handler).
+		expect(getProfile).toHaveBeenNthCalledWith(1, { name: "old-profile" })
+		expect(getProfile).toHaveBeenNthCalledWith(2, { name: "new-profile" })
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("new-profile", {
 			apiProvider: providerIdentifiers.anthropic,
 			id: "profile-id",
