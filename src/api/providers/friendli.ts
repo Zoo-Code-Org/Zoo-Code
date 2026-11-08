@@ -19,6 +19,7 @@ import { getModelParams } from "../transform/model-params"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	createTimeoutError,
 	hasUsableTimeout,
@@ -117,14 +118,18 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const signal = metadata?.abortSignal
-		await this.waitForCatalog(signal)
+		await this.waitForCatalog(metadata?.abortSignal)
+		// The SDK never removes its listener from the signal it receives, so hand it a
+		// per-request signal and detach that from the caller's long-lived one when the stream ends.
+		const { signal, dispose } = bridgeExternalAbortSignal(metadata?.abortSignal)
 		try {
-			yield* super.createMessage(systemPrompt, messages, metadata)
+			yield* super.createMessage(systemPrompt, messages, metadata && { ...metadata, abortSignal: signal })
 		} catch (error) {
 			// The SDK's abort error is not the AbortError contract callers check for.
 			if (isRequestAborted(error, signal)) throw createAbortError(this.providerName)
 			throw error
+		} finally {
+			dispose()
 		}
 	}
 

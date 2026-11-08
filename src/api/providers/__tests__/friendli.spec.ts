@@ -170,7 +170,7 @@ describe("FriendliHandler", () => {
 		expect(mockCreate).not.toHaveBeenCalled()
 	})
 
-	it("createMessage should forward the abort signal and normalize a mid-stream abort", async () => {
+	it("createMessage should forward a per-request signal and normalize a mid-stream abort", async () => {
 		const controller = new AbortController()
 		mockCreate.mockImplementationOnce(async function* () {
 			yield { choices: [{ delta: { content: "partial" }, index: 0 }] }
@@ -184,7 +184,92 @@ describe("FriendliHandler", () => {
 			name: "AbortError",
 			message: "The Friendli request was aborted",
 		})
-		expect(mockCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+		const forwarded = (mockCreate.mock.calls[0][1] as { signal: AbortSignal }).signal
+		expect(forwarded).not.toBe(controller.signal)
+		expect(forwarded.aborted).toBe(true)
+	})
+
+	describe("caller signal listener cleanup", () => {
+		// Mirrors openai@5 client.js: an anonymous abort listener that is never removed.
+		const leakyCreate = (body: () => AsyncGenerator<unknown>) =>
+			mockCreate.mockImplementation((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				opts?.signal?.addEventListener("abort", () => {})
+				return body()
+			})
+		const trackListeners = (signal: AbortSignal) => {
+			const live = new Set<unknown>()
+			const add = signal.addEventListener.bind(signal)
+			const remove = signal.removeEventListener.bind(signal)
+			vi.spyOn(signal, "addEventListener").mockImplementation((type, fn, opts) => {
+				live.add(fn)
+				add(type, fn, opts)
+			})
+			vi.spyOn(signal, "removeEventListener").mockImplementation((type, fn, opts) => {
+				live.delete(fn)
+				remove(type, fn, opts)
+			})
+			return live
+		}
+		const chunk = { choices: [{ delta: { content: "x" }, index: 0 }] }
+
+		it("detaches from a signal reused across completed streams", async () => {
+			leakyCreate(() => asyncStreamFrom([chunk]))
+			const { signal } = new AbortController()
+			const live = trackListeners(signal)
+
+			for (let i = 0; i < 3; i++) {
+				await collectStream(handler.createMessage("system", [], { taskId: "t", abortSignal: signal }))
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(3)
+			expect(live.size).toBe(0)
+		})
+
+		it.each([
+			{
+				exit: "a failed stream",
+				body: async function* () {
+					yield chunk
+					throw new Error("boom")
+				},
+				consume: (s: AsyncGenerator<unknown>) => expect(collectStream(s)).rejects.toThrow("boom"),
+			},
+			{
+				exit: "an early generator exit",
+				body: async function* () {
+					yield chunk
+					yield chunk
+				},
+				consume: async (s: AsyncGenerator<unknown>) => {
+					await s.next()
+					await s.return(undefined)
+				},
+			},
+		])("detaches after $exit", async ({ body, consume }) => {
+			leakyCreate(body)
+			const { signal } = new AbortController()
+			const live = trackListeners(signal)
+
+			await consume(handler.createMessage("system", [], { taskId: "t", abortSignal: signal }))
+
+			expect(live.size).toBe(0)
+		})
+	})
+
+	it("should retry an empty catalog and keep the next nonempty one", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({}).mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "k" })
+
+		await handlerWithModel.ensureModelFetched()
+		expect(handlerWithModel.getModel().info).toEqual(openAiModelInfoSaneDefaults)
+
+		await handlerWithModel.ensureModelFetched()
+		expect(handlerWithModel.getModel().info).toBe(info)
+
+		await handlerWithModel.ensureModelFetched()
+		expect(mockGetModels).toHaveBeenCalledTimes(2)
+		expect(handlerWithModel.getModel().info).toBe(info)
 	})
 
 	it("completePrompt should give the completion only the time left after the catalog wait", async () => {
