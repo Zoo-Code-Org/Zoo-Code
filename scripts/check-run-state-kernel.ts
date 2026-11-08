@@ -35,6 +35,7 @@ interface Options {
 	useTable: boolean
 	maxDepth: number
 	maxStates: number
+	allTurnStates: boolean
 }
 
 interface Applied {
@@ -316,7 +317,8 @@ function canonical(value: unknown): string {
 
 function eventsFor({ run, askCount }: ModelState): ModelEvent[] {
 	const events: ModelEvent[] = [{ name: "initialized()", source: "init", event: { tag: "initialized" } }]
-	if (run.generation < MAX_GENERATION) {
+	const streamStartRejects = run.phase !== "running" || run.stream.tag !== "none"
+	if (run.generation < MAX_GENERATION || streamStartRejects) {
 		events.push({ name: "streamStarted()", source: "stream", event: { tag: "streamStarted" } })
 	}
 	events.push(
@@ -419,6 +421,9 @@ function apply(options: Options, state: ModelState, { event }: ModelEvent): Appl
 	if (result === undefined || !("ok" in result || "rejected" in result)) {
 		return { next: state, accepted: false, problems: [`${event.tag} returned neither ok nor rejected`] }
 	}
+	if ("ok" in result && "rejected" in result) {
+		return { next: state, accepted: false, problems: [`${event.tag} returned both ok and rejected`] }
+	}
 
 	const problems: string[] = []
 	if (canonical(input) !== canonical(state.run)) problems.push(`${event.tag} mutated its state`)
@@ -442,7 +447,8 @@ function apply(options: Options, state: ModelState, { event }: ModelEvent): Appl
 		if (event.ask.tag === "completion") next.completionAsks = [...state.completionAsks, event.ask.askTs]
 	}
 	if (event.tag === "reasonSet" && event.reason === "streaming_failed" && state.run.stream.tag === "live") {
-		next.currentStreamFailed = state.currentStreamFailed || state.run.latches.reason === undefined
+		const firstReason = state.run.latches.reason === undefined
+		next.currentStreamFailed = state.currentStreamFailed || firstReason
 	}
 	if (event.tag === "streamEnded" && state.run.stream.tag === "live") {
 		next.lastEndedStreamFailedAndCleaned = state.run.stream.cleanupFinished && state.currentStreamFailed
@@ -466,41 +472,37 @@ function formatCounterexample(message: string, trace: TraceStep[], options: Opti
 	].join("\n")
 }
 
-const dirtyTurn = {
-	waitingForFirstChunk: true,
-	toolRejected: true,
-	toolUsed: true,
-	toolFailed: true,
-	streamReadComplete: true,
-}
-
-const shapeOf = ({ run }: ModelState) =>
+const shapeOf = ({ run, askCount }: ModelState) =>
 	canonical({
 		phase: run.phase,
 		generation: run.generation > 0,
+		belowGenerationCap: run.generation < MAX_GENERATION,
+		belowAskCap: askCount < MAX_ASK_TS,
 		stream: run.stream.tag === "live" ? run.stream.cleanupFinished : "none",
 		ask: run.ask.tag,
 		latches: run.latches,
 		lastCompletionAskTs: run.lastCompletionAskTs !== undefined,
 	})
 
+const everyTurn = Array.from({ length: 32 }, (_, bits) => ({
+	waitingForFirstChunk: Boolean(bits & 1),
+	toolRejected: Boolean(bits & 2),
+	toolUsed: Boolean(bits & 4),
+	toolFailed: Boolean(bits & 8),
+	streamReadComplete: Boolean(bits & 16),
+}))
+const allFalseTurn = everyTurn[0]!
+const allTrueTurn = everyTurn[31]!
+
 function checkTurnRegion(options: Options, searched: ModelState[], reachedActions: Set<string>): void {
 	const shapes = new Map(searched.map((state) => [shapeOf(state), state]))
-	const cases = [...shapes.values()].flatMap((state) => [
-		{ state, events: [...eventsFor(state), ...turnTags.map(turnEvent)] },
-		{ state: { ...state, run: { ...state.run, turn: dirtyTurn } }, events: eventsFor(state) },
-	])
-	const everyTurn = Array.from({ length: 32 }, (_, bits) => ({
-		waitingForFirstChunk: Boolean(bits & 1),
-		toolRejected: Boolean(bits & 2),
-		toolUsed: Boolean(bits & 4),
-		toolFailed: Boolean(bits & 8),
-		streamReadComplete: Boolean(bits & 16),
-	}))
-	for (const turn of everyTurn) {
-		const state = initialState()
-		cases.push({ state: { ...state, run: { ...state.run, turn } }, events: turnTags.map(turnEvent) })
-	}
+	const turns = options.allTurnStates ? everyTurn : [allFalseTurn, allTrueTurn]
+	const cases = [...shapes.values()].flatMap((state) =>
+		turns.map((turn) => ({
+			state: { ...state, run: { ...state.run, turn } },
+			events: [...eventsFor(state), ...turnTags.map(turnEvent)],
+		})),
+	)
 
 	for (const { state, events } of cases) {
 		for (const modelEvent of events) {
@@ -508,6 +510,7 @@ function checkTurnRegion(options: Options, searched: ModelState[], reachedAction
 			const turnEventRejected = modelEvent.source === "turn" && !applied.accepted
 			const problems = [
 				...applied.problems,
+				...(applied.accepted ? stateViolations(applied.next) : []),
 				...(turnEventRejected ? [`${modelEvent.event.tag} was rejected`] : []),
 			]
 			if (problems.length) {
@@ -836,6 +839,42 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		caughtBy: differsFor("streamStarted"),
 		useTable: true,
 	},
+	"ask-start-resets-turn": {
+		step: (state, event) => {
+			const result = nextRunState(state, event)
+			return event.tag === "askStarted" && "ok" in result
+				? { ok: { ...result.ok, turn: { ...result.ok.turn, toolUsed: false } } }
+				: result
+		},
+		caughtBy: differsFor("askStarted"),
+		useTable: true,
+	},
+	"later-stream-start-resets-turn": {
+		step: (state, event) => {
+			const result = nextRunState(state, event)
+			return event.tag === "streamStarted" && "ok" in result && state.generation > 0
+				? { ok: { ...result.ok, turn: { ...result.ok.turn, toolUsed: false } } }
+				: result
+		},
+		caughtBy: differsFor("streamStarted"),
+		useTable: true,
+	},
+	"capped-stream-start-resets-turn": {
+		step: (state, event) =>
+			event.tag === "streamStarted" && state.stream.tag === "live" && state.generation === MAX_GENERATION
+				? { rejected: { ...state, turn: allFalseTurn } }
+				: nextRunState(state, event),
+		caughtBy: /streamStarted rejection changed state/,
+		useTable: false,
+	},
+	"stream-start-rejected-after-failure": {
+		step: (state, event) =>
+			event.tag === "streamStarted" && state.latches.reason === "streaming_failed"
+				? { rejected: state }
+				: nextRunState(state, event),
+		caughtBy: /unreachable semantic witnesses: stream-after-failure-cleanup/,
+		useTable: false,
+	},
 	"completion-keeps-ask": {
 		step: (state, event) => {
 			const result = nextRunState(state, event)
@@ -908,6 +947,14 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		caughtBy: /askSettled mutated its event/,
 		useTable: false,
 	},
+	"returns-both": {
+		step: (state, event) => {
+			const result = nextRunState(state, event)
+			return event.tag === "streamEnded" && "ok" in result ? { ok: result.ok, rejected: state } : result
+		},
+		caughtBy: /returned both ok and rejected/,
+		useTable: false,
+	},
 	"returns-nothing": {
 		step: (state, event) => (event.tag === "streamEnded" ? undefined : nextRunState(state, event)),
 		caughtBy: /returned neither/,
@@ -927,13 +974,13 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 
 function runUnsafeKernels(): void {
 	for (const [name, { step, caughtBy, useTable }] of Object.entries(unsafeKernels)) {
-		const options = { step, useTable, maxDepth: MAX_DEPTH, maxStates: MAX_STATES }
+		const options = { step, useTable, maxDepth: MAX_DEPTH, maxStates: MAX_STATES, allTurnStates: false }
 		assert.throws(() => runModelCheck(options), caughtBy, `unsafe kernel not caught as expected: ${name}`)
 	}
 }
 
 function runBoundSelfTests(): void {
-	const base = { step: nextRunState, useTable: true, maxDepth: MAX_DEPTH, maxStates: MAX_STATES }
+	const base = { step: nextRunState, useTable: true, maxDepth: MAX_DEPTH, maxStates: MAX_STATES, allTurnStates: true }
 	assert.throws(() => runModelCheck({ ...base, maxDepth: 3 }), /unseen successor/)
 	assert.throws(() => runModelCheck({ ...base, maxStates: 50 }), /state budget/)
 }
@@ -956,6 +1003,7 @@ const { states, deepest } = runModelCheck({
 	useTable: true,
 	maxDepth: MAX_DEPTH,
 	maxStates: MAX_STATES,
+	allTurnStates: true,
 })
 runUnsafeKernels()
 runBoundSelfTests()
