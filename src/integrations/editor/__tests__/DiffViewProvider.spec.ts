@@ -1821,7 +1821,15 @@ describe("DiffViewProvider", () => {
 			})
 
 			try {
-				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not save the restored buffer")
+				const failure = await diffViewProvider.revertChanges().then(
+					() => undefined,
+					(error: unknown): Error => (error instanceof Error ? error : new Error(String(error))),
+				)
+				// Only this attempt is described: the message says where the rollback stopped and makes
+				// no promise about the buffer or the tab afterwards, because a later retry may close it.
+				expect(failure?.message).toContain("could not save the restored buffer")
+				expect(failure?.message).toContain("this attempt stopped before closing the tab")
+				expect(failure?.message).not.toMatch(/still dirty|left open/)
 			} finally {
 				if (originalTabs) {
 					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
