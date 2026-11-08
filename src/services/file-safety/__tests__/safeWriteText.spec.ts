@@ -1774,6 +1774,76 @@ describe("caller-supplied staging path", () => {
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
+	// NTFS hands an 8.3 alias to every path component longer than eight characters, and the hosted
+	// Windows runner's temp directory arrives in that spelling while the writer's resolved target
+	// arrives in the long spelling of the same directory; a junction or link does the same thing on
+	// any box. Two strings, one directory: the textual check above rejects a staging file that really
+	// is beside the target. What that check protects is the opposite - a staging file that is NOT
+	// beside the target, which is what makes the commit rename cross-filesystem (EXDEV) or lets a
+	// caller publish an unrelated file onto the target. Identity is that property, so a textual
+	// mismatch is resolved by comparing the two directories' dev and ino. path.resolve cannot settle
+	// it (it preserves whichever spelling it is given) and neither can fs.realpath: measured on node
+	// 22.23.4, Node's JavaScript realpath preserves an NTFS 8.3 spelling, and only
+	// fs.realpathSync.native expands it. These two tests drive the identity branch directly because a
+	// whole-file mock of fs/promises cannot present two spellings of a real directory.
+	it("accepts a caller-staged file whose directory is the target directory under another spelling", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const aliasDir = path.resolve("/tmp/alias-dir")
+		const targetDir = path.dirname(path.resolve(targetPath))
+		// One directory under two spellings: each side hands back its own realpath, so only the pair's
+		// identity says they are the same directory.
+		// realpath here mirrors what node 22.23.4 does to an NTFS 8.3 name: it hands back the
+		// spelling it was given, so only the directory identity can tell an alias from another directory.
+		vi.mocked(fs.realpath).mockImplementation((p: unknown) => Promise.resolve(path.resolve(String(p))))
+		vi.mocked(fs.stat).mockImplementation((p: unknown) => {
+			const s = String(p)
+			if (s === aliasDir || s === targetDir) {
+				return Promise.resolve(_fileStatsWithIdentity(4242n, 7n))
+			}
+			return Promise.reject(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }))
+		})
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+
+		const customTempPath = path.join(aliasDir, ".new_target.txt_1_x.tmp")
+
+		await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
+
+		// The alias directory and the target directory are one directory, so the staging file is
+		// beside the target and the publish proceeds.
+		expect(fsSync.openSync).toHaveBeenCalledWith(customTempPath, "r+")
+		expect(fs.rename).toHaveBeenCalledWith(customTempPath, path.resolve(targetPath))
+	})
+
+	it("still rejects a caller-staged file whose directory has a different identity", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const otherDir = path.resolve("/tmp/other-dir")
+		const targetDir = path.dirname(path.resolve(targetPath))
+		// Two directories that both resolve cleanly but are not the same directory: a staging file in
+		// one of them would publish an unrelated file onto the target, and across a mount the commit
+		// rename would fail with EXDEV.
+		// realpath here mirrors what node 22.23.4 does to an NTFS 8.3 name: it hands back the
+		// spelling it was given, so only the directory identity can tell an alias from another directory.
+		vi.mocked(fs.realpath).mockImplementation((p: unknown) => Promise.resolve(path.resolve(String(p))))
+		vi.mocked(fs.stat).mockImplementation((p: unknown) => {
+			const s = String(p)
+			if (s === otherDir) {
+				return Promise.resolve(_fileStatsWithIdentity(9999n, 7n))
+			}
+			if (s === targetDir) {
+				return Promise.resolve(_fileStatsWithIdentity(4242n, 7n))
+			}
+			return Promise.reject(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }))
+		})
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+
+		const customTempPath = path.join(otherDir, ".new_target.txt_1_x.tmp")
+
+		await expect(safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })).rejects.toThrow(
+			"Staging file must sit in the target's directory",
+		)
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
 	it("rejects a caller-staged file that gained a second hard link before the open", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
