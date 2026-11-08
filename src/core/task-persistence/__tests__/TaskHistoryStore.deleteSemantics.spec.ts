@@ -36,6 +36,20 @@ vi.mock("fs/promises", async () => {
 const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
 const actualFileLock = await vi.importActual<typeof import("../../../utils/fileLock")>("../../../utils/fileLock")
 
+// The delete path hands fs.unlink and the per-file lock a canonical spelling - it comes out of
+// resolveLockKey (services/file-safety/safeWriteText.ts:367), which follows links - while this file's
+// own expected paths come from the spelling os.tmpdir() answered. On a hosted Windows runner those
+// two spellings name the same file while differing as strings (the 8.3 form of the profile directory
+// against its long name), so comparing paths with === pins a spelling rather than a file: the
+// injected EACCES stops recognising its own target, the real unlink runs, and the read-back rows
+// see ENOENT. Reproduced on this machine by pointing TMP/TEMP at a junction alias of a real
+// directory, which produced the same four failures the hosted Windows lane reported.
+async function sameFileAs(candidate: unknown, expected: string): Promise<boolean> {
+	const resolved = await fs.realpath(String(candidate)).catch(() => String(candidate))
+	const expectedCanonical = await fs.realpath(expected).catch(() => expected)
+	return resolved === expectedCanonical
+}
+
 function makeHistoryItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
 	return {
 		id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
@@ -137,7 +151,8 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const backup = path.join(path.dirname(filePath), `.${path.basename(filePath)}.bak_1_saved.tmp`)
 			await fs.writeFile(backup, JSON.stringify(history))
 			vi.mocked(fs.unlink).mockImplementation(async (target) => {
-				if (target === backup) throw Object.assign(new Error("Cleanup failed"), { code: "EACCES" })
+				if (await sameFileAs(target, backup))
+					throw Object.assign(new Error("Cleanup failed"), { code: "EACCES" })
 				return actualFs.unlink(target)
 			})
 			if (operation === "delete") await store.delete(history.id)
@@ -156,10 +171,28 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			await expect(store.delete("locked-delete")).resolves.toBeUndefined()
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(
-				historyFilePath(storagePath, "locked-delete"),
-				expect.any(Function),
-			)
+			// Production hands withFileLock the canonical spelling of the key (it comes out of
+			// resolveLockKey, which follows links), while historyFilePath builds this row's path from
+			// the spelling os.tmpdir() answered. On a hosted Windows runner those two name the same
+			// file and differ as strings - the 8.3 profile directory against its long name - so a string
+			// match pins a spelling. This row pins the file instead: the key the store locked must name
+			// this file inside the directory object this row's path resolves to. The parent directory is
+			// what gets canonicalised rather than the file, because the delete removes the file and after
+			// that neither realpath nor stat can answer for it.
+			const expectedFile = historyFilePath(storagePath, "locked-delete")
+			const expectedDir = await fs.realpath(path.dirname(expectedFile)).catch(() => path.dirname(expectedFile))
+			let matchingKeys = 0
+			let matchedHandlerType = ""
+			for (const call of vi.mocked(withFileLock).mock.calls) {
+				const acquired = String(call[0])
+				const acquiredDir = await fs.realpath(path.dirname(acquired)).catch(() => path.dirname(acquired))
+				if (acquiredDir === expectedDir && path.basename(acquired) === path.basename(expectedFile)) {
+					matchingKeys++
+					matchedHandlerType = typeof call[1]
+				}
+			}
+			expect(matchingKeys).toBeGreaterThan(0)
+			expect(matchedHandlerType).toBe("function")
 			await expect(fs.access(historyFilePath(storagePath, "locked-delete"))).rejects.toMatchObject({
 				code: "ENOENT",
 			})
@@ -242,7 +275,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			onWrite.mockClear()
 
 			vi.mocked(fs.unlink).mockImplementation(async (p) => {
-				if (p === historyFilePath(storagePath, "batch-b")) {
+				if (await sameFileAs(p, historyFilePath(storagePath, "batch-b"))) {
 					throw Object.assign(new Error("EACCES: permission denied, unlink"), { code: "EACCES" })
 				}
 				return actualFs.unlink(p)
