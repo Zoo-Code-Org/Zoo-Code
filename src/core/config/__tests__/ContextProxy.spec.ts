@@ -5,7 +5,15 @@ import * as vscode from "vscode"
 import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
-import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+import {
+	makeExtensionContext,
+	makeExtensionDouble,
+	makeFreshMemento,
+	makeFreshSecrets,
+	makeUri,
+	type MementoDouble,
+	type SecretsDouble,
+} from "../../../test-utils/vscode"
 
 import { logger } from "../../../utils/logging"
 import { ContextProxy, SettingsWriteError } from "../ContextProxy"
@@ -24,26 +32,26 @@ vi.mock("vscode", () => ({
 
 describe("ContextProxy", () => {
 	let proxy: ContextProxy
-	let mockContext: any
-	let mockGlobalState: any
-	let mockSecrets: any
+	let mockContext: vscode.ExtensionContext
+	let mockGlobalState: MementoDouble
+	let mockSecrets: SecretsDouble
 
 	beforeEach(async () => {
 		// Reset mocks
 		clearAllMocks()
 
 		// Mock globalState
-		mockGlobalState = {
+		mockGlobalState = makeFreshMemento({
 			get: vi.fn(),
 			update: vi.fn().mockResolvedValue(undefined),
-		}
+		})
 
 		// Mock secrets
-		mockSecrets = {
+		mockSecrets = makeFreshSecrets({
 			get: vi.fn().mockResolvedValue("test-secret"),
 			store: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn().mockResolvedValue(undefined),
-		}
+		})
 
 		// Mock the extension context
 		mockContext = {
@@ -56,12 +64,24 @@ describe("ContextProxy", () => {
 			}),
 			globalStorageUri: makeUri("/test/storage"),
 			logUri: makeUri("/test/logs"),
-			extension: { packageJSON: { version: "1.0.0" } },
+			extension: makeExtensionDouble({ packageJSON: { version: "1.0.0" } }),
 		}
 
 		// Create proxy instance
 		proxy = new ContextProxy(mockContext)
 		await proxy.initialize()
+	})
+
+	describe("shared test-utils doubles", () => {
+		it("gives each Memento double its own stored values", () => {
+			// Freshness is the helper's contract: a module-scope Memento in a shared test helper leaks
+			// stored values between cases, and nothing else in this run would notice.
+			const first = makeFreshMemento()
+			void first.update("leakProbe", "stored-in-first")
+			const second = makeFreshMemento()
+			expect(second.get("leakProbe")).toBeUndefined()
+			expect(second.keys()).toEqual([])
+		})
 	})
 
 	describe("read-only pass-through properties", () => {
