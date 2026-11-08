@@ -576,6 +576,19 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// cancellation instead.
 			if (requestController.signal.aborted) {
 				if (hasNumericHttpStatus(sdkErr)) {
+					// Capture once before propagating the original error object, mirroring
+					// the fallback path's ordering: a 401/429/5xx that raced the abort must be
+					// visible in provider telemetry, and capturing must not rewrite or
+					// replace the propagated error.
+					const failedModel = this.getModel()
+					TelemetryService.instance.captureException(
+						new ApiProviderError(
+							sdkErr instanceof Error ? sdkErr.message : String(sdkErr),
+							this.providerName,
+							failedModel.id,
+							"createMessage",
+						),
+					)
 					throw sdkErr
 				}
 				throw createAbortError(this.providerName)

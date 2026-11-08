@@ -1515,6 +1515,11 @@ describe("OpenAiNativeHandler", () => {
 				// retry/backoff read its status, so a wrapper or clone would break them.
 				expect(error).toBe(rateLimited)
 				expect(mockFetch).not.toHaveBeenCalled()
+				// The terminal failure is captured once for provider telemetry before the
+				// original error object is propagated: an abort-raced 429 must not vanish
+				// from error reporting just because the abort won the race.
+				expect(mockCaptureException).toHaveBeenCalledTimes(1)
+				expect(mockCaptureException).toHaveBeenCalledWith(expect.any(ApiProviderError))
 			})
 
 			it("should keep a streaming request's controller when completePrompt uses its own signal", async () => {
