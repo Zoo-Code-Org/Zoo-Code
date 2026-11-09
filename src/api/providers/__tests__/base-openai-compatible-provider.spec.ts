@@ -1072,3 +1072,179 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 	})
 })
+
+describe("BaseOpenAiCompatibleProvider cancellation ordering (PR 1311 reviewer rows)", () => {
+	let handler: TestOpenAiCompatibleProvider
+
+	beforeEach(() => {
+		clearAllMocks()
+		handler = new TestOpenAiCompatibleProvider("test-api-key")
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("releases reasoning, content and tool events from one chunk when nothing cancels", async () => {
+		// Positive control for the fixture below: with no cancellation this single chunk
+		// yields all three event kinds, so an empty post-abort list is the guards' doing
+		// and not the fixture withholding content.
+		mockCreate.mockImplementationOnce(() =>
+			asyncStreamFrom([
+				{
+					choices: [
+						{
+							delta: {
+								content: "<think>plan\n</think>\ntail",
+								tool_calls: [
+									{ index: 0, id: "call_gate", function: { name: "gate_tool", arguments: "{}" } },
+								],
+							},
+							finish_reason: "tool_calls",
+						},
+					],
+				},
+			]),
+		)
+
+		const chunks = await collectStream(handler.createMessage("system prompt", []))
+		expect(chunks.map((chunk) => chunk.type)).toEqual(["reasoning", "text", "tool_call_partial", "tool_call_end"])
+	})
+
+	it("releases none of the remaining yields from a chunk once the caller aborts", async () => {
+		// The chunk above carries reasoning, content and a tool call plus its finish reason.
+		// Cancelling after the first yield must suppress the content and both tool events
+		// already parsed out of this same chunk, and the stream must reject with the abort
+		// contract rather than end normally after the buffered events.
+		mockCreate.mockImplementationOnce(() =>
+			asyncStreamFrom([
+				{
+					choices: [
+						{
+							delta: {
+								content: "<think>plan\n</think>\ntail",
+								tool_calls: [
+									{ index: 0, id: "call_gate", function: { name: "gate_tool", arguments: "{}" } },
+								],
+							},
+							finish_reason: "tool_calls",
+						},
+					],
+				},
+			]),
+		)
+
+		const controller = new AbortController()
+		const gen = handler.createMessage("system prompt", [], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+		const first = await gen.next()
+		expect(first.done).toBe(false)
+		expect(first.value).toMatchObject({ type: "reasoning", text: "plan\n" })
+
+		controller.abort()
+
+		const leaked: unknown[] = []
+		const result = await captureError(
+			(async () => {
+				for await (const chunk of gen) {
+					leaked.push(chunk)
+				}
+			})(),
+		)
+
+		expect(leaked).toEqual([])
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The TestProvider request was aborted")
+	})
+
+	it("hands the captured usage record to the caller before raising the cancellation", async () => {
+		let releaseSecond!: () => void
+		const secondGate = new Promise<void>((resolve) => {
+			releaseSecond = resolve
+		})
+		mockCreate.mockImplementationOnce(() =>
+			(async function* () {
+				yield {
+					choices: [{ delta: { content: "hello " } }],
+					usage: { prompt_tokens: 3, completion_tokens: 5 },
+				}
+				await secondGate
+				yield { choices: [{ delta: { content: "world" } }] }
+			})(),
+		)
+
+		const controller = new AbortController()
+		const gen = handler.createMessage("system prompt", [], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+		const first = await gen.next()
+		expect(first.value).toMatchObject({ type: "text", text: "hello " })
+
+		controller.abort()
+		releaseSecond()
+
+		// The full post-abort list, unfiltered: the captured usage record must reach the
+		// caller and the deferred chunk must not.
+		const postAbort: unknown[] = []
+		const result = await captureError(
+			(async () => {
+				for await (const chunk of gen) {
+					postAbort.push(chunk)
+				}
+			})(),
+		)
+
+		expect(postAbort).toMatchObject([{ type: "usage", inputTokens: 3, outputTokens: 5 }])
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The TestProvider request was aborted")
+	})
+
+	it("records the captured usage before an iterator error instead of bypassing it", async () => {
+		// No cancellation at all: an async iterator that fails on the next pull used to
+		// discard the usage record captured from the first chunk, because the catch
+		// normalized the error before the usage yield was reached.
+		mockCreate.mockImplementationOnce(() =>
+			(async function* () {
+				yield {
+					choices: [{ delta: { content: "hello " } }],
+					usage: { prompt_tokens: 1, completion_tokens: 2 },
+				}
+				throw new Error("upstream died")
+			})(),
+		)
+
+		const collected: unknown[] = []
+		const result = await captureError(
+			(async () => {
+				for await (const chunk of handler.createMessage("system prompt", [])) {
+					collected.push(chunk)
+				}
+			})(),
+		)
+
+		expect(collected).toMatchObject([
+			{ type: "text", text: "hello " },
+			{ type: "usage", inputTokens: 1, outputTokens: 2 },
+		])
+		expect(result.message).toBe("TestProvider completion error: upstream died")
+	})
+
+	it("discards a completePrompt response that arrives after the caller aborted", async () => {
+		// The create() call resolves normally while the caller's abort lands in the same
+		// window: the post-await re-check must discard the response and raise the abort
+		// contract instead of returning its content as a completed prompt.
+		const controller = new AbortController()
+		mockCreate.mockImplementationOnce(async () => {
+			controller.abort()
+			return { choices: [{ message: { content: "answer" } }] }
+		})
+
+		await expect(handler.completePrompt("prompt", { abortSignal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+})

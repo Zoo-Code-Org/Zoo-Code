@@ -462,9 +462,13 @@ describe("KimiCodeHandler", () => {
 
 		// A later request on the same handler must retry discovery rather than
 		// keep the fallback metadata.
-		mockGetModels.mockImplementationOnce(async () => ({ "test-model": { maxTokens: 1000 } }))
+		mockGetModels.mockImplementationOnce(async () => ({ "kimi-for-coding": { maxTokens: 7777 } }))
 		await handler.completePrompt("second")
 		expect(mockGetModels).toHaveBeenCalledTimes(2)
+		// Adoption is observable through the public accessor: the record discovery returned
+		// must be what the handler serves afterwards, not the pre-discovery fallback.
+		expect(handler.getModel().id).toBe("kimi-for-coding")
+		expect(handler.getModel().info.maxTokens).toBe(7777)
 	})
 
 	it("forwards completePrompt abort options and timeoutMs through the override on both 401 retry attempts", async () => {

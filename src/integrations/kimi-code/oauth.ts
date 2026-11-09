@@ -116,9 +116,29 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 		signal?.removeEventListener("abort", forwardAbort)
 	}
 }
+/** Consume a response body under the caller's signal: an abort while the body is still
+ * pending surfaces as this module's cancellation instead of waiting for a stalled read. */
+async function readBodyWithSignal<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+	if (!signal) return read()
+	if (signal.aborted) throw createOAuthAbortError()
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(createOAuthAbortError())
+		signal.addEventListener("abort", onAbort, { once: true })
+		void read().then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}
 
-async function readOAuthError(response: Response): Promise<KimiCodeOAuthError> {
-	const text = await response.text()
+async function readOAuthError(response: Response, signal?: AbortSignal): Promise<KimiCodeOAuthError> {
+	const text = await readBodyWithSignal(() => response.text(), signal)
 	try {
 		const parsed = oauthErrorSchema.parse(JSON.parse(text))
 		return new KimiCodeOAuthError(parsed.error_description ?? parsed.error, parsed.error)
@@ -133,8 +153,8 @@ export async function requestDeviceAuthorization(signal?: AbortSignal) {
 		{ client_id: KIMI_CODE_OAUTH_CONFIG.clientId },
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response)
-	return deviceAuthorizationSchema.parse(await response.json())
+	if (!response.ok) throw await readOAuthError(response, signal)
+	return deviceAuthorizationSchema.parse(await readBodyWithSignal(() => response.json(), signal))
 }
 
 async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Promise<KimiCodeCredentials> {
@@ -147,8 +167,8 @@ async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Pro
 		},
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response)
-	const tokens = tokenResponseSchema.parse(await response.json())
+	if (!response.ok) throw await readOAuthError(response, signal)
+	const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
 	if (!tokens.refresh_token) throw new Error("Kimi Code OAuth did not return a refresh token")
 	return {
 		type: providerIdentifiers.kimiCode,
@@ -174,8 +194,8 @@ export async function refreshKimiCodeAccessToken(
 		},
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response)
-	const tokens = tokenResponseSchema.parse(await response.json())
+	if (!response.ok) throw await readOAuthError(response, signal)
+	const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
 	return {
 		type: providerIdentifiers.kimiCode,
 		accessToken: tokens.access_token,
@@ -214,6 +234,9 @@ export class KimiCodeOAuthManager {
 	private refreshPromise: Promise<string | null> | null = null
 	private refreshController: AbortController | null = null
 	private refreshWaiters: Set<{ signal?: AbortSignal }> | null = null
+	// Sign-out fence: while credentials are being cleared no new refresh may start, so the drain
+	// in clearCredentials() terminates and a caller cannot re-install what its delete removes.
+	private clearingCredentials = false
 	private pollingPromise: Promise<KimiCodeCredentials> | null = null
 	private pollingController: AbortController | null = null
 	private credentialsGeneration = 0
@@ -265,11 +288,24 @@ export class KimiCodeOAuthManager {
 	async clearCredentials(): Promise<void> {
 		this.credentialsGeneration++
 		this.cancelAuthorization()
-		const refreshPromise = this.refreshPromise
-		if (refreshPromise) await refreshPromise.catch(() => null)
-		await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
-		this.credentials = null
-		this.state = { status: "idle" }
+		// Sign-out fences the refresh path. The capture-and-await only waited for the refresh that
+		// existed at entry, so a refresh started during that await could still store credentials
+		// after the delete. Holding the fence across the await closes that window instead of
+		// re-polling for a refresh that cannot appear: the only startRefresh() call site is
+		// getAccessToken(), downstream of the fence check below, so while the fence is held no new
+		// refresh can begin and the entry-captured one is the only work the delete has to wait for.
+		this.clearingCredentials = true
+		try {
+			const refreshPromise = this.refreshPromise
+			if (refreshPromise) {
+				await refreshPromise.catch(() => null)
+			}
+			await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
+			this.credentials = null
+			this.state = { status: "idle" }
+		} finally {
+			this.clearingCredentials = false
+		}
 	}
 
 	async isAuthenticated(): Promise<boolean> {
@@ -282,6 +318,11 @@ export class KimiCodeOAuthManager {
 		if (!forceRefresh && Date.now() < credentials.expiresAt - TOKEN_EXPIRY_BUFFER_MS) {
 			return credentials.accessToken
 		}
+		// A caller that is already cancelled must not start network work it cannot wait for, and a
+		// caller that arrives mid-sign-out has no token to be served: starting a refresh here would
+		// duplicate the one the sign-out is draining and could re-install what its delete removes.
+		if (signal?.aborted) throw createOAuthAbortError()
+		if (this.clearingCredentials) return null
 		// A pending refresh whose controller was already aborted can never settle successfully:
 		// start a replacement even if the old promise has not run its finally yet.
 		if (!this.refreshPromise || this.refreshController?.signal.aborted) {
@@ -342,6 +383,9 @@ export class KimiCodeOAuthManager {
 	private awaitRefresh(signal?: AbortSignal): Promise<string | null> {
 		const promise = this.refreshPromise
 		const waiters = this.refreshWaiters
+		// Capture the controller with the waiter set: a waiter that joined this refresh must never
+		// abort a replacement refresh it was never enrolled in.
+		const controller = this.refreshController
 		if (!promise) return Promise.resolve(null)
 		if (!waiters) return promise
 
@@ -356,7 +400,7 @@ export class KimiCodeOAuthManager {
 		}
 		if (signal.aborted) {
 			waiters.delete(waiter)
-			if (waiters.size === 0) this.refreshController?.abort(signal.reason)
+			if (waiters.size === 0) controller?.abort(signal.reason)
 			return Promise.reject(createOAuthAbortError())
 		}
 		return new Promise<string | null>((resolve, reject) => {
@@ -371,7 +415,7 @@ export class KimiCodeOAuthManager {
 				cleanup()
 				reject(createOAuthAbortError())
 				// Abort the shared POST only when nobody else is waiting for its result.
-				if (waiters.size === 0) this.refreshController?.abort(signal.reason)
+				if (waiters.size === 0) controller?.abort(signal.reason)
 			}
 			signal.addEventListener("abort", onAbort, { once: true })
 			void promise.then(

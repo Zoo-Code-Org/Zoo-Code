@@ -751,4 +751,167 @@ describe("KimiCodeOAuthManager", () => {
 		await expect(manager.getAccessToken(false)).resolves.toBe("new")
 		expect(fetchSpy).toHaveBeenCalledTimes(1)
 	})
+
+	it("drains an in-flight refresh before sign-out deletes credentials and refuses a re-install", async () => {
+		const { context, values } = createContext()
+		const key = "kimi-code-oauth-credentials"
+		values.set(
+			key,
+			JSON.stringify({ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		const writes: string[] = []
+		const store = vi.mocked(context.secrets.store)
+		const remove = vi.mocked(context.secrets.delete)
+		store.mockImplementation(async (k: string, v: string) => {
+			writes.push("store")
+			values.set(k, v)
+		})
+		remove.mockImplementation(async (k: string) => {
+			writes.push("delete")
+			values.delete(k)
+		})
+		let resolveRefresh!: (response: Response) => void
+		let posts = 0
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+			posts++
+			if (posts === 1) {
+				return new Promise<Response>((resolve) => {
+					resolveRefresh = resolve
+				})
+			}
+			return Promise.resolve(
+				new Response(JSON.stringify({ access_token: "fresh", refresh_token: "rotated", expires_in: 3600 }), {
+					status: 200,
+				}),
+			)
+		})
+		const tokenPromise = manager.getAccessToken(false)
+		await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce())
+		const clearPromise = manager.clearCredentials()
+		// While the clear holds its fence a new caller has no token to be served and must not start
+		// the network work the sign-out is draining.
+		await expect(manager.getAccessToken(false)).resolves.toBeNull()
+		// The 401-retry path is fenced the same way: it is offered no token and starts no POST while
+		// the sign-out is still draining.
+		await expect(manager.forceRefreshAccessToken()).resolves.toBeNull()
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+		resolveRefresh(
+			new Response(JSON.stringify({ access_token: "stale", refresh_token: "rotated", expires_in: 3600 }), {
+				status: 200,
+			}),
+		)
+		await clearPromise
+		await expect(tokenPromise).resolves.toBeNull()
+		// The delete is the last write: the refresh that resolved after sign-out began was drained
+		// first, and its save was refused by the generation the clear moved past.
+		expect(writes).toEqual(["delete"])
+		expect(values.has(key)).toBe(false)
+		// The fence is released with the clear: a later caller with expired credentials gets its own
+		// POST and its save is installed.
+		values.set(
+			key,
+			JSON.stringify({ type: "kimi-code", accessToken: "mid", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		await expect(manager.getAccessToken(false)).resolves.toBe("fresh")
+		expect(writes).toEqual(["delete", "store"])
+		expect(fetchSpy).toHaveBeenCalledTimes(2)
+	})
+
+	it("cancels a token exchange whose response body stalls after the caller aborts", async () => {
+		const controller = new AbortController()
+		const bodyReads: string[] = []
+		const stalledResponse = {
+			ok: true,
+			status: 200,
+			json: () => {
+				bodyReads.push("json")
+				return new Promise<unknown>(() => {})
+			},
+		} as unknown as Response
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(stalledResponse)
+		const credentials = { type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }
+		const pending = refreshKimiCodeAccessToken(credentials, controller.signal)
+		await vi.waitFor(() => expect(bodyReads).toEqual(["json"]))
+		controller.abort()
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		// An already-cancelled caller must not even start the body read.
+		const aborted = new AbortController()
+		aborted.abort()
+		await expect(refreshKimiCodeAccessToken(credentials, aborted.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(bodyReads).toEqual(["json"])
+	})
+
+	it("never aborts a replacement refresh on behalf of a waiter enrolled in the previous one", async () => {
+		const { context, values } = createContext()
+		values.set(
+			"kimi-code-oauth-credentials",
+			JSON.stringify({ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		let resolveFirst!: (response: Response) => void
+		let resolveSecond!: (response: Response) => void
+		let firstSignal: AbortSignal | undefined
+		let secondSignal: AbortSignal | undefined
+		let posts = 0
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+			posts++
+			const signal = (init as RequestInit)?.signal as AbortSignal
+			if (posts === 1) {
+				firstSignal = signal
+				return new Promise<Response>((resolve) => {
+					resolveFirst = resolve
+				})
+			}
+			secondSignal = signal
+			return new Promise<Response>((resolve) => {
+				resolveSecond = resolve
+			})
+		})
+		const leaving = new AbortController()
+		const leavingWaiter = manager.getAccessToken(false, leaving.signal)
+		await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce())
+		const staying = new AbortController()
+		const stayingWaiter = manager.getAccessToken(false, staying.signal)
+		// Both callers must be enrolled in the shared POST before anybody leaves it, so the enrollment
+		// is not racing the abort.
+		await vi.waitFor(() => expect(manager["refreshWaiters"]?.size).toBe(2))
+		// One waiter detaching while another still needs the shared POST must not cancel that POST.
+		leaving.abort()
+		await expect(leavingWaiter).rejects.toMatchObject({ name: "AbortError" })
+		expect(firstSignal?.aborted).toBe(false)
+		// The POST this waiter enrolled in then dies on its own lifecycle, and a replacement takes
+		// its place before the remaining waiter detaches. That waiter must cancel the POST it joined,
+		// which is already dead, and leave the replacement it never enrolled in alone.
+		manager["refreshController"]?.abort()
+		const replacement = manager.getAccessToken(false)
+		await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2))
+		staying.abort()
+		await expect(stayingWaiter).rejects.toMatchObject({ name: "AbortError" })
+		expect(firstSignal?.aborted).toBe(true)
+		expect(secondSignal?.aborted).toBe(false)
+		resolveSecond(
+			new Response(JSON.stringify({ access_token: "new", refresh_token: "rotated", expires_in: 3600 }), {
+				status: 200,
+			}),
+		)
+		await expect(replacement).resolves.toBe("new")
+		// The stalled POST the cancelled waiters were enrolled in resolves last, with a controller
+		// that no longer owns the refresh state, so its save must not install over the replacement's.
+		resolveFirst(
+			new Response(JSON.stringify({ access_token: "late", refresh_token: "rotated", expires_in: 3600 }), {
+				status: 200,
+			}),
+		)
+		await vi.waitFor(() => expect(context.secrets.store).toHaveBeenCalledTimes(1))
+		expect(context.secrets.store).toHaveBeenCalledWith(
+			"kimi-code-oauth-credentials",
+			expect.stringContaining("new"),
+		)
+		void values
+	})
 })

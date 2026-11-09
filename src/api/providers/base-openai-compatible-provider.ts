@@ -153,6 +153,10 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
 
+		// An iterator error is normalized only after the usage record below has been handed to the
+		// caller, so a mid-stream failure cannot bypass the tokens already streamed.
+		let streamError: unknown = undefined
+
 		try {
 			for await (const chunk of stream) {
 				// Streaming-loop abort defense: the for-await above already pulled this
@@ -191,6 +195,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 				if (delta?.content) {
 					for (const processedChunk of matcher.update(delta.content)) {
+						if (signal?.aborted) {
+							break
+						}
 						yield processedChunk
 					}
 				}
@@ -198,6 +205,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				// Emit raw tool call chunks - NativeToolCallParser handles state management
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
+						if (signal?.aborted) {
+							break
+						}
 						if (toolCall.id) {
 							activeToolCallIds.add(toolCall.id)
 						}
@@ -215,6 +225,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				// This ensures tool calls are finalized even if the stream doesn't properly close
 				if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
 					for (const id of activeToolCallIds) {
+						if (signal?.aborted) {
+							break
+						}
 						yield { type: "tool_call_end", id }
 					}
 					activeToolCallIds.clear()
@@ -226,22 +239,32 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			}
 		} catch (error) {
 			// The creation-site catch does not cover errors raised by the async
-			// iterator itself (e.g. a mid-stream abort); normalize them the same way.
-			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+			// iterator itself (e.g. a mid-stream abort); record them here so the usage
+			// record below still reaches the caller before the normalized error does.
+			streamError = error
 		}
 
-		// Post-loop abort defense: a signal that aborted while the loop was running must
-		// surface the Task.ts abort contract instead of letting the stream end normally
-		// with the buffered usage / matcher.final() content below.
-		if (signal?.aborted) {
-			throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
-		}
-
+		// Usage before the verdict: a captured usage record must reach the caller ahead of an
+		// abort or an iterator error, or the cost of the tokens already streamed disappears
+		// from the task's accounting exactly when the stream stops early.
 		if (lastUsage) {
 			yield this.processUsageMetrics(lastUsage, this.getModel().info)
 		}
 
-		// Process any remaining content
+		if (streamError !== undefined) {
+			throw handleOpenAIRequestError(streamError, this.providerName, metadata?.abortSignal)
+		}
+
+		// Post-loop abort defense: a signal that aborted while the loop was running must
+		// surface the Task.ts abort contract instead of letting the stream end normally
+		// with the matcher.final() content below.
+		if (signal?.aborted) {
+			throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
+		}
+
+		// Process any remaining content. No cancellation re-check is needed here: the throw above
+		// already covers an aborted caller signal, and matcher.final() is a synchronous array, so
+		// no await exists between that check and this loop in which an abort could appear.
 		for (const processedChunk of matcher.final()) {
 			yield processedChunk
 		}
@@ -296,6 +319,17 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		try {
 			const response = await this.client.chat.completions.create(params, requestConfig)
+
+			// A cancellation that lands while the response is in flight must not be reported as a
+			// completed prompt: the response is discarded and the abort contract is raised instead.
+			if (options?.abortSignal?.aborted) {
+				throw handleOpenAIRequestError(
+					createAbortError(this.providerName),
+					this.providerName,
+					options.abortSignal,
+					requestSignal,
+				)
+			}
 
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const responseAny = response as any
