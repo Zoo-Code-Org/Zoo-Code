@@ -442,7 +442,7 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			const result = await storeB.setGeneratedTitleIfUnset("shared-task", "Generated Title")
 
 			expect(result.applied).toBe(false)
-			expect(result.item.title).toBe("Manual Title")
+			expect(result.item?.title).toBe("Manual Title")
 			// The stale cache is refreshed with the authoritative disk record.
 			expect(storeB.get("shared-task")?.title).toBe("Manual Title")
 			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toMatchObject({ title: "Manual Title" })
@@ -481,5 +481,85 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			storeB.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
 		}
+	})
+
+	describe("setGeneratedTitleIfUnset title input and cancellation", () => {
+		async function withSingleStore(
+			run: (store: TaskHistoryStore, filePath: string, onWrite: ReturnType<typeof vi.fn>) => Promise<void>,
+		) {
+			const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-generated-title-input-"))
+			const onWrite = vi.fn(async () => {})
+			const store = new TaskHistoryStore(storagePath, { onWrite })
+			const filePath = path.join(storagePath, "tasks", "solo-task", "history_item.json")
+			try {
+				await store.initialize()
+				await store.upsert(item("solo-task"))
+				onWrite.mockClear()
+				await run(store, filePath, onWrite)
+			} finally {
+				store.dispose()
+				await fs.rm(storagePath, { recursive: true, force: true })
+			}
+		}
+
+		it("persists a padded title trimmed", async () => {
+			await withSingleStore(async (store, filePath) => {
+				const result = await store.setGeneratedTitleIfUnset("solo-task", "  Padded Title  ")
+
+				expect(result).toMatchObject({ applied: true, item: { title: "Padded Title" } })
+				expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toMatchObject({ title: "Padded Title" })
+			})
+		})
+
+		it.each([
+			["a blank title", "   ", undefined],
+			["an aborted signal", "Generated Title", AbortSignal.abort()],
+		])("does not write or notify for %s", async (_label, title, signal) => {
+			await withSingleStore(async (store, filePath, onWrite) => {
+				const before = await fs.readFile(filePath, "utf8")
+
+				const result = await store.setGeneratedTitleIfUnset("solo-task", title, { signal })
+
+				expect(result.applied).toBe(false)
+				expect(await fs.readFile(filePath, "utf8")).toBe(before)
+				expect(onWrite).not.toHaveBeenCalled()
+				expect(store.get("solo-task")?.title).toBeUndefined()
+			})
+		})
+	})
+
+	describe("setGeneratedTitleIfUnset with a rejected disk record", () => {
+		it.each([
+			["deleted by another host", async (filePath: string) => fs.rm(filePath)],
+			["unreadable", async (filePath: string) => fs.writeFile(filePath, "{not json")],
+			[
+				"persisted under a different task ID",
+				async (filePath: string) => fs.writeFile(filePath, JSON.stringify(item("other-task"))),
+			],
+		])("fails closed without writing when the disk record is %s", async (_label, mutateDisk) => {
+			const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-generated-title-reject-"))
+			const onWrite = vi.fn(async () => {})
+			const store = new TaskHistoryStore(storagePath, { onWrite })
+			const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+
+			try {
+				await store.initialize()
+				await store.upsert(item("shared-task"))
+				// Another host changes the disk record after this store cached it.
+				await mutateDisk(filePath)
+				const before = await fs.readFile(filePath, "utf8").catch(() => undefined)
+				onWrite.mockClear()
+
+				const result = await store.setGeneratedTitleIfUnset("shared-task", "Generated Title")
+
+				expect(result).toEqual({ item: undefined, applied: false })
+				expect(await fs.readFile(filePath, "utf8").catch(() => undefined)).toBe(before)
+				expect(store.get("shared-task")).toBeUndefined()
+				expect(onWrite).toHaveBeenCalledTimes(1)
+			} finally {
+				store.dispose()
+				await fs.rm(storagePath, { recursive: true, force: true })
+			}
+		})
 	})
 })

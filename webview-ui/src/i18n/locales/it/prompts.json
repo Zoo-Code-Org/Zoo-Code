@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Avvia nuova attività",
 				"description": "Avvia una nuova attività con il tuo input. Disponibile nella palette dei comandi."
+			},
+			"TASK_TITLE": {
+				"label": "Titolo dell'attività",
+				"description": "Genera un titolo breve per una nuova attività a partire dal prompt iniziale. Viene eseguito in background all'avvio di un'attività."
 			}
 		}
 	},

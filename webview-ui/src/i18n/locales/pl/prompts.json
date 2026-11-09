@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Rozpocznij nowe zadanie",
 				"description": "Rozpocznij nowe zadanie z wprowadzonymi danymi. Dostępne w palecie poleceń."
+			},
+			"TASK_TITLE": {
+				"label": "Tytuł zadania",
+				"description": "Generuje krótki tytuł nowego zadania na podstawie jego początkowego promptu. Działa w tle po rozpoczęciu zadania."
 			}
 		}
 	},

@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { ProviderSettings } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
+import * as vscode from "vscode"
 
 import { Task } from "../Task"
 import * as taskTitleGen from "../taskTitleGenerator"
@@ -31,6 +32,7 @@ type TaskTitleAccess = {
 	startTask(task?: string, images?: string[]): Promise<void>
 	cancelCurrentRequest(): void
 	requestAbort(isAbandoned: boolean): void
+	cancelTitleGeneration(): void
 	titleAbortController?: AbortController
 	abort: boolean
 	abandoned: boolean
@@ -54,6 +56,8 @@ describe("Task title generation", () => {
 	let mockProvider: {
 		setGeneratedTaskTitle: ReturnType<typeof vi.fn>
 		postStateToWebviewWithoutTaskHistory: ReturnType<typeof vi.fn>
+		getState: ReturnType<typeof vi.fn>
+		context: { extensionMode: vscode.ExtensionMode }
 	}
 
 	beforeEach(() => {
@@ -62,6 +66,8 @@ describe("Task title generation", () => {
 		mockProvider = {
 			setGeneratedTaskTitle: mockSetGeneratedTaskTitle,
 			postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
+			getState: vi.fn().mockResolvedValue({}),
+			context: { extensionMode: vscode.ExtensionMode.Development },
 		}
 	})
 
@@ -113,7 +119,11 @@ describe("Task title generation", () => {
 			// Issue #2333: the model request is limited to 15 seconds.
 			expect(taskTitleGen.DEFAULT_TITLE_TIMEOUT_MS).toBe(15000)
 			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledTimes(1)
-			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledWith("task-title-1", "Summarized Title")
+			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledWith(
+				"task-title-1",
+				"Summarized Title",
+				expect.any(AbortSignal),
+			)
 		})
 
 		it("falls back to the first 42 characters of the prompt when generation fails (issue #2333)", async () => {
@@ -126,7 +136,11 @@ describe("Task title generation", () => {
 			const expectedFallback = taskTitleGen.fallbackTaskTitle(longPrompt)
 			expect(expectedFallback).toHaveLength(42)
 			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledTimes(1)
-			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledWith("task-title-1", expectedFallback)
+			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledWith(
+				"task-title-1",
+				expectedFallback,
+				expect.any(AbortSignal),
+			)
 		})
 
 		it("keeps an existing title instead of overwriting it (manual rename wins)", async () => {
@@ -150,7 +164,11 @@ describe("Task title generation", () => {
 			await getTaskTitleAccess(task).generateTitleInBackground("Initial prompt message")
 
 			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledTimes(2)
-			expect(mockSetGeneratedTaskTitle).toHaveBeenLastCalledWith("task-title-1", "Summarized Title")
+			expect(mockSetGeneratedTaskTitle).toHaveBeenLastCalledWith(
+				"task-title-1",
+				"Summarized Title",
+				expect.any(AbortSignal),
+			)
 		})
 
 		it("applies the truncated-prompt fallback title after the write retries are exhausted (issue #2333)", async () => {
@@ -166,11 +184,22 @@ describe("Task title generation", () => {
 
 			// Three attempts with the generated title, then one with the fallback.
 			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledTimes(4)
-			expect(mockSetGeneratedTaskTitle).toHaveBeenNthCalledWith(1, "task-title-1", "Summarized Title")
-			expect(mockSetGeneratedTaskTitle).toHaveBeenNthCalledWith(3, "task-title-1", "Summarized Title")
+			expect(mockSetGeneratedTaskTitle).toHaveBeenNthCalledWith(
+				1,
+				"task-title-1",
+				"Summarized Title",
+				expect.any(AbortSignal),
+			)
+			expect(mockSetGeneratedTaskTitle).toHaveBeenNthCalledWith(
+				3,
+				"task-title-1",
+				"Summarized Title",
+				expect.any(AbortSignal),
+			)
 			expect(mockSetGeneratedTaskTitle).toHaveBeenLastCalledWith(
 				"task-title-1",
 				taskTitleGen.fallbackTaskTitle("Initial prompt message"),
+				expect.any(AbortSignal),
 			)
 		})
 
@@ -198,6 +227,80 @@ describe("Task title generation", () => {
 			expect(mockSetGeneratedTaskTitle).not.toHaveBeenCalled()
 		})
 
+		it("skips title generation and the title write in ExtensionMode.Test", async () => {
+			mockProvider.context.extensionMode = vscode.ExtensionMode.Test
+			const task = createTestTask()
+
+			await getTaskTitleAccess(task).generateTitleInBackground("Initial prompt message")
+
+			expect(taskTitleGen.generateTaskTitle).not.toHaveBeenCalled()
+			expect(mockSetGeneratedTaskTitle).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			["a saved TASK_TITLE prompt", { customSupportPrompts: { TASK_TITLE: "Custom ${userInput}" } }],
+			["an unreadable state", undefined],
+		])("passes the custom support prompts from %s", async (_label, state) => {
+			if (state) {
+				mockProvider.getState.mockResolvedValueOnce(state)
+			} else {
+				mockProvider.getState.mockRejectedValueOnce(new Error("state unavailable"))
+			}
+			vi.mocked(taskTitleGen.generateTaskTitle).mockResolvedValueOnce("Summarized Title")
+			const task = createTestTask()
+
+			await getTaskTitleAccess(task).generateTitleInBackground("Initial prompt message")
+
+			expect(taskTitleGen.generateTaskTitle).toHaveBeenCalledWith(
+				"Initial prompt message",
+				mockApiConfig,
+				expect.objectContaining({ customSupportPrompts: state?.customSupportPrompts }),
+			)
+			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not write the fallback title when cancelled during the third failed write", async () => {
+			vi.mocked(taskTitleGen.generateTaskTitle).mockResolvedValueOnce("Summarized Title")
+			const task = createTestTask()
+			const access = getTaskTitleAccess(task)
+			mockSetGeneratedTaskTitle
+				.mockRejectedValueOnce(new Error("task not found in cache"))
+				.mockRejectedValueOnce(new Error("task not found in cache"))
+				.mockImplementationOnce(async () => {
+					access.cancelTitleGeneration()
+					throw new Error("task not found in cache")
+				})
+
+			await access.generateTitleInBackground("Initial prompt message")
+
+			// Three attempts with the generated title and no fallback write.
+			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledTimes(3)
+			expect(mockSetGeneratedTaskTitle).not.toHaveBeenCalledWith(
+				"task-title-1",
+				taskTitleGen.fallbackTaskTitle("Initial prompt message"),
+				expect.anything(),
+			)
+		})
+
+		it("passes a signal to the title write that cancellation aborts", async () => {
+			vi.mocked(taskTitleGen.generateTaskTitle).mockResolvedValueOnce("Summarized Title")
+			const task = createTestTask()
+			const access = getTaskTitleAccess(task)
+			let writeSignal: AbortSignal | undefined
+			mockSetGeneratedTaskTitle.mockImplementationOnce(
+				async (_id: string, _title: string, signal: AbortSignal) => {
+					writeSignal = signal
+					access.cancelTitleGeneration()
+					return false
+				},
+			)
+
+			await access.generateTitleInBackground("Initial prompt message")
+
+			// The store re-checks this signal once the queued write takes the lock.
+			expect(writeSignal?.aborted).toBe(true)
+		})
+
 		it("cleans up titleAbortController when finished", async () => {
 			vi.mocked(taskTitleGen.generateTaskTitle).mockResolvedValueOnce("Summarized Title")
 			const task = createTestTask()
@@ -209,6 +312,24 @@ describe("Task title generation", () => {
 	})
 
 	describe("generateTitleInBackground rate-limit coordination", () => {
+		// The rate-limit wait re-reads the shared clock after each wait, so the
+		// mocked delay advances a controlled `performance.now()` like a real wait.
+		let now: number
+
+		beforeEach(() => {
+			now = 1_000_000
+			vi.spyOn(performance, "now").mockImplementation(() => now)
+			vi.mocked(delay).mockImplementation((ms: number) => {
+				now += ms
+				return Promise.resolve(undefined)
+			})
+		})
+
+		afterEach(() => {
+			vi.mocked(performance.now).mockRestore()
+			vi.mocked(delay).mockReset().mockResolvedValue(undefined)
+		})
+
 		it("waits out the remaining provider rate-limit window before the title request", async () => {
 			const clock = createRateLimitClock()
 			const task = createTestTask({
@@ -220,8 +341,9 @@ describe("Task title generation", () => {
 			// Record the wait options while the controller still exists; it is
 			// cleaned up in the method's `finally` block.
 			let observedSignal: unknown
-			mockDelay.mockImplementationOnce((_ms: number, opts?: { signal?: AbortSignal }) => {
+			mockDelay.mockImplementationOnce((ms: number, opts?: { signal?: AbortSignal }) => {
 				observedSignal = opts?.signal
+				now += ms
 				return Promise.resolve(undefined)
 			})
 
@@ -292,6 +414,38 @@ describe("Task title generation", () => {
 			expect(taskTitleGen.generateTaskTitle).not.toHaveBeenCalled()
 			expect(clock.getLastRequestTime()).toBe(timestampBeforeWait)
 			expect(mockSetGeneratedTaskTitle).not.toHaveBeenCalled()
+		})
+
+		it("re-waits when a task request dispatches during the title request's wait", async () => {
+			const clock = createRateLimitClock()
+			const task = createTestTask({
+				rateLimitClock: clock,
+				apiConfiguration: { ...mockApiConfig, rateLimitSeconds: 10 },
+			})
+			let taskDispatchTime: number | undefined
+			let titleDispatchTime: number | undefined
+			vi.mocked(taskTitleGen.generateTaskTitle).mockImplementationOnce(async () => {
+				titleDispatchTime = now
+				return "Summarized Title"
+			})
+			// When the title's wait ends, the task loop's wait for the same
+			// window has also ended and it dispatches first on the shared clock.
+			vi.mocked(delay).mockImplementationOnce((ms: number) => {
+				now += ms
+				clock.recordRequest()
+				taskDispatchTime = now
+				return Promise.resolve(undefined)
+			})
+			clock.recordRequest()
+
+			await getTaskTitleAccess(task).generateTitleInBackground("Initial prompt message")
+
+			// The title request is spaced a full window from the task dispatch
+			// instead of proceeding from the stale timestamp it first read.
+			expect(delay).toHaveBeenCalledTimes(2)
+			expect(titleDispatchTime).toBeDefined()
+			expect(taskDispatchTime).toBeDefined()
+			expect((titleDispatchTime ?? 0) - (taskDispatchTime ?? 0)).toBeGreaterThanOrEqual(10_000)
 		})
 	})
 
@@ -376,7 +530,11 @@ describe("Task title generation", () => {
 			resolveGeneration("Summarized Title")
 			await started
 			await vi.waitFor(() => expect(mockSetGeneratedTaskTitle).toHaveBeenCalled())
-			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledWith("task-title-1", "Summarized Title")
+			expect(mockSetGeneratedTaskTitle).toHaveBeenCalledWith(
+				"task-title-1",
+				"Summarized Title",
+				expect.any(AbortSignal),
+			)
 		})
 	})
 })

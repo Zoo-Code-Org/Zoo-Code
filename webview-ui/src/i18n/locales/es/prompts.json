@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar nueva tarea",
 				"description": "Inicia una nueva tarea con entrada del usuario. Disponible en la Paleta de comandos."
+			},
+			"TASK_TITLE": {
+				"label": "Título de la tarea",
+				"description": "Genera un título breve para una tarea nueva a partir de su solicitud inicial. Se ejecuta en segundo plano al iniciar una tarea."
 			}
 		}
 	},

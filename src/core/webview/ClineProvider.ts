@@ -2814,6 +2814,11 @@ export class ClineProvider
 			return
 		}
 
+		// The user's choice — including clearing the title — supersedes a
+		// generated title still pending for a running task. Cancel it before
+		// queuing the rename so a queued generated-title write sees the abort.
+		this.taskRegistry.getById(id)?.cancelTitleGeneration()
+
 		// Read and write under the store lock so a queued task save or delegation
 		// transition cannot be overwritten by a stale snapshot of the item.
 		const trimmed = title?.trim()
@@ -2836,26 +2841,26 @@ export class ClineProvider
 	 * The existing-title check reads the persisted record inside the same
 	 * per-file lock as the write, so a manual rename committed by another
 	 * provider's store after this store's cache was last refreshed is never
-	 * overwritten by the generated title. Returns true when the title was
-	 * applied, false when the item already had a title. Throws when the task
-	 * is not in the store yet so the caller can retry.
+	 * overwritten by the generated title. The store's authoritative item is
+	 * published even when the generated title is not applied, so a title
+	 * preserved from another host reaches the local header and task list. A
+	 * signal aborted while the write is queued skips it. Returns true when the
+	 * title was applied, false otherwise. Throws when the task is not in the
+	 * store yet so the caller can retry.
 	 */
-	async setGeneratedTaskTitle(id: string, title: string): Promise<boolean> {
+	async setGeneratedTaskTitle(id: string, title: string, signal?: AbortSignal): Promise<boolean> {
 		const trimmed = title.trim()
 		if (!trimmed) {
 			return false
 		}
 
-		const { applied } = await this.taskHistoryStore.setGeneratedTitleIfUnset(id, trimmed)
+		const { item, applied } = await this.taskHistoryStore.setGeneratedTitleIfUnset(id, trimmed, { signal })
 
-		if (applied) {
+		if (item && item.title) {
 			this.recentTasksCache = undefined
 
 			if (this.isViewLaunched) {
-				const updatedItem = this.taskHistoryStore.get(id)
-				if (updatedItem) {
-					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
-				}
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: item })
 			}
 		}
 

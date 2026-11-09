@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Yeni Görev Başlat",
 				"description": "Girdiyle yeni bir görev başlat. Komut paletinde kullanılabilir."
+			},
+			"TASK_TITLE": {
+				"label": "Görev Başlığı",
+				"description": "Yeni bir görev için ilk isteminden kısa bir başlık oluşturur. Görev başladığında arka planda çalışır."
 			}
 		}
 	},

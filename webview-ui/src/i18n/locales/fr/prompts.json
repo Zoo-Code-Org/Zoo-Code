@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Démarrer une nouvelle tâche",
 				"description": "Démarre une nouvelle tâche avec ton entrée. Disponible dans la palette de commandes."
+			},
+			"TASK_TITLE": {
+				"label": "Titre de la tâche",
+				"description": "Génère un titre court pour une nouvelle tâche à partir de sa demande initiale. S'exécute en arrière-plan au démarrage d'une tâche."
 			}
 		}
 	},

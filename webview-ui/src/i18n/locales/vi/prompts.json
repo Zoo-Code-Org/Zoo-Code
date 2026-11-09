@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Bắt đầu tác vụ mới",
 				"description": "Bắt đầu tác vụ mới với nội dung đã nhập. Có sẵn trong bảng lệnh."
+			},
+			"TASK_TITLE": {
+				"label": "Tiêu đề tác vụ",
+				"description": "Tạo tiêu đề ngắn cho tác vụ mới từ lời nhắc ban đầu. Chạy ở chế độ nền khi tác vụ bắt đầu."
 			}
 		}
 	},

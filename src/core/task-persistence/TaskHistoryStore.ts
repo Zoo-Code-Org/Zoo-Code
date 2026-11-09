@@ -1199,21 +1199,28 @@ export class TaskHistoryStore {
 	 * and the record's other disk fields are preserved when the generated
 	 * title is applied.
 	 *
-	 * @returns The authoritative disk record and whether the generated title
-	 * was applied.
+	 * Deletion by another host is authoritative: when no persisted record
+	 * exists, or the persisted record is malformed or carries a different task
+	 * ID, nothing is written, the stale cache entry is dropped, and the result
+	 * has no item. A signal aborted while the call waits on the store lock
+	 * skips the write, so a cancelled task's title is never persisted.
+	 *
+	 * @returns The authoritative record (absent when the write was rejected)
+	 * and whether the generated title was applied.
 	 * @throws If the task ID is not present in the cache, so the caller can retry.
 	 */
 	public async setGeneratedTitleIfUnset(
 		taskId: string,
 		title: string,
-	): Promise<{ item: HistoryItem; applied: boolean }> {
+		options: { signal?: AbortSignal } = {},
+	): Promise<{ item: HistoryItem | undefined; applied: boolean }> {
 		return this.withLock(async () => {
 			const cached = this.cache.get(taskId)
 			if (!cached) {
 				throw new Error(`[TaskHistoryStore] setGeneratedTitleIfUnset: task ${taskId} not found in cache`)
 			}
 			const trimmed = title.trim()
-			if (!trimmed) {
+			if (!trimmed || options.signal?.aborted) {
 				return { item: cached, applied: false }
 			}
 
@@ -1225,9 +1232,21 @@ export class TaskHistoryStore {
 			// never invokes `merge`), the cache decision stands.
 			let applied = !cached.title
 			let authoritative: HistoryItem = cached.title ? cached : incoming
-			await safeWriteJson(filePath, incoming, {
-				merge: (existing) => {
-					if (existing && typeof existing === "object" && "id" in existing) {
+			let rejectedDiskRecord = false
+			try {
+				await safeWriteJson(filePath, incoming, {
+					merge: (existing) => {
+						// Writing the cached item back would recreate a task another
+						// host deleted or overwrite a record that is not this task's,
+						// so a missing, malformed, or mismatched record fails closed.
+						// A throwing merge writes nothing.
+						const parsed = historyItemSchema.safeParse(existing)
+						if (!parsed.success || parsed.data.id !== taskId) {
+							rejectedDiskRecord = true
+							throw new Error(
+								`[TaskHistoryStore] setGeneratedTitleIfUnset: task ${taskId} has no valid disk record`,
+							)
+						}
 						const disk = existing as HistoryItem
 						if (disk.title) {
 							// A manual rename or an earlier generated title
@@ -1241,15 +1260,19 @@ export class TaskHistoryStore {
 						applied = true
 						authoritative = { ...disk, title: trimmed }
 						return authoritative
-					}
-					// No readable disk record; fall back to writing the
-					// cached item with the title applied, matching the
-					// delta-write fallback for a missing file.
-					applied = true
-					authoritative = incoming
-					return incoming
-				},
-			})
+					},
+				})
+			} catch (error) {
+				if (!rejectedDiskRecord) {
+					throw error
+				}
+				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
+				if (this.onWrite) {
+					await this.onWrite(this.getAll())
+				}
+				return { item: undefined, applied: false }
+			}
 			this.cache.set(taskId, authoritative)
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())

@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Nieuwe taak starten",
 				"description": "Start een nieuwe taak met gebruikersinvoer. Beschikbaar via de Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Taaktitel",
+				"description": "Genereert een korte titel voor een nieuwe taak op basis van de eerste prompt. Wordt op de achtergrond uitgevoerd wanneer een taak start."
 			}
 		}
 	},

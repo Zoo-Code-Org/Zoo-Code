@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Mulai Tugas Baru",
 				"description": "Mulai tugas baru dengan input pengguna. Tersedia di Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Judul Tugas",
+				"description": "Membuat judul singkat untuk tugas baru dari prompt awalnya. Berjalan di latar belakang saat tugas dimulai."
 			}
 		}
 	},

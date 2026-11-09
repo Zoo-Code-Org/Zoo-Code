@@ -1,6 +1,6 @@
 import type { ProviderSettings } from "@roo-code/types"
 
-import { supportPrompt } from "../../shared/support-prompt"
+import { supportPrompt, type CustomSupportPrompts } from "../../shared/support-prompt"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 
 export const MAX_INPUT_PROMPT_LENGTH = 1000
@@ -15,6 +15,7 @@ export interface GenerateTaskTitleOptions {
 	abortSignal?: AbortSignal
 	timeoutMs?: number
 	taskId?: string
+	customSupportPrompts?: CustomSupportPrompts
 }
 
 /**
@@ -85,15 +86,32 @@ export async function generateTaskTitle(
 		controller.abort()
 	}, timeoutMs)
 
+	// Timeout and parent cancellation settle the title request on their own
+	// instead of relying on the provider to honour the abort signal, so a
+	// provider that ignores it cannot hold the title flow open.
+	let onAbort: (() => void) | undefined
+	const aborted = new Promise<never>((_resolve, reject) => {
+		onAbort = () => reject(new Error("Title generation timed out or was cancelled"))
+		controller.signal.addEventListener("abort", onAbort, { once: true })
+	})
+
 	try {
 		const promptSnippet = trimmedPrompt.slice(0, MAX_INPUT_PROMPT_LENGTH)
-		const titlePrompt = supportPrompt.create("TASK_TITLE", { userInput: promptSnippet })
+		const titlePrompt = supportPrompt.create(
+			"TASK_TITLE",
+			{ userInput: promptSnippet },
+			options?.customSupportPrompts,
+		)
 
-		const rawTitle = await singleCompletionHandler(apiConfiguration, titlePrompt, {
+		const completion = singleCompletionHandler(apiConfiguration, titlePrompt, {
 			abortSignal: controller.signal,
 			timeoutMs,
 			taskId: options?.taskId,
 		})
+		// Whichever side loses the race settles with nobody awaiting it.
+		completion.catch(() => {})
+		aborted.catch(() => {})
+		const rawTitle = await Promise.race([completion, aborted])
 
 		if (controller.signal.aborted || parentSignal?.aborted) {
 			return undefined
@@ -107,6 +125,9 @@ export async function generateTaskTitle(
 		return undefined
 	} finally {
 		clearTimeout(timeoutId)
+		if (onAbort) {
+			controller.signal.removeEventListener("abort", onAbort)
+		}
 		if (parentSignal) {
 			parentSignal.removeEventListener("abort", onParentAbort)
 		}

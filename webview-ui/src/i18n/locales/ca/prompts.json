@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar nova tasca",
 				"description": "Inicieu una nova tasca amb l'entrada proporcionada. Disponible a la paleta de comandes."
+			},
+			"TASK_TITLE": {
+				"label": "Títol de la tasca",
+				"description": "Genera un títol breu per a una tasca nova a partir de la seva sol·licitud inicial. S'executa en segon pla quan comença una tasca."
 			}
 		}
 	},

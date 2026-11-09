@@ -736,7 +736,9 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(getStored("task-gen-after")?.title).toBe("Manual Title")
 		})
 
-		it("keeps an existing title and reports that nothing was applied", async () => {
+		it("keeps an existing title and publishes the authoritative item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
 			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-existing", task: "Original prompt" }), {
 				broadcast: false,
 			})
@@ -747,7 +749,59 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			expect(getStored("task-gen-existing")?.title).toBe("Manual Title")
 			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
-			expect(updates).toHaveLength(0)
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({
+				id: "task-gen-existing",
+				title: "Manual Title",
+			})
+		})
+
+		it("publishes a title preserved from another host when the generated title is not applied", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			const item = createHistoryItem({ id: "task-gen-remote", task: "Original prompt" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+			// The store read a rename committed on disk by another host.
+			vi.spyOn(provider.taskHistoryStore, "setGeneratedTitleIfUnset").mockResolvedValueOnce({
+				item: { ...item, title: "Remote Title" },
+				applied: false,
+			})
+			mockPostMessage.mockClear()
+
+			await expect(provider.setGeneratedTaskTitle("task-gen-remote", "Generated Title")).resolves.toBe(false)
+
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-gen-remote", title: "Remote Title" })
+		})
+
+		it.each([
+			["a new title", "Manual Title"],
+			["a cleared title", ""],
+		])("cancels pending title generation of the running task on %s", async (_label, title) => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-clear", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			// Task is module-mocked in this suite, so the double supplies the method.
+			const cancelTitleGeneration = vi.fn()
+			const runningTask = Object.assign(Object.create(Task.prototype) as Task, { cancelTitleGeneration })
+			vi.spyOn(provider["taskRegistry"], "getById").mockImplementation((id: string) =>
+				id === "task-gen-clear" ? runningTask : undefined,
+			)
+
+			await provider.renameTaskWithId("task-gen-clear", title)
+
+			expect(cancelTitleGeneration).toHaveBeenCalledTimes(1)
+		})
+
+		it("skips the write when the signal is aborted before the queued write runs", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-abort", task: "Original prompt" }), {
+				broadcast: false,
+			})
+
+			await expect(
+				provider.setGeneratedTaskTitle("task-gen-abort", "Generated Title", AbortSignal.abort()),
+			).resolves.toBe(false)
+
+			expect(getStored("task-gen-abort")?.title).toBeUndefined()
 		})
 
 		it("throws when the task is not yet recorded so the caller can retry", async () => {

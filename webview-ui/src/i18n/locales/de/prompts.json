@@ -129,6 +129,10 @@
 			"NEW_TASK": {
 				"label": "Neue Aufgabe starten",
 				"description": "Starte eine neue Aufgabe mit deiner Eingabe. Verfügbar in der Befehlspalette."
+			},
+			"TASK_TITLE": {
+				"label": "Aufgabentitel",
+				"description": "Erzeugt aus der ersten Eingabe einen kurzen Titel für eine neue Aufgabe. Läuft im Hintergrund, wenn eine Aufgabe startet."
 			}
 		}
 	},

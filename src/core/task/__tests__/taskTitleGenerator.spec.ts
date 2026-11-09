@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { ProviderSettings } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 
@@ -173,6 +173,48 @@ describe("taskTitleGenerator", () => {
 			})
 
 			expect(result).toBeUndefined()
+		})
+
+		describe("with a completion that ignores the abort signal", () => {
+			beforeEach(() => {
+				vi.useFakeTimers()
+				vi.mocked(singleCompletionHandler).mockImplementationOnce(() => new Promise<string>(() => {}))
+			})
+
+			afterEach(() => {
+				vi.useRealTimers()
+			})
+
+			it("settles with undefined once the timeout elapses", async () => {
+				const result = generateTaskTitle("Do something", mockApiConfig, { timeoutMs: 1_000 })
+
+				await vi.advanceTimersByTimeAsync(1_000)
+
+				await expect(result).resolves.toBeUndefined()
+			})
+
+			it("settles with undefined when the parent signal aborts", async () => {
+				const controller = new AbortController()
+				const result = generateTaskTitle("Do something", mockApiConfig, {
+					abortSignal: controller.signal,
+					timeoutMs: 60_000,
+				})
+
+				await vi.advanceTimersByTimeAsync(0)
+				controller.abort()
+
+				await expect(result).resolves.toBeUndefined()
+			})
+		})
+
+		it("uses a customized TASK_TITLE support prompt when one is saved", async () => {
+			vi.mocked(singleCompletionHandler).mockResolvedValueOnce("Custom Title")
+
+			await generateTaskTitle("Do something", mockApiConfig, {
+				customSupportPrompts: { TASK_TITLE: "My template: ${userInput}" },
+			})
+
+			expect(vi.mocked(singleCompletionHandler).mock.calls[0]?.[1]).toBe("My template: Do something")
 		})
 
 		it("returns undefined when cleaned title is empty", async () => {

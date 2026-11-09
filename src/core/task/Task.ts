@@ -3237,10 +3237,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.rateLimitClock.recordRequest()
 
+			// A saved TASK_TITLE support prompt replaces the built-in template;
+			// an unreadable state falls back to the built-in template.
+			const state = await provider.getState().catch(() => undefined)
+
 			const generated = await generateTaskTitle(taskText, this.apiConfiguration, {
 				abortSignal: controller.signal,
 				timeoutMs: DEFAULT_TITLE_TIMEOUT_MS,
 				taskId: this.taskId,
+				customSupportPrompts: state?.customSupportPrompts,
 			})
 
 			if (controller.signal.aborted || this.abort || this.abandoned) {
@@ -3262,7 +3267,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 
 				try {
-					await provider.setGeneratedTaskTitle(this.taskId, desiredTitle)
+					await provider.setGeneratedTaskTitle(this.taskId, desiredTitle, controller.signal)
 					return
 				} catch (error) {
 					console.debug(
@@ -3271,10 +3276,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 
 					if (attempt === Task.TITLE_WRITE_ATTEMPTS) {
+						// The task may have been cancelled while the last write
+						// attempt was pending; a cancelled task gets no title.
+						if (controller.signal.aborted || this.abort || this.abandoned) {
+							return
+						}
 						// Retries exhausted: final attempt with the truncated-prompt
 						// fallback title (issue #2333).
 						try {
-							await provider.setGeneratedTaskTitle(this.taskId, fallback)
+							await provider.setGeneratedTaskTitle(this.taskId, fallback, controller.signal)
 						} catch (fallbackError) {
 							console.error(
 								`[Task#generateTitleInBackground] Fallback title failed for ${this.taskId}:`,
@@ -3633,6 +3643,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Stops background title generation so a pending generated or fallback
+	 * title is never written, e.g. after the user renames or clears the title.
+	 */
+	public cancelTitleGeneration(): void {
+		if (this.titleAbortController) {
+			this.titleAbortController.abort()
+			this.titleAbortController = undefined
+		}
+	}
+
+	/**
 	 * Cancels the current HTTP request if one is in progress.
 	 * This immediately aborts the underlying stream rather than waiting for the next chunk.
 	 */
@@ -3648,10 +3669,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.metadataFetchAbortController.abort()
 			this.metadataFetchAbortController = undefined
 		}
-		if (this.titleAbortController) {
-			this.titleAbortController.abort()
-			this.titleAbortController = undefined
-		}
+		this.cancelTitleGeneration()
 	}
 
 	/**
@@ -3713,10 +3731,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (isAbandoned) {
 			this.abandoned = true
 		}
-		if (this.titleAbortController) {
-			this.titleAbortController.abort()
-			this.titleAbortController = undefined
-		}
+		this.cancelTitleGeneration()
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}
 
@@ -5815,22 +5830,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * signal aborts; callers must still re-check abort state after the wait and
 	 * call `rateLimitClock.recordRequest()` right before issuing the request,
 	 * mirroring the task loop.
+	 *
+	 * A task request can dispatch on the shared clock while this one waits, so
+	 * the latest timestamp is re-read after every wait: the request is spaced
+	 * from the most recent dispatch, not from the timestamp it first read.
 	 */
 	private async waitForProviderRateLimitWindow(signal: AbortSignal): Promise<void> {
 		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
-		const lastRequestTime = this.rateLimitClock.getLastRequestTime()
-		if (rateLimitSeconds <= 0 || !lastRequestTime) {
+		if (rateLimitSeconds <= 0) {
 			return
 		}
 
-		const remainingMs = rateLimitSeconds * 1000 - (performance.now() - lastRequestTime)
-		if (remainingMs <= 0) {
-			return
-		}
+		while (!signal.aborted) {
+			const lastRequestTime = this.rateLimitClock.getLastRequestTime()
+			if (!lastRequestTime) {
+				return
+			}
 
-		await delay(remainingMs, { signal }).catch(() => {
-			// Aborted mid-wait: cancellation, not a failure.
-		})
+			const remainingMs = rateLimitSeconds * 1000 - (performance.now() - lastRequestTime)
+			if (remainingMs <= 0) {
+				return
+			}
+
+			await delay(remainingMs, { signal }).catch(() => {
+				// Aborted mid-wait: cancellation, not a failure.
+			})
+		}
 	}
 
 	public async *attemptApiRequest(
