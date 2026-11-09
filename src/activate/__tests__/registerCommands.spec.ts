@@ -1482,12 +1482,23 @@ describe("openClineInNewTab", () => {
 		// Each gate is a promise whose resolver a promise executor installs. TS cannot see an
 		// assignment made inside the executor from a sibling `let`, so the settle function starts as a
 		// no-op and the executor always replaces it.
-		const makeGate = (): { wait: Promise<void>; settle: (error?: Error) => void } => {
+		const makeGate = (): { wait: Promise<void>; settle: (error?: Error) => void; releases: number } => {
 			let settle: (error?: Error) => void = () => undefined
-			const wait = new Promise<void>((resolve, reject) => {
-				settle = (error) => (error === undefined ? resolve() : reject(error))
+			// releases counts how many times the gate was actually let go, which is what the leak
+			// assertions below read: a gate settled twice means the test asked twice, and a gate at
+			// zero at the end of the test means a creation is still parked on it.
+			const gate = { wait: Promise.resolve(), settle: (error?: Error) => settle(error), releases: 0 }
+			gate.wait = new Promise<void>((resolve, reject) => {
+				settle = (error) => {
+					gate.releases += 1
+					if (error === undefined) {
+						resolve()
+					} else {
+						reject(error)
+					}
+				}
 			})
-			return { wait, settle }
+			return gate
 		}
 		const ordinaryGroup = makeGate()
 		const apiGroup = makeGate()
@@ -1516,17 +1527,31 @@ describe("openClineInNewTab", () => {
 			return previousExecute?.(command)
 		})
 
+		// Both creations are marked handled at creation. A rejection nobody awaits fires into the
+		// next test as an unhandled rejection, which is how a stranded creation in this one shows up
+		// as a failure somewhere else; marking handled does not change what awaiting them sees.
+		const markHandled = <T>(promise: Promise<T>): Promise<T> => {
+			void promise.catch(() => undefined)
+			return promise
+		}
+		let apiAttempt: Promise<unknown> | undefined
+		let ordinaryAttempt: Promise<unknown> | undefined
+		let reachedEnd = false
 		try {
-			const apiAttempt = openClineInNewTabForApi({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			})
-			const ordinaryAttempt = openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			})
+			const apiPromise = (apiAttempt = markHandled(
+				openClineInNewTabForApi({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			))
+			const ordinaryPromise = (ordinaryAttempt = markHandled(
+				openClineInNewTab({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			))
 			await waitFor("both creations parked on their group command", () => groupCalls === 2)
 			apiGroup.settle()
 			// Published, registered, creation still unsettled: the dispose listener is installed after
@@ -1545,8 +1570,8 @@ describe("openClineInNewTab", () => {
 			// could adopt fails from here on.
 			apiLock.settle(new Error("api lock failed"))
 
-			await expect(apiAttempt).rejects.toThrow("api lock failed")
-			const returned = await ordinaryAttempt
+			await expect(apiPromise).rejects.toThrow("api lock failed")
+			const returned = await ordinaryPromise
 
 			// The caller keeps its own provider. Without the wait in the later reuse check the adoption
 			// happens first and this reddens on provider identity, naming the raced provider rather
@@ -1564,12 +1589,45 @@ describe("openClineInNewTab", () => {
 			// The ordinary creation still opened its own tab, and that tab is the tracked one.
 			expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
 			expect(getPanel()).toBe(ordinaryPanel)
+			// The stranded creation is asserted, not tolerated. registerCommands.ts clears
+			// apiTabPanelCreation only when the creation settles (:448-451), and the reuse paths await
+			// that chain (:529-530, and the guard at :601-602), so the queue is only empty again once
+			// this creation has reached a terminal state — which is what these two assertions prove.
+			expect([ordinaryGroup.releases, apiGroup.releases, apiLock.releases]).toEqual([1, 1, 1])
+			const outcomes = await Promise.allSettled([apiPromise, ordinaryPromise])
+			expect(outcomes.map((outcome) => outcome.status)).toEqual(["rejected", "fulfilled"])
+			expect((outcomes[0] as PromiseRejectedResult).reason).toBeInstanceOf(Error)
+			expect((outcomes[0] as PromiseRejectedResult).reason).toHaveProperty("message", "api lock failed")
+			expect((outcomes[1] as PromiseFulfilledResult<unknown>).value).toBe(ordinaryProvider)
+			reachedEnd = true
 		} finally {
+			// Release every gate the test did not already let go. A failing assertion or a waitFor
+			// timeout used to leave a gate parked, and a parked gate is the stranding: the creation
+			// awaiting it never settles, so apiTabPanelCreation (registerCommands.ts:448-451) stays
+			// occupied and every later reuse path in this file awaits a creation that already failed
+			// (:529-530, :601-602). Releasing here is what makes the stranded creation terminate.
+			for (const gate of [ordinaryGroup, apiGroup, apiLock]) {
+				if (gate.releases === 0) {
+					gate.settle()
+				}
+			}
 			// Restore the saved implementation rather than mockRestore(): this file's beforeEach only
 			// clears call history, and mockRestore() on a bare vi.fn() leaves executeCommand with no
 			// implementation at all, so every later tab creation in this file breaks. In a finally so a
 			// failing assertion cannot leak the override.
 			executeCommandMock.mockImplementation(previousExecute ?? (async () => undefined))
+			// The drain is awaited, not assumed. If a gate were still parked this await would never
+			// return and this file would report the timeout, naming this test rather than the next one.
+			const drained = apiAttempt && ordinaryAttempt ? await Promise.allSettled([apiAttempt, ordinaryAttempt]) : []
+			if (!reachedEnd && drained.length === 2) {
+				// The leak assertion for the failure path: no gate left parked, both creations terminal,
+				// so nothing is chained into whatever test runs next in this file.
+				expect([ordinaryGroup.releases, apiGroup.releases, apiLock.releases]).toEqual([1, 1, 1])
+				expect(drained.map((outcome) => outcome.status)).toEqual([
+					expect.stringMatching(/^(fulfilled|rejected)$/),
+					expect.stringMatching(/^(fulfilled|rejected)$/),
+				])
+			}
 		}
 	})
 
