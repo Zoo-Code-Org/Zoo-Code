@@ -54,6 +54,9 @@ type CondenseStubResult = {
 	prevContextTokens: number
 }
 
+// Timestamp of the follow-up ask buildTask seeds so the task is idle-eligible.
+const PENDING_ASK_TS = 1
+
 function buildTask({
 	state = baseState(),
 	contextTokens = 600,
@@ -70,11 +73,15 @@ function buildTask({
 	const task = Object.create(Task.prototype) as Task
 
 	// Context window is 1_000, so contextTokens 600 => 60% full.
-	const condense = vi.fn(async (): Promise<CondenseStubResult> => ({
-		condensed: true,
-		newContextTokens: 100,
-		prevContextTokens: contextTokens,
-	}))
+	// Mirrors condenseContextWithLease: the idle caller passes an
+	// onLeaseAcquired callback (it posts the in-progress cue and re-checks
+	// staleness), and a false verdict aborts before any summarization.
+	const condense = vi.fn(async (onLeaseAcquired?: () => Promise<boolean>): Promise<CondenseStubResult> => {
+		if (onLeaseAcquired && !(await onLeaseAcquired())) {
+			return { condensed: false, prevContextTokens: contextTokens }
+		}
+		return { condensed: true, newContextTokens: 100, prevContextTokens: contextTokens }
+	})
 
 	const postMessageToWebview = vi.fn(async (_message: { type: string; text?: string }) => {})
 	const getState = vi.fn(async () => state)
@@ -86,9 +93,22 @@ function buildTask({
 	Object.defineProperty(task, "abort", { value: false, configurable: true, writable: true })
 	task["abandoned"] = false
 	task["activeApiWork"] = 0
-	// Object.create skips constructor field initialisers; mirror the default.
+	// Object.create skips constructor field initialisers; mirror the defaults.
 	task["lastActionWasCondense"] = false
-	task["clineMessages"] = []
+	task["idleCondenseActivitySeq"] = 0
+	task["idleCondenseExpiryEvaluating"] = false
+	// The shared arming path only arms while an idle-eligible ask is pending,
+	// so every task defaults to waiting on a complete follow-up. Tests that
+	// need a different waiting state replace clineMessages/askResponse.
+	task["lastMessageTs"] = PENDING_ASK_TS
+	task["askResponse"] = undefined
+	task["clineMessages"] = [
+		{ ts: PENDING_ASK_TS, type: "ask", ask: "followup", text: "What should I do next?" } as ClineMessage,
+	]
+	// handleWebviewAskResponse marks the seeded follow-up answered and
+	// persists; the harness must never touch real storage.
+	task["saveClineMessages"] = vi.fn(async () => true)
+	task["updateClineMessage"] = vi.fn(async () => {})
 	Object.defineProperty(task, "taskId", { value: "task-1" })
 	// Double providing only the provider members the idle-condense gate touches
 	// (getCurrentTask and getState); the real ClineProvider surface is irrelevant here.
@@ -110,6 +130,16 @@ function buildTask({
 const postedCueTypes = (postMessageToWebview: {
 	mock: { calls: Array<[{ type: string; text?: string }]> }
 }): string[] => postMessageToWebview.mock.calls.map(([message]) => message.type)
+
+// Lease stub override: honors the onLeaseAcquired gate before returning `result`.
+const leaseGated =
+	(result: CondenseStubResult) =>
+	async (onLeaseAcquired?: () => Promise<boolean>): Promise<CondenseStubResult> => {
+		if (onLeaseAcquired && !(await onLeaseAcquired())) {
+			return { condensed: false, prevContextTokens: 600 }
+		}
+		return result
+	}
 
 describe("Task idle condensing — evaluateIdleCondense", () => {
 	test("builds the gate and clamps the idle threshold to the main threshold", async () => {
@@ -340,6 +370,53 @@ describe("Task idle condensing — arming the timer", () => {
 
 		expect(vi.getTimerCount()).toBe(0)
 	})
+
+	// Idle condensing only makes sense while the task genuinely waits on the
+	// user: the shared arming path rejects tasks with nothing pending, tasks
+	// mid-approval (command/tool/MCP asks), and answered asks.
+	test("does not arm when no ask is pending", async () => {
+		const { task } = buildTask()
+		task["clineMessages"] = []
+
+		await task["maybeStartIdleCondenseTimer"]()
+
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	test.each(["command", "tool", "use_mcp_server"] as const)(
+		"does not arm while a %s approval ask is pending",
+		async (ask) => {
+			const { task } = buildTask()
+			task["clineMessages"] = [{ ts: PENDING_ASK_TS, type: "ask", ask } as ClineMessage]
+
+			await task["maybeStartIdleCondenseTimer"]()
+
+			expect(vi.getTimerCount()).toBe(0)
+		},
+	)
+
+	test("does not arm once the pending ask has been answered", async () => {
+		const { task } = buildTask()
+		task["askResponse"] = "messageResponse"
+
+		await task["maybeStartIdleCondenseTimer"]()
+
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	// The eligible set mirrors the ask categories that arm on a status
+	// transition: follow-up plus the idle and resumable asks.
+	test.each(["followup", "completion_result", "resume_task"] as const)(
+		"arms while a %s ask is pending",
+		async (ask) => {
+			const { task } = buildTask()
+			task["clineMessages"] = [{ ts: PENDING_ASK_TS, type: "ask", ask } as ClineMessage]
+
+			await task["maybeStartIdleCondenseTimer"]()
+
+			expect(vi.getTimerCount()).toBe(1)
+		},
+	)
 
 	// The tests above call the scheduler directly; these drive the real ask()
 	// so the two-second status-transition hooks — the only places a waiting
@@ -574,7 +651,7 @@ describe("Task idle condensing — timer expiry", () => {
 
 	test("a condense that did not shrink the context does not re-arm", async () => {
 		const { task, condense, postMessageToWebview } = buildTask()
-		condense.mockResolvedValue({ condensed: false, prevContextTokens: 600, error: "summarize failed" })
+		condense.mockImplementation(leaseGated({ condensed: false, prevContextTokens: 600, error: "summarize failed" }))
 
 		await task["maybeStartIdleCondenseTimer"]()
 		await vi.advanceTimersByTimeAsync(30_000)
@@ -590,7 +667,12 @@ describe("Task idle condensing — timer expiry", () => {
 
 	test("a condense that throws still closes the in-progress cue", async () => {
 		const { task, condense, postMessageToWebview } = buildTask()
-		condense.mockRejectedValue(new Error("summarize exploded"))
+		condense.mockImplementation(async (onLeaseAcquired?: () => Promise<boolean>) => {
+			if (onLeaseAcquired && !(await onLeaseAcquired())) {
+				return { condensed: false, prevContextTokens: 600 }
+			}
+			throw new Error("summarize exploded")
+		})
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
 		try {
@@ -611,12 +693,14 @@ describe("Task idle condensing — timer expiry", () => {
 	test("an in-flight condense blocks a second expiry pass", async () => {
 		const { task, condense, postMessageToWebview } = buildTask()
 		let release: (result: CondenseStubResult) => void = () => {}
-		condense.mockImplementation(
-			() =>
-				new Promise<CondenseStubResult>((resolve) => {
-					release = resolve
-				}),
-		)
+		condense.mockImplementation(async (onLeaseAcquired?: () => Promise<boolean>) => {
+			if (onLeaseAcquired && !(await onLeaseAcquired())) {
+				return { condensed: false, prevContextTokens: 600 }
+			}
+			return new Promise<CondenseStubResult>((resolve) => {
+				release = resolve
+			})
+		})
 
 		await task["maybeStartIdleCondenseTimer"]()
 		await vi.advanceTimersByTimeAsync(30_000)
@@ -636,6 +720,43 @@ describe("Task idle condensing — timer expiry", () => {
 			"condenseTaskContextStarted",
 			"condenseTaskContextResponse",
 		])
+	})
+
+	test("a cancel aborts the in-flight idle summarization request", async () => {
+		// The idle path runs without the request loop, so its summarization call
+		// has no request-scoped controller: the expiry run hands the lease a
+		// task-owned signal, and `cancelCurrentRequest` (user cancel or disposal)
+		// aborts the in-flight HTTP call through it.
+		const { task } = buildTask()
+		let summarySignal: AbortSignal | undefined
+		let release: (result: CondenseStubResult) => void = () => {}
+		task["condenseContextWithLease"] = vi.fn(
+			async (onLeaseAcquired?: () => Promise<boolean>, signal?: AbortSignal): Promise<CondenseStubResult> => {
+				summarySignal = signal
+				if (onLeaseAcquired && !(await onLeaseAcquired())) {
+					return { condensed: false, prevContextTokens: 600 }
+				}
+				return new Promise<CondenseStubResult>((resolve) => {
+					release = resolve
+				})
+			},
+		)
+
+		await task["maybeStartIdleCondenseTimer"]()
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(task["idleCondenseInFlight"]).toBe(true)
+		expect(summarySignal).toBeDefined()
+		expect(summarySignal?.aborted).toBe(false)
+
+		task.cancelCurrentRequest()
+		expect(summarySignal?.aborted).toBe(true)
+		// The cancel owns the abort; the finishing run just finds the field clear.
+		expect(task["idleCondenseAbortController"]).toBeUndefined()
+
+		release({ condensed: false, prevContextTokens: 600 })
+		await vi.advanceTimersByTimeAsync(0)
+		expect(task["idleCondenseInFlight"]).toBe(false)
+		expect(task["idleCondenseAbortController"]).toBeUndefined()
 	})
 
 	test("an idle wait beyond the maximum timer delay waits the full duration", async () => {
@@ -753,6 +874,107 @@ describe("Task idle condensing — activity invalidates a pending expiry evaluat
 
 		expect(condense).toHaveBeenCalledTimes(1)
 	})
+
+	// A typing signal arrives after the countdown expired but while its
+	// evaluation still awaits: no timer is armed, so without the
+	// expiry-evaluating flag the reset would silently no-op and the stale
+	// evaluation would condense over the conversation being edited.
+	test("typing during the gate evaluation discards it and restarts the countdown", async () => {
+		const { task, condense, settleGate, postMessageToWebview } = buildPendingGateTask()
+
+		await expireIntoPendingGate(task)
+		expect(task["idleCondenseExpiryEvaluating"]).toBe(true)
+
+		// The user types in the prompt area while the expiry is evaluating.
+		task.resetIdleCondenseTimer()
+		settleGate()
+		await vi.advanceTimersByTimeAsync(0)
+
+		// The stale evaluation was discarded: no condense, no in-progress cue.
+		expect(condense).not.toHaveBeenCalled()
+		expect(postMessageToWebview).not.toHaveBeenCalled()
+		// A fresh countdown replaced it, and the evaluation flag was cleared.
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+		expect(task["idleCondenseExpiryEvaluating"]).toBe(false)
+
+		// The restarted countdown runs the condense normally.
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(condense).toHaveBeenCalledTimes(1)
+	})
+
+	// A settings save during the expiry evaluation means the evaluation
+	// measured against pre-save settings: it must be discarded, and the
+	// re-armed evaluation must apply the newly saved thresholds instead.
+	test("a settings save during the gate evaluation discards it and re-arms", async () => {
+		const { task, condense, settleGate, postMessageToWebview } = buildPendingGateTask()
+
+		await expireIntoPendingGate(task)
+
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		settleGate()
+		await vi.advanceTimersByTimeAsync(0)
+
+		// The pre-save evaluation was discarded: no condense, no cue.
+		expect(condense).not.toHaveBeenCalled()
+		expect(postMessageToWebview).not.toHaveBeenCalled()
+		// The post-save evaluation armed a fresh countdown.
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+		expect(task["idleCondenseExpiryEvaluating"]).toBe(false)
+		task["cancelIdleCondenseTimer"]()
+	})
+})
+
+describe("Task idle condensing — activity invalidates a pending arming evaluation", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	// Defers the arming gate's provider state read so activity can land while
+	// maybeStartIdleCondenseTimer is still awaiting evaluateIdleCondense.
+	function buildPendingArmTask() {
+		const built = buildTask()
+		let resolveState: (state: StateStub) => void = () => {}
+		const pendingGate = new Promise<StateStub>((resolve) => {
+			resolveState = resolve
+		})
+		built.getState.mockImplementation(() => pendingGate)
+		return { ...built, settleGate: () => resolveState(baseState()) }
+	}
+
+	test("an answer landing during the arming evaluation discards the pending arm", async () => {
+		const { task, settleGate } = buildPendingArmTask()
+		task["checkpointSave"] = vi.fn(async () => {})
+
+		const arming = task["maybeStartIdleCondenseTimer"]()
+		await vi.advanceTimersByTimeAsync(0)
+
+		// The user answers the pending ask while the arming gate still runs.
+		task.handleWebviewAskResponse("messageResponse", "new prompt")
+		settleGate()
+		await arming
+
+		// The stale evaluation was discarded: no countdown for a task that is
+		// no longer waiting on the user.
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+	})
+
+	test("arming proceeds when no activity lands during the gate evaluation", async () => {
+		const { task, settleGate } = buildPendingArmTask()
+
+		const arming = task["maybeStartIdleCondenseTimer"]()
+		await vi.advanceTimersByTimeAsync(0)
+
+		// The gate resolves while the task is still idle: the countdown arms.
+		settleGate()
+		await arming
+
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+		task["cancelIdleCondenseTimer"]()
+	})
 })
 
 describe("Task idle condensing — last-action-was-a-condense suppression", () => {
@@ -846,6 +1068,15 @@ describe("Task idle condensing — last-action-was-a-condense suppression", () =
 			// The user sends a prompt: idle condensing becomes eligible again.
 			task["checkpointSave"] = vi.fn(async () => {})
 			task.handleWebviewAskResponse("messageResponse", "new prompt")
+			// The prompt is consumed by a new request cycle that ends with a
+			// fresh follow-up ask, so the task is waiting on the user again.
+			task["askResponse"] = undefined
+			task["lastMessageTs"] = PENDING_ASK_TS + 1
+			task["clineMessages"].push({
+				ts: PENDING_ASK_TS + 1,
+				type: "ask",
+				ask: "followup",
+			} as ClineMessage)
 			await task["maybeStartIdleCondenseTimer"]()
 			expect(vi.getTimerCount()).toBe(1)
 		} finally {
@@ -915,6 +1146,56 @@ describe("Task idle condensing — restoring last-action-was-a-condense on reope
 	})
 })
 
+describe("Task idle condensing — reconciling last-action-was-a-condense on history replacement", () => {
+	// Rewinds, checkpoint restores, and message deletes/edits replace the API
+	// history wholesale via overwriteApiConversationHistory. The suppression
+	// flag must follow the new history: without reconciliation a rewind that
+	// truncates past the condense summary would keep suppressing idle
+	// condensing until the next prompt, even though the last action is gone.
+	function buildFlaggedTask() {
+		const { task } = buildTask()
+		const history: ApiMessage[] = [
+			{ role: "user", content: [{ type: "text", text: "do the thing" }] },
+			{ role: "assistant", content: [{ type: "text", text: "all set" }] },
+			{
+				role: "user",
+				content: [{ type: "text", text: "Summary of the condensed conversation..." }],
+				isSummary: true,
+				condenseId: "condense-1",
+			},
+		]
+		task["apiConversationHistory"] = history
+		task["lastActionWasCondense"] = true
+		return { task, history }
+	}
+
+	test("a rewind that truncates past the summary clears the flag", async () => {
+		const { task, history } = buildFlaggedTask()
+
+		// Checkpoint restore keeps only the messages before the rewind point,
+		// dropping the trailing condense summary.
+		await task.overwriteApiConversationHistory(history.slice(0, 2), false)
+
+		expect(task["lastActionWasCondense"]).toBe(false)
+	})
+
+	test("a replacement that keeps the trailing summary keeps the flag", async () => {
+		const { task, history } = buildFlaggedTask()
+
+		await task.overwriteApiConversationHistory(history, false)
+
+		expect(task["lastActionWasCondense"]).toBe(true)
+	})
+
+	test("replacing history with an empty list clears the flag", async () => {
+		const { task } = buildFlaggedTask()
+
+		await task.overwriteApiConversationHistory([], false)
+
+		expect(task["lastActionWasCondense"]).toBe(false)
+	})
+})
+
 describe("Task idle condensing — re-arm after API work discards the timer", () => {
 	beforeEach(() => {
 		vi.useFakeTimers()
@@ -940,11 +1221,13 @@ describe("Task idle condensing — re-arm after API work discards the timer", ()
 		return built
 	}
 
-	// Arm the timer for the pending follow-up, then let it expire while the
-	// task still has a request in flight, so the expiry discards the timer.
+	// Arm the countdown directly, then let it expire while the task still has
+	// a request in flight, so the expiry discards the timer. Direct arming
+	// (bypassing the eligibility-gated shared path, covered by its own tests)
+	// keeps the helper usable for asks that must not arm on their own.
 	async function discardTimerDuringApiWork(task: Task) {
 		const endApiWork = task["beginApiWork"]()
-		await task["maybeStartIdleCondenseTimer"]()
+		task["armIdleCondenseTimeout"](30)
 		await vi.advanceTimersByTimeAsync(30_000)
 		expect(vi.getTimerCount()).toBe(0)
 		expect(task["idleCondenseRearmAfterApiWork"]).toBe(true)
@@ -986,7 +1269,7 @@ describe("Task idle condensing — re-arm after API work discards the timer", ()
 	})
 
 	test.each([
-		["a different pending ask", () => "resume_task" as ClineAsk],
+		["an approval ask", () => "command" as ClineAsk],
 		["a partial follow-up ask", () => "followup" as ClineAsk],
 	])("does not re-arm when the stream ends with %s", async (_label, pickAsk) => {
 		const ask = pickAsk()
@@ -1006,6 +1289,27 @@ describe("Task idle condensing — re-arm after API work discards the timer", ()
 		await vi.advanceTimersByTimeAsync(60_000)
 		expect(condense).not.toHaveBeenCalled()
 	})
+
+	// The idle-eligible set (idle and resumable asks) re-arms too: they wait
+	// on the user just like a follow-up, so a discarded timer must return.
+	test.each(["completion_result", "resume_task"] as const)(
+		"re-arms the timer when the last request finishes with a %s ask still pending",
+		async (ask) => {
+			const { task, condense } = buildApiWorkTask(ask)
+			const endApiWork = await discardTimerDuringApiWork(task)
+			expect(condense).not.toHaveBeenCalled()
+
+			endApiWork()
+			// Flush the microtasks of the re-arm kicked off by the completion.
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(task["idleCondenseRearmAfterApiWork"]).toBe(false)
+			expect(vi.getTimerCount()).toBe(1)
+
+			await vi.advanceTimersByTimeAsync(30_000)
+			expect(condense).toHaveBeenCalledTimes(1)
+		},
+	)
 })
 
 describe("Task idle condensing — history barrier serializes ask responses", () => {
@@ -1045,6 +1349,137 @@ describe("Task idle condensing — history barrier serializes ask responses", ()
 		await expect(task["condenseContextWithLease"]()).rejects.toThrow("summarize failed")
 
 		expect(barrierDuringSummarize).toBeInstanceOf(Promise)
+		expect(task["condenseHistoryBarrier"]).toBeUndefined()
+	})
+
+	test("concurrent leases serialize: the second summary waits for the first", async () => {
+		// A manual condense and an idle condense must never overlap: the second
+		// lease chains behind the first via condenseLeaseTail, so it cannot
+		// install its barrier or summarize while the first still holds history.
+		let releaseFirst!: () => void
+		const firstSummaryDone = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		const { task } = buildTask()
+		task["condenseContextWithLease"] = Task.prototype["condenseContextWithLease"].bind(task)
+		task["beginApiWork"] = vi.fn(() => vi.fn())
+		const seenBarriers: Array<Promise<void> | undefined> = []
+		let calls = 0
+		const summarize = vi.fn(async () => {
+			calls += 1
+			seenBarriers.push(task["condenseHistoryBarrier"])
+			if (calls === 1) {
+				await firstSummaryDone
+			}
+			return { condensed: true, newContextTokens: 100, prevContextTokens: 600 }
+		})
+		task["condenseContextWithActiveApi"] = summarize
+
+		const first = task["condenseContextWithLease"]()
+		const second = task["condenseContextWithLease"]()
+
+		// The first summary is in flight while the second must still be chained
+		// behind it: no second summarize, and the field still holds the first barrier.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(summarize).toHaveBeenCalledTimes(1)
+		expect(task["condenseHistoryBarrier"]).toBe(seenBarriers[0])
+
+		releaseFirst()
+		await Promise.all([first, second])
+
+		expect(summarize).toHaveBeenCalledTimes(2)
+		// Each lease ran under its own barrier, and both settled.
+		expect(seenBarriers[0]).toBeInstanceOf(Promise)
+		expect(seenBarriers[1]).toBeInstanceOf(Promise)
+		expect(seenBarriers[1]).not.toBe(seenBarriers[0])
+		expect(task["condenseHistoryBarrier"]).toBeUndefined()
+	})
+
+	test("the idle callback runs under the barrier before the condense counts as API work", async () => {
+		// The in-progress cue and the staleness re-check run inside the lease's
+		// barrier: a response landing while the cue is posted must stay held.
+		// beginApiWork runs only after the callback passes, so the lease's own
+		// API-work count cannot make the callback see activeApiWork > 0 and
+		// cancel every idle condense.
+		const { task } = buildTask()
+		task["condenseContextWithLease"] = Task.prototype["condenseContextWithLease"].bind(task)
+		const beginApiWork = vi.fn(() => vi.fn())
+		task["beginApiWork"] = beginApiWork
+		task["condenseContextWithActiveApi"] = vi.fn(async () => ({
+			condensed: true,
+			newContextTokens: 100,
+			prevContextTokens: 600,
+		}))
+
+		let barrierDuringCue: Promise<void> | undefined
+		let apiWorkDuringCue = -1
+		const result = await task["condenseContextWithLease"](async () => {
+			barrierDuringCue = task["condenseHistoryBarrier"]
+			apiWorkDuringCue = task["activeApiWork"]
+			return true
+		})
+
+		expect(result.condensed).toBe(true)
+		expect(barrierDuringCue).toBeInstanceOf(Promise)
+		expect(apiWorkDuringCue).toBe(0)
+		expect(beginApiWork).toHaveBeenCalledTimes(1)
+		expect(task["lastActionWasCondense"]).toBe(true)
+		expect(task["condenseHistoryBarrier"]).toBeUndefined()
+	})
+
+	test("the lease forwards the summary signal to the summarization call", async () => {
+		// The idle run's task-owned controller signal must reach the summarize
+		// call, which threads it into the API metadata as `abortSignal`.
+		const { task } = buildTask()
+		task["condenseContextWithLease"] = Task.prototype["condenseContextWithLease"].bind(task)
+		task["beginApiWork"] = vi.fn(() => vi.fn())
+		let summarySignal: AbortSignal | undefined
+		task["condenseContextWithActiveApi"] = vi.fn(async (signal?: AbortSignal) => {
+			summarySignal = signal
+			return { condensed: true, newContextTokens: 100, prevContextTokens: 600 }
+		})
+		const controller = new AbortController()
+
+		const result = await task["condenseContextWithLease"](async () => true, controller.signal)
+
+		expect(result.condensed).toBe(true)
+		expect(summarySignal).toBe(controller.signal)
+	})
+
+	test("a manual condense forwards no summary signal", async () => {
+		// Manual condensing keeps the current request's signal semantics inside
+		// condenseContextWithActiveApi; the lease passes no idle signal through.
+		const { task } = buildTask()
+		task["condenseContextWithLease"] = Task.prototype["condenseContextWithLease"].bind(task)
+		task["beginApiWork"] = vi.fn(() => vi.fn())
+		let summarySignal: AbortSignal | undefined
+		task["condenseContextWithActiveApi"] = vi.fn(async (signal?: AbortSignal) => {
+			summarySignal = signal
+			return { condensed: true, newContextTokens: 100, prevContextTokens: 600 }
+		})
+
+		await task["condenseContextWithLease"]()
+
+		expect(summarySignal).toBeUndefined()
+	})
+
+	test("a false onLeaseAcquired verdict aborts without touching history", async () => {
+		// The idle caller aborts when the user engaged during the cue's await:
+		// no summarize call, no API-work count, and the last action is not
+		// marked as a condense, so the next idle wait can re-arm normally.
+		const { task } = buildTask()
+		task["condenseContextWithLease"] = Task.prototype["condenseContextWithLease"].bind(task)
+		const beginApiWork = vi.fn(() => vi.fn())
+		task["beginApiWork"] = beginApiWork
+		const summarize = vi.fn()
+		task["condenseContextWithActiveApi"] = summarize
+
+		const result = await task["condenseContextWithLease"](async () => false)
+
+		expect(result).toEqual({ condensed: false, prevContextTokens: 600 })
+		expect(summarize).not.toHaveBeenCalled()
+		expect(beginApiWork).not.toHaveBeenCalled()
+		expect(task["lastActionWasCondense"]).toBe(false)
 		expect(task["condenseHistoryBarrier"]).toBeUndefined()
 	})
 })

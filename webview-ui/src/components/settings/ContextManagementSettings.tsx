@@ -1,4 +1,4 @@
-import { FormEvent, HTMLAttributes } from "react"
+import { FormEvent, HTMLAttributes, useEffect } from "react"
 import React from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox, VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
@@ -24,6 +24,7 @@ import { SetCachedStateField } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
+import { useSearchIndexContext } from "./useSettingsSearch"
 
 type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	autoCondenseContext: boolean
@@ -115,6 +116,27 @@ export const ContextManagementSettings = ({
 	const [selectedThresholdProfile, setSelectedThresholdProfile] = React.useState<string>("default")
 	const [selectedIdleProfile, setSelectedIdleProfile] = React.useState<string>("default")
 
+	const idleTimeLabel = t("settings:contextManagement.idleCondensing.idleTime.label")
+
+	// Settings search indexes each tab once during an initial cycling phase,
+	// before the user has a chance to enable idle condensing. The idle time
+	// control only renders when idle condensing is enabled, so registering it
+	// only through the rendered SearchableSetting would leave "Idle time"
+	// unsearchable whenever the feature starts out disabled. Register the
+	// label unconditionally here (like SearchableSetting, we never unregister)
+	// so the result is always in the index; the rendered control below still
+	// carries the matching data-setting-id for navigation when it is visible.
+	const searchContext = useSearchIndexContext()
+	useEffect(() => {
+		if (searchContext) {
+			searchContext.registerSetting({
+				settingId: "context-idle-time",
+				section: "contextManagement",
+				label: idleTimeLabel,
+			})
+		}
+	}, [searchContext, idleTimeLabel])
+
 	// Helper function to get the CONDENSE prompt value
 	const getCondensePromptValue = (): string => {
 		return supportPrompt.get(customSupportPrompts, "CONDENSE")
@@ -138,16 +160,29 @@ export const ContextManagementSettings = ({
 		setCustomSupportPrompts(updatedPrompts)
 	}
 
+	// Mirrors computeEffectiveCondenseThreshold in src/core/context-management
+	// (and the MIN/MAX_CONDENSE_THRESHOLD constants in src/core/condense, which
+	// the webview cannot import): -1/undefined inherit the global value, a value
+	// inside [5, 100] overrides it, and anything else (e.g. an invalid imported
+	// override) falls back to the global value, exactly as the runtime does.
+	const MIN_CONDENSE_THRESHOLD = 5
+	const MAX_CONDENSE_THRESHOLD = 100
+	const resolveCondensePercent = (globalPercent: number, profileValue: number | undefined): number => {
+		if (profileValue === undefined || profileValue === -1) {
+			return globalPercent
+		}
+		if (profileValue >= MIN_CONDENSE_THRESHOLD && profileValue <= MAX_CONDENSE_THRESHOLD) {
+			return profileValue
+		}
+		return globalPercent
+	}
+
 	// Helper function to get the current threshold value based on selected profile
 	const getCurrentThresholdValue = () => {
 		if (selectedThresholdProfile === "default") {
 			return autoCondenseContextPercent
 		}
-		const profileThreshold = profileThresholds[selectedThresholdProfile]
-		if (profileThreshold === undefined || profileThreshold === -1) {
-			return autoCondenseContextPercent // Use default if profile not configured or set to -1
-		}
-		return profileThreshold
+		return resolveCondensePercent(autoCondenseContextPercent, profileThresholds[selectedThresholdProfile])
 	}
 
 	// Lowering the condensing trigger threshold lowers the current idle thresholds
@@ -203,31 +238,28 @@ export const ContextManagementSettings = ({
 
 	// Effective main condense threshold for the profile currently selected in
 	// the idle-threshold UI: the idle threshold value may never exceed it,
-	// though the slider's max stays at 100%.
+	// though the slider's max stays at 100%. Invalid profile overrides resolve
+	// to the global threshold, matching the runtime fallback.
 	const getMainThresholdForIdleProfile = () => {
 		if (selectedIdleProfile === "default") {
 			return autoCondenseContextPercent
 		}
-		const profileThreshold = profileThresholds[selectedIdleProfile]
-		if (profileThreshold === undefined || profileThreshold === -1) {
-			return autoCondenseContextPercent
-		}
-		return profileThreshold
+		return resolveCondensePercent(autoCondenseContextPercent, profileThresholds[selectedIdleProfile])
 	}
 
 	// Helper function to get the current idle threshold value based on selected profile.
 	// The displayed value is capped at the profile's effective main threshold to match
 	// the runtime behavior (Task.ts resolves idlePercent = Math.min(idlePercentSetting,
-	// mainPercent)); the inherited setting itself is left unchanged.
+	// mainPercent)); the inherited setting itself is left unchanged. Invalid profile
+	// overrides display the global idle threshold they fall back to at runtime.
 	const getCurrentIdleThresholdValue = () => {
 		if (selectedIdleProfile === "default") {
-			return idleCondenseContextPercent
-		}
-		const profileThreshold = profileIdleThresholds[selectedIdleProfile]
-		if (profileThreshold === undefined || profileThreshold === -1) {
 			return Math.min(idleCondenseContextPercent, getMainThresholdForIdleProfile())
 		}
-		return Math.min(profileThreshold, getMainThresholdForIdleProfile())
+		return Math.min(
+			resolveCondensePercent(idleCondenseContextPercent, profileIdleThresholds[selectedIdleProfile]),
+			getMainThresholdForIdleProfile(),
+		)
 	}
 
 	// Helper function to handle idle threshold changes (value clamped to the main threshold)
@@ -243,7 +275,9 @@ export const ContextManagementSettings = ({
 		}
 	}
 
-	// Helper function to get the current idle time value based on selected profile
+	// Helper function to get the current idle time value based on selected profile.
+	// Mirrors resolveIdleCondenseTimeInSeconds in Task.ts: only -1/undefined inherit
+	// and values >= 0 override; anything else falls back to the global value.
 	const getCurrentIdleTimeValue = () => {
 		if (selectedIdleProfile === "default") {
 			return idleCondenseTimeInSeconds
@@ -252,7 +286,10 @@ export const ContextManagementSettings = ({
 		if (profileSeconds === undefined || profileSeconds === -1) {
 			return idleCondenseTimeInSeconds
 		}
-		return profileSeconds
+		if (profileSeconds >= 0) {
+			return profileSeconds
+		}
+		return idleCondenseTimeInSeconds
 	}
 
 	// Helper function to handle idle time changes
@@ -790,12 +827,13 @@ export const ContextManagementSettings = ({
 								<div>
 									<div className="flex items-center gap-2">
 										<Slider
-											min={10}
+											min={5}
 											max={100}
 											step={1}
 											value={[getCurrentIdleThresholdValue()]}
 											onValueChange={([value]) => handleIdleThresholdChange(value)}
 											data-testid="idle-condense-threshold-slider"
+											aria-label={t("settings:contextManagement.idleCondensing.name")}
 										/>
 										<span className="w-20">{getCurrentIdleThresholdValue()}%</span>
 									</div>
@@ -809,19 +847,22 @@ export const ContextManagementSettings = ({
 								</div>
 
 								{/* Idle Time Input */}
-								<div>
+								<SearchableSetting
+									settingId="context-idle-time"
+									section="contextManagement"
+									label={idleTimeLabel}>
 									<div className="flex items-center gap-2">
-										<span className="font-medium">
-											{t("settings:contextManagement.idleCondensing.idleTime.label")}
-										</span>
+										<span className="font-medium">{idleTimeLabel}</span>
 										<Input
-											aria-label={t("settings:contextManagement.idleCondensing.idleTime.label")}
+											aria-label={idleTimeLabel}
 											type="number"
 											min={0}
 											step={1}
 											value={getCurrentIdleTimeValue()}
 											onChange={(e) =>
-												handleIdleTimeChange(parseInt((e.target as HTMLInputElement).value, 10))
+												// Number (not parseInt) so a pasted value like "1e3"
+												// is read as 1000 instead of stopping at "1".
+												handleIdleTimeChange(Number((e.target as HTMLInputElement).value))
 											}
 											className="w-24"
 											data-testid="idle-condense-time-input"
@@ -831,7 +872,7 @@ export const ContextManagementSettings = ({
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
 										{t("settings:contextManagement.idleCondensing.idleTime.description")}
 									</div>
-								</div>
+								</SearchableSetting>
 
 								{selectedIdleProfile !== "default" && (
 									<div>

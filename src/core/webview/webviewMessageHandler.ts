@@ -917,78 +917,88 @@ export const webviewMessageHandler = async (
 							continue
 						}
 					} else if (key === "idleCondenseContextPercent") {
-						if (typeof value === "number") {
-							const mainPercent =
-								(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
-								getGlobalState("autoCondenseContextPercent") ??
-								100
-							newValue = clampIdleCondensePercent(value, mainPercent)
+						// A hand-crafted message can carry payloads the webview controls
+						// never produce; storing them unchanged surfaces as NaN at the
+						// runtime (e.g. idle condensing below the configured threshold),
+						// so invalid values are rejected instead of persisted.
+						if (typeof value !== "number" || !Number.isFinite(value)) {
+							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
+							continue
 						}
+						const mainPercent =
+							(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
+							getGlobalState("autoCondenseContextPercent") ??
+							100
+						newValue = clampIdleCondensePercent(value, mainPercent)
 					} else if (key === "profileIdleThresholds") {
-						if (value && typeof value === "object") {
-							const globalMainPercent =
-								(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
-								getGlobalState("autoCondenseContextPercent") ??
-								100
-							// Each profile's idle override may only be clamped against that
-							// profile's own effective main threshold, since that is what the
-							// runtime resolves per profile; clamping against the global
-							// threshold could silently lower a profile's idle trigger below
-							// what the user selected.
-							const profileMainThresholds =
-								(message.updatedSettings.profileThresholds as Record<string, number> | undefined) ??
-								getGlobalState("profileThresholds") ??
-								{}
-							newValue = Object.fromEntries(
-								Object.entries(value as Record<string, number>).map(([id, percent]) => {
-									// Mirror computeEffectiveCondenseThreshold's resolve semantics:
-									// -1 inherits and a value within the shared bounds is a valid
-									// override; anything else (e.g. 1%) must preserve global
-									// inheritance instead of becoming a valid override through
-									// clamping (which would silently condense below the global
-									// idle threshold).
-									if (
-										percent === -1 ||
-										!Number.isFinite(percent) ||
-										percent < MIN_CONDENSE_THRESHOLD ||
-										percent > MAX_CONDENSE_THRESHOLD
-									) {
-										return [id, -1]
-									}
-									return [
-										id,
-										clampIdleCondensePercent(
-											percent,
-											computeEffectiveCondenseThreshold({
-												globalPercent: globalMainPercent,
-												profileThresholds: profileMainThresholds,
-												currentProfileId: id,
-											}),
-										),
-									]
-								}),
-							)
+						if (!value || typeof value !== "object") {
+							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
+							continue
 						}
-					} else if (key === "idleCondenseTimeInSeconds") {
-						if (typeof value === "number") {
-							newValue = Math.max(0, Math.round(value))
-						}
-					} else if (key === "profileIdleCondenseTimes") {
-						if (value && typeof value === "object") {
-							newValue = Object.fromEntries(
-								Object.entries(value as Record<string, number>).map(([id, seconds]) => [
+						const globalMainPercent =
+							(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
+							getGlobalState("autoCondenseContextPercent") ??
+							100
+						// Each profile's idle override may only be clamped against that
+						// profile's own effective main threshold, since that is what the
+						// runtime resolves per profile; clamping against the global
+						// threshold could silently lower a profile's idle trigger below
+						// what the user selected.
+						const profileMainThresholds =
+							(message.updatedSettings.profileThresholds as Record<string, number> | undefined) ??
+							getGlobalState("profileThresholds") ??
+							{}
+						newValue = Object.fromEntries(
+							Object.entries(value as Record<string, number>).map(([id, percent]) => {
+								// Mirror computeEffectiveCondenseThreshold's resolve semantics:
+								// -1 inherits and a value within the shared bounds is a valid
+								// override; anything else (e.g. 1%) must preserve global
+								// inheritance instead of becoming a valid override through
+								// clamping (which would silently condense below the global
+								// idle threshold).
+								if (
+									percent === -1 ||
+									!Number.isFinite(percent) ||
+									percent < MIN_CONDENSE_THRESHOLD ||
+									percent > MAX_CONDENSE_THRESHOLD
+								) {
+									return [id, -1]
+								}
+								return [
 									id,
-									// Mirror resolveIdleCondenseTimeInSeconds' resolve semantics:
-									// -1 inherits the global wait and any other non-negative number
-									// is a valid override; anything else (e.g. -7s) must preserve
-									// global inheritance instead of clamping into a valid override
-									// (which would silently condense on an immediate 0s trigger).
-									seconds === -1 || !Number.isFinite(seconds) || seconds < 0
-										? -1
-										: Math.round(seconds),
-								]),
-							)
+									clampIdleCondensePercent(
+										percent,
+										computeEffectiveCondenseThreshold({
+											globalPercent: globalMainPercent,
+											profileThresholds: profileMainThresholds,
+											currentProfileId: id,
+										}),
+									),
+								]
+							}),
+						)
+					} else if (key === "idleCondenseTimeInSeconds") {
+						if (typeof value !== "number" || !Number.isFinite(value)) {
+							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
+							continue
 						}
+						newValue = Math.max(0, Math.round(value))
+					} else if (key === "profileIdleCondenseTimes") {
+						if (!value || typeof value !== "object") {
+							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
+							continue
+						}
+						newValue = Object.fromEntries(
+							Object.entries(value as Record<string, number>).map(([id, seconds]) => [
+								id,
+								// Mirror resolveIdleCondenseTimeInSeconds' resolve semantics:
+								// -1 inherits the global wait and any other non-negative number
+								// is a valid override; anything else (e.g. -7s) must preserve
+								// global inheritance instead of clamping into a valid override
+								// (which would silently condense on an immediate 0s trigger).
+								seconds === -1 || !Number.isFinite(seconds) || seconds < 0 ? -1 : Math.round(seconds),
+							]),
+						)
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
@@ -997,19 +1007,22 @@ export const webviewMessageHandler = async (
 						idleCondenseSettingsChanged = true
 					}
 				}
-
+			} catch (error) {
+				failed = true
+				failure = error
+			} finally {
 				// Saving these settings can change idle-condense eligibility: a
 				// task waiting on the user above the idle threshold has no
 				// countdown armed (and nothing else arms one) when the feature is
 				// only just enabled or its thresholds loosened. Let the active
 				// task re-run the full eligibility check; tasks with API work in
 				// flight stay ineligible and an already-armed countdown is kept.
+				// The writes are not a transaction, so re-run even when a later
+				// write failed after an idle key was already stored: that stored
+				// key still changed the task's eligibility.
 				if (idleCondenseSettingsChanged) {
 					provider.getCurrentTask()?.reevaluateIdleCondenseAfterSettingsSave()
 				}
-			} catch (error) {
-				failed = true
-				failure = error
 			}
 
 			// A failed refresh must neither undo a stored save nor keep the webview from getting the result.

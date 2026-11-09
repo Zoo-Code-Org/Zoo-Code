@@ -520,6 +520,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	private idleCondenseActivitySeq = 0
 	/**
+	 * True while an expired idle-condense timer is awaiting its async
+	 * re-checks. The countdown itself is already consumed, so
+	 * `resetIdleCondenseTimer` needs this flag to know the task is still
+	 * mid-evaluation: user activity then invalidates the evaluation (via the
+	 * activity sequence) and restarts the countdown from the beginning.
+	 */
+	private idleCondenseExpiryEvaluating = false
+	/**
+	 * Set while the idle-triggered summarization request is in flight. An idle
+	 * condense runs without the request loop, so its summarization call has no
+	 * request-scoped controller: this task-owned one lets `cancelCurrentRequest`
+	 * (user cancel and disposal) abort the in-flight HTTP call. The idle run
+	 * that created it clears it when the lease finishes.
+	 */
+	private idleCondenseAbortController?: AbortController
+	/**
 	 * Set while a condense (idle or manual) replaces the API history. `ask()`
 	 * treats a landing response as still pending and the queue drain stays
 	 * blocked, so a resuming request cannot append turns the summary — computed
@@ -528,6 +544,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * remain blocked.
 	 */
 	private condenseHistoryBarrier?: Promise<void>
+	/**
+	 * FIFO tail serializing condense leases per task. Every condense (manual
+	 * or idle) chains behind this promise, so only one summary can be in
+	 * flight at a time: a finishing lease cannot clear the barrier while
+	 * another condense still holds a pre-condense snapshot that would
+	 * overwrite turns appended in between. `undefined` means no condense is
+	 * in flight: an uncontended lease then runs straight into claiming its
+	 * API work synchronously, because yielding even a microtask first would
+	 * let a profile switch dispose the handler the condense is about to use.
+	 */
+	private condenseLeaseTail?: Promise<void>
 
 	// Tool Use
 	consecutiveMistakeCount: number = 0
@@ -1442,12 +1469,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * flipping those would re-enable interactive prompt timers whenever a claim
 	 * is outstanding. The condense barrier blocks draining while a condense is
 	 * replacing the API history, so the queued message's follow-up request cannot
-	 * append turns the in-flight summary would then overwrite.
+	 * append turns the in-flight summary would then overwrite. A landed response
+	 * held pending by the barrier must be delivered as-is: draining now would
+	 * overwrite it with the queued message, so the drain waits and the message
+	 * stays unclaimed for a later turn.
 	 */
 	private mayDrainQueuedMessageForAsk(): boolean {
 		return (
 			!this.blanketDeniedCommandThisTurn &&
 			!this.condenseHistoryBarrier &&
+			this.askResponse === undefined &&
 			this.messageQueueService.hasUnclaimed()
 		)
 	}
@@ -1812,6 +1843,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private hydrateApiConversationHistory(messages: ApiMessage[]) {
 		this.apiConversationHistory = ensureMessageIdentifiers(messages)
+
+		// The condense suppression flag tracks whether the conversation still
+		// ends in a condense summary. Reconcile it on every wholesale history
+		// replacement: a condense persists its summary as the last entry (so
+		// reopen and post-condense writes keep the flag set), while rewinds,
+		// deletes, and edits that truncate past the summary clear it so idle
+		// condensing can arm again without waiting for a new prompt.
+		this.lastActionWasCondense = messages.at(-1)?.isSummary === true
 	}
 
 	/**
@@ -2629,14 +2668,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/**
 	 * Restart the idle-condense countdown. Called when the user types in the
-	 * prompt area. Only acts while a timer is currently armed (i.e. the task is
-	 * waiting on the user with context above the idle threshold); a typing
-	 * signal during active work must not start condensing.
+	 * prompt area. Only acts while the task is waiting with an armed countdown
+	 * — or while an expired countdown is still awaiting its async re-checks,
+	 * where the timer itself has already been consumed; a typing signal during
+	 * active work must not start condensing. In the evaluating case the
+	 * pending evaluation is invalidated and replaced by a fresh countdown,
+	 * instead of typing silently no-opping while a stale evaluation proceeds
+	 * to condense over the conversation being edited.
 	 */
 	public resetIdleCondenseTimer(): void {
-		if (!this.idleCondenseTimeoutRef) {
+		if (!this.idleCondenseTimeoutRef && !this.idleCondenseExpiryEvaluating) {
 			return
 		}
+		// Invalidate any expiry evaluation already in flight before restarting:
+		// without this the evaluation would finish its stale gate check and
+		// condense over the conversation the user is currently editing.
+		this.idleCondenseActivitySeq++
 		this.cancelIdleCondenseTimer()
 		void this.maybeStartIdleCondenseTimer()
 	}
@@ -2648,7 +2695,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * countdown armed, and nothing else arms one for it; this gives it a fresh
 	 * evaluation. A task with API work in flight stays ineligible, and every
 	 * other existing gate (abort, active task, enabled flags, thresholds,
-	 * in-flight condense) is re-checked by the shared arming path.
+	 * in-flight condense, pending idle-eligible ask) is re-checked by the
+	 * shared arming path.
 	 *
 	 * An already-armed countdown is cancelled first: otherwise the shared
 	 * arming path would no-op and the countdown could fire on a stale deadline
@@ -2660,6 +2708,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (this.activeApiWork > 0) {
 			return
 		}
+		// Any arming or expiry evaluation already in flight measured against
+		// the pre-save settings: invalidate it so it cannot condense under
+		// thresholds the user just replaced. The re-armed evaluation below
+		// captures the bumped sequence and proceeds normally.
+		this.idleCondenseActivitySeq++
 		this.cancelIdleCondenseTimer()
 		void this.maybeStartIdleCondenseTimer()
 	}
@@ -2791,12 +2844,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (this.idleCondenseTimeoutRef || this.idleCondenseInFlight) {
 				return
 			}
+			// Idle condensing only makes sense while the task genuinely waits
+			// on the user: never arm when nothing is pending, or while an
+			// approval ask that must not be condensed around is pending.
+			if (!this.hasPendingIdleEligibleAsk()) {
+				return
+			}
+			const activitySeq = this.idleCondenseActivitySeq
 			const gate = await this.evaluateIdleCondense()
 			if (!gate || gate.contextPercent < gate.idlePercent) {
 				return
 			}
 			// Re-check after the async gate evaluation: a prompt may have landed.
-			if (this.abort || this.abandoned || this.idleCondenseTimeoutRef) {
+			// The activity sequence catches the answer case specifically: the
+			// user answered the pending ask while the gate ran, so arming now
+			// would start a countdown for a task that is no longer waiting.
+			if (
+				this.abort ||
+				this.abandoned ||
+				this.idleCondenseTimeoutRef ||
+				this.idleCondenseActivitySeq !== activitySeq
+			) {
 				return
 			}
 			this.armIdleCondenseTimeout(gate.idleSeconds)
@@ -2852,64 +2920,98 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return
 			}
 			const activitySeq = this.idleCondenseActivitySeq
-			const gate = await this.evaluateIdleCondense()
-			if (!gate || gate.contextPercent < gate.idlePercent) {
-				return
-			}
-			// The gate is an async evaluation: the user may have answered (bumping
-			// the activity sequence) or a new request may have started (incrementing
-			// `activeApiWork`) while it ran. Condensing now would summarize and
-			// overwrite history without those updates, so discard the stale
-			// evaluation; the idle transition after the response re-arms the timer.
-			if (
-				this.abort ||
-				this.abandoned ||
-				this.activeApiWork > 0 ||
-				this.idleCondenseActivitySeq !== activitySeq
-			) {
-				return
-			}
-
-			this.idleCondenseInFlight = true
-			let result: CondenseContextResult
+			// Publish that an expiry evaluation is mid-flight: the countdown has
+			// already been consumed here, so without this flag a prompt or typing
+			// signal arriving during the awaits below would find no timer armed
+			// and silently do nothing (see `resetIdleCondenseTimer`).
+			this.idleCondenseExpiryEvaluating = true
 			try {
-				// Give the user the same in-progress cue a manual condense shows:
-				// the "Condensing context..." row with its busy icon. The chat box
-				// keeps the normal press-to-send state, like a manual condense.
-				await this.providerRef
-					.deref()
-					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
-				result = await this.condenseContextWithLease()
-			} finally {
-				this.idleCondenseInFlight = false
-				// Always clear the cue, even when the lease or the condense throws.
-				await this.providerRef
-					.deref()
-					?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
-			}
+				const gate = await this.evaluateIdleCondense()
+				if (!gate || gate.contextPercent < gate.idlePercent) {
+					return
+				}
+				// The gate is an async evaluation: the user may have answered (bumping
+				// the activity sequence) or a new request may have started (incrementing
+				// `activeApiWork`) while it ran. Condensing now would summarize and
+				// overwrite history without those updates, so discard the stale
+				// evaluation; the idle transition after the response re-arms the timer.
+				if (
+					this.abort ||
+					this.abandoned ||
+					this.activeApiWork > 0 ||
+					this.idleCondenseActivitySeq !== activitySeq
+				) {
+					return
+				}
 
-			if (!result.condensed) {
-				return
+				this.idleCondenseInFlight = true
+				// The summarization request gets a task-owned controller: the idle
+				// path runs without the request loop, so without this the call could
+				// not be aborted by a cancel or disposal (see `cancelCurrentRequest`).
+				const abortController = new AbortController()
+				this.idleCondenseAbortController = abortController
+				let result: CondenseContextResult
+				try {
+					result = await this.condenseContextWithLease(async () => {
+						// Give the user the same in-progress cue a manual condense shows:
+						// the "Condensing context..." row with its busy icon. The chat box
+						// keeps the normal press-to-send state, like a manual condense.
+						// Posted under the installed history barrier: a response landing
+						// during the notification's await is held pending by `ask()`
+						// instead of resuming the task mid-condense.
+						await this.providerRef
+							.deref()
+							?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
+						// The notification is an await: re-check that nothing engaged in
+						// the meantime before issuing the summarization request.
+						return !(
+							this.abort ||
+							this.abandoned ||
+							this.activeApiWork > 0 ||
+							this.idleCondenseActivitySeq !== activitySeq
+						)
+					}, abortController.signal)
+				} finally {
+					this.idleCondenseInFlight = false
+					this.idleCondenseAbortController = undefined
+					// Always clear the cue, even when the lease or the condense throws.
+					await this.providerRef
+						.deref()
+						?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
+				}
+
+				if (!result.condensed) {
+					return
+				}
+				// Do not re-arm: the condense is now the last task action
+				// (`condenseContextWithLease` set `lastActionWasCondense`), so another
+				// idle condense must not trigger until the task does something else.
+			} finally {
+				this.idleCondenseExpiryEvaluating = false
 			}
-			// Do not re-arm: the condense is now the last task action
-			// (`condenseContextWithLease` set `lastActionWasCondense`), so another
-			// idle condense must not trigger until the task does something else.
 		} catch (error) {
 			console.error("[Task#onIdleCondenseTimerFired] error:", error)
 		}
 	}
 
 	/**
-	 * True while the task is still waiting on a follow-up ask: no response has
-	 * arrived and the last ask message is a complete follow-up at the current
-	 * `lastMessageTs`. Mirrors the pending-ask check used when arming the timer.
+	 * True while the task waits on an ask idle condensing may act on: no
+	 * response has arrived and the last ask message is a complete follow-up,
+	 * idle, or resumable ask at the current `lastMessageTs`. Command, tool and
+	 * MCP approval asks are excluded — they wait mid-request, and replacing
+	 * the history around a pending approval could drop its context — as are
+	 * partial asks and any ask the user has already answered.
 	 */
-	private hasPendingFollowupAsk(): boolean {
+	private hasPendingIdleEligibleAsk(): boolean {
 		if (this.askResponse !== undefined) {
 			return false
 		}
 		const lastAsk = findLast(this.clineMessages, (message) => message.type === "ask")
-		return lastAsk?.ask === "followup" && lastAsk.ts === this.lastMessageTs && lastAsk.partial !== true
+		if (!lastAsk || lastAsk.ts !== this.lastMessageTs || lastAsk.partial === true) {
+			return false
+		}
+		const ask = lastAsk.ask
+		return ask !== undefined && (ask === "followup" || isIdleAsk(ask) || isResumableAsk(ask))
 	}
 
 	public approveAsk({ text, images }: { text?: string; images?: string[] } = {}) {
@@ -2973,11 +3075,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 			// The idle condense timer may have expired and been discarded while this
 			// request was in flight (see `onIdleCondenseTimerFired`). Re-arm it now
-			// that the task is idle again, but only while a follow-up ask is still
-			// pending; any other idle transition re-arms the timer as usual.
+			// that the task is idle again, but only while an idle-eligible ask is
+			// still pending; any other idle transition re-arms the timer as usual.
 			if (this.idleCondenseRearmAfterApiWork) {
 				this.idleCondenseRearmAfterApiWork = false
-				if (this.hasPendingFollowupAsk()) {
+				if (this.hasPendingIdleEligibleAsk()) {
 					void this.maybeStartIdleCondenseTimer()
 				}
 			}
@@ -3071,18 +3173,81 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		await this.condenseContextWithLease()
 	}
 
-	private async condenseContextWithLease(): Promise<CondenseContextResult> {
+	/**
+	 * `summaryAbortSignal` is forwarded to the summarization call so the idle
+	 * condense's task-owned controller can abort the in-flight request; a manual
+	 * condense forwards none and keeps the current request's signal semantics.
+	 */
+	private async condenseContextWithLease(
+		onLeaseAcquired?: () => Promise<boolean>,
+		summaryAbortSignal?: AbortSignal,
+	): Promise<CondenseContextResult> {
+		// Serialize condense work per task: chain behind the previous lease so a
+		// manual and an idle condense can never overlap. Clearing the barrier at
+		// the end of the first lease while a second summary still ran would let a
+		// resumed request append turns the second summary then overwrites. When no
+		// condense is in flight (`condenseLeaseTail` undefined) the lease is
+		// uncontended, so skip the await: yielding even a microtask before
+		// `beginApiWork` would let a synchronous profile switch dispose the
+		// handler this condense is about to call.
+		const priorLease = this.condenseLeaseTail
+		let releaseLease: () => void = () => {}
+		const lease = new Promise<void>((resolve) => {
+			releaseLease = resolve
+		})
+		this.condenseLeaseTail = lease
+
 		// Hold ask responses while the summary below replaces the API history, so
 		// a resuming request cannot append turns the summary would overwrite. The
 		// barrier settles in `finally`, releasing waiting responses on both the
-		// success and the failure path.
+		// success and the failure path. `onLeaseAcquired` runs under the barrier
+		// so an idle condense's webview cue cannot open a window where a landed
+		// response resumes the task before history protection is installed.
 		let settleBarrier: () => void = () => {}
-		this.condenseHistoryBarrier = new Promise<void>((resolve) => {
-			settleBarrier = resolve
-		})
-		const endApiWork = this.beginApiWork()
+		const installBarrier = (): void => {
+			this.condenseHistoryBarrier = new Promise<void>((resolve) => {
+				settleBarrier = resolve
+			})
+		}
+		// Install the barrier synchronously only when no other condense holds
+		// the lease: a queued condense must wait until the previous lease's
+		// `finally` clears the barrier it owns, or it would clobber that
+		// barrier and have it cleared out from under the running summary.
+		let endApiWork: () => void = () => {}
+		if (!priorLease) {
+			installBarrier()
+			// Uncontended manual condense (no staleness callback): also claim
+			// the API-work lease synchronously, before any await. Yielding even
+			// a microtask first would let a profile switch in the same turn
+			// dispose the handler this condense is about to call (see
+			// `retireApi`). An idle condense defers its claim until after the
+			// staleness re-check below, which must not see this lease's own
+			// count as engaging work and cancel itself.
+			if (!onLeaseAcquired) {
+				endApiWork = this.beginApiWork()
+			}
+		}
 		try {
-			const result = await this.condenseContextWithActiveApi()
+			if (priorLease) {
+				await priorLease
+				// The lease is actually held now: the previous condense's
+				// `finally` has released (and disposed) its handler and cleared
+				// the barrier it owned, so install this lease's guards now.
+				installBarrier()
+			}
+			if (onLeaseAcquired && !(await onLeaseAcquired())) {
+				// The caller invalidated this condense under the barrier (the user
+				// engaged or work started during the cue's await): release without
+				// touching history and without marking the condense as the last action.
+				return { condensed: false, prevContextTokens: this.getTokenUsage().contextTokens }
+			}
+			// Deferred claim for every path that did not install above: the
+			// staleness re-check has passed, so counting this condense as API
+			// work now cannot cancel it.
+			if (priorLease || onLeaseAcquired) {
+				endApiWork = this.beginApiWork()
+			}
+			const result = await this.condenseContextWithActiveApi(summaryAbortSignal)
 			if (result.condensed) {
 				// Covers the manual condense button and the idle-triggered condense.
 				this.lastActionWasCondense = true
@@ -3092,10 +3257,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.condenseHistoryBarrier = undefined
 			settleBarrier()
 			endApiWork()
+			// Return the FIFO slot to "no condense in flight" when this was the
+			// last queued lease, so a later uncontended condense still takes the
+			// synchronous (no-await) lease path.
+			if (this.condenseLeaseTail === lease) {
+				this.condenseLeaseTail = undefined
+			}
+			releaseLease()
 		}
 	}
 
-	private async condenseContextWithActiveApi(): Promise<CondenseContextResult> {
+	private async condenseContextWithActiveApi(idleSummaryAbortSignal?: AbortSignal): Promise<CondenseContextResult> {
 		// CRITICAL: Flush any pending tool results before condensing
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
@@ -3146,13 +3318,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			allTools = toolsResult.tools
 		}
 
-		// Build metadata with tools and taskId for the condensing API call
+		// Build metadata with tools and taskId for the condensing API call. The
+		// idle condense forwards its own task-owned signal (no request loop runs
+		// while the task waits on the user, so the request controller is absent);
+		// a manual condense keeps using the current request's signal when present.
+		const abortSignal = idleSummaryAbortSignal ?? this.currentRequestAbortController?.signal
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
-			...(this.currentRequestAbortController?.signal
+			...(abortSignal
 				? {
-						abortSignal: this.currentRequestAbortController.signal,
+						abortSignal,
 					}
 				: {}),
 			...(allTools.length > 0
@@ -3209,6 +3385,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				undefined /* progressStatus */,
 				{ isNonInteractive: true } /* options */,
 			)
+			// A failed summary must not strand messages queued while the
+			// condense ran: drain the queue like the success path below, or the
+			// user's queued prompt sits in the queue with nothing left to
+			// trigger a submit (the condense was the resumed action).
+			this.processQueuedMessages()
 			return { condensed: false, error, prevContextTokens }
 		}
 		await this.overwriteApiConversationHistory(messages)
@@ -3675,11 +3856,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// the task first.
 			this.hydrateApiConversationHistory(savedApiConversationHistory)
 
-			// A condense persists its summary as the last API-history entry. Restore
-			// the in-memory suppression flag before the resume ask arms the idle
-			// condense timer, so a task closed right after a condense does not arm
-			// another idle condense on reopen.
-			this.lastActionWasCondense = savedApiConversationHistory.at(-1)?.isSummary === true
+			// hydrateApiConversationHistory restored the in-memory condense
+			// suppression flag from the saved history before the resume ask arms
+			// the idle condense timer, so a task closed right after a condense
+			// does not arm another idle condense on reopen.
 
 			await this.settleInterruptedCreateSubtaskBeforeReplay()
 			if (
@@ -3953,6 +4133,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (this.metadataFetchAbortController) {
 			this.metadataFetchAbortController.abort()
 			this.metadataFetchAbortController = undefined
+		}
+		// An idle condense's summarization call is an HTTP request too: abort it
+		// with the rest (user cancel via ClineProvider, or disposal) so a task
+		// that no longer serves requests cannot finish a summary that would then
+		// replace history from a stale snapshot.
+		if (this.idleCondenseAbortController) {
+			this.idleCondenseAbortController.abort()
+			this.idleCondenseAbortController = undefined
 		}
 	}
 

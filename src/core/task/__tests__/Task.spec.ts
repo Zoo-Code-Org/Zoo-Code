@@ -8093,6 +8093,41 @@ describe("Queued message processing after condense", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("drains the queue after a condense whose summarization failed", async () => {
+		const provider = createProvider()
+		const task = new Task({
+			provider,
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+
+		vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("system")
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		// The summarize request fails, so the condense reports the error and
+		// returns without replacing the history.
+		vi.mocked(summarizeConversation).mockResolvedValueOnce({
+			messages: [{ role: "user", content: [{ type: "text", text: "unchanged" }], ts: Date.now() }],
+			summary: "",
+			cost: 0,
+			error: "Condensing failed: rate limited",
+		})
+
+		// Queue a message while the (failing) condense runs.
+		task.messageQueueService.addMessage("queued after failure")
+
+		vi.useFakeTimers()
+		await task.condenseContext()
+
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		// The failure path must still deliver the queued message: nothing else
+		// will trigger a submit, so skipping the drain strands the user's prompt.
+		expect(submitSpy).toHaveBeenCalledWith("queued after failure", undefined)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
 	it("does not cross-drain queues between separate tasks", async () => {
 		const providerA = createProvider()
 		const providerB = createProvider()

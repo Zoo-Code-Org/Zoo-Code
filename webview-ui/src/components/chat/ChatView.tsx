@@ -666,7 +666,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					clineAskRef.current === "command_output"
 				) {
 					try {
-						console.log("queueMessage", text, images)
+						// Diagnostic only: never log message text or image data.
+						console.log("queueMessage", { textLength: text.length, imageCount: images.length })
 						vscode.postMessage({ type: "queueMessage", text, images })
 						setInputValue("")
 						setSelectedImages([])
@@ -955,20 +956,23 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 					break
 				case "condenseTaskContextStarted":
-					// Handle both manual and automatic condensation start
-					// We don't check the task ID because:
-					// 1. There can only be one active task at a time
-					// 2. Task switching resets isCondensing to false (see useEffect with currentTaskId dependency)
-					// 3. For new tasks, currentTaskItem may not be populated yet due to async state updates
-					if (message.text) {
+					// Handle both manual and automatic condensation start.
+					// The cue is tagged with the task it belongs to: ignore one
+					// from another task (e.g. a late cue from a task the user
+					// switched away from) so it can't toggle this view's
+					// condensing indicator.
+					if (message.text && message.text === currentTaskIdRef.current) {
 						setIsCondensing(true)
 						// Note: sendingDisabled is only set for manual condensation via handleCondenseContext
 						// Automatic condensation doesn't disable sending since the task is already running
 					}
 					break
 				case "condenseTaskContextResponse":
-					// Same reasoning as above - we trust this is for the current task
-					if (message.text) {
+					// Same task-identity guard as the started cue: a response
+					// from a previously condensing task must not clear the
+					// indicator (or re-enable sending) while the current
+					// task's condense is still in flight.
+					if (message.text && message.text === currentTaskIdRef.current) {
 						if (isCondensing && sendingDisabled) {
 							setSendingDisabled(false)
 						}

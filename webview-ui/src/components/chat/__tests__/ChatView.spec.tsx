@@ -1767,6 +1767,7 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 
 		// First hydrate state with an active task
 		mockPostMessage({
+			currentTaskId: "test-task-id",
 			clineMessages: [
 				{
 					type: "say",
@@ -1831,6 +1832,7 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 
 		// Hydrate with a completed API request so sending is enabled and not streaming
 		mockPostMessage({
+			currentTaskId: "test-task-id",
 			clineMessages: [
 				{
 					type: "say",
@@ -1898,5 +1900,49 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 				askResponse: "messageResponse",
 			}),
 		)
+	})
+
+	it("ignores condense cues tagged with another task's id", async () => {
+		// The started/response cues carry the task they belong to. A cue from
+		// a different (e.g. previously condensing) task must not toggle the
+		// current view's indicator; the current task's cue still must.
+		const { container, getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 5_000)
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+		})
+
+		const findCondensingRow = () =>
+			Array.from(container.querySelectorAll('[data-testid="chat-row"]')).find((row) => {
+				const text = row.textContent || ""
+				return text.includes('"say":"condense_context"') && text.includes('"partial":true')
+			})
+
+		// Reject path: a stale started cue for another task stays ignored.
+		await dispatchExtensionMessage({ type: "condenseTaskContextStarted", text: "task-b" })
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+		expect(findCondensingRow()).toBeUndefined()
+
+		// Accept path: the current task's cue shows the indicator.
+		await dispatchExtensionMessage({ type: "condenseTaskContextStarted", text: "task-a" })
+		await waitFor(() => {
+			expect(findCondensingRow()).toBeTruthy()
+		})
+
+		// Reject path: a stale response for another task does not clear it.
+		await dispatchExtensionMessage({ type: "condenseTaskContextResponse", text: "task-b" })
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+		expect(findCondensingRow()).toBeTruthy()
+
+		// Accept path: the current task's response clears it.
+		await dispatchExtensionMessage({ type: "condenseTaskContextResponse", text: "task-a" })
+		await waitFor(() => {
+			expect(findCondensingRow()).toBeUndefined()
+		})
 	})
 })

@@ -1643,5 +1643,61 @@ describe("ChatTextArea", () => {
 			fireEvent.change(textarea, { target: { value: "hel", selectionStart: 3 } })
 			expect(idleSignals()).toHaveLength(3)
 		})
+
+		it("posts idleCondenseReset when a URL paste rewrites the prompt", () => {
+			// A URL paste preventDefaults the native paste and sets the input
+			// programmatically, so no onChange fires; the mutation itself must
+			// restart the armed idle countdown.
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="visit " />)
+			const textarea = getTextarea(container)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("https://example.com visit ")
+			expect(idleSignals()).toHaveLength(1)
+		})
+
+		it("posts idleCondenseReset when a dropped path rewrites the prompt", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="abcdef" />)
+			const textarea = getTextarea(container)
+			textarea.setSelectionRange(3, 3)
+			fireEvent.mouseUp(textarea)
+
+			fireEvent.drop(container.querySelector(".chat-text-area") as HTMLElement, {
+				dataTransfer: { getData: () => "/some/path", files: [] },
+				preventDefault: vi.fn(),
+			})
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("abc/some/path def")
+			expect(idleSignals()).toHaveLength(1)
+		})
+
+		it("posts idleCondenseReset when history navigation recalls a prompt", () => {
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				filePaths: [],
+				openedTabs: [],
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				taskHistory: [],
+				clineMessages: [{ type: "say", say: "user_feedback", text: "First prompt", ts: 1000 }],
+				cwd: "/test/workspace",
+			})
+
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+			const textarea = getTextarea(container)
+			textarea.setSelectionRange(0, 0)
+
+			fireEvent.keyDown(textarea, { key: "ArrowUp" })
+
+			// Recalling a prompt replaces the input without an onChange event.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("First prompt")
+			expect(idleSignals()).toHaveLength(1)
+		})
 	})
 })

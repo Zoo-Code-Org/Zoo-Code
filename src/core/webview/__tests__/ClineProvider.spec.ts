@@ -4687,11 +4687,13 @@ describe("ClineProvider", () => {
 			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", { raised: 80 })
 		})
 
-		test("persists non-numeric idle-condense values unchanged when their guards reject them", async () => {
+		test("rejects invalid idle-condense payloads instead of persisting them", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			// A hand-crafted message can carry payloads the webview controls never produce; the
-			// normalization guards reject them and the raw value is stored unchanged.
+			// A hand-crafted message can carry payloads the webview controls never produce;
+			// storing them unchanged would surface as NaN at the runtime (e.g. idle
+			// condensing below the configured threshold), so the handler must reject them
+			// without persisting, while valid values in the same save still persist.
 			await getMessageHandler()({
 				type: "updateSettings",
 				updatedSettings: {
@@ -4699,13 +4701,17 @@ describe("ClineProvider", () => {
 					profileIdleThresholds: null as unknown as Record<string, number>,
 					idleCondenseTimeInSeconds: "180" as unknown as number,
 					profileIdleCondenseTimes: "180" as unknown as Record<string, number>,
+					idleCondenseContext: true,
 				},
 			})
 
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", "40")
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", null)
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseTimeInSeconds", "180")
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleCondenseTimes", "180")
+			const persistedKeys: unknown[] = updateGlobalStateSpy.mock.calls.map(([key]: [unknown]) => key)
+			expect(persistedKeys).not.toContain("idleCondenseContextPercent")
+			expect(persistedKeys).not.toContain("profileIdleThresholds")
+			expect(persistedKeys).not.toContain("idleCondenseTimeInSeconds")
+			expect(persistedKeys).not.toContain("profileIdleCondenseTimes")
+			// A valid sibling still persists.
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContext", true)
 		})
 
 		test("clamps a negative idleCondenseTimeInSeconds message to zero", async () => {
@@ -4771,6 +4777,27 @@ describe("ClineProvider", () => {
 			} as unknown as Task)
 
 			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContext: true } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
+		})
+
+		test("re-evaluates the active task when a later write fails after an idle setting was stored", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+			// The writes are not a transaction: idleCondenseContext stores, then
+			// the next key's write fails. The stored key still changed the task's
+			// idle-condense eligibility, so the re-evaluation must still run.
+			updateGlobalStateSpy.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("write failed"))
+
+			await expect(
+				getMessageHandler()({
+					type: "updateSettings",
+					updatedSettings: { idleCondenseContext: true, soundEnabled: true },
+				}),
+			).rejects.toThrow("write failed")
 
 			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
 		})

@@ -80,6 +80,7 @@ describe("Task.ask queued message drain", () => {
 		expect(premature).toBe("pending")
 		// Not even claimed: the message is intact for the post-settle drain.
 		expect(task.messageQueueService.messages[0]?.text).toBe("picked answer")
+		expect(task.messageQueueService.hasUnclaimed()).toBe(true)
 
 		releaseBarrier()
 		const result = await askPromise
@@ -111,6 +112,36 @@ describe("Task.ask queued message drain", () => {
 		releaseBarrier()
 		const result = await askPromise
 		expect(result).toMatchObject({ response: "messageResponse", text: "answered mid-condense" })
+	})
+
+	it("delivers a held direct response instead of draining a queued message", async () => {
+		const task = await createTask()
+
+		const releaseBarrier = installCondenseBarrier(task)
+		// A queued message lands while the condense holds the history.
+		task.messageQueueService.addMessage("queued while condensing")
+
+		const askPromise = task.ask("followup", "Q?", false)
+
+		// The user resumes directly mid-summarize. The drain gate must prefer
+		// the landed response: claiming the queued message now would overwrite
+		// the pending direct response the user is waiting on.
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		task.handleWebviewAskResponse("messageResponse", "answered mid-condense")
+
+		const premature = await Promise.race([
+			askPromise,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task["askResponse"]).toBe("messageResponse")
+
+		releaseBarrier()
+		const result = await askPromise
+		// The direct response wins the ask...
+		expect(result).toMatchObject({ response: "messageResponse", text: "answered mid-condense" })
+		// ...and the queued message survives unclaimed for a later turn.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("queued while condensing")
 	})
 
 	it("does not consume queued messages for command_output asks", async () => {
