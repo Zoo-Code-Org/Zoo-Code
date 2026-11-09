@@ -4668,6 +4668,46 @@ describe("ClineProvider", () => {
 			})
 		})
 
+		test("clamps idle thresholds against main percentages persisted in global state", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Neither the main percent nor the profile thresholds are in the message, so the
+			// handler must resolve them from global state instead of the message or the default.
+			await provider.contextProxy.setValue("autoCondenseContextPercent", 70)
+			await provider.contextProxy.setValue("profileThresholds", { raised: 90 })
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: { idleCondenseContextPercent: 90, profileIdleThresholds: { raised: 80 } },
+			})
+
+			// The global idle percent is capped at the stored main percent (70), while the
+			// profile idle override is clamped against that profile's own stored threshold (90).
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 70)
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", { raised: 80 })
+		})
+
+		test("persists non-numeric idle-condense values unchanged when their guards reject them", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// A hand-crafted message can carry payloads the webview controls never produce; the
+			// normalization guards reject them and the raw value is stored unchanged.
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					idleCondenseContextPercent: "40" as unknown as number,
+					profileIdleThresholds: null as unknown as Record<string, number>,
+					idleCondenseTimeInSeconds: "180" as unknown as number,
+					profileIdleCondenseTimes: "180" as unknown as Record<string, number>,
+				},
+			})
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", "40")
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", null)
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseTimeInSeconds", "180")
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleCondenseTimes", "180")
+		})
+
 		test("clamps a negative idleCondenseTimeInSeconds message to zero", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 

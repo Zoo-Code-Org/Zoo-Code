@@ -15,6 +15,7 @@ import {
 	truncateConversation,
 	manageContext,
 	willManageContext,
+	computeEffectiveCondenseThreshold,
 } from "../index"
 
 // Create a mock ApiHandler for testing
@@ -1244,6 +1245,96 @@ describe("Context Management", () => {
 
 			// Clean up
 			summarizeSpy.mockRestore()
+		})
+	})
+
+	/**
+	 * Tests for the computeEffectiveCondenseThreshold helper
+	 */
+	describe("computeEffectiveCondenseThreshold", () => {
+		it("returns the profile threshold when it is within the valid range", () => {
+			expect(
+				computeEffectiveCondenseThreshold({
+					globalPercent: 80,
+					profileThresholds: { architect: 40 },
+					currentProfileId: "architect",
+				}),
+			).toBe(40)
+		})
+
+		it("returns the global percent when the profile threshold is -1 (inheritance)", () => {
+			expect(
+				computeEffectiveCondenseThreshold({
+					globalPercent: 80,
+					profileThresholds: { architect: -1 },
+					currentProfileId: "architect",
+				}),
+			).toBe(80)
+		})
+
+		it("returns the global percent when the profile has no specific threshold", () => {
+			expect(
+				computeEffectiveCondenseThreshold({
+					globalPercent: 80,
+					profileThresholds: { code: 40 },
+					currentProfileId: "architect",
+				}),
+			).toBe(80)
+		})
+
+		it("warns and returns the global percent when the profile threshold is below the minimum", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				expect(
+					computeEffectiveCondenseThreshold({
+						globalPercent: 80,
+						profileThresholds: { architect: 1 },
+						currentProfileId: "architect",
+					}),
+				).toBe(80)
+				expect(warnSpy).toHaveBeenCalledWith(
+					'Invalid profile threshold 1 for profile "architect". Using global default of 80%',
+				)
+			} finally {
+				warnSpy.mockRestore()
+			}
+		})
+
+		it("warns and returns the global percent when the profile threshold is above the maximum", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				expect(
+					computeEffectiveCondenseThreshold({
+						globalPercent: 80,
+						profileThresholds: { architect: 150 },
+						currentProfileId: "architect",
+					}),
+				).toBe(80)
+				expect(warnSpy).toHaveBeenCalledWith(
+					'Invalid profile threshold 150 for profile "architect". Using global default of 80%',
+				)
+			} finally {
+				warnSpy.mockRestore()
+			}
+		})
+
+		it("uses a custom label in the warning message", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				expect(
+					computeEffectiveCondenseThreshold({
+						globalPercent: 180,
+						profileThresholds: { architect: -5 },
+						currentProfileId: "architect",
+						label: "idle time",
+					}),
+				).toBe(180)
+				expect(warnSpy).toHaveBeenCalledWith(
+					'Invalid profile idle time -5 for profile "architect". Using global default of 180%',
+				)
+			} finally {
+				warnSpy.mockRestore()
+			}
 		})
 	})
 

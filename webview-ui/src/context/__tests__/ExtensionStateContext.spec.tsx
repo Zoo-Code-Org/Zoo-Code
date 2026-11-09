@@ -779,6 +779,31 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("profile-idle-condense-times").textContent!)).toEqual({ code: 90 })
 	})
 
+	it("falls back to the idle condensing defaults when initialState carries explicit undefined values", () => {
+		// A hand-written state payload can carry explicit undefined values, which the plain
+		// merge spread lets overwrite the initialized defaults; the provider's fallbacks must
+		// still expose the documented defaults rather than undefined.
+		render(
+			<ExtensionStateContextProvider
+				initialState={{
+					profileThresholds: undefined,
+					profileIdleThresholds: undefined,
+					profileIdleCondenseTimes: undefined,
+					idleCondenseContext: undefined,
+					idleCondenseContextPercent: undefined,
+					idleCondenseTimeInSeconds: undefined,
+				}}>
+				<IdleCondenseTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("idle-condense").textContent!)).toBe(false)
+		expect(JSON.parse(screen.getByTestId("idle-condense-percent").textContent!)).toBe(50)
+		expect(JSON.parse(screen.getByTestId("idle-condense-time").textContent!)).toBe(180)
+		expect(JSON.parse(screen.getByTestId("profile-idle-thresholds").textContent!)).toEqual({})
+		expect(JSON.parse(screen.getByTestId("profile-idle-condense-times").textContent!)).toEqual({})
+	})
+
 	it("initializes the write delay to the pre-hydration default", () => {
 		// The initializer itself (not a merge fixture) must carry the shared
 		// default: a regression that dropped it from createInitialExtensionState

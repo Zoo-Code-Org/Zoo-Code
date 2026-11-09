@@ -1,6 +1,6 @@
 // npx vitest src/components/settings/__tests__/ContextManagementSettings.spec.tsx
 
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
+import { render, screen, fireEvent, waitFor, within } from "@/utils/test-utils"
 import { ContextManagementSettings } from "../ContextManagementSettings"
 import { vscode } from "@/utils/vscode"
 
@@ -810,6 +810,62 @@ describe("ContextManagementSettings", () => {
 
 			expect(screen.getByTestId("idle-condense-threshold-slider")).toHaveValue("20")
 			expect(screen.getByText("20%")).toBeInTheDocument()
+		})
+
+		it("clamps inheriting profile idle overrides when the default trigger threshold is reduced", () => {
+			const setCachedStateField = vi.fn()
+			render(
+				<ContextManagementSettings
+					{...idleProps}
+					profileThresholds={{ "config-2": 90 }}
+					profileIdleThresholds={{ "config-1": -1, "config-2": 70, "config-3": 50 }}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+
+			const triggerSlider = screen.getByTestId("condense-threshold-slider")
+			fireEvent.change(triggerSlider, { target: { value: "40" } })
+
+			// config-1 keeps its -1 inheritance, config-2 follows its own profile trigger
+			// (90) and stays 70, and only config-3, which inherits the default trigger,
+			// follows the lowered threshold down to 40.
+			expect(setCachedStateField).toHaveBeenCalledWith("profileIdleThresholds", {
+				"config-1": -1,
+				"config-2": 70,
+				"config-3": 40,
+			})
+		})
+
+		it("displays a profile idle time override in the idle time input", () => {
+			render(<ContextManagementSettings {...idleProps} profileIdleCondenseTimes={{ "config-1": 42 }} />)
+
+			selectIdleProfile("config-1")
+
+			expect(screen.getByTestId("idle-condense-time-input")).toHaveValue(42)
+		})
+
+		it("shows each profile's idle threshold override as a suffix in the profile select", () => {
+			render(<ContextManagementSettings {...idleProps} profileIdleThresholds={{ "config-1": 55 }} />)
+
+			const idleSelect = screen.getByTestId("idle-threshold-profile-select")
+			expect(within(idleSelect).getByText("Config 1 (55%)")).toBeInTheDocument()
+			// A profile without an override shows no suffix.
+			expect(within(idleSelect).getByText("Config 2")).toBeInTheDocument()
+		})
+
+		it("ignores an idle condense checkbox change whose target has no boolean checked value", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...idleProps} setCachedStateField={setCachedStateField} />)
+
+			const input = screen.getByTestId("idle-condense-context-checkbox").querySelector('input[type="checkbox"]')!
+			// Simulate an event whose target lacks a boolean `checked`: the mocked toolkit
+			// forwards { target: { checked: undefined } }, so the component's guard must
+			// reject it. React fires the checkbox onChange on click, and the no-op setter
+			// keeps jsdom's activation behavior from throwing on the getter-only override.
+			Object.defineProperty(input, "checked", { get: () => undefined, set: () => {}, configurable: true })
+			fireEvent.click(input)
+
+			expect(setCachedStateField).not.toHaveBeenCalledWith("idleCondenseContext", expect.anything())
 		})
 	})
 })
