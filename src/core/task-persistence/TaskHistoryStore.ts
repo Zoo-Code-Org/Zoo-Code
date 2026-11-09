@@ -1186,6 +1186,78 @@ export class TaskHistoryStore {
 		})
 	}
 
+	/**
+	 * Disk-authoritative conditional write for a generated task title.
+	 *
+	 * The decision reads the persisted record inside the per-file advisory
+	 * lock's merge callback, so a manual rename committed by another store
+	 * (another extension host) after this store's cache was last refreshed is
+	 * preserved instead of overwritten: every provider owns a separate
+	 * TaskHistoryStore with a separate in-process lock and cache, so a
+	 * cache-only existing-title check is not sufficient. An existing disk
+	 * title — a manual rename or an earlier generated title — always wins,
+	 * and the record's other disk fields are preserved when the generated
+	 * title is applied.
+	 *
+	 * @returns The authoritative disk record and whether the generated title
+	 * was applied.
+	 * @throws If the task ID is not present in the cache, so the caller can retry.
+	 */
+	public async setGeneratedTitleIfUnset(
+		taskId: string,
+		title: string,
+	): Promise<{ item: HistoryItem; applied: boolean }> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				throw new Error(`[TaskHistoryStore] setGeneratedTitleIfUnset: task ${taskId} not found in cache`)
+			}
+			const trimmed = title.trim()
+			if (!trimmed) {
+				return { item: cached, applied: false }
+			}
+
+			const filePath = await this.getTaskFilePath(taskId)
+			const incoming: HistoryItem = { ...cached, title: trimmed }
+			// Seed the decision from the cache, then let the locked disk record
+			// override it inside the merge callback. When the per-file lock
+			// cannot hand back the disk record (a safeWriteJson double that
+			// never invokes `merge`), the cache decision stands.
+			let applied = !cached.title
+			let authoritative: HistoryItem = cached.title ? cached : incoming
+			await safeWriteJson(filePath, incoming, {
+				merge: (existing) => {
+					if (existing && typeof existing === "object" && "id" in existing) {
+						const disk = existing as HistoryItem
+						if (disk.title) {
+							// A manual rename or an earlier generated title
+							// from any host is already persisted; keep it.
+							applied = false
+							authoritative = disk
+							return disk
+						}
+						// Apply only the title onto the locked disk record so
+						// fields written by another host are preserved.
+						applied = true
+						authoritative = { ...disk, title: trimmed }
+						return authoritative
+					}
+					// No readable disk record; fall back to writing the
+					// cached item with the title applied, matching the
+					// delta-write fallback for a missing file.
+					applied = true
+					authoritative = incoming
+					return incoming
+				},
+			})
+			this.cache.set(taskId, authoritative)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return { item: authoritative, applied }
+		})
+	}
+
 	// ────────────────────────────── Private: Write lock ──────────────────────────────
 
 	/**

@@ -2833,11 +2833,12 @@ export class ClineProvider
 
 	/*
 	 * Applies an automatically generated title for a history item (issue #2333).
-	 * The existing-title check and the write happen inside one atomic store
-	 * update, so a manual rename queued ahead of this call is never overwritten
-	 * by the generated title. Returns true when the title was applied, false
-	 * when the item already had a title. Throws when the task is not in the
-	 * store yet so the caller can retry.
+	 * The existing-title check reads the persisted record inside the same
+	 * per-file lock as the write, so a manual rename committed by another
+	 * provider's store after this store's cache was last refreshed is never
+	 * overwritten by the generated title. Returns true when the title was
+	 * applied, false when the item already had a title. Throws when the task
+	 * is not in the store yet so the caller can retry.
 	 */
 	async setGeneratedTaskTitle(id: string, title: string): Promise<boolean> {
 		const trimmed = title.trim()
@@ -2845,16 +2846,7 @@ export class ClineProvider
 			return false
 		}
 
-		let applied = false
-		await this.taskHistoryStore.atomicReadAndUpdate(id, (historyItem) => {
-			// Preserve any title set before this write: a manual rename, or an
-			// earlier generated title, always wins over a later generated one.
-			if (historyItem.title) {
-				return historyItem
-			}
-			applied = true
-			return { ...historyItem, title: trimmed }
-		})
+		const { applied } = await this.taskHistoryStore.setGeneratedTitleIfUnset(id, trimmed)
 
 		if (applied) {
 			this.recentTasksCache = undefined

@@ -421,4 +421,65 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			await fs.rm(storagePath, { recursive: true, force: true })
 		}
 	})
+
+	it("preserves a manual rename committed by another store over a stale-cache generated title", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-generated-title-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			// storeB hydrates its cache before the rename, so its cached copy
+			// never sees the manual title.
+			await storeB.initialize()
+
+			// The manual rename commits to disk through store A before store
+			// B attempts the generated-title write.
+			await storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, title: "Manual Title" }))
+
+			const result = await storeB.setGeneratedTitleIfUnset("shared-task", "Generated Title")
+
+			expect(result.applied).toBe(false)
+			expect(result.item.title).toBe("Manual Title")
+			// The stale cache is refreshed with the authoritative disk record.
+			expect(storeB.get("shared-task")?.title).toBe("Manual Title")
+			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toMatchObject({ title: "Manual Title" })
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("applies the generated title onto the locked disk record when no disk title exists", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-generated-title-apply-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const filePath = path.join(storagePath, "tasks", "shared-task", "history_item.json")
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(item("shared-task"))
+			await storeB.initialize()
+
+			// Another host persists an unrelated field; storeB's cache stays
+			// stale, so the apply must read the locked disk record.
+			await storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, totalCost: 42 }))
+
+			const result = await storeB.setGeneratedTitleIfUnset("shared-task", "Generated Title")
+
+			expect(result.applied).toBe(true)
+			expect(result.item).toMatchObject({ title: "Generated Title", totalCost: 42 })
+			expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toMatchObject({
+				title: "Generated Title",
+				totalCost: 42,
+			})
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
 })
