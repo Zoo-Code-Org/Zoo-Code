@@ -368,8 +368,12 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 
-			// the failing cleanup was the post-commit backup unlink
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			// the failing cleanup was the post-commit backup unlink, aimed at the copy this
+			// write created: shape alone would pass for a cleanup aimed at somebody else's
+			// backup, so the name that was created is read off the copyFile call.
+			const createdBackup = String((vi.mocked(fs.copyFile).mock.calls.at(-1) || [])[1])
+			expect(createdBackup).toContain("safeWriteText.bak_")
+			expect(fs.unlink).toHaveBeenCalledWith(createdBackup)
 
 			// the staging temp was already committed by the rename; nothing
 			// temp-shaped is unlinked afterwards
@@ -441,6 +445,13 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "new data", { backup: true })
 
 			expect(backupUnlinks).toHaveLength(2)
+			// Identity, not shape: both attempts must be aimed at the copy this write created.
+			// A retry that retargeted to another backup-shaped name would still produce two
+			// unlink calls and clear nothing.
+			const createdBackupPath = String((vi.mocked(fs.copyFile).mock.calls.at(-1) || [])[1])
+			expect(createdBackupPath).toContain("safeWriteText.bak_")
+			expect(backupUnlinks[0]).toBe(createdBackupPath)
+			expect(backupUnlinks[1]).toBe(createdBackupPath)
 		})
 
 		it("surfaces an orphaned pre-write copy instead of returning success", async () => {
@@ -1288,6 +1299,29 @@ describe("safeWriteText", () => {
 		// the only path this write owns at the target is the published content itself, and
 		// removing it would turn a durability warning into data loss.
 		expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+	})
+
+	it("names the commit rather than a rename when a no-replace publish commits by hard link and the directory fsync fails", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const dirPath = path.dirname(targetPath)
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockImplementation((target) => {
+			if (String(target) === dirPath) throw new Error("EBADF")
+			return 1
+		})
+
+		// failIfExist commits with link(2), not rename(2): the target name is created at
+		// the target and the staged name is removed afterwards. A durability error that
+		// claims a rename misdescribes the syscall that committed for a caller logging
+		// it, so the wording is asserted, not only the error class.
+		const error = await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+		expect(error).toBeInstanceOf(PostCommitDurabilityError)
+		expect(fs.link).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect((error as PostCommitDurabilityError).message).toContain("The commit published the content")
+		expect((error as PostCommitDurabilityError).message).not.toContain("rename")
 	})
 
 	it("a failed post-commit directory fsync does not unlink the staging path this write no longer owns", async () => {

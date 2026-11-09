@@ -212,7 +212,7 @@ export class StagingPathError extends Error {
 }
 
 /**
- * The commit rename succeeded but the parent-directory fsync did not, so the
+ * The commit succeeded - a rename, or a hard link under failIfExist - but the parent-directory fsync did not, so the
  * directory entry is not known to be durable. The content is at the target; the
  * caller cannot assume it survives a crash. Reported as its own error so a
  * successful return never claims durability the filesystem did not grant.
@@ -224,7 +224,7 @@ export class PostCommitDurabilityError extends Error {
 		super(
 			copiedTargetFsync
 				? "The exclusive copy committed but the copied target could not be fsynced -- the content is at the target path reported on this error, and it may not survive a crash on a volume without hard links."
-				: "The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
+				: "The commit published the content but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
