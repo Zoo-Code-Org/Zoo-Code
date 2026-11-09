@@ -140,6 +140,16 @@ export class SkillsManager {
 			}
 			// Disposal can land during the sweep: stop before touching discovery or watchers.
 			if (this.isDisposed) return
+			// One bounded retry, taken after the freshness window closes. The sweep skips sidecars that
+			// are still fresh because they may belong to a live write in another process, and nothing
+			// else ever revisits them: a host that died mid-write leaves the sidecar until the next
+			// launch. unref() so a pending retry cannot hold the extension host open, and dispose()
+			// cancels it so a host that stops inside the window does not sweep again.
+			const staleRetry = setTimeout(() => {
+				void this.sweepStaleSkillTempFiles().catch(() => {})
+			}, SKILL_TEMP_SIDECAR_STALE_MS)
+			staleRetry.unref()
+			this.disposables.push({ dispose: () => clearTimeout(staleRetry) })
 			await this.discoverSkills()
 			if (this.isDisposed) return
 			await this.setupFileWatchers()
@@ -753,14 +763,20 @@ export class SkillsManager {
 	 * await the complete write, then rename it over the target. A crash or failed write
 	 * must not leave a truncated SKILL.md that the loader would silently misparse.
 	 * The temp file is removed when the write or rename fails.
+	 * Content may be passed as a producer; a producer runs inside the directory lock, so a
+	 * caller that must read the current file first keeps read and publish in one queued unit.
 	 */
 	private async writeSkillFileAtomically(
 		filePath: string,
-		content: string,
+		content: string | (() => Promise<string>),
 		validateTarget?: (targetPath: string) => Promise<void>,
 	): Promise<void> {
 		const directory = path.dirname(filePath)
 		await this.withDirectoryLock(directory, async () => {
+			// Materialise the payload here, inside the queue: a caller that has to read the current
+			// SKILL.md before composing its replacement passes a producer, and reading outside this
+			// lock would let another writer land between that read and the rename below.
+			const payload = typeof content === "function" ? await content() : content
 			const temporaryPath = path.join(
 				directory,
 				`.${path.basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
@@ -772,7 +788,7 @@ export class SkillsManager {
 			try {
 				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
-				await fs.writeFile(temporaryPath, content, { encoding: "utf-8", flag: "wx" })
+				await fs.writeFile(temporaryPath, payload, { encoding: "utf-8", flag: "wx" })
 				ownsTemporaryPath = true
 				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				// Re-validate the final target immediately before the rename: the target (or an
@@ -1238,37 +1254,46 @@ Add your skill instructions here.
 
 		this.assertNotContainerSkill(skill)
 
-		// Read the current SKILL.md file
-		const fileContent = await fs.readFile(skill.path, "utf-8")
-		const { data: frontmatter, content: body } = matter(fileContent)
-
-		// Update the frontmatter with new modeSlugs
-		if (newModeSlugs && newModeSlugs.length > 0) {
-			frontmatter.modeSlugs = newModeSlugs
-			// Remove legacy mode field if present
-			delete frontmatter.mode
-		} else {
-			// Empty/undefined = any mode, remove mode restrictions
-			delete frontmatter.modeSlugs
-			delete frontmatter.mode
-		}
-
-		// Serialize back to SKILL.md format. lineWidth: -1 prevents long
-		// values from being reflowed into folded block scalars, keeping the
-		// file stable (see issue #859).
-		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 		// Resolve the link target first: publishing through the temp+rename must update the file
 		// the skill was discovered through, not replace a symlinked SKILL.md with a regular file.
 		// A resolution failure propagates: publishing through the unresolved path could replace a
 		// symlink with a regular file (or write somewhere other than the target the caller saw).
 		const targetPath = await fs.realpath(skill.path)
 		await this.assertTargetWithinSkillsRoots(targetPath, source)
-		await this.writeSkillFileAtomically(targetPath, newContent, async (target) => {
-			// Fail closed: a resolution failure must propagate so the staged temp write is removed
-			// and the rename is skipped, rather than publishing through a stale path.
-			const freshTarget = await fs.realpath(target)
-			await this.assertTargetWithinSkillsRoots(freshTarget, source)
-		})
+		// Read, serialise and publish as one queued operation. writeSkillFileAtomically takes the
+		// directory lock before it runs this producer, so another writer in the same directory -
+		// another update, or a stale-sidecar sweep - cannot land between reading SKILL.md and
+		// renaming the staged file over it, and an edit that landed while this call waited in the
+		// queue is read here instead of being silently discarded.
+		await this.writeSkillFileAtomically(
+			targetPath,
+			async () => {
+				const fileContent = await fs.readFile(skill.path, "utf-8")
+				const { data: frontmatter, content: body } = matter(fileContent)
+
+				// Update the frontmatter with new modeSlugs
+				if (newModeSlugs && newModeSlugs.length > 0) {
+					frontmatter.modeSlugs = newModeSlugs
+					// Remove legacy mode field if present
+					delete frontmatter.mode
+				} else {
+					// Empty/undefined = any mode, remove mode restrictions
+					delete frontmatter.modeSlugs
+					delete frontmatter.mode
+				}
+
+				// Serialize back to SKILL.md format. lineWidth: -1 prevents long
+				// values from being reflowed into folded block scalars, keeping the
+				// file stable (see issue #859).
+				return matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
+			},
+			async (target) => {
+				// Fail closed: a resolution failure must propagate so the staged temp write is removed
+				// and the rename is skipped, rather than publishing through a stale path.
+				const freshTarget = await fs.realpath(target)
+				await this.assertTargetWithinSkillsRoots(freshTarget, source)
+			},
+		)
 
 		// Refresh skills list
 		await this.discoverSkills()

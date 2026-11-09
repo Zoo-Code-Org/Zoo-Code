@@ -2419,6 +2419,10 @@ Instructions`)
 			const temporaryPath = String(mockWriteFile.mock.calls[0][0])
 			expect(temporaryPath).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
 			expect(mockUnlink).toHaveBeenCalledWith(temporaryPath)
+			// The half-created skill directory goes as well: rmdir (not rm) so only the empty
+			// directory this call introduced is removed, and no recursive removal is reached.
+			expect(mockRmdir).toHaveBeenCalledWith(p(GLOBAL_ROO_DIR, "skills", "rename-fails"))
+			expect(mockRm).not.toHaveBeenCalled()
 			expect(skillsManager["activeTempFiles"].size).toBe(0)
 		})
 
@@ -2686,6 +2690,52 @@ Body.`
 			expect(mockRmdir).not.toHaveBeenCalled()
 			expect(mockRm).not.toHaveBeenCalled()
 			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
+		it("queues a second update's read behind the first update's rename", async () => {
+			// Both calls queue on the skill directory. Reading SKILL.md outside that queue let the
+			// second call read before the first had published, so the first rename committed a
+			// value the second call had already read past. Pinning the event order pins the fix.
+			const skillDir = p(globalSkillsDir, "queue-order")
+			const skillMd = p(skillDir, "SKILL.md")
+			const skillContent = "---\nname: queue-order\ndescription: A skill\n---\nInstructions"
+			const events: string[] = []
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["queue-order"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReadFile.mockResolvedValue(skillContent)
+			mockWriteFile.mockResolvedValue(undefined)
+			mockRename.mockResolvedValue(undefined)
+			await skillsManager.discoverSkills()
+			// Discovery is finished reading: from here every read of this SKILL.md belongs to an
+			// update, so the recorded order is the write path's own.
+			mockDirectoryExists.mockResolvedValue(false)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === skillMd) {
+					events.push("read")
+				}
+				return skillContent
+			})
+			mockRename.mockImplementation(async (_from: string, to: string) => {
+				if (to === skillMd) {
+					events.push("rename")
+				}
+			})
+
+			const first = skillsManager.updateSkillModes("queue-order", "global", ["code"])
+			const second = skillsManager.updateSkillModes("queue-order", "global", ["debug"])
+			await Promise.all([first, second])
+
+			// Each update reads and publishes before the next update reads.
+			expect(events).toEqual(["read", "rename", "read", "rename"])
+			expect(mockRename).toHaveBeenCalledTimes(2)
 		})
 
 		it("fails closed when the pre-rename target resolution fails", async () => {
