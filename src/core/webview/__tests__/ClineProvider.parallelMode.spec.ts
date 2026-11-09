@@ -569,6 +569,7 @@ vi.mock("../../config/ProviderSettingsManager", async (importOriginal) => {
 					}
 				}),
 				getModeConfigId: vi.fn().mockImplementation(async (mode: string) => gate.modeApiConfigs[mode]),
+				getModeConfigIds: vi.fn().mockImplementation(async () => ({ ...gate.modeApiConfigs })),
 				getSelectionAndModeConfigs: vi.fn().mockImplementation(async () => ({
 					currentApiConfigName: gate.currentApiConfigName,
 					modeApiConfigs: { ...gate.modeApiConfigs },

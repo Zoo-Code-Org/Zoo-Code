@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 
-import i18next, * as i18nSetup from "../setup"
+import i18next, { loadLanguage } from "../setup"
 import TranslationProvider, { useAppTranslation } from "../TranslationContext"
 
 // The provider reads the active language from extension state. Tests drive it
@@ -11,7 +11,7 @@ import TranslationProvider, { useAppTranslation } from "../TranslationContext"
 // language later, which is the hole these cases must not paper over. The wrapper records
 // every call the provider makes and hands back the real promise, so awaiting it is awaiting
 // the memoized in-flight load the provider is waiting on.
-const realLoadLanguage = i18nSetup.loadLanguage
+const realLoadLanguage = loadLanguage
 const providerLoads: { calls: Array<{ language: string; promise: Promise<void> }> } = { calls: [] }
 const awaitProviderLoad = async (language: string) => {
 	const started = providerLoads.calls.filter((call) => call.language === language)
@@ -52,7 +52,7 @@ describe("TranslationProvider locale loading", () => {
 		// earlier test would mask the fallback path this suite is checking.
 		await i18next.changeLanguage("en")
 		providerLoads.calls = []
-		vi.spyOn(i18nSetup, "loadLanguage").mockImplementation((language: string) => {
+		vi.spyOn(await import("../setup"), "loadLanguage").mockImplementation((language: string) => {
 			const promise = realLoadLanguage(language)
 			providerLoads.calls.push({ language, promise })
 			return promise
@@ -186,7 +186,7 @@ describe("TranslationProvider locale loading", () => {
 				</TranslationProvider>,
 			)
 		})
-		await loadLanguage("pt-BR")
+		await awaitProviderLoad("pt-BR")
 
 		expect(i18next.language).toBe("en")
 		expect(screen.getByTestId("active-language")).toHaveTextContent("en")

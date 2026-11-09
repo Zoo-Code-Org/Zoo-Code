@@ -2172,6 +2172,10 @@ describe("API - configuration", () => {
 		// sibling-refresh hint the settled write always passes.
 		expect(setValues).toHaveBeenCalledWith(expect.not.objectContaining({ viewStates: expect.anything() }), {
 			savedProfileName: "default",
+			// The settled write now hands siblings the settings that landed, so the hint carries
+			// them; pinning the pair here keeps the guard exact - the stripped payload left no
+			// stale per-view snapshot for either argument to carry back.
+			savedProfileSettings: {},
 		})
 		expect(saveConfig).toHaveBeenCalledWith(
 			"default",

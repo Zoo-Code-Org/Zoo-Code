@@ -88,6 +88,17 @@ const normalizedProfileSettings = (payload: Record<string, unknown>): Record<str
 	}
 }
 
+type TaskAskController = {
+	approveAsk(): void
+	denyAsk(): void
+	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
+}
+
+type RegisteredTask = {
+	task: TaskAskController
+	provider: ClineProvider
+}
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooCodeTestOnlyApi {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
