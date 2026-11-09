@@ -279,12 +279,36 @@ function errorCode(error: unknown): string | undefined {
  * Windows 8.3 short name, so a lock key must be canonical even when the file
  * itself is not there yet -- otherwise the key for one file depends on whether
  * the file exists when the key is computed, and two writers take two locks.
+ * Components that are not there yet are walked over and re-joined onto the nearest
+ * ancestor that is: the writer that arrives before this file's parent directory is
+ * created has to take the lock of the writer that arrives after it. Only a missing
+ * component may be walked over. An ancestor that exists but cannot be canonicalized
+ * (ENOTDIR under a regular-file component, EACCES, EIO, ELOOP) means the canonical
+ * key is unknown, and handing back the literal spelling would key this writer apart
+ * from every writer that did canonicalize the same file.
  */
-
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
-	const dirPath = path.dirname(absoluteFilePath)
-	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
-	return path.join(canonicalDir, path.basename(absoluteFilePath))
+	const basename = path.basename(absoluteFilePath)
+	const missing: string[] = []
+	let cursor = path.dirname(absoluteFilePath)
+	for (;;) {
+		try {
+			const canonicalDir = await fs.realpath(cursor)
+			return path.join(canonicalDir, ...missing.reverse(), basename)
+		} catch (error: unknown) {
+			if (errorCode(error) !== "ENOENT") {
+				throw error
+			}
+			const parent = path.dirname(cursor)
+			if (parent === cursor) {
+				// The root of this path was reached with components still missing: no ancestor
+				// is left to canonicalize, so this spelling is the only answer available.
+				return path.join(cursor, ...missing.reverse(), basename)
+			}
+			missing.push(path.basename(cursor))
+			cursor = parent
+		}
+	}
 }
 
 /**
@@ -325,7 +349,15 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 				throw linkError
 			})
 			if (target === undefined) return await canonicalDirKey(key)
-			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
+			// A relative referent is relative to the link's REAL parent, not to the spelling the
+			// caller arrived with: under a symlinked directory `..` names the referent's parent,
+			// so a lexical join keys a different file and the writer through the alias stops
+			// excluding the writer through the referent. When the link's own parent cannot be
+			// canonicalized - a dangling chain - the lexical join is the only answer available.
+			const referentParent = path.isAbsolute(target)
+				? undefined
+				: await fs.realpath(path.dirname(key)).catch(() => undefined)
+			key = await canonicalDirKey(path.resolve(referentParent ?? path.dirname(key), target))
 		}
 		// The bound only exists to terminate a cycle. Past it the chain names no file, so
 		// the caller is told instead of handed whichever link the walk stopped on.

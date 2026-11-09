@@ -1011,24 +1011,38 @@ describe("safeWriteJson", () => {
 		const realFsync = fsSyncMod.fsyncSync
 		const fsyncFailure = new Error("EIO directory fsync")
 		const newData = { published: "new content" }
-		let renameCallCount = 0
-		let committed = false
+		const targetBaseName = path.basename(currentTestFilePath)
+		let commitAttemptFailed = false
+		let commitLanded = false
 		const actualRename = fsPromisesActuals.rename!
 		// The EPERM fallback is the only path that takes a backup at all: the first commit
 		// rename fails with the Windows-style EPERM, the fallback moves the target to its
 		// backup and renames the replacement in. That second commit succeeds - it is the
 		// rename onto the target below - and only then does the parent-directory fsync fail.
+		// The commit rename is recognised by what it lands on rather than by the path this test
+		// built, because safeWriteText commits onto its re-resolved publish target: when the
+		// temp directory is reached through a link - which is how the windows-latest runner
+		// reports its temp path - that destination is the resolved directory, not the literal
+		// path written here. Path equality then waits for an event that already happened, the
+		// injection never fires, and the real parent-directory fsync runs instead - on a
+		// read-only handle that is EPERM on Windows, which is why safeWriteText opens its
+		// backup "r+". The basename identifies the commit rename here: this write is the only
+		// activity in this directory, and neither the staging name nor the backup name carries
+		// it.
 		vi.mocked(fs.rename).mockImplementation((async (from: string, to: string) => {
-			renameCallCount++
-			if (renameCallCount === 1) {
+			const ontoTarget = path.basename(to) === targetBaseName
+			if (ontoTarget && !commitAttemptFailed) {
+				commitAttemptFailed = true
 				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
 			}
+			if (ontoTarget) {
+				commitLanded = true
+			}
 			await actualRename(from, to)
-			if (path.resolve(to) === path.resolve(currentTestFilePath)) committed = true
 		}) as typeof fs.rename)
 		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
 		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
-			if (committed) throw fsyncFailure
+			if (commitLanded) throw fsyncFailure
 			return (realFsync as (f: number) => unknown)(fd)
 		}) as never)
 		vi.mocked(fs.unlink).mockClear()

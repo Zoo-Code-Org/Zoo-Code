@@ -193,6 +193,112 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		})
 		await expect(resolveLockKey(file)).rejects.toBe(eacces)
 	})
+
+	it("keys a relative referent through the link's real parent, not the spelled one", async () => {
+		// The link lives under a directory that is itself a link and its referent is relative.
+		// `..` names the referent's parent, so joining the referent onto the spelling the caller
+		// arrived with keys dir/aliasdir/other - a different file from the one a writer that
+		// reached the referent through dir/realdir/elsewhere keys, and those two writers then
+		// hold two locks for one file.
+		const dir = await makeDir("lockkey-")
+		const spelledParent = path.join(dir, "aliasdir", "notes")
+		const realParent = path.join(dir, "realdir", "elsewhere")
+		const link = path.join(spelledParent, "link.json")
+		currentLink = link
+		const referent = "../other/x.json"
+		mockedRealpath.mockImplementation(async (target) => {
+			const p = String(target)
+			if (p === link) {
+				throw enoent // peer mid-commit: the referent is renamed away from this name
+			}
+			if (p === spelledParent) {
+				return realParent // "notes" is itself a directory link
+			}
+			return p
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			String(target) === link ? referent : Promise.reject(enoent),
+		)
+
+		const key = await resolveLockKey(link)
+		expect(key).toBe(path.join(dir, "realdir", "other", "x.json"))
+	})
+
+	it("refuses a lock key when an ancestor exists but cannot be canonicalized", async () => {
+		// ENOTDIR is what fs.realpath answers when a component of the path is a regular file:
+		// the ancestor was inspected and it says this spelling is not the canonical one. A
+		// swallowed realpath failure handed back the literal path, which is a key no other
+		// writer uses for this file.
+		const dir = await makeDir("lockkey-")
+		const link = path.join(dir, "aliasdir", "link.json")
+		currentLink = link
+		const referent = path.join(dir, "package", "sub", "x.json")
+		const enotdir = Object.assign(new Error("ENOTDIR: not a directory"), { code: "ENOTDIR" })
+		mockedRealpath.mockImplementation(async (target) => {
+			const p = String(target)
+			if (p === link) {
+				throw enoent
+			}
+			if (p === path.join(dir, "package", "sub")) {
+				throw enotdir // "package" is a file, so this chain is not a directory
+			}
+			return p
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			String(target) === link ? referent : Promise.reject(enoent),
+		)
+
+		await expect(resolveLockKey(link)).rejects.toBe(enotdir)
+	})
+
+	it("keys the same file the same way before and after its parent directory appears", async () => {
+		// A missing parent directory is walked over and re-joined onto the nearest ancestor that
+		// exists, because the writer that arrives before the mkdir has to take the lock of the
+		// writer that arrives after it. Under a directory link the literal spelling is not that
+		// key. The two calls below are the two moments a real mkdir separates.
+		const realDir = await makeDir("lockkey-")
+		const aliasDir = path.join(realDir, "alias")
+		const missingDir = path.join(aliasDir, "state")
+		const file = path.join(missingDir, "history_item.json")
+		currentLink = ""
+		const canonicalParent = path.join(realDir, "referent-of-alias")
+		mockedLstat.mockImplementation(
+			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+		)
+
+		mockedRealpath.mockImplementation(async (target) => {
+			const p = String(target)
+			if (p === file || p === missingDir) {
+				throw enoent // neither the file nor its parent directory is there yet
+			}
+			if (p === aliasDir) {
+				return canonicalParent // "alias" is a directory link
+			}
+			return p
+		})
+		const beforeCreation = await resolveLockKey(file)
+
+		// The directory exists by now, which is the only difference the later writer sees.
+		mockedRealpath.mockImplementation(async (target) => {
+			const p = String(target)
+			if (p === file) {
+				throw enoent
+			}
+			if (p === missingDir) {
+				return path.join(canonicalParent, "state")
+			}
+			if (p === aliasDir) {
+				return canonicalParent
+			}
+			return p
+		})
+		const afterCreation = await resolveLockKey(file)
+
+		expect(beforeCreation).toBe(path.join(canonicalParent, "state", "history_item.json"))
+		expect(afterCreation).toBe(beforeCreation)
+	})
 })
 
 it("keeps a readlink failure that names no code from keying the writer to the alias", async () => {
