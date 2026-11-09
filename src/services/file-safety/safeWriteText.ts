@@ -639,6 +639,11 @@ export async function safeWriteText(
 	// True only when this write's own seed open created the backup file. A name that already
 	// existed is not this write's file, and the failure path below must not unlink it.
 	let backupSeeded = false
+	// Set once the target access check in step 3 below has found a target there. It is what
+	// separates the one ENOENT this write may answer by publishing without a backup - the
+	// target not being there at all - from an ENOENT raised while seeding the backup after
+	// the target was found.
+	let backupTargetFound = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
@@ -816,6 +821,7 @@ export async function safeWriteText(
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
+					backupTargetFound = true
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
 					// Copy, never move. Renaming the target away leaves the canonical path absent for
 					// the whole commit window: readers see a missing file, and a concurrent
@@ -890,7 +896,13 @@ export async function safeWriteText(
 					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
-					if (getErrorCode(err) !== "ENOENT") throw err
+					// Only the access check above may be answered by a missing target: with nothing at
+					// the target there was no backup to make. An ENOENT from the seed block - the copy
+					// gone before copyFile, or a chmod on a backup that vanished after it - says the
+					// durability this call asked for could not be made, and publishing would drop the
+					// backup the caller requested; that block has already removed its own partial copy
+					// and reported an unremovable one, so the failure is propagated, not swallowed.
+					if (getErrorCode(err) !== "ENOENT" || backupTargetFound) throw err
 				}
 			}
 

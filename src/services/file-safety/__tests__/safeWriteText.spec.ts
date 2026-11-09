@@ -694,6 +694,106 @@ describe("safeWriteText", () => {
 			// no unlink (no backup to delete; DACL skipped via platform:linux)
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
+
+		// The four tests below are the acceptance criteria the follow-up issue #2389 records for
+		// this behavior (issue body, 1,662 bytes, opened 2026-11-09T18:20:58Z from this thread).
+		// The two ENOENT-injection tests describe the proposed behavior and fail on the code as
+		// committed before the narrowing; the other two pin the halves the criteria say must not
+		// change, and pass on both trees.
+
+		it("publishes without a backup when the target is absent at the access check (AC1, unchanged)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The target access check is the one ENOENT this write may answer with a publish:
+			// with nothing at the target there was no backup to make.
+			vi.mocked(fs.access).mockImplementation(async (p) => {
+				if (typeof p === "string" && p.endsWith("target.txt")) throw { code: "ENOENT" }
+			})
+
+			await safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })
+
+			expect(fs.access).toHaveBeenCalledWith(targetPath)
+			// Nothing was copied and nothing was chmod-ed: the seed block never ran.
+			expect(fs.copyFile).not.toHaveBeenCalled()
+			expect(fs.chmod).not.toHaveBeenCalled()
+			// The commit still happens, which is what "publishes without a backup" means.
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("rejects instead of publishing when copyFile raises ENOENT after the target was found (AC2)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The target is there for the access check; the copy is what reports it missing.
+			vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				"ENOENT",
+			)
+
+			// Nothing was published: the commit rename never ran, so the target still holds the
+			// content it had before this call rather than the content this call wanted to write.
+			expect(fs.rename).not.toHaveBeenCalled()
+			// Cleanup ran for this write's own leftovers: the half-seeded copy, the staged temp
+			// and the staging directory.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+			expect(fs.rmdir).toHaveBeenCalled()
+		})
+
+		it("rejects instead of publishing when chmod raises ENOENT on a copy that vanished after it (AC2)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// copyFile resolves - the copy was made - and the chmod that follows it is told the
+			// backup is gone. This is the exact sequence the row describes.
+			vi.mocked(fs.chmod).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				"ENOENT",
+			)
+
+			expect(fs.copyFile).toHaveBeenCalledTimes(1)
+			expect(fs.chmod).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"), 0o600)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			// The target itself was never removed, so its previous content is what remains.
+			expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+		})
+
+		it("reports an owned partial backup it cannot remove when the seed fails with ENOENT (AC3, unchanged)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			// The name this write opened with "wx" is still on disk and its removal keeps failing
+			// with the error Windows reports for a file whose handle is not released yet. The other
+			// half of this criterion - a backup name another writer owns is never unlinked - is the
+			// test above this one.
+			vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+				if (String(p).includes("safeWriteText.bak_")) {
+					throw Object.assign(new Error("EPERM"), { code: "EPERM" })
+				}
+			})
+
+			const error = await safeWriteText(targetPath, "new data", {
+				backup: true,
+				platform: "linux",
+			}).catch((caught: unknown) => caught)
+
+			expect(error).toBeInstanceOf(OrphanedBackupError)
+			const orphan = error as OrphanedBackupError
+			expect(orphan.orphanedBackupPath).toContain("safeWriteText.bak_")
+			// The seed failure stays the primary fact; the removal failure says why the copy is
+			// still there.
+			expect((orphan.originalError as Error).message).toBe("ENOENT")
+			expect((orphan.cleanupError as Error).message).toBe("EPERM")
+			expect(orphan.cause).toBe(orphan.originalError)
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
 	})
 
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
