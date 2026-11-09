@@ -19,7 +19,9 @@ import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain } from "../g
 import { safeWriteText, type SafeWriteTextOptions } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { ObservationRegistry } from "../../task/observationRegistry"
-import type { Task } from "../../task/Task"
+import { Task } from "../../task/Task"
+import { initialRunState, type RunState } from "../../task/run-state/runState"
+import type { RunRejection } from "../../task/run-state/runStateShadow"
 
 // -- Mocks -------------------------------------------------------------------
 
@@ -53,18 +55,51 @@ interface MockTaskOptions {
 }
 
 /**
- * Minimal structural Task: guardedWrite only reads task.cwd and
- * task.observationRegistry. The real Task constructor needs the full provider
- * machinery, so a single documented double cast stands in for the class.
+ * Task stand-in that runs the production cancellation path instead of re-implementing it.
+ *
+ * guardedWrite reads cwd, observationRegistry and abort off the task
+ * (src/core/tools/guardedWrite.ts:289, :351, :358), and building a real Task needs the full
+ * provider machinery: the smallest spec on this branch that does it,
+ * src/core/task/__tests__/Task.abort-reason-race.spec.ts, carries 12 vi.mock blocks and a
+ * 34-line provider double for exactly that reason. So this stands on Task.prototype and
+ * supplies only the values the constructor would have initialized. requestAbort is then the
+ * class's own method: the flag write at Task.ts:3596 and the run-state kernel it drives
+ * (Task.ts:3592-3598, driveRunEvent at :3610-3631 over runState and runRejections) are
+ * production code rather than a re-implementation in the double.
+ *
+ * Nothing here depends on which spelling of abort the tree carries. cwd is an accessor on
+ * Task.prototype (Task.ts:6494), so it is shadowed with an own property instead of assigned;
+ * abort is left to production - undefined until requestAbort runs, which reads the same as
+ * false at the truthy check in guardedWrite.ts:358 - because that call site reads only abort,
+ * while main (5319fe91f, #2283) exposes abort as a get-only accessor fed by the kernel latches
+ * (src/core/task/run-state/runState.ts:188), where a test that wrote the field would not
+ * compile: the CI typecheck runs on the PR merge tree, and this file writing task.abort is
+ * what made compile fail there.
  */
-function createMockTask(options: MockTaskOptions = {}): Task {
-	const task = {
-		cwd: options.cwd ?? WORKSPACE,
-		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
-	}
-	return task as unknown as Task
+/** The fields Task's constructor initializes that this stand-in has to supply by hand. */
+interface TaskDoubleFields {
+	cwd?: string
+	observationRegistry?: ObservationRegistry
+	runState?: RunState
+	runRejections?: RunRejection[]
 }
 
+function createMockTask(options: MockTaskOptions = {}): Task {
+	// Object.create is untyped in this lib: its signature takes no type argument, so the shape
+	// comes from the structural type above rather than from a generic parameter.
+	const task: TaskDoubleFields = Object.create(Task.prototype)
+	Object.defineProperty(task, "cwd", {
+		value: options.cwd ?? WORKSPACE,
+		writable: true,
+		configurable: true,
+	})
+	task.observationRegistry = options.observationRegistry ?? new ObservationRegistry()
+	task.runState = initialRunState
+	task.runRejections = []
+	// The stand-in covers only the members guardedWrite touches; Task's own surface is wider and
+	// no constructor runs here, so the double assertion stands in for that gap.
+	return task as unknown as Task
+}
 // -- Tests -------------------------------------------------------------------
 
 describe("guardedWrite (S4a, epic #1375)", () => {
@@ -546,7 +581,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 					setImmediate(resolve)
 				})
 				// The second link is still queued behind the gated first one when the task goes away.
-				task.abort = true
+				task.requestAbort(false)
 				releaseFirst()
 				await first
 				await expect(second).rejects.toThrow(/was cancelled/)
@@ -807,7 +842,7 @@ describe("task cancellation (S4a, epic #1375)", () => {
 		await new Promise(function (resolve) {
 			setImmediate(resolve)
 		})
-		task.abort = true
+		task.requestAbort(false)
 		releaseFirst()
 		await first
 		await expect(second).rejects.toThrow(/was cancelled/)
@@ -821,7 +856,7 @@ describe("task cancellation (S4a, epic #1375)", () => {
 
 	it("refuses an already-cancelled task's write before any I/O", async () => {
 		const task = createMockTask()
-		task.abort = true
+		task.requestAbort(false)
 		await expect(guardedWrite(task, "gone.txt", "x", "create")).rejects.toThrow(/was cancelled/)
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		expect(mockedFsAccess).not.toHaveBeenCalled()
