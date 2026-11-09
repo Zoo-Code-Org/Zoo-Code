@@ -143,7 +143,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
-import { generateTaskTitle } from "./taskTitleGenerator"
+import { DEFAULT_TITLE_TIMEOUT_MS, fallbackTaskTitle, generateTaskTitle } from "./taskTitleGenerator"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
@@ -3195,10 +3195,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	// Issue #2333: bounded attempts for the atomic generated-title write. The
+	// task may not be recorded in the history store yet when the title is
+	// ready; each attempt retries the atomic check-and-write under the lock.
+	private static readonly TITLE_WRITE_ATTEMPTS = 3
+	private static readonly TITLE_WRITE_RETRY_DELAY_MS = 50
+
 	/**
 	 * Generates a concise title for the task in the background using the initial prompt.
-	 * If the user cancels the task, or if generation fails/times out, the title is left
-	 * unchanged so the original prompt remains the task title.
+	 * When generation fails, times out, or returns no title, the title falls back to
+	 * the first 42 characters of the initial prompt (issue #2333). If the user cancels
+	 * the task, no title is written. A manual rename always wins: the existing-title
+	 * check and the write happen inside one atomic store update, so a rename queued
+	 * ahead of this write is never overwritten.
 	 */
 	private async generateTitleInBackground(taskText: string): Promise<void> {
 		if (this.abort || this.abandoned) {
@@ -3214,38 +3223,55 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.titleAbortController = controller
 
 		try {
-			const title = await generateTaskTitle(taskText, this.apiConfiguration, {
+			const generated = await generateTaskTitle(taskText, this.apiConfiguration, {
 				abortSignal: controller.signal,
-				timeoutMs: 10000,
+				timeoutMs: DEFAULT_TITLE_TIMEOUT_MS,
 				taskId: this.taskId,
 			})
-
-			if (controller.signal.aborted || this.abort || this.abandoned || !title) {
-				return
-			}
-
-			// In tests or fast completion paths, wait briefly until the task is recorded in the store
-			for (let i = 0; i < 20; i++) {
-				if (controller.signal.aborted || this.abort || this.abandoned) {
-					return
-				}
-				if (provider.taskHistoryStore.get(this.taskId)) {
-					break
-				}
-				await delay(50)
-			}
-
-			// If the task already has a custom title set (e.g. user manually renamed it), do not overwrite
-			const existing = provider.taskHistoryStore.get(this.taskId)
-			if (existing?.title) {
-				return
-			}
 
 			if (controller.signal.aborted || this.abort || this.abandoned) {
 				return
 			}
 
-			await provider.renameTaskWithId(this.taskId, title)
+			// Issue #2333 fallback: when generation fails, times out, or returns
+			// no usable title, use the first 42 characters of the initial prompt.
+			const fallback = fallbackTaskTitle(taskText)
+			const desiredTitle = generated ?? fallback
+
+			// The atomic write only applies while the item has no title. A
+			// failure (e.g. the task not yet recorded in the store) is retried a
+			// bounded number of times before the truncated-prompt fallback title
+			// gets a final attempt.
+			for (let attempt = 1; attempt <= Task.TITLE_WRITE_ATTEMPTS; attempt++) {
+				if (controller.signal.aborted || this.abort || this.abandoned) {
+					return
+				}
+
+				try {
+					await provider.setGeneratedTaskTitle(this.taskId, desiredTitle)
+					return
+				} catch (error) {
+					console.debug(
+						`[Task#generateTitleInBackground] Title write attempt ${attempt} failed for ${this.taskId}:`,
+						error,
+					)
+
+					if (attempt === Task.TITLE_WRITE_ATTEMPTS) {
+						// Retries exhausted: final attempt with the truncated-prompt
+						// fallback title (issue #2333).
+						try {
+							await provider.setGeneratedTaskTitle(this.taskId, fallback)
+						} catch (fallbackError) {
+							console.error(
+								`[Task#generateTitleInBackground] Fallback title failed for ${this.taskId}:`,
+								fallbackError,
+							)
+						}
+					} else {
+						await delay(Task.TITLE_WRITE_RETRY_DELAY_MS)
+					}
+				}
+			}
 		} catch (error) {
 			console.error(`[Task#generateTitleInBackground] Failed for ${this.taskId}:`, error)
 		} finally {

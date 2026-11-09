@@ -690,6 +690,73 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("setGeneratedTaskTitle", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		it("applies the generated title when the task has none and broadcasts the update", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			mockPostMessage.mockClear()
+
+			await expect(provider.setGeneratedTaskTitle("task-gen", "Generated Title")).resolves.toBe(true)
+
+			expect(getStored("task-gen")).toMatchObject({ title: "Generated Title", task: "Original prompt" })
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-gen", title: "Generated Title" })
+		})
+
+		it("does not overwrite a manual rename queued before the generated-title write", async () => {
+			const item = createHistoryItem({ id: "task-gen-race", task: "Original prompt", status: "active" })
+			await provider.updateTaskHistory(item, { broadcast: false })
+
+			// The manual rename queues on the store lock first; the generated-title
+			// write runs behind it and must see the manual title inside the same
+			// atomic update instead of overwriting it.
+			const manual = provider.renameTaskWithId("task-gen-race", "Manual Title")
+			const generated = provider.setGeneratedTaskTitle("task-gen-race", "Generated Title")
+			const [generatedApplied] = await Promise.all([generated, manual])
+
+			expect(generatedApplied).toBe(false)
+			expect(getStored("task-gen-race")?.title).toBe("Manual Title")
+		})
+
+		it("lets a manual rename win when it is queued after the generated title", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-after", task: "Original prompt" }), {
+				broadcast: false,
+			})
+
+			const generated = provider.setGeneratedTaskTitle("task-gen-after", "Generated Title")
+			const manual = provider.renameTaskWithId("task-gen-after", "Manual Title")
+			await Promise.all([generated, manual])
+
+			// Last writer wins: the user's explicit rename is the final title.
+			expect(getStored("task-gen-after")?.title).toBe("Manual Title")
+		})
+
+		it("keeps an existing title and reports that nothing was applied", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-existing", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			await provider.renameTaskWithId("task-gen-existing", "Manual Title")
+			mockPostMessage.mockClear()
+
+			await expect(provider.setGeneratedTaskTitle("task-gen-existing", "Generated Title")).resolves.toBe(false)
+
+			expect(getStored("task-gen-existing")?.title).toBe("Manual Title")
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates).toHaveLength(0)
+		})
+
+		it("throws when the task is not yet recorded so the caller can retry", async () => {
+			await expect(provider.setGeneratedTaskTitle("missing-task", "Generated Title")).rejects.toThrow(
+				"missing-task",
+			)
+		})
+	})
+
 	describe("broadcastTaskHistoryUpdate", () => {
 		it("sends taskHistoryUpdated message with sorted history", async () => {
 			await provider.resolveWebviewView(mockWebviewView)

@@ -54,7 +54,7 @@ type SupportPromptType =
 
 const supportPromptConfigs: Record<SupportPromptType, SupportPromptConfig> = {
 	TASK_TITLE: {
-		template: `Generate a concise title summarizing the following user prompt. The title should be in the same language as the prompt, 3 to 8 words long (maximum 50 characters). Reply with ONLY the title itself, with no quotation marks, no ending punctuation, and no explanations:
+		template: `Generate a concise title summarizing the following user prompt. The title should be in the same language as the prompt, 5 to 10 words long (maximum 50 characters). Reply with ONLY the title itself, with no quotation marks, no ending punctuation, and no explanations:
 
 \${userInput}`,
 	},

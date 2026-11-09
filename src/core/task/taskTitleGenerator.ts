@@ -5,7 +5,11 @@ import { singleCompletionHandler } from "../../utils/single-completion-handler"
 
 export const MAX_INPUT_PROMPT_LENGTH = 1000
 export const MAX_TITLE_LENGTH = 50
-export const DEFAULT_TITLE_TIMEOUT_MS = 10000
+// Issue #2333: the model request for the title must be limited to 15 seconds.
+export const DEFAULT_TITLE_TIMEOUT_MS = 15000
+// Issue #2333: when generation fails or times out, the title falls back to the
+// first 42 characters of the initial prompt.
+export const FALLBACK_TITLE_MAX_LENGTH = 42
 
 export interface GenerateTaskTitleOptions {
 	abortSignal?: AbortSignal
@@ -30,6 +34,16 @@ export function cleanGeneratedTitle(rawTitle: string): string {
 	}
 
 	return cleaned
+}
+
+/**
+ * Issue #2333 fallback: the first FALLBACK_TITLE_MAX_LENGTH characters of the
+ * initial prompt, used when title generation fails, times out, or returns no
+ * usable title.
+ */
+export function fallbackTaskTitle(prompt: string): string {
+	const normalized = (prompt ?? "").replace(/\s+/g, " ").trim()
+	return normalized.slice(0, FALLBACK_TITLE_MAX_LENGTH).trim()
 }
 
 /**

@@ -5,8 +5,11 @@ import { providerIdentifiers } from "@roo-code/types"
 import {
 	generateTaskTitle,
 	cleanGeneratedTitle,
+	fallbackTaskTitle,
 	MAX_TITLE_LENGTH,
 	MAX_INPUT_PROMPT_LENGTH,
+	FALLBACK_TITLE_MAX_LENGTH,
+	DEFAULT_TITLE_TIMEOUT_MS,
 } from "../taskTitleGenerator"
 import { singleCompletionHandler } from "../../../utils/single-completion-handler"
 
@@ -22,6 +25,27 @@ describe("taskTitleGenerator", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	describe("fallbackTaskTitle", () => {
+		it("returns the first 42 characters of the prompt (issue #2333)", () => {
+			expect(fallbackTaskTitle("Fix the login page button alignment issue on mobile devices")).toBe(
+				"Fix the login page button alignment issue",
+			)
+		})
+
+		it("truncates prompts longer than FALLBACK_TITLE_MAX_LENGTH", () => {
+			const longPrompt = "x".repeat(FALLBACK_TITLE_MAX_LENGTH + 10)
+			expect(fallbackTaskTitle(longPrompt)).toBe("x".repeat(FALLBACK_TITLE_MAX_LENGTH))
+		})
+
+		it("normalizes whitespace before truncating", () => {
+			expect(fallbackTaskTitle("  Fix   the\n\nlogin   issue  ")).toBe("Fix the login issue")
+		})
+
+		it("keeps shorter prompts unchanged", () => {
+			expect(fallbackTaskTitle("Short prompt")).toBe("Short prompt")
+		})
 	})
 
 	describe("cleanGeneratedTitle", () => {
@@ -91,9 +115,12 @@ describe("taskTitleGenerator", () => {
 				expect.stringContaining("Please fix the login page button bug"),
 				expect.objectContaining({
 					taskId: "task-123",
-					timeoutMs: 10000,
+					timeoutMs: DEFAULT_TITLE_TIMEOUT_MS,
 				}),
 			)
+
+			// Issue #2333: the model request for the title is limited to 15 seconds.
+			expect(DEFAULT_TITLE_TIMEOUT_MS).toBe(15000)
 		})
 
 		it("truncates prompt exceeding MAX_INPUT_PROMPT_LENGTH before sending", async () => {
