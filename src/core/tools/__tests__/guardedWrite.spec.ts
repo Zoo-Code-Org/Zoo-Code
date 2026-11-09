@@ -102,14 +102,24 @@ interface MockTaskOptions {
  * task.observationRegistry. The real Task constructor needs the full provider
  * machinery, so a single documented double cast stands in for the class.
  */
-function createMockTask(options: MockTaskOptions = {}): Task {
+function createMockTask(options: MockTaskOptions = {}): Task & { abortState: { abort: boolean } } {
+	// Task.ts:3587 exposes abort as an accessor over the task's run state, so the double
+	// exposes it the same way instead of a writable field: a test that needs the abort to
+	// land mid-flight flips abortState.abort, and the code under test still reads it through
+	// the accessor shape it reads on a real task.
+	const abortState = { abort: options.abort ?? false }
 	const task = {
 		cwd: options.cwd ?? WORKSPACE,
-		abort: options.abort ?? false,
+		get abort(): boolean {
+			return abortState.abort
+		},
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
 		...(options.rooIgnoreController ? { rooIgnoreController: options.rooIgnoreController } : {}),
+		abortState,
 	}
-	return task as unknown as Task
+	// The double carries only the members guardedWrite reads, plus the abort state holder
+	// it drives that accessor through.
+	return task as unknown as Task & { abortState: { abort: boolean } }
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -976,7 +986,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// is already gone.
 		const task = createMockTask()
 		mockedWithFileLock.mockImplementation(function (filePath, operation) {
-			task.abort = true
+			task.abortState.abort = true
 			return operation(path.resolve(filePath))
 		})
 		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
@@ -992,7 +1002,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// The abort lands while the version token is being computed. The guard has to
 		// refuse on the way to the publish, not write for a task that is already gone.
 		mockedComputeVersionToken.mockImplementation(async () => {
-			task.abort = true
+			task.abortState.abort = true
 			return "v1"
 		})
 		const reg = new ObservationRegistry()
