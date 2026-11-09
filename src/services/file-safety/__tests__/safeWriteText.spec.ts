@@ -1592,9 +1592,16 @@ describe("resolveLockKey", () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		// Only the link path is read, so a single answer is enough and keeps the mock's
-		// return type matching fs.promises.readlink.
-		vi.mocked(fs.readlink).mockResolvedValue("referent.json")
+		// Two reads happen, in order: the link answers with its referent, and the referent -
+		// absent while the peer writer is mid-commit - answers ENOENT (measured with node
+		// 22.23.4 on win32), which is what ends the walk. Answered by call order so the
+		// mock's return type still matches fs.promises.readlink on every platform.
+		let linkReads = 0
+		vi.mocked(fs.readlink).mockImplementation(async () => {
+			linkReads++
+			if (linkReads === 1) return "referent.json"
+			throw enoent
+		})
 
 		// Mid-commit a peer writer renames the referent away and back, so the key
 		// must still be computable while the link dangles.
@@ -1603,18 +1610,50 @@ describe("resolveLockKey", () => {
 		)
 	})
 
-	it("terminates on a two-link cycle instead of walking forever", async () => {
+	it("rejects instead of naming an arbitrary link when the bounded walk exhausts", async () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		// Every readlink answers with the same link, so an unbounded walk would
-		// never end; the bounded walk returns the key it actually reached.
+		// Every readlink answers with the same link, so an unbounded walk would never
+		// end. Past the bound the chain names no file: the behaviour this row replaces
+		// handed the caller whichever link the walk stopped on, so a writer starting from
+		// the other end of the same cycle keyed the very same file with a different lock.
 		vi.mocked(fs.readlink).mockImplementation(async () => "a.json")
 
-		await expect(resolveLockKey("/tmp/linkdir/a.json")).resolves.toBe(
-			path.resolve(path.join("/tmp/linkdir", "a.json")),
-		)
+		await expect(resolveLockKey("/tmp/linkdir/a.json")).rejects.toThrow("the symlink chain is deeper than 8 links")
 		expect(fs.readlink).toHaveBeenCalledTimes(8)
+	})
+
+	it("propagates a readlink failure that is not a not-a-link or absent answer", async () => {
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		const eio = Object.assign(new Error("EIO: i/o error, readlink"), { code: "EIO" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		// An unreadable link says nothing about where the file is. Answering with the
+		// alias would let this writer hold the alias's lock while a writer that reached
+		// the referent holds the referent's lock: two locks, one file, and the merged
+		// update that gets lost.
+		vi.mocked(fs.readlink).mockRejectedValueOnce(eio)
+
+		await expect(resolveLockKey("/tmp/linkdir/file.json")).rejects.toBe(eio)
+		expect(fs.readlink).toHaveBeenCalledTimes(1)
+	})
+
+	it("ends the walk on the two answers that mean not-a-link or absent", async () => {
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		const reachedKey = path.join(path.dirname("/tmp/linkdir/file.json"), "file.json")
+		// Control for the row above. A regular file answers readlink with EINVAL - measured
+		// with node 22.23.4 on win32 - and an absent path answers with ENOENT; the walk has
+		// to stop on both and key the path it reached, or every plain write to a normal
+		// file would fail out of the lock-key step.
+		vi.mocked(fs.readlink).mockRejectedValueOnce(
+			Object.assign(new Error("EINVAL: invalid argument, readlink"), { code: "EINVAL" }),
+		)
+		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(reachedKey)
+		vi.mocked(fs.readlink).mockRejectedValueOnce(enoent)
+		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(reachedKey)
 	})
 })
 
@@ -1639,10 +1678,16 @@ describe("caller-supplied staging path", () => {
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
 
-		// Renaming a link over the target publishes whatever the link points at.
+		// Renaming a link over the target publishes whatever the link points at. The name
+		// is convention-conforming on purpose: with a name like "x.tmp" the name guard
+		// rejects the call first, so this row would still pass if the link check were
+		// deleted, and it would be pinning the name rule instead of the link rule.
 		await expect(
-			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/x.tmp", platform: "linux" }),
-		).rejects.toThrow(StagingPathError)
+			safeWriteText(targetPath, "data", {
+				tempPath: "/tmp/test-dir/.new_target.txt_1.tmp",
+				platform: "linux",
+			}),
+		).rejects.toThrow("Staging file must be a regular file, not a symlink")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 	})

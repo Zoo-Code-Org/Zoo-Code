@@ -19,13 +19,34 @@ function getStagedReplacementPrefix(absoluteFilePath: string): string {
 	return `.new_${path.basename(absoluteFilePath)}_`
 }
 
+/**
+ * The tail every writer of this file produces after its prefix: `_<timestamp>_<random>.tmp`
+ * (see safeWriteJson's createStagingFilePath and createBackupFilePath). The random token is
+ * base36, so it never contains an underscore, and the timestamp is all digits.
+ */
+const OWNED_LEFTOVER_TAIL = /^\d+_[^_]+\.tmp$/
+
+/**
+ * Whether `entry` is a leftover this target's own writer staged.
+ *
+ * Matching the prefix alone is not scoping. A basename that starts with this basename plus an
+ * underscore - `a.json_extra.json` beside `a.json` - produces `.new_a.json_extra_<ts>_<rand>.tmp`,
+ * which starts with this file's `.new_a.json_` prefix. Its writer holds only the sibling's lock,
+ * so a recovery of `a.json` that collected that name would unlink a staging file a live writer is
+ * about to publish, and that write then fails with ENOENT before it can commit. Requiring the tail
+ * a writer of this file actually produces keeps the pattern scoped to the target.
+ */
 function isReplacementLeftover(absoluteFilePath: string, entry: string): boolean {
-	return (
-		entry.endsWith(".tmp") &&
-		(entry.startsWith(getTempFilePrefix(absoluteFilePath, "new")) ||
-			entry.startsWith(getTempFilePrefix(absoluteFilePath, "bak")) ||
-			entry.startsWith(getStagedReplacementPrefix(absoluteFilePath)))
-	)
+	for (const prefix of [
+		getTempFilePrefix(absoluteFilePath, "new"),
+		getTempFilePrefix(absoluteFilePath, "bak"),
+		getStagedReplacementPrefix(absoluteFilePath),
+	]) {
+		if (entry.startsWith(prefix) && OWNED_LEFTOVER_TAIL.test(entry.slice(prefix.length))) {
+			return true
+		}
+	}
+	return false
 }
 
 /**

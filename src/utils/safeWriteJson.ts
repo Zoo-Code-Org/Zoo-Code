@@ -249,18 +249,37 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			actualTempNewFilePath = null
 		}
 
-		// If the EPERM fallback had moved the committed file to the backup path, restore it
-		// so the target keeps its previous content. A failed restore leaves the backup as
-		// the only committed copy - it is preserved for recovery by a later writer rather
-		// than unlinked, and the error from the failed replacement is the one rethrown.
+		// If the EPERM fallback had moved the committed file to the backup path, decide by
+		// whether the second commit landed. A PostCommitDurabilityError is raised only after
+		// the commit rename succeeded, so the new content is already at the target and the
+		// backup holds the content the target no longer has: renaming it back would put the
+		// old bytes over the published ones while the rethrown error tells the caller the new
+		// content is at the target. It is dropped instead, and a failed drop leaves it as a
+		// leftover the next writer's recovery pass collects.
+		// A failure before the commit is the other case: the target still holds the content
+		// the fallback moved aside, so the backup goes back and a failed restore leaves it
+		// as the only committed copy for a later recovery rather than unlinked.
 		if (actualTempBackupFilePath) {
-			try {
-				await fs.rename(actualTempBackupFilePath, resolvedTargetPath ?? absoluteFilePath)
-			} catch (rollbackError) {
-				console.error(
-					`Failed to restore backup ${actualTempBackupFilePath} to ${resolvedTargetPath ?? absoluteFilePath}:`,
-					rollbackError,
-				)
+			if (originalError instanceof PostCommitDurabilityError) {
+				try {
+					await fs.unlink(actualTempBackupFilePath)
+				} catch (backupCleanupError: unknown) {
+					if (getErrorCode(backupCleanupError) !== "ENOENT") {
+						console.error(
+							`Published ${resolvedTargetPath ?? absoluteFilePath} but failed to delete the stale EPERM-fallback backup ${actualTempBackupFilePath}:`,
+							backupCleanupError,
+						)
+					}
+				}
+			} else {
+				try {
+					await fs.rename(actualTempBackupFilePath, resolvedTargetPath ?? absoluteFilePath)
+				} catch (rollbackError) {
+					console.error(
+						`Failed to restore backup ${actualTempBackupFilePath} to ${resolvedTargetPath ?? absoluteFilePath}:`,
+						rollbackError,
+					)
+				}
 			}
 			actualTempBackupFilePath = null
 		}

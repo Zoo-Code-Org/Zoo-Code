@@ -152,6 +152,23 @@ describe("replacement leftover name patterns", () => {
 		expect(JSON.parse(await fs.readFile(sibling, "utf8"))).toEqual({ sibling: true })
 	})
 
+	// The boundary a prefix check alone misses: a sibling whose basename *starts with* this
+	// basename plus an underscore. Its staging name carries this file's prefix, and its writer
+	// holds only its own lock, so collecting that name would unlink a live writer's staging file
+	// and fail its commit rename with ENOENT.
+	it("leaves the staging file of a sibling whose name extends this basename", async () => {
+		const sibling = path.join(dir, "a.json_extra.json")
+		await fs.writeFile(sibling, JSON.stringify({ sibling: true }))
+		const mine = path.join(dir, ".new_a.json_1_mine.tmp")
+		const theirs = path.join(dir, ".new_a.json_extra_2_theirs.tmp")
+		await fs.writeFile(mine, "stale")
+		await fs.writeFile(theirs, "in flight")
+		await expect(recoverMissingJsonFile(target)).resolves.toBe(true)
+		await expect(fs.access(mine)).rejects.toMatchObject({ code: "ENOENT" })
+		expect(await fs.readFile(theirs, "utf8")).toBe("in flight")
+		expect(await fs.readFile(sibling, "utf8")).toBe(JSON.stringify({ sibling: true }))
+	})
+
 	// The negative boundary: safeWriteText accepts any basename matching .new_*.tmp, so
 	// an unscoped name proves nothing about which target staged it, and recovery must
 	// not treat it as this target's leftover.

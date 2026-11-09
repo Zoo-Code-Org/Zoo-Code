@@ -1005,4 +1005,57 @@ describe("safeWriteJson", () => {
 		const stagingUnlinks = vi.mocked(fs.unlink).mock.calls.filter((call) => /\.new_.*\.tmp$/.test(String(call[0])))
 		expect(stagingUnlinks).toHaveLength(0)
 	})
+
+	it("does not restore the fallback backup over a commit that landed", async () => {
+		const fsSyncMod = await import("fs")
+		const realFsync = fsSyncMod.fsyncSync
+		const fsyncFailure = new Error("EIO directory fsync")
+		const newData = { published: "new content" }
+		let renameCallCount = 0
+		let committed = false
+		const actualRename = fsPromisesActuals.rename!
+		// The EPERM fallback is the only path that takes a backup at all: the first commit
+		// rename fails with the Windows-style EPERM, the fallback moves the target to its
+		// backup and renames the replacement in. That second commit succeeds - it is the
+		// rename onto the target below - and only then does the parent-directory fsync fail.
+		vi.mocked(fs.rename).mockImplementation((async (from: string, to: string) => {
+			renameCallCount++
+			if (renameCallCount === 1) {
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+			await actualRename(from, to)
+			if (path.resolve(to) === path.resolve(currentTestFilePath)) committed = true
+		}) as typeof fs.rename)
+		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
+		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
+			if (committed) throw fsyncFailure
+			return (realFsync as (f: number) => unknown)(fd)
+		}) as never)
+		vi.mocked(fs.unlink).mockClear()
+
+		const failure: unknown = await safeWriteJson(currentTestFilePath, newData).then(
+			() => null,
+			(error: unknown) => error,
+		)
+		expect(failure).toBeInstanceOf(PostCommitDurabilityError)
+		expect((failure as Error).cause).toBe(fsyncFailure)
+
+		// The replacement is at the target. Renaming the backup back over it - which is what
+		// the pre-commit rollback does - would put the old bytes where the rethrown error says
+		// the new content is.
+		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+
+		// Nothing moved the backup back, and the stale backup is gone rather than left beside
+		// the published file.
+		const rollbackRenames = vi
+			.mocked(fs.rename)
+			.mock.calls.filter(
+				(call) =>
+					/\.bak_/.test(String(call[0])) &&
+					path.resolve(String(call[1])) === path.resolve(currentTestFilePath),
+			)
+		expect(rollbackRenames).toHaveLength(0)
+		const backupLeftovers = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(backupLeftovers).toEqual([])
+	})
 })

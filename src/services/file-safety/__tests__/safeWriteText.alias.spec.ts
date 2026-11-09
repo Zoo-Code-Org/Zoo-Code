@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process"
+import { spawnSync } from "child_process"
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -36,9 +36,30 @@ function shortPathOf(directory: string): string | null {
 		return null
 	}
 	try {
-		const out = execFileSync(SHORT_NAME_PROBE_BIN, ["/c", "for %A in (" + directory + ") do @echo %~sA"], {
+		// The directory has to reach cmd quoted. cmd's `for ... in (set)` splits an unquoted set
+		// on spaces, so a directory named "...has a space inside it" becomes six items and cmd
+		// echoes one line per item, each resolved against cmd's own working directory (measured
+		// with node 22.23.4: the unquoted form answers six lines for one directory). Quoting the
+		// item is not enough by itself: quoting argv entries that contain spaces leaves cmd a value
+		// whose quotes are part of the name, so %~sA hands back the long spelling wrapped in quotes
+		// and the probe reports no alias at all (measured: three rows skipped, none run).
+		// windowsVerbatimArguments hands cmd exactly the string written here, which is the only
+		// measured form that answers a single short path for a directory with a space. It is a
+		// spawnSync option in the node typings - execFileSync's typed options do not carry it
+		// (tsc reports TS2769 there), so the probe runs through the API that documents the flag.
+		// Both measure the same answer in all four quoting combinations (measured with node 22.23.4
+		// on win32), so the switch changes the typing, not the behaviour.
+		const probe = spawnSync(SHORT_NAME_PROBE_BIN, ["/c", 'for %A in ("' + directory + '") do @echo %~sA'], {
 			encoding: "utf8",
-		}).trim()
+			windowsVerbatimArguments: true,
+		})
+		// The typings say `error: Error | null`; spawnSync actually leaves it undefined on a
+		// successful run, and a `!== null` test would reject every healthy probe - which is how
+		// the whole suite ends up silently skipped rather than run.
+		if (probe.error || probe.status !== 0 || probe.stdout === null) {
+			return null
+		}
+		const out = probe.stdout.trim()
 		return out.includes(SHORT_NAME_MARKER) ? out : null
 	} catch {
 		return null
@@ -61,8 +82,19 @@ function probeGeneratesEightThreeNames(): boolean {
 	} catch {
 		return false
 	} finally {
+		// Cleanup must not decide the answer. `force` swallows a missing directory but not the
+		// EPERM/EBUSY Windows reports while a handle is still being released, and a throw from this
+		// finally block escapes the function at module import time - the failed-suite-with-no-skip-
+		// that-vitest-can-rescue case this probe exists to avoid.
 		if (probeBase !== undefined) {
-			fs.rmSync(probeBase, { recursive: true, force: true })
+			for (let attempt = 0; attempt < 2; attempt++) {
+				try {
+					fs.rmSync(probeBase, { recursive: true, force: true })
+					break
+				} catch {
+					if (attempt === 1) break
+				}
+			}
 		}
 	}
 }
@@ -117,6 +149,32 @@ describe("safeWriteText staging guard against a second spelling of the target di
 
 			expect(fs.readFileSync(targetPath, "utf8")).toBe("staged")
 			expect(fs.existsSync(stagingPath)).toBe(false)
+		},
+	)
+
+	// The probe is the harness for both rows below, and its own answer is what breaks when the
+	// directory is quoted badly: a space in a directory name is not exotic on Windows - every
+	// profile path under "Documents and Settings" has one - and an unquoted for-set turns one
+	// directory into one line per word of its name.
+	it.runIf(IS_WINDOWS && EIGHT_THREE_NAMES_ARE_GENERATED)(
+		"answers one short path for a directory whose name contains a space",
+		() => {
+			const spacedDir = path.join(tempDir, "SPACE CONTAINING TARGET DIRECTORY")
+			fs.mkdirSync(spacedDir)
+			const short = shortPathOf(spacedDir)
+			expect(short).not.toBeNull()
+			if (short === null) {
+				return
+			}
+			// One answer, not one answer per word of the name.
+			expect(short.split(/\r?\n/)).toHaveLength(1)
+			// And the answer is a directory that exists, not a token of the name resolved
+			// against the probe's own working directory.
+			expect(fs.existsSync(short)).toBe(true)
+			expect(fs.statSync(short).isDirectory()).toBe(true)
+			const viaShort = fs.statSync(short, { bigint: true })
+			const viaLong = fs.statSync(spacedDir, { bigint: true })
+			expect([String(viaShort.dev), String(viaShort.ino)]).toEqual([String(viaLong.dev), String(viaLong.ino)])
 		},
 	)
 

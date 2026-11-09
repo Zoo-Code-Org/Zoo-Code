@@ -24,6 +24,14 @@ const mockedAcquireFileLock = vi.mocked(acquireFileLock)
 
 const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
+// A real readlink answers with a code. ENOENT is the answer for a path that is not there -
+// which is the state both peer-commit rows below describe, because the peer writer has renamed
+// the referent away - and EINVAL is the answer for a path that exists and is not a link
+// (measured with node 22.23.4 on win32). resolveLockKey ends its walk on either, and propagates
+// anything else: a rejection that names no code says nothing about whether the path is a link,
+// and keying the writer to the alias on that answer is how two writers end up holding two locks
+// for one file.
+
 // Each test creates a real temp directory so the real fs calls still work.
 // doubles between tests so an implementation from one test cannot carry over.
 const createdDirs: string[] = []
@@ -85,7 +93,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			return symlinkStat(target)
 		})
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(enoent),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -135,7 +143,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			return symlinkStat(target)
 		})
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(enoent),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -185,6 +193,29 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		})
 		await expect(resolveLockKey(file)).rejects.toBe(eacces)
 	})
+})
+
+it("keeps a readlink failure that names no code from keying the writer to the alias", async () => {
+	// The peer-commit rows above answer with the code a real readlink uses. This row covers the
+	// other answer: a rejection that names nothing. Keying the writer to the alias path would let
+	// it hold the alias's lock while a writer that reached the referent held the referent's lock,
+	// and the safeWriteJson flow must not reach the lock at all when the key is unknown.
+	const dir = await makeDir("lockkey-")
+	currentLink = path.join(dir, "link.json")
+	const unanswering = new Error("readlink failed without naming a code")
+	mockedRealpath.mockImplementation(async () => {
+		throw enoent
+	})
+	mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+	mockedReadlink.mockImplementation(async () => Promise.reject(unanswering))
+	let locked = false
+	mockedAcquireFileLock.mockImplementation(async () => {
+		locked = true
+		return async () => {}
+	})
+
+	await expect(safeWriteJson(currentLink, { id: "task-1" })).rejects.toBe(unanswering)
+	expect(locked).toBe(false)
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {

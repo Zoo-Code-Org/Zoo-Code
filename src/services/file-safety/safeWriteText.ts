@@ -293,8 +293,10 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * tolerates a dangling link, because the lock key has to be computable while a
  * peer writer is mid-commit (a publish renames the staged file onto the referent,
  * and backup mode keeps a copy beside it).
- * The walk is bounded so a two-link cycle terminates, and every key it returns is
- * canonicalized through canonicalDirKey.
+ * The walk is bounded, and a chain the bound cannot resolve rejects rather than naming
+ * an arbitrary intermediate link: two writers that enter the same chain from different
+ * ends would otherwise key one file with two different locks. Every key it does return
+ * is canonicalized through canonicalDirKey.
  */
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
@@ -307,16 +309,29 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 		if (errorCode(error) !== "ENOENT") {
 			throw error
 		}
-		// A real readlink throws for anything that is not a link, so a normal chain
-		// ends the walk. Two links that point at each other never would, so the
-		// walk is bounded and callers use the key they actually reached.
+		// A real readlink reports "this is not a link" by throwing: EINVAL on the
+		// platforms this file runs on (measured with node 22.23.4 on win32, and EINVAL
+		// on linux), and ENOENT when the path itself is gone. Those two answers end the
+		// walk. Any other failure - EACCES, EIO, ELOOP - says nothing about whether this
+		// path is a link, so it propagates: keying this writer to the alias while a
+		// writer that reached the referent keys the referent is the two-locks-for-one-file
+		// loss this function exists to prevent, and guessing it is how that loss arrives.
+		const linkWalkLimit = 8
 		let key = absoluteFilePath
-		for (let depth = 0; depth < 8; depth++) {
-			const target = await fs.readlink(key).catch(() => undefined)
+		for (let depth = 0; depth < linkWalkLimit; depth++) {
+			const target = await fs.readlink(key).catch((linkError: unknown) => {
+				const code = errorCode(linkError)
+				if (code === "ENOENT" || code === "EINVAL") return undefined
+				throw linkError
+			})
 			if (target === undefined) return await canonicalDirKey(key)
 			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
 		}
-		return await canonicalDirKey(key)
+		// The bound only exists to terminate a cycle. Past it the chain names no file, so
+		// the caller is told instead of handed whichever link the walk stopped on.
+		throw new Error(
+			`safeWriteText: could not resolve a lock key for ${absoluteFilePath}: the symlink chain is deeper than ${linkWalkLimit} links`,
+		)
 	}
 }
 

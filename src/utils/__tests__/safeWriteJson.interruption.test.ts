@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "child_process"
+import { spawn, spawnSync, type ChildProcess } from "child_process"
 import { createRequire } from "module"
 import { fileURLToPath } from "url"
 import * as fs from "fs/promises"
@@ -398,9 +398,22 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 			return null
 		}
 		try {
-			const out = execFileSync("cmd.exe", ["/c", "for %A in (" + directory + ") do @echo %~sA"], {
+			// Quoted, and verbatim: cmd splits an unquoted for-set on spaces, and a quoted argv
+			// entry alone leaves cmd a value whose quotes are part of the name (see the same probe
+			// in safeWriteText.alias.spec.ts, where both forms are measured). spawnSync is the API
+			// whose typings carry windowsVerbatimArguments - execFileSync's do not - and both
+			// measure the same answer, so the choice is about the typing only.
+			const probe = spawnSync("cmd.exe", ["/c", 'for %A in ("' + directory + '") do @echo %~sA'], {
 				encoding: "utf8",
-			}).trim()
+				windowsVerbatimArguments: true,
+			})
+			// The typings say `error: Error | null`; spawnSync leaves it undefined on a successful run,
+			// so a `!== null` test would reject every healthy probe and make the alias rows below
+			// return early instead of asserting.
+			if (probe.error || probe.status !== 0 || probe.stdout === null) {
+				return null
+			}
+			const out = probe.stdout.trim()
 			return out.includes("~1") ? out : null
 		} catch {
 			return null
@@ -408,7 +421,11 @@ describe("safeWriteJson subprocess interruption fault injection", () => {
 	}
 
 	it("recognises the commit rename through a short-name alias, and refuses another directory", async () => {
-		const base = await fs.mkdtemp(path.join(os.tmpdir(), "interruption-matcher-"))
+		// Inside tempDir on purpose: this test returns early on a box with no short-name alias and
+		// stops at an assertion failure more often than it reaches its own cleanup, and a directory
+		// under os.tmpdir() survives both. The describe's afterEach removes tempDir, so creating the
+		// matcher's scratch tree inside it cleans up on every exit.
+		const base = await fs.mkdtemp(path.join(tempDir, "interruption-matcher-"))
 		const longDir = path.join(base, "LONGMATCHERDIRECTORYNAME")
 		const otherDir = path.join(base, "OTHERMATCHERDIRECTORYNAME")
 		await fs.mkdir(longDir, { recursive: true })
