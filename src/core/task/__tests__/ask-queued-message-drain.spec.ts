@@ -349,7 +349,7 @@ describe("Task.ask queued message drain", () => {
 		access.abort = true
 		finishAddingAsk()
 
-		await expect(ask).rejects.toThrow("aborted")
+		await expect(ask).rejects.toThrow(/#ask\] task \S+ aborted$/)
 		expect(task.messageQueueService.messages).toHaveLength(1)
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Persist me later")
 	})

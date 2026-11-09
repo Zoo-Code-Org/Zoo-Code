@@ -1208,7 +1208,7 @@ describe("RequestyHandler", () => {
 				// Aborting mid-flight is the third exit path through finally: the SDK-shaped mock
 				// rejects once the signal aborts, so dispose() must detach on that path too.
 				outcome: "aborts mid-flight",
-				expectRejection: "aborted",
+				expectRejection: "The Requesty request was aborted",
 				start: (controller: AbortController) => {
 					let notifyStarted!: () => void
 					const barrier = new Promise<void>((resolve) => {

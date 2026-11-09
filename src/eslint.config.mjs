@@ -1,5 +1,6 @@
 import { config } from "@roo-code/config-eslint/base"
 import {
+	abortSubstringSelector,
 	apiProviderHygieneConfig,
 	apiProviderTestSelectors,
 	apiSpecTsIgnoreConfig,
@@ -123,7 +124,7 @@ export default [
 			"**/services/__tests__/workflow-self-listen.test.ts",
 		],
 		rules: {
-			"no-restricted-syntax": ["error", ...testPathTraversalSelectors],
+			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, abortSubstringSelector],
 		},
 	},
 	{
@@ -144,7 +145,12 @@ export default [
 			"integrations/terminal/**/__tests__/**/*.ts",
 		],
 		rules: {
-			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, testResetHelperSelector],
+			"no-restricted-syntax": [
+				"error",
+				...testPathTraversalSelectors,
+				abortSubstringSelector,
+				testResetHelperSelector,
+			],
 		},
 	},
 	{

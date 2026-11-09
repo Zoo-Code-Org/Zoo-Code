@@ -173,6 +173,22 @@ describe("api provider hygiene: spec loops", () => {
 			assert.deepEqual(lintSpec(code), [])
 		})
 	}
+
+	for (const code of ['await expect(p).rejects.toThrow("aborted")', "expect(() => f()).toThrow('abort')"]) {
+		it(`flags a bare abort substring: ${code}`, () => {
+			assert.equal(lintSpec(code).length, 1)
+		})
+	}
+
+	for (const code of [
+		'await expect(p).rejects.toThrow("The Requesty request was aborted")',
+		'await expect(p).rejects.toMatchObject({ name: "AbortError" })',
+		'await expect(p).rejects.toThrow("API Error")',
+	]) {
+		it(`allows: ${code}`, () => {
+			assert.deepEqual(lintSpec(code), [])
+		})
+	}
 })
 
 describe("api provider hygiene: hand-built AbortError", () => {
