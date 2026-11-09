@@ -4557,6 +4557,25 @@ describe("ClineProvider", () => {
 			expect(provider["localModeConfigIds"].has("code")).toBe(false)
 		})
 
+		it("preserves a local choice made while the initial snapshot is pending", async () => {
+			let resolveSnapshot = (_ids: Record<string, string>) => {}
+			provider["initialModeConfigIds"] = new Promise<Record<string, string>>((resolve) => {
+				resolveSnapshot = resolve
+			})
+			existingProfiles("new-id")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			const sharedLookup = vi
+				.spyOn(provider.providerSettingsManager, "getModeConfigId")
+				.mockResolvedValue("other-window-id")
+
+			const lookup = provider["getModeConfigId"]("code")
+			await provider.setModeConfig("code", "new-id")
+			resolveSnapshot({})
+
+			await expect(lookup).resolves.toBe("new-id")
+			expect(sharedLookup).not.toHaveBeenCalled()
+		})
+
 		it.each(["removed-id", "existing-id"])(
 			"preserves a newer local choice while validating %s",
 			async (previousId) => {
