@@ -73,7 +73,29 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
-			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			// Bytes, not a decoded string: fs.readFile with a "utf-8" encoding replaces every byte sequence
+			// that is not valid UTF-8 with U+FFFD, and every path below republishes the decoded string -
+			// saveDirectly, saveChanges, and the baseline the diff view and the approval payload are built
+			// from - so a file with undecodable bytes used to be saved back with the replacements in it,
+			// silently rewriting bytes the model never asked to touch. Decoding fatally refuses instead,
+			// which is the fail-closed decision the guarded publish already makes about a target it cannot
+			// vouch for. The file is reported by name and the first undecodable byte is reported by offset,
+			// because the refusal is only actionable if the model can find the byte.
+			const originalBytes = await fs.readFile(absolutePath)
+			let originalContent: string
+			try {
+				originalContent = new TextDecoder("utf-8", { fatal: true }).decode(originalBytes)
+			} catch {
+				const lossy = new TextDecoder("utf-8").decode(originalBytes)
+				const undecodableByte = new TextEncoder().encode(lossy.slice(0, lossy.indexOf("\uFFFD"))).length
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_diff")
+				const formattedError = `File ${absolutePath} is not valid UTF-8 (first undecodable byte at offset ${undecodableByte}).\n\n<error_details>\napply_diff decodes the file, applies the diff to the decoded text, and saves the result back. Bytes that cannot be decoded would have been saved back as U+FFFD alongside every byte the diff did not touch, so the edit was refused and nothing was written. Re-read the file and convert it to UTF-8 before applying the diff again.\n</error_details>`
+				await task.say("error", formattedError)
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formattedError)
+				return
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(

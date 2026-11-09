@@ -14,9 +14,14 @@ vi.mock("@roo-code/telemetry", () => ({
 
 vi.mock("fs/promises", () => ({
 	default: {
-		readFile: vi.fn().mockResolvedValue(""),
+		readFile: vi.fn().mockResolvedValue(Buffer.alloc(0)),
 	},
 }))
+
+// ApplyDiffTool reads the file with no encoding, so the call the double stands in for is the
+// byte-returning one: fs.readFile returns Buffer unless an encoding is passed. vi.mocked resolves
+// the encoding overload, so the mock is typed against the signature the tool actually calls.
+const mockedReadFile = vi.mocked(fs.readFile as (path: string) => Promise<Buffer>)
 
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(true),
@@ -59,7 +64,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		vi.clearAllMocks()
 		pushedResult = undefined
 		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
-		vi.mocked(fs.readFile).mockResolvedValue("line one\nline two\nline three\n")
+		mockedReadFile.mockResolvedValue(Buffer.from("line one\nline two\nline three\n", "utf8"))
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
@@ -145,6 +150,65 @@ describe("ApplyDiffTool failure reporting", () => {
 		}
 		return failures
 	}
+
+	describe("bytes the decoder cannot read", () => {
+		async function runOnBytes(bytes: Buffer): Promise<string> {
+			mockedReadFile.mockResolvedValue(bytes)
+			const applyDiff = vi.fn().mockResolvedValue({ success: true, content: "unused" })
+			mockTask.diffStrategy = { getName: () => "test", applyDiff }
+			await applyDiffTool.execute({ path: testFilePath, diff: buildDiffContent(1) }, mockTask, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				toolCallId: "tool-call-1",
+				pushToolResult: vi.fn((result: ToolResponse) => {
+					pushedResult = result
+				}),
+			})
+			return String(pushedResult ?? "")
+		}
+
+		// A byte the UTF-8 decoder rejects sits at index 3; everything around it is plain ASCII, so the
+		// offset the tool reports has to be that index and nothing else.
+		const UNDECODABLE = Buffer.from([0x68, 0x69, 0x20, 0xff, 0x61, 0x0a])
+
+		it("refuses the edit and names the file and the first undecodable byte", async () => {
+			const output = await runOnBytes(UNDECODABLE)
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 3")
+			expect(mockTask.say).toHaveBeenCalledWith("error", output)
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_diff")
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("refuses before the diff is computed, approved, or written", async () => {
+			await runOnBytes(UNDECODABLE)
+
+			expect(mockedReadFile).toHaveBeenCalledWith(path.resolve("/workspace", testFilePath))
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("still edits a file whose bytes are valid multi-byte UTF-8", async () => {
+			const output = await runOnBytes(Buffer.from("héllo 中文 ✅\n", "utf8"))
+
+			expect(output).not.toContain("is not valid UTF-8")
+			expect(output).toContain("Changes successfully applied.")
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+		})
+
+		it("reports the first undecodable byte when invalid bytes repeat", async () => {
+			const output = await runOnBytes(Buffer.from([0x41, 0xc3, 0x28, 0x42, 0xfe, 0x43, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 1")
+			expect(output).not.toContain("offset 4")
+		})
+	})
 
 	describe("failure accumulation and rendering", () => {
 		it("reports every failed block, not just the last one", async () => {
@@ -326,7 +390,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		const applyingBlock = "<<<<<<< SEARCH\nconst header = 1\n=======\nconst header = 3\n>>>>>>> REPLACE"
 
 		async function runRealStrategy(diff: string): Promise<string> {
-			vi.mocked(fs.readFile).mockResolvedValue(fileText)
+			mockedReadFile.mockResolvedValue(Buffer.from(fileText, "utf8"))
 			const strategy = new MultiSearchReplaceDiffStrategy()
 			const realResult = await strategy.applyDiff(fileText, diff)
 			// Synthetic details exercise the tool's own guard against forwarding strategy detail objects.
