@@ -2539,10 +2539,11 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
 			// The saves of the new values go through; so does nothing that restores an old one (the storage stalls), and
 			// the later setting never settles either.
+			const stalled: Array<() => void> = []
 			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
 				(k: string, v: unknown): Promise<void> =>
 					k === "timeFormat" || v === 100 || v === 12
-						? new Promise<void>(() => {})
+						? new Promise<void>((resolve) => stalled.push(resolve))
 						: (real(k as never, v as never) as Promise<void>),
 			)
 
@@ -2553,6 +2554,11 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 
 			await failed
 			expect(resultsOf()).toEqual([expect.objectContaining({ success: false })]) // told after 30 s, not 45
+
+			// The storage recovers: what was stalled settles, so nothing is left in the write lines for the next test.
+			for (const settle of stalled) settle()
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(0)
 		})
 
 		it("keeps nothing for repeated saves that time out", async () => {
