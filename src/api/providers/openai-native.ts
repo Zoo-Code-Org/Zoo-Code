@@ -762,7 +762,23 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			})
 
 			if (!response.ok) {
-				const errorText = await response.text()
+				// The status is already in hand, so a body read that fails must not lose it:
+				// retry, backoff and the UI read the numeric status, not the message text. A
+				// cancelled read is the other case: it keeps surfacing as the contract
+				// AbortError through the catch below. A failed-but-not-cancelled read keeps the
+				// status by carrying on with the reason as the body text, which the parse below
+				// turns into error details so the friendly status message and the
+				// status-carrying throw at the end of this block still apply.
+				let errorText: string
+				try {
+					errorText = await response.text()
+				} catch (bodyReadError) {
+					if (bodyReadError instanceof Error && bodyReadError.name === "AbortError") {
+						throw bodyReadError
+					}
+					const reason = bodyReadError instanceof Error ? bodyReadError.message : String(bodyReadError)
+					errorText = `the error response body could not be read (${reason})`
+				}
 
 				let errorMessage = `OpenAI Responses API request failed (${response.status})`
 				let errorDetails = ""

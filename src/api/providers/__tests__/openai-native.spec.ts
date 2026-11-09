@@ -519,7 +519,7 @@ describe("OpenAiNativeHandler", () => {
 			// The abort must land mid-request, so poll the observable that the request
 			// exists - the fetch double having been called - instead of a wall-clock delay.
 			// The explicit timeout is what makes a condition that never fires fail the test.
-			await vi.waitFor(() => mockFetch.mock.calls.length > 0, { timeout: 2000, interval: 25 })
+			await vi.waitUntil(() => mockFetch.mock.calls.length > 0, { timeout: 2000, interval: 25 })
 			controller.abort()
 
 			await expect(collected).rejects.toMatchObject({ name: "AbortError" })
@@ -547,7 +547,7 @@ describe("OpenAiNativeHandler", () => {
 			const firstCollected = collectStream(firstStream)
 			// Observable: the first request has registered an in-flight stream. The
 			// explicit timeout keeps a condition that never fires from idling to green.
-			await vi.waitFor(() => openStreams.length >= 1, { timeout: 2000, interval: 25 })
+			await vi.waitUntil(() => openStreams.length >= 1, { timeout: 2000, interval: 25 })
 			requireController(0).enqueue(
 				new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
 			)
@@ -566,7 +566,7 @@ describe("OpenAiNativeHandler", () => {
 			const secondCollected = collectStream(secondStream)
 			// Observable: both requests are in flight; the length assertion stays because
 			// polling replaces the sleep, not the assertion.
-			await vi.waitFor(() => openStreams.length >= 2, { timeout: 2000, interval: 25 })
+			await vi.waitUntil(() => openStreams.length >= 2, { timeout: 2000, interval: 25 })
 			expect(openStreams).toHaveLength(2)
 
 			// Aborting the FIRST request's signal must not leak into the second request.
@@ -1268,7 +1268,7 @@ describe("OpenAiNativeHandler", () => {
 				// Abort first, then let the stream fail: the failure is the real outcome.
 				// Observable: the reader has entered pull and is parked on the gate. Polling it, then
 				// flushing one macrotask so the pending read is registered, replaces the fixed 10ms sleep.
-				await vi.waitFor(() => pullStarted, { timeout: 2000, interval: 10 })
+				await vi.waitUntil(() => pullStarted, { timeout: 2000, interval: 10 })
 				await flushMacrotasks()
 				controller.abort()
 				releaseStream()
@@ -1537,6 +1537,9 @@ describe("OpenAiNativeHandler", () => {
 				// from error reporting just because the abort won the race.
 				expect(mockCaptureException).toHaveBeenCalledTimes(1)
 				expect(mockCaptureException).toHaveBeenCalledWith(expect.any(ApiProviderError))
+				// The attribution is the reason for capturing it: retry and the error surface read
+				// operation, so an empty or missing one has to fail here rather than pass quietly.
+				expect(mockCaptureException.mock.calls[0]?.[0]).toMatchObject({ operation: "createMessage" })
 			})
 
 			it("should keep a streaming request's controller when completePrompt uses its own signal", async () => {
@@ -2047,7 +2050,7 @@ describe("OpenAiNativeHandler", () => {
 			const pending = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
 			// Observable: the SDK call has been issued with the request signal, so the abort now
 			// arrives mid-request instead of after a wall-clock delay.
-			await vi.waitFor(() => sdkRequestStarted, { timeout: 2000, interval: 25 })
+			await vi.waitUntil(() => sdkRequestStarted, { timeout: 2000, interval: 25 })
 			controller.abort()
 
 			await expect(pending).rejects.toMatchObject({
@@ -3246,6 +3249,64 @@ describe("OpenAiNativeHandler", () => {
 
 		beforeEach(() => {
 			mockCaptureException.mockClear()
+		})
+		it("should keep the numeric status when the error-response body read fails on a 429", async () => {
+			// The 429 headers are already in hand and only the body read fails. A connection
+			// failure that drops the status would leave retry and backoff without the number
+			// they act on, so the synthesized failure has to carry it.
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: false,
+				status: 429,
+				statusText: "Too Many Requests",
+				text: () => Promise.reject(new Error("socket hang up while reading the error body")),
+			})
+			global.fetch = mockFetch as typeof fetch
+
+			// Mock SDK to fail so it falls back to fetch
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			handler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			const error = await collectStream(handler.createMessage(errorSystemPrompt, errorMessages)).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+
+			expect(error).toMatchObject({ status: 429 })
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toContain("Rate limit exceeded")
+			expect((error as Error).message).toContain("could not be read")
+			// Captured once, as every other terminal failure is: the read failure must not
+			// double-report the request just because the body never arrived.
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(mockCaptureException).toHaveBeenCalledWith(expect.any(ApiProviderError))
+			deleteGlobalFetch()
+		})
+
+		it("should keep the contract AbortError when the caller aborts during the error body read", async () => {
+			// The cancellation is the caller's act, not a failed read: it must still surface as
+			// the AbortError the abort contract promises, with no status invented for it.
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: false,
+				status: 503,
+				statusText: "Service Unavailable",
+				text: () =>
+					Promise.reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" })),
+			})
+			global.fetch = mockFetch as typeof fetch
+
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			handler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-5.1" })
+
+			const error = await collectStream(handler.createMessage(errorSystemPrompt, errorMessages)).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as { status?: unknown }).status).toBeUndefined()
+			deleteGlobalFetch()
 		})
 
 		it("should capture telemetry on createMessage error", async () => {
