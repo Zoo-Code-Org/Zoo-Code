@@ -2183,6 +2183,7 @@ export class ClineProvider
 	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
 		const localId = this.localModeConfigIds.get(mode)
 		const initialIds = localId === undefined ? await this.initialModeConfigIds : undefined
+		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode)
 		if (localId === undefined && initialIds === undefined) {
 			return this.providerSettingsManager.getModeConfigId(mode)
 		}
@@ -2190,6 +2191,8 @@ export class ClineProvider
 		if (cachedId === undefined) return undefined
 
 		const profiles = await this.providerSettingsManager.listConfig()
+		// A profile selection may have changed while either asynchronous read was pending.
+		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode)
 		if (profiles.some(({ id }) => id === cachedId)) return cachedId
 
 		if (localId !== undefined) this.localModeConfigIds.delete(mode)

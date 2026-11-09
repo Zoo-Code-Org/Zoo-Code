@@ -4557,6 +4557,42 @@ describe("ClineProvider", () => {
 			expect(provider["localModeConfigIds"].has("code")).toBe(false)
 		})
 
+		it.each(["removed-id", "existing-id"])(
+			"preserves a newer local choice while validating %s",
+			async (previousId) => {
+				provider["initialModeConfigIds"] = Promise.resolve({ code: "opened-with-id" })
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				const sharedLookup = vi
+					.spyOn(provider.providerSettingsManager, "getModeConfigId")
+					.mockResolvedValue("other-window-id")
+				await provider.setModeConfig("code", previousId)
+				let releaseLookup = () => {}
+				const pendingLookup = new Promise<void>((resolve) => {
+					releaseLookup = resolve
+				})
+				const profiles = [
+					{ name: "existing", id: "existing-id" },
+					{ name: "new", id: "new-id" },
+				]
+				const listConfig = vi.spyOn(provider.providerSettingsManager, "listConfig")
+				listConfig
+					.mockImplementationOnce(async () => {
+						await pendingLookup
+						return profiles
+					})
+					.mockResolvedValue(profiles)
+
+				const lookup = provider["getModeConfigId"]("code")
+				expect(listConfig).toHaveBeenCalledOnce()
+				await provider.setModeConfig("code", "new-id")
+				releaseLookup()
+
+				await expect(lookup).resolves.toBe("new-id")
+				await expect(provider["getModeConfigId"]("code")).resolves.toBe("new-id")
+				expect(sharedLookup).not.toHaveBeenCalled()
+			},
+		)
+
 		it("restores the previous local choice when the shared write fails", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({})
 			existingProfiles("first-id", "second-id")
