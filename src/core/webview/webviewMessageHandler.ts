@@ -802,6 +802,11 @@ export const webviewMessageHandler = async (
 					}
 				}
 
+				// A save that has appearance values keeps their records (and the chance to put them back) until it is over,
+				// whichever order its settings come in: a store, or an MCP change, that does not finish must not hold it
+				// for good, so each is waited for for the usual time. Other saves wait as they always did.
+				const boundsStores = Object.keys(message.updatedSettings).some(isAppearanceSetting)
+
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
@@ -924,9 +929,9 @@ export const webviewMessageHandler = async (
 							// Applied one at a time, and a retried save joins the change that is under way: the hub removes a
 							// connection only after its close has finished, so a second disconnect would close it again.
 							const change = changeMcpEnabled(mcpHub, newValue as boolean)
-							// With appearance writes in flight, a change that does not finish must not keep their records for
+							// In a save with appearance values, a change that does not finish must not keep their records for
 							// good: the save fails after the usual time, and the change goes on (it is not repeated).
-							await (written.length > 0 ? withinSettingWriteTime(change, key) : change)
+							await (boundsStores ? withinSettingWriteTime(change, key) : change)
 						}
 					} else if (key === "experiments") {
 						if (!value) {
@@ -951,9 +956,9 @@ export const webviewMessageHandler = async (
 					}
 
 					const store = provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
-					// With appearance writes in flight, a store that never settles must not keep their records for good: the
+					// In a save with appearance values, a store that never settles must not keep their records for good: the
 					// save fails after the usual time, and they are put back below. (The store goes on; it cannot be cancelled.)
-					await (written.length > 0 ? withinSettingWriteTime(store, key) : store)
+					await (boundsStores ? withinSettingWriteTime(store, key) : store)
 				}
 
 				finishSettingWrites(written)

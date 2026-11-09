@@ -4,10 +4,13 @@ import { afterEach, describe, it, expect, vi } from "vitest"
 import { UISettings } from "../UISettings"
 import { telemetryClient } from "@/utils/TelemetryClient"
 import { APPEARANCE_SETTINGS, applyAppearanceVariables, type AppearanceKey } from "@/utils/appearance"
+import { withVscodeEditorFontSize } from "./vscodeEditorFontSize"
 
 vi.mock("@/utils/TelemetryClient", () => ({
 	telemetryClient: { capture: vi.fn() },
 }))
+
+withVscodeEditorFontSize(12)
 
 describe("UISettings", () => {
 	const defaultProps = {
@@ -185,26 +188,29 @@ describe("UISettings", () => {
 		it("renders all four size controls, in the design order, with defaults", () => {
 			const { getByTestId } = render(<UISettings {...defaultProps} />)
 			const inputs = keys.map((k) => (getByTestId(`appearance-${k}-input`) as HTMLInputElement).value)
-			expect(inputs).toEqual(["100", "12", "13", "100"])
+			// The terminal follows the editor font size of VS Code (12px in the test setup); the editor has no text to follow.
+			expect(inputs).toEqual(["100", "12", "12", "100"])
 		})
 
 		it("shows, for the unset sizes, what the UI renders, and the first click steps from it", () => {
 			const root = document.documentElement
+			const editorFontSizeBefore = root.style.getPropertyValue("--vscode-editor-font-size")
 			root.style.setProperty("--vscode-font-size", "14px")
 			root.style.setProperty("--vscode-editor-font-size", "16px")
 			try {
 				const { getByTestId } = render(<UISettings {...defaultProps} chatFontSize={20} />)
 
-				// The terminal follows the editor size of VS Code; the editor is 0.95 of the chat text.
+				// The terminal follows the editor size of VS Code; the editor is what a code block renders: 0.95em for its
+				// `pre` and 0.95em again for the `code` inside it, of the chat text (20 × 0.9025 = 18).
 				expect((getByTestId("appearance-terminalFontSize-input") as HTMLInputElement).value).toBe("16")
-				expect((getByTestId("appearance-editorFontSize-input") as HTMLInputElement).value).toBe("19")
+				expect((getByTestId("appearance-editorFontSize-input") as HTMLInputElement).value).toBe("18")
 				fireEvent.click(getByTestId("appearance-terminalFontSize-increment"))
 				expect(defaultProps.setCachedStateField).toHaveBeenLastCalledWith("terminalFontSize", 17)
 				fireEvent.click(getByTestId("appearance-editorFontSize-increment"))
-				expect(defaultProps.setCachedStateField).toHaveBeenLastCalledWith("editorFontSize", 20)
+				expect(defaultProps.setCachedStateField).toHaveBeenLastCalledWith("editorFontSize", 19)
 			} finally {
 				root.style.removeProperty("--vscode-font-size")
-				root.style.removeProperty("--vscode-editor-font-size")
+				root.style.setProperty("--vscode-editor-font-size", editorFontSizeBefore)
 			}
 		})
 
@@ -227,7 +233,7 @@ describe("UISettings", () => {
 		it.each([
 			["interfaceFontScale", 105],
 			["terminalFontSize", 13],
-			["editorFontSize", 14],
+			["editorFontSize", 13],
 			["spacingScale", 105],
 		] as const)("stores %s as %s when incremented from the default", (key, expected) => {
 			const setCachedStateField = vi.fn()
@@ -273,7 +279,7 @@ describe("UISettings", () => {
 			expect(telemetryClient.capture).toHaveBeenCalledTimes(1)
 			expect(telemetryClient.capture).toHaveBeenCalledWith("ui_settings_appearance_changed", {
 				key: "editorFontSize",
-				value: 14,
+				value: 13,
 			})
 		})
 

@@ -1,7 +1,13 @@
 import type { CSSProperties } from "react"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
-import { APPEARANCE_SETTINGS, clampAppearance, isChatFontSize, type AppearanceKey } from "@/utils/appearance"
+import {
+	APPEARANCE_SETTINGS,
+	clampAppearance,
+	EDITOR_DEFAULT_EM,
+	isChatFontSize,
+	type AppearanceKey,
+} from "@/utils/appearance"
 
 interface AppearancePreviewProps {
 	values: Partial<Record<AppearanceKey, number | undefined>>
@@ -78,7 +84,7 @@ export const AppearancePreview = ({ values, chatFontSize }: AppearancePreviewPro
 				<pre
 					className="bg-vscode-textCodeBlock-background mb-2"
 					// Same fallback as CodeBlock: relative to the chat text when no editor size is set.
-					style={{ ...mono, fontSize: "var(--zoo-editor-font-size, 0.95em)" }}>
+					style={{ ...mono, fontSize: `var(--zoo-editor-font-size, ${EDITOR_DEFAULT_EM}em)` }}>
 					{'const isLoading = status === "saving"'}
 				</pre>
 

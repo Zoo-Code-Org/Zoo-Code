@@ -8,6 +8,7 @@ import { vscode } from "@src/utils/vscode"
 
 import SettingsView from "../SettingsView"
 import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
+import { withVscodeEditorFontSize } from "./vscodeEditorFontSize"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 vi.mock("@/utils/TelemetryClient", () => ({ telemetryClient: { capture: vi.fn() } }))
@@ -25,6 +26,8 @@ const hostPosts = (state: Record<string, unknown>) =>
 
 const input = (key: string) => screen.getByTestId(`appearance-${key}-input`) as HTMLInputElement
 const thinkingCheckbox = () => screen.getByTestId("collapse-thinking-checkbox") as HTMLInputElement
+
+withVscodeEditorFontSize(12)
 
 describe("SettingsView – the form after an import that failed part of the way", () => {
 	it("takes the values that the import stored, and keeps the edit made to another setting", async () => {
@@ -291,6 +294,24 @@ describe("SettingsView – the form after an import that failed part of the way"
 			lateRefresh()
 
 			expect(input("terminalFontSize").value).toBe("17")
+		})
+
+		it("treats a later, ordinary refresh as ordinary: the host says it is not late, after one that was", async () => {
+			await answeredWithFailedValue()
+			lateRefresh() // the late refresh: the form took 14
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 15: an edit
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+			// Another import that failed part of the way: a refresh of its own, with the flag sent as false.
+			hostPosts({
+				terminalFontSize: 20,
+				settingsImportRefreshedAt: 3_000,
+				settingsImportStoredKeys: ["terminalFontSize"],
+				settingsImportRefreshIsLate: false,
+			})
+
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("20")) // replaced, as an ordinary refresh does
 		})
 
 		it("is not what an ordinary refresh does: the same edit is replaced by the stored value there", async () => {

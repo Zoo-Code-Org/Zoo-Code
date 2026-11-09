@@ -2614,6 +2614,28 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 				await third
 			})
 
+			it("fails and retries the same way when the switch comes before the appearance values, as the settings view sends them", async () => {
+				const { hub, releases } = stalledHub()
+				const failed = (value: Promise<unknown>) =>
+					expect(value).rejects.toThrow("did not finish in 15 seconds")
+
+				const first = failed(save({ mcpEnabled: false, interfaceFontScale: 120 }, "save-1"))
+				await vi.advanceTimersByTimeAsync(15_000)
+				await first
+				expect(stored.interfaceFontScale).toBe(100) // never written: the switch came first
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+
+				await vi.advanceTimersByTimeAsync(5_000)
+				const retry = failed(save({ mcpEnabled: false, interfaceFontScale: 120 }, "save-2"))
+				await vi.advanceTimersByTimeAsync(15_000)
+				await retry
+
+				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1) // the retry joined the change that is under way
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				expect(vi.getTimerCount()).toBe(0)
+				releases[0]()
+			})
+
 			it("does not bound or repeat anything for a save without appearance values: it waits for the one change", async () => {
 				const { hub } = stalledHub()
 				let finished = false

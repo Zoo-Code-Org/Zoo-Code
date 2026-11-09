@@ -6,12 +6,15 @@ import { renderWithExtensionState } from "@/utils/test-utils"
 import * as latestRefHook from "@src/hooks/useLatestRef"
 
 import SettingsView from "../SettingsView"
+import { withVscodeEditorFontSize } from "./vscodeEditorFontSize"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 vi.mock("@/utils/TelemetryClient", () => ({ telemetryClient: { capture: vi.fn() } }))
 
 // What a save result is compared with is read from refs that follow the latest commit (see `useLatestRef`): the view must
 // keep its edited state and its edit count in them.
+withVscodeEditorFontSize(12)
+
 describe("SettingsView – the values that a save result is compared with", () => {
 	it("keeps the edited form and the edit count in refs that follow the commit", async () => {
 		const useLatestRef = vi.spyOn(latestRefHook, "useLatestRef")

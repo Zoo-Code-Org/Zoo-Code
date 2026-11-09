@@ -2988,7 +2988,9 @@ export class ClineProvider
 		if (importRefresh) {
 			state.settingsImportRefreshedAt = importRefresh.at
 			state.settingsImportStoredKeys = importRefresh.storedKeys
-			state.settingsImportRefreshIsLate = importRefresh.late || undefined
+			// Always sent as a boolean: the webview keeps what an earlier state said of a key that a state leaves out, so a
+			// refresh that is not late has to say so after one that was.
+			state.settingsImportRefreshIsLate = importRefresh.late
 		}
 		await this.postMessageToWebview({ type: "state", state })
 	}

@@ -4116,7 +4116,7 @@ describe("ClineProvider", () => {
 				settingsImportRefreshedAt: 1_700_000_000_000,
 				settingsImportStoredKeys: ["terminalFontSize", "mode"],
 			})
-			expect(postedState().settingsImportRefreshIsLate).toBeUndefined()
+			expect(postedState().settingsImportRefreshIsLate).toBe(false)
 		})
 
 		test("marks a refresh that follows a late rollback as late", async () => {
@@ -4125,6 +4125,19 @@ describe("ClineProvider", () => {
 			await provider.postStateToWebview({ at: 1, storedKeys: ["terminalFontSize"], late: true })
 
 			expect(postedState().settingsImportRefreshIsLate).toBe(true)
+		})
+
+		test("says that a refresh is not late after one that was, in the sequence of messages the webview gets", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.postStateToWebview({ at: 2, storedKeys: ["terminalFontSize"], late: true })
+			await provider.postStateToWebview({ at: 3, storedKeys: ["mode"], late: false })
+
+			const [late, ordinary] = postedStates()
+			expect(late.settingsImportRefreshIsLate).toBe(true)
+			// An absent key would leave `true` in a webview that keeps what an earlier state said: it is sent as false.
+			expect(ordinary).toHaveProperty("settingsImportRefreshIsLate", false)
+			expect(ordinary.settingsImportRefreshedAt).toBe(3)
 		})
 
 		test("leaves the marks out of every other state, also the one that follows a marked one", async () => {
@@ -4166,7 +4179,7 @@ describe("ClineProvider", () => {
 				settingsImportRefreshedAt: 1,
 				settingsImportStoredKeys: ["mode"],
 			})
-			expect(firstPosted.settingsImportRefreshIsLate).toBeUndefined()
+			expect(firstPosted.settingsImportRefreshIsLate).toBe(false)
 			expect(postedStates()).toHaveLength(2)
 		})
 	})

@@ -32,7 +32,8 @@ export const APPEARANCE_SETTINGS = {
 		min: 8,
 		max: 32,
 		step: 1,
-		fallback: 12,
+		// What the terminal renders when VS Code gives no editor font size (`TerminalOutput`: 13px).
+		fallback: 13,
 		unit: "px",
 		cssVar: "--zoo-terminal-font-size",
 		toCss: (v) => `${v}px`,
@@ -41,7 +42,8 @@ export const APPEARANCE_SETTINGS = {
 		min: 8,
 		max: 32,
 		step: 1,
-		fallback: 13,
+		// What a code block renders when nothing is known of the text it follows: 13px text, twice 0.95em of it.
+		fallback: 12,
 		unit: "px",
 		cssVar: "--zoo-editor-font-size",
 		toCss: (v) => `${v}px`,
@@ -83,8 +85,12 @@ export interface AppearanceDefaultsContext {
 	interfaceFontScale?: number
 }
 
-/** The factor of the chat text that code blocks use while no editor font size is set (`CodeBlock`, `AppearancePreview`). */
-const EDITOR_DEFAULT_EM = 0.95
+/**
+ * The factor of the chat text that code blocks render at while no editor font size is set. `CodeBlock` gives both its
+ * `pre` and the `code` inside it 0.95em, and the second is relative to the first: 0.95 × 0.95. (`AppearancePreview`,
+ * which has one element for the sample, uses the same factor.)
+ */
+export const EDITOR_DEFAULT_EM = 0.9025
 
 /**
  * The size, in the unit of the setting, that the UI renders while the setting is unset: what the stepper shows and

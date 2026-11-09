@@ -125,14 +125,17 @@ describe("renderedAppearanceDefault", () => {
 		[
 			"the chat text, with the interface scale",
 			{ chatFontSize: 20, interfaceFontScale: 100, vscodeFontSize: 13 },
-			19,
+			18,
 		],
 		["VS Code's text when no chat size is set", { vscodeFontSize: 14 }, 13],
-		["the scaled chat text", { chatFontSize: 20, interfaceFontScale: 150 }, 29],
+		["the scaled chat text", { chatFontSize: 20, interfaceFontScale: 150 }, 27],
 		["a chat size the host would not accept is not used", { chatFontSize: 99, vscodeFontSize: 14 }, 13],
-	])("gives the editor the 0.95 of %s", (_name, context, expected) => {
-		expect(renderedAppearanceDefault("editorFontSize", context)).toBe(expected)
-	})
+	])(
+		"gives the editor what a code block renders of %s: 0.95em for its pre, and 0.95em of that for the code in it",
+		(_name, context, expected) => {
+			expect(renderedAppearanceDefault("editorFontSize", context)).toBe(expected)
+		},
+	)
 
 	it("stays inside the range of the setting", () => {
 		expect(renderedAppearanceDefault("terminalFontSize", { vscodeEditorFontSize: 200 })).toBe(32)
@@ -141,8 +144,8 @@ describe("renderedAppearanceDefault", () => {
 	})
 
 	it.each([
-		["terminalFontSize", 12],
-		["editorFontSize", 13],
+		["terminalFontSize", 13], // what the terminal renders with no editor font size from VS Code
+		["editorFontSize", 12], // 13px text, twice 0.95em
 		["interfaceFontScale", 100],
 		["spacingScale", 100],
 	] as const)("falls back to the fixed value of %s when what it follows is not known", (key, fallback) => {

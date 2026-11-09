@@ -136,9 +136,9 @@ describe("AppearancePreview", () => {
 		})
 	})
 
-	it("sizes the editor sample like the live code block when no editor size is set (0.95em of the chat text)", () => {
+	it("sizes the editor sample like the live code block when no editor size is set (0.95em of 0.95em of the chat text: its pre and the code inside it)", () => {
 		const { container } = render(<AppearancePreview values={{}} />)
 		const sample = container.querySelector("pre")!
-		expect(sample.style.fontSize).toBe("var(--zoo-editor-font-size, 0.95em)")
+		expect(sample.style.fontSize).toBe("var(--zoo-editor-font-size, 0.9025em)")
 	})
 })

@@ -13,6 +13,7 @@ import SettingsView, {
 	type SettingsViewRef,
 } from "../SettingsView"
 import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
+import { withVscodeEditorFontSize } from "./vscodeEditorFontSize"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
@@ -51,6 +52,8 @@ const lastUpdatedSettings = () =>
 	{}
 
 const appearanceKeys = ["interfaceFontScale", "terminalFontSize", "editorFontSize", "spacingScale"] as const
+
+withVscodeEditorFontSize(12)
 
 describe("SettingsView – save acknowledgement", () => {
 	beforeEach(() => postMessage.mockClear())

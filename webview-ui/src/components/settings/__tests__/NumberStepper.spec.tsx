@@ -5,7 +5,8 @@ import { APPEARANCE_SETTINGS } from "@/utils/appearance"
 
 import { NumberStepper } from "../NumberStepper"
 
-const setting = APPEARANCE_SETTINGS.terminalFontSize // 8–32 px, step 1, fallback 12
+// A stepper of 8–32 px, step 1, that shows 12 while it is unset (the component does not depend on which setting it is).
+const setting = { ...APPEARANCE_SETTINGS.terminalFontSize, fallback: 12 }
 
 const setup = (props: Partial<React.ComponentProps<typeof NumberStepper>> = {}) => {
 	const onChange = vi.fn()
