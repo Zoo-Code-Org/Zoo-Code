@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Punto de control después de cada escritura de archivo",
-			"description": "Registra una instantánea de punto de control después de cada operación de escritura exitosa; un parche de varios archivos produce un único punto de control."
+			"description": "Registra un punto de control tras cada escritura correcta de las herramientas write_to_file, edit_file o apply_patch del agente; un parche de varios archivos produce un único punto de control. Guardar un archivo desde el editor no registra ninguno."
 		}
 	},
 	"notifications": {

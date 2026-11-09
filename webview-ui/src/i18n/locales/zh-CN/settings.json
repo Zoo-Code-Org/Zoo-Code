@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "每次文件写入后创建存档点",
-			"description": "在每次成功写入操作后记录检查点快照；多文件补丁只会生成一个检查点。"
+			"description": "在代理的 write_to_file、edit_file 或 apply_patch 工具每次成功写入后记录一个检查点；涉及多个文件的补丁只产生一个检查点。在编辑器中保存文件不会记录检查点。"
 		}
 	},
 	"notifications": {

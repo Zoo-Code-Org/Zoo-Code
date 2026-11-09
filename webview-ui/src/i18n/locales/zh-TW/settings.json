@@ -725,7 +725,7 @@
 		},
 		"perWrite": {
 			"label": "每次檔案寫入後建立檢查點",
-			"description": "在每次成功的寫入操作後記錄檢查點快照；多檔案修補程式只會產生一個檢查點。"
+			"description": "在代理的 write_to_file、edit_file 或 apply_patch 工具每次成功寫入後記錄一個檢查點；涉及多個檔案的補丁只產生一個檢查點。在編輯器中儲存檔案不會記錄檢查點。"
 		}
 	},
 	"notifications": {

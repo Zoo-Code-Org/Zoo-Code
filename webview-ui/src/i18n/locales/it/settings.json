@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Punto di controllo dopo ogni scrittura del file",
-			"description": "Registra un’istantanea del punto di controllo dopo ogni operazione di scrittura riuscita; una patch con più file produce un unico punto di controllo."
+			"description": "Registra un checkpoint dopo ogni scrittura riuscita degli strumenti write_to_file, edit_file o apply_patch dell'agente; una patch con più file produce un solo checkpoint. Salvare un file dall'editor non ne registra uno."
 		}
 	},
 	"notifications": {

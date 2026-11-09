@@ -224,24 +224,26 @@ async function checkGitInstallation(
 	}
 }
 
-// Serialize checkpoint saves per task. saveCheckpoint() runs stageAll + commit, so two
-// concurrent saves for the same task (for example the task-start baseline racing the first
-// per-write save after the baseline timeout) can stage each other's writes or interleave
-// commits. A per-task promise queue makes every save wait for the previous one, including
-// a baseline that is still running.
-const checkpointSaveQueues = new Map<string, Promise<unknown>>()
+// Serialize checkpoint work per task. saveCheckpoint() runs stageAll + commit and
+// restoreCheckpoint() resets the workspace through the same shadow git, so two concurrent
+// operations for the same task (for example the task-start baseline racing the first
+// per-write save after the baseline timeout, or a restore while a per-write save is still
+// queued) can stage each other's writes or interleave commits. A per-task promise queue
+// makes every save and every restore wait for the previous one, including a baseline that
+// is still running.
+const checkpointWorkQueues = new Map<string, Promise<unknown>>()
 
-function enqueueCheckpointSave<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
-	const previous = checkpointSaveQueues.get(taskId) ?? Promise.resolve()
+function enqueueCheckpointWork<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
+	const previous = checkpointWorkQueues.get(taskId) ?? Promise.resolve()
 	const next = previous.then(operation, operation)
 	const tail = next.then(
 		() => undefined,
 		() => undefined,
 	)
-	checkpointSaveQueues.set(taskId, tail)
+	checkpointWorkQueues.set(taskId, tail)
 	void tail.finally(() => {
-		if (checkpointSaveQueues.get(taskId) === tail) {
-			checkpointSaveQueues.delete(taskId)
+		if (checkpointWorkQueues.get(taskId) === tail) {
+			checkpointWorkQueues.delete(taskId)
 		}
 	})
 	return next
@@ -256,9 +258,9 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
-	// Start the checkpoint process in the background, queued behind any save already
-	// running for this task so stageAll + commit never overlap.
-	return enqueueCheckpointSave(task.taskId, () =>
+	// Start the checkpoint process in the background, queued behind any checkpoint work
+	// already running for this task so stageAll + commit never overlap.
+	return enqueueCheckpointWork(task.taskId, () =>
 		service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage }),
 	).catch((err) => {
 		console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
@@ -294,7 +296,11 @@ export async function checkpointRestore(
 	const provider = task.providerRef.deref()
 
 	try {
-		await service.restoreCheckpoint(commitHash)
+		// The same per-task lock the saves use, in both directions: a restore resets the
+		// workspace through shadow git, so a queued save must not stage and commit while it
+		// is running (that save would record the restored bytes and drop the write's own
+		// checkpoint), and a restore requested during a save waits for that save to settle.
+		await enqueueCheckpointWork(task.taskId, () => service.restoreCheckpoint(commitHash))
 		TelemetryService.instance.captureCheckpointRestored(task.taskId)
 		await provider?.postMessageToWebview({ type: "currentCheckpointUpdated", text: commitHash })
 

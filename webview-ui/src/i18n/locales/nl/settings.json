@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Checkpoint na elke bestandsschrijving",
-			"description": "Leg na elke succesvolle schrijfbewerking een checkpointmomentopname vast; een patch met meerdere bestanden produceert één checkpoint."
+			"description": "Leg na elke succesvolle schrijfactie van de write_to_file-, edit_file- of apply_patch-tool van de agent een checkpoint vast; een patch met meerdere bestanden levert één checkpoint op. Een bestand opslaan vanuit de editor doet dat niet."
 		}
 	},
 	"notifications": {

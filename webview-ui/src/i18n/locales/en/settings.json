@@ -771,7 +771,7 @@
 		},
 		"perWrite": {
 			"label": "Checkpoint after each file write",
-			"description": "Record a checkpoint snapshot after each successful write operation; a multi-file patch produces a single checkpoint."
+			"description": "Record a checkpoint after each successful write by the agent's write_to_file, edit_file or apply_patch tools; a multi-file patch produces a single checkpoint. Saving a file from the editor does not record one."
 		}
 	},
 	"notifications": {

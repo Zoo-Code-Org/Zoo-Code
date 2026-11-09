@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Checkpoint setelah setiap penulisan file",
-			"description": "Rekam snapshot titik pemeriksaan setelah setiap operasi tulis berhasil; patch multi-file menghasilkan satu titik pemeriksaan."
+			"description": "Rekam checkpoint setelah setiap penulisan berhasil oleh perkakas write_to_file, edit_file, atau apply_patch agen; patch multi-berkas menghasilkan satu checkpoint. Menyimpan berkas dari editor tidak merekam checkpoint."
 		}
 	},
 	"notifications": {

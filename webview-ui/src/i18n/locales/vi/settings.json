@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Điểm kiểm tra sau mỗi lần ghi file",
-			"description": "Ghi ảnh chụp điểm kiểm tra sau mỗi thao tác ghi thành công; một vá nhiều tệp chỉ tạo một điểm kiểm tra."
+			"description": "Ghi điểm kiểm tra sau mỗi lần các công cụ write_to_file, edit_file hoặc apply_patch của tác nhân ghi tệp thành công; một patch nhiều tệp chỉ tạo một điểm kiểm tra duy nhất. Lưu tệp từ trình soạn thảo không ghi điểm kiểm tra."
 		}
 	},
 	"notifications": {

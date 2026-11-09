@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Kontrollpunkt nach jedem Dateischreibvorgang",
-			"description": "Erstellt nach jedem erfolgreichen Schreibvorgang einen Checkpoint-Schnappschuss; ein Patch mit mehreren Dateien erzeugt genau einen Checkpoint."
+			"description": "Erstellt nach jedem erfolgreichen Schreiben der Agent-Tools write_to_file, edit_file oder apply_patch einen Kontrollpunkt; ein Patch mit mehreren Dateien erzeugt einen einzigen Kontrollpunkt. Eine Datei im Editor zu speichern erzeugt keinen."
 		}
 	},
 	"notifications": {

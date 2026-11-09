@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Ponto de verificação após cada gravação de arquivo",
-			"description": "Registra um snapshot de ponto de verificação após cada operação de gravação bem-sucedida; um patch com vários arquivos produz um único ponto de verificação."
+			"description": "Registra um checkpoint após cada gravação bem-sucedida das ferramentas write_to_file, edit_file ou apply_patch do agente; um patch com vários arquivos produz um único checkpoint. Salvar um arquivo pelo editor não registra nenhum."
 		}
 	},
 	"notifications": {
