@@ -24,6 +24,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import type { Mock } from "vitest"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
+import { t } from "../../../i18n"
 
 function createDeferred<T>() {
 	let resolve!: (value: T) => void
@@ -1686,10 +1687,52 @@ describe("importExport", () => {
 			expect(mockProviderSettingsManager.export).toHaveBeenCalled()
 			expect(mockContextProxy.export).toHaveBeenCalled()
 			expect(fs.mkdir).toHaveBeenCalledWith("/mock/path", { recursive: true })
-			expect(safeWriteJson).toHaveBeenCalled() // safeWriteJson is called, but it will throw
-			// The error is caught and the function exits silently.
-			// Optionally, ensure no error message was shown if that's part of "silent"
-			// expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+		})
+
+		it("notifies the user when the export write is refused, and still swallows the failure", async () => {
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
+				fsPath: "/mock/path/zoo-code-settings.json",
+			})
+
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "test",
+				apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+				migrations: { rateLimitSecondsMigrated: false },
+			})
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+
+			// The refusal this unit introduced: refuseSymlinkTarget is set at the call above, so a
+			// link at the path the user picked makes the writer reject instead of publishing.
+			const refusal = new Error(
+				"safeWriteJson: refusing to write through the symlink now at /mock/path/zoo-code-settings.json (before publication); the payload would land at /elsewhere/settings.json",
+			)
+			;(safeWriteJson as Mock).mockRejectedValueOnce(refusal)
+
+			const showErrorMessageSpy = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// The contract the caller relies on: webviewMessageHandler awaits exportSettings without a
+			// try, so a refusal must not become an unhandled rejection.
+			await expect(
+				exportSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+				}),
+			).resolves.toBeUndefined()
+
+			// The user learns the file did not land, through the same channel and the same key shape the
+			// import route uses. Expected is computed with the same t() call the module makes, so the
+			// assertion holds whether this lane resolves t to the string or to the key.
+			expect(showErrorMessageSpy).toHaveBeenCalledTimes(1)
+			expect(showErrorMessageSpy).toHaveBeenCalledWith(
+				t("common:errors.settings_export_failed", { error: refusal.message }),
+			)
+			expect(showErrorMessageSpy).toHaveBeenCalledWith(expect.stringContaining("errors.settings_export_failed"))
+			expect(showErrorMessageSpy).not.toHaveBeenCalledWith(expect.stringContaining("settings_import_failed"))
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to export settings:", refusal)
+
+			showErrorMessageSpy.mockRestore()
+			consoleErrorSpy.mockRestore()
 		})
 
 		it("should handle errors during directory creation", async () => {

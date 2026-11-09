@@ -47,6 +47,7 @@
 		"cannot_access_path": "Cannot access path {{path}}: {{error}}",
 		"path_outside_workspace": "Path is outside the workspace",
 		"settings_import_failed": "Settings import failed: {{error}}.",
+		"settings_export_failed": "Settings export failed: {{error}}.",
 		"mistake_limit_guidance": "This may indicate a failure in the model's thought process or inability to use a tool properly, which can be mitigated with some user guidance (e.g. \"Try breaking down the task into smaller steps\").",
 		"violated_organization_allowlist": "Failed to run task: the current profile isn't compatible with your organization settings",
 		"condense_failed": "Failed to condense context",
