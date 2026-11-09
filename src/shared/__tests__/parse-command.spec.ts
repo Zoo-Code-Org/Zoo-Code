@@ -2304,7 +2304,9 @@ describe("parseCommand", () => {
 			// and the opener byte behind a backslash-CR-LF run are adjacent to
 			// that shell: each substitution below really executes, so the parser
 			// must open its frame and extract the payload instead of leaving it
-			// masked in the expansion's verbatim host text.
+			// masked in the expansion's verbatim host text. The CR-joined `{` is
+			// the exception the next test covers: the reference shell reads that
+			// join only to reject the whole line, so it fails closed.
 			const inExpansion = parseCommand("echo ${x:-$\\\r\n(printf RAN > ran.marker)}\n")
 			expect(inExpansion.parseError).toBeNull()
 			expect(inExpansion.commands).toEqual([
@@ -2314,9 +2316,12 @@ describe("parseCommand", () => {
 			const topLevel = parseCommand("echo $\\\r\n(printf RAN > ran.marker)\n")
 			expect(topLevel.parseError).toBeNull()
 			expect(topLevel.commands).toEqual(["echo", "printf RAN > ran.marker"])
-			const brace = parseCommand("echo a$\\\r\n{x:-$(printf RAN > ran.marker)}\n")
-			expect(brace.parseError).toBeNull()
-			expect(brace.commands).toEqual(["echo a$\\\r\n{x:-$(printf RAN > ran.marker)}", "printf RAN > ran.marker"])
+			const braceInput = "echo a$\\\r\n{x:-$(printf RAN > ran.marker)}\n"
+			const brace = parseCommand(braceInput)
+			expect(brace.parseError?.quoteType).toBe("ambiguous-opener")
+			// A fail-closed result returns the raw input verbatim as its one
+			// opaque token.
+			expect(brace.commands).toEqual([braceInput])
 			const processSub = parseCommand("echo ${x:-<\\\r\n(printf RAN > ran.marker)}\n")
 			expect(processSub.parseError).toBeNull()
 			expect(processSub.commands).toEqual([
@@ -2329,6 +2334,55 @@ describe("parseCommand", () => {
 			const processOut = parseCommand("echo >\\\r\n(printf RAN > ran.marker)\n")
 			expect(processOut.parseError).toBeNull()
 			expect(processOut.commands).toEqual(["echo", "printf RAN > ran.marker"])
+		})
+
+		it("fails closed on a brace opener its CR continuation joins ambiguously", () => {
+			// A `{` that meets its `$` only through a backslash-CR-LF run is
+			// ambiguous between read models of the executing shell, unlike the
+			// `(` arms the tests above show the reference shell executing. The
+			// scan masks nothing behind the opener and refuses the input
+			// instead, so no allowlisted host word can carry the remainder.
+			const crBrace = "echo $\\\r\n{ touch /tmp/cr.marker; }\n"
+			expect(parseCommand(crBrace).parseError?.quoteType).toBe("ambiguous-opener")
+			expect(parseCommand(crBrace).commands).toEqual([crBrace])
+			// The strict adjacency rule still opens the expansion: the
+			// adjacent and LF-only joins parse as before.
+			expect(parseCommand("echo a$\\\n{x:-$(printf RAN > ran.marker)}\n").parseError).toBeNull()
+			expect(parseCommand("echo ${x:-2}").parseError).toBeNull()
+			// The CR tolerance stays exactly where the reference shell joins:
+			// the `(` arms keep extracting their payloads across CR runs.
+			const crParen = parseCommand("echo $\\\r\n(printf RAN > ran.marker)\n")
+			expect(crParen.parseError).toBeNull()
+			expect(crParen.commands).toEqual(["echo", "printf RAN > ran.marker"])
+		})
+
+		it("fails closed on a CR-joined brace opener nested inside an expansion", () => {
+			// The nested `{` arm applies the same strictness as the top-level
+			// one, so the enclosing expansion cannot mask it away.
+			const nested = "echo ${x:-a$\\\r\n{y:-2}}"
+			expect(parseCommand(nested).parseError?.quoteType).toBe("ambiguous-opener")
+			expect(parseCommand(nested).commands).toEqual([nested])
+			// The LF-only twin still parses: the strictness is scoped to CR.
+			expect(parseCommand("echo ${x:-a$\\\n{y:-2}}").parseError).toBeNull()
+		})
+
+		it("fails closed on a glob word inside a re-scanned substitution payload", () => {
+			// shell-quote reduces a glob word to an inert `glob` token whose
+			// pattern the reconstruction drops, so the re-scanned words would
+			// under-approximate what bash glob-expands. The payload fails
+			// closed on the shared error channel.
+			const input = "echo $(rm* /tmp/victim)"
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError?.quoteType).toBe("payload-glob")
+			expect(commands).toEqual([input])
+			// Payloads without a glob token are unchanged: the accept path.
+			const clean = parseCommand("echo $(printf x /tmp/victim)")
+			expect(clean.parseError).toBeNull()
+			expect(clean.commands).toEqual(["echo", "printf x /tmp/victim"])
+			// The strict rule is scoped to re-scanned payloads: a host-level
+			// glob word stays host text exactly as before, so an ordinary
+			// globbed host line still parses.
+			expect(parseCommand("ls *.ts").parseError).toBeNull()
 		})
 
 		it("keeps a carriage return inside a delimiter word from joining a dollar to a quote byte", () => {

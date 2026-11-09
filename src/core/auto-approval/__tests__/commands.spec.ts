@@ -565,6 +565,35 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		expect(getCommandDecision("cat <<\nEOF\nrm -rf /\n", ["cat"], [])).toBe("auto_approve")
 	})
 
+	it("fails closed on a CR-joined brace opener even when the first word is allowed", () => {
+		// The CR in the continuation makes the joined `${` ambiguous between
+		// read models of the executing shell. The parser refuses the input, so
+		// the allowlisted `echo` must not carry the masked brace group to an
+		// approval. The LF-only join is the accept path: bash really joins it.
+		expect(getCommandDecision("echo $\\\r\n{ touch /tmp/cr.marker; }", ["echo"], [])).toBe("malformed_command")
+		expect(
+			getCommandDecision("echo a$\\\n{x:-$(printf RAN > ran.marker)}", ["echo", "printf RAN > ran.marker"], []),
+		).toBe("auto_approve")
+	})
+
+	it("does not let a glob inside a substitution payload ride the host allowlist", () => {
+		// shell-quote reduces `rm*` to an inert `glob` token, so the re-scanned
+		// payload reads as the bare word `glob`. With that word allowlisted the
+		// whole command used to auto-approve while bash could glob-expand the
+		// pattern onto denylisted binaries. The payload now fails closed, so
+		// neither rule set carries it.
+		expect(getCommandDecision("echo $(rm* /tmp/victim)", ["echo", "glob"], [])).toBe("malformed_command")
+		// Deny side: the denylist no longer sees a bare `glob` word it cannot
+		// match; the input is rejected outright instead of asking on an
+		// under-approximated segment list.
+		expect(getCommandDecision("echo $(rm* /tmp/victim)", ["echo"], ["rm"])).toBe("malformed_command")
+		// Accept path: a payload without a glob token still decomposes and
+		// rides the host allowlist unchanged.
+		expect(getCommandDecision("echo $(printf x /tmp/victim)", ["echo", "printf x /tmp/victim"], [])).toBe(
+			"auto_approve",
+		)
+	})
+
 	it("asks user when a quoted-empty heredoc delimiter lets a later command escape", () => {
 		// bash's quote removal makes `<<''` terminate at the first blank line,
 		// so `rm -rf /` really executes as its own command. Now that the parser

@@ -42,6 +42,14 @@ export type ShellToken = string | { op: string } | { command: string }
  * - `tokenize-failure`: the tokenizer rejected the masked host text. The
  *   masked text carries no active shell syntax, so a rejection means the
  *   scan's decomposition does not account for the input.
+ * - `ambiguous-opener`: a `{` that meets its `$` only through a line
+ *   continuation carrying a carriage return. The read models disagree about
+ *   whether the joined bytes open a parameter expansion, so the scan masks
+ *   nothing and refuses the input instead of guessing.
+ * - `payload-glob`: a glob word inside a re-scanned substitution payload.
+ *   The tokenizer keeps only the literal `glob` for such a word, which
+ *   under-approximates the files bash expands the pattern to. The scan
+ *   refuses the input instead of reconstructing a bare `glob` word.
  */
 export type QuoteType =
 	| "posix-single"
@@ -58,6 +66,8 @@ export type QuoteType =
 	| "nul-byte"
 	| "nesting-too-deep"
 	| "tokenize-failure"
+	| "ambiguous-opener"
+	| "payload-glob"
 
 /**
  * The result of parsing a command string.
@@ -67,9 +77,11 @@ export type QuoteType =
  * command string is malformed. Causes: an unterminated quote or heredoc, an
  * expansion delimiter or arithmetic expression that never closes, a stray
  * closer, a raw NUL byte, substitution nesting beyond the re-scan depth cap,
- * or the shell tokenizer rejecting the masked command. `commands` then holds
- * the raw input as one opaque token. Callers can surface the error without
- * splitting unsafe fragments.
+ * the shell tokenizer rejecting the masked command, a `{` opener joined to
+ * its `$` across a carriage-return continuation, or a glob word inside a
+ * re-scanned substitution payload. `commands` then holds the raw input as one
+ * opaque token. Callers can surface the error without splitting unsafe
+ * fragments.
  *
  * Callers that only need the sub-command list can destructure `{ commands }`.
  * A caller that must tell a parse error from a normal single-command result
@@ -121,9 +133,16 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 		"nul-byte": "NUL byte (control characters cannot appear in a shell command)",
 		"nesting-too-deep": `substitution nesting deeper than ${MAX_PAYLOAD_SCAN_DEPTH} levels`,
 		"tokenize-failure": "shell tokenizer rejected the masked command",
+		"ambiguous-opener":
+			"ambiguous parameter-expansion opener (a carriage return sits in the line continuation before `{`)",
+		"payload-glob": "glob pattern inside a substitution payload (glob expansion cannot be accounted for)",
 	}
 	const problem =
-		quoteType === "stray-closer" || quoteType === "nul-byte" || quoteType === "nesting-too-deep"
+		quoteType === "stray-closer" ||
+		quoteType === "nul-byte" ||
+		quoteType === "nesting-too-deep" ||
+		quoteType === "ambiguous-opener" ||
+		quoteType === "payload-glob"
 			? labels[quoteType]
 			: `unterminated ${labels[quoteType]}`
 	const snippetStart = Math.max(0, openIndex - 10)
@@ -342,6 +361,19 @@ function continuationRunEnd(text: string, from: number): number {
  */
 function openerContinuationRunEnd(text: string, from: number): number {
 	return continuationRunEndFrom(text, from, true)
+}
+
+/**
+ * True when at least one carriage return sits inside the opener continuation
+ * run that spans `from` to `arm`. The `{` opener arm treats such a join as
+ * ambiguous: unlike the `(` arms, whose CR-joined openers the reference shell
+ * demonstrably executes, a CR-joined `${` reads as an expansion under one
+ * model of the shell and as separate syntax under another. That arm fails
+ * closed instead of masking, so an ambiguous opener can never carry an
+ * approval.
+ */
+function openerRunCarriesCR(text: string, from: number, arm: number): boolean {
+	return text.slice(from, arm).includes("\r")
 }
 
 /**
@@ -1659,6 +1691,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 					continue
 				}
 				if (text[arm] === "{") {
+					if (openerRunCarriesCR(text, i + 1, arm)) {
+						// A carriage return inside the continuation leaves the
+						// joined `${` ambiguous between read models of the
+						// executing shell. Masking the region could hide a
+						// brace group one model runs as separate live syntax,
+						// so this opener fails closed instead of masking.
+						return errorAt("ambiguous-opener", i)
+					}
 					frames.push({
 						kind: "parameter-expansion",
 						openIndex: i,
@@ -2162,6 +2202,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 					continue
 				}
 				if (text[arm] === "{") {
+					if (openerRunCarriesCR(text, i + 1, arm)) {
+						// Same fail-closed rule as the `{` arm of the body
+						// walk: a CR in the continuation makes the joined
+						// opener ambiguous, so the scan refuses the input
+						// instead of masking the region behind a frame.
+						outcome.error = errorAt("ambiguous-opener", i)
+						return outcome
+					}
 					stack.push({
 						kind: "parameter-expansion",
 						openIndex: i,
@@ -2454,6 +2502,14 @@ function scanShellSyntax(text: string): ScanOutcome {
 				continue
 			}
 			if (text[arm] === "{") {
+				if (openerRunCarriesCR(text, i + 1, arm)) {
+					// Same fail-closed rule as the other `{` arms: a CR in the
+					// continuation makes the joined opener ambiguous, so the
+					// scan refuses the input instead of masking the region
+					// behind an expansion frame.
+					outcome.error = errorAt("ambiguous-opener", i)
+					return outcome
+				}
 				stack.push({
 					kind: "parameter-expansion",
 					openIndex: i,
@@ -2791,7 +2847,7 @@ export function parseCommand(command: string): ParseResult {
 		if (!line.trim()) {
 			continue
 		}
-		allCommands.push(...parseLine(line, outcome, 0))
+		allCommands.push(...parseLine(line, outcome, 0, false))
 		if (outcome.error !== null) {
 			return { commands: [command], parseError: outcome.error }
 		}
@@ -2816,8 +2872,11 @@ export function parseCommand(command: string): ParseResult {
  * The scan records structural errors found while it recurses into payloads on
  * `outcome` (fail-closed). The caller checks `outcome` after every line.
  * `depth` counts payload re-entries, and `scanPayloadSegments` caps it.
+ * `fromPayload` marks a re-scan of an extracted substitution payload: there a
+ * glob token fails closed, because the reconstructed word would be the bare
+ * literal `glob` instead of the files bash expands the pattern to.
  */
-function parseLine(line: string, outcome: ScanOutcome, depth: number): string[] {
+function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayload: boolean): string[] {
 	let tokens: ShellToken[]
 	try {
 		tokens = parse(line) as ShellToken[]
@@ -2861,6 +2920,21 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number): string[] 
 		if (typeof token === "object" && "op" in token) {
 			if (["&&", "||", ";", "|", "&", "|&"].includes(token.op)) {
 				flush()
+			} else if (token.op === "glob" && fromPayload) {
+				// The tokenizer reduces a glob word to `{ op: "glob" }` and
+				// keeps the pattern only on `pattern`, which this
+				// reconstruction drops. The re-scanned payload would then
+				// carry the bare word `glob` — a word that matches allow and
+				// deny prefixes no more specifically than the files bash may
+				// expand the pattern to, and possibly to denylisted binaries.
+				// That under-approximation cannot carry an approval, so the
+				// payload fails closed on the shared error channel.
+				outcome.error = {
+					quoteType: "payload-glob",
+					openIndex: 0,
+					message: unterminatedQuoteMessage("payload-glob", 0, line),
+				}
+				return []
 			} else {
 				// Other operators (>, <) are part of the command word.
 				current.push(token.op)
@@ -2945,7 +3019,7 @@ function scanPayloadSegments(raw: string, outcome: ScanOutcome, depth: number): 
 		if (!line.trim()) {
 			continue
 		}
-		parts.push(...parseLine(line, nested, depth))
+		parts.push(...parseLine(line, nested, depth, true))
 		if (nested.error !== null) {
 			outcome.error = nested.error
 			return []
