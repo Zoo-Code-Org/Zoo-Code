@@ -26,6 +26,7 @@ import {
 } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { deleteGlobalFetch } from "../../../test-utils/reset"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 // Mock OpenAI client - now everything uses Responses API
 const mockResponsesCreate = vitest.fn()
@@ -598,23 +599,26 @@ describe("OpenAiNativeHandler", () => {
 				return error
 			}
 
-			const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+			// A tick has no observable condition to poll here, so it uses the shared macrotask flush
+			// (test-utils/timers, setImmediate-based) rather than a wall-clock timer.
+			const tick = flushMacrotasks
 
+			// The mocked stream must stay open until the abort arrives, with a bounded fallback so a
+			// missing propagation cannot hang the test. AbortSignal.timeout is the platform's own
+			// deadline primitive: no wall-clock sleep to clear and no listener to forget.
 			function untilSignalAborted(signal: AbortSignal, timeoutMs = 200): Promise<void> {
 				return new Promise<void>((resolve) => {
 					if (signal.aborted) {
 						resolve()
 						return
 					}
-					const timer = setTimeout(() => resolve(), timeoutMs)
-					signal.addEventListener(
-						"abort",
-						() => {
-							clearTimeout(timer)
-							resolve()
-						},
-						{ once: true },
-					)
+					const deadline = AbortSignal.timeout(timeoutMs)
+					const settle = () => {
+						deadline.removeEventListener("abort", settle)
+						resolve()
+					}
+					signal.addEventListener("abort", settle, { once: true })
+					deadline.addEventListener("abort", settle, { once: true })
 				})
 			}
 
@@ -1240,9 +1244,11 @@ describe("OpenAiNativeHandler", () => {
 				const streamGate = new Promise<void>((resolve) => {
 					releaseStream = resolve
 				})
+				let pullStarted = false
 				const mockFetch = vitest.fn().mockImplementation(() => {
 					const body = new ReadableStream<Uint8Array>({
 						pull: async () => {
+							pullStarted = true
 							await streamGate
 							throw rateLimited
 						},
@@ -1260,7 +1266,10 @@ describe("OpenAiNativeHandler", () => {
 					),
 				)
 				// Abort first, then let the stream fail: the failure is the real outcome.
-				await new Promise((resolve) => setTimeout(resolve, 10))
+				// Observable: the reader has entered pull and is parked on the gate. Polling it, then
+				// flushing one macrotask so the pending read is registered, replaces the fixed 10ms sleep.
+				await vi.waitFor(() => pullStarted, { timeout: 2000, interval: 10 })
+				await flushMacrotasks()
 				controller.abort()
 				releaseStream()
 
@@ -2020,8 +2029,10 @@ describe("OpenAiNativeHandler", () => {
 			// "Request was aborted.") instead of a native AbortError when the
 			// request signal aborts. Cancellations must surface as the contract
 			// AbortError and must never be captured as provider telemetry.
+			let sdkRequestStarted = false
 			mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
 				return new Promise((_resolve, reject) => {
+					sdkRequestStarted = true
 					const error = new Error("Request was aborted.")
 					error.name = "APIUserAbortError"
 					if (options?.signal?.aborted) {
@@ -2034,7 +2045,9 @@ describe("OpenAiNativeHandler", () => {
 
 			const controller = new AbortController()
 			const pending = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			// Observable: the SDK call has been issued with the request signal, so the abort now
+			// arrives mid-request instead of after a wall-clock delay.
+			await vi.waitFor(() => sdkRequestStarted, { timeout: 2000, interval: 25 })
 			controller.abort()
 
 			await expect(pending).rejects.toMatchObject({
