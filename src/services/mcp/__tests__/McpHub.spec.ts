@@ -2260,6 +2260,54 @@ describe("McpHub", () => {
 			vi.clearAllMocks()
 		})
 
+		it("handleMcpEnabledChange(false) closes the transport of a connected server and leaves it disconnected, on a hub that is not disposed", async () => {
+			const stdioModule = await import("@modelcontextprotocol/sdk/client/stdio.js")
+			const StdioClientTransport = stdioModule.StdioClientTransport as ReturnType<typeof vi.fn>
+			const mockTransport = {
+				start: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+				stderr: { on: vi.fn() },
+				onerror: null,
+				onclose: null,
+			}
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			const Client = clientModule.Client as ReturnType<typeof vi.fn>
+			const mockClient = {
+				connect: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+				getInstructions: vi.fn().mockReturnValue("test instructions"),
+				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+			}
+			Client.mockImplementation(function () {
+				return mockClient
+			})
+			mockProvider.getState = vi.fn().mockResolvedValue({ mcpEnabled: true })
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({ mcpServers: { "toggle-false-server": { command: "node", args: ["test.js"] } } }),
+			)
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await mcpHub.waitUntilReady()
+			expect(mcpHub.connections.find((conn) => conn.server.name === "toggle-false-server")!.server.status).toBe(
+				"connected",
+			)
+
+			// The setting is stored as disabled, then the hub is told, as the message handler does.
+			mockProvider.getState = vi.fn().mockResolvedValue({ mcpEnabled: false })
+			await mcpHub.handleMcpEnabledChange(false)
+
+			const server = mcpHub.connections.find((conn) => conn.server.name === "toggle-false-server")
+			expect(server).toBeDefined()
+			expect(server!.server.status).toBe("disconnected")
+			expect(server!.client).toBeNull()
+			expect(server!.transport).toBeNull()
+			expect(mockClient.close).toHaveBeenCalled()
+			expect(mockTransport.close).toHaveBeenCalled()
+			await mcpHub.dispose()
+		})
+
 		it("should disconnect all servers when MCP is toggled from enabled to disabled", async () => {
 			// Mock StdioClientTransport
 			const stdioModule = await import("@modelcontextprotocol/sdk/client/stdio.js")
