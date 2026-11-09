@@ -2745,13 +2745,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * reopened tasks keep a task-local profile that may differ from the
 	 * provider's current profile, so profile-scoped overrides must be selected
 	 * for the task, not the global selection. Falls back to the provider's
-	 * current profile, then to "default" (same semantics as
-	 * `getCurrentProfileId`).
+	 * current profile, then to "default".
 	 */
-	private async getTaskProfileId(state: {
-		currentApiConfigName?: string
-		listApiConfigMeta?: Array<{ id: string; name: string }>
-	}): Promise<string> {
+	private async getTaskProfileId(
+		state:
+			| {
+					currentApiConfigName?: string
+					listApiConfigMeta?: Array<{ id: string; name: string }>
+			  }
+			| undefined,
+	): Promise<string> {
 		const apiConfigName = (await this.getTaskApiConfigName()) ?? state?.currentApiConfigName
 		return state?.listApiConfigMeta?.find((profile) => profile.name === apiConfigName)?.id ?? "default"
 	}
@@ -6032,13 +6035,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		})()
 	}
 
-	private getCurrentProfileId(state: any): string {
-		return (
-			state?.listApiConfigMeta?.find((profile: any) => profile.name === state?.currentApiConfigName)?.id ??
-			"default"
-		)
-	}
-
 	/**
 	 * Ensures router-provider model metadata is loaded before getModel() is used for
 	 * context management or streaming. Failures fall back to hardcoded defaults rather
@@ -6180,8 +6176,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
 		const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
 
-		// Get the current profile ID using the helper method
-		const currentProfileId = this.getCurrentProfileId(state)
+		// Profile overrides follow the task's own provider profile, matching the
+		// idle-condense gate: a delegated child or reopened task may condense
+		// under a different profile than the provider's current selection.
+		const currentProfileId = await this.getTaskProfileId(state)
 
 		// Log the context window error for debugging
 		console.warn(
@@ -6405,8 +6403,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
 			const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
 
-			// Get the current profile ID using the helper method
-			const currentProfileId = this.getCurrentProfileId(state)
+			// Profile overrides follow the task's own provider profile, matching
+			// the idle-condense gate: a delegated child or reopened task may use
+			// a different profile than the provider's current selection.
+			const currentProfileId = await this.getTaskProfileId(state)
 			// Check if context management will likely run (threshold check)
 			// This allows us to show an in-progress indicator to the user
 			// We use the centralized willManageContext helper to avoid duplicating threshold logic

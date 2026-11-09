@@ -2689,6 +2689,90 @@ describe("Cline", () => {
 			expect(metadata?.mode).toBe("ask")
 		})
 
+		// Regression: a delegated task that keeps a provider profile different from
+		// the provider's current selection must resolve profile-scoped condense
+		// thresholds for the task, not for the global selection. A 55k/128k context
+		// sits above the child profile's 40% threshold and below the global
+		// profile's 90% threshold, so whether the normal request path condenses
+		// reveals which profile's threshold the threshold check used.
+		async function createProfileSplitCondenseTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({
+					mode: "code",
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 0,
+					autoCondenseContext: true,
+					autoCondenseContextPercent: 100,
+					profileThresholds: { "profile-global": 90, "profile-child": 40 },
+					currentApiConfigName: "global-profile",
+					listApiConfigMeta: [
+						{ id: "profile-global", name: "global-profile" },
+						{ id: "profile-child", name: "child-profile" },
+					],
+				}),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 55_000,
+			})
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 128_000,
+					maxTokens: 4096,
+					inputPrice: 0.3,
+					outputPrice: 1.5,
+				} as ModelInfo,
+			})
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const stream = (async function* () {
+				yield { type: "text", text: "response" } as ApiStreamChunk
+			})()
+			vi.spyOn(task.api, "createMessage").mockReturnValue(stream)
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this request starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+			return { task, summarizeCallsBefore }
+		}
+
+		it("condenses the normal request path with the task's own profile threshold when it keeps another profile", async () => {
+			const { task, summarizeCallsBefore } = await createProfileSplitCondenseTask()
+			// A delegated child kept a different provider profile than the
+			// provider's current selection: its 40% threshold must win.
+			task["taskApiConfigReady"] = Promise.resolve()
+			task["_taskApiConfigName"] = "child-profile"
+
+			await task.attemptApiRequest(0).next()
+
+			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore + 1)
+		})
+
+		it("keeps the provider's current profile threshold for the normal request path when the task has no own profile", async () => {
+			const { task, summarizeCallsBefore } = await createProfileSplitCondenseTask()
+
+			// Accept path for the fallback: the task initializes to the provider's
+			// current profile ("profile-global", 90%), so the ~43% context stays
+			// below the threshold and no condense runs.
+			await task.attemptApiRequest(0).next()
+
+			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore)
+		})
+
 		it("condenses with an undefined state snapshot when the provider is gone", async () => {
 			const task = new Task({
 				provider: mockProvider,
