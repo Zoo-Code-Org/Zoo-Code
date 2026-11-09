@@ -240,14 +240,16 @@ export async function withFileLock<T>(
 	// unlink) must keep the caller's alias semantics: unlinking the referent instead of the
 	// alias would delete a different directory entry.
 	const operationPath = path.resolve(filePath)
-	// The LOCK key is canonical - the same one safeWriteJson computes - so a caller that
-	// reaches the file through a symlinked directory and one that reaches it lexically
-	// contend for ONE lock file. Locking the raw path here would let a deletion through this
-	// helper run concurrently with a safeWriteJson read-modify-write on the referent, breaking
-	// the compound atomicity the deletion contract promises. The canonicalization runs inside
-	// acquireFileLock, so the walk happens once and direct acquireFileLock callers (safeWriteJson
-	// passes an already-canonical key, jsonFileRecovery and the specs pass raw paths) are all
-	// covered by the same rule.
+	// The LOCK key is canonical - the same key acquireFileLock derives for this path - so a
+	// caller that reaches the file through a symlinked directory and one that reaches it
+	// lexically contend for ONE lock file. Locking the raw path here would let a deletion
+	// through this helper run concurrently with a safeWriteJson read-modify-write on the
+	// referent, breaking the compound atomicity the deletion contract promises. The derivation
+	// is not shared between the two routes: this call derives the key itself through
+	// canonicalLockPath just below, and acquireFileLock derives it again inside itself for the
+	// callers that come through it - safeWriteJson hands it a path.resolve result, and
+	// jsonFileRecovery and the specs hand it raw paths - so both routes apply the same rule
+	// instead of reusing one route's answer.
 	let lockKey = await canonicalLockPath(operationPath)
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: lockKey })
 
@@ -260,7 +262,17 @@ export async function withFileLock<T>(
 		// contending for, and a concurrent merge could recreate what the callback deletes. Re-derive
 		// the key under the same rules before running anything, and on a change release, retake the
 		// lock for the new key, and only then run the callback.
-		const currentKey = await canonicalLockPath(operationPath).catch(() => lockKey)
+		let currentKey: string
+		try {
+			currentKey = await canonicalLockPath(operationPath)
+		} catch (recheckError) {
+			// The walk that took this lock refuses to invent a key when an ancestor exists but
+			// cannot be inspected; the recheck has to refuse the same way. An EACCES here used
+			// to answer with the caller's own spelling, which is a key no peer is provably
+			// holding, and the callback then ran under a lock that excludes nobody.
+			await releaseLock().catch(() => undefined)
+			throw recheckError
+		}
 		if (currentKey !== lockKey) {
 			await releaseLock().catch(() => undefined)
 			if (attempt >= MAX_LOCK_KEY_RETARGETS) {

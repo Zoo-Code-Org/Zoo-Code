@@ -13,6 +13,25 @@ vi.mock("proper-lockfile", () => ({
 	unlock: vi.fn(async () => {}),
 }))
 
+// The ancestor walk inside `lockArtefactSpelling` had no test at all: every row here locks a leaf
+// that already exists, so the one realpathSync.native call answered on the first cursor and the
+// walk-up, the re-join below it and the volume-root guard were never executed. The handler answers
+// the walk cursor by cursor - including a canonical spelling no volume on this host would give -
+// and defaults to the platform's own answer for the two rows above.
+let nativeHandler: ((cursor: string) => string) | undefined
+
+vi.mock("fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("fs")>()
+	const realpathSyncShim = Object.assign(
+		(target: string, options?: Parameters<typeof actual.realpathSync>[1]) => actual.realpathSync(target, options),
+		{
+			native: (target: string, options?: Parameters<typeof actual.realpathSync>[1]) =>
+				nativeHandler ? nativeHandler(target) : actual.realpathSync.native(target, options),
+		},
+	)
+
+	return { ...actual, realpathSync: realpathSyncShim }
+})
 /**
  * The artefact spelling is caller-owned: a writer that renames the leaf as part of its own write
  * captures the spelling once, before the first rename, and hands it back per acquisition, because
@@ -99,5 +118,54 @@ describe("acquireFileLock artefact spelling", () => {
 			.mock.calls.slice(1)
 			.map((call) => String(call[1]?.lockfilePath))
 		expect(artefacts).toEqual([supplied, derivedArtefact, derivedArtefact])
+	})
+	afterEach(() => {
+		nativeHandler = undefined
+	})
+
+	// The walk stops at the nearest ancestor the volume can spell and re-joins what the caller
+	// spelled below it, in order. `reverse()` is the ordering, `missing.push` is the existence,
+	// and taking the canonical answer at all is the difference between an artefact a peer that
+	// reached the same file through the canonical path also takes and one only this caller takes.
+	test("re-joins the missing components in the caller order under the canonicalized ancestor", () => {
+		const anchor = path.resolve(path.join("store", "anchor"))
+		const canonicalAnchor = path.resolve(path.join("store", "anchor-on-volume"))
+		nativeHandler = (cursor: string) => {
+			if (cursor === anchor) return canonicalAnchor
+			throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		}
+
+		const spelled = lockArtefactSpelling(path.join(anchor, "aa", "bb", "task.json"))
+
+		expect(spelled).toBe(path.join(canonicalAnchor, "aa", "bb", "task.json") + ".lock")
+	})
+
+	// Nothing inspectable anywhere on the path: the conservative answer is the caller's own
+	// spelling plus the suffix, which is the artefact that writer already takes.
+	test("falls back to the caller spelling when nothing on the path can be inspected", () => {
+		nativeHandler = () => {
+			throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		}
+		const nowhere = path.resolve(path.join("store", "gone", "deeper", "task.json"))
+
+		expect(lockArtefactSpelling(nowhere)).toBe(nowhere + ".lock")
+	})
+
+	// The root is the one cursor the walk must not step past: `path.dirname` answers with the same
+	// string, so that guard is what ends the loop. The handler answers the root only on a second
+	// visit, which is what a guard that keeps walking reaches - turning a hang into an artefact this
+	// assertion can see.
+	test("stops the ancestor walk at the volume root instead of stepping past it", () => {
+		const nowhere = path.resolve(path.join("store", "gone", "task.json"))
+		const root = path.parse(nowhere).root
+		let rootVisits = 0
+		nativeHandler = (cursor: string) => {
+			if (cursor === root && ++rootVisits > 1) return path.join(root, "root-on-volume")
+			throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		}
+
+		expect(lockArtefactSpelling(nowhere)).toBe(nowhere + ".lock")
+		// one ask of the root, and the walk is over; a second visit is the loop the guard prevents
+		expect(rootVisits).toBe(1)
 	})
 })

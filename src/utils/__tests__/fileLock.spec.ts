@@ -207,7 +207,11 @@ test("terminates on a three-link cycle instead of recursing forever", async () =
 	// Terminated with exactly one lock acquisition on a cycle member, and the
 	// total hop budget held across all frames.
 	expect(lockfile.lock).toHaveBeenCalledTimes(1)
-	expect(vi.mocked(fsPromises.readlink).mock.calls.length).toBeLessThanOrEqual(64)
+	// Exactly the budget, not merely under it: eight hops per frame, eight frames left by the
+	// recursion, so 64 asks. A frame that walks nine hops, and a recursion that hands the next
+	// frame no budget, both keep a cycle green under `<= 64`; one of them also stops eight links
+	// short of the referent the lock is supposed to name.
+	expect(vi.mocked(fsPromises.readlink).mock.calls.length).toBe(64)
 
 	await releaseLock()
 })
@@ -305,4 +309,161 @@ test("retakes the lock when the canonical key moves while the callback waits to 
 		"acquire:2:completed",
 		"callback",
 	])
+})
+
+// The rows below exist because the mutation run named lines in this module with no test behind
+// them. Each one says which mutant it is there to kill, so the disposition list on the PR has an
+// executable answer behind every line it names.
+describe("fileLock - retarget bound, fail-closed recheck and release failures", () => {
+	beforeEach(() => {
+		vi.mocked(lockfile.lock).mockReset()
+		vi.mocked(fsPromises.realpath).mockReset()
+		vi.mocked(fsPromises.readlink).mockReset()
+	})
+
+	// The fail-closed rule has two codes. Every carried test walks an ENOENT ancestor, so
+	// emptying the ENOTDIR string changed nothing anybody executed. A parent that is a file is
+	// how a real volume answers, and the climb has to continue past it.
+	test("keeps climbing past a parent that is a file instead of failing closed on ENOTDIR", async () => {
+		vi.mocked(fsPromises.realpath).mockImplementation(async (target: unknown) => {
+			const asString = String(target)
+			if (asString.includes("fileLike")) {
+				throw Object.assign(new Error("ENOTDIR: not a directory"), { code: "ENOTDIR" })
+			}
+			return asString
+		})
+		const target = path.join(STORE, "fileLike", "nested", "task.json")
+
+		const releaseLock = await acquireFileLock(target)
+
+		expect(lockfile.lock).toHaveBeenCalledWith(target, expect.objectContaining({ realpath: false }))
+		await releaseLock()
+	})
+
+	// The hop budget was only ever exercised by a cycle, and a cycle spends it whatever the frame
+	// looks like. A chain that ends on its own names the key it has to land on, so a recursion
+	// that hands the next frame no budget stops eight links short of the referent the lock is
+	// supposed to name.
+	test("walks a 20-link chain to its final referent instead of stopping at a frame boundary", async () => {
+		const referents = new Map<string, string>()
+		for (let i = 1; i < 20; i++) {
+			referents.set(
+				path.join(STORE, "chain", "link" + i, "task.json"),
+				path.join(STORE, "chain", "link" + (i + 1), "task.json"),
+			)
+		}
+		referents.set(path.join(STORE, "chain", "link20", "task.json"), path.join(STORE, "chainFinal", "task.json"))
+		vi.mocked(fsPromises.readlink).mockImplementation(async (target: unknown) => {
+			const referent = referents.get(String(target))
+			if (referent === undefined) throw Object.assign(new Error("EINVAL"), { code: "EINVAL" })
+			return referent
+		})
+		const firstLink = path.join(STORE, "chain", "link1", "task.json")
+		const finalKey = path.join(STORE, "chainFinal", "task.json")
+
+		const releaseLock = await acquireFileLock(firstLink)
+
+		expect(lockfile.lock).toHaveBeenCalledWith(finalKey, expect.objectContaining({ realpath: false }))
+		// 20 links answered plus two rejections: the one that says the walk has arrived at a file,
+		// and the terminal frame asking its own entry cursor once before it canonicalizes.
+		expect(vi.mocked(fsPromises.readlink).mock.calls.length).toBe(22)
+		await releaseLock()
+	})
+
+	// Nothing asserted on the retarget bound or on its message: `attempt--`, `attempt >` and an
+	// emptied error string all kept the carried tests green. The spelling below moves on every
+	// derivation until the sixth, so the bound has to fire after three retargets - four locks
+	// taken, all four handed back, callback never run.
+	test("gives up after three retargets, releases every lock it took and never runs the callback", async () => {
+		let derivations = 0
+		vi.mocked(fsPromises.realpath).mockImplementation(async () => {
+			derivations++
+			return path.join(STORE, derivations <= 5 ? "realDir" + derivations : "realDirHeld", "task.json")
+		})
+		const releases: number[] = []
+		let acquisitions = 0
+		vi.mocked(lockfile.lock).mockImplementation(async () => {
+			const acquiredAs = ++acquisitions
+			return async () => {
+				releases.push(acquiredAs)
+			}
+		})
+		const aliasPath = path.join(STORE, "aliasDir", "task.json")
+		const seen: string[] = []
+
+		await expect(
+			withFileLock(aliasPath, async () => {
+				seen.push("callback")
+			}),
+		).rejects.toThrow(/kept moving across 3 retargets/)
+
+		expect(seen).toEqual([])
+		expect(acquisitions).toBe(4)
+		expect(releases).toEqual([1, 2, 3, 4])
+	})
+
+	// No test ever let the recheck reject, which is how the fallback to the caller's spelling
+	// survived as a mutant and how the asymmetry against the walk that took the lock stayed
+	// unexercised: that walk fails closed on an uninspectable ancestor.
+	test("releases the held lock and rethrows when the post-acquisition recheck cannot canonicalize", async () => {
+		const release = vi.fn(async () => {})
+		vi.mocked(lockfile.lock).mockImplementation(async () => release)
+		let derivations = 0
+		vi.mocked(fsPromises.realpath).mockImplementation(async () => {
+			derivations++
+			if (derivations === 1) return path.join(STORE, "realDir", "task.json")
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		})
+		const aliasPath = path.join(STORE, "aliasDir", "task.json")
+		const seen: string[] = []
+
+		await expect(
+			withFileLock(aliasPath, async () => {
+				seen.push("callback")
+			}),
+		).rejects.toMatchObject({ code: "EACCES" })
+
+		expect(seen).toEqual([])
+		expect(lockfile.lock).toHaveBeenCalledTimes(1)
+		expect(release).toHaveBeenCalledTimes(1)
+	})
+
+	// Both release-failure log lines were code no test executed. They disagree about what the caller
+	// sees - the operation's own error outranks a failed release, a completed operation is not
+	// undone by one - and that difference is what the two assertions below pin.
+	test("rethrows the operation error when the release fails too, and logs the release failure", async () => {
+		const releaseError = new Error("release failed")
+		vi.mocked(lockfile.lock).mockResolvedValue(async () => {
+			throw releaseError
+		})
+		const operationError = new Error("operation failed")
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+		const target = path.join(STORE, "plain", "task.json")
+
+		await expect(
+			withFileLock(target, async () => {
+				throw operationError
+			}),
+		).rejects.toBe(operationError)
+
+		expect(logged).toHaveBeenCalledTimes(1)
+		expect(logged).toHaveBeenCalledWith(`Failed to release lock for ${target}:`, releaseError)
+		logged.mockRestore()
+	})
+
+	test("returns the result when only the release fails, and logs the release failure", async () => {
+		const releaseError = new Error("release failed")
+		vi.mocked(lockfile.lock).mockResolvedValue(async () => {
+			throw releaseError
+		})
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+		const target = path.join(STORE, "plain", "task.json")
+
+		const result = await withFileLock(target, async () => "written")
+
+		expect(result).toBe("written")
+		expect(logged).toHaveBeenCalledTimes(1)
+		expect(logged).toHaveBeenCalledWith(`Failed to release lock for ${target}:`, releaseError)
+		logged.mockRestore()
+	})
 })
