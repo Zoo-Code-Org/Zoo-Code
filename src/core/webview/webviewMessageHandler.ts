@@ -108,6 +108,24 @@ import { computeEffectiveCondenseThreshold } from "../context-management"
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
 /**
+ * Resolve the main auto-condense threshold that idle thresholds clamp
+ * against. A hand-crafted message can carry a non-numeric
+ * autoCondenseContextPercent alongside an otherwise valid idle setting; using
+ * it unchanged would poison every clamp computed against it (NaN bounds make
+ * comparisons silently pass). Only finite numbers count — the message value
+ * first, then the stored value (which the generic persist loop may have just
+ * written from this same garbage message), and finally the default.
+ */
+function resolveMainCondensePercent(
+	updatedSettings: { autoCondenseContextPercent?: unknown } | undefined,
+	storedPercent: number | undefined,
+): number {
+	const finiteNumber = (candidate: unknown): number | undefined =>
+		typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined
+	return finiteNumber(updatedSettings?.autoCondenseContextPercent) ?? finiteNumber(storedPercent) ?? 100
+}
+
+/**
  * Clamp an idle-condense trigger threshold: within the shared condense
  * threshold bounds and never above the main auto-condense threshold (the idle
  * condense is a strictly-earlier trigger of the same condense).
@@ -916,6 +934,15 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "autoCondenseContextPercent") {
+						// Idle thresholds clamp against this value (from the message or
+						// from storage), and the runtime does the same. Persisting a
+						// non-numeric one would poison every clamp computed against the
+						// stored value, so reject it instead of storing it unchanged.
+						if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
+							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
+							continue
+						}
 					} else if (key === "idleCondenseContextPercent") {
 						// A hand-crafted message can carry payloads the webview controls
 						// never produce; storing them unchanged surfaces as NaN at the
@@ -925,20 +952,20 @@ export const webviewMessageHandler = async (
 							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
 							continue
 						}
-						const mainPercent =
-							(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
-							getGlobalState("autoCondenseContextPercent") ??
-							100
+						const mainPercent = resolveMainCondensePercent(
+							message.updatedSettings,
+							getGlobalState("autoCondenseContextPercent"),
+						)
 						newValue = clampIdleCondensePercent(value, mainPercent)
 					} else if (key === "profileIdleThresholds") {
 						if (!value || typeof value !== "object") {
 							provider.log(`[updateSettings] Rejected an invalid value for ${key}`)
 							continue
 						}
-						const globalMainPercent =
-							(message.updatedSettings.autoCondenseContextPercent as number | undefined) ??
-							getGlobalState("autoCondenseContextPercent") ??
-							100
+						const globalMainPercent = resolveMainCondensePercent(
+							message.updatedSettings,
+							getGlobalState("autoCondenseContextPercent"),
+						)
 						// Each profile's idle override may only be clamped against that
 						// profile's own effective main threshold, since that is what the
 						// runtime resolves per profile; clamping against the global

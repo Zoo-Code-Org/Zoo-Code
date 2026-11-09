@@ -522,7 +522,9 @@ describe("Task idle condensing — reset and cancel", () => {
 
 	test("reset is a no-op while no timer is armed", () => {
 		const { task } = buildTask()
-		const maybeStart = vi.fn(async () => {})
+		// "declined" keeps the stub compatible with the arming-outcome
+		// signature without arming anything.
+		const maybeStart = vi.fn(async (): Promise<"declined"> => "declined")
 		task["maybeStartIdleCondenseTimer"] = maybeStart
 
 		task.resetIdleCondenseTimer()
@@ -533,7 +535,7 @@ describe("Task idle condensing — reset and cancel", () => {
 	test("reset re-arms the countdown only while a timer is armed", async () => {
 		const { task } = buildTask()
 		task["idleCondenseTimeoutRef"] = setTimeout(() => {}, 30_000)
-		const maybeStart = vi.fn(async () => {})
+		const maybeStart = vi.fn(async (): Promise<"declined"> => "declined")
 		task["maybeStartIdleCondenseTimer"] = maybeStart
 
 		task.resetIdleCondenseTimer()
@@ -1595,5 +1597,95 @@ describe("Task idle condensing — re-evaluation after settings save", () => {
 
 		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
 		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	test("a transient state-read failure arms no countdown, then retries and condenses", async () => {
+		// The settings-save re-evaluation races a provider whose state is
+		// transiently unreadable. The failed pass must leave no countdown
+		// armed (the save's cancel already consumed the old one), but it must
+		// not strand an eligible task forever either: the gate is retried
+		// briefly, and once the read recovers the full saved delay still
+		// applies before condensing.
+		const { task, getState, condense } = buildTask()
+		getState.mockRejectedValueOnce(new Error("storage unavailable"))
+
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		await vi.advanceTimersByTimeAsync(0)
+
+		// No countdown armed; only the bounded retry is pending.
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+		expect(task["idleCondenseSettingsRetryRef"]).toBeDefined()
+
+		// The first retry fires once the state read works again and arms the
+		// countdown from scratch.
+		await vi.advanceTimersByTimeAsync(1_000)
+		expect(task["idleCondenseSettingsRetryRef"]).toBeUndefined()
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+
+		// Condensing still waits out the full saved idle delay.
+		await vi.advanceTimersByTimeAsync(29_999)
+		expect(condense).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(1)
+		expect(condense).toHaveBeenCalledTimes(1)
+	})
+
+	test("a persisting state-read failure retries a bounded number of times", async () => {
+		const { task, getState, condense } = buildTask()
+		getState.mockRejectedValue(new Error("storage unavailable"))
+
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(task["idleCondenseSettingsRetryRef"]).toBeDefined()
+
+		// 1s + 5s + 15s of backoff; the fourth attempt is out of retries and
+		// the chain stops instead of spinning forever.
+		await vi.advanceTimersByTimeAsync(1_000 + 5_000 + 15_000)
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+		expect(task["idleCondenseSettingsRetryRef"]).toBeUndefined()
+		expect(vi.getTimerCount()).toBe(0)
+
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(condense).not.toHaveBeenCalled()
+	})
+
+	test("a cancel while a retry is pending stops the retry", async () => {
+		const { task, getState, condense } = buildTask()
+		getState.mockRejectedValueOnce(new Error("storage unavailable"))
+
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(task["idleCondenseSettingsRetryRef"]).toBeDefined()
+
+		// The task is cancelled before the retry fires: the retry must not
+		// resurrect a countdown for a dead task.
+		task.cancelIdleCondenseTimer()
+		await vi.advanceTimersByTimeAsync(60_000)
+
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+		expect(vi.getTimerCount()).toBe(0)
+		expect(condense).not.toHaveBeenCalled()
+	})
+
+	test("a later settings save supersedes a pending retry", async () => {
+		const state = baseState()
+		const { task, getState, condense } = buildTask({ state })
+		getState.mockRejectedValueOnce(new Error("storage unavailable"))
+
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(task["idleCondenseSettingsRetryRef"]).toBeDefined()
+
+		// A second save lands while the first pass' retry is pending, this
+		// one disabling the feature. It clears the stale retry and runs its
+		// own (now declined) evaluation; the superseded pass must never arm.
+		state.idleCondenseContext = false
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(task["idleCondenseSettingsRetryRef"]).toBeUndefined()
+		expect(vi.getTimerCount()).toBe(0)
+
+		await vi.advanceTimersByTimeAsync(600_000)
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+		expect(condense).not.toHaveBeenCalled()
 	})
 })

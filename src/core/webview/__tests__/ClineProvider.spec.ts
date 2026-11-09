@@ -4687,6 +4687,29 @@ describe("ClineProvider", () => {
 			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", { raised: 80 })
 		})
 
+		test("ignores a non-numeric autoCondenseContextPercent message when clamping idle thresholds", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// The stored main percent is the clamp bound...
+			await provider.contextProxy.setValue("autoCondenseContextPercent", 70)
+
+			// ...but a hand-crafted message rides a garbage main percent alongside
+			// otherwise valid idle settings. Feeding it to the clamp unchanged
+			// poisons every bound (NaN comparisons silently pass), so only a
+			// finite number from the message may count; here the stored 70 wins.
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					autoCondenseContextPercent: "oops" as unknown as number,
+					idleCondenseContextPercent: 90,
+					profileIdleThresholds: { lowered: 80 },
+				},
+			})
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 70)
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", { lowered: 70 })
+		})
+
 		test("rejects invalid idle-condense payloads instead of persisting them", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 

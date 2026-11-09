@@ -1704,6 +1704,8 @@ describe("ChatView - Follow-up Suggestions", () => {
 		// so the appended "\n" is absent from the DOM value.
 		await waitFor(() => expect(input.value).toBe("Draft text Copy me"))
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+		// The draft changed programmatically, so the idle countdown must restart.
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "idleCondenseReset" })
 
 		// With an empty draft the answer is set as-is (no dangling "\n" prefix).
 		fireEvent.change(input, { target: { value: "" } })

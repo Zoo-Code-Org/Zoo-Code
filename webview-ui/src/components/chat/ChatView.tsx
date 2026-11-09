@@ -741,6 +741,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			setInputValue(newValue)
 			setSelectedImages([...selectedImages, ...images])
+			// Parent-owned input edits never fire the textarea's onChange, so
+			// the armed idle-condense countdown must be restarted here.
+			vscode.postMessage({ type: "idleCondenseReset" })
 		},
 		[inputValue, selectedImages],
 	)
@@ -1473,6 +1476,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				setInputValue((currentValue: string) => {
 					return currentValue !== "" ? `${currentValue} \n${answer}` : answer
 				})
+				// "Copy to input" rewrites the prompt without a textarea onChange,
+				// so the armed idle-condense countdown must be restarted here.
+				vscode.postMessage({ type: "idleCondenseReset" })
 			} else {
 				// Don't clear the input value when sending a follow-up choice
 				// The message should be sent but the text area should preserve what the user typed

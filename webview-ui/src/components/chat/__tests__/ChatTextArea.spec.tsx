@@ -5,6 +5,7 @@ import { render, fireEvent, screen, act } from "@src/utils/test-utils"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 import * as pathMentions from "@src/utils/path-mentions"
+import { ContextMenuOptionType } from "@src/utils/context-mentions"
 
 import { ChatTextArea } from "../ChatTextArea"
 
@@ -16,6 +17,20 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@src/components/common/CodeBlock")
 vi.mock("@src/components/common/MarkdownBlock")
+
+// Capture the ContextMenu's onSelect so tests can invoke menu selections
+// directly. The real ContextMenu only renders option rows; stubbing it keeps
+// the ChatTextArea signal tests focused on what a selection does.
+const contextMenuHarness = vi.hoisted(() => ({
+	onSelect: undefined as ((type: string, value?: string) => void) | undefined,
+}))
+
+vi.mock("../ContextMenu", () => ({
+	default: (props: { onSelect: (type: string, value?: string) => void }) => {
+		contextMenuHarness.onSelect = props.onSelect
+		return null
+	},
+}))
 vi.mock("@src/utils/path-mentions", () => ({
 	convertToMentionPath: vi.fn((path, cwd) => {
 		// Simple mock implementation that mimics the real function's behavior
@@ -1698,6 +1713,79 @@ describe("ChatTextArea", () => {
 			// Recalling a prompt replaces the input without an onChange event.
 			expect(defaultProps.setInputValue).toHaveBeenCalledWith("First prompt")
 			expect(idleSignals()).toHaveLength(1)
+		})
+
+		it("posts idleCondenseReset when an enhanced prompt replaces the input", () => {
+			// The enhancedPrompt response rewrites the input programmatically;
+			// in jsdom there is no execCommand, so the setInputValue fallback
+			// runs and never fires the textarea onChange. The handler must
+			// signal unconditionally.
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="write tests" />)
+			const textarea = getTextarea(container)
+			// The typing signal proves the baseline before the enhancement lands.
+			fireEvent.change(textarea, { target: { value: "write unit tests", selectionStart: 16 } })
+			expect(idleSignals()).toHaveLength(1)
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "enhancedPrompt", text: "improved prompt" } }),
+				)
+			})
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("improved prompt")
+			expect(idleSignals()).toHaveLength(2)
+		})
+
+		it("posts idleCondenseReset when a command is selected from the context menu", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} />)
+			const textarea = getTextarea(container)
+
+			// Typing "/" opens the slash-command context menu and signals once.
+			fireEvent.change(textarea, { target: { value: "/", selectionStart: 1 } })
+			expect(contextMenuHarness.onSelect).toBeDefined()
+
+			// Selecting a command rewrites the input programmatically (no
+			// onChange), so the selection itself must restart the countdown.
+			act(() => {
+				contextMenuHarness.onSelect!(ContextMenuOptionType.Command, "test-command")
+			})
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("/test-command ")
+			expect(idleSignals()).toHaveLength(2)
+		})
+
+		it("posts idleCondenseReset when a mode is selected from the context menu", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} />)
+			const textarea = getTextarea(container)
+
+			fireEvent.change(textarea, { target: { value: "/", selectionStart: 1 } })
+			expect(idleSignals()).toHaveLength(1)
+
+			act(() => {
+				contextMenuHarness.onSelect!(ContextMenuOptionType.Mode, "architect")
+			})
+
+			// A mode selection clears the input and switches modes without an
+			// onChange event.
+			expect(defaultProps.setMode).toHaveBeenCalledWith("architect")
+			expect(idleSignals()).toHaveLength(2)
+		})
+
+		it("posts idleCondenseReset when a mention is inserted from the context menu", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} />)
+			const textarea = getTextarea(container)
+
+			// Typing "@" opens the mention context menu and signals once.
+			fireEvent.change(textarea, { target: { value: "@", selectionStart: 1 } })
+			expect(contextMenuHarness.onSelect).toBeDefined()
+
+			act(() => {
+				contextMenuHarness.onSelect!(ContextMenuOptionType.Problems)
+			})
+
+			// The generic insertMention path rewrites the input programmatically.
+			expect(defaultProps.setInputValue).toHaveBeenCalled()
+			expect(idleSignals()).toHaveLength(2)
 		})
 	})
 })

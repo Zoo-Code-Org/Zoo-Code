@@ -312,6 +312,20 @@ type IdleCondenseGate = {
 	idleSeconds: number
 }
 
+/**
+ * Result of an idle-condense arming pass. Only a throw (e.g. a transient
+ * provider `getState` rejection) is a `failed` outcome worth retrying;
+ * `declined` means a gate intentionally kept this task from condensing.
+ */
+type IdleCondenseArmingOutcome = "armed" | "declined" | "failed"
+
+/**
+ * Backoff schedule (ms) for retrying the idle-condense gate after the
+ * settings-save re-evaluation throws, e.g. because provider state was
+ * transiently unreadable. Bounded so a persistent failure cannot spin.
+ */
+const IDLE_CONDENSE_SETTINGS_RETRY_DELAYS_MS = [1_000, 5_000, 15_000] as const
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -497,6 +511,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 	/** Timer for opportunistic idle condensing; armed only while the task waits on the user. */
 	private idleCondenseTimeoutRef?: NodeJS.Timeout
+	/**
+	 * Pending retry of a failed settings-save gate re-evaluation. Kept separate
+	 * from `idleCondenseTimeoutRef` so a failed re-evaluation never leaves a
+	 * countdown armed; cleared whenever the countdown is cancelled (a later
+	 * settings save, a reset, or disposal supersedes the retry).
+	 */
+	private idleCondenseSettingsRetryRef?: NodeJS.Timeout
 	/** True while an idle-triggered condense is running, to prevent overlapping runs/re-arms. */
 	private idleCondenseInFlight = false
 	/**
@@ -2664,6 +2685,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			clearTimeout(this.idleCondenseTimeoutRef)
 			this.idleCondenseTimeoutRef = undefined
 		}
+		// A pending settings-retry evaluates the gate against the settings that
+		// are current when it fires; any cancel means those settings (or the
+		// task itself) changed, so the retry must not proceed on its own.
+		if (this.idleCondenseSettingsRetryRef) {
+			clearTimeout(this.idleCondenseSettingsRetryRef)
+			this.idleCondenseSettingsRetryRef = undefined
+		}
 	}
 
 	/**
@@ -2714,7 +2742,39 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// captures the bumped sequence and proceeds normally.
 		this.idleCondenseActivitySeq++
 		this.cancelIdleCondenseTimer()
-		void this.maybeStartIdleCondenseTimer()
+		void this.reevaluateIdleCondenseGate(0)
+	}
+
+	/**
+	 * Run the arming gate for a settings-save re-evaluation, retrying briefly
+	 * when the gate itself throws. A transient provider-state read failure
+	 * would otherwise leave a task that is idle above the newly saved
+	 * threshold with no countdown — the cancel above already consumed the old
+	 * one — and nothing else arms one until the next user activity. Retries
+	 * are bounded, stop if any newer activity or save invalidates this pass
+	 * (activity sequence), and respect abort/abandon/active-work at fire time.
+	 */
+	private async reevaluateIdleCondenseGate(attempt: number): Promise<void> {
+		const activitySeq = this.idleCondenseActivitySeq
+		const outcome = await this.maybeStartIdleCondenseTimer()
+		if (outcome !== "failed" || attempt >= IDLE_CONDENSE_SETTINGS_RETRY_DELAYS_MS.length) {
+			return
+		}
+		// A newer save or user activity bumped the sequence: that pass owns
+		// the re-evaluation (and cleared this retry slot if it cancelled).
+		if (activitySeq !== this.idleCondenseActivitySeq || this.abort || this.abandoned) {
+			return
+		}
+		const delayMs = IDLE_CONDENSE_SETTINGS_RETRY_DELAYS_MS[attempt]
+		this.idleCondenseSettingsRetryRef = setTimeout(() => {
+			this.idleCondenseSettingsRetryRef = undefined
+			// New API work makes the task ineligible anyway; the teardown of
+			// that work re-arms through the shared path.
+			if (this.abort || this.abandoned || this.activeApiWork > 0) {
+				return
+			}
+			void this.reevaluateIdleCondenseGate(attempt + 1)
+		}, delayMs)
 	}
 
 	/**
@@ -2837,26 +2897,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/**
 	 * Arm the idle-condense timer if the gate allows. No-op when a timer is
-	 * already armed or an idle condense is in flight.
+	 * already armed or an idle condense is in flight. Returns a discriminable
+	 * outcome so callers that need to distinguish a declined gate from a
+	 * thrown failure (the settings-save retry) can; every other caller
+	 * discards it.
 	 */
-	private async maybeStartIdleCondenseTimer(): Promise<void> {
+	private async maybeStartIdleCondenseTimer(): Promise<IdleCondenseArmingOutcome> {
 		try {
 			if (this.abort || this.abandoned) {
-				return
+				return "declined"
 			}
 			if (this.idleCondenseTimeoutRef || this.idleCondenseInFlight) {
-				return
+				return "declined"
 			}
 			// Idle condensing only makes sense while the task genuinely waits
 			// on the user: never arm when nothing is pending, or while an
 			// approval ask that must not be condensed around is pending.
 			if (!this.hasPendingIdleEligibleAsk()) {
-				return
+				return "declined"
 			}
 			const activitySeq = this.idleCondenseActivitySeq
 			const gate = await this.evaluateIdleCondense()
 			if (!gate || gate.contextPercent < gate.idlePercent) {
-				return
+				return "declined"
 			}
 			// Re-check after the async gate evaluation: a prompt may have landed.
 			// The activity sequence catches the answer case specifically: the
@@ -2868,11 +2931,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.idleCondenseTimeoutRef ||
 				this.idleCondenseActivitySeq !== activitySeq
 			) {
-				return
+				return "declined"
 			}
 			this.armIdleCondenseTimeout(gate.idleSeconds)
+			return "armed"
 		} catch (error) {
 			console.error("[Task#maybeStartIdleCondenseTimer] error:", error)
+			return "failed"
 		}
 	}
 
