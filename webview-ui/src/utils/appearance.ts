@@ -105,7 +105,9 @@ export function renderedAppearanceDefault(key: AppearanceKey, context: Appearanc
 			rendered = chat * scale * EDITOR_DEFAULT_EM
 		}
 	}
-	return clampAppearance(key, rendered) ?? fallback
+	// Always a number here (`fallback` or a known size): it is only brought into the range, and to whole units.
+	const { min, max } = APPEARANCE_SETTINGS[key]
+	return Math.min(max, Math.max(min, Math.round(rendered)))
 }
 
 /** Present on <html> while the user has set an editor font size. */

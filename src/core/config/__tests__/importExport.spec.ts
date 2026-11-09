@@ -673,6 +673,7 @@ describe("importExport", () => {
 					provider: { postStateToWebview: (refresh?: SettingsImportRefresh) => Promise<void> } = {
 						postStateToWebview,
 					},
+					globalSettings: Record<string, unknown> = { interfaceFontScale: 120, mode: "code" },
 				) => {
 					;(fs.access as Mock).mockResolvedValue(undefined)
 					;(fs.readFile as Mock).mockResolvedValue(
@@ -687,7 +688,7 @@ describe("importExport", () => {
 									},
 								},
 							},
-							globalSettings: { interfaceFontScale: 120, mode: "code" },
+							globalSettings,
 						}),
 					)
 					mockContextProxy.setValues.mockRejectedValue(new Error("other settings failed"))
@@ -804,6 +805,24 @@ describe("importExport", () => {
 					expect(seen[0]!.at).toBeGreaterThan(0) // the form is told to take what the import stored
 					expect(seen[0]!.storedKeys).toEqual(["interfaceFontScale"]) // and which settings those are
 					expect(seen[0]!.late).toBe(false)
+					showErrorMessage.mockRestore()
+				})
+
+				it("marks the refresh with no settings that were stored when the import stored none of them", async () => {
+					const seen: Array<SettingsImportRefresh | undefined> = []
+					const provider = {
+						postStateToWebview: vi.fn(async (refresh?: SettingsImportRefresh) => {
+							seen.push(refresh)
+						}),
+					}
+
+					// Only settings that are not appearance values: the failed store of them names nothing that was stored.
+					const showErrorMessage = await importFailing(provider.postStateToWebview, provider, {
+						mode: "code",
+					})
+
+					expect(seen).toHaveLength(1)
+					expect(seen[0]).toMatchObject({ storedKeys: [], late: false })
 					showErrorMessage.mockRestore()
 				})
 

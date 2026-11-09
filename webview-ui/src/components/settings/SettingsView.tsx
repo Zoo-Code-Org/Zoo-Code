@@ -330,6 +330,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// that succeeded, which replaces the form).
 	const handledImportRefreshAt = useRef<number | undefined>(undefined)
 	const liveStateBefore = useRef(extensionState)
+	// The settings the user has edited since the import was answered. Kept here, by setting, and not worked out from
+	// how the live state moved: an unmarked state push (the host cached the value that failed to be stored, and the
+	// rollback has not finished) can put the live value anywhere before the late refresh, and says nothing of edits.
+	const editedSinceImportAnswer = useRef(new Set<string>())
 	useEffect(() => {
 		const before = liveStateBefore.current
 		liveStateBefore.current = extensionState
@@ -339,12 +343,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledImportRefreshAt.current = settingsImportRefreshedAt
 		const stored: Record<string, unknown> = {}
-		// A late refresh (a rollback that finished after the import was answered) corrects the value the form took then:
-		// a setting that the form no longer shows as the live state did before it was edited since, and its edit stays.
+		// A late refresh (a rollback that finished after the import was answered) corrects the value the form took then,
+		// unless the user has edited that setting since the answer: that edit stays. An import that is answered starts
+		// the count again.
+		if (settingsImportRefreshIsLate !== true) editedSinceImportAnswer.current.clear()
 		const editedSince = (key: string) =>
-			settingsImportRefreshIsLate === true &&
-			JSON.stringify(latestCachedState.current[key as keyof typeof before]) !==
-				JSON.stringify(before[key as keyof typeof before])
+			settingsImportRefreshIsLate === true && editedSinceImportAnswer.current.has(key)
 		// The settings the import says it stored are taken whatever they were before: the live state may have been stale
 		// (a save that was stored while its state refresh failed), so a value that looks unchanged may still differ from the
 		// form, and what a save stored is no longer what is stored.
@@ -352,6 +356,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (editedSince(key)) continue
 			stored[key] = extensionState[key as keyof typeof extensionState]
 			delete appearanceSaved.current[key]
+			// What the form shows is what is stored now, not an edit: a later save does not send it as one.
+			editedAppearance.current.delete(key as AppearanceKey)
 		}
 		for (const [key, value] of Object.entries(extensionState)) {
 			// Compared by value: the host builds new arrays and objects for every state it posts.
@@ -361,16 +367,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(value)
 			) {
 				stored[key] = value
+				editedAppearance.current.delete(key as AppearanceKey)
 			}
 		}
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...stored }))
-	}, [
-		settingsImportRefreshedAt,
-		settingsImportStoredKeys,
-		settingsImportRefreshIsLate,
-		extensionState,
-		latestCachedState,
-	])
+	}, [settingsImportRefreshedAt, settingsImportStoredKeys, settingsImportRefreshIsLate, extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
@@ -379,6 +380,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			if (field in APPEARANCE_SETTINGS) editedAppearance.current.add(field as AppearanceKey)
+			editedSinceImportAnswer.current.add(field)
 			setChangeDetected(true)
 			return { ...prevState, [field]: value }
 		})

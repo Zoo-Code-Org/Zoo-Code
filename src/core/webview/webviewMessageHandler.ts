@@ -48,6 +48,7 @@ import {
 	type SettingWrite,
 } from "../config/appearanceSettingWrites"
 import { isInvalidDisplayValue } from "../config/displaySettings"
+import { changeMcpEnabled } from "./mcpEnabledChanges"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -920,7 +921,12 @@ export const webviewMessageHandler = async (
 						const mcpHub = provider.getMcpHub()
 
 						if (mcpHub) {
-							await mcpHub.handleMcpEnabledChange(newValue as boolean)
+							// Applied one at a time, and a retried save joins the change that is under way: the hub removes a
+							// connection only after its close has finished, so a second disconnect would close it again.
+							const change = changeMcpEnabled(mcpHub, newValue as boolean)
+							// With appearance writes in flight, a change that does not finish must not keep their records for
+							// good: the save fails after the usual time, and the change goes on (it is not repeated).
+							await (written.length > 0 ? withinSettingWriteTime(change, key) : change)
 						}
 					} else if (key === "experiments") {
 						if (!value) {

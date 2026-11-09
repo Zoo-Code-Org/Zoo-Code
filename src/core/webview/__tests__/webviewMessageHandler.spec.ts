@@ -2568,6 +2568,64 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
 		})
 
+		describe("when the disconnect of the MCP servers does not finish", () => {
+			const stalledHub = () => {
+				const releases: Array<() => void> = []
+				const hub = {
+					handleMcpEnabledChange: vi.fn(
+						(_enabled: boolean) => new Promise<void>((resolve) => releases.push(resolve)),
+					),
+				}
+				;(mockClineProvider as unknown as { getMcpHub: () => typeof hub }).getMcpHub = vi.fn(() => hub)
+				return { hub, releases }
+			}
+			afterEach(() => {
+				Reflect.deleteProperty(mockClineProvider, "getMcpHub")
+			})
+
+			it("starts the disconnect once when the save is sent again after the webview gave up on it, and keeps nothing", async () => {
+				const { hub, releases } = stalledHub()
+				const failed = (value: Promise<unknown>) =>
+					expect(value).rejects.toThrow("did not finish in 15 seconds")
+
+				// The first save: appearance values, then the switch, whose disconnect never finishes.
+				const first = failed(save({ interfaceFontScale: 120, mcpEnabled: false }, "save-1"))
+				await vi.advanceTimersByTimeAsync(15_000)
+				await first
+				expect(stored.interfaceFontScale).toBe(100) // put back
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+
+				// The webview waits 20 seconds, and sends the save again, with the same switch.
+				await vi.advanceTimersByTimeAsync(5_000)
+				const retry = failed(save({ interfaceFontScale: 120, mcpEnabled: false }, "save-2"))
+				await vi.advanceTimersByTimeAsync(15_000)
+				await retry
+
+				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1) // not a second disconnect on the closing transport
+				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
+				expect(stored.interfaceFontScale).toBe(100)
+
+				releases[0]() // the disconnect finishes at last
+				await vi.advanceTimersByTimeAsync(0)
+				const third = save({ interfaceFontScale: 120, mcpEnabled: false }, "save-3") // and a later save is a new change
+				await vi.advanceTimersByTimeAsync(0)
+				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(2)
+				releases[1]()
+				await third
+			})
+
+			it("does not bound or repeat anything for a save without appearance values: it waits for the one change", async () => {
+				const { hub } = stalledHub()
+				let finished = false
+
+				void save({ mcpEnabled: false }, "save-1").then(() => (finished = true))
+				await vi.advanceTimersByTimeAsync(60_000)
+
+				expect(finished).toBe(false)
+				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+			})
+		})
+
 		it("does not bound a save with no appearance value: it waits for its store as it always did", async () => {
 			hangOn("timeFormat")
 

@@ -288,6 +288,12 @@ export const stories: Record<string, Story> = {
 		const { default: MermaidBlock } = await import("@/components/common/MermaidBlock")
 		return <MermaidBlock code={mermaidGantt} />
 	},
+	// A diagram that does not parse: the block shows its error label (collapsed, so the picture does not hold the message
+	// text of the Mermaid version).
+	"mermaid-error": async () => {
+		const { default: MermaidBlock } = await import("@/components/common/MermaidBlock")
+		return <MermaidBlock code={"graph TD\n  A -->"} />
+	},
 	"model-info": async () => {
 		const { ModelInfoViewFixture } = await import("@/components/settings/__tests__/ModelInfoView.visual.fixture")
 		return <ModelInfoViewFixture />

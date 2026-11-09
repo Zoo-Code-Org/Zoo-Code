@@ -213,6 +213,86 @@ describe("SettingsView – the form after an import that failed part of the way"
 			expect(save?.updatedSettings?.terminalFontSize).toBe(13)
 		})
 
+		it("takes the stored value when an unmarked state push reported it before the late refresh, if the user has not edited the setting", async () => {
+			await answeredWithFailedValue() // the form took 16
+			// The host cached 16 before its store settled, and the rollback has put 14 back: a state is pushed with 14.
+			hostPosts({ terminalFontSize: 14 })
+			expect(input("terminalFontSize").value).toBe("16") // an unmarked state does not change the form
+
+			lateRefresh() // the live value did not change with this one: 14 was already there
+
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+		})
+
+		it("does not send the failed value with the next save, when the setting had been edited before the import", async () => {
+			renderUiTab()
+			await screen.findByTestId("appearance-terminalFontSize-input")
+			hostPosts({ terminalFontSize: 14 })
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 15: an edit made before the import
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			hostPosts({
+				terminalFontSize: 16, // the value that failed to be stored, as the host cached it
+				settingsImportRefreshedAt: 1_000,
+				settingsImportStoredKeys: ["terminalFontSize"],
+			})
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
+			hostPosts({ terminalFontSize: 14 }) // an unmarked push, with the rollback value
+			lateRefresh()
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("14"))
+			fireEvent.click(await screen.findByTestId("collapse-thinking-checkbox")) // an unrelated edit, to be saved
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			vi.mocked(vscode.postMessage).mockClear()
+
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			const save = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.map((call) => call[0] as { type: string; updatedSettings?: Record<string, unknown> })
+				.find((message) => message.type === "updateSettings")
+			expect(save?.updatedSettings).toBeDefined()
+			// 16 is not sent: it was not stored, and it was not the user's edit any more.
+			expect(save?.updatedSettings).not.toHaveProperty("terminalFontSize", 16)
+			expect(save?.updatedSettings?.terminalFontSize).toBeUndefined()
+		})
+
+		it("does not count an edit made before the import as one once the form took the stored value, even if the late refresh never comes", async () => {
+			renderUiTab()
+			await screen.findByTestId("appearance-terminalFontSize-input")
+			hostPosts({ terminalFontSize: 14 })
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 15: an edit made before the import
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			hostPosts({
+				terminalFontSize: 16,
+				settingsImportRefreshedAt: 1_000,
+				settingsImportStoredKeys: ["terminalFontSize"],
+			})
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
+			hostPosts({ terminalFontSize: 14 }) // the rollback value is pushed, unmarked, and the form still shows 16
+			fireEvent.click(await screen.findByTestId("collapse-thinking-checkbox"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			vi.mocked(vscode.postMessage).mockClear()
+
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			const save = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.map((call) => call[0] as { type: string; updatedSettings?: Record<string, unknown> })
+				.find((message) => message.type === "updateSettings")
+			expect(save?.updatedSettings).toBeDefined()
+			expect(save?.updatedSettings?.terminalFontSize).toBeUndefined() // the form took 16: that is not an edit of the user
+		})
+
+		it("keeps an edit that was made after the answer through an unmarked push of the rollback value", async () => {
+			await answeredWithFailedValue()
+			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 17, after the answer
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			hostPosts({ terminalFontSize: 14 }) // an unmarked push with the rollback value
+
+			lateRefresh()
+
+			expect(input("terminalFontSize").value).toBe("17")
+		})
+
 		it("is not what an ordinary refresh does: the same edit is replaced by the stored value there", async () => {
 			await answeredWithFailedValue()
 			fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 17
