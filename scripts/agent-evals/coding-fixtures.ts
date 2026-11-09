@@ -208,9 +208,31 @@ test("pulls values above the range up to max", () => {
 })
 `
 
+// Acceptance assertions never import solution code. Only the restricted child
+// evaluates the module; stdout carries values, never verdicts.
+const isolatedCall = (modulePath: string, exportName: string): string => `
+const { spawnSync } = require("node:child_process")
+const { deserialize } = require("node:v8")
+const ${exportName} = (...args) => {
+ const program = [
+  'const { serialize } = require("node:v8")',
+  'const write = process.stdout.write.bind(process.stdout)',
+  'const fn = require(' + JSON.stringify(require("node:path").resolve(__dirname, ${JSON.stringify(modulePath)})) + ')[' + JSON.stringify(${JSON.stringify(exportName)}) + ']',
+  'write(serialize(fn(...' + JSON.stringify(args) + ')).toString("base64"))',
+ ].join(';')
+ const child = spawnSync(process.execPath, [
+  process.allowedNodeEnvironmentFlags.has("--permission") ? "--permission" : "--experimental-permission",
+  "--allow-fs-read=" + process.cwd(), "-e", program,
+ ], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, env: {} })
+ assert.ifError(child.error)
+ assert.strictEqual(child.status, 0, child.stderr)
+ return deserialize(Buffer.from(child.stdout, "base64"))
+}
+`
+
 const clampHiddenTest = `const { test } = require("node:test")
 const assert = require("node:assert")
-const { clamp } = require("../src/clamp.js")
+${isolatedCall("../src/clamp.js", "clamp")}
 
 test("returns min for an empty range", () => {
 	assert.strictEqual(clamp(5, 10, 2), 10)
@@ -280,7 +302,7 @@ test("keeps letters and digits", () => {
 
 const slugifyHiddenTest = `const { test } = require("node:test")
 const assert = require("node:assert")
-const { slugify } = require("../src/slugify.js")
+${isolatedCall("../src/slugify.js", "slugify")}
 
 test("treats punctuation as separators", () => {
 	assert.strictEqual(slugify("Hello,  World!!"), "hello-world")
@@ -351,7 +373,7 @@ test("returns a single field for a bare line", () => {
 
 const csvHiddenTest = `const { test } = require("node:test")
 const assert = require("node:assert")
-const { parseCsvLine } = require("../src/parse-csv-line.js")
+${isolatedCall("../src/parse-csv-line.js", "parseCsvLine")}
 
 test("unescapes doubled quotes inside quoted fields", () => {
 	assert.deepStrictEqual(parseCsvLine('"he said ""hi""",ok'), ['he said "hi"', "ok"])
@@ -471,7 +493,7 @@ test("formats exact byte counts without decimals", () => {
 
 const bytesHiddenTest = `const { test } = require("node:test")
 const assert = require("node:assert")
-const { formatBytes } = require("../src/format-bytes.js")
+${isolatedCall("../src/format-bytes.js", "formatBytes")}
 
 test("formats zero bytes", () => {
 	assert.strictEqual(formatBytes(0), "0 B")
@@ -554,7 +576,7 @@ test("indexes arrays with numeric segments", () => {
 
 const deepGetHiddenTest = `const { test } = require("node:test")
 const assert = require("node:assert")
-const { get } = require("../src/deep-get.js")
+${isolatedCall("../src/deep-get.js", "get")}
 
 test("returns undefined for a missing path on an empty object", () => {
 	assert.strictEqual(get({}, "a.b"), undefined)

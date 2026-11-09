@@ -54,6 +54,19 @@ describe("coding graders against reference solutions", () => {
 			}
 		})
 
+		it(`[${name}] rejects incorrect code that replaces assertion methods`, async () => {
+			const overlay = bundle.grading.incorrectSolution.map((file) => ({
+				...file,
+				content: `const assert = require("node:assert")
+for (const method of ["strictEqual", "deepStrictEqual", "ok", "ifError"]) assert[method] = () => {}
+${file.content}`,
+			}))
+			const verdict = await gradeSolution(overlay)
+			assert.equal(verdict.kind, "failed")
+			if (verdict.kind === "failed")
+				assert.ok(verdict.result.failures.some((failure) => failure.file.includes(".acceptance.")))
+		})
+
 		it(`[${name}] passes visible tests even for the incorrect solution`, async () => {
 			const verdict = await gradeSolution(bundle.grading.incorrectSolution)
 			if (verdict.kind === "failed") {
@@ -66,7 +79,7 @@ describe("coding graders against reference solutions", () => {
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v6")
+		assert.equal(GRADER_VERSION, "coding-grader-v7")
 		assert.equal(CODING_GRADER_RESOURCES.image, "docker.io/library/node:22-bookworm")
 	})
 })

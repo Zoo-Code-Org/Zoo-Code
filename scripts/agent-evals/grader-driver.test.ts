@@ -168,14 +168,7 @@ it("rejects a missing result path", async () => {
 	assert.equal(await runDriver([], os.tmpdir()), 2)
 })
 
-for (const scenario of [
-	"forged-stderr",
-	"forged-stdout",
-	"early-exit",
-	"partial-exit",
-	"no-tests",
-	"write-result",
-] as const) {
+for (const scenario of ["forged-stderr", "forged-stdout", "early-exit", "partial-exit", "no-tests"] as const) {
 	it(`rejects solution tampering: ${scenario}`, async () => {
 		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-tampering-"))
 		try {
@@ -188,9 +181,7 @@ for (const scenario of [
 						? "import { test } from 'node:test'; test('decoy', () => {}); setImmediate(() => process.exit(0))"
 						: scenario === "no-tests"
 							? ""
-							: scenario === "write-result"
-								? `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(out)}, '{}')`
-								: `process.${scenario === "forged-stderr" ? "stderr" : "stdout"}.write('# pass 100\\n# fail 0\\n# cancelled 0\\n')`
+							: `process.${scenario === "forged-stderr" ? "stderr" : "stdout"}.write('# pass 100\\n# fail 0\\n# cancelled 0\\n')`
 			await fs.writeFile(path.join(workspace, "solution.mjs"), payload)
 			await fs.writeFile(
 				path.join(workspace, "test", "passing.test.mjs"),
@@ -245,16 +236,39 @@ it("rejects a nonzero runner exit even after its acceptance test passed", async 
 			`
 import { test } from 'node:test'
 await test('acceptance', () => {})
+await new Promise(resolve => setTimeout(resolve, 100))
 process.exit(7)
 `,
 		)
 		const out = path.join(scratch, "result.json")
 		assert.equal(await runDriver([out, "test"], scratch), 0)
 		const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string; passed?: boolean }
-		// Node versions may discard buffered events on an abrupt exit. Both a
-		// driver failure and a completed failed result must refuse correctness.
-		assert.notEqual(result.passed, true)
-		assert.ok(result.kind === "driver-error" || result.passed === false)
+		assert.equal(result.kind, "driver-error")
+	} finally {
+		await fs.rm(scratch, { recursive: true, force: true })
+	}
+})
+
+it("denies result writes in the test child", async () => {
+	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-write-denied-"))
+	try {
+		const workspace = await writeWorkspace(scratch)
+		const out = path.join(scratch, "result.json")
+		await fs.writeFile(
+			path.join(workspace, "test", "passing.test.mjs"),
+			`
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+test('result write denied', () => {
+ assert.throws(() => fs.writeFileSync(${JSON.stringify(out)}, '{}'), { code: 'ERR_ACCESS_DENIED' })
+})
+`,
+		)
+		assert.equal(await runDriver([out, "test"], workspace), 0)
+		const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string; passed: boolean }
+		assert.equal(result.kind, "completed")
+		assert.equal(result.passed, true)
 	} finally {
 		await fs.rm(scratch, { recursive: true, force: true })
 	}

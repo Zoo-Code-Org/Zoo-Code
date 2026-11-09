@@ -13,6 +13,7 @@ import {
 	type ComparisonFlowWiring,
 	type SideResultFile,
 } from "./coding-compare.ts"
+import { acquireSideOutputLock } from "./output-lock.ts"
 import { buildRunMetrics } from "./coding-metrics.ts"
 import type { SidePins } from "./coding-pins.ts"
 import { createInterruptFlag, type InterruptFlag } from "./side-process-guard.ts"
@@ -529,6 +530,39 @@ for (const fails of [false, true]) {
 		} finally {
 			release()
 			await settled
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+for (const side of ["baseline", "candidate"] as const) {
+	it(`preserves scratch output owned by a standalone ${side} side during cleanup`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "comparison-owned-scratch-"))
+		const scratchDir = path.join(dir, "scratch")
+		const sideOut = path.join(scratchDir, `${side}-out`)
+		let release: (() => void) | undefined
+		try {
+			await assert.rejects(
+				executeComparisonFlow(
+					flowWiring({
+						flag: createInterruptFlag(),
+						out: path.join(dir, "out"),
+						scratchDir,
+						runSide: async (current) => {
+							if (current === "candidate") {
+								release = await acquireSideOutputLock(sideOut)
+								await fs.writeFile(path.join(sideOut, "side-results.json"), "owned")
+							}
+							return record(current, COMMIT)
+						},
+					}),
+				),
+				/cannot acquire side output lock/,
+			)
+			assert.equal(await fs.readFile(path.join(sideOut, "side-results.json"), "utf8"), "owned")
+			await assert.rejects(fs.access(path.join(dir, "out", "comparison-report.complete")))
+		} finally {
+			release?.()
 			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})

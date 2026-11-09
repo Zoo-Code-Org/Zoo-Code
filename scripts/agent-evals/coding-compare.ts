@@ -10,6 +10,7 @@ import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
 import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
 import { createSideProcessGuard, type SideProcessGuard } from "./side-process-guard.ts"
+import { acquireSideOutputLock } from "./output-lock.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
 
 export { buildComparisonReport, renderMarkdownReport }
@@ -301,17 +302,36 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 		// An interrupt escalation must finish before the worktrees go away,
 		// so no child is still writing while its tree is deleted.
 		await wiring.interruptKill()
-		await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "baseline")], {
-			cwd: wiring.root,
-			timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-			env: buildWorktreeEnvironment(process.env),
-		}).catch(() => {})
-		await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "candidate")], {
-			cwd: wiring.root,
-			timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-			env: buildWorktreeEnvironment(process.env),
-		}).catch(() => {})
-		await fs.rm(wiring.scratchDir, { recursive: true, force: true }).catch(() => {})
+		// Acquire both output locks before removing any scratch content. A
+		// standalone side may still own one after the comparison child exits.
+		const releases: (() => void)[] = []
+		try {
+			for (const side of ["baseline", "candidate"])
+				releases.push(await acquireSideOutputLock(path.join(wiring.scratchDir, `${side}-out`)))
+			await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "baseline")], {
+				cwd: wiring.root,
+				timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+				env: buildWorktreeEnvironment(process.env),
+			}).catch(() => {})
+			await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "candidate")], {
+				cwd: wiring.root,
+				timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+				env: buildWorktreeEnvironment(process.env),
+			}).catch(() => {})
+			// Keep the lock directories in place until their owners release them.
+			// A new writer after release can recreate its output; the final
+			// nonrecursive rmdir then leaves that writer's directory intact.
+			for (const entry of await fs.readdir(wiring.scratchDir)) {
+				if (!entry.startsWith(".coding-side-"))
+					await fs.rm(path.join(wiring.scratchDir, entry), { recursive: true, force: true })
+			}
+		} catch (error) {
+			await removeComparisonReport(wiring.out)
+			throw error
+		} finally {
+			for (const release of releases.reverse()) release()
+		}
+		await fs.rmdir(wiring.scratchDir).catch(() => {})
 	}
 	const signal = wiring.interruptedSignal()
 	if (signal === "SIGINT" || signal === "SIGTERM") {
