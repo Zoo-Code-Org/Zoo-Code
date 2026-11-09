@@ -592,9 +592,19 @@ const createTabPanelUnlocked = async ({
 		// The provider built above never receives a panel on this path, so it has to be disposed or
 		// it stays registered with its listeners attached.
 		if (!forceNew && tabPanel) {
-			const racedProvider = ClineProvider.getInstanceForView(tabPanel)
-			if (racedProvider) {
-				await tabPanel.reveal()
+			// The same wait as the one above, for a panel the API path published between the two
+			// checks. Adopting it before its creation settles hands this caller a provider the owning
+			// rollback is about to dispose: disposeFailedTabCreation tears down that provider and the
+			// panel it published, so the caller would be handed a dead tab. Settling can dispose the
+			// panel and clear the ref, so the panel is re-read afterwards and only a panel that is
+			// still tracked and still has a live provider is adopted.
+			if (apiTabPanelCreation) {
+				await apiTabPanelCreation.catch(() => {})
+			}
+			const racedPanel = tabPanel
+			const racedProvider = racedPanel ? ClineProvider.getInstanceForView(racedPanel) : undefined
+			if (racedPanel && racedProvider) {
+				await racedPanel.reveal()
 				await racedProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				// The constructor above rebound telemetry to this provider (ClineProvider binds itself
 				// with TelemetryService.setProvider) and the client keeps only a weak reference to

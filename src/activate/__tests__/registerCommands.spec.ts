@@ -1423,6 +1423,156 @@ describe("openClineInNewTab", () => {
 		expect(telemetryBinding.events[1]).toMatchObject({ taskId: "surviving-tab" })
 		expect(telemetryBinding.current).toBe(trackedProvider)
 	})
+
+	it("does not return an API provider that fails after publishing its panel", async () => {
+		const waitFor = async (label: string, condition: () => boolean): Promise<void> => {
+			for (let attempt = 0; attempt < 240; attempt++) {
+				if (condition()) {
+					return
+				}
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			throw new Error(`condition never held: ${label}`)
+		}
+
+		// Both creations park on their own newGroupRight await, the last stop before a panel is
+		// created. The ordinary one must get past the reuse check at the top with nothing tracked
+		// - that is the shape of the bug - and the API one must publish its panel while the
+		// ordinary one is still parked, so the later check is the only thing that can adopt it.
+		const apiPanel = makeTabPanel("api-tab", { active: true, visible: true })
+		const ordinaryPanel = makeTabPanel("ordinary-tab", { active: true, visible: true })
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(apiPanel).mockReturnValueOnce(ordinaryPanel)
+
+		// The automocked class neither registers instances nor assigns the panel to the provider's
+		// view; resolveWebviewView does both in the real code (ClineProvider.ts:1896-1931), so the
+		// doubles do it here and the survivor rule reads the same two lookups. Disposal
+		// unregisters, as it does at ClineProvider.ts:1653-1659.
+		const providerByView = new Map<vscode.WebviewPanel, ClineProvider>()
+		const apiProvider = {
+			view: undefined as vscode.WebviewPanel | undefined,
+			resolveWebviewView: vi.fn(async (view: vscode.WebviewPanel) => {
+				apiProvider.view = view
+				providerByView.set(view, apiProvider as unknown as ClineProvider)
+			}),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn(async () => {
+				providerByView.delete(apiPanel)
+			}),
+		}
+		const ordinaryProvider = {
+			resolveWebviewView: vi.fn().mockResolvedValue(undefined),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: vscode.WebviewPanel) =>
+			providerByView.get(view),
+		)
+		;(ClineProvider.getAllInstances as Mock).mockImplementation(() => [...providerByView.values()])
+		// The ordinary construction happens first, so it takes the first implementation.
+		vi.mocked(ClineProvider)
+			.mockImplementationOnce(function () {
+				return ordinaryProvider
+			} as never)
+			.mockImplementationOnce(function () {
+				return apiProvider
+			} as never)
+
+		let groupCalls = 0
+		let lockCalls = 0
+		// Each gate is a promise whose resolver a promise executor installs. TS cannot see an
+		// assignment made inside the executor from a sibling `let`, so the settle function starts as a
+		// no-op and the executor always replaces it.
+		const makeGate = (): { wait: Promise<void>; settle: (error?: Error) => void } => {
+			let settle: (error?: Error) => void = () => undefined
+			const wait = new Promise<void>((resolve, reject) => {
+				settle = (error) => (error === undefined ? resolve() : reject(error))
+			})
+			return { wait, settle }
+		}
+		const ordinaryGroup = makeGate()
+		const apiGroup = makeGate()
+		const apiLock = makeGate()
+		const executeCommandMock = vscode.commands.executeCommand as Mock
+		const previousExecute = executeCommandMock.getMockImplementation()
+		executeCommandMock.mockImplementation(async (command: string) => {
+			if (command === "workbench.action.newGroupRight") {
+				groupCalls += 1
+				if (groupCalls === 1) {
+					await ordinaryGroup.wait
+				} else {
+					await apiGroup.wait
+				}
+				return undefined
+			}
+			if (command === "workbench.action.lockEditorGroup") {
+				lockCalls += 1
+				if (lockCalls === 1) {
+					// The API creation's last step is the one that fails, after its panel was published
+					// and its provider registered for that view.
+					await apiLock.wait
+				}
+				return undefined
+			}
+			return previousExecute?.(command)
+		})
+
+		try {
+			const apiAttempt = openClineInNewTabForApi({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			const ordinaryAttempt = openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			await waitFor("both creations parked on their group command", () => groupCalls === 2)
+			apiGroup.settle()
+			// Published, registered, creation still unsettled: the dispose listener is installed after
+			// resolveWebviewView, so its single call is the signal that a live panel is tracked while
+			// the creation that made it is still running.
+			await waitFor(
+				"the API panel published and tracked with its creation unsettled",
+				() => getPanel() === apiPanel && (apiPanel.onDidDispose as Mock).mock.calls.length === 1,
+			)
+			ordinaryGroup.settle()
+			// The failure has to land on the API creation's own last step. Between installing the
+			// dispose listener and taking the editor-group lock the creation sits in a 100ms delay,
+			// and rejecting the lock before anything awaits it fires the rejection into nobody.
+			await waitFor("the API creation parked on the editor-group lock", () => lockCalls === 1)
+			// The ordinary creation has reached the later reuse check by now, and the creation it
+			// could adopt fails from here on.
+			apiLock.settle(new Error("api lock failed"))
+
+			await expect(apiAttempt).rejects.toThrow("api lock failed")
+			const returned = await ordinaryAttempt
+
+			// The caller keeps its own provider. Without the wait in the later reuse check the adoption
+			// happens first and this reddens on provider identity, naming the raced provider rather
+			// than a timer: the rolled-back creation had already published the panel and registered
+			// this provider for it.
+			expect(returned).toBe(ordinaryProvider)
+			expect(returned).not.toBe(apiProvider)
+			// The ordinary call's own provider is the one it returned, not the one the rollback disposed.
+			expect(ordinaryProvider.dispose).not.toHaveBeenCalled()
+			expect(apiProvider.dispose).toHaveBeenCalledTimes(1)
+			expect(apiPanel.dispose).toHaveBeenCalledTimes(1)
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalledWith(
+				expect.stringContaining("cleanup was incomplete"),
+			)
+			// The ordinary creation still opened its own tab, and that tab is the tracked one.
+			expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+			expect(getPanel()).toBe(ordinaryPanel)
+		} finally {
+			// Restore the saved implementation rather than mockRestore(): this file's beforeEach only
+			// clears call history, and mockRestore() on a bare vi.fn() leaves executeCommand with no
+			// implementation at all, so every later tab creation in this file breaks. In a finally so a
+			// failing assertion cannot leak the override.
+			executeCommandMock.mockImplementation(previousExecute ?? (async () => undefined))
+		}
+	})
+
 	it("creates a webview panel with title 'Zoo Code'", async () => {
 		const webviewFocusTracker = new WebviewFocusTracker()
 		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker })
