@@ -1411,7 +1411,6 @@ function scanShellSyntax(text: string): ScanOutcome {
 			return errorAt("nesting-too-deep", start)
 		}
 		const frames: RegionFrame[] = []
-		let localParamOpen = 0
 		let dqOpen = false
 		// Index just past the most recent non-group frame close in this walk,
 		// or -1. The shell ends an expansion at its closer but not the
@@ -1503,27 +1502,19 @@ function scanShellSyntax(text: string): ScanOutcome {
 					// would emit it twice. Slicing every close eagerly would
 					// also cost O(n²) on adversarial nesting.
 					if (closed.kind === "parameter-expansion") {
-						localParamOpen--
 						const parent = frames[frames.length - 1]
 						if (frames.length === 0) {
 							collect.push(...(closed.payloads ?? []))
 						} else {
-							// Stryker disable next-line ConditionalExpression: a non-parameter parent carries a null payload list, so an always-true gate short-circuits on the same optional chain the real gate's false branch already skips, and no reachable input differs.
-							if (parent === innermostParam(frames, localParamOpen)) {
-								// Stryker disable next-line ArrayDeclaration,OptionalChaining: the gate restricts this push to a parameter-expansion parent, which always carries a payload list, so the optional chain and the empty-coalesce default are both unreachable branches of the same invariant.
-								parent.payloads?.push(...(closed.payloads ?? []))
-							}
+							// Stryker disable next-line ArrayDeclaration: a closed parameter-expansion frame always carries a payload list, so the empty-coalesce default has no reachable reader.
+							parent.payloads?.push(...(closed.payloads ?? []))
 						}
 					} else {
 						const parent = frames[frames.length - 1]
 						if (frames.length === 0) {
 							collect.push(trimScanBlanks(text.slice(closed.contentStart, i)))
 						} else {
-							// Stryker disable next-line ConditionalExpression: a non-parameter parent carries a null payload list, so an always-true gate short-circuits on the same optional chain the real gate's false branch already skips, and no reachable input differs.
-							if (parent === innermostParam(frames, localParamOpen)) {
-								// Stryker disable next-line OptionalChaining: the gate restricts this push to a parameter-expansion parent, which always carries a payload list, so removing the optional chain changes no observable output.
-								parent.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
-							}
+							parent.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
 						}
 					}
 					i++
@@ -1678,7 +1669,6 @@ function scanShellSyntax(text: string): ScanOutcome {
 						groupDepth: 0,
 						payloads: [],
 					})
-					localParamOpen++
 					i = arm + 1
 					continue
 				}
@@ -2040,15 +2030,11 @@ function scanShellSyntax(text: string): ScanOutcome {
 					// into the enclosing expansion is that list's only carrier.
 					frameCloseEnd = closeEnd
 					const parent = stack[stack.length - 1]
-					// Stryker disable next-line ConditionalExpression: a non-parameter parent carries a null payload list, so an always-true gate short-circuits on the same optional chain the real gate's false branch already skips, and no reachable input differs.
-					if (parent === innermostParam(stack, paramFramesOpen)) {
-						if (closed.kind === "parameter-expansion") {
-							// Stryker disable next-line ArrayDeclaration,OptionalChaining: the gate restricts this push to a parameter-expansion parent, which always carries a payload list, so the optional chain and the empty-coalesce default cannot be observed.
-							parent.payloads?.push(...(closed.payloads ?? []))
-						} else {
-							// Stryker disable next-line OptionalChaining: the same gate guarantees a payload-carrying parent, so removing the optional chain changes no observable output.
-							parent.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
-						}
+					if (closed.kind === "parameter-expansion") {
+						// Stryker disable next-line ArrayDeclaration: a closed parameter-expansion frame always carries a payload list, so the empty-coalesce default has no reachable reader.
+						parent.payloads?.push(...(closed.payloads ?? []))
+					} else {
+						parent.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
 					}
 				}
 				i = closeEnd
