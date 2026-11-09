@@ -41,6 +41,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/pr
 import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
+import { getPanel, setPanel } from "../../../activate/registerCommands"
 
 // Mock setup must come before imports.
 vi.mock("../../prompts/sections/custom-instructions")
@@ -647,7 +648,10 @@ describe("ClineProvider", () => {
 
 		await provider.resolveWebviewView(first.view)
 		// The replacement resolves before the old view's disposal callback runs.
+		// (and before the tracked sidebar ref is consulted by the late disposal below).
 		await provider.resolveWebviewView(second.view)
+
+		expect(getPanel(), "the replacement view must be the tracked sidebar").toBe(second.view)
 
 		await first.triggerDispose()
 
@@ -655,9 +659,14 @@ describe("ClineProvider", () => {
 		for (const disposable of second.disposables) {
 			expect(disposable.dispose).not.toHaveBeenCalled()
 		}
+		expect(second.disposables.length, "the replacement view must have listeners at stake").toBeGreaterThan(0)
+		expect(first.disposables.length, "the disposed view must have had listeners to release").toBeGreaterThan(0)
 		for (const disposable of first.disposables) {
 			expect(disposable.dispose).toHaveBeenCalled()
 		}
+		// The disposal below is identity-checked: a late disposal of the view that was already
+		// replaced must not clear the ref, or the commands and this provider would lose the live view.
+		expect(getPanel(), "a late disposal of the replaced view must not clear the tracked ref").toBe(second.view)
 		await provider.dispose()
 	})
 
@@ -698,6 +707,9 @@ describe("ClineProvider", () => {
 		const configDisposable = { dispose: vi.fn() }
 		vi.mocked(vscode.workspace.onDidChangeConfiguration).mockReturnValue(configDisposable)
 
+		// Tracked explicitly rather than relying on the resolve-time bookkeeping, so the assertion
+		// below cannot pass on state some earlier test left behind.
+		setPanel(view, "sidebar")
 		await provider.resolveWebviewView(view)
 
 		// Registering the view puts its listeners in the provider's one disposable list.
@@ -714,6 +726,12 @@ describe("ClineProvider", () => {
 		for (const callback of disposeCallbacks) {
 			await callback()
 		}
+
+		// The tracked sidebar ref is gone too: ClineProvider and the sidebar commands read it through
+		// the registerCommands seam, and a disposed view left behind there would be handed to
+		// focusPanel and to every title-bar command as if it were still on screen. Deleting the
+		// clearSidebarPanel call in the sidebar disposal branch fails here.
+		expect(getPanel(), "the disposed sidebar view must no longer be tracked").toBeUndefined()
 
 		// The one drain is what releases them: every registration the view caused - message listener,
 		// focus registration, visibility listener, configuration listener - is gone from the list, and none

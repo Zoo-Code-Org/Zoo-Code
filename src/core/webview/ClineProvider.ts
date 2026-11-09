@@ -1983,7 +1983,10 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webviewView The view whose webview messages are listened to
+	 * @param webview The webview whose messages are listened to
+	 * @param view The view that owns `webview`. The listener drops every message whose view is no
+	 *   longer the provider's current view, so a late message from a replaced view cannot act on the
+	 *   replacement's state.
 	 */
 	private setWebviewMessageListener(webview: vscode.Webview, view: vscode.WebviewView | vscode.WebviewPanel) {
 		const onReceiveMessage = async (message: WebviewMessage) => {

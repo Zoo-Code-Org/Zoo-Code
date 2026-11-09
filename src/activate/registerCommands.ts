@@ -114,11 +114,14 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // excluded from this map.
 //
 // Callback shape mirrors VS Code's own `commands.registerCommand` signature
-// (`(...args: any[]) => any`), with the return narrowed to `unknown` so
-// callers must inspect before using. `any[]` for args is unavoidable: the
-// callbacks here are heterogeneous (`importSettings` takes an optional
-// `filePath?: string`, others take none) and VS Code dispatches positional
-// args dynamically.
+// (`(...args: any[]) => any`) except for the args, which are typed `never[]`.
+// Nothing in this file calls these callbacks - VS Code dispatches positional
+// args dynamically - so `never[]` is the stricter choice: it accepts every
+// callback shape in the map (`importSettings` takes an optional
+// `filePath?: string`, the rest take none) while a direct call like
+// `cb("path")` fails to typecheck instead of compiling silently. Widening the
+// rest back to `any[]` would drop that guard. The return stays narrowed to
+// `unknown` so callers must inspect before using.
 type CommandCallback = (...args: never[]) => unknown
 
 // Posts each action in order to the target instance. Failures are logged
@@ -460,7 +463,17 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
 	}
 
-	await tabProvider.resolveWebviewView(newPanel)
+	try {
+		await tabProvider.resolveWebviewView(newPanel)
+	} catch (error) {
+		// The tab ref is already this panel (setPanel above) and the panel's own disposal handler is
+		// only registered below, so a failed resolve has to close the blank panel and clear the ref
+		// itself before rethrowing: otherwise the next click reveals a panel whose webview never
+		// resolved, and the tracked ref keeps pointing at it.
+		if (tabPanel === newPanel) setPanel(undefined, "tab")
+		newPanel.dispose()
+		throw error
+	}
 
 	// Add listener for visibility changes to notify webview
 	newPanel.onDidChangeViewState(

@@ -530,11 +530,15 @@ describe("registerCommands handlers", () => {
 		})
 	})
 
-	it("focusInput awaits postMessage on the registered provider when a sidebar panel is active", async () => {
+	it("focusInput awaits postMessage on the instance resolved from the tracked sidebar view", async () => {
 		const fakeSidebar = {} as vscode.WebviewView
 		setPanel(fakeSidebar, "sidebar")
-		// The sidebar target is resolved through the live-instance lookup.
-		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockProvider)
+		// The sidebar target is resolved through the live-instance lookup, so the lookup has to hand back
+		// a provider that is NOT the one registered at activation: if both names refer to the same
+		// double, a handler that posted to the registered provider instead of the looked-up instance
+		// would pass either way.
+		const sidebarProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(sidebarProvider)
 
 		// Same deferred-promise pattern as above. focusInput first awaits
 		// focusPanel() (mocked to resolve sync) and then awaits
@@ -545,7 +549,7 @@ describe("registerCommands handlers", () => {
 		const postPromise = new Promise<void>((resolve) => {
 			resolvePost = resolve
 		})
-		mockProvider.postMessageToWebview.mockReturnValueOnce(postPromise)
+		sidebarProvider.postMessageToWebview.mockReturnValueOnce(postPromise)
 
 		const handlerPromise = handlers["zoo-code.focusInput"]() as Promise<unknown>
 		let settled = false
@@ -559,10 +563,13 @@ describe("registerCommands handlers", () => {
 		resolvePost()
 		await handlerPromise
 
-		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(fakeSidebar)
+		expect(sidebarProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",
 			action: "focusInput",
 		})
+		// The registered provider is a different double: it must not receive the post.
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	it("focusInput does not post when no sidebar panel is tracked", async () => {
@@ -575,7 +582,8 @@ describe("registerCommands handlers", () => {
 	})
 
 	it("focusInput posts to the tab provider when a tab panel is tracked alongside the sidebar", async () => {
-		setPanel({} as vscode.WebviewView, "sidebar")
+		const sidebarView = {} as vscode.WebviewView
+		setPanel(sidebarView, "sidebar")
 		const tabPanel = {} as vscode.WebviewPanel
 		setPanel(tabPanel, "tab")
 		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
@@ -585,6 +593,9 @@ describe("registerCommands handlers", () => {
 
 		// focusPanel selects the tab when one is tracked, so the focus message follows that
 		// selection: the tab webview is the one that became visible and must receive it.
+		// Pin the arguments handed to focusPanel, not only the outcome: swapping them would make
+		// focusPanel reveal the sidebar while the post still followed the tracked tab.
+		expect(focusPanel).toHaveBeenCalledWith(tabPanel, sidebarView)
 		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
 		expect(tabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
@@ -596,10 +607,16 @@ describe("registerCommands handlers", () => {
 		// that lookup finds no live instance (tab provider disposed or untracked), the
 		// sidebar must not receive the post - focusPanel made the tab visible, so a
 		// sidebar post would focus an input the user cannot see.
-		setPanel({} as vscode.WebviewView, "sidebar")
+		const sidebarView = {} as vscode.WebviewView
+		setPanel(sidebarView, "sidebar")
 		const tabPanel = {} as vscode.WebviewPanel
 		setPanel(tabPanel, "tab")
-		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		// The lookup is view-specific on purpose: the tab lookup must miss while the sidebar stays live.
+		// A blanket `undefined` cannot tell "no fallback" apart from "fell back to a sidebar that also
+		// resolved to nothing", which is the defect these silence assertions exist to catch.
+		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: unknown) =>
+			view === tabPanel ? undefined : mockProvider,
+		)
 
 		await handlers["zoo-code.focusInput"]()
 
@@ -949,11 +966,12 @@ describe("openClineInNewTab", () => {
 
 	it("reveals the existing tab instead of creating a second panel", async () => {
 		const mockExistingProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		const revealMock = vi.fn().mockResolvedValue(undefined)
 		const mockPanel = {
 			webview: { postMessage: vi.fn() },
 			onDidChangeViewState: vi.fn(),
 			onDidDispose: vi.fn(),
-			reveal: vi.fn().mockResolvedValue(undefined),
+			reveal: revealMock,
 		} as unknown as vscode.WebviewPanel
 		setPanel(mockPanel, "tab")
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(mockExistingProvider)
@@ -965,12 +983,18 @@ describe("openClineInNewTab", () => {
 		})
 
 		expect(result).toBe(mockExistingProvider)
-		expect(mockPanel.reveal).toHaveBeenCalledTimes(1)
+		expect(revealMock).toHaveBeenCalledTimes(1)
 		expect(vscode.window.createWebviewPanel).not.toHaveBeenCalled()
 		expect(mockExistingProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",
 			action: "didBecomeVisible",
 		})
+		// Each assertion above is order-blind on its own. The contract is reveal first, then the
+		// didBecomeVisible post: posting first would light up an input in a panel the user cannot
+		// see yet, so the invocation order is pinned directly.
+		expect(revealMock.mock.invocationCallOrder[0]).toBeLessThan(
+			mockExistingProvider.postMessageToWebview.mock.invocationCallOrder[0],
+		)
 	})
 
 	it("creates a new tab panel when the tracked tab's provider has been disposed", async () => {
@@ -991,6 +1015,40 @@ describe("openClineInNewTab", () => {
 
 		expect(mockPanel.reveal).not.toHaveBeenCalled()
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("disposes the new panel and clears the tab ref when the first resolve rejects", async () => {
+		// The tab ref is stored before the resolve and the panel's own disposal handler is registered
+		// only after it, so a failed resolve used to leave a blank panel open and tracked: the next
+		// click would reveal a panel whose webview never resolved.
+		const failedPanel = {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			dispose: vi.fn(),
+			reveal: vi.fn().mockResolvedValue(undefined),
+		} as unknown as vscode.WebviewPanel
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(failedPanel)
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		const ctor = ClineProvider as unknown as Mock
+		// A regular function, not an arrow: the class mock is constructed with new, and an arrow factory
+		// throws "is not a constructor". Once, so it is consumed by this test only.
+		ctor.mockImplementationOnce(function (this: unknown) {
+			return {
+				resolveWebviewView: vi.fn().mockRejectedValue(new Error("webview resolve failed")),
+			} as unknown as ClineProvider
+		})
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: tabFocusTracker,
+			}),
+		).rejects.toThrow("webview resolve failed")
+
+		expect(failedPanel.dispose).toHaveBeenCalledTimes(1)
+		expect(getPanel()).toBeUndefined()
 	})
 
 	it("falls back to an undefined MdmService when MdmService.getInstance throws", async () => {
