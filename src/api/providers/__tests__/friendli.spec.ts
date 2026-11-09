@@ -329,6 +329,18 @@ describe("FriendliHandler", () => {
 		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { timeout: 2000 })
 	})
 
+	it("completePrompt should time out without a chat request when a resolved catalog wait spends the deadline", async () => {
+		let now = 1_000
+		vi.spyOn(Date, "now").mockImplementation(() => now)
+		mockGetModels.mockImplementationOnce(async () => {
+			now += 3_000
+			return {}
+		})
+
+		await expect(handler.completePrompt("a", { timeoutMs: 3000 })).rejects.toMatchObject({ name: "TimeoutError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
 	it("completePrompt should time out without a chat request when the catalog wait uses the deadline", async () => {
 		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
 

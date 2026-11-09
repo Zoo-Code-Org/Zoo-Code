@@ -511,6 +511,26 @@ describe("Model Validation Functions", () => {
 			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
 			expect(result).toBeUndefined()
 		})
+
+		// The live catalog is authoritative: a static-only ID it no longer serves is flagged,
+		// while an empty catalog (failed fetch) keeps the static fallback valid.
+		it.each([
+			{
+				label: "a loaded catalog without the ID",
+				catalog: { "zai-org/GLM-5.2": {}, "zai-org/GLM-5.1": {} },
+				flagged: true,
+			},
+			{ label: "an empty catalog", catalog: {}, flagged: false },
+		])("handles a static-only Friendli ID with $label", ({ catalog, flagged }) => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "deepseek-ai/DeepSeek-V3.2",
+			}
+			const routerModels = { ...mockRouterModels, friendli: catalog } as RouterModels
+
+			const result = getModelValidationError(config, routerModels, allowAllOrganization)
+			expect(result?.startsWith("settings:validation.modelAvailability") ?? false).toBe(flagged)
+		})
 	})
 
 	describe("Zoo Gateway validation", () => {
