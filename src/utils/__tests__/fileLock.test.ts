@@ -182,6 +182,45 @@ describe("one lock per file, not one lock per spelling", () => {
 		expect(canonicalLockKey(aliasFile)).toBe(canonicalLockKey(file))
 		await releaseAlias()
 	})
+
+	// The portable half of the leaf-spelling coverage. The 8.3 row above needs a volume that hands
+	// back two spellings of one entry and the real-library link rows below need a filesystem that
+	// lets a leaf be a link; this one needs neither. It substitutes the spelling the volume reports
+	// and asserts the artefact acquireFileLock asks the library to create, so dropping the
+	// substitution fails here on every platform, not only where a second spelling exists by luck.
+	it("names the artefact by the spelling the volume reports for the leaf, not by the caller's", async () => {
+		const directory = path.join(root(), "substituted-leaf-lock")
+		fs.mkdirSync(directory, { recursive: true })
+		const callerPath = path.join(directory, "history-item.json")
+		const volumePath = path.join(directory, "HISTORY-ITEM.JSON")
+		fs.writeFileSync(callerPath, "{}", "utf8")
+		// fs's namespace types these properties read-only, and the module double forwards to the real
+		// realpathSync object, so the substitution is installed by reading the callable through a
+		// mutable view of it and restoring the original function in the finally below.
+		const realpathModule: { native: (target: string) => string } = fs.realpathSync
+		const actualNative = realpathModule.native
+		try {
+			realpathModule.native = (target: string) =>
+				target === path.resolve(callerPath) ? volumePath : actualNative(target)
+			const release = await acquireFileLock(callerPath, { immediate: true })
+			try {
+				const call = vi.mocked(lockfile.lock).mock.calls.at(-1)
+				expect(call?.[1]?.lockfilePath).toBe(path.join(directory, "HISTORY-ITEM.JSON.lock"))
+				expect(String(call?.[0])).toBe(canonicalLockKey(path.resolve(callerPath)))
+				expect(fs.existsSync(path.join(directory, "HISTORY-ITEM.JSON.lock"))).toBe(false)
+				expect(fs.existsSync(path.join(directory, "history-item.json.lock"))).toBe(false)
+			} finally {
+				await release()
+			}
+		} finally {
+			realpathModule.native = actualNative
+		}
+		const after = await acquireFileLock(callerPath, { immediate: true })
+		await after()
+		expect(vi.mocked(lockfile.lock).mock.calls.at(-1)?.[1]?.lockfilePath).toBe(
+			path.join(directory, "history-item.json.lock"),
+		)
+	})
 	itAlias("hands each caller back its own spelling rather than the canonicalised one", async () => {
 		const longDir = path.join(root(), "a-really-long-directory-name-for-spelling-control")
 		fs.mkdirSync(longDir, { recursive: true })
