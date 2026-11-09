@@ -23,7 +23,7 @@
 		"checkpoint_failed": "Ha fallat la restauració del punt de control.",
 		"checkpoint_restore_failed": "Error durant la restauració del punt de control: {{error}}",
 		"checkpoint_rewind_failed": "Els fitxers s'han restaurat al punt de control, però no s'ha pogut rebobinar la conversa: {{error}}. La tasca s'ha reiniciat amb la conversa anterior; torna a restaurar el punt de control per rebobinar-la.",
-		"checkpoint_rewind_restart_failed": "Els fitxers s'han restaurat al punt de control, però no s'ha pogut rebobinar la conversa: {{error}}. Tampoc no s'ha pogut reiniciar la tasca; reinicia-la o torna a restaurar el punt de control per rebobinar la conversa.",
+		"checkpoint_rewind_restart_failed": "Els fitxers s'han restaurat al punt de control, però no s'ha pogut rebobinar la conversa: {{error}}. Tampoc no s'ha pogut reiniciar la tasca ({{restartError}}); reinicia-la o torna a restaurar el punt de control per rebobinar la conversa.",
 		"checkpoint_restart_failed": "Els fitxers s'han restaurat i la conversa s'ha rebobinat, però no s'ha pogut reiniciar la tasca: {{error}}. Obre-la des de l'historial per continuar.",
 		"checkpoint_missing": "No es pot restaurar el punt de control {{commitHash}}: aquest punt de control ja no existeix al repositori de punts de control. No s'ha modificat cap fitxer.",
 		"checkpoint_invalid_hash": "No es pot restaurar ni comparar el punt de control: la referència no correspon a cap punt de control vàlid d'aquesta tasca. No s'ha modificat cap fitxer.",

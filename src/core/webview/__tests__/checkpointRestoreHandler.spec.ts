@@ -136,28 +136,30 @@ describe("checkpointRestoreHandler", () => {
 		vi.restoreAllMocks()
 	})
 
-	it.each([false, true])("successful delete saves and rehydrates, already aborted: %s", async (aborted) => {
-		fixture.taskDouble.abort = aborted
-		fixture.taskDouble.checkpointRestore.mockImplementationOnce(async () => {
-			fixture.task.clineMessages = fixture.task.clineMessages.slice(0, 1)
-		})
-		await handleCheckpointRestoreOperation(fixture.config)
-		expect(fixture.taskDouble.abortTask).toHaveBeenCalledTimes(aborted ? 0 : 1)
-		expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledExactlyOnceWith({
-			ts: 3,
-			commitHash: "abc123",
-			mode: "restore",
-			operation: "delete",
-		})
-		expect(saveTaskMessages).toHaveBeenCalledExactlyOnceWith({
-			messages: fixture.task.clineMessages,
-			taskId: fixture.task.taskId,
-			globalStoragePath: "/test/storage",
-		})
-		expect(fixture.providerDouble.getTaskWithId).toHaveBeenCalledExactlyOnceWith(fixture.task.taskId)
-		expect(fixture.providerDouble.createTaskWithHistoryItem).toHaveBeenCalledExactlyOnceWith(fixture.historyItem)
-		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
-	})
+	it.each([false, true])(
+		"successful delete leaves the restart to `checkpointRestore`, already aborted: %s",
+		async (aborted) => {
+			fixture.taskDouble.abort = aborted
+			fixture.taskDouble.checkpointRestore.mockImplementationOnce(async () => {
+				fixture.task.clineMessages = fixture.task.clineMessages.slice(0, 1)
+			})
+			await handleCheckpointRestoreOperation(fixture.config)
+			expect(fixture.taskDouble.abortTask).toHaveBeenCalledTimes(aborted ? 0 : 1)
+			expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledExactlyOnceWith({
+				ts: 3,
+				commitHash: "abc123",
+				mode: "restore",
+				operation: "delete",
+			})
+			// The rewind is saved and the task was started again by `checkpointRestore`: the handler neither saves the messages
+			// of the old task (they could overwrite newer ones) nor starts a second replacement (it would abort the first one,
+			// and a prompt that it posted).
+			expect(saveTaskMessages).not.toHaveBeenCalled()
+			expect(fixture.providerDouble.getTaskWithId).not.toHaveBeenCalled()
+			expect(fixture.providerDouble.createTaskWithHistoryItem).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		},
+	)
 
 	it("successful edit retains pending data for automatic rehydration, without saving or aborting", async () => {
 		await handleCheckpointRestoreOperation({
@@ -226,34 +228,6 @@ describe("checkpointRestoreHandler", () => {
 					expect.any(Object),
 				)
 			}
-		},
-	)
-
-	it.each([
-		{
-			step: "saving messages",
-			fail: (f: typeof fixture) => vi.mocked(saveTaskMessages).mockRejectedValueOnce(f.failure),
-		},
-		{
-			step: "loading history",
-			fail: (f: typeof fixture) => f.providerDouble.getTaskWithId.mockRejectedValueOnce(f.failure),
-		},
-		{
-			step: "rehydrating the task",
-			fail: (f: typeof fixture) => f.providerDouble.createTaskWithHistoryItem.mockRejectedValueOnce(f.failure),
-		},
-	])(
-		"delete restore that succeeds then fails while $step surfaces the error without a restart prompt",
-		async ({ fail }) => {
-			fail(fixture)
-			await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toBe(fixture.failure)
-			expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledOnce()
-			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
-				"common:errors.checkpoint_restore_failed: Disk full",
-			)
-			expect(console.error).toHaveBeenCalledWith("Error in checkpoint restore (delete):", fixture.failure)
-			expect(showWarningMessage).not.toHaveBeenCalled()
-			expect(fixture.providerDouble.restartTaskIfCurrent).not.toHaveBeenCalled()
 		},
 	)
 

@@ -19,7 +19,7 @@
 		"checkpoint_failed": "Failed to restore checkpoint.",
 		"checkpoint_restore_failed": "Error during checkpoint restore: {{error}}",
 		"checkpoint_rewind_failed": "The files were restored to the checkpoint, but the conversation could not be rewound: {{error}}. The task was restarted with its previous conversation; restore the checkpoint again to rewind it.",
-		"checkpoint_rewind_restart_failed": "The files were restored to the checkpoint, but the conversation could not be rewound: {{error}}. The task could not be restarted either; restart it, or restore the checkpoint again to rewind the conversation.",
+		"checkpoint_rewind_restart_failed": "The files were restored to the checkpoint, but the conversation could not be rewound: {{error}}. The task could not be restarted either ({{restartError}}); restart it, or restore the checkpoint again to rewind the conversation.",
 		"checkpoint_restart_failed": "The files were restored and the conversation was rewound, but the task could not be started again: {{error}}. Open it from the history to continue.",
 		"checkpoint_missing": "Cannot restore checkpoint {{commitHash}}: this checkpoint no longer exists in the checkpoint repository. No files were changed.",
 		"checkpoint_invalid_hash": "Cannot restore or compare checkpoint: the checkpoint reference is not a valid checkpoint of this task. No files were changed.",

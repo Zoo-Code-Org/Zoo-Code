@@ -1,3 +1,4 @@
+import { t } from "../../../i18n"
 import {
 	checkpointRestoreFailureMessage,
 	ConversationRewindError,
@@ -38,13 +39,25 @@ describe("checkpointRestoreFailureMessage", () => {
 		},
 	)
 
-	it("says that the task has to be started by the user too when it could not be started again", () => {
-		const error = new ConversationRewindError(new Error("Failed to save the messages"), { error: "no" })
+	it.each([
+		["an Error", new Error("cannot rehydrate"), "cannot rehydrate"],
+		["a plain value", "no history", "no history"],
+	])(
+		"tells why the task could not be started again too, when the restart failure is %s",
+		(_name, restartFailure, restartError) => {
+			const error = new ConversationRewindError(new Error("Failed to save the messages"), {
+				error: restartFailure,
+			})
 
-		expect(checkpointRestoreFailureMessage(error)).toBe(
-			"common:errors.checkpoint_rewind_restart_failed: Failed to save the messages",
-		)
-	})
+			expect(checkpointRestoreFailureMessage(error)).toBe(
+				"common:errors.checkpoint_rewind_restart_failed: Failed to save the messages",
+			)
+			expect(t).toHaveBeenLastCalledWith("common:errors.checkpoint_rewind_restart_failed", {
+				error: "Failed to save the messages",
+				restartError,
+			})
+		},
+	)
 
 	it("says that the task has to be opened from the history when it could not be started again after a rewind that worked", () => {
 		expect(checkpointRestoreFailureMessage(new TaskNotRestartedError(new Error("cannot rehydrate")))).toBe(

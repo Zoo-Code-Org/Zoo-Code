@@ -1614,6 +1614,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Whether the API history on disk is the one in memory, as far as an overwrite is concerned: when a rewind or an edit
+	 * cut it and the write was lost, it is retried (the saves that follow are authoritative, see below). Resolves to
+	 * `false` when it still cannot be stored: a task started again from the disk would then load the turns that were cut.
+	 */
+	public async ensureApiConversationHistoryStored(): Promise<boolean> {
+		if (!this.apiHistoryOverwriteNotStored) return true
+		return await this.retrySaveApiConversationHistory()
+	}
+
+	/**
 	 * An authoritative write of the API history (an overwrite: a rewind or an edit cut it) failed, so the disk still has
 	 * the messages that were cut. A merging save (every ordinary save) would bring them back: it keeps what is on disk and
 	 * not in memory. Until an authoritative write succeeds, the saves are authoritative too.
@@ -1744,6 +1754,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const replaced = this.clineMessages
 		this.hydrateClineMessages(newMessages)
 		const replacement = new Set(this.clineMessages)
+		// Which replacement this is: a later one (a second rewind while this write is on its way) is the newer word, and a
+		// rollback of this one must not bring back the messages that it removed.
+		const overwrite = ++this.clineMessagesOverwriteCount
 		if (persist) {
 			// A failed write is reported to the caller: the delete, edit and checkpoint flows go on to save the
 			// messages again, and carrying on after a lost write would leave the history entry (and its usage
@@ -1752,11 +1765,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// back, with what came in while the write was on its way, and the two stay consistent. They are put back by the
 			// write itself, before the next save in the line starts: one behind this would otherwise copy the cut messages,
 			// and a message that was never on the disk would be lost to it.
-			if (!(await this.saveClineMessages(false, () => this.restoreReplacedMessages(replaced, replacement)))) {
+			const rollBack = () => {
+				if (this.clineMessagesOverwriteCount === overwrite) this.restoreReplacedMessages(replaced, replacement)
+			}
+			if (!(await this.saveClineMessages(false, rollBack))) {
 				throw new Error("Failed to save the messages")
 			}
 		}
 	}
+
+	/** How many times the messages were replaced (see `overwriteClineMessages`). */
+	private clineMessagesOverwriteCount = 0
 
 	/**
 	 * Undoes a replacement whose write was lost: the messages that were replaced come back, and so does every message
@@ -4075,6 +4094,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			await this.maybeWaitForProviderRateLimit(currentItem.retryAttempt ?? 0)
 			this.rateLimitClock.recordRequest()
 
+			const messageCountBefore = this.clineMessages.length
 			await this.say(
 				"api_req_started",
 				JSON.stringify({
@@ -4084,6 +4104,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					modelId,
 				}),
 			)
+			// The placeholder that the say above added, kept from here: it is this request's, whatever is deleted, rewound
+			// or added during the waits below, and no lookup later can select an older request's instead.
+			const requestMessage =
+				this.clineMessages.slice(messageCountBefore).find((message) => message.say === "api_req_started") ??
+				// A task whose `say` added nothing (a test double): the last request message, taken in the same step.
+				findLast(this.clineMessages, (message) => message.say === "api_req_started")
 
 			const provider = this.providerRef.deref()
 			const state = provider ? await provider.getState() : undefined
@@ -4155,12 +4181,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// webview while waiting to actually start the API request (to load
 			// potential details for example), we need to update the text of that
 			// message.
-			const lastApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
-			// The placeholder itself: the messages can be rewound or deleted during the waits below, which moves it or
-			// removes it, so the handler is bound to this message and not to an index taken now.
-			const requestMessage = this.clineMessages[lastApiReqIndex]
+			// The messages can be rewound or deleted during the waits above, which removes the placeholder (and moves the
+			// ones after it): the request stops here, as an abort does, and no other message is relabelled in its place.
+			if (!requestMessage || !this.clineMessages.includes(requestMessage)) {
+				throw new Error(
+					`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} request was removed from the conversation`,
+				)
+			}
+			// Where the placeholder is now: it is looked up by identity every time, never kept as an index.
+			const requestIndex = () => this.clineMessages.indexOf(requestMessage)
 
-			this.clineMessages[lastApiReqIndex].text = JSON.stringify({
+			requestMessage.text = JSON.stringify({
 				apiProtocol,
 				apiProvider,
 				modelId,
@@ -4189,11 +4220,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// of prices in tasks from history (it's worth removing a few months
 				// from now).
 				const updateApiReqMsg = (cancelReason?: ClineApiReqCancelReason, streamingFailedMessage?: string) => {
-					if (lastApiReqIndex < 0 || !this.clineMessages[lastApiReqIndex]) {
+					// The request's own message, wherever it is now: a rewind while the usage is still being drained can put
+					// another request at the index it had, and the usage must not be written to that one.
+					if (requestIndex() < 0) {
 						return
 					}
 
-					const existingData = JSON.parse(this.clineMessages[lastApiReqIndex].text || "{}")
+					const existingData = JSON.parse(requestMessage.text || "{}")
 
 					// Calculate total tokens and cost with the protocol this request started with: a profile switch
 					// while the usage is still being drained must not price it with another provider's formula.
@@ -4219,7 +4252,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cacheWrite12hTokens,
 								)
 
-					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
+					requestMessage.text = JSON.stringify({
 						...existingData,
 						modelId: resolveRecordedModelId(existingData.modelId, served.modelId),
 						tokensIn: costResult.totalInputTokens,
@@ -4667,7 +4700,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								cacheRead: number
 								total?: number
 							},
-							messageIndex: number = apiReqIndex,
 							_status: "completed" | "cancelled" = "completed",
 						) => {
 							if (
@@ -4690,9 +4722,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								await this.saveClineMessages()
 
 								// Update the specific message in the webview
-								const apiReqMessage = this.clineMessages[messageIndex]
-								if (apiReqMessage) {
-									await this.updateClineMessage(apiReqMessage)
+								if (requestIndex() >= 0) {
+									await this.updateClineMessage(requestMessage)
 								}
 
 								// Capture telemetry with provider-aware cost calculation, using the protocol this request
@@ -4786,7 +4817,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
-									lastApiReqIndex,
 									status,
 								)
 							} else {
@@ -4813,7 +4843,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
-									lastApiReqIndex,
 									status,
 								)
 							}
@@ -4822,12 +4851,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Start the background task and handle any errors
 					// Pass "cancelled" status if the task was aborted by the user
-					drainStreamInBackgroundToFindAllUsage(
-						lastApiReqIndex,
-						this.abort ? "cancelled" : "completed",
-					).catch((error) => {
-						console.error("Background usage collection failed:", error)
-					})
+					drainStreamInBackgroundToFindAllUsage(requestIndex(), this.abort ? "cancelled" : "completed").catch(
+						(error) => {
+							console.error("Background usage collection failed:", error)
+						},
+					)
 				} catch (error) {
 					// Close the request generator so its `finally` releases the API
 					// work it holds (a replaced handler is disposed once nothing uses

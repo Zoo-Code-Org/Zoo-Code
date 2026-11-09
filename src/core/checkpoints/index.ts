@@ -316,6 +316,11 @@ async function startTaskAgain(
 	task: Task,
 ): Promise<{ error: unknown } | undefined> {
 	try {
+		// Only the task that was restored is started again: if the user moved to another one while the rewind was being
+		// written, cancelling would interrupt that one instead.
+		if (provider && provider.getCurrentTask()?.taskId !== task.taskId) {
+			throw new Error("the task is no longer the current one")
+		}
 		await provider?.cancelTask()
 		const current = provider?.getCurrentTask()
 		if (provider && (!current || current.taskId !== task.taskId || current.instanceId === task.instanceId)) {
@@ -349,6 +354,12 @@ async function rewindConversation(
 	await task.messageManager.rewindToTimestamp(ts, {
 		includeTargetMessage: operation === "edit",
 	})
+
+	// The cut of the API history has to be on disk before the task is started again from it: a write that was lost is
+	// retried, and a cut that cannot be stored is a failed rewind, not one that the restart would then undo silently.
+	if (!(await task.ensureApiConversationHistoryStored())) {
+		throw new Error("The API conversation history could not be saved")
+	}
 
 	return {
 		tokensIn: totalTokensIn,

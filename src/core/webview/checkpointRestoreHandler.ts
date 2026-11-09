@@ -5,7 +5,6 @@ import {
 	taskWasNotRestarted,
 } from "../checkpoints/ConversationRewindError"
 import { ClineProvider } from "./ClineProvider"
-import { saveTaskMessages } from "../task-persistence"
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 
@@ -72,23 +71,9 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 
 		checkpointRestored = true
 
-		// For delete operations, we need to save messages and reinitialize
-		// For edit operations, the reinitialization happens automatically
-		// and processes the pending edit
-		if (operation === "delete") {
-			// Save the updated messages to disk after checkpoint restoration
-			await saveTaskMessages({
-				messages: currentCline.clineMessages,
-				taskId: currentCline.taskId,
-				globalStoragePath: provider.contextProxy.globalStorageUri.fsPath,
-			})
-
-			// Get the updated history item and reinitialize
-			const { historyItem } = await provider.getTaskWithId(currentCline.taskId)
-			await provider.createTaskWithHistoryItem(historyItem)
-		}
-		// For edit operations, the task cancellation in checkpointRestore
-		// will trigger reinitialization, which will process pendingEditAfterRestore
+		// The rewind is saved and the task has been started again (and checked to be) by `checkpointRestore`, for a delete
+		// as for an edit, which processes its pending edit: saving the messages of the old task and starting another
+		// replacement would abort the first one (and any prompt it posted) and could overwrite newer messages.
 	} catch (error) {
 		// The files were restored and the task is started again (see `ConversationRewindError`): the starting task
 		// takes the pending edit, and hands it back to the user if it cannot apply it, and there is nothing to restart.

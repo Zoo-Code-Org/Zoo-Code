@@ -19,7 +19,7 @@
 		"checkpoint_failed": "Nie udało się przywrócić punktu kontrolnego.",
 		"checkpoint_restore_failed": "Błąd podczas przywracania punktu kontrolnego: {{error}}",
 		"checkpoint_rewind_failed": "Pliki zostały przywrócone do punktu kontrolnego, ale nie udało się cofnąć rozmowy: {{error}}. Zadanie uruchomiono ponownie z poprzednią rozmową; przywróć punkt kontrolny jeszcze raz, aby ją cofnąć.",
-		"checkpoint_rewind_restart_failed": "Pliki zostały przywrócone do punktu kontrolnego, ale nie udało się cofnąć rozmowy: {{error}}. Nie udało się też ponownie uruchomić zadania; uruchom je ponownie albo przywróć punkt kontrolny jeszcze raz, aby cofnąć rozmowę.",
+		"checkpoint_rewind_restart_failed": "Pliki zostały przywrócone do punktu kontrolnego, ale nie udało się cofnąć rozmowy: {{error}}. Nie udało się też ponownie uruchomić zadania ({{restartError}}); uruchom je ponownie albo przywróć punkt kontrolny jeszcze raz, aby cofnąć rozmowę.",
 		"checkpoint_restart_failed": "Pliki zostały przywrócone, a rozmowa cofnięta, ale nie udało się ponownie uruchomić zadania: {{error}}. Otwórz je z historii, aby kontynuować.",
 		"checkpoint_missing": "Nie można przywrócić punktu kontrolnego {{commitHash}}: ten punkt kontrolny nie istnieje już w repozytorium punktów kontrolnych. Żadne pliki nie zostały zmienione.",
 		"checkpoint_invalid_hash": "Nie można przywrócić ani porównać punktu kontrolnego: odwołanie nie jest prawidłowym punktem kontrolnym tego zadania. Żadne pliki nie zostały zmienione.",

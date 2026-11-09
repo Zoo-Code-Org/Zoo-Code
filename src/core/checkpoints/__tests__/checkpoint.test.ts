@@ -99,6 +99,7 @@ describe("Checkpoint functionality", () => {
 			apiConversationHistory: [],
 			pendingUserMessageCheckpoint: undefined,
 			say: vi.fn().mockResolvedValue(undefined),
+			ensureApiConversationHistoryStored: vi.fn().mockResolvedValue(true),
 			overwriteClineMessages: vi.fn(),
 			overwriteApiConversationHistory: vi.fn(),
 			combineMessages: vi.fn().mockReturnValue([]),
@@ -362,6 +363,30 @@ describe("Checkpoint functionality", () => {
 			)
 		})
 
+		it("is a failed rewind when the cut of the API history cannot be stored, so a restart does not load the turns that were cut", async () => {
+			mockTask.ensureApiConversationHistoryStored.mockResolvedValueOnce(false)
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" }),
+			).rejects.toMatchObject({
+				name: "ConversationRewindError",
+				message: "The API conversation history could not be saved",
+			})
+			expect(mockTask.say).not.toHaveBeenCalled()
+		})
+
+		it("checks that the cut of the API history is stored after the rewind, and before the note and the restart", async () => {
+			await checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "edit" })
+
+			expect(mockTask.ensureApiConversationHistoryStored).toHaveBeenCalledOnce()
+			expect(mockTask.overwriteApiConversationHistory.mock.invocationCallOrder[0]).toBeLessThan(
+				mockTask.ensureApiConversationHistoryStored.mock.invocationCallOrder[0],
+			)
+			expect(mockTask.ensureApiConversationHistoryStored.mock.invocationCallOrder[0]).toBeLessThan(
+				mockProvider.cancelTask.mock.invocationCallOrder[0],
+			)
+		})
+
 		it("says the task was restarted after a failed rewind when it was", async () => {
 			mockTask.overwriteClineMessages.mockRejectedValueOnce(new Error("Failed to save the messages"))
 
@@ -387,6 +412,7 @@ describe("Checkpoint functionality", () => {
 				expect(mockTask.overwriteClineMessages).toHaveBeenCalledTimes(1)
 			})
 
+			// The first look is before `cancelTask`, where the task has to be the current one; the second is after it.
 			it.each([
 				["there is no current task (cancelTask returned without a word)", () => undefined],
 				["the current task is another one", () => ({ taskId: "another-task", instanceId: "x" })],
@@ -394,13 +420,43 @@ describe("Checkpoint functionality", () => {
 					"the current task is the same instance: nothing was rehydrated",
 					() => ({ taskId: "test-task-id", instanceId: "original" }),
 				],
-			])("reports it when %s", async (_name, current) => {
-				mockProvider.getCurrentTask.mockImplementation(current)
+			])("reports it when %s", async (_name, afterCancel) => {
+				mockProvider.getCurrentTask
+					.mockImplementationOnce(() => ({ taskId: "test-task-id", instanceId: "original" }))
+					.mockImplementation(afterCancel)
 
 				await expect(restore("delete")).rejects.toMatchObject({
 					name: "TaskNotRestartedError",
 					message: "the task was not rehydrated",
 				})
+			})
+
+			it.each([
+				["there is no current task", () => undefined],
+				[
+					"the user moved to another task while the rewind was written",
+					() => ({ taskId: "another-task", instanceId: "x" }),
+				],
+			])("does not cancel what is not the restored task: %s", async (_name, current) => {
+				mockProvider.getCurrentTask.mockImplementation(current)
+
+				await expect(restore("delete")).rejects.toMatchObject({
+					name: "TaskNotRestartedError",
+					message: "the task is no longer the current one",
+				})
+				expect(mockProvider.cancelTask).not.toHaveBeenCalled() // the other task is not interrupted
+			})
+
+			it("does not cancel the task that the user moved to after a rewind that failed either", async () => {
+				mockTask.overwriteClineMessages.mockRejectedValueOnce(new Error("Failed to save the messages"))
+				mockProvider.getCurrentTask.mockImplementation(() => ({ taskId: "another-task", instanceId: "x" }))
+
+				await expect(restore("edit")).rejects.toMatchObject({
+					name: "ConversationRewindError",
+					restarted: false,
+					restartFailure: { error: new Error("the task is no longer the current one") },
+				})
+				expect(mockProvider.cancelTask).not.toHaveBeenCalled()
 			})
 
 			it("resolves when another instance of the same task is current", async () => {

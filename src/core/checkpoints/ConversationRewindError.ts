@@ -46,8 +46,11 @@ export function checkpointRestoreFailureMessage(error: unknown): string {
 	if (error instanceof TaskNotRestartedError) return t("common:errors.checkpoint_restart_failed", { error: reason })
 	if (!(error instanceof ConversationRewindError))
 		return t("common:errors.checkpoint_restore_failed", { error: reason })
-	return t(
-		error.restarted ? "common:errors.checkpoint_rewind_failed" : "common:errors.checkpoint_rewind_restart_failed",
-		{ error: reason },
-	)
+	if (error.restarted) return t("common:errors.checkpoint_rewind_failed", { error: reason })
+	// Both failures are told: why the conversation was not rewound, and why the task was not started again.
+	const restartError = error.restartFailure?.error
+	return t("common:errors.checkpoint_rewind_restart_failed", {
+		error: reason,
+		restartError: restartError instanceof Error ? restartError.message : String(restartError),
+	})
 }

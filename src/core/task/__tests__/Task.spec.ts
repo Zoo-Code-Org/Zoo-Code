@@ -3893,6 +3893,49 @@ describe("Cline", () => {
 				const payload = await firstApiReqPayload({} as ProviderSettings)
 				expect(payload.apiProvider).toBeUndefined()
 			})
+
+			it("stops, and relabels no other request, when the placeholder of the request is deleted while it is prepared", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "k",
+						apiModelId: "claude-sonnet-5",
+					},
+					task: "test task",
+					startTask: false,
+				})
+				Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "hello" }],
+					mode: undefined,
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				const attempt = vi.spyOn(task, "attemptApiRequest")
+				// An older request, and the placeholder that this request adds.
+				const older = {
+					ts: 1,
+					type: "say" as const,
+					say: "api_req_started" as const,
+					text: '{"apiProvider":"older"}',
+				}
+				task.clineMessages = [older]
+				vi.spyOn(task, "say").mockImplementation(async (type, text) => {
+					task.clineMessages.push({ ts: 2, type: "say", say: type as "api_req_started", text: String(text) })
+					return undefined as never
+				})
+				// A deletion that is confirmed while the request is being prepared removes its placeholder.
+				vi.spyOn(task.diffViewProvider, "reset").mockImplementation(async () => {
+					task.clineMessages = task.clineMessages.filter((message) => message.ts !== 2)
+				})
+
+				// The loop ends the request there, as it does for an abort.
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+				expect(older.text).toBe('{"apiProvider":"older"}') // not relabelled in its place
+				expect(attempt).not.toHaveBeenCalled() // and nothing was sent
+			})
 		})
 
 		describe("Subtask Rate Limiting", () => {

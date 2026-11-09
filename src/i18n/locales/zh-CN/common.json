@@ -24,7 +24,7 @@
 		"checkpoint_failed": "恢复检查点失败。",
 		"checkpoint_restore_failed": "恢复存档点时出错：{{error}}",
 		"checkpoint_rewind_failed": "文件已恢复到检查点，但无法回退对话：{{error}}。任务已使用之前的对话重新启动；请再次恢复检查点以回退对话。",
-		"checkpoint_rewind_restart_failed": "文件已恢复到检查点，但无法回退对话：{{error}}。任务也无法重新启动；请重新启动任务，或再次恢复检查点以回退对话。",
+		"checkpoint_rewind_restart_failed": "文件已恢复到检查点，但无法回退对话：{{error}}。任务也无法重新启动（{{restartError}}）；请重新启动任务，或再次恢复检查点以回退对话。",
 		"checkpoint_restart_failed": "文件已恢复，对话已回退，但无法重新启动任务：{{error}}。请从历史记录中打开以继续。",
 		"checkpoint_missing": "无法恢复存档点 {{commitHash}}：此存档点已不存在于存档点仓库中。未更改任何文件。",
 		"checkpoint_invalid_hash": "无法恢复或比较存档点：该引用不是此任务的有效存档点。未更改任何文件。",

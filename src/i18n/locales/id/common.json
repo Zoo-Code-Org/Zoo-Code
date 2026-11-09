@@ -19,7 +19,7 @@
 		"checkpoint_failed": "Gagal memulihkan checkpoint.",
 		"checkpoint_restore_failed": "Terjadi kesalahan saat memulihkan checkpoint: {{error}}",
 		"checkpoint_rewind_failed": "File telah dipulihkan ke checkpoint, tetapi percakapan tidak dapat diputar mundur: {{error}}. Tugas dimulai ulang dengan percakapan sebelumnya; pulihkan checkpoint lagi untuk memutar mundur percakapan.",
-		"checkpoint_rewind_restart_failed": "File telah dipulihkan ke checkpoint, tetapi percakapan tidak dapat diputar mundur: {{error}}. Tugas juga tidak dapat dimulai ulang; mulai ulang tugas, atau pulihkan checkpoint lagi untuk memutar mundur percakapan.",
+		"checkpoint_rewind_restart_failed": "File telah dipulihkan ke checkpoint, tetapi percakapan tidak dapat diputar mundur: {{error}}. Tugas juga tidak dapat dimulai ulang ({{restartError}}); mulai ulang tugas, atau pulihkan checkpoint lagi untuk memutar mundur percakapan.",
 		"checkpoint_restart_failed": "File telah dipulihkan dan percakapan telah diputar mundur, tetapi tugas tidak dapat dimulai ulang: {{error}}. Buka dari riwayat untuk melanjutkan.",
 		"checkpoint_missing": "Tidak dapat memulihkan checkpoint {{commitHash}}: checkpoint ini sudah tidak ada di repositori checkpoint. Tidak ada file yang diubah.",
 		"checkpoint_invalid_hash": "Tidak dapat memulihkan atau membandingkan checkpoint: referensi ini bukan checkpoint yang valid untuk tugas ini. Tidak ada file yang diubah.",

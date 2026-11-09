@@ -447,6 +447,36 @@ describe("Task persistence", () => {
 				expect(mockSaveApiMessages).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ merge: false }))
 			})
 
+			it("ensureApiConversationHistoryStored retries a lost overwrite, and says whether it is stored", async () => {
+				const task = await newTaskWithHistory()
+				expect(await task.ensureApiConversationHistoryStored()).toBe(true) // nothing was lost: nothing to do
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+
+				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+				await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+				expect(contents(disk)).toEqual(["first", "second"]) // the cut is not on disk
+
+				expect(await task.ensureApiConversationHistoryStored()).toBe(true)
+				expect(contents(disk)).toEqual(["first"])
+				expect(await task.ensureApiConversationHistoryStored()).toBe(true) // and it is stored now: nothing more to do
+			})
+
+			it("ensureApiConversationHistoryStored says when the cut still cannot be stored", async () => {
+				vi.useFakeTimers()
+				try {
+					const task = await newTaskWithHistory()
+					mockSaveApiMessages.mockRejectedValue(new Error("disk full"))
+					await task.overwriteApiConversationHistory([task.apiConversationHistory[0]])
+
+					const ensuring = task.ensureApiConversationHistoryStored()
+					await vi.advanceTimersByTimeAsync(5_000) // the backoff of the retries
+
+					expect(await ensuring).toBe(false)
+				} finally {
+					vi.useRealTimers()
+				}
+			})
+
 			it("does not turn the merging saves of a task that never lost an overwrite into authoritative ones", async () => {
 				const task = await newTaskWithHistory()
 				mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
@@ -1185,6 +1215,30 @@ describe("Task persistence", () => {
 						"not on the disk yet",
 					])
 					expect(texts(task)).toEqual(["on the disk", "not on the disk yet"])
+					consoleError.mockRestore()
+				})
+
+				it("does not bring back what a later rewind removed when the write of an earlier one is lost", async () => {
+					const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+					const failFirstWrite = slowFailingWrite()
+					mockSaveTaskMessages.mockResolvedValue([])
+					const task = newTask()
+					task.clineMessages.push(text("a", 1), text("b", 2), text("c", 3))
+
+					const first = task.overwriteClineMessages([task.clineMessages[0], task.clineMessages[1]]) // cuts c
+					const firstFailed = expect(first).rejects.toThrow("Failed to save the messages")
+					await vi.waitFor(() => expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1))
+					const second = task.overwriteClineMessages([task.clineMessages[0]]) // a second rewind cuts b as well
+					failFirstWrite() // the write of the first is lost
+					await firstFailed
+					await second
+
+					// The first one is rolled back to what it replaced only if nothing replaced it since: the later one wins.
+					expect(texts(task)).toEqual(["a"])
+					const writes = mockSaveTaskMessages.mock.calls.map(([args]) =>
+						(args.messages as ClineMessage[]).map((message) => message.text),
+					)
+					expect(writes.at(-1)).toEqual(["a"])
 					consoleError.mockRestore()
 				})
 
