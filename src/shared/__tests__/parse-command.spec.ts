@@ -235,7 +235,17 @@ describe("parseCommand", () => {
 				expect(parseError?.quoteType).toBe("tokenize-failure")
 				// The diagnostic warning still fires, exactly once, but carries
 				// neither the command line nor the error text it derived from.
+				// The positive shape pin (not just absence checks) keeps this
+				// from passing vacuously if a refactor hands warn an object:
+				// String() would then read "[object Object]" and hide content.
 				expect(warnSpy).toHaveBeenCalledTimes(1)
+				expect(warnSpy.mock.calls).toEqual([
+					[
+						expect.stringMatching(
+							/^shell-quote parse error: tokenizer rejected a \d+-character command line$/,
+						),
+					],
+				])
 				const logged = warnSpy.mock.calls.map((call) => call.map(String).join(" ")).join("\n")
 				expect(logged).not.toContain(secret)
 				expect(logged).not.toContain(input)

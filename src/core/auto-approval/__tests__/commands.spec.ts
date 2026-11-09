@@ -542,17 +542,19 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		// reading different bytes. The mask cannot then be verified in a
 		// model-independent way, so it fails closed. The decision is a
 		// rejection, never the approval an opaque `cat` word would otherwise
-		// earn.
-		expect(getCommandDecision("cat << \r\nEOF\n\r\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
+		// earn. The first input isolates the opener CR (no CR in the body);
+		// the second keeps the opener-plus-body-CR coverage.
+		expect(getCommandDecision("cat << \r\nEOF\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 		expect(getCommandDecision("cat << \r\nEOF\n\r\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 	})
 
 	it("fails closed on a bare-<< heredoc whose CR rides against the opener", () => {
 		// This is the same decision-level rejection with the CR directly after
 		// `<<`. One CR byte inside the masked region is enough to fail the
-		// heredoc closed.
+		// heredoc closed. The first input isolates the opener CR; the second
+		// adds a body CR.
 		expect(getCommandDecision("cat <<\r\nEOF\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
-		expect(getCommandDecision("cat <<\r\nEOF\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
+		expect(getCommandDecision("cat <<\r\nEOF\n\r\nrm -rf /\n", ["cat"], [])).toBe("malformed_command")
 	})
 
 	it("auto-approves a CR-free bare-<< heredoc (no over-fire)", () => {
