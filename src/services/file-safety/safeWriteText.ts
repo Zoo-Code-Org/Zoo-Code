@@ -69,13 +69,21 @@ function _tempName(dir: string, prefix: string): string {
 	return path.join(dir, "." + prefix + "_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp")
 }
 
-/** Create a private staging sub-directory inside *dir* so that multiple
- * concurrent writes never collide on their temp names. */
+/** Create a private per-write staging sub-directory inside *dir*. The name is
+ * generated here, the way the temp file inside it is named, so concurrent writes
+ * never collide on their temp names and never share a directory whose release one
+ * write would have to decide about while another write is still staging in it. */
 function _stagingDir(dir: string): string {
-	const sd = path.join(dir, ".file-safety-staging")
+	// A shared fixed name is a path the workspace controls: mkdirSync with
+	// recursive:true accepts an existing entry of that name without creating
+	// anything, so a committed .file-safety-staging symlink would have the chmod
+	// below repair the permissions of a directory outside the target directory and
+	// put the staged file in it. A name this call generated cannot be pre-planted.
+	const sd = path.join(dir, ".file-safety-staging_" + Date.now() + "_" + Math.random().toString(36).substring(2))
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
-	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
-	// existing directory), so staged temp files are never group/world readable.
+	// covers the case where an entry already sits at the generated name (mkdirSync
+	// with recursive:true never chmods an existing directory), so staged temp files
+	// are never group/world readable.
 	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
 	try {
 		fsSync.chmodSync(sd, 0o700)
@@ -86,16 +94,17 @@ function _stagingDir(dir: string): string {
 	return sd
 }
 
-/** Remove the staging sub-directory when nothing is staged in it any more.
- * rmdirSync fails on a non-empty directory (a concurrent write is still using it)
- * and on a directory that is already gone, so the last write to finish cleans up
- * and the others leave it to that writer - no shared bookkeeping is needed, and a
- * persistent hidden directory is never left in the user's workspace. */
+/** Remove this write's staging sub-directory when nothing is staged in it any
+ * more. rmdirSync fails on a non-empty directory (this write's temp unlink did not
+ * land) and on a directory that is already gone; both are tolerated. The name is
+ * this call's, so the rmdir never has to decide about a directory another write is
+ * still staging in, and a persistent hidden directory is never left in the user's
+ * workspace. */
 function _removeStagingDirIfEmpty(dir: string): void {
 	try {
 		fsSync.rmdirSync(dir)
 	} catch {
-		// non-empty (a concurrent write is still staging there) or already removed
+		// non-empty (the temp unlink did not land) or already removed
 	}
 }
 
@@ -233,7 +242,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
-	// with an empty .file-safety-staging directory behind.
+	// with an empty staging directory behind, and a directory named here is this
+	// call's own, never a path the workspace already controls.
 	let stagingDirPath: string | null = null
 	let tempPath: string
 	if (options?.tempPath) {
@@ -399,8 +409,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 		}
 
-		// tempPath is now the committed file; no cleanup needed. Remove the staging
-		// directory when this write was the last one using it.
+		// tempPath is now the committed file; no cleanup needed. The staging directory
+		// carries this call's generated name, so removing it cannot reach another write.
 		if (stagingDirPath !== null) {
 			_removeStagingDirIfEmpty(stagingDirPath)
 		}
@@ -426,8 +436,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// cleanup failure is non-fatal
 		}
 
-		// The temp is gone, so the staging directory is ours to remove when no other
-		// write is staging in it; a non-empty rmdir leaves it for that writer.
+		// The temp is gone, so this write's staging directory is empty and can go. A
+		// non-empty rmdir means the unlink above did not land; the directory is this
+		// call's own, so a concurrent write never loses its staging place here.
 		if (stagingDirPath !== null) {
 			_removeStagingDirIfEmpty(stagingDirPath)
 		}

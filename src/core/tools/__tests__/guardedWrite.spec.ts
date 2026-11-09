@@ -512,6 +512,57 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 		})
 
+		// The 2359 lane carries an open CodeRabbit row (PRRT_kwDOSK-bwM61HM7S, guardedWrite.ts:163 at
+		// 4e1c51c31c) about a reserved chain promise that stays unattached for an event-loop turn, so
+		// Node can report an unhandled rejection even though the caller handles the write's promise.
+		// This unit has no reserved promise to leave unattached: enqueue composes with prev.then(fn, fn)
+		// (src/core/tools/guardedWrite.ts:87) and returns the same link its own bookkeeping handlers
+		// are attached to. Measured rather than asserted - a real cancellation rejection queued behind
+		// a gated link, a real macrotask flush, and the process's own unhandled-rejection signal.
+		it("reports no unhandled rejection for a queued write that rejects behind a pending one", async () => {
+			const unhandled: unknown[] = []
+			const onUnhandledRejection = (reason: unknown): void => {
+				unhandled.push(reason)
+			}
+			let releaseFirst: () => void = () => {}
+			process.on("unhandledRejection", onUnhandledRejection)
+			try {
+				const firstGate = new Promise<void>(function (resolve) {
+					releaseFirst = resolve
+				})
+				mockedSafeWriteText.mockImplementationOnce(async () => {
+					await firstGate
+				})
+				// The target is absent, the only state an unobserved "create" may publish into: both
+				// links' entry probes report ENOENT, so the first reaches the gated publish and the
+				// second stays queued behind it.
+				mockedFsAccess.mockRejectedValue(
+					Object.assign(new Error("ENOENT: no such file or directory, access"), { code: "ENOENT" }),
+				)
+				const task = createMockTask()
+				const first = guardedWrite(task, "unhandled.txt", "first", "create")
+				const second = guardedWrite(task, "unhandled.txt", "second", "create")
+				await new Promise(function (resolve) {
+					setImmediate(resolve)
+				})
+				// The second link is still queued behind the gated first one when the task goes away.
+				task.abort = true
+				releaseFirst()
+				await first
+				await expect(second).rejects.toThrow(/was cancelled/)
+				// Node decides unhandledness once the microtask queue drains, so one macrotask turn is
+				// long enough for a rejection nobody attached a handler to in time to be reported.
+				await new Promise(function (resolve) {
+					setImmediate(resolve)
+				})
+			} finally {
+				releaseFirst()
+				process.off("unhandledRejection", onUnhandledRejection)
+			}
+
+			expect(unhandled).toEqual([])
+		})
+
 		it("a write submitted after an earlier one settled still serializes in submission order", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("evict.txt"), "v1")

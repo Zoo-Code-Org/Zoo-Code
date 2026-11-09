@@ -14,6 +14,13 @@ const fsPromisesActuals = vi.hoisted(() => ({
 	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
 }))
 
+// The sync open is captured the same way: the staging rows below spy fs.openSync to inspect
+// or refuse the exclusive create, and a spy that delegated to the spied binding would recurse
+// instead of opening the file.
+const fsSyncActuals = vi.hoisted(() => ({
+	openSync: undefined as (typeof import("fs"))["openSync"] | undefined,
+}))
+
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
 	fsPromisesActuals.rename = actual.rename
@@ -42,6 +49,10 @@ vi.mock("fs/promises", async () => {
 // Mock the 'fs' module for fsSync.createWriteStream
 vi.mock("fs", async () => {
 	const actualFs = await vi.importActual<typeof import("fs")>("fs")
+	// The staging rows spy fs.openSync and delegate through this captured real open,
+	// so a spy never recurses into its own binding.
+	fsSyncActuals.openSync = actualFs.openSync
+
 	return {
 		...actualFs, // Spread actual implementations
 		createWriteStream: vi.fn(actualFs.createWriteStream), // Default to actual, but mockable
@@ -49,6 +60,13 @@ vi.mock("fs", async () => {
 })
 
 import * as fs from "fs/promises" // This will now be the mocked version
+
+/** One recorded fs.openSync of a staging file. */
+interface StageOpen {
+	path: string
+	flags: string
+	mode: number | undefined
+}
 
 function makeErrorWriteStream(message: string): fsSyncActual.WriteStream {
 	const stream = Object.assign(
@@ -328,8 +346,9 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(newData)
 	})
 
-	// Test for console error suppression during backup deletion
-	test("should suppress console.error when backup deletion fails", async () => {
+	// The json entry point's own half of the backup-deletion claim: the failure is reported,
+	// not fatal, and the orphaned backup stays recoverable.
+	test("should keep the committed content and the orphaned backup when backup deletion fails", async () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
 		const initialData = { message: "Initial" }
 		const newData = { message: "New" }
@@ -353,6 +372,16 @@ describe("safeWriteJson", () => {
 
 		// Verify console.error was called with the expected message
 		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Successfully wrote"), expect.any(Error))
+
+		// The claim the absent title made about json behaviour, asserted here at this entry
+		// point instead of only at the text layer: the payload is committed, the backup that
+		// could not be deleted survives with the pre-write content for a later writer to
+		// recover, and no staging file is left behind.
+		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+		const orphanedBackups = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(orphanedBackups).toHaveLength(1)
+		expect(await readFileContent(path.join(tempDir, orphanedBackups[0]))).toEqual(initialData)
+		expect((await fs.readdir(tempDir)).filter((entry) => entry.includes(".new_"))).toHaveLength(0)
 
 		consoleErrorSpy.mockRestore()
 		vi.mocked(fs.unlink).mockRestore()
@@ -820,16 +849,24 @@ describe("safeWriteJson", () => {
 	})
 })
 
-// Two guarded-write titles are deliberately absent from this file, because under main's
-// replacement protocol the json entry no longer owns the backup/rollback surface:
-//   "does not fail the write when backup deletion fails (orphaned backup is acceptable)"
-//   "re-throws the original error when the rollback rename fails, leaving an orphaned backup"
-// Both assert safeWriteText's backup naming and its RollbackFailedError taxonomy, and both
-// claims are already tested at the module that provides them, in this same merge:
+// Two guarded-write titles are deliberately absent from this file. The claims they name split
+// in two, and where each half is tested is measured rather than asserted:
+
+// The json-layer consequences are asserted in this file, at this entry point:
+//   "should keep the committed content and the orphaned backup when backup deletion fails"
+//     the write succeeds, the target holds the new payload, the .bak_ survives with the
+//     pre-write content, and no .new_ staging file is left.
+//   "should log error and re-throw original if rollback fails"
+//     the original error rejects the write, the .bak_ survives with the pre-write content,
+//     and a later write recovers it. Inherited from upstream main at bb6cbee59, not new here.
+
+// What stays only at the text layer is that module's own taxonomy, which this file never
+// claimed to cover and does not:
 //   src/services/file-safety/__tests__/safeWriteText.spec.ts
 //     "a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind"
 //     "throws RollbackFailedError with the backup path when the rollback rename also fails"
-// Nothing is dropped; the two claims stay tested at the layer that implements them.
+// The RollbackFailedError type and the .bak_ naming live in safeWriteText.ts; this entry
+// point has its own backup protocol and never constructs that error.
 
 describe("safeWriteJson guarded-publish requirements carried by the guarded-write branch", () => {
 	let originalConsoleError: typeof console.error
@@ -992,6 +1029,142 @@ describe("safeWriteJson guarded-publish requirements carried by the guarded-writ
 		// The hoisted vi.unmock runs before this test's runtime vi.doMock, so it
 		// cannot remove it; doUnmock + resetModules clear the registry entry so
 		// later test files import the real proper-lockfile.
+		vi.doUnmock("proper-lockfile")
+		vi.resetModules()
+	})
+
+	// The staged payload can carry API credentials, and the staging path is generated inside a
+	// directory the workspace already controls. Two properties make writing into it safe: it is
+	// opened exclusively, so a file another writer planted at the generated name fails the write
+	// instead of receiving the payload, and it is created at the mode of the file it replaces, so
+	// the commit rename can neither widen a 0o600 target nor narrow a shared one. The text writer
+	// applies the same rule: src/services/file-safety/safeWriteText.ts stages at the target's mode
+	// with 0o644 as the default for a target that does not exist yet.
+	/** Record every open of a staging file made through fs.openSync, and pass each call to the
+	 *  captured real open unless this row asked to be refused. */
+	function spyOnStageOpens(refuseStagedOpens: boolean): StageOpen[] {
+		const stageOpens: StageOpen[] = []
+		const openSyncSpy = vi.spyOn(fsSyncActual, "openSync")
+		openSyncSpy.mockImplementation((filePath, flags, mode) => {
+			const openedPath = String(filePath)
+			if (openedPath.includes(".new_")) {
+				stageOpens.push({
+					path: openedPath,
+					flags: String(flags),
+					mode: typeof mode === "number" ? mode : undefined,
+				})
+				if (refuseStagedOpens) {
+					throw Object.assign(new Error("EEXIST: file already exists, open"), { code: "EEXIST" })
+				}
+			}
+			return fsSyncActuals.openSync!(filePath, flags, mode)
+		})
+		return stageOpens
+	}
+
+	test("refuses to write into a staging path another writer already created", async () => {
+		const stageOpens = spyOnStageOpens(true)
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteJson(currentTestFilePath, { message: "New" })).rejects.toThrow("EEXIST")
+
+		// The refusal happened at a generated staging path, under an exclusive create, and not at
+		// the target: the committed file keeps its pre-write content and nothing is left behind.
+		expect(stageOpens.length).toBeGreaterThan(0)
+		expect(stageOpens.every((open) => open.flags === "wx")).toBe(true)
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+		expect((await fs.readdir(tempDir)).filter((entry) => entry.includes(".new_"))).toHaveLength(0)
+
+		consoleErrorSpy.mockRestore()
+	})
+
+	test("stages the payload at the mode of the file it replaces", async () => {
+		const targetMode = fsSyncActual.statSync(currentTestFilePath).mode & 0o777
+		const stageOpens = spyOnStageOpens(false)
+
+		await safeWriteJson(currentTestFilePath, { message: "New" })
+
+		expect(stageOpens).toHaveLength(1)
+		expect(stageOpens[0].flags).toBe("wx")
+		expect(stageOpens[0].mode).toBe(targetMode)
+		expect(await readFileContent(currentTestFilePath)).toEqual({ message: "New" })
+	})
+
+	test("keeps the creation default for a target that does not exist yet", async () => {
+		const freshTarget = path.join(tempDir, "brand-new.json")
+		const stageOpens = spyOnStageOpens(false)
+
+		await safeWriteJson(freshTarget, { created: true })
+
+		// A target that does not exist yet is staged at the 0o644 default, so the process umask
+		// still decides what the published file becomes, exactly as it did before this change.
+		expect(stageOpens).toHaveLength(1)
+		expect(stageOpens[0].flags).toBe("wx")
+		expect(stageOpens[0].mode).toBe(0o644)
+		expect(await readFileContent(freshTarget)).toEqual({ created: true })
+	})
+
+	// The two alias rows above simulate the link by mocking fs.realpath. This one asks the platform
+	// for a real link: a junction on Windows, which needs no elevation, and a directory symlink
+	// elsewhere. Where the platform refuses, the row records the refusal instead of asserting a
+	// resolution it never exercised.
+	test("keys the lock to the referent of a real link, not to the alias the caller named", async () => {
+		vi.resetModules()
+
+		const referentDir = path.join(tempDir, "real-referent")
+		const aliasDir = path.join(tempDir, "real-alias")
+		await fs.mkdir(referentDir, { recursive: true })
+		let linkRefusal: string | undefined
+		try {
+			await fs.symlink(referentDir, aliasDir, process.platform === "win32" ? "junction" : "dir")
+		} catch (error: unknown) {
+			linkRefusal =
+				error && typeof error === "object" && "code" in error
+					? String((error as { code?: string }).code)
+					: "unknown"
+		}
+		if (linkRefusal !== undefined) {
+			// Capability probe: a lane that cannot create the link says why rather than passing
+			// a row that never resolved anything.
+			expect(["EPERM", "ENOSYS", "ENOTSUP", "EOPNOTSUPP"]).toContain(linkRefusal)
+			return
+		}
+
+		const aliasFile = path.join(aliasDir, "locked.json")
+		const referentFile = path.join(referentDir, "locked.json")
+		await fsPromisesActuals.writeFile!(referentFile, JSON.stringify({ seed: 1 }))
+
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(
+			async (file: Parameters<typeof realLockfile.lock>[0], options?: Parameters<typeof realLockfile.lock>[1]) =>
+				realLockfile.lock(file, options),
+		)
+		// The mock must be assignable to the module's lock signature; this is the same double
+		// shape the alias row above uses.
+		const lockMock = lockMockFn as unknown as typeof realLockfile.lock
+		vi.doMock("proper-lockfile", () => ({ ...realLockfile, lock: lockMock }))
+
+		const { safeWriteJson: realLinkSafeWriteJson } = await import("../safeWriteJson")
+		const mergeFn = vi.fn((existing: unknown, incoming: unknown) => ({
+			...(existing as Record<string, unknown>),
+			...(incoming as Record<string, unknown>),
+		}))
+		await realLinkSafeWriteJson(aliasFile, { added: true }, { merge: mergeFn })
+
+		// The link is the operating system's, so the resolution is not a mock's: the alias and the
+		// referent are two names for one file, and both writers must contend on one lock.
+		const resolvedReferent = await fs.realpath(aliasFile)
+		expect(resolvedReferent).not.toBe(aliasFile)
+		expect(lockMockFn).toHaveBeenCalledTimes(1)
+		expect(String(lockMockFn.mock.calls[0][0])).toBe(resolvedReferent)
+		// The merge read the seeded content through the alias, and the write landed on the same
+		// file, seen from either name.
+		expect(mergeFn.mock.calls[0][0]).toEqual({ seed: 1 })
+		expect(await readFileContent(aliasFile)).toEqual({ seed: 1, added: true })
+		expect(await readFileContent(referentFile)).toEqual({ seed: 1, added: true })
+
+		// Measured on this box: removing the junction leaves the referent and its content.
+		await fs.unlink(aliasDir)
 		vi.doUnmock("proper-lockfile")
 		vi.resetModules()
 	})

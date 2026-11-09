@@ -343,7 +343,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		options?.trace?.({ stage: "write-start" })
 		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		await _streamDataToFile(actualTempNewFilePath, data, publishTargetPath, options?.prettyPrint)
 		await _flushFileToDisk(actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
@@ -458,12 +458,52 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
  * Helper function to stream JSON data to a file.
  * @param targetPath The path to write the stream to.
  * @param data The data to stream.
+ * @param preserveModeOf The existing file whose mode the staged file must inherit.
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(
+	targetPath: string,
+	data: unknown,
+	preserveModeOf: string,
+	prettyPrint = false,
+): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
+	// The staged payload can carry API credentials and the staging path is generated inside a
+	// directory the workspace already controls, so it is opened exclusively: a file a local
+	// writer planted at that name fails the write with EEXIST instead of receiving the payload,
+	// and a staging path left by a crashed writer is not silently overwritten. The creation mode
+	// comes from the file being replaced, so the commit rename can neither widen a 0o600 target
+	// nor narrow a shared one - the same rule src/services/file-safety/safeWriteText.ts applies to
+	// its own staging file, with 0o644 as the default for a target that does not exist yet.
+	let stageMode = 0o644
+	let targetExisted = true
+	try {
+		stageMode = fsSync.statSync(preserveModeOf).mode & 0o777
+	} catch {
+		// No target yet: the default below leaves the process umask in charge, as before.
+		targetExisted = false
+	}
+	const stagedFd = fsSync.openSync(targetPath, "wx", stageMode)
+	if (targetExisted) {
+		// openSync applies the process umask to the requested mode, so a 0o664 or 0o666 target
+		// would be staged as 0o644 under the common umask 022 and lose group write through the
+		// rename. Set the mode on the descriptor instead. A filesystem that refuses chmod keeps
+		// the creation mode, which is no wider than what this writer published before.
+		try {
+			fsSync.fchmodSync(stagedFd, stageMode)
+		} catch {
+			// best-effort mode alignment; the write itself is not blocked
+		}
+	}
+	let fileWriteStream: fsSync.WriteStream
+	try {
+		// The stream owns the descriptor: it closes it on finish and on error.
+		fileWriteStream = fsSync.createWriteStream(targetPath, { fd: stagedFd, encoding: "utf8" })
+	} catch (streamError) {
+		fsSync.closeSync(stagedFd)
+		throw streamError
+	}
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass

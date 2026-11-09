@@ -189,6 +189,72 @@ describe("safeWriteText", () => {
 		})
 	})
 
+	// The staging directory's name is the chain's single shape for this directory (tracking issue 1991
+	// section 6): it is generated per write, the way the temp file inside it is generated, so no path the
+	// user's workspace already controls can become the directory this primitive mkdirs, chmods and rmdirs.
+	describe("per-write staging directory name", () => {
+		// The generated shape: the fixed prefix plus the same Date.now + random suffix the temp file gets,
+		// end-anchored so a suffix-less or hand-named path fails.
+		const _isPerWriteStagingName = (name: string): boolean => /^\.file-safety-staging_\d+_[a-z0-9]+$/.test(name)
+
+		it("names the staging directory of the generated shape", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "hello", { targetPathIsResolved: true, platform: "linux" })
+
+			const staged = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+			expect(staged).toHaveLength(1)
+			expect(_isPerWriteStagingName(path.basename(staged[0]))).toBe(true)
+			// Staged beside the directory the publish targets, not somewhere else.
+			expect(path.resolve(path.dirname(staged[0]))).toBe(path.resolve(_dirPath(targetPath)))
+		})
+
+		it("gives each self-staged write its own staging directory", async () => {
+			const dir = "/tmp/test-dir"
+			const targetA = path.join(dir, "target-a.txt")
+			const targetB = path.join(dir, "target-b.txt")
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await Promise.all([
+				safeWriteText(targetA, "A", { targetPathIsResolved: true, platform: "linux" }),
+				safeWriteText(targetB, "B", { targetPathIsResolved: true, platform: "linux" }),
+			])
+
+			// Two writes into one directory must not stage into one shared directory: with a shared name
+			// each write's cleanup rmdir runs while the other write still has a temp open in it, so a
+			// release either fails or removes a directory another write is about to publish from.
+			const staged = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+			expect(staged).toHaveLength(2)
+			expect(new Set(staged).size).toBe(2)
+			for (const stagedDir of staged) {
+				expect(_isPerWriteStagingName(path.basename(stagedDir))).toBe(true)
+			}
+		})
+
+		it("leaves a path the workspace controls at the fixed shared name untouched", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			// The name the shared-name shape mkdir-ed, chmod-ed and rmdir-ed. A workspace can commit a
+			// symlink or a directory at exactly this path, and mkdirSync with recursive:true accepts the
+			// existing entry without creating anything, so the chmod would repair a directory outside the
+			// target directory and the staged file would land in it.
+			const sharedName = path.basename(_stagingDir(_dirPath(targetPath)))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "hello", { targetPathIsResolved: true, platform: "linux" })
+
+			const mkdirNames = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => path.basename(String(call[0])))
+			expect(mkdirNames).not.toContain(sharedName)
+			const chmodNames = vi
+				.mocked(fsSync.chmodSync)
+				.mock.calls.filter((call) => call[1] === 0o700)
+				.map((call) => path.basename(String(call[0])))
+			expect(chmodNames).not.toContain(sharedName)
+			const rmdirNames = vi.mocked(fsSync.rmdirSync).mock.calls.map((call) => path.basename(String(call[0])))
+			expect(rmdirNames).not.toContain(sharedName)
+		})
+	})
+
 	// ── Test 2: fsync ordering ───────────────────────────────────────────────
 
 	describe("fsync ordering", () => {
