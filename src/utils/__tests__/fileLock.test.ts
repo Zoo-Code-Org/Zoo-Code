@@ -356,6 +356,65 @@ describe("two spellings contend with the real library", () => {
 		await released()
 		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
 	})
+
+	// The rows above alias a directory, and on ext4 a case variant is a different file and an 8.3 alias
+	// does not exist, so the only way the final component is spelled more than one way on the linux arm
+	// is a leaf that is itself a link. These two rows are the linux arm's version of the two rows above,
+	// gated the other way round: they run where the 8.3 rows skip and skip where they run.
+	const itPosixLeaf = (name: string, fn: () => Promise<void>) =>
+		it(name, async (context) => {
+			if (process.platform === "win32") {
+				return context.skip()
+			}
+			await fn()
+		})
+
+	itPosixLeaf(
+		"blocks the target of a link while the link holds the real lock, on one artefact named by the target",
+		async () => {
+			const directory = path.join(root(), "link-leaf-lock")
+			fs.mkdirSync(directory, { recursive: true })
+			const target = path.join(directory, "history.json")
+			fs.writeFileSync(target, "{}", "utf8")
+			const link = path.join(directory, "history-link.json")
+			fs.symlinkSync("history.json", link)
+			expect(fs.statSync(link).ino).toBe(fs.statSync(target).ino)
+			const release = await acquireFileLock(link, { immediate: true })
+			try {
+				expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([
+					"history.json.lock",
+				])
+				await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+			} finally {
+				await release()
+			}
+			const released = await acquireFileLock(target, { immediate: true })
+			await released()
+			expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
+		},
+	)
+
+	itPosixLeaf("keeps a link's artefact in the caller's directory when its target lives elsewhere", async () => {
+		const directory = path.join(root(), "far-link-lock")
+		const elsewhere = path.join(root(), "far-link-target")
+		fs.mkdirSync(directory, { recursive: true })
+		fs.mkdirSync(elsewhere, { recursive: true })
+		const target = path.join(elsewhere, "history.json")
+		fs.writeFileSync(target, "{}", "utf8")
+		const link = path.join(directory, "history-link.json")
+		fs.symlinkSync(target, link)
+		const release = await acquireFileLock(link, { immediate: true })
+		try {
+			expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual(["history.json.lock"])
+			expect(fs.readdirSync(elsewhere).filter((name) => name.endsWith(".lock"))).toEqual([])
+			const besideTarget = await acquireFileLock(target, { immediate: true })
+			await besideTarget()
+		} finally {
+			await release()
+		}
+		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
+		expect(fs.readdirSync(elsewhere).filter((name) => name.endsWith(".lock"))).toEqual([])
+	})
 })
 
 /**
