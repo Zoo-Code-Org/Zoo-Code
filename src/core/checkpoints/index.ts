@@ -2,6 +2,7 @@ import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
 import type { ClineApiReqInfo } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../task/Task"
@@ -233,9 +234,43 @@ async function checkGitInstallation(
 // is still running.
 const checkpointWorkQueues = new Map<string, Promise<unknown>>()
 
-function enqueueCheckpointWork<T>(taskId: string, operation: () => Promise<T>): Promise<T> {
+type QueuedCheckpointWorkOptions = {
+	/** Human-readable name used in the skip warning, e.g. "queued per-write checkpoint save". */
+	label: string
+	/** Wall-clock deadline after which the operation must not start: a save requested behind a
+	 * stalled predecessor stages whatever the workspace looks like when it finally gets its turn,
+	 * which is not the state the caller asked to record. Omit for work that must run whenever its
+	 * turn arrives, such as a user-initiated restore. */
+	expiresAt?: number
+	/** Checked when the operation's turn arrives, not when it is requested: a task that was canceled
+	 * while its work was queued performs no checkpoint work. */
+	isCanceled?: () => boolean
+}
+
+const DEFAULT_QUEUED_WORK_OPTIONS: QueuedCheckpointWorkOptions = { label: "checkpoint work" }
+
+function enqueueCheckpointWork<T>(
+	taskId: string,
+	operation: () => Promise<T>,
+	options: QueuedCheckpointWorkOptions = DEFAULT_QUEUED_WORK_OPTIONS,
+): Promise<T | undefined> {
 	const previous = checkpointWorkQueues.get(taskId) ?? Promise.resolve()
-	const next = previous.then(operation, operation)
+	// Both arms of the previous settlement get the same gate, so a failed predecessor does not
+	// smuggle an expired or canceled operation past it.
+	// attempt may return the operation's promise or nothing at all; Promise.then flattens the
+	// former and resolves the latter, which is exactly the two outcomes callers need.
+	const attempt = (): T | Promise<T> | undefined => {
+		const expired = options.expiresAt !== undefined && Date.now() > options.expiresAt
+		if (expired || options.isCanceled?.()) {
+			const reason = expired ? "expired behind a slower checkpoint" : "task canceled"
+			console.warn(
+				`[checkpoints] skipping ${options.label} for task ${taskId}: ${reason}; it never reached the shadow git`,
+			)
+			return undefined
+		}
+		return operation()
+	}
+	const next = previous.then(attempt, attempt)
 	const tail = next.then(
 		() => undefined,
 		() => undefined,
@@ -259,9 +294,22 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
 	// Start the checkpoint process in the background, queued behind any checkpoint work
-	// already running for this task so stageAll + commit never overlap.
-	return enqueueCheckpointWork(task.taskId, () =>
-		service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage }),
+	// already running for this task so stageAll + commit never overlap. The queue is not only a
+	// lock: a save that is still queued past the caller's own checkpoint window is describing a
+	// workspace that has moved on, so it is dropped rather than started late, and a save queued by a
+	// task that has since been canceled performs no checkpoint work at all. A dropped save is
+	// reported to the caller the same way a missing service is (a resolve with no commit), which is
+	// how the task-start baseline already treats it - by retrying on a later loop entry.
+	const timeoutSeconds = task.checkpointTimeout > 0 ? task.checkpointTimeout : DEFAULT_CHECKPOINT_TIMEOUT_SECONDS
+	return enqueueCheckpointWork(
+		task.taskId,
+		() =>
+			service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage }),
+		{
+			label: force ? "queued task-start checkpoint baseline" : "queued per-write checkpoint save",
+			expiresAt: Date.now() + Math.max(1, timeoutSeconds * 1000),
+			isCanceled: () => task.abort,
+		},
 	).catch((err) => {
 		console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
 		task.enableCheckpoints = false

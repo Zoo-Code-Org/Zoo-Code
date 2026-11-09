@@ -178,6 +178,35 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockHandleError).toHaveBeenCalled()
 		})
 
+		it("keeps the written content when a move targets the file's own path", async () => {
+			// A patch whose Move to resolves back onto its Update File path rewrites that path;
+			// it does not create a second copy. Unlinking the source afterwards - the same inode
+			// the destination now holds - would delete the content the patch just committed.
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/old.ts
+@@
+-original file content
++new content
+*** End Patch`
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The staged content was renamed onto the path, and nothing was unlinked.
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".staging"),
+				expect.stringMatching(/[\\/]old\.ts$/),
+			)
+			expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.pushToolWriteResult).toHaveBeenCalledOnce()
+		})
+
 		it("restores the pre-move state and fails the operation when source deletion fails", async () => {
 			const patch = `*** Begin Patch
 *** Update File: src/old.ts

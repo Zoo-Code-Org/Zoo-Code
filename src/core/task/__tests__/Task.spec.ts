@@ -7419,6 +7419,46 @@ describe("Cline", () => {
 			warnSpy.mockRestore()
 		})
 
+		it("retries the baseline on a later loop entry when the stalled save commits after the timeout", async () => {
+			// The reviewer's question, tested at the layer that owns it: what becomes of the
+			// baseline once a save the task already gave up on finally settles. A late commit
+			// must not retire the baseline, because writes have been performed in the meantime,
+			// so a later loop entry re-takes it.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "late baseline commit task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			type SaveResult = Awaited<ReturnType<typeof task.checkpointSave>>
+			let resolveStalled: (value: SaveResult) => void = () => {}
+			const saveSpy = vi
+				.spyOn(task, "checkpointSave")
+				.mockImplementationOnce(() => new Promise<SaveResult>((resolve) => (resolveStalled = resolve)))
+				.mockResolvedValueOnce({ commit: "retry-baseline-commit" } satisfies Awaited<
+					ReturnType<typeof task.checkpointSave>
+				>)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			task.checkpointTimeout = 0.01
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			await taskAccess.initiateTaskLoop([])
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(requestSpy).toHaveBeenCalled()
+
+			// The abandoned save commits long after the task moved on.
+			resolveStalled({ commit: "late-baseline-commit" } as SaveResult)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			await taskAccess.initiateTaskLoop([])
+			// The late commit did not mark the baseline done: this loop entry asked for it again.
+			expect(saveSpy).toHaveBeenCalledTimes(2)
+			warnSpy.mockRestore()
+		})
+
 		it("continues task startup when the baseline checkpoint fails", async () => {
 			const task = new Task({
 				provider: mockProvider,
