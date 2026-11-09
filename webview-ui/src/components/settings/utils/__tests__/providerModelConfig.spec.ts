@@ -4,6 +4,7 @@ import {
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
 	providerIdentifiers,
+	standardComputeDefaultModelId,
 } from "@roo-code/types"
 
 import {
@@ -190,6 +191,13 @@ describe("providerModelConfig", () => {
 			expect(getProviderModelConfig(providerIdentifiers.ioIntelligence)).toEqual({
 				field: "ioIntelligenceModelId",
 				default: ioIntelligenceDefaultModelId,
+			})
+		})
+
+		it("returns Standard Compute's dynamic model field and fallback", () => {
+			expect(getProviderModelConfig(providerIdentifiers.standardCompute)).toEqual({
+				field: "standardComputeModelId",
+				default: standardComputeDefaultModelId,
 			})
 		})
 	})

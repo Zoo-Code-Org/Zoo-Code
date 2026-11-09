@@ -44,6 +44,7 @@ type ModelIdKey = keyof Pick<
 	| "kenariModelId"
 	| "nanoGptModelId"
 	| "ioIntelligenceModelId"
+	| "standardComputeModelId"
 	| "zooGatewayModelId"
 	| "apiModelId"
 	| "ollamaModelId"

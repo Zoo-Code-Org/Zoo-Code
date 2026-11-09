@@ -15,6 +15,7 @@ describe("getContextWindow", () => {
 		[providerIdentifiers.opencodeGo, "opencodeGoModelId"],
 		[providerIdentifiers.kenari, "kenariModelId"],
 		[providerIdentifiers.ioIntelligence, "ioIntelligenceModelId"],
+		[providerIdentifiers.standardCompute, "standardComputeModelId"],
 		[providerIdentifiers.nanogpt, "nanoGptModelId"],
 		[providerIdentifiers.zooGateway, "zooGatewayModelId"],
 	] as const)("uses the provider-specific model field for %s", (provider, modelField) => {

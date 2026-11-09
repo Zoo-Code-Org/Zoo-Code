@@ -104,6 +104,7 @@ describe("NanoGPT", () => {
 		kenari: {},
 		nanogpt: { "openai/test": { contextWindow: 1, maxTokens: 1, supportsPromptCache: false } },
 		"io-intelligence": {},
+		"standard-compute": {},
 		"kimi-code": {},
 		ollama: {},
 		lmstudio: {},

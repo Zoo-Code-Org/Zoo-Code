@@ -394,6 +394,12 @@
 			"getApiKey": "IO Intelligence API-Schlüssel holen",
 			"model": "Modell"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute API-Schlüssel",
+			"getApiKey": "Standard Compute API-Schlüssel holen",
+			"model": "Modell"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API-Schlüssel",

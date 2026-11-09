@@ -16,6 +16,7 @@ export const providerIdentifiers = {
 	kenari: "kenari",
 	nanogpt: "nanogpt",
 	ioIntelligence: "io-intelligence",
+	standardCompute: "standard-compute",
 	ollama: "ollama",
 	lmstudio: "lmstudio",
 	vscodeLm: "vscode-lm",

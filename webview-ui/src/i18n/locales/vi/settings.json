@@ -394,6 +394,12 @@
 			"getApiKey": "Lấy khóa API IO Intelligence",
 			"model": "Mô hình"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Khóa API Standard Compute",
+			"getApiKey": "Lấy khóa API Standard Compute",
+			"model": "Mô hình"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Khóa API NanoGPT",

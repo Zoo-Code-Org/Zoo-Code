@@ -53,6 +53,7 @@ describe("Model Validation Functions", () => {
 		unbound: {},
 		litellm: {},
 		"io-intelligence": {},
+		"standard-compute": {},
 		ollama: {},
 		lmstudio: {},
 		"vercel-ai-gateway": {},
@@ -452,6 +453,27 @@ describe("Model Validation Functions", () => {
 				apiProvider: providerIdentifiers.ioIntelligence,
 				ioIntelligenceApiKey: "valid-key",
 				ioIntelligenceModelId: "zai-org/GLM-4.6",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
+		})
+	})
+
+	describe("Standard Compute validation", () => {
+		it("returns an apiKey error when the Standard Compute API key is unset", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.standardCompute,
+				standardComputeModelId: "z-ai/glm-5.3",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("accepts a Standard Compute API key and selected model", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.standardCompute,
+				standardComputeApiKey: "valid-key",
+				standardComputeModelId: "z-ai/glm-5.3",
 			}
 
 			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()

@@ -394,6 +394,12 @@
 			"getApiKey": "Получить API-ключ IO Intelligence",
 			"model": "Модель"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "API-ключ Standard Compute",
+			"getApiKey": "Получить API-ключ Standard Compute",
+			"model": "Модель"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Ключ API NanoGPT",

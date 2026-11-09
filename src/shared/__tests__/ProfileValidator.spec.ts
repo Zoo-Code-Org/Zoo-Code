@@ -32,6 +32,7 @@ describe("ProfileValidator", () => {
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
 			["ioIntelligence", { ioIntelligenceModelId: "model" }],
+			["standardCompute", { standardComputeModelId: "model" }],
 			["poe", { apiModelId: "model" }],
 			["moonshot", { apiModelId: "model" }],
 			["kimiCode", { apiModelId: "model" }],
@@ -318,6 +319,25 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 			expect(
 				ProfileValidator.isProfileAllowed({ ...profile, ioIntelligenceModelId: "other-model" }, allowList),
+			).toBe(false)
+		})
+
+		// Test for standard-compute provider which uses standardComputeModelId
+		it(`should extract standardComputeModelId for standard-compute provider`, () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.standardCompute]: { allowAll: false, models: ["test-model"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.standardCompute,
+				standardComputeModelId: "test-model",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed({ ...profile, standardComputeModelId: "other-model" }, allowList),
 			).toBe(false)
 		})
 
