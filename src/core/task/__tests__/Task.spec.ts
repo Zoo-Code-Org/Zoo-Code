@@ -7327,7 +7327,7 @@ describe("Cline", () => {
 			const state = await mockProvider.getState()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
 
-			task.abort = true
+			task.requestAbort(false)
 
 			await taskAccess.initiateTaskLoop([])
 
@@ -7353,7 +7353,10 @@ describe("Cline", () => {
 
 			const loopPromise = taskAccess.initiateTaskLoop([])
 			// Cancellation lands while the state lookup is still pending.
-			task.abort = true
+			// requestAbort is the class's public, synchronous way to raise the abort
+			// latch; main (5319fe91f, #2283) exposes abort as a get-only accessor fed by
+			// the run-state latches, so assigning task.abort does not typecheck there.
+			task.requestAbort(false)
 			resolveState({ ...state, perWriteCheckpoints: true })
 			await loopPromise
 
@@ -8438,12 +8441,10 @@ describe("Queued message processing after condense", () => {
 		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
 
 		task.messageQueueService.addMessage("queued text")
-		task.abort = true
-		try {
-			task.processQueuedMessages()
-		} finally {
-			task.abort = false
-		}
+		// requestAbort raises the latch without tearing the task down: abortTask()
+		// would dispose it and drain the queue, which is not the state this row reads.
+		task.requestAbort(false)
+		task.processQueuedMessages()
 
 		expect(submitSpy).not.toHaveBeenCalled()
 		expect(task.messageQueueService.isEmpty()).toBe(false)
