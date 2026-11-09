@@ -1696,6 +1696,46 @@ describe("OpenRouterHandler", () => {
 			expect(text).not.toContain("[object Object]")
 		})
 
+		it.each([
+			{ type: "reasoning.text", field: "text", good: "ok", emitsReasoning: true },
+			{ type: "reasoning.summary", field: "summary", good: "s", emitsReasoning: true },
+			{ type: "reasoning.encrypted", field: "data", good: "enc", emitsReasoning: false },
+		])(
+			"keeps the valid fragment when a non-string $type fragment arrives after it at the same index",
+			async ({ type, field, good, emitsReasoning }) => {
+				const handler = new OpenRouterHandler(mockOptions)
+				const mockCreate = vitest.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
+							id: "1",
+							choices: [
+								{ delta: { reasoning_details: [{ index: 0, type, [field]: good }] } },
+								{ delta: { reasoning_details: [{ index: 0, type, [field]: { not: "a string" } }] } },
+							],
+						},
+					]),
+				)
+				// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+				const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+				Object.defineProperty(client, "chat", {
+					value: { completions: { create: mockCreate } },
+					configurable: true,
+					writable: true,
+				})
+
+				const chunks = await collectStream(
+					handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+				)
+				// The valid fragment is the only displayable one; the non-string fragment yields nothing.
+				expect(chunks).toEqual(emitsReasoning ? [{ type: "reasoning", text: good }] : [])
+
+				const details = handler.getReasoningDetails()
+				expect(details).toHaveLength(1)
+				expect(details?.[0]).toMatchObject({ type, index: 0, [field]: good })
+				expect(JSON.stringify(details)).not.toContain("[object Object]")
+			},
+		)
+
 		it("excludes reasoning for Gemini 2.5 Pro models by default", async () => {
 			const handler = new OpenRouterHandler(
 				makeApiHandlerOptions({
@@ -2397,11 +2437,57 @@ describe("OpenRouterHandler", () => {
 			const chunks = await collectStream(
 				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
 			)
-			expect(chunks).toContainEqual({ type: "reasoning", text: "a" })
+			// Both fragments stream live in arrival order (the summary is yielded from detail.summary),
+			// so a dropped summary is visible here rather than hidden by toContainEqual on one chunk.
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "a" },
+				{ type: "reasoning", text: "s" },
+			])
+
+			const details = handler.getReasoningDetails()
+			// consolidateReasoningDetails emits a summary entry only when no text arrived at the same
+			// index (src/api/transform/openai-format.ts:116), so the consolidated store keeps the text
+			// and drops the summary; asserting the drop is what makes this fail when that predicate
+			// narrows. The companion test below covers the no-text branch. The entry's type label
+			// follows the last fragment seen for the index (openai-format.ts:93-99, 105), which is why
+			// it reports reasoning.summary while carrying text "a" and no summary field.
+			expect(details).toHaveLength(1)
+			expect(details?.[0]?.text).toBe("a")
+			expect(details?.[0]?.index).toBe(0)
+			expect(details?.[0]?.type).toBe("reasoning.summary")
+			expect(details?.[0]?.summary).toBeUndefined()
+		})
+
+		it("keeps a reasoning summary entry when no text arrives at the same index", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "1",
+						choices: [
+							{
+								delta: { reasoning_details: [{ type: "reasoning.summary", index: 0, summary: "s" }] },
+							},
+						],
+					},
+				]),
+			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+			expect(chunks).toEqual([{ type: "reasoning", text: "s" }])
 
 			const details = handler.getReasoningDetails()
 			expect(details).toHaveLength(1)
-			expect(details?.[0]?.text).toBe("a")
+			expect(details?.[0]).toMatchObject({ type: "reasoning.summary", index: 0, summary: "s" })
 		})
 
 		it("does not yield displayable reasoning for encrypted-only details", async () => {

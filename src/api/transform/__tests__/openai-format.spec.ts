@@ -1394,6 +1394,77 @@ describe("consolidateReasoningDetails", () => {
 		expect(result).toHaveLength(1)
 		expect(result[0].summary).toBe("Summary part 1Summary part 2")
 	})
+
+	it("should consolidate interleaved item types and assert the full output array", () => {
+		const details: ReasoningDetail[] = [
+			{ type: "reasoning.summary", summary: "s1", format: "google-gemini-v1", index: 0 },
+			{
+				type: "reasoning.text",
+				text: "t1",
+				signature: "sig_1",
+				id: "rs_t1",
+				format: "google-gemini-v1",
+				index: 0,
+			},
+			{ type: "reasoning.encrypted", data: "e1", id: "rs_e1", format: "google-gemini-v1", index: 0 },
+			{
+				type: "reasoning.text",
+				text: "t2",
+				signature: "sig_2",
+				id: "rs_t2",
+				format: "google-gemini-v1",
+				index: 0,
+			},
+			{ type: "reasoning.encrypted", data: "e2", id: "rs_e2", format: "google-gemini-v1", index: 0 },
+			{ type: "reasoning.encrypted", data: "e3", id: "rs_e3", format: "google-gemini-v1", index: 1 },
+			{ type: "reasoning.summary", summary: "only summary", format: "google-gemini-v1", index: 1 },
+		]
+
+		const result = consolidateReasoningDetails(details)
+
+		// Full output array, not a subset: consolidated text per index, then the summary-only entry
+		// per index, then the last encrypted block per index. The summary interleaved at index 0 is
+		// dropped because text exists at that index, while the index-1 summary survives because no
+		// text arrived there; a single-type test cannot fail when that predicate narrows. The text
+		// entry takes id, format and type from the last item in the group that carries them: the
+		// encrypted fragment arrives last at index 0, so index 0 reports rs_e2 and the consolidated
+		// text block is labelled reasoning.encrypted (openai-format.ts:93-99, 105). Asserted as
+		// measured at this revision, because the full array is what catches that labelling.
+		expect(result).toEqual([
+			{
+				type: "reasoning.encrypted",
+				text: "t1t2",
+				signature: "sig_2",
+				id: "rs_e2",
+				format: "google-gemini-v1",
+				index: 0,
+			},
+			{
+				type: "reasoning.encrypted",
+				data: "e2",
+				signature: undefined,
+				id: "rs_e2",
+				format: "google-gemini-v1",
+				index: 0,
+			},
+			{
+				type: "reasoning.summary",
+				summary: "only summary",
+				signature: undefined,
+				id: "rs_e3",
+				format: "google-gemini-v1",
+				index: 1,
+			},
+			{
+				type: "reasoning.encrypted",
+				data: "e3",
+				signature: undefined,
+				id: "rs_e3",
+				format: "google-gemini-v1",
+				index: 1,
+			},
+		])
+	})
 })
 
 describe("sanitizeGeminiMessages", () => {
