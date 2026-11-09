@@ -1447,10 +1447,15 @@ describe("safeWriteText", () => {
 
 		it("when realpath reports ENOENT (target absent), uses the given path as-is", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
-			vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-			// lstat reports the path itself as absent, so this is a new target and
-			// the fallback is allowed.
-			vi.mocked(fs.lstat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockRejectedValue(enoent)
+			// lstat reports the target path itself as absent, so this is a new target and
+			// the fallback is allowed. The staging name is answered apart: the commit
+			// re-verifies the staged file before renaming it, and the file this write just
+			// created and fsynced is present there.
+			vi.mocked(fs.lstat).mockImplementation(async (target) =>
+				String(target).includes("safeWriteText_") ? _fileStats(false) : Promise.reject(enoent),
+			)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
 			await safeWriteText(targetPath, "data", { platform: "linux" })
@@ -1653,9 +1658,16 @@ describe("resolveLockKey", () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		// Only the link path is read, so a single answer is enough and keeps the mock's
-		// return type matching fs.promises.readlink.
-		vi.mocked(fs.readlink).mockResolvedValue("referent.json")
+		// The link answers with its referent; the referent itself is the file that is
+		// missing, so readlink answers ENOENT there and the walk stops. Those are the two
+		// answers a real readlink gives - measured with node 22.23.4 on win32, a missing
+		// path reports ENOENT and a path that is not a link reports EINVAL - and the walk
+		// ends on both and on no other code.
+		// Matched by basename because the walk hands readlink the spelling it is holding,
+		// which is the caller's spelling for the first hop and the joined referent after it.
+		vi.mocked(fs.readlink).mockImplementation(async (target) =>
+			path.basename(String(target)) === "file.json" ? "referent.json" : Promise.reject(enoent),
+		)
 
 		// Mid-commit a peer writer renames the referent away and back, so the key
 		// must still be computable while the link dangles.
@@ -1664,18 +1676,133 @@ describe("resolveLockKey", () => {
 		)
 	})
 
-	it("terminates on a two-link cycle instead of walking forever", async () => {
+	it("terminates on a link cycle and refuses rather than naming whichever link the bound stopped on", async () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
 		// Every readlink answers with the same link, so an unbounded walk would
-		// never end; the bounded walk returns the key it actually reached.
+		// never end. Returning the intermediate link was not a safe answer either: a
+		// writer that entered the same chain from the other end stops at a different
+		// link, and the two writers then hold two locks for one file. The walk is
+		// bounded and the caller is told that no key could be resolved.
 		vi.mocked(fs.readlink).mockImplementation(async () => "a.json")
 
-		await expect(resolveLockKey("/tmp/linkdir/a.json")).resolves.toBe(
-			path.resolve(path.join("/tmp/linkdir", "a.json")),
-		)
+		await expect(resolveLockKey("/tmp/linkdir/a.json")).rejects.toThrow(/symlink chain is deeper than 8 links/)
+		// The bound is still what terminates the walk: eight reads, no more.
 		expect(fs.readlink).toHaveBeenCalledTimes(8)
+	})
+
+	it("refuses a lock key when an ancestor exists but cannot be canonicalized", async () => {
+		// The file itself is absent, so the key is computed from the directory. The directory
+		// is there but its parent component is a regular file, so realpath answers ENOTDIR:
+		// the canonical location of that directory is unknown. Returning the spelled path
+		// would key this writer apart from every writer that did canonicalize the same file,
+		// which is the two-locks-for-one-file loss this function exists to prevent, so only
+		// the ENOENT answer may be walked over.
+		const enotdir = Object.assign(new Error("ENOTDIR: not a directory"), { code: "ENOTDIR" })
+		vi.mocked(fs.realpath).mockImplementation(async (target) => {
+			if (path.resolve(String(target)) === path.resolve("/tmp/dir/package/sub")) throw enotdir
+			return String(target)
+		})
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+
+		await expect(resolveLockKey("/tmp/dir/package/sub/file.json")).rejects.toBe(enotdir)
+	})
+
+	it("keys a relative referent through the link's real parent, not the spelled one", async () => {
+		// `..` in a referent names the directory the link lives in. Under a symlinked
+		// directory that is not the directory the caller spelled, so joining the referent
+		// onto the spelled parent keys a different file: the writer that arrives through the
+		// alias and the writer that arrives through the referent then stop excluding each
+		// other. The link here hangs in /tmp/alias/notes, which resolves to /real/notes, and
+		// its referent is ../other/b.json, which lives in /real/other.
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockImplementation(async (target) => {
+			const key = path.resolve(String(target))
+			if (key === path.resolve("/tmp/alias/notes/a.json")) throw enoent
+			if (key === path.resolve("/tmp/alias/notes")) return path.resolve("/real/notes")
+			if (key === path.resolve("/real/other")) return path.resolve("/real/other")
+			return String(target)
+		})
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		vi.mocked(fs.readlink).mockImplementation(async (target) =>
+			path.basename(String(target)) === "a.json"
+				? "../other/b.json"
+				: Promise.reject(Object.assign(new Error("EINVAL: invalid argument"), { code: "EINVAL" })),
+		)
+
+		await expect(resolveLockKey("/tmp/alias/notes/a.json")).resolves.toBe(
+			path.join(path.resolve("/real/other"), "b.json"),
+		)
+	})
+
+	it("propagates a readlink failure that says nothing about whether the path is a link", async () => {
+		// ENOENT and EINVAL are the two answers that end the walk, because each says the
+		// path is not a chain to follow. EACCES says nothing of the kind: the path may or
+		// may not be a link, and guessing that it is not keys this writer to the alias while
+		// a writer that reached the referent keys the referent.
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		vi.mocked(fs.readlink).mockRejectedValue(eacces)
+
+		await expect(resolveLockKey("/tmp/linkdir/file.json")).rejects.toBe(eacces)
+	})
+})
+
+describe("staged file identity at the commit rename", () => {
+	beforeEach(() => mockDefaults())
+
+	it("refuses the commit rename when a different file sits at the staging name after the fsync", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The file this write opened, wrote and fsynced: a single-named regular file with
+		// identity (dev 7, ino 4242). lstat with { bigint: true } reports every numeric field
+		// as a bigint, so the staging-side doubles carry nlink as one too.
+		const fsynced = _fileStatsWithIdentity(4242n, 7n)
+		fsynced.nlink = 1n
+		vi.mocked(fsSync.fstatSync).mockReturnValue(fsynced)
+		// After this write closed the descriptor, a process that can write the staging
+		// directory moved this write's file aside and named another file after it. The commit
+		// rename takes the name, so it would publish bytes this write never wrote or flushed.
+		const foreign = _fileStatsWithIdentity(9999n, 7n)
+		foreign.nlink = 1n
+		vi.mocked(fs.lstat).mockImplementation(async (target) =>
+			String(target).includes("safeWriteText_") ? foreign : _fileStats(false),
+		)
+
+		const error = await safeWriteText(targetPath, "hello", { platform: "linux" }).then(
+			() => undefined,
+			(commitError: unknown) => commitError,
+		)
+
+		expect(error).toBeInstanceOf(StagingPathError)
+		expect((error as StagingPathError).message).toContain("between the fsync and the commit rename")
+		// The rename is the statement that publishes, and it never ran.
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The file at the staging name belongs to someone else: the failure cleanup must not
+		// delete the file that took this write's name.
+		expect(fs.unlink).not.toHaveBeenCalled()
+	})
+
+	it("keeps the commit when the staged name still holds the file that was fsynced", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The staging name resolves to the same identity the descriptor carried, so the
+		// guard above must not fire on an ordinary write.
+		const fsynced = _fileStatsWithIdentity(4242n, 7n)
+		fsynced.nlink = 1n
+		vi.mocked(fsSync.fstatSync).mockReturnValue(fsynced)
+		vi.mocked(fs.lstat).mockImplementation(async (target) =>
+			String(target).includes("safeWriteText_") ? fsynced : _fileStats(false),
+		)
+
+		await safeWriteText(targetPath, "hello", { platform: "linux" })
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 	})
 })
 
@@ -1945,7 +2072,12 @@ describe("resolvePublishTarget", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
-		vi.mocked(fs.lstat).mockRejectedValue(enoent)
+		// The target is absent, which is what the fallback is about. The staging name is
+		// answered separately: the commit re-verifies the staged file before renaming it,
+		// and this write created and fsynced that file itself.
+		vi.mocked(fs.lstat).mockImplementation(async (target) =>
+			String(target).includes("safeWriteText_") ? _fileStats(false) : Promise.reject(enoent),
+		)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
 
 		await safeWriteText(targetPath, "data", { platform: "linux" })

@@ -84,8 +84,13 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			order.push("lstat")
 			return symlinkStat(target)
 		})
+		// A real readlink reports a non-link by rejecting with code EINVAL (measured with
+		// node 22.23.4 on win32; linux reports the same code), and the lock-key walk ends the
+		// walk on exactly that code, so the double carries it.
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink
+				? referent
+				: Promise.reject(Object.assign(new Error("not a link"), { code: "EINVAL" })),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -124,8 +129,11 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			order.push("lstat")
 			return symlinkStat(target)
 		})
+		// Non-link answers carry EINVAL, the code a real readlink reports (see the row above).
 		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink
+				? referent
+				: Promise.reject(Object.assign(new Error("not a link"), { code: "EINVAL" })),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -175,6 +183,55 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		})
 		await expect(resolveLockKey(file)).rejects.toBe(eacces)
 	})
+})
+
+it("recovers an interrupted write beside the referent the lock key names, not beside the spelling the caller arrived with", async () => {
+	// The interrupted writer staged its files beside the publish target it resolved. A writer
+	// that arrives through a differently named alias finds them only by looking beside the
+	// referent, which is where the lock key points; keyed to the caller's own spelling it scans
+	// a different directory, leaves the orphaned backup where it is, and stages beside the alias.
+	// A directory link cannot expose this on either platform - both spellings enumerate the same
+	// entries - so this is proved the way the rest of the key is proved here: a mocked resolution
+	// over a real filesystem, plus the path the recovery call was actually handed.
+	const realDir = await makeDir("recovery-real-")
+	const aliasDir = await makeDir("recovery-alias-")
+	const referent = path.join(realDir, "history_item.json")
+	const alias = path.join(aliasDir, "history_item.json")
+	const leftover = `.history_item.json.bak_${Date.now()}_fedcba.tmp`
+	await fs.writeFile(path.join(realDir, leftover), JSON.stringify({ previous: "content" }), "utf8")
+
+	mockedRealpath.mockImplementation(async (target) =>
+		path.resolve(String(target)) === path.resolve(alias) ? referent : String(target),
+	)
+	const realLstat = (await vi.importActual<typeof import("fs/promises")>("fs/promises")).lstat
+	mockedLstat.mockImplementation(async (target) => realLstat(String(target)))
+	mockedAcquireFileLock.mockImplementation(async () => async () => {})
+
+	const recoveryModule = await import("../jsonFileRecovery")
+	// Captured before the spy is installed: calling the namespace property from inside the
+	// implementation would recurse through the spy itself.
+	const realRecover = recoveryModule.recoverInterruptedReplacement
+	const recovered: string[] = []
+	const recoverySpy = vi.spyOn(recoveryModule, "recoverInterruptedReplacement").mockImplementation(async (target) => {
+		recovered.push(path.resolve(String(target)))
+		return realRecover(target)
+	})
+
+	try {
+		await safeWriteJson(alias, { id: "task-1" })
+	} finally {
+		recoverySpy.mockRestore()
+	}
+
+	// Recovery ran against the key, so it scanned the directory beside the referent.
+	expect(recovered).toEqual([path.resolve(referent)])
+	// The orphaned backup was found and restored, and the write then published the caller's
+	// content over it. (The write's own backup step leaves a fresh .bak_ file beside the
+	// target; the name asserted here is the one this fixture planted.)
+	expect((await fs.readdir(realDir)).filter((entry) => entry === leftover)).toEqual([])
+	expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
+	// Nothing was staged beside the alias.
+	expect(await fs.readdir(aliasDir)).toEqual([])
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {

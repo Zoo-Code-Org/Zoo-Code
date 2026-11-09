@@ -348,12 +348,37 @@ function errorCode(error: unknown): string | undefined {
  * Windows 8.3 short name, so a lock key must be canonical even when the file
  * itself is not there yet -- otherwise the key for one file depends on whether
  * the file exists when the key is computed, and two writers take two locks.
+ * Components that are not there yet are walked over and re-joined onto the nearest
+ * ancestor that is: the writer that arrives before this file's parent directory is
+ * created has to take the lock of the writer that arrives after it. Only a missing
+ * component may be walked over. An ancestor that exists but cannot be canonicalized
+ * (ENOTDIR under a regular-file component, EACCES, EIO, ELOOP) means the canonical
+ * key is unknown, and handing back the literal spelling would key this writer apart
+ * from every writer that did canonicalize the same file.
  */
 
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
-	const dirPath = path.dirname(absoluteFilePath)
-	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
-	return path.join(canonicalDir, path.basename(absoluteFilePath))
+	const basename = path.basename(absoluteFilePath)
+	const missing: string[] = []
+	let cursor = path.dirname(absoluteFilePath)
+	for (;;) {
+		try {
+			const canonicalDir = await fs.realpath(cursor)
+			return path.join(canonicalDir, ...missing.reverse(), basename)
+		} catch (error: unknown) {
+			if (errorCode(error) !== "ENOENT") {
+				throw error
+			}
+			const parent = path.dirname(cursor)
+			if (parent === cursor) {
+				// The root of this path was reached with components still missing: no ancestor
+				// is left to canonicalize, so this spelling is the only answer available.
+				return path.join(cursor, ...missing.reverse(), basename)
+			}
+			missing.push(path.basename(cursor))
+			cursor = parent
+		}
+	}
 }
 
 /**
@@ -362,8 +387,10 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * tolerates a dangling link, because the lock key has to be computable while a
  * peer writer is mid-commit (a publish renames the staged file onto the referent,
  * and backup mode keeps a copy beside it).
- * The walk is bounded so a two-link cycle terminates, and every key it returns is
- * canonicalized through canonicalDirKey.
+ * The walk is bounded, and a chain the bound cannot resolve rejects rather than naming
+ * an arbitrary intermediate link: two writers that enter the same chain from different
+ * ends would otherwise key one file with two different locks. Every key it does return
+ * is canonicalized through canonicalDirKey.
  */
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
@@ -376,16 +403,37 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 		if (errorCode(error) !== "ENOENT") {
 			throw error
 		}
-		// A real readlink throws for anything that is not a link, so a normal chain
-		// ends the walk. Two links that point at each other never would, so the
-		// walk is bounded and callers use the key they actually reached.
+		// A real readlink reports "this is not a link" by throwing: EINVAL on the
+		// platforms this file runs on (measured with node 22.23.4 on win32, and EINVAL
+		// on linux), and ENOENT when the path itself is gone. Those two answers end the
+		// walk. Any other failure - EACCES, EIO, ELOOP - says nothing about whether this
+		// path is a link, so it propagates: keying this writer to the alias while a
+		// writer that reached the referent keys the referent is the two-locks-for-one-file
+		// loss this function exists to prevent, and guessing it is how that loss arrives.
+		const linkWalkLimit = 8
 		let key = absoluteFilePath
-		for (let depth = 0; depth < 8; depth++) {
-			const target = await fs.readlink(key).catch(() => undefined)
+		for (let depth = 0; depth < linkWalkLimit; depth++) {
+			const target = await fs.readlink(key).catch((linkError: unknown) => {
+				const code = errorCode(linkError)
+				if (code === "ENOENT" || code === "EINVAL") return undefined
+				throw linkError
+			})
 			if (target === undefined) return await canonicalDirKey(key)
-			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
+			// A relative referent is relative to the link's REAL parent, not to the spelling the
+			// caller arrived with: under a symlinked directory `..` names the referent's parent,
+			// so a lexical join keys a different file and the writer through the alias stops
+			// excluding the writer through the referent. When the link's own parent cannot be
+			// canonicalized - a dangling chain - the lexical join is the only answer available.
+			const referentParent = path.isAbsolute(target)
+				? undefined
+				: await fs.realpath(path.dirname(key)).catch(() => undefined)
+			key = await canonicalDirKey(path.resolve(referentParent ?? path.dirname(key), target))
 		}
-		return await canonicalDirKey(key)
+		// The bound only exists to terminate a cycle. Past it the chain names no file, so
+		// the caller is told instead of handed whichever link the walk stopped on.
+		throw new Error(
+			`safeWriteText: could not resolve a lock key for ${absoluteFilePath}: the symlink chain is deeper than ${linkWalkLimit} links`,
+		)
 	}
 }
 
@@ -531,6 +579,15 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
+	// Identity of the staged file as this write last held it open, captured from the descriptor
+	// that was fsynced. The commit rename below takes a NAME, and between the fsync (which
+	// releases the descriptor) and that rename a process that can write the staging directory can
+	// move this write's file aside and put another file at the same name; the rename would then
+	// publish content this write never wrote and never flushed.
+	let stagedIdentity: fsSync.BigIntStats | null = null
+	// Set when the pre-commit comparison finds a different file at the staging name: the name no
+	// longer belongs to this write, so the failure cleanup must not unlink somebody else's file.
+	let stagedPathIsForeign = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
@@ -599,6 +656,7 @@ export async function safeWriteText(
 					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
 				}
 				_fsyncFile(fd)
+				stagedIdentity = fsSync.fstatSync(fd, { bigint: true })
 			} finally {
 				fsSync.closeSync(fd)
 			}
@@ -637,6 +695,7 @@ export async function safeWriteText(
 					fsSync.fchmodSync(fd, targetMode)
 				}
 				_fsyncFile(fd)
+				stagedIdentity = fsSync.fstatSync(fd, { bigint: true })
 			} finally {
 				fsSync.closeSync(fd)
 			}
@@ -805,6 +864,42 @@ export async function safeWriteText(
 				)
 			}
 
+			// The staging path is a name, not the file. Everything above released the descriptor,
+			// and a process that can write the staging directory has had the whole window since the
+			// fsync to move this write's file aside and name another file after it. The rename below
+			// follows the name, so compare the name against the descriptor this write fsynced and
+			// refuse rather than publish bytes that were never flushed here. A move preserves dev+ino,
+			// and a hard link leaves nlink above 1, so both are caught the same way the open above is.
+			if (stagedIdentity) {
+				const nowStaged = await fs.lstat(tempPath, { bigint: true }).catch((error: unknown) => {
+					if (errorCode(error) === "ENOENT") {
+						throw new StagingPathError(
+							`Staging file disappeared before the commit rename: ${tempPath}`,
+							tempPath,
+						)
+					}
+					throw error
+				})
+				if (
+					typeof nowStaged.ino === "bigint" &&
+					typeof stagedIdentity.ino === "bigint" &&
+					(!nowStaged.isFile() ||
+						nowStaged.ino !== stagedIdentity.ino ||
+						nowStaged.dev !== stagedIdentity.dev ||
+						// bigint against bigint: lstat with { bigint: true } reports nlink as a bigint,
+						// so comparing it with the number 1 would never be equal.
+						nowStaged.nlink !== 1n)
+				) {
+					// The name now belongs to a different file: unlinking it here would delete the
+					// file that took its place, which this write has no claim on.
+					stagedPathIsForeign = true
+					throw new StagingPathError(
+						`Staging file changed between the fsync and the commit rename: ${tempPath}`,
+						tempPath,
+					)
+				}
+			}
+
 			await fs.rename(tempPath, targetPath)
 			committed = true
 
@@ -939,7 +1034,10 @@ export async function safeWriteText(
 		// Only a write that never committed has a staged file to remove. After the commit
 		// rename there is nothing at tempPath but the published target, and unlinking it here
 		// would un-commit the write the caller is being told about.
-		if (!committed) {
+		// The pre-commit comparison above found a foreign file at the staging name: this write's own
+		// file is gone from that name, and removing what took its place would destroy a file the
+		// caller never handed over.
+		if (!committed && !stagedPathIsForeign) {
 			let cleanupError: unknown = null
 			for (let attempt = 0; attempt < 2; attempt++) {
 				try {
