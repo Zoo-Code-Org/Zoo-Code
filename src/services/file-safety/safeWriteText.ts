@@ -15,6 +15,14 @@ export interface SafeWriteTextOptions {
 	backup?: boolean
 
 	/**
+	 * The filesystem identity the caller authorized for this target. When present, the commit
+	 * rename below refuses unless the target is still that same file, so an authorization made
+	 * outside this module cannot be spent on a link or a different file swapped in for the pathname
+	 * afterwards. A failure to read the identity counts as "not that file": the guard fails closed.
+	 */
+	authorizedTarget?: { dev: number; ino: number }
+
+	/**
 	 * Platform override for testing.  When omitted the real process.platform
 	 * value is used.  Set to "win32" or "linux" / "darwin" from tests so that
 	 * both branches are reachable without needing a real Windows runner.
@@ -735,6 +743,17 @@ export async function safeWriteText(
 				)
 			}
 
+			// A pathname re-check cannot bind an authorization: the path can become a link, or a
+			// different file, after the re-check and before this rename, and a rename has no conditional
+			// form. Comparing identities conditions the commit on the file that was authorized, which
+			// narrows the window to this stat-plus-rename pair - the most a rename-based writer can do.
+			const authorizedTarget = options?.authorizedTarget
+			if (authorizedTarget) {
+				const identity = await fs.stat(targetPath).catch(() => undefined)
+				if (!identity || identity.dev !== authorizedTarget.dev || identity.ino !== authorizedTarget.ino) {
+					throw new Error(`safeWriteText: ${absoluteFilePath} changed identity after it was authorized`)
+				}
+			}
 			await fs.rename(tempPath, targetPath)
 			committed = true
 
