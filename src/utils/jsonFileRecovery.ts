@@ -20,29 +20,36 @@ function getStagedReplacementPrefix(absoluteFilePath: string): string {
 }
 
 /**
- * The tail every writer of this file produces after its prefix: `_<timestamp>_<random>.tmp`
- * (see safeWriteJson's createStagingFilePath and createBackupFilePath). The random token is
- * base36, so it never contains an underscore, and the timestamp is all digits.
- */
-const OWNED_LEFTOVER_TAIL = /^\d+_[^_]+\.tmp$/
-
-/**
- * Whether `entry` is a leftover this target's own writer staged.
+ * The tail that marks a leftover as this target's own, and the three prefixes do not scope alike.
  *
- * Matching the prefix alone is not scoping. A basename that starts with this basename plus an
- * underscore - `a.json_extra.json` beside `a.json` - produces `.new_a.json_extra_<ts>_<rand>.tmp`,
- * which starts with this file's `.new_a.json_` prefix. Its writer holds only the sibling's lock,
- * so a recovery of `a.json` that collected that name would unlink a staging file a live writer is
- * about to publish, and that write then fails with ENOENT before it can commit. Requiring the tail
- * a writer of this file actually produces keeps the pattern scoped to the target.
+ * The dot-anchored prefixes `.<basename>.new_` and `.<basename>.bak_` already pin this file's
+ * basename through the literal dot before the kind, so a timestamp alone identifies the name. The
+ * token is optional there because writers appended it later: `.history_item.json.bak_1.tmp`, which
+ * core/task-persistence/__tests__/TaskHistoryStore.realConcurrency.spec.ts still plants and
+ * migration must still recover, is a backup of this target. Current writers append
+ * `_<timestamp>_<random>.tmp` (see safeWriteJson's createStagingFilePath and createBackupFilePath);
+ * the base36 token never contains an underscore and the timestamp is all digits.
+ *
+ * The underscore-anchored staged prefix `.new_<basename>_` is not scoped by its prefix alone. A
+ * basename that starts with this basename plus an underscore - `a.json_extra.json` beside `a.json` -
+ * produces `.new_a.json_extra_<ts>_<rand>.tmp`, which starts with this file's `.new_a.json_` prefix.
+ * That writer holds only the sibling's lock, so collecting the name would unlink a staging file a
+ * live writer is about to publish, and that write then fails with ENOENT before it can commit. Only
+ * the full `<ts>_<rand>.tmp` tail attributes a staged-looking name, so without the token it is not
+ * this target's leftover.
  */
+const ANCHORED_LEFTOVER_TAIL = /^\d+(_[^_]+)?\.tmp$/
+const STAGED_LEFTOVER_TAIL = /^\d+_[^_]+\.tmp$/
+
+/** Whether `entry` is a leftover this target's own writer staged. */
 function isReplacementLeftover(absoluteFilePath: string, entry: string): boolean {
-	for (const prefix of [
-		getTempFilePrefix(absoluteFilePath, "new"),
-		getTempFilePrefix(absoluteFilePath, "bak"),
-		getStagedReplacementPrefix(absoluteFilePath),
-	]) {
-		if (entry.startsWith(prefix) && OWNED_LEFTOVER_TAIL.test(entry.slice(prefix.length))) {
+	const patterns: [string, RegExp][] = [
+		[getTempFilePrefix(absoluteFilePath, "new"), ANCHORED_LEFTOVER_TAIL],
+		[getTempFilePrefix(absoluteFilePath, "bak"), ANCHORED_LEFTOVER_TAIL],
+		[getStagedReplacementPrefix(absoluteFilePath), STAGED_LEFTOVER_TAIL],
+	]
+	for (const [prefix, tail] of patterns) {
+		if (entry.startsWith(prefix) && tail.test(entry.slice(prefix.length))) {
 			return true
 		}
 	}

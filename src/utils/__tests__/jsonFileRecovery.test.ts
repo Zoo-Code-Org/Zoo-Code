@@ -136,6 +136,30 @@ describe("replacement leftover name patterns", () => {
 		},
 	)
 
+	// The tail rule is deliberately not uniform across the prefixes, and core/task-persistence/
+	// __tests__/TaskHistoryStore.realConcurrency.spec.ts is the reason it may not be: that spec plants
+	// `.history_item.json.bak_1.tmp`, a backup from before writers appended a random token, and
+	// migration must still recover it. The dot-anchored prefix already pins this file's basename
+	// through the literal dot before the kind, so the token stays optional there.
+	it("collects a timestamp-only backup name under the dot-anchored prefix", async () => {
+		const leftover = path.join(dir, ".a.json.bak_1.tmp")
+		await fs.writeFile(leftover, "stale")
+		await expect(recoverMissingJsonFile(target)).resolves.toBe(true)
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+		await expect(fs.access(leftover)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	// The other half of the same rule: on the underscore-anchored staged prefix the token is the only
+	// thing that attributes a staged-looking name to this target, so the very same tail shape there
+	// is somebody else's in-flight file and must survive.
+	it("does not collect a staged-looking name that lacks the token", async () => {
+		const unscoped = path.join(dir, ".new_a.json_1.tmp")
+		await fs.writeFile(unscoped, "someone else's staging file")
+		await expect(recoverMissingJsonFile(target)).resolves.toBe(false)
+		expect(await fs.readFile(unscoped, "utf8")).toBe("someone else's staging file")
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+	})
+
 	// A shared directory is the failure mode the target-derived prefix exists to
 	// prevent: a live writer of b.json holds only b.json's lock, so recovery of a.json
 	// must not unlink the staging file that writer is about to rename onto b.json.
