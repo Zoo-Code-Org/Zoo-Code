@@ -1,6 +1,11 @@
 import type { ExtensionContext } from "vscode"
 
-import { KIMI_CODE_OAUTH_CONFIG, KimiCodeOAuthManager, refreshKimiCodeAccessToken } from "../oauth"
+import {
+	KIMI_CODE_OAUTH_CONFIG,
+	KimiCodeOAuthManager,
+	refreshKimiCodeAccessToken,
+	type KimiCodeCredentials,
+} from "../oauth"
 
 const createContext = () => {
 	const values = new Map<string, string>()
@@ -831,7 +836,14 @@ describe("KimiCodeOAuthManager", () => {
 			},
 		} as unknown as Response
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(stalledResponse)
-		const credentials = { type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }
+		// The token refresher takes the credentials record by its declared shape, so the double is
+		// annotated rather than asserted: an unannotated literal widens `type` to string.
+		const credentials: KimiCodeCredentials = {
+			type: "kimi-code",
+			accessToken: "old",
+			refreshToken: "refresh",
+			expiresAt: 0,
+		}
 		const pending = refreshKimiCodeAccessToken(credentials, controller.signal)
 		await vi.waitFor(() => expect(bodyReads).toEqual(["json"]))
 		controller.abort()
