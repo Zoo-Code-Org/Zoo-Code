@@ -793,6 +793,7 @@ describe("DiffViewProvider", () => {
 			const { createDirectoriesForFile } = await import("../../../utils/fs")
 			vi.mocked(createDirectoriesForFile).mockClear()
 			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(assertPublishWithinAuthorizedRoot).mockClear()
 			const escape = new Error("safeWriteText: refusing to publish outside the authorized root")
 			vi.mocked(assertPublishWithinAuthorizedRoot).mockRejectedValueOnce(escape)
 
@@ -805,6 +806,13 @@ describe("DiffViewProvider", () => {
 			// already have created the outside directory the check exists to protect.
 			expect(createDirectoriesForFile).not.toHaveBeenCalled()
 			expect(safeWriteText).not.toHaveBeenCalled()
+			// The stub rejects whatever it is handed, so without pinning the arguments this test
+			// would still pass if the guard were given the workspace root instead of the target.
+			expect(assertPublishWithinAuthorizedRoot).toHaveBeenCalledWith(
+				mockCwd,
+				`${mockCwd}/linkdir/new/secret.txt`,
+				`${mockCwd}/linkdir/new/secret.txt`,
+			)
 			vi.mocked(assertPublishWithinAuthorizedRoot).mockResolvedValue(undefined)
 		})
 		it("rejects a save over a read-only target instead of renaming onto it", async () => {

@@ -75,7 +75,10 @@ describe("acquireFileLock", () => {
 		let contention: Promise<() => Promise<void>> | undefined
 		let acquiredRelease: (() => Promise<void>) | undefined
 		try {
-			await entered
+			// Race, do not await: if the acquisition itself fails, signalEntered never runs, and
+			// awaiting `entered` alone would surface this test's 15-second timeout (plus an unhandled
+			// rejection) instead of the lock error that actually happened.
+			await Promise.race([entered, holding])
 			// Pin the failure kind: proper-lockfile rejects with ELOCKED, so this asserts lock
 			// contention rather than an unrelated lockfile failure.
 			contention = acquireFileLock(referentPath)
