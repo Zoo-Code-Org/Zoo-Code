@@ -1037,6 +1037,25 @@ describe("safeWriteJson", () => {
 		},
 	)
 
+	// The two confinement rows above skip Windows because they need a symlink. Confinement itself is
+	// not the skipped property: a plain in-scope write must succeed on every platform, including
+	// inside a nonempty directory. Without this row a Windows regression that rejects valid
+	// project-settings saves would pass the whole confinement matrix unnoticed, because every
+	// other accept-path row in it is skipped on that platform.
+	test("confines a plain write inside a nonempty confined directory on every platform", async () => {
+		const projectDir = path.join(tempDir, "plain-confine")
+		await fs.mkdir(projectDir)
+		await fs.writeFile(path.join(projectDir, "unrelated.json"), JSON.stringify({ keep: true }), "utf8")
+		const target = path.join(projectDir, "mcp.json")
+
+		await safeWriteJson(target, { mcpServers: { local: { url: "http://localhost" } } }, { confineTo: projectDir })
+
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({
+			mcpServers: { local: { url: "http://localhost" } },
+		})
+		expect(JSON.parse(await fs.readFile(path.join(projectDir, "unrelated.json"), "utf8"))).toEqual({ keep: true })
+	})
+
 	test.skipIf(process.platform === "win32")(
 		"preserves a restrictive 0o600 target mode through the atomic publish",
 		async () => {
@@ -1049,48 +1068,46 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
-	// The two failure paths of _copyTargetMode: a target whose mode cannot be read, and a staged
-	// file whose mode cannot be set. Both have to log and let the write finish, because the
-	// replacement protocol - not the mode - is what makes the publish atomic. They are driven
-	// through the fs/promises mocks rather than a real EACCES/EPERM, because forcing either one
-	// for real needs privileges a developer box and a CI runner neither have. That is also why
-	// these two run on every platform while the symlink and mode rows above skip windows.
-	test("logs and still publishes when the target's mode cannot be read", async () => {
+	// The two failure paths of _copyTargetMode: a target whose mode cannot be read, and a staged file
+	// whose mode cannot be set. Both refuse the publish and leave the target exactly as it was: proceeding
+	// would land a umask-derived mode over a target whose owner had narrowed it, which is the same
+	// widening the copy exists to prevent. They are driven through the fs/promises mocks rather than a
+	// real EACCES/EPERM, because forcing either one for real needs privileges a developer box and a CI
+	// runner neither have. That is also why these two run on every platform while the symlink and mode
+	// rows above skip windows.
+	test("refuses the publish and keeps the target's bytes when the target's mode cannot be read", async () => {
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		// fs.stat is already vi.fn() in the factory above - vi.mocked keeps the real
 		// implementation reachable once this single call is done.
-		await vi.mocked(fs.stat).mockImplementationOnce(async () => {
+		vi.mocked(fs.stat).mockImplementationOnce(async () => {
 			const error: NodeJS.ErrnoException = new Error(`EACCES: permission denied, stat '${currentTestFilePath}'`)
 			error.code = "EACCES"
 			throw error
 		})
 
-		await safeWriteJson(currentTestFilePath, { after: true })
+		await expect(safeWriteJson(currentTestFilePath, { after: true })).rejects.toThrow(/Could not read the mode of/)
 
-		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
-		// The log must name the target it could not read; it must not be compared against
-		// the caller's spelling. The writer resolves the target before logging, and on
-		// Windows a path whose components carry 8.3 aliases resolves to a different
-		// spelling than the one the caller handed it - measured on this row: a temp under
-		// C:\work\ZOO-CO~1\TMP-AL~2 logged its target as ...\Zoo-Code-fork\.tmp-alias-vps2f\
-		// on the same run. The mkdtemp directory name and the file's own name are the parts
-		// that survive resolution, so the log is pinned to those.
-		const loggedTargets = consoleErrorSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n")
-		expect(loggedTargets).toContain(path.basename(path.dirname(currentTestFilePath)))
-		expect(loggedTargets).toContain(path.basename(currentTestFilePath))
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining(path.basename(currentTestFilePath)),
-			expect.anything(),
+		// The target still holds the bytes it had before the refused write, and the staged file is
+		// gone: a refused publish must not leave a second copy of the payload beside it.
+		expect(await readFileContent(currentTestFilePath)).toEqual({ before: true })
+		const leftovers = (await fs.readdir(path.dirname(currentTestFilePath))).filter(
+			(entry) => entry.includes(".new_") || entry.endsWith(".lock"),
 		)
+		expect(leftovers).toEqual([])
+		// The refusal names the target it could not read. Pinned to the components that survive
+		// path resolution on every platform rather than the caller's spelling.
+		const logged = consoleErrorSpy.mock.calls.map((call: unknown[]) => String(call[0])).join("\n")
+		expect(logged).toContain(path.basename(path.dirname(currentTestFilePath)))
+		expect(logged).toContain(path.basename(currentTestFilePath))
 		consoleErrorSpy.mockRestore()
 	}, 20_000)
 
-	test("logs and still publishes when the staged file's mode cannot be set", async () => {
+	test("refuses the publish and keeps the target's bytes when the staged file's mode cannot be set", async () => {
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		// chmod is a vi.fn() in the factory above for the same reason.
-		await vi.mocked(fs.chmod).mockImplementationOnce(async () => {
+		vi.mocked(fs.chmod).mockImplementationOnce(async () => {
 			const error: NodeJS.ErrnoException = new Error(
 				`EPERM: operation not permitted, chmod '${currentTestFilePath}'`,
 			)
@@ -1098,12 +1115,31 @@ describe("safeWriteJson", () => {
 			throw error
 		})
 
-		await safeWriteJson(currentTestFilePath, { after: true })
+		await expect(safeWriteJson(currentTestFilePath, { after: true })).rejects.toThrow(/Failed to copy mode/)
 
-		expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
-		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to copy mode"), expect.anything())
+		expect(await readFileContent(currentTestFilePath)).toEqual({ before: true })
+		const leftovers = (await fs.readdir(path.dirname(currentTestFilePath))).filter(
+			(entry) => entry.includes(".new_") || entry.endsWith(".lock"),
+		)
+		expect(leftovers).toEqual([])
 		consoleErrorSpy.mockRestore()
 	}, 20_000)
+
+	// CWE-732 on the staged file itself: fs.createWriteStream defaults its creation mode to 0o666
+	// narrowed only by the process umask, so a payload carrying MCP credentials briefly sits in a
+	// file every local user can read before the mode copy and the commit rename land. The writer
+	// pins the creation mode instead. Asserted on the options handed to createWriteStream because
+	// the mode a freshly created file answers to is umask- and platform-dependent, and a runner's
+	// umask is not the property under test.
+	test("creates the staged file with an explicit restrictive mode instead of the umask default", async () => {
+		const streamCallsBefore = vi.mocked(fsSyncActual.createWriteStream).mock.calls.length
+		await safeWriteJson(currentTestFilePath, { value: 1 })
+		const calls = vi.mocked(fsSyncActual.createWriteStream).mock.calls.slice(streamCallsBefore)
+		expect(calls.length).toBeGreaterThan(0)
+		const modes = calls.map((call) => (call[1] as { mode?: number } | undefined)?.mode)
+		expect(modes).toContain(0o600)
+		expect(await readFileContent(currentTestFilePath)).toEqual({ value: 1 })
+	})
 
 	// Ordering matters for the security guarantee: proper-lockfile creates
 	// ${lockKey}.lock beside the lock key, and the key is the symlink referent. If

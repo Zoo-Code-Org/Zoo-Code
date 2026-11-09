@@ -553,7 +553,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
  */
 async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
+	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", mode: 0o600 })
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass
@@ -574,10 +574,11 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 
 /**
  * Copies the existing target's permission mode onto the staged file so the publish
- * does not silently widen it. A missing target has no mode to copy; a stat or chmod
- * that fails for another reason is logged and the write proceeds with the staged
- * file's own mode, because the replacement protocol - not the mode - is what makes the
- * write atomic.
+ * does not silently widen it. A missing target (ENOENT, ENOTDIR) has no mode to copy and
+ * the staged file keeps its own. Any other stat or chmod failure is a refusal, not a log:
+ * the publish would land a umask-derived mode over a target whose owner had narrowed it,
+ * and a 0o600 MCP configuration replaced by a 0o644 file is readable by every local user
+ * that can traverse the directory. Refusing leaves the target exactly as it was.
  */
 async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<void> {
 	let mode: number
@@ -586,15 +587,15 @@ async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<
 		mode = stats.mode & 0o777
 	} catch (statError: unknown) {
 		const code = getErrorCode(statError)
-		if (code && code !== "ENOENT" && code !== "ENOTDIR") {
-			console.error(`Could not read the mode of ${targetPath} before publishing onto it:`, statError)
+		if (!code || (code !== "ENOENT" && code !== "ENOTDIR")) {
+			throw new Error(`Could not read the mode of ${targetPath} before publishing onto it: ${statError}`)
 		}
 		return
 	}
 	try {
 		await fs.chmod(stagedPath, mode)
 	} catch (chmodError: unknown) {
-		console.error(`Failed to copy mode ${mode.toString(8)} from ${targetPath} onto ${stagedPath}:`, chmodError)
+		throw new Error(`Failed to copy mode ${mode.toString(8)} from ${targetPath}: ${chmodError}`)
 	}
 }
 

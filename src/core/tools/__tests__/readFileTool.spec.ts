@@ -2786,6 +2786,39 @@ describe("ReadFileTool", () => {
 				expect(reg.get(calledPath)!.complete).toBe(false)
 			})
 
+			// Positive control for the row above: EF BF BD is valid UTF-8, so a file that already
+			// carries a U+FFFD decodes and re-encodes to the same bytes and the read is complete. The
+			// row above asserts only the partial direction, and it would still pass if the writer marked
+			// every U+FFFD it saw as a lossy decode.
+			it("native: a file that already contains a U+FFFD byte sequence is a complete read", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				const raw = Buffer.from([0x61, 0xef, 0xbf, 0xbd])
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(raw)
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\uFFFD",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute({ path: "already-lossy.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(true)
+				expect(reg.get(calledPath)!.complete).toBe(true)
+			})
+
 			it("legacy: a read whose bytes did not survive the UTF-8 decode records a partial observation", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
@@ -2818,6 +2851,43 @@ describe("ReadFileTool", () => {
 				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(false)
 				expect(reg.get(calledPath)!.complete).toBe(false)
+			})
+			// Positive control for the row above: EF BF BD is valid UTF-8, so a file that already
+			// carries a U+FFFD decodes and re-encodes to the same bytes and the read is complete. The
+			// row above asserts only the partial direction, and it would still pass if the writer marked
+			// every U+FFFD it saw as a lossy decode.
+			it("legacy: a file that already contains a U+FFFD byte sequence is a complete read", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				const raw = Buffer.from([0x61, 0xef, 0xbf, 0xbd])
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(raw)
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\uFFFD",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy-already-lossy.ts" }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(true)
+				expect(reg.get(calledPath)!.complete).toBe(true)
 			})
 		})
 	})

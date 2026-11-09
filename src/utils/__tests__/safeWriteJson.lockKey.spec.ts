@@ -174,6 +174,46 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
+
+	it("releases the first referent lock and acquires the new referent lock when the alias moves under the lock", async () => {
+		const order: string[] = []
+		const dir = await makeDir("lockswitch-")
+		const referentA = path.join(dir, "history_item_a.json")
+		const referentB = path.join(dir, "history_item_b.json")
+		currentLink = path.join(dir, "link.json")
+		await fs.writeFile(referentA, JSON.stringify({ id: "a" }), "utf8")
+		await fs.writeFile(referentB, JSON.stringify({ id: "b" }), "utf8")
+
+		// The alias points at A when the lock key is computed and at B by the time that lock is held.
+		// A writer that keeps A's lock merges into B while a second writer queues behind A, so one side
+		// of the update is lost. The reacquisition pass must release A and take B before reading for
+		// the merge. A mock that always returned one referent could not tell that apart from skipping
+		// the pass, so this row drives the change under the lock.
+		let aliasTarget = referentA
+		mockedRealpath.mockImplementation(async (target) =>
+			String(target) === currentLink ? aliasTarget : String(target),
+		)
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink ? aliasTarget : Promise.reject(new Error("not a link")),
+		)
+		mockedAcquireFileLock.mockImplementation(async (key) => {
+			order.push("acquire:" + (key === referentA ? "A" : "B"))
+			if (key === referentA) {
+				aliasTarget = referentB
+			}
+			return async () => {
+				order.push("release:" + (key === referentA ? "A" : "B"))
+			}
+		})
+
+		await safeWriteJson(currentLink, { id: "task-1" })
+
+		expect(mockedAcquireFileLock.mock.calls.map((call) => call[0])).toEqual([referentA, referentB])
+		expect(order).toEqual(["acquire:A", "release:A", "acquire:B", "release:B"])
+		expect(JSON.parse(await fs.readFile(referentB, "utf8"))).toEqual({ id: "task-1" })
+		expect(JSON.parse(await fs.readFile(referentA, "utf8"))).toEqual({ id: "a" })
+	})
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
