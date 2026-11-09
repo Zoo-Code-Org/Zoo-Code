@@ -99,6 +99,7 @@ vi.mock("delay", () => ({
 
 import delay from "delay"
 import pWaitFor from "p-wait-for"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 vi.mock("uuid", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("uuid")>()
@@ -1071,7 +1072,7 @@ describe("Cline", () => {
 			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
 				const [type, _text, _images, partial] = args
 				if (type === "text" && partial === false) {
-					task.abort = true
+					setAbortLatch(task, true)
 					throw new Error("presenter text failed while aborting")
 				}
 				return say(...args)
@@ -4925,7 +4926,7 @@ describe("Cline", () => {
 				const abortTaskSpy = vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
 
 				// Test Case 1: Stream failure should NOT abort task
-				task.abort = false
+				setAbortLatch(task, false)
 				task.abandoned = false
 
 				// Simulate the catch block behavior for stream failure
@@ -4946,7 +4947,7 @@ describe("Cline", () => {
 				expect(abortTaskSpy).not.toHaveBeenCalled()
 
 				// Test Case 2: User cancellation SHOULD abort task
-				task.abort = true
+				setAbortLatch(task, true)
 
 				// For user cancellation, abortTask SHOULD be called
 				if (task.abort) {
@@ -7347,7 +7348,7 @@ describe("Cline", () => {
 			await flushMicrotasks()
 			consoleErrorSpy.mockClear()
 
-			task.abort = true
+			setAbortLatch(task, true)
 			getTaskTestAccess(task).presentAssistantMessageSafe()
 			await flushMicrotasks()
 
@@ -7401,7 +7402,7 @@ describe("Cline", () => {
 			consoleErrorSpy.mockClear()
 
 			// Simulate the TOCTOU race: abort flips between throw and catch.
-			task.abort = true
+			setAbortLatch(task, true)
 			getTaskTestAccess(task).presentAssistantMessageSafe()
 			await flushMicrotasks()
 
