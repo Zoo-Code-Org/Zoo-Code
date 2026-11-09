@@ -1574,6 +1574,42 @@ describe("safeWriteJson", () => {
 		}
 		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
 	})
+	test("publishes over a target whose mode is wider than the staged file's", async () => {
+		const target = path.join(tempDir, "mode-wider-target.json")
+		await fs.writeFile(target, JSON.stringify({ existing: true }), "utf8")
+		await fs.chmod(target, 0o664)
+		// Both sides of the mode test above are 0o600, so an implementation that published the
+		// staged file's private mode onto the target - the copy running the wrong way round - still
+		// passed it. Here the target starts wider than the staged file, so only a copy in the right
+		// direction can leave a group-readable target behind: a hardcoded 0o600 would quietly take
+		// group read away from a file the caller had deliberately left group-readable.
+		const targetMode = (await fs.stat(target)).mode & 0o777
+		const chmodSpy = vi.spyOn(fs, "chmod")
+		let chmodModes: number[] = []
+		let failure: unknown = null
+		try {
+			failure = await safeWriteJson(target, { written: "payload" }, { confineTo: tempDir }).then(
+				() => null,
+				(reason: unknown) => reason,
+			)
+			// Read from the spy before mockRestore: restoring clears the call history.
+			chmodModes = chmodSpy.mock.calls.map((call) => call[1] as number)
+		} finally {
+			chmodSpy.mockRestore()
+		}
+		expect(failure).toBeNull()
+		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
+		// The mode handed to chmod is the target's own mode, read back rather than assumed, so the
+		// copy is pinned to the right direction on every platform. Windows synthesizes the reported
+		// mode from the read-only attribute, so the number here is 0o666 for a 0o664 request; the
+		// point is that it is not the staged file's 0o600.
+		expect(chmodModes).toContain(targetMode)
+		if (process.platform !== "win32") {
+			// The end state, on a platform that actually stores a mode: the target is still
+			// group-readable after the publish, at the mode the caller put on it.
+			expect((await fs.stat(target)).mode & 0o777).toBe(0o664)
+		}
+	})
 	test("aborts the publish when the staged file cannot take the target's mode", async () => {
 		const target = path.join(tempDir, "chmod-fail-target.json")
 		await fs.writeFile(target, JSON.stringify({ existing: true }), "utf8")
