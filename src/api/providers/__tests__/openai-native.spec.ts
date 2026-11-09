@@ -1542,6 +1542,53 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockCaptureException.mock.calls[0]?.[0]).toMatchObject({ operation: "createMessage" })
 			})
 
+			it("keeps the provider's own error text out of the abort-race telemetry capture", async () => {
+				// A 400 body can echo request content — an address, a prompt fragment — and the
+				// telemetry client forwards error.message to PostHog, so an abort-raced failure
+				// must be reported as fixed text plus the numeric status, never as its own text.
+				const mockFetch = vitest.fn()
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				const sensitiveText = "400 Invalid request: someone@example.com sent 120000 tokens"
+				const leaky = Object.assign(new Error(sensitiveText), { status: 400 })
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						if (options?.signal?.aborted) {
+							reject(leaky)
+							return
+						}
+						options?.signal?.addEventListener("abort", () => reject(leaky), { once: true })
+					})
+				})
+
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				await tick()
+				controller.abort()
+
+				const error = await collected.then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				// The caller still receives the provider's own object, provider text included.
+				expect(error).toBe(leaky)
+				expect(mockFetch).not.toHaveBeenCalled()
+				expect(mockCaptureException).toHaveBeenCalledTimes(1)
+				const [captured] = mockCaptureException.mock.calls[0] ?? []
+				const capturedError = captured instanceof ApiProviderError ? captured : undefined
+				expect(capturedError).toBeDefined()
+				expect(capturedError?.message).toBe(
+					"OpenAI Native createMessage request failed with a status-bearing error after the caller aborted",
+				)
+				expect(capturedError?.message).not.toContain("someone@example.com")
+				expect(capturedError?.errorCode).toBe(400)
+			})
+
 			it("should keep a streaming request's controller when completePrompt uses its own signal", async () => {
 				// completePrompt is a request-local signal path: it must not take over or clear the
 				// controller owned by an in-flight createMessage on the same handler, and aborting

@@ -54,6 +54,21 @@ export function hasNumericHttpStatus(error: unknown): boolean {
 	return false
 }
 
+/**
+ * The numeric HTTP status carried by an error, or `undefined` when it carries none.
+ * Same field order as hasNumericHttpStatus — `status` (most SDKs expose it that way)
+ * before `statusCode` (the AI SDK's APICallError shape) — and only finite numbers,
+ * so a null or stringy status never becomes a retry header or a telemetry property.
+ */
+export function getNumericHttpStatus(error: unknown): number | undefined {
+	if (!error || typeof error !== "object") return undefined
+	const candidate = error as { status?: unknown; statusCode?: unknown }
+	// Number.isFinite does not coerce, so the value it accepted has to be handed back
+	// with a cast: there is no narrower form for an already-validated unknown number.
+	if (Number.isFinite(candidate.status)) return candidate.status as number
+	return Number.isFinite(candidate.statusCode) ? (candidate.statusCode as number) : undefined
+}
+
 export function handleProviderError(
 	error: unknown,
 	providerName: string,

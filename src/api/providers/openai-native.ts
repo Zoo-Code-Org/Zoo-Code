@@ -36,7 +36,7 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
-import { hasNumericHttpStatus } from "./utils/error-handler"
+import { getNumericHttpStatus, hasNumericHttpStatus } from "./utils/error-handler"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -581,12 +581,18 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					// visible in provider telemetry, and capturing must not rewrite or
 					// replace the propagated error.
 					const failedModel = this.getModel()
+					// The provider's own error text stays out of telemetry: a 400 body can echo
+					// request content (an email address, a prompt fragment), and the telemetry
+					// client sends error.message straight to PostHog, so this path reports a fixed
+					// message plus the numeric status in errorCode, which the client turns into a
+					// structured property. The propagated object still carries the provider text.
 					TelemetryService.instance.captureException(
 						new ApiProviderError(
-							sdkErr instanceof Error ? sdkErr.message : String(sdkErr),
+							`${this.providerName} createMessage request failed with a status-bearing error after the caller aborted`,
 							this.providerName,
 							failedModel.id,
 							"createMessage",
+							getNumericHttpStatus(sdkErr),
 						),
 					)
 					throw sdkErr
