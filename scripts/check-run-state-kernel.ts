@@ -480,6 +480,7 @@ const shapeOf = ({ run, askCount }: ModelState) =>
 		belowAskCap: askCount < MAX_ASK_TS,
 		stream: run.stream.tag === "live" ? run.stream.cleanupFinished : "none",
 		ask: run.ask.tag,
+		askTs: run.ask.tag === "none" ? undefined : run.ask.askTs,
 		latches: run.latches,
 		lastCompletionAskTs: run.lastCompletionAskTs !== undefined,
 	})
@@ -638,6 +639,7 @@ interface UnsafeKernel {
 	step: Step
 	caughtBy: RegExp
 	useTable: boolean
+	allTurnStates?: boolean
 }
 
 const differsFor = (tag: EventTag) =>
@@ -849,6 +851,38 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		caughtBy: differsFor("askStarted"),
 		useTable: true,
 	},
+	"ask-start-resets-mixed-turn": {
+		step: (state, event) => {
+			const result = nextRunState(state, event)
+			return event.tag === "askStarted" && "ok" in result && state.turn.toolUsed && !state.turn.toolFailed
+				? { ok: { ...result.ok, turn: { ...result.ok.turn, toolUsed: false } } }
+				: result
+		},
+		caughtBy: differsFor("askStarted"),
+		useTable: true,
+		allTurnStates: true,
+	},
+	...Object.fromEntries(
+		[1, 2].map((askTs): [string, UnsafeKernel] => [
+			`ask-start-resets-turn-after-approval-${askTs}`,
+			{
+				step: (state, event) => {
+					const result = nextRunState(state, event)
+					return event.tag === "askStarted" &&
+						"ok" in result &&
+						state.ask.tag === "approval" &&
+						state.ask.askTs === askTs &&
+						state.generation === 0 &&
+						!state.latches.abort &&
+						state.latches.reason === undefined
+						? { ok: { ...result.ok, turn: { ...result.ok.turn, toolUsed: false } } }
+						: result
+				},
+				caughtBy: differsFor("askStarted"),
+				useTable: true,
+			},
+		]),
+	),
 	"later-stream-start-resets-turn": {
 		step: (state, event) => {
 			const result = nextRunState(state, event)
@@ -973,8 +1007,8 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 }
 
 function runUnsafeKernels(): void {
-	for (const [name, { step, caughtBy, useTable }] of Object.entries(unsafeKernels)) {
-		const options = { step, useTable, maxDepth: MAX_DEPTH, maxStates: MAX_STATES, allTurnStates: false }
+	for (const [name, { step, caughtBy, useTable, allTurnStates = false }] of Object.entries(unsafeKernels)) {
+		const options = { step, useTable, maxDepth: MAX_DEPTH, maxStates: MAX_STATES, allTurnStates }
 		assert.throws(() => runModelCheck(options), caughtBy, `unsafe kernel not caught as expected: ${name}`)
 	}
 }
