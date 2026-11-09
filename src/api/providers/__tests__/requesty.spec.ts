@@ -993,6 +993,29 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("applies timeoutMs to model lookup while a live caller signal stays untouched", async () => {
+			// The case above proves the deadline can end a pending lookup with no caller in the picture.
+			// This one proves it still does when a caller signal *is* present: the lookup must die on the
+			// merged request signal, not on the caller's, and the caller's own signal must still read as
+			// live afterwards. Red if the timeout is dropped whenever a caller signal exists (the lookup
+			// then hangs and the settle guard fires), which no other case here distinguishes.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => new Promise<ModelRecord>(() => {}))
+			const promise = handler.completePrompt("test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 20,
+			})
+			void promise.catch(() => {})
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+			expect(controller.signal.aborted, "the timeout must not surface through the caller signal").toBe(false)
+			expect(mockCreate, "the lookup must not fall through into a completion").not.toHaveBeenCalled()
+		})
+
 		it("rethrows non-abort model lookup failures from completePrompt", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")
