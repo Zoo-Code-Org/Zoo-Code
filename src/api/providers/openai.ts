@@ -249,11 +249,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 					if (delta.content) {
 						for (const chunk of matcher.update(delta.content)) {
+							// Same-chunk abort defense: the reasoning yield above may already have been
+							// the last event the caller wanted, so the signal is re-read between the yields a
+							// single chunk produces instead of only between chunks.
+							if (signal?.aborted) {
+								break
+							}
+
 							yield chunk
 						}
 					}
 
-					yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+					yield* this.processToolCalls(delta, finishReason, activeToolCallIds, signal)
 
 					if (chunk.usage) {
 						lastUsage = chunk.usage
@@ -304,6 +311,13 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				)
 			} catch (error) {
 				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+			}
+
+			// A cancellation that lands while the response is in flight must not be reported as
+			// completed work: the arrived text and tool calls are discarded and the abort contract
+			// is raised instead, so Task.ts never sees content the caller already cancelled.
+			if (signal?.aborted) {
+				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
 			}
 
 			const message = response.choices?.[0]?.message
@@ -412,6 +426,17 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					error,
 					this.providerName,
 					options?.abortSignal,
+					requestConfig.signal ?? undefined,
+				)
+			}
+
+			// A cancellation that lands while the response is in flight must not be reported as a
+			// completed prompt: the answer is discarded and the abort contract is raised instead.
+			if (options?.abortSignal?.aborted) {
+				throw handleOpenAIRequestError(
+					createAbortError(this.providerName),
+					this.providerName,
+					options.abortSignal,
 					requestConfig.signal ?? undefined,
 				)
 			}
@@ -572,6 +597,13 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
+			// A cancellation that lands while the response is in flight must not be reported as
+			// completed work: the arrived text and tool calls are discarded and the abort contract
+			// is raised instead, so Task.ts never sees content the caller already cancelled.
+			if (signal?.aborted) {
+				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
+			}
+
 			const message = response.choices?.[0]?.message
 			if (message?.tool_calls) {
 				for (const toolCall of message.tool_calls) {
@@ -618,7 +650,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					}
 				}
 
-				yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+				yield* this.processToolCalls(delta, finishReason, activeToolCallIds, signal)
 			}
 
 			if (chunk.usage) {
@@ -633,11 +665,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	 * @param delta - The delta object from the stream chunk
 	 * @param finishReason - The finish_reason from the stream chunk
 	 * @param activeToolCallIds - Set to track active tool call IDs (mutated in place)
+	 * @param signal - Caller abort signal, re-read before each yield so a cancelled caller stops
+	 * receiving tool-call events instead of draining the ones that already arrived
 	 */
 	protected *processToolCalls(
 		delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta | undefined,
 		finishReason: string | null | undefined,
 		activeToolCallIds: Set<string>,
+		signal?: AbortSignal,
 	): Generator<
 		| { type: "tool_call_partial"; index: number; id?: string; name?: string; arguments?: string }
 		| { type: "tool_call_end"; id: string }
@@ -646,6 +681,11 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			for (const toolCall of delta.tool_calls) {
 				if (toolCall.id) {
 					activeToolCallIds.add(toolCall.id)
+				}
+				// A cancelled caller must not receive tool-call partials that arrived after the
+				// cancellation; the guard is read before the yield, not after it.
+				if (signal?.aborted) {
+					break
 				}
 				yield {
 					type: "tool_call_partial",
@@ -661,6 +701,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		// This ensures tool calls are finalized even if the stream doesn't properly close
 		if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
 			for (const id of activeToolCallIds) {
+				if (signal?.aborted) {
+					break
+				}
 				yield { type: "tool_call_end", id }
 			}
 			activeToolCallIds.clear()

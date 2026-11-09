@@ -866,6 +866,42 @@ describe("ZAiHandler", () => {
 			expect(requestOptions?.signal?.aborted).toBe(true)
 		})
 
+		it("glm-5.3 completePrompt discards an answer that arrives after the caller cancelled", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const controller = new AbortController()
+			// The GLM endpoint answered, and the answer arrived after the caller had already
+			// cancelled: the provider must not turn a cancelled request into a completed prompt.
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal }) =>
+					new Promise((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve({ choices: [{ message: { role: "assistant", content: "late answer" } }] })
+						} else {
+							options?.signal?.addEventListener(
+								"abort",
+								() =>
+									resolve({ choices: [{ message: { role: "assistant", content: "late answer" } }] }),
+								{ once: true },
+							)
+						}
+					}),
+			)
+
+			const answered = h53.completePrompt("prompt", { abortSignal: controller.signal })
+			controller.abort()
+			const failure = await answered.then(
+				(): unknown => null,
+				(error: unknown) => error,
+			)
+
+			expect((failure as Error)?.name, JSON.stringify(failure)).toBe("AbortError")
+			expect(String((failure as Error)?.message)).toContain("request was aborted")
+		})
+
 		it("glm-5.3 completePrompt should normalize the SDK APIUserAbortError", async () => {
 			const h53 = new ZAiHandler({
 				apiModelId: "glm-5.3",

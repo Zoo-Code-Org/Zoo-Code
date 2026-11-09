@@ -707,6 +707,177 @@ describe("KimiCodeOAuthManager", () => {
 		await expect(result).rejects.toMatchObject({ name: "AbortError" })
 	})
 
+	it("a sign-in that completes inside a parked sign-out delete leaves no credentials behind", async () => {
+		const { context, values } = createContext()
+		const key = "kimi-code-oauth-credentials"
+		values.set(
+			key,
+			JSON.stringify({
+				type: "kimi-code",
+				accessToken: "old",
+				refreshToken: "refresh",
+				expiresAt: 0,
+				tokenType: "Bearer",
+			}),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		const order: string[] = []
+		let releaseDelete: () => void = () => {}
+		const store = vi.mocked(context.secrets.store)
+		const remove = vi.mocked(context.secrets.delete)
+		store.mockImplementation(async (k: string, v: string) => {
+			order.push("store")
+			values.set(k, v)
+		})
+		remove.mockImplementation(
+			(k: string) =>
+				new Promise<void>((resolve) => {
+					order.push("delete:start")
+					releaseDelete = () => {
+						order.push("delete:end")
+						values.delete(k)
+						resolve()
+					}
+				}),
+		)
+		const signingOut = manager.clearCredentials()
+		await new Promise((resolve) => setImmediate(resolve))
+		// The sign-out is held inside its own delete, which is the window the row asks about.
+		expect(manager["clearingCredentials"], "sign-out holds its fence across the parked delete").toBe(true)
+		expect(order).toEqual(["delete:start"])
+
+		// A full sign-in - device authorization plus the token poll - completes inside the park.
+		const fetchSpy = vi.spyOn(globalThis, "fetch")
+		fetchSpy
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						device_code: "device",
+						user_code: "ABCD-EFGH",
+						verification_uri: "https://auth.kimi.com/device",
+						expires_in: 600,
+						// The schema requires a positive interval; one second is the shortest the endpoint accepts.
+						interval: 1,
+					}),
+					{ status: 200 },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						access_token: "fresh",
+						refresh_token: "fresh-refresh",
+						expires_in: 3_600_000,
+						token_type: "Bearer",
+					}),
+					{ status: 200 },
+				),
+			)
+		await manager.startAuthorization()
+		const signedIn = await manager.waitForAuthorization()
+
+		expect(signedIn.accessToken).toBe("fresh")
+		// The exact credentials the sign-in stored, character for character.
+		expect(store).toHaveBeenCalledWith(key, JSON.stringify(signedIn))
+		expect(manager.getState()).toEqual({ status: "authenticated" })
+
+		releaseDelete()
+		await signingOut
+
+		// The delete the sign-out was holding lands after the sign-in's write, so the sign-out
+		// wins the key, the in-memory credentials and the state.
+		expect(order).toEqual(["delete:start", "store", "delete:end"])
+		expect(remove).toHaveBeenCalledTimes(1)
+		expect(values.has(key)).toBe(false)
+		expect(manager["credentials"]).toBeNull()
+		expect(manager.getState()).toEqual({ status: "idle" })
+		expect(manager["clearingCredentials"]).toBe(false)
+	})
+
+	it("a sign-out that lands while a sign-in is storing rejects that write instead of installing it", async () => {
+		const { context, values } = createContext()
+		const key = "kimi-code-oauth-credentials"
+		values.set(
+			key,
+			JSON.stringify({
+				type: "kimi-code",
+				accessToken: "old",
+				refreshToken: "refresh",
+				expiresAt: 0,
+				tokenType: "Bearer",
+			}),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		let releaseStore: () => void = () => {}
+		const store = vi.mocked(context.secrets.store)
+		const remove = vi.mocked(context.secrets.delete)
+		const deletes: string[] = []
+		store.mockImplementation(
+			(k: string, v: string) =>
+				new Promise<void>((resolve) => {
+					releaseStore = () => {
+						values.set(k, v)
+						resolve()
+					}
+				}),
+		)
+		remove.mockImplementation(async (k: string) => {
+			deletes.push(k)
+			values.delete(k)
+		})
+		vi.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						device_code: "device",
+						user_code: "ABCD-EFGH",
+						verification_uri: "https://auth.kimi.com/device",
+						expires_in: 600,
+						// The schema requires a positive interval; one second is the shortest the endpoint accepts.
+						interval: 1,
+					}),
+					{ status: 200 },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						access_token: "late",
+						refresh_token: "late-refresh",
+						expires_in: 3_600_000,
+						token_type: "Bearer",
+					}),
+					{ status: 200 },
+				),
+			)
+		// The token poll sleeps for the endpoint's interval, so the clock is taken over
+		// before the poll starts and then advanced: the write is reached deterministically
+		// instead of by wall-clock luck.
+		vi.useFakeTimers()
+		await manager.startAuthorization()
+		const signingIn = manager.waitForAuthorization()
+		await vi.advanceTimersByTimeAsync(1_000)
+		await vi.advanceTimersByTimeAsync(1)
+		expect(store.mock.calls.length, "the sign-in reached the credential write").toBe(1)
+
+		// Sign-out lands while that write is parked, which makes the write stale before it commits.
+		const signingOut = manager.clearCredentials()
+		await vi.advanceTimersByTimeAsync(1)
+		releaseStore()
+
+		await expect(signingIn).rejects.toMatchObject({ message: "Kimi Code authorization was cancelled" })
+		await signingOut
+
+		// The parked write never becomes the stored state: it is removed and nothing is installed.
+		expect(manager["credentials"]).toBeNull()
+		expect(manager.getState()).toEqual({ status: "idle" })
+		expect(values.has(key)).toBe(false)
+		// Once for the sign-out and once for the stale write's own cleanup.
+		expect(deletes.length).toBe(2)
+		expect(manager["clearingCredentials"]).toBe(false)
+	})
 	it("a delayed invalid_grant from a stale refresh keeps credentials a newer sign-in saved", async () => {
 		const { context, values } = createContext()
 		const key = "kimi-code-oauth-credentials"

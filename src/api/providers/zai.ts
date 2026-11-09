@@ -18,7 +18,7 @@ import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { NOT_PROVIDED } from "./constants"
 import { handleOpenAIRequestError } from "./utils/error-handler"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
-import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
@@ -188,6 +188,19 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
 				requestConfig,
 			)
+
+			// A cancellation that lands while the GLM request is in flight must not be reported as a
+			// completed prompt: the arrived content is discarded and the abort contract is raised
+			// instead, which is the behaviour the base provider already has for every other model.
+			if (options?.abortSignal?.aborted) {
+				throw handleOpenAIRequestError(
+					createAbortError(this.providerName),
+					this.providerName,
+					options.abortSignal,
+					requestSignal,
+				)
+			}
+
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal, requestSignal)
