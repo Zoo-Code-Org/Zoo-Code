@@ -140,11 +140,13 @@ The `model` field can be added to either match when a test targets a specific mo
 Use `streamingProfile: { ttft: <ms> }` on a fixture, not a flat `latency: <ms>`, when a test needs
 to simulate a slow or hung provider (e.g. to cancel an in-flight request mid-stream). `ttft` delays
 only the first SSE chunk, so the pending window is exactly the configured value. Flat `latency`
-delays _every_ chunk, and aimock never observes client disconnects — after a test cancels the
-request, a flat-latency stream keeps flushing chunks server-side for `chunks × latency` before
-reaching the dead socket, which can interleave with the next test's request against the same mock
-server. See `SUBTASK_API_HANG_RESPONSE_LATENCY_MS` in `fixtures/subtasks.ts` for an example,
-including the bounded post-test drain the calling suite uses to wait out that window.
+delays _every_ chunk. Before aimock 1.47.0, the mock did not observe client disconnects — after a
+test cancelled the request, a flat-latency stream kept flushing chunks server-side for
+`chunks × latency` before reaching the dead socket, which could interleave with the next test's
+request against the same mock server. Version 1.47.0 stops the reply on disconnect, but the
+suite keeps its drain wait until an e2e run shows it is not needed. See
+`SUBTASK_API_HANG_RESPONSE_LATENCY_MS` in `fixtures/subtasks.ts` for an example, including the
+bounded post-test drain the calling suite uses to wait out that window.
 
 ## 404 errors in logs are expected
 
@@ -278,3 +280,7 @@ Always restore the default OpenRouter config in `suiteTeardown` so subsequent su
 ## Programmatic fixtures (regex matching)
 
 For requests that can't be matched by a stable substring (e.g. "starts with `<environment_details>` but not preceded by a user message"), add a programmatic fixture in `src/runTest.ts` using `mock.addFixture()` with a `RegExp` match. These are only available in replay mode and are not recorded.
+
+## Webview heap diagnostic
+
+The opt-in suite under `src/heap/` measures retained renderer heap through real VS Code task hydration and switching. See [src/heap/README.md](src/heap/README.md) for build, run, and summarize commands. Keep base and candidate host builds identical, use isolated profiles, and preserve cleanup on failure. Heap snapshots and generated measurements stay in the git-ignored `heap-results/` directory. This diagnostic has no CI memory threshold and does not replace focused webview tests.

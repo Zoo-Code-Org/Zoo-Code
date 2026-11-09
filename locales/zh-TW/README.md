@@ -43,11 +43,11 @@ Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
 - **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
 - **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
 
-## v3.92.0 新功能
+## v3.96.0 新功能
 
-- ✨ **更快速的模型選擇與更強大的模型支援：** 直接從聊天輸入框切換模型。在 Amazon Bedrock 上使用 Claude Haiku 5.5；在 OpenRouter 上取得更準確的 Kimi K3 功能；在 Vercel AI Gateway 上使用修正後的 Gemini 4 Argon 限制。
-- 🧭 **更可靠的終端機、編輯、聊天與遠端工作流程：** 可依需求預設收合命令輸出、更清楚地查看編輯失敗原因、讓推理與 API 列保持可見，並避免遠端工作區中的啟動與 Proxy 問題。
-- 🔌 **擴充 MCP 市集：** 透過 MCP 市集將 Zoo Code 連線至 AnySearch、Mailtea 和 Tradehand。
+- ✨ **全新聊天設定與診斷:** 以可設定的時間與日期格式顯示訊息時間戳記，為 Anthropic 設定檔調整 prompt-cache TTL，並產生注重隱私的診斷報告。
+- 💸 **更精準的供應商計費與快取:** 保持 Anthropic 工具結果完整無損，在 Anthropic 和 MiniMax 成本中採用累計輸出 token，讀取 DeepSeek 的 prompt-cache 計數器，命中 xAI Responses 快取，並以 0.1x 計收 Mistral 快取讀取費用。
+- 🧭 **更可靠、更快速的對話:** 重新啟動後續跑已完成的任務，在已儲存的 commit 遺失時仍能還原 checkpoint，自動重新載入無回應的 webview 轉譯器，節流串流更新，並視需要載入語言包。
 
 ## Zoo Code 能為您做什麼？
 
