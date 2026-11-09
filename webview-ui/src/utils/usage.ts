@@ -342,6 +342,15 @@ export function modelIdFromKey(key: string): string | undefined {
 	return i === -1 ? key : key.slice(i + 1)
 }
 
+/** The first MAX_CSV_TEXT_LENGTH units of a text, without the half of a character that the cut may leave. */
+function cutText(value: string): string {
+	const cut = value.slice(0, MAX_CSV_TEXT_LENGTH)
+	return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut
+}
+
+/** The longest text kept in a text cell of the CSV (in UTF-16 units); a row is then a fraction of a kilobyte. */
+export const MAX_CSV_TEXT_LENGTH = 500
+
 /** Serialises the filtered usage rows as CSV (one row per task). */
 export function usageToCsv(history: HistoryItem[], options: UsageOptions): string {
 	const header = [
@@ -362,7 +371,10 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 	// The text is made one line first, and judged as it is written: a line break in front of a sign becomes a space, and
 	// an application that trims spaces (or skips invisible characters) would read the sign as the start of the cell.
 	const escape = (value: string) => {
-		const flat = value.replace(/\r?\n/g, " ")
+		// A task text has no bound of its own, and the extension host refuses an export that is too large (it saves
+		// nothing): each text cell is cut to a length that lets a very large history through.
+		const bounded = value.length > MAX_CSV_TEXT_LENGTH ? cutText(value) : value
+		const flat = bounded.replace(/\r?\n/g, " ")
 		const safe = /^[\s\p{Cc}\p{Cf}]*[=+\-@\t\r]/u.test(flat) ? `'${flat}` : flat
 		return `"${safe.replace(/"/g, '""')}"`
 	}

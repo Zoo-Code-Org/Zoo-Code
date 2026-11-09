@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { providerIdentifiers, type HistoryItem } from "@roo-code/types"
 
@@ -37,7 +37,9 @@ vi.mock("@src/components/ui", () => ({
 // The provider-limits section talks to the extension host; it has its own spec.
 vi.mock("../ProviderLimits", () => ({ ProviderLimits: () => <div data-testid="provider-limits-stub" /> }))
 
-const NOW = Date.now()
+// A fixed local midday: the view reads "now" from the date, and a clock close to midnight would move a task made a
+// minute ago to another day.
+const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime()
 
 let n = 0
 const task = (overrides: Partial<HistoryItem> = {}): HistoryItem => ({
@@ -86,10 +88,15 @@ const copilot = (overrides: Partial<HistoryItem> = {}) =>
 
 describe("UsageSettings", () => {
 	beforeEach(() => {
+		// Only the date is frozen: the view reads "now" from it, the timers stay real.
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(NOW)
 		post.mockClear()
 		state.taskHistory = []
 		state.cwd = "/ws/a"
 	})
+
+	afterEach(() => vi.useRealTimers())
 
 	it("always renders the provider limits section", () => {
 		render(<UsageSettings />)

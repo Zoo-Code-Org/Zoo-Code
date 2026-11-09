@@ -94,7 +94,8 @@ async function getGitHubToken(signal: AbortSignal): Promise<string | undefined> 
 	return undefined
 }
 
-let cache: { at: number; result: GitHubCopilotQuotaResult } | undefined
+/** The token that the cached quota was fetched with: a quota is only served to the session that it belongs to. */
+let cache: { at: number; result: GitHubCopilotQuotaResult; token: string } | undefined
 let inFlight:
 	| {
 			request: Promise<GitHubCopilotQuotaResult>
@@ -127,16 +128,42 @@ export function getGitHubCopilotQuota(
 	fetchImpl: typeof fetch = fetch,
 ): Promise<GitHubCopilotQuotaResult> {
 	if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"))
-	if (!force && cache && Date.now() - cache.at < CACHE_TTL_MS) return Promise.resolve(cache.result)
+	const cached = cache
+	if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
+		// The cache does not know which account it was for: the session is looked up (silently, and locally) first, and
+		// the cached quota is served only to the session that it was fetched with. After a sign-out or an account switch
+		// it is dropped, and the quota is fetched for the session that is there now.
+		const lookup = new AbortController()
+		const sameSession = untilAborted(
+			getGitHubToken(AbortSignal.any([lookup.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])),
+			signal,
+			() => lookup.abort(),
+		).then(
+			(token) => token === cached.token,
+			(error: unknown) => {
+				// A caller that left is not answered; a lookup that failed leaves the session unknown, so it is fetched again.
+				if (signal?.aborted) throw error
+				return false
+			},
+		)
+		return sameSession.then((same) => {
+			if (same) return cached.result
+			if (cache === cached) cache = undefined
+			return getGitHubCopilotQuota({ force: true, signal }, fetchImpl)
+		})
+	}
 
 	if (!inFlight) {
 		const controller = new AbortController()
+		// The token of the session that this request is for (set once it is known).
+		let sessionToken: string | undefined
 		const fetchQuota = async (): Promise<GitHubCopilotQuotaResult> => {
 			try {
 				const token = await getGitHubToken(
 					AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
 				)
 				if (!token) return { ok: false, reason: "signedOut" }
+				sessionToken = token
 
 				const response = await fetchImpl(COPILOT_USER_URL, {
 					method: "GET",
@@ -169,7 +196,9 @@ export function getGitHubCopilotQuota(
 				// One place for every outcome: a success is cached, and anything else (signed out, no Copilot, an
 				// HTTP error, a thrown or cancelled request) drops an older success so it is not served as current.
 				// A cancelled request says nothing about the account, so it leaves the cache alone.
-				if (!controller.signal.aborted) cache = result.ok ? { at: Date.now(), result } : undefined
+				if (!controller.signal.aborted) {
+					cache = result.ok && sessionToken ? { at: Date.now(), result, token: sessionToken } : undefined
+				}
 				return result
 			})
 			.finally(() => {

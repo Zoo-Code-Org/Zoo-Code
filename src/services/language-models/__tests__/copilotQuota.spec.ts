@@ -192,6 +192,65 @@ describe("getGitHubCopilotQuota", () => {
 		expect(fetchSpy).toHaveBeenCalledTimes(2)
 	})
 
+	describe("a cached quota belongs to the session that it was fetched with", () => {
+		const other = { ...businessPayload, copilot_plan: "individual" }
+
+		it("serves the cache to the same session without another request", async () => {
+			const fetchSpy = vi.fn(async () => json(businessPayload))
+			await getGitHubCopilotQuota({}, fetchSpy as never)
+			const again = await getGitHubCopilotQuota({}, fetchSpy as never)
+
+			expect(again).toMatchObject({ ok: true, quota: { plan: "business" } })
+			expect(fetchSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not serve it to another account that signed in within the lifetime", async () => {
+			await getGitHubCopilotQuota({}, vi.fn(async () => json(businessPayload)) as never)
+
+			getSession.mockResolvedValue({ accessToken: "gho_other" })
+			const fetchOther = vi.fn(async () => json(other))
+			const result = await getGitHubCopilotQuota({}, fetchOther as never)
+
+			expect(result).toMatchObject({ ok: true, quota: { plan: "individual" } })
+			expect(fetchOther).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not serve it after a sign-out", async () => {
+			await getGitHubCopilotQuota({}, vi.fn(async () => json(businessPayload)) as never)
+
+			getSession.mockResolvedValue(undefined)
+			const fetchSpy = vi.fn(async () => json(businessPayload))
+			const result = await getGitHubCopilotQuota({}, fetchSpy as never)
+
+			expect(result).toEqual({ ok: false, reason: "signedOut" })
+			expect(fetchSpy).not.toHaveBeenCalled()
+		})
+
+		it("fetches again when the session cannot be looked up", async () => {
+			await getGitHubCopilotQuota({}, vi.fn(async () => json(businessPayload)) as never)
+
+			getSession.mockRejectedValue(new Error("auth broken"))
+			const fetchSpy = vi.fn(async () => json(other))
+			const result = await getGitHubCopilotQuota({}, fetchSpy as never)
+
+			expect(result).not.toMatchObject({ ok: true, quota: { plan: "business" } })
+		})
+
+		it("rejects with the cancellation when the caller leaves while the session is looked up", async () => {
+			await getGitHubCopilotQuota({}, vi.fn(async () => json(businessPayload)) as never)
+
+			getSession.mockImplementation(() => new Promise(() => {})) // never answers
+			const controller = new AbortController()
+			const fetchSpy = vi.fn(async () => json(businessPayload))
+			const result = getGitHubCopilotQuota({ signal: controller.signal }, fetchSpy as never)
+			await vi.waitFor(() => expect(getSession).toHaveBeenCalled())
+			controller.abort()
+
+			await expect(result).rejects.toMatchObject({ name: "AbortError" })
+			expect(fetchSpy).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("the cache lifetime", () => {
 		afterEach(() => vi.useRealTimers())
 

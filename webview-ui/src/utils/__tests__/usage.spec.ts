@@ -9,6 +9,7 @@ import {
 	primaryUsage,
 	rangeStart,
 	summarizeUsage,
+	MAX_CSV_TEXT_LENGTH,
 	usageToCsv,
 } from "../usage"
 
@@ -545,6 +546,32 @@ describe("usageToCsv formula safety", () => {
 		expect(row).toContain('"Fix the = sign"')
 		expect(row).not.toContain("'Fix")
 		expect(row.endsWith(",1.5000")).toBe(true)
+	})
+})
+
+describe("usageToCsv text cell length", () => {
+	const cell = (csv: string) => csv.split("\n")[1].split(",")[1]
+
+	it("cuts a long task text, so a large history stays within what the host accepts", () => {
+		const csv = usageToCsv([item({ task: "x".repeat(MAX_CSV_TEXT_LENGTH * 40) })], { range: "all", now: NOW })
+
+		expect(cell(csv)).toBe(`"${"x".repeat(MAX_CSV_TEXT_LENGTH)}"`)
+		expect(csv.length).toBeLessThan(1000)
+	})
+
+	it("keeps a text of exactly the limit, and does not split a character in two", () => {
+		const exact = "y".repeat(MAX_CSV_TEXT_LENGTH)
+		expect(cell(usageToCsv([item({ task: exact })], { range: "all", now: NOW }))).toBe(`"${exact}"`)
+
+		const emoji = "x".repeat(MAX_CSV_TEXT_LENGTH - 1) + "\u{1F600}\u{1F600}"
+		const written = cell(usageToCsv([item({ task: emoji })], { range: "all", now: NOW }))
+		expect(written).toBe(`"${"x".repeat(MAX_CSV_TEXT_LENGTH - 1)}"`)
+	})
+
+	it("still neutralises a long text that starts with a sign", () => {
+		const csv = usageToCsv([item({ task: "=" + "z".repeat(MAX_CSV_TEXT_LENGTH * 2) })], { range: "all", now: NOW })
+
+		expect(cell(csv).startsWith(`"'=`)).toBe(true)
 	})
 })
 
