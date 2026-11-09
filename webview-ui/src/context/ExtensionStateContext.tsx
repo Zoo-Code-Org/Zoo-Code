@@ -37,6 +37,12 @@ import { experimentDefault } from "@roo/experiments"
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 import { StringCache } from "@src/utils/stringCache"
+import {
+	recordDiagnosticsHydration,
+	recordDiagnosticsExtensionState,
+	recordDiagnosticsStateSequence,
+	recordDiagnosticsUnknownMessageUpdate,
+} from "@src/utils/diagnostics"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
@@ -133,6 +139,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setHistoryPreviewCollapsed: (value: boolean) => void
 	setReasoningBlockCollapsed: (value: boolean) => void
 	chatFontSize?: number
+	timeFormat?: "auto" | "12h" | "24h"
+	dateFormat?: "auto" | "mdy" | "dmy" | "ymd"
+	showRelativeTimes?: boolean
 	setChatFontSize: (value: number | undefined) => void
 	enterBehavior?: "send" | "newline"
 	setEnterBehavior: (value: "send" | "newline") => void
@@ -339,6 +348,15 @@ export const ExtensionStateContextProvider: React.FC<{
 		return mergedState
 	})
 
+	useEffect(() => {
+		recordDiagnosticsExtensionState({
+			currentTaskId: state.currentTaskId,
+			chatMessageCount: state.clineMessages.length,
+			historyItemCount: state.taskHistory.length,
+			todoCount: state.currentTaskTodos?.length ?? 0,
+		})
+	}, [state.currentTaskId, state.clineMessages.length, state.taskHistory.length, state.currentTaskTodos?.length])
+
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
 	const [theme, setTheme] = useState<any>(undefined)
@@ -395,6 +413,11 @@ export const ExtensionStateContextProvider: React.FC<{
 					const newState = message.state ?? {}
 
 					const staleMessages = messagesAreStale(newState, clineMessagesSeqRef.current)
+					recordDiagnosticsStateSequence(
+						newState.clineMessagesSeq,
+						newState.clineMessages !== undefined,
+						staleMessages,
+					)
 
 					if (!staleMessages && newState.clineMessages !== undefined) {
 						if (newState.currentTaskId !== currentTaskIdRef.current) {
@@ -425,6 +448,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
+					recordDiagnosticsHydration(true)
 					// Update alwaysAllowFollowupQuestions if present in state message
 					if ((newState as any).alwaysAllowFollowupQuestions !== undefined) {
 						setAlwaysAllowFollowupQuestions((newState as any).alwaysAllowFollowupQuestions)
@@ -487,6 +511,9 @@ export const ExtensionStateContextProvider: React.FC<{
 				case "messageUpdated": {
 					const clineMessage = message.clineMessage!
 					const messageIndex = findLastIndex(messagesRef.current, (item) => item.ts === clineMessage.ts)
+					if (messageIndex === -1) {
+						recordDiagnosticsUnknownMessageUpdate()
+					}
 					if (messageIndex !== -1) {
 						messageCache.intern(clineMessage)
 						messagesRef.current = messagesRef.current.map((item, index) =>
@@ -624,6 +651,9 @@ export const ExtensionStateContextProvider: React.FC<{
 		// `chatFontSize` is persisted as nullish (null on reset); normalize null to
 		// undefined so it matches the context type and means "use VS Code default".
 		chatFontSize: state.chatFontSize ?? undefined,
+		timeFormat: state.timeFormat ?? "auto",
+		dateFormat: state.dateFormat ?? "auto",
+		showRelativeTimes: state.showRelativeTimes ?? true,
 		reasoningBlockCollapsed: state.reasoningBlockCollapsed ?? true,
 		didHydrateState,
 		showWelcome,

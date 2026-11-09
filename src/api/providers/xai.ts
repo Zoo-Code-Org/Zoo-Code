@@ -1,5 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
+import { v7 as uuidv7 } from "uuid"
 
 import { type XAIModelId, xaiDefaultModelId, xaiModels, ApiProviderError } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -26,10 +27,16 @@ import { isMcpTool } from "../../utils/mcp-name"
 
 const XAI_DEFAULT_TEMPERATURE = 0
 
+// Conservative length guard for `prompt_cache_key`: OpenAI's documented cap is 64
+// chars; xAI does not document a bound for this field, so we apply the same cap.
+// Task ids are uuid v7 (36 chars), so this never truncates in practice.
+const XAI_MAX_PROMPT_CACHE_KEY_LENGTH = 64
+
 export class XAIHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
 	private readonly providerName = "xAI"
+	private readonly sessionId: string = uuidv7()
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -43,6 +50,38 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			defaultHeaders: DEFAULT_HEADERS,
 			timeout: this.timeoutMs,
 		})
+	}
+
+	/**
+	 * Cache routing affinity key for the Responses API.
+	 *
+	 * xAI's prompt cache lives on individual servers, so every turn of one
+	 * conversation has to reach the same server to reuse it. For the Responses API
+	 * the documented lever is the body field `prompt_cache_key`; the
+	 * `x-grok-conv-id` header is the Chat Completions / gRPC equivalent and is not
+	 * read on this path.
+	 *
+	 * The task id is the longest-lived identifier available here: `Task.taskId` is
+	 * assigned once and restored from history on resume, so it survives restarts
+	 * and provider switches, which a per-handler session id does not. The handler
+	 * session id is the fallback for callers that send no task id, and is the sole
+	 * key for `completePrompt`, which carries no task metadata at all.
+	 *
+	 * Returns undefined (never an empty string) when there is nothing to key on or
+	 * when the model does not support prompt caching, so the field is omitted
+	 * rather than sent blank.
+	 */
+	private getPromptCacheKey(model: ReturnType<XAIHandler["getModel"]>, taskId?: string): string | undefined {
+		if (!model.info.supportsPromptCache) {
+			return undefined
+		}
+
+		const key = taskId || this.sessionId
+		if (!key) {
+			return undefined
+		}
+
+		return key.length > XAI_MAX_PROMPT_CACHE_KEY_LENGTH ? key.slice(0, XAI_MAX_PROMPT_CACHE_KEY_LENGTH) : key
 	}
 
 	override getModel() {
@@ -169,6 +208,12 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			include: ["reasoning.encrypted_content"],
 		}
 
+		// Route every turn of this task to the server holding its cache.
+		const promptCacheKey = this.getPromptCacheKey(model, metadata?.taskId)
+		if (promptCacheKey) {
+			requestBody.prompt_cache_key = promptCacheKey
+		}
+
 		// Model params are always resolved by getModel(); send them unconditionally.
 		requestBody.max_output_tokens = model.maxTokens
 		requestBody.temperature = model.temperature
@@ -255,11 +300,15 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 
+			const promptCacheKey = this.getPromptCacheKey(model)
 			const response = await this.client.responses.create(
 				{
 					model: model.id,
 					input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
 					store: false,
+					// A completion is its own cache scope: no task metadata exists on
+					// this path, so the handler session id is the whole key.
+					...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
 				},
 				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
 			)
