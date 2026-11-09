@@ -48,7 +48,7 @@ import {
 	type SettingWrite,
 } from "../config/appearanceSettingWrites"
 import { isInvalidDisplayValue } from "../config/displaySettings"
-import { changeMcpEnabled } from "./mcpEnabledChanges"
+import { changeMcpEnabled, reconcileMcpEnabled } from "./mcpEnabledChanges"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -934,15 +934,14 @@ export const webviewMessageHandler = async (
 							try {
 								await (boundsStores ? withinSettingWriteTime(change, key) : change)
 							} catch (error) {
-								// The save fails, and the setting stays as it was stored, but the change may still land: when it
-								// has settled (however it ends) the hub is brought back to the setting that is stored, so servers
-								// that a late disable closed do not stay disconnected while MCP is stored as enabled.
-								const reconcile = () => {
-									const stored = provider.contextProxy.getValue("mcpEnabled") ?? true
-									if (stored !== newValue)
-										void changeMcpEnabled(mcpHub, stored as boolean).catch(() => undefined)
-								}
-								void change.then(reconcile, reconcile)
+								// The save fails, and the setting stays as it was stored, but the change may still land: once the
+								// changes in line have settled (however they end) the hub is brought back to the setting that is
+								// stored, so servers that a late disable closed do not stay disconnected while MCP is stored as
+								// enabled.
+								void reconcileMcpEnabled(
+									mcpHub,
+									() => (provider.contextProxy.getValue("mcpEnabled") ?? true) as boolean,
+								)
 								throw error
 							}
 						}

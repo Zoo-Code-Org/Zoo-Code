@@ -12,7 +12,7 @@ export function withVscodeEditorFontSize(px: number) {
 		document.documentElement.style.setProperty("--vscode-editor-font-size", `${px}px`)
 	})
 	afterAll(() => {
-		if (before) document.documentElement.style.setProperty("--vscode-editor-font-size", before)
-		else document.documentElement.style.removeProperty("--vscode-editor-font-size")
+		// An empty value removes the property.
+		document.documentElement.style.setProperty("--vscode-editor-font-size", before)
 	})
 }

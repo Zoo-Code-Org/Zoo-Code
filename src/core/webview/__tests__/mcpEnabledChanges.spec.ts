@@ -1,4 +1,4 @@
-import { changeMcpEnabled } from "../mcpEnabledChanges"
+import { changeMcpEnabled, reconcileMcpEnabled } from "../mcpEnabledChanges"
 
 const createHub = () => {
 	const releases: Array<() => void> = []
@@ -98,5 +98,121 @@ describe("changeMcpEnabled", () => {
 		await vi.waitFor(() => expect(b.releases).toHaveLength(1))
 		expect(a.hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		expect(b.hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+	})
+
+	describe("a stalled change", () => {
+		it("keeps at most one change waiting, whatever the number of saves that alternate the switch", async () => {
+			const { hub, releases } = createHub()
+
+			const first = changeMcpEnabled(hub, false) // stalled
+			const waiting = Array.from({ length: 51 }, (_, i) => changeMcpEnabled(hub, i % 2 === 0))
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+
+			releases[0]()
+			await first
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await Promise.all(waiting)
+
+			// The stalled change, then only the latest value of the ones that waited (the last one asked for true).
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]])
+			expect(new Set(waiting).size).toBe(1) // every caller of the waiting change is answered by the one that ran
+		})
+
+		it("applies nothing for a waiting change whose value turns out to be what was just applied", async () => {
+			const { hub, releases } = createHub()
+
+			const first = changeMcpEnabled(hub, false)
+			const waiting = changeMcpEnabled(hub, true)
+			const latest = changeMcpEnabled(hub, false) // replaces the waiting value: nothing is left to do after the first
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]()
+
+			await Promise.all([first, waiting, latest])
+			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+		})
+
+		it("applies the waiting value when the change before it failed, even if the value is the same", async () => {
+			const failing = {
+				handleMcpEnabledChange: vi
+					.fn<(enabled: boolean) => Promise<void>>()
+					.mockRejectedValueOnce(new Error("transport stuck"))
+					.mockResolvedValue(undefined),
+			}
+
+			const first = changeMcpEnabled(failing, false)
+			const retry = changeMcpEnabled(failing, true)
+			const again = changeMcpEnabled(failing, false)
+
+			await expect(first).rejects.toThrow("transport stuck")
+			await Promise.all([retry, again])
+			expect(failing.handleMcpEnabledChange.mock.calls).toEqual([[false], [false]])
+		})
+	})
+
+	describe("reconcileMcpEnabled", () => {
+		it("applies the stored value once the changes in line have settled, and only once for several saves that gave up", async () => {
+			const { hub, releases } = createHub()
+			void changeMcpEnabled(hub, false) // a save whose change stalled
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+
+			const getStored = vi.fn(() => true)
+			const reconciles = Array.from({ length: 20 }, () => reconcileMcpEnabled(hub, getStored))
+			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await Promise.all(reconciles)
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]])
+			expect(getStored).toHaveBeenCalledTimes(1) // not a waiting reconciliation for each save
+		})
+
+		it("waits for a change that was queued after the first one, and looks at what is stored then", async () => {
+			const { hub, releases } = createHub()
+			let stored = true
+			void changeMcpEnabled(hub, false)
+			const waiting = changeMcpEnabled(hub, true)
+			const reconcile = reconcileMcpEnabled(hub, () => stored)
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			stored = false // changed by the time the changes are done
+			releases[1]()
+			await waiting
+			await vi.waitFor(() => expect(releases).toHaveLength(3))
+			releases[2]()
+			await reconcile
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true], [false]])
+		})
+
+		it("applies nothing when the stored value is the one the hub got last", async () => {
+			const { hub, releases } = createHub()
+			void changeMcpEnabled(hub, false)
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+
+			const reconcile = reconcileMcpEnabled(hub, () => false)
+			releases[0]()
+			await reconcile
+
+			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+		})
+
+		it("can be started again after it is done", async () => {
+			const { hub, releases } = createHub()
+			const first = reconcileMcpEnabled(hub, () => true) // nothing was ever applied: the stored value is applied
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]()
+			await first
+
+			const again = reconcileMcpEnabled(hub, () => false)
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await again
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
+		})
 	})
 })

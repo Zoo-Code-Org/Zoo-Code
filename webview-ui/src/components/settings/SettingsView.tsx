@@ -419,6 +419,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				const isAutomaticNoOpSync = !isUserAction && areValuesEqual(previousValue, value)
 
 				if (!isInitialSync && !isAutomaticNoOpSync) {
+					editedSinceImportAnswer.current.add("apiConfiguration")
 					setChangeDetected(true)
 				}
 				return { ...prevState, apiConfiguration: { ...prevState.apiConfiguration, [field]: value } }
@@ -433,6 +434,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
+			editedSinceImportAnswer.current.add("experiments")
 			setChangeDetected(true)
 			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
 		})
@@ -444,6 +446,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
+			editedSinceImportAnswer.current.add("telemetrySetting")
 			setChangeDetected(true)
 			return { ...prevState, telemetrySetting: setting }
 		})
@@ -455,6 +458,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
+			editedSinceImportAnswer.current.add("debug")
 			setChangeDetected(true)
 			return { ...prevState, debug }
 		})
@@ -463,6 +467,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setImageGenerationProvider = useCallback((provider: ImageGenerationProvider) => {
 		setCachedState((prevState) => {
 			if (prevState.imageGenerationProvider !== provider) {
+				editedSinceImportAnswer.current.add("imageGenerationProvider")
 				setChangeDetected(true)
 			}
 
@@ -473,6 +478,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setOpenRouterImageApiKey = useCallback((apiKey: string) => {
 		setCachedState((prevState) => {
 			if (prevState.openRouterImageApiKey !== apiKey) {
+				editedSinceImportAnswer.current.add("openRouterImageApiKey")
 				setChangeDetected(true)
 			}
 
@@ -483,6 +489,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const setImageGenerationSelectedModel = useCallback((model: string) => {
 		setCachedState((prevState) => {
 			if (prevState.openRouterImageGenerationSelectedModel !== model) {
+				editedSinceImportAnswer.current.add("openRouterImageGenerationSelectedModel")
 				setChangeDetected(true)
 			}
 
@@ -499,6 +506,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				return prevState
 			}
 
+			editedSinceImportAnswer.current.add("customSupportPrompts")
 			setChangeDetected(true)
 			return { ...prevState, customSupportPrompts: prompts }
 		})
