@@ -120,6 +120,25 @@ describe("safeWriteJson", () => {
 		fsSyncActual.symlinkSync(pointsAt, ancestor, ancestorLinkKind)
 	}
 
+	function removeAncestorLink(ancestor: string): void {
+		// The undo of the link above, and the two platforms remove it differently. Measured on
+		// this box (node 22.23.4, win32): lstatSync reports a junction as a symbolic link, and
+		// unlinkSync does remove the junction while leaving the target directory's contents
+		// alone - but while another handle is still open on that directory the unlink only marks
+		// the name for deletion, and the rename that puts the directory back then answers
+		// "EPERM: operation not permitted", which is what this row reported after switching to
+		// unlink. rmdir takes a junction cleanly. On POSIX the entry is a real directory symlink
+		// and rmdir will not take it: the ubuntu coverage lane answered
+		// "ENOTDIR: not a directory, rmdir '.../midwrite-swap-project/settings'" for this
+		// restoration, so unlink is the removal there. The branch follows the same platform fact
+		// the link was created with, rather than pretending one call serves both shapes.
+		if (process.platform === "win32") {
+			fsSyncActual.rmdirSync(ancestor)
+		} else {
+			fsSyncActual.unlinkSync(ancestor)
+		}
+	}
+
 	// Helper function to check if a file exists
 	async function fileExists(filePath: string): Promise<boolean> {
 		try {
@@ -1264,8 +1283,12 @@ describe("safeWriteJson", () => {
 
 		// Contrast in the same fixture: put the directory back and the same write publishes.
 		// Without this, the rejection above would also be the outcome of a publish that never
-		// reached the rename.
-		fsSyncActual.rmdirSync(ancestor)
+		// reached the rename. The name currently holds the link swapAncestorAfterTheCheck put
+		// there - a junction on win32, a directory symlink on POSIX, where the helper calls the
+		// same kind "dir" - and removeAncestorLink undoes it the way this platform removes that
+		// shape. rmdirSync alone was wrong: the ubuntu coverage lane reported "ENOTDIR: not a
+		// directory, rmdir '.../midwrite-swap-project/settings'".
+		removeAncestorLink(ancestor)
 		fsSyncActual.renameSync(ancestor + "-moved-aside", ancestor)
 		// The failed write's lock release named the path, which at release time resolved through
 		// the link, so the empty lock directory stayed in the moved-aside copy and came back with
