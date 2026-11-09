@@ -214,6 +214,7 @@ export function buildContainerArgs(job: GraderJob, outDir: string, containerName
 		"/driver/grader-driver.mjs",
 		"/out/result.json",
 		"test",
+		JSON.stringify(job.trustedTests ?? []),
 	]
 }
 

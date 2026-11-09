@@ -162,6 +162,7 @@ describe("container grading runtime", () => {
 			"/driver/grader-driver.mjs",
 			"/out/result.json",
 			"test",
+			"[]",
 		])
 		// No environment passes through, so no credential can leak in.
 		assert.equal(args.includes("-e"), false)
@@ -479,6 +480,7 @@ for (const identity of ["node@sha256:" + "c".repeat(64), "sha256:" + "d".repeat(
 			"/driver/grader-driver.mjs",
 			"/out/result.json",
 			"test",
+			"[]",
 		])
 		assert.equal(args.includes(GRADER_IMAGE), false)
 		assert.deepEqual(await runtime.imageDigest!(), { available: true, value: identity })

@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -567,3 +568,60 @@ for (const side of ["baseline", "candidate"] as const) {
 		}
 	})
 }
+
+it("excludes another process with a different TMPDIR during publication cleanup", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-process-lock-"))
+	const out = path.join(dir, "out")
+	let release = () => {}
+	let entered = () => {}
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	const ready = new Promise<void>((resolve) => {
+		entered = resolve
+	})
+	const first = flowWiring({
+		flag: createInterruptFlag(),
+		out,
+		scratchDir: path.join(dir, "first"),
+		runSide: async (side) => record(side, COMMIT),
+	})
+	first.interruptKill = async () => {
+		entered()
+		await gate
+	}
+	const running = executeComparisonFlow(first)
+	try {
+		await ready
+		const before = await publishedComparisonGeneration(out)
+		const otherTmp = path.join(dir, "other-tmp")
+		await fs.mkdir(otherTmp)
+		const source = `
+import { executeComparisonFlow } from ${JSON.stringify(new URL("./coding-compare.ts", import.meta.url).href)};
+try {
+ await executeComparisonFlow({
+  out: ${JSON.stringify(out)}, scratchDir: ${JSON.stringify(path.join(dir, "second"))}, root: ${JSON.stringify(repoRoot)}, reps: 1,
+  runSide: async () => { throw new Error('must not run') },
+  interruptedSignal: () => undefined, interruptKill: async () => {}
+ });
+ process.exitCode = 2;
+} catch (error) { process.exitCode = /cannot acquire comparison output lock/.test(error.message) ? 0 : 3 }
+`
+		const { NODE_TEST_CONTEXT: _context, ...env } = process.env
+		const exit = await new Promise<number | null>((resolve, reject) => {
+			const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], {
+				cwd: repoRoot,
+				env: { ...env, TMPDIR: otherTmp },
+				stdio: "inherit",
+			})
+			child.once("error", reject)
+			child.once("close", resolve)
+		})
+		assert.equal(exit, 0)
+		assert.equal(await publishedComparisonGeneration(out), before)
+	} finally {
+		release()
+		await running
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})

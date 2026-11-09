@@ -258,9 +258,9 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 	await fs.mkdir(wiring.out, { recursive: true })
 	const canonicalOut = await fs.realpath(wiring.out)
 	// A canonical path also excludes aliases through symlinks. Keep the lock
-	// outside scratch/output so cleanup cannot remove it before ownership ends.
+	// beside the canonical output so all processes share it regardless of TMPDIR.
 	const key = createHash("sha256").update(canonicalOut).digest("hex")
-	const lock = path.join(os.tmpdir(), `coding-comparison-${key}.lock`)
+	const lock = path.join(path.dirname(canonicalOut), `.coding-comparison-${key}.lock`)
 	try {
 		await fs.mkdir(lock, { mode: 0o700 })
 	} catch (error) {
@@ -273,6 +273,8 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		return await executeLockedComparisonFlow(wiring)
 	} finally {
 		await fs.rmdir(lock)
+		// Scratch may contain the output lock; retry its empty-directory cleanup after release.
+		await fs.rmdir(wiring.scratchDir).catch(() => {})
 	}
 }
 
@@ -322,7 +324,7 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 			// A new writer after release can recreate its output; the final
 			// nonrecursive rmdir then leaves that writer's directory intact.
 			for (const entry of await fs.readdir(wiring.scratchDir)) {
-				if (!entry.startsWith(".coding-side-"))
+				if (!entry.startsWith(".coding-side-") && !entry.startsWith(".coding-comparison-"))
 					await fs.rm(path.join(wiring.scratchDir, entry), { recursive: true, force: true })
 			}
 		} catch (error) {
