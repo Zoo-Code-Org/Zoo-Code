@@ -1,4 +1,9 @@
-import { checkpointRestoreFailureMessage, ConversationRewindError } from "../ConversationRewindError"
+import {
+	checkpointRestoreFailureMessage,
+	ConversationRewindError,
+	TaskNotRestartedError,
+	taskWasNotRestarted,
+} from "../ConversationRewindError"
 
 vi.mock("../../../i18n", () => ({
 	t: vi.fn((key: string, options?: { error?: string }) => `${key}: ${options?.error}`),
@@ -39,5 +44,35 @@ describe("checkpointRestoreFailureMessage", () => {
 		expect(checkpointRestoreFailureMessage(error)).toBe(
 			"common:errors.checkpoint_rewind_restart_failed: Failed to save the messages",
 		)
+	})
+
+	it("says that the task has to be opened from the history when it could not be started again after a rewind that worked", () => {
+		expect(checkpointRestoreFailureMessage(new TaskNotRestartedError(new Error("cannot rehydrate")))).toBe(
+			"common:errors.checkpoint_restart_failed: cannot rehydrate",
+		)
+	})
+})
+
+describe("TaskNotRestartedError and taskWasNotRestarted", () => {
+	it.each([
+		["a restart that failed after a rewind that worked", new TaskNotRestartedError("x"), true],
+		["a failed rewind whose restart failed too", new ConversationRewindError(new Error("x"), { error: "y" }), true],
+		["a failed rewind whose task was restarted", new ConversationRewindError(new Error("x")), false],
+		["any other failure", new Error("Missing commit"), false],
+		["something that is not an error", "Invalid reference", false],
+	])("for %s: %s", (_name, error, expected) => {
+		expect(taskWasNotRestarted(error)).toBe(expected)
+	})
+
+	it.each([
+		["an Error", new Error("cannot rehydrate"), "cannot rehydrate"],
+		["a plain value", "cannot rehydrate", "cannot rehydrate"],
+	])("keeps the cause, an %s", (_name, cause, message) => {
+		const error = new TaskNotRestartedError(cause)
+
+		expect(error).toBeInstanceOf(Error)
+		expect(error.name).toBe("TaskNotRestartedError")
+		expect(error.message).toBe(message)
+		expect(error.cause).toBe(cause)
 	})
 })

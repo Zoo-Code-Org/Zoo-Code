@@ -81,11 +81,14 @@ describe("Checkpoint functionality", () => {
 			postMessageToWebview: vi.fn(),
 			postStateToWebview: vi.fn(),
 			cancelTask: vi.fn(),
+			// After `cancelTask` the provider has rehydrated the task: another instance of it is the current one.
+			getCurrentTask: vi.fn(() => ({ taskId: "test-task-id", instanceId: "rehydrated" })),
 		}
 
 		// Create mock task
 		mockTask = {
 			taskId: "test-task-id",
+			instanceId: "original",
 			enableCheckpoints: true,
 			checkpointService: mockCheckpointService,
 			checkpointServiceInitializing: false,
@@ -367,29 +370,43 @@ describe("Checkpoint functionality", () => {
 			).rejects.toMatchObject({ restarted: true, restartFailure: undefined })
 		})
 
-		it("does not leave a rejection unhandled when the restart after a rewind that worked fails: it is logged", async () => {
-			const unhandled = vi.fn()
-			process.on("unhandledRejection", unhandled)
-			try {
-				mockProvider.cancelTask.mockRejectedValueOnce(new Error("cannot rehydrate"))
+		describe("when the task is not rehydrated after a rewind that worked", () => {
+			const restore = (operation: "delete" | "edit") =>
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation })
 
-				await expect(
-					checkpointRestore(mockTask, {
-						ts: 2,
-						commitHash: RESTORE_HASH,
-						mode: "restore",
-						operation: "delete",
-					}),
-				).resolves.toBeUndefined()
-				await new Promise((resolve) => setTimeout(resolve, 20)) // a stray rejection surfaces a turn later
+			it("reports a restart that fails, instead of resolving, so that the edit can be handed back", async () => {
+				const failure = new Error("cannot rehydrate")
+				mockProvider.cancelTask.mockRejectedValueOnce(failure)
 
-				expect(unhandled).not.toHaveBeenCalled()
-				expect(mockProvider.log).toHaveBeenCalledWith(
-					expect.stringContaining("could not be started again: cannot rehydrate"),
-				)
-			} finally {
-				process.off("unhandledRejection", unhandled)
-			}
+				await expect(restore("edit")).rejects.toMatchObject({
+					name: "TaskNotRestartedError",
+					message: "cannot rehydrate",
+					cause: failure,
+				})
+				// The conversation was rewound and saved all the same.
+				expect(mockTask.overwriteClineMessages).toHaveBeenCalledTimes(1)
+			})
+
+			it.each([
+				["there is no current task (cancelTask returned without a word)", () => undefined],
+				["the current task is another one", () => ({ taskId: "another-task", instanceId: "x" })],
+				[
+					"the current task is the same instance: nothing was rehydrated",
+					() => ({ taskId: "test-task-id", instanceId: "original" }),
+				],
+			])("reports it when %s", async (_name, current) => {
+				mockProvider.getCurrentTask.mockImplementation(current)
+
+				await expect(restore("delete")).rejects.toMatchObject({
+					name: "TaskNotRestartedError",
+					message: "the task was not rehydrated",
+				})
+			})
+
+			it("resolves when another instance of the same task is current", async () => {
+				await expect(restore("edit")).resolves.toBeUndefined()
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+			})
 		})
 
 		it("does not start the task again when the files could not be restored", async () => {

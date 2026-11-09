@@ -1,5 +1,9 @@
 import { Task } from "../task/Task"
-import { checkpointRestoreFailureMessage, ConversationRewindError } from "../checkpoints/ConversationRewindError"
+import {
+	checkpointRestoreFailureMessage,
+	ConversationRewindError,
+	taskWasNotRestarted,
+} from "../checkpoints/ConversationRewindError"
 import { ClineProvider } from "./ClineProvider"
 import { saveTaskMessages } from "../task-persistence"
 import * as vscode from "vscode"
@@ -91,9 +95,9 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		const taskRestarted = error instanceof ConversationRewindError && error.restarted
 		if (operation === "edit" && !checkpointRestored && pendingEditOwner && !taskRestarted) {
 			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
-			// The rewind failed and the task could not be started again either: nothing will apply the edit, so it is
-			// put back in the chat box, as the provider does when it cannot apply it.
-			if (error instanceof ConversationRewindError && editData) {
+			// The task could not be started again (after a rewind that failed, or one that worked): nothing will apply the
+			// edit, so it is put back in the chat box, as the provider does when it cannot apply it.
+			if (taskWasNotRestarted(error) && editData) {
 				try {
 					await provider.postMessageToWebview({
 						type: "invoke",

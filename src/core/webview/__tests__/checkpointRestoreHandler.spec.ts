@@ -3,7 +3,7 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { Task } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
-import { ConversationRewindError } from "../../checkpoints/ConversationRewindError"
+import { ConversationRewindError, TaskNotRestartedError } from "../../checkpoints/ConversationRewindError"
 import { handleCheckpointRestoreOperation, type CheckpointRestoreConfig } from "../checkpointRestoreHandler"
 import { PendingEditOperationStore } from "../PendingEditOperationStore"
 import { saveTaskMessages } from "../../task-persistence"
@@ -441,6 +441,52 @@ describe("checkpointRestoreHandler", () => {
 				await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toMatchObject({
 					restarted: false,
 				})
+
+				expect(showWarningMessage).toHaveBeenCalledWith(
+					"common:checkpoints.restart_after_restore_failure",
+					"common:checkpoints.restart",
+				)
+			})
+		})
+
+		describe("when the rewind worked but the task could not be started again", () => {
+			const notRestarted = () => new TaskNotRestartedError(new Error("cannot rehydrate"))
+
+			it("clears the edit that nothing will apply, and puts it back in the chat box", async () => {
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(notRestarted())
+
+				await expect(
+					handleCheckpointRestoreOperation({
+						...fixture.config,
+						operation: "edit",
+						editData: {
+							editedContent: "Edited prompt",
+							images: ["image.png"],
+							apiConversationHistoryIndex: 0,
+						},
+					}),
+				).rejects.toBeInstanceOf(TaskNotRestartedError)
+
+				// Not left to expire (a task reopened meanwhile would apply it to a conversation it no longer matches).
+				expect(fixture.store.get(`task-${fixture.task.taskId}`)).toBeUndefined()
+				expect(fixture.providerDouble.postMessageToWebview).toHaveBeenCalledWith({
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: "Edited prompt",
+					images: ["image.png"],
+				})
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+					"common:errors.checkpoint_restart_failed: cannot rehydrate",
+				)
+			})
+
+			it("offers to restart a deleted task", async () => {
+				fixture.taskDouble.abort = true
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(notRestarted())
+
+				await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toBeInstanceOf(
+					TaskNotRestartedError,
+				)
 
 				expect(showWarningMessage).toHaveBeenCalledWith(
 					"common:checkpoints.restart_after_restore_failure",

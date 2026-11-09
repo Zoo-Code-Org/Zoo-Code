@@ -20,6 +20,7 @@
 		"checkpoint_restore_failed": "還原存檔點時發生錯誤：{{error}}",
 		"checkpoint_rewind_failed": "檔案已還原至檢查點，但無法回溯對話：{{error}}。工作已使用先前的對話重新啟動；請再次還原檢查點以回溯對話。",
 		"checkpoint_rewind_restart_failed": "檔案已還原至檢查點，但無法回溯對話：{{error}}。工作也無法重新啟動；請重新啟動工作，或再次還原檢查點以回溯對話。",
+		"checkpoint_restart_failed": "檔案已還原，對話已回溯，但無法重新啟動工作：{{error}}。請從歷史記錄中開啟以繼續。",
 		"checkpoint_missing": "無法還原存檔點 {{commitHash}}：此存檔點已不存在於存檔點儲存庫中。未變更任何檔案。",
 		"checkpoint_invalid_hash": "無法還原或比較存檔點：此參照不是此工作的有效存檔點。未變更任何檔案。",
 		"git_not_installed": "存檔點功能需要 Git。請安裝 Git 以啟用存檔點。",

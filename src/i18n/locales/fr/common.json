@@ -20,6 +20,7 @@
 		"checkpoint_restore_failed": "Erreur lors du rétablissement du checkpoint : {{error}}",
 		"checkpoint_rewind_failed": "Les fichiers ont été restaurés au point de contrôle, mais la conversation n'a pas pu être rembobinée : {{error}}. La tâche a été redémarrée avec sa conversation précédente ; restaurez à nouveau le point de contrôle pour la rembobiner.",
 		"checkpoint_rewind_restart_failed": "Les fichiers ont été restaurés au point de contrôle, mais la conversation n'a pas pu être rembobinée : {{error}}. La tâche n'a pas pu être redémarrée non plus ; redémarrez-la ou restaurez à nouveau le point de contrôle pour rembobiner la conversation.",
+		"checkpoint_restart_failed": "Les fichiers ont été restaurés et la conversation a été rembobinée, mais la tâche n'a pas pu être redémarrée : {{error}}. Ouvrez-la depuis l'historique pour continuer.",
 		"checkpoint_missing": "Impossible de rétablir le checkpoint {{commitHash}} : ce checkpoint n'existe plus dans le dépôt de checkpoints. Aucun fichier n'a été modifié.",
 		"checkpoint_invalid_hash": "Impossible de rétablir ou de comparer le checkpoint : la référence ne correspond à aucun checkpoint valide de cette tâche. Aucun fichier n'a été modifié.",
 		"git_not_installed": "Git est requis pour la fonctionnalité des points de contrôle. Veuillez installer Git pour activer les points de contrôle.",

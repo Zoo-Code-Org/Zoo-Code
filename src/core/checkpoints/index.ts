@@ -17,7 +17,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 import { assertRecordedCheckpoint } from "./recordedCheckpoint"
-import { ConversationRewindError } from "./ConversationRewindError"
+import { ConversationRewindError, TaskNotRestartedError } from "./ConversationRewindError"
 
 const WARNING_THRESHOLD_MS = 5000
 
@@ -269,7 +269,7 @@ export async function checkpointRestore(
 			} catch (error) {
 				// The workspace is already restored: the task still has to be started again, as after a rewind that worked.
 				// A restart that fails is not hidden by the rewind failure, nor does it hide it: both are told.
-				throw new ConversationRewindError(error, await startTaskAgain(provider))
+				throw new ConversationRewindError(error, await startTaskAgain(provider, task))
 			}
 
 			// The rewind is saved. The row that reports the deleted requests is only a note: a task that cannot say it
@@ -296,19 +296,31 @@ export async function checkpointRestore(
 		// I'd like to revisit this in the future and try to improve the
 		// task flow and the communication between the webview and the
 		// `Task` instance.
-		void startTaskAgain(provider)
+		// The restart is awaited and checked: a task that was not rehydrated is reported, and a pending edit is not left
+		// for a task that will not come.
+		const restart = await startTaskAgain(provider, task)
+		if (restart) throw new TaskNotRestartedError(restart.error)
 	} catch (error) {
 		provider?.log("[checkpointRestore] failed to restore checkpoint")
 		throw error
 	}
 }
 
-/** Starts the task again (the provider cancels it, and it is rehydrated). Resolves to what failed, if the restart did. */
+/**
+ * Starts the task again (the provider cancels it, and rehydrates it) and checks that it was: `cancelTask` returns
+ * without a word when there is no current task, or no history to rehydrate from. Resolves to what failed, if the restart
+ * did.
+ */
 async function startTaskAgain(
 	provider: ReturnType<Task["providerRef"]["deref"]>,
+	task: Task,
 ): Promise<{ error: unknown } | undefined> {
 	try {
 		await provider?.cancelTask()
+		const current = provider?.getCurrentTask()
+		if (provider && (!current || current.taskId !== task.taskId || current.instanceId === task.instanceId)) {
+			throw new Error("the task was not rehydrated")
+		}
 		return undefined
 	} catch (error) {
 		provider?.log(

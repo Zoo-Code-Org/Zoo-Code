@@ -24,6 +24,7 @@
 		"checkpoint_restore_failed": "Erro durante a restauração do ponto de verificação: {{error}}",
 		"checkpoint_rewind_failed": "Os arquivos foram restaurados para o checkpoint, mas não foi possível retroceder a conversa: {{error}}. A tarefa foi reiniciada com a conversa anterior; restaure o checkpoint novamente para retroceder a conversa.",
 		"checkpoint_rewind_restart_failed": "Os arquivos foram restaurados para o checkpoint, mas não foi possível retroceder a conversa: {{error}}. Também não foi possível reiniciar a tarefa; reinicie-a ou restaure o checkpoint novamente para retroceder a conversa.",
+		"checkpoint_restart_failed": "Os arquivos foram restaurados e a conversa foi retrocedida, mas não foi possível reiniciar a tarefa: {{error}}. Abra-a pelo histórico para continuar.",
 		"checkpoint_missing": "Não é possível restaurar o ponto de verificação {{commitHash}}: este ponto de verificação não existe mais no repositório de pontos de verificação. Nenhum arquivo foi alterado.",
 		"checkpoint_invalid_hash": "Não é possível restaurar ou comparar o ponto de verificação: a referência não é um ponto de verificação válido desta tarefa. Nenhum arquivo foi alterado.",
 		"git_not_installed": "O Git é necessário para o recurso de checkpoints. Por favor, instale o Git para habilitar os checkpoints.",
