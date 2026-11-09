@@ -91,10 +91,28 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			const originalBytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, "utf-8")
 			let originalContent: string
 			try {
-				originalContent = new TextDecoder("utf-8", { fatal: true }).decode(originalBytes)
+				originalContent = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(originalBytes)
 			} catch {
-				const lossy = new TextDecoder("utf-8").decode(originalBytes)
-				const undecodableByte = new TextEncoder().encode(lossy.slice(0, lossy.indexOf("\uFFFD"))).length
+				const lossy = new TextDecoder("utf-8", { ignoreBOM: true }).decode(originalBytes)
+				// The offset is counted back through the bytes, not read off the decoded string. Two things
+				// make the string lie: a byte-order mark is three bytes that decode to one character, so a
+				// count through the string is three short on every BOM file, and a U+FFFD that the file itself
+				// contains is indistinguishable in the output from a replacement the decoder produced, so the
+				// first one of those is read as the failure position too. Each replacement is therefore located
+				// in the original bytes and only stepped over when those bytes really are the encoded form of
+				// U+FFFD, which is the one case where moving past it is correct.
+				let undecodableByte = 0
+				for (const prefix of lossy.split("\uFFFD")) {
+					undecodableByte += Buffer.byteLength(prefix, "utf-8")
+					if (
+						originalBytes[undecodableByte] !== 0xef ||
+						originalBytes[undecodableByte + 1] !== 0xbf ||
+						originalBytes[undecodableByte + 2] !== 0xbd
+					) {
+						break
+					}
+					undecodableByte += 3
+				}
 				task.consecutiveMistakeCount++
 				task.recordToolError("apply_diff")
 				const formattedError = `File ${absolutePath} is not valid UTF-8 (first undecodable byte at offset ${undecodableByte}).\n\n<error_details>\napply_diff decodes the file, applies the diff to the decoded text, and saves the result back. Bytes that cannot be decoded would have been saved back as U+FFFD alongside every byte the diff did not touch, so the edit was refused and nothing was written. Re-read the file and convert it to UTF-8 before applying the diff again.\n</error_details>`

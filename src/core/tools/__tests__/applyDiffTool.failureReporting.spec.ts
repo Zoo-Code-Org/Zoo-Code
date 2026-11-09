@@ -154,7 +154,7 @@ describe("ApplyDiffTool failure reporting", () => {
 	}
 
 	describe("bytes the decoder cannot read", () => {
-		async function runOnBytes(bytes: string | Buffer): Promise<string> {
+		async function runOnBytes(bytes: string | Buffer): Promise<{ output: string; appliedTo: unknown }> {
 			mockedReadFile.mockResolvedValue(bytes)
 			const applyDiff = vi.fn().mockResolvedValue({ success: true, content: "unused" })
 			mockTask.diffStrategy = { getName: () => "test", applyDiff }
@@ -166,7 +166,10 @@ describe("ApplyDiffTool failure reporting", () => {
 					pushedResult = result
 				}),
 			})
-			return String(pushedResult ?? "")
+			return {
+				output: String(pushedResult ?? ""),
+				appliedTo: applyDiff.mock.calls[0] ? applyDiff.mock.calls[0][0] : undefined,
+			}
 		}
 
 		// A byte the UTF-8 decoder rejects sits at index 3; everything around it is plain ASCII, so the
@@ -174,7 +177,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		const UNDECODABLE = Buffer.from([0x68, 0x69, 0x20, 0xff, 0x61, 0x0a])
 
 		it("refuses the edit and names the file and the first undecodable byte", async () => {
-			const output = await runOnBytes(UNDECODABLE)
+			const { output } = await runOnBytes(UNDECODABLE)
 
 			expect(output).toContain("is not valid UTF-8")
 			expect(output).toContain("first undecodable byte at offset 3")
@@ -196,7 +199,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		})
 
 		it("still edits a file whose bytes are valid multi-byte UTF-8", async () => {
-			const output = await runOnBytes(Buffer.from("héllo 中文 ✅\n", "utf8"))
+			const { output } = await runOnBytes(Buffer.from("héllo 中文 ✅\n", "utf8"))
 
 			expect(output).not.toContain("is not valid UTF-8")
 			expect(output).toContain("Changes successfully applied.")
@@ -209,7 +212,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		// file (the merge ref of 1910 onto main failed 9 of its rows under the strict read), and that spec
 		// is main's, so this branch cannot edit it. This row is the pin: it says which side gives way.
 		it("edits a file a caller already decoded, which is what the encoding overload hands back", async () => {
-			const output = await runOnBytes("line one\nline two\nline three\n")
+			const { output } = await runOnBytes("line one\nline two\nline three\n")
 
 			expect(output).toContain("Changes successfully applied.")
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
@@ -217,10 +220,47 @@ describe("ApplyDiffTool failure reporting", () => {
 		})
 
 		it("reports the first undecodable byte when invalid bytes repeat", async () => {
-			const output = await runOnBytes(Buffer.from([0x41, 0xc3, 0x28, 0x42, 0xfe, 0x43, 0xff]))
+			const { output } = await runOnBytes(Buffer.from([0x41, 0xc3, 0x28, 0x42, 0xfe, 0x43, 0xff]))
 
 			expect(output).toContain("first undecodable byte at offset 1")
 			expect(output).not.toContain("offset 4")
+		})
+
+		// A byte-order mark is three bytes that decode to one character, and a U+FFFD written in the file is
+		// indistinguishable in the decoded output from a replacement the decoder produced. Both make a
+		// count through the decoded string report the wrong byte, so the offsets below are asserted
+		// against the byte positions a hex dump shows, not against anything derived from the string.
+		it("counts a byte-order mark as the three bytes it is", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xef, 0xbb, 0xbf, 0x41, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 4")
+			expect(output).not.toContain("offset 1")
+		})
+
+		it("does not mistake a literal replacement character for an undecodable byte", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xef, 0xbf, 0xbd, 0x41, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 4")
+			expect(output).not.toContain("offset 0")
+		})
+
+		it("counts past a byte-order mark and a literal replacement character together", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xef, 0xbb, 0xbf, 0xef, 0xbf, 0xbd, 0xff]))
+
+			expect(output).toContain("first undecodable byte at offset 6")
+		})
+
+		// The BOM survives into the text the diff is applied to and the approval baseline is built from,
+		// which is what fs.readFile with a utf-8 encoding used to hand over: the decoded string plus the
+		// BOM character, and re-encoding it reproduces the file's bytes exactly.
+		it("keeps a byte-order mark in the content the diff and the approval are built from", async () => {
+			const bomFile = Buffer.from("\uFEFFhi\r\nthere\r\n", "utf8")
+			const { output, appliedTo } = await runOnBytes(bomFile)
+
+			expect(output).toContain("Changes successfully applied.")
+			expect(typeof appliedTo).toBe("string")
+			expect(String(appliedTo).startsWith("\uFEFF")).toBe(true)
+			expect(Buffer.from(String(appliedTo), "utf8").equals(bomFile)).toBe(true)
 		})
 	})
 
