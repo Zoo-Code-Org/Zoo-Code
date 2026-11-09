@@ -1028,6 +1028,74 @@ describe("KimiCodeOAuthManager", () => {
 		expect(bodyReads).toEqual(["json"])
 	})
 
+	it("cancels the underlying response when the caller aborts during the token body read", async () => {
+		// The wrapper rejection alone is not cancellation: the fetch signal that carries the POST must
+		// still be armed while the body is pending, or a replacement refresh can start on top of a
+		// response this caller has already given up on.
+		let fetchedSignal: AbortSignal | undefined
+		const bodyReads: string[] = []
+		const bodyPending = new Promise<unknown>(() => {})
+		vi.spyOn(globalThis, "fetch").mockImplementation(((_url: unknown, init?: RequestInit) => {
+			fetchedSignal = init?.signal as AbortSignal | undefined
+			return Promise.resolve({
+				ok: true,
+				status: 200,
+				json: () => {
+					bodyReads.push("json")
+					return bodyPending
+				},
+			} as unknown as Response)
+		}) as typeof fetch)
+		const controller = new AbortController()
+		const credentials: KimiCodeCredentials = {
+			type: "kimi-code",
+			accessToken: "old",
+			refreshToken: "refresh",
+			expiresAt: 0,
+		}
+		const pending = refreshKimiCodeAccessToken(credentials, controller.signal)
+		await vi.waitFor(() => expect(bodyReads).toEqual(["json"]))
+		expect(fetchedSignal?.aborted, "the POST signal stays live while the body is pending").toBe(false)
+		controller.abort()
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(fetchedSignal?.aborted, "the abort reached the underlying response").toBe(true)
+	})
+
+	it("cancels the underlying response when the caller aborts during a stalled OAuth error body", async () => {
+		// The failure path reads a body too. An error body that stalls must be cancelled the same way,
+		// or the rejected refresh still holds the response open after the caller is gone.
+		let fetchedSignal: AbortSignal | undefined
+		const bodyReads: string[] = []
+		const bodyPending = new Promise<unknown>(() => {})
+		vi.spyOn(globalThis, "fetch").mockImplementation(((_url: unknown, init?: RequestInit) => {
+			fetchedSignal = init?.signal as AbortSignal | undefined
+			return Promise.resolve({
+				ok: false,
+				status: 400,
+				statusText: "Bad Request",
+				text: () => {
+					bodyReads.push("text")
+					return bodyPending
+				},
+			} as unknown as Response)
+		}) as typeof fetch)
+		const controller = new AbortController()
+		const credentials: KimiCodeCredentials = {
+			type: "kimi-code",
+			accessToken: "old",
+			refreshToken: "refresh",
+			expiresAt: 0,
+		}
+		const pending = refreshKimiCodeAccessToken(credentials, controller.signal)
+		await vi.waitFor(() => expect(bodyReads).toEqual(["text"]))
+		expect(fetchedSignal?.aborted, "the POST signal stays live while the error body is pending").toBe(false)
+		controller.abort()
+		await expect(pending).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The Kimi Code OAuth request was aborted",
+		})
+		expect(fetchedSignal?.aborted, "the abort reached the underlying error-body response").toBe(true)
+	})
 	it("never aborts a replacement refresh on behalf of a waiter enrolled in the previous one", async () => {
 		const { context, values } = createContext()
 		values.set(

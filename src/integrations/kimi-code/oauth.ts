@@ -79,7 +79,19 @@ function createOAuthAbortError(): Error {
 	return error
 }
 
-async function postForm(endpoint: string, values: Record<string, string>, signal?: AbortSignal): Promise<Response> {
+/** A form POST whose cancellation contract outlives the response headers: `settle` detaches the
+ * caller's abort forwarder once the body is consumed, so an abort during a body read cancels the
+ * underlying response too. An abort detaches the forwarder by itself ({ once: true }). */
+interface CancellingPost {
+	response: Response
+	settle: () => void
+}
+
+async function postForm(
+	endpoint: string,
+	values: Record<string, string>,
+	signal?: AbortSignal,
+): Promise<CancellingPost> {
 	const controller = new AbortController()
 	const forwardAbort = () => controller.abort(signal?.reason)
 	if (signal?.aborted) forwardAbort()
@@ -88,8 +100,11 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 		() => controller.abort(new Error("Kimi Code OAuth request timed out")),
 		OAUTH_REQUEST_TIMEOUT_MS,
 	)
+	const settle = () => {
+		signal?.removeEventListener("abort", forwardAbort)
+	}
 	try {
-		return await fetch(endpoint, {
+		const response = await fetch(endpoint, {
 			method: "POST",
 			headers: {
 				Accept: "application/json",
@@ -98,7 +113,11 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 			body: new URLSearchParams(values).toString(),
 			signal: controller.signal,
 		})
+		return { response, settle }
 	} catch (error) {
+		// Nothing will read a body from a POST that never produced a response, so the forwarder
+		// is detached on this path and nothing else.
+		settle()
 		// Classify from the CALLER signal: only a rejection that came from the caller's own abort
 		// is normalized. The caller's reason can be an ordinary Error and fetch forwards it
 		// verbatim, and an independent OAuth/network failure that merely races the abort must be
@@ -113,7 +132,6 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 		throw error
 	} finally {
 		clearTimeout(timeout)
-		signal?.removeEventListener("abort", forwardAbort)
 	}
 }
 /** Consume a response body under the caller's signal: an abort while the body is still
@@ -148,17 +166,21 @@ async function readOAuthError(response: Response, signal?: AbortSignal): Promise
 }
 
 export async function requestDeviceAuthorization(signal?: AbortSignal) {
-	const response = await postForm(
+	const { response, settle } = await postForm(
 		KIMI_CODE_OAUTH_CONFIG.deviceAuthorizationEndpoint,
 		{ client_id: KIMI_CODE_OAUTH_CONFIG.clientId },
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response, signal)
-	return deviceAuthorizationSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+	try {
+		if (!response.ok) throw await readOAuthError(response, signal)
+		return deviceAuthorizationSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+	} finally {
+		settle()
+	}
 }
 
 async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Promise<KimiCodeCredentials> {
-	const response = await postForm(
+	const { response, settle } = await postForm(
 		KIMI_CODE_OAUTH_CONFIG.tokenEndpoint,
 		{
 			grant_type: KIMI_CODE_OAUTH_CONFIG.deviceGrantType,
@@ -167,15 +189,19 @@ async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Pro
 		},
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response, signal)
-	const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
-	if (!tokens.refresh_token) throw new Error("Kimi Code OAuth did not return a refresh token")
-	return {
-		type: providerIdentifiers.kimiCode,
-		accessToken: tokens.access_token,
-		refreshToken: tokens.refresh_token,
-		expiresAt: Date.now() + tokens.expires_in * 1000,
-		tokenType: tokens.token_type,
+	try {
+		if (!response.ok) throw await readOAuthError(response, signal)
+		const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+		if (!tokens.refresh_token) throw new Error("Kimi Code OAuth did not return a refresh token")
+		return {
+			type: providerIdentifiers.kimiCode,
+			accessToken: tokens.access_token,
+			refreshToken: tokens.refresh_token,
+			expiresAt: Date.now() + tokens.expires_in * 1000,
+			tokenType: tokens.token_type,
+		}
+	} finally {
+		settle()
 	}
 }
 
@@ -185,7 +211,7 @@ export async function refreshKimiCodeAccessToken(
 ): Promise<KimiCodeCredentials> {
 	// The caller's signal aborts the token POST itself, not just the caller's wait: a cancelled
 	// task must not keep a refresh request (and its rotated refresh token) in flight.
-	const response = await postForm(
+	const { response, settle } = await postForm(
 		KIMI_CODE_OAUTH_CONFIG.tokenEndpoint,
 		{
 			grant_type: "refresh_token",
@@ -194,14 +220,18 @@ export async function refreshKimiCodeAccessToken(
 		},
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response, signal)
-	const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
-	return {
-		type: providerIdentifiers.kimiCode,
-		accessToken: tokens.access_token,
-		refreshToken: tokens.refresh_token ?? credentials.refreshToken,
-		expiresAt: Date.now() + tokens.expires_in * 1000,
-		tokenType: tokens.token_type ?? credentials.tokenType,
+	try {
+		if (!response.ok) throw await readOAuthError(response, signal)
+		const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+		return {
+			type: providerIdentifiers.kimiCode,
+			accessToken: tokens.access_token,
+			refreshToken: tokens.refresh_token ?? credentials.refreshToken,
+			expiresAt: Date.now() + tokens.expires_in * 1000,
+			tokenType: tokens.token_type ?? credentials.tokenType,
+		}
+	} finally {
+		settle()
 	}
 }
 

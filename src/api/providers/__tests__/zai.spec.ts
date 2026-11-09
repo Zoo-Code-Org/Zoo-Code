@@ -714,20 +714,51 @@ describe("ZAiHandler", () => {
 			mockCreate.mockRejectedValueOnce(new Error("boom"))
 			const errorLog = vitest.spyOn(console, "error").mockImplementation(() => {})
 
-			const result = await captureError(
-				(async () => {
-					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
-						// consume
-					}
-				})(),
-			)
-
+			// captureError throws when the operation resolves instead of rejecting - the very contract
+			// violation this test exists to catch - so the restoration has to span the await: a restoring
+			// finally that starts after it leaks the console.error spy into whichever test runs next.
+			let result: Error
 			try {
+				result = await captureError(
+					(async () => {
+						for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+							// consume
+						}
+					})(),
+				)
 				expect(result.message).toBe("Z.ai completion error: boom")
 				expect(errorLog).toHaveBeenCalledTimes(1)
 			} finally {
 				errorLog.mockRestore()
 			}
+		})
+
+		it("createMessage leaves no console.error spy installed when the mocked create resolves", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			// The resolving shape: an empty async iterable satisfies the stream loop and rejects nothing,
+			// so the only failure left is captureError's own "expected a rejection" assertion.
+			mockCreate.mockResolvedValueOnce((async function* () {})())
+			const errorLog = vitest.spyOn(console, "error").mockImplementation(() => {})
+			let failure: Error | undefined
+			try {
+				failure = await captureError(
+					(async () => {
+						for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+							// consume
+						}
+					})(),
+				)
+			} catch (error) {
+				failure = error instanceof Error ? error : new Error(String(error))
+			} finally {
+				errorLog.mockRestore()
+			}
+			expect(failure?.message).toBe("Expected the operation to reject")
+			expect(vitest.isMockFunction(console.error), "the spy must not outlive its own test").toBe(false)
 		})
 
 		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
