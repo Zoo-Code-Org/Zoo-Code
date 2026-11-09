@@ -180,7 +180,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			const { output } = await runOnBytes(UNDECODABLE)
 
 			expect(output).toContain("is not valid UTF-8")
-			expect(output).toContain("first undecodable byte at offset 3")
+			expect(output).toContain("first undecodable byte at offset 3).")
 			expect(mockTask.say).toHaveBeenCalledWith("error", output)
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_diff")
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
@@ -222,7 +222,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		it("reports the first undecodable byte when invalid bytes repeat", async () => {
 			const { output } = await runOnBytes(Buffer.from([0x41, 0xc3, 0x28, 0x42, 0xfe, 0x43, 0xff]))
 
-			expect(output).toContain("first undecodable byte at offset 1")
+			expect(output).toContain("first undecodable byte at offset 1).")
 			expect(output).not.toContain("offset 4")
 		})
 
@@ -233,21 +233,21 @@ describe("ApplyDiffTool failure reporting", () => {
 		it("counts a byte-order mark as the three bytes it is", async () => {
 			const { output } = await runOnBytes(Buffer.from([0xef, 0xbb, 0xbf, 0x41, 0xff]))
 
-			expect(output).toContain("first undecodable byte at offset 4")
+			expect(output).toContain("first undecodable byte at offset 4).")
 			expect(output).not.toContain("offset 1")
 		})
 
 		it("does not mistake a literal replacement character for an undecodable byte", async () => {
 			const { output } = await runOnBytes(Buffer.from([0xef, 0xbf, 0xbd, 0x41, 0xff]))
 
-			expect(output).toContain("first undecodable byte at offset 4")
+			expect(output).toContain("first undecodable byte at offset 4).")
 			expect(output).not.toContain("offset 0")
 		})
 
 		it("counts past a byte-order mark and a literal replacement character together", async () => {
 			const { output } = await runOnBytes(Buffer.from([0xef, 0xbb, 0xbf, 0xef, 0xbf, 0xbd, 0xff]))
 
-			expect(output).toContain("first undecodable byte at offset 6")
+			expect(output).toContain("first undecodable byte at offset 6).")
 		})
 
 		// The BOM survives into the text the diff is applied to and the approval baseline is built from,
@@ -261,6 +261,22 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(typeof appliedTo).toBe("string")
 			expect(String(appliedTo).startsWith("\uFEFF")).toBe(true)
 			expect(Buffer.from(String(appliedTo), "utf8").equals(bomFile)).toBe(true)
+		})
+		// The row above shows a BOM or a file-written U+FFFD shifting a later failure; these two put a
+		// truncated sequence next to a literal U+FFFD in both orders, and every offset below is asserted
+		// against the position a hex dump shows. The closing `).` is included because a substring check on
+		// "offset 1" is also satisfied by "offset 10", which would let a wrong offset pass.
+		it("reports the truncated sequence itself when a literal replacement character follows it", async () => {
+			const { output } = await runOnBytes(Buffer.from([0xe2, 0x82, 0xef, 0xbf, 0xbd]))
+
+			expect(output).toContain("first undecodable byte at offset 0).")
+		})
+
+		it("counts past a literal replacement character into a truncated sequence", async () => {
+			const { output } = await runOnBytes(Buffer.from([0x61, 0xef, 0xbf, 0xbd, 0xe2, 0x82]))
+
+			expect(output).toContain("first undecodable byte at offset 4).")
+			expect(output).not.toContain("first undecodable byte at offset 3).")
 		})
 	})
 
