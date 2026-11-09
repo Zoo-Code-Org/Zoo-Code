@@ -19,6 +19,7 @@
 		"checkpoint_failed": "Herstellen van checkpoint mislukt.",
 		"checkpoint_restore_failed": "Fout bij het herstellen van checkpoint: {{error}}",
 		"checkpoint_rewind_failed": "De bestanden zijn hersteld naar het checkpoint, maar het gesprek kon niet worden teruggespoeld: {{error}}. De taak is opnieuw gestart met het vorige gesprek; herstel het checkpoint opnieuw om het terug te spoelen.",
+		"checkpoint_rewind_restart_failed": "De bestanden zijn hersteld naar het checkpoint, maar het gesprek kon niet worden teruggespoeld: {{error}}. De taak kon ook niet opnieuw worden gestart; start hem opnieuw of herstel het checkpoint opnieuw om het gesprek terug te spoelen.",
 		"checkpoint_missing": "Checkpoint {{commitHash}} kan niet worden hersteld: dit checkpoint bestaat niet meer in de checkpoint-repository. Er zijn geen bestanden gewijzigd.",
 		"checkpoint_invalid_hash": "Checkpoint kan niet worden hersteld of vergeleken: de verwijzing is geen geldig checkpoint van deze taak. Er zijn geen bestanden gewijzigd.",
 		"git_not_installed": "Git is vereist voor de checkpoint-functie. Installeer Git om checkpoints in te schakelen.",

@@ -382,6 +382,73 @@ describe("checkpointRestoreHandler", () => {
 			)
 		})
 
+		describe("when the task could not be started again either", () => {
+			const notRestarted = () =>
+				new ConversationRewindError(new Error("Failed to save the messages"), {
+					error: new Error("cannot rehydrate"),
+				})
+
+			it("does not leave an edit waiting for a task that will not come: it is cleared and put back in the chat box", async () => {
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(notRestarted())
+
+				await expect(
+					handleCheckpointRestoreOperation({
+						...fixture.config,
+						operation: "edit",
+						editData: {
+							editedContent: "Edited prompt",
+							images: ["image.png"],
+							apiConversationHistoryIndex: 0,
+						},
+					}),
+				).rejects.toMatchObject({ restarted: false })
+
+				expect(fixture.providerDouble.clearPendingEditOperation).toHaveBeenCalledWith(
+					`task-${fixture.task.taskId}`,
+					expect.any(Object),
+				)
+				expect(fixture.store.get(`task-${fixture.task.taskId}`)).toBeUndefined()
+				expect(fixture.providerDouble.postMessageToWebview).toHaveBeenCalledWith({
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: "Edited prompt",
+					images: ["image.png"],
+				})
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+					"common:errors.checkpoint_rewind_restart_failed: Failed to save the messages",
+				)
+			})
+
+			it("still reports it when the chat box cannot be filled", async () => {
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(notRestarted())
+				fixture.providerDouble.postMessageToWebview.mockRejectedValue(new Error("webview gone"))
+
+				await expect(
+					handleCheckpointRestoreOperation({
+						...fixture.config,
+						operation: "edit",
+						editData: { editedContent: "Edited prompt", apiConversationHistoryIndex: 0 },
+					}),
+				).rejects.toMatchObject({ restarted: false })
+
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce()
+			})
+
+			it("offers to restart a deleted task, since nothing started it", async () => {
+				fixture.taskDouble.abort = true
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(notRestarted())
+
+				await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toMatchObject({
+					restarted: false,
+				})
+
+				expect(showWarningMessage).toHaveBeenCalledWith(
+					"common:checkpoints.restart_after_restore_failure",
+					"common:checkpoints.restart",
+				)
+			})
+		})
+
 		it("for a deleted task that was aborted, tells the user the files changed, and neither saves nor rehydrates it again", async () => {
 			fixture.taskDouble.abort = true // the task was aborted before the restore, as a delete does
 			fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(rewindFailure())

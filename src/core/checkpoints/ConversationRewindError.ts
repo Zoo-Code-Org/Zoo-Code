@@ -6,22 +6,31 @@ import { t } from "../../i18n"
  * not left apart with the task stopped; the caller still has to tell the user, and may keep an edit for it.
  */
 export class ConversationRewindError extends Error {
-	constructor(override readonly cause: unknown) {
+	/** Whether the task was started again. When it was not, nothing will take a pending edit: the caller hands it back. */
+	readonly restarted: boolean
+
+	/** `restartFailure` is given when starting the task again failed too (what failed is in its `error`). */
+	constructor(
+		override readonly cause: unknown,
+		readonly restartFailure?: { error: unknown },
+	) {
 		super(cause instanceof Error ? cause.message : String(cause))
 		this.name = "ConversationRewindError"
+		this.restarted = restartFailure === undefined
 	}
 }
 
 /**
  * What the user is told when a checkpoint restore failed. A restore that put the files back but could not rewind the
- * conversation says so: the files did change, and the task was started again with its previous conversation.
+ * conversation says so: the files did change, and the task was started again with its previous conversation (or, when
+ * that failed too, it has to be started by the user).
  */
 export function checkpointRestoreFailureMessage(error: unknown): string {
 	const reason = error instanceof Error ? error.message : String(error)
+	if (!(error instanceof ConversationRewindError))
+		return t("common:errors.checkpoint_restore_failed", { error: reason })
 	return t(
-		error instanceof ConversationRewindError
-			? "common:errors.checkpoint_rewind_failed"
-			: "common:errors.checkpoint_restore_failed",
+		error.restarted ? "common:errors.checkpoint_rewind_failed" : "common:errors.checkpoint_rewind_restart_failed",
 		{ error: reason },
 	)
 }

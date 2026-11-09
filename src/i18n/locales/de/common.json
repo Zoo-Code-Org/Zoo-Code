@@ -19,6 +19,7 @@
 		"checkpoint_failed": "Fehler beim Wiederherstellen des Checkpoints.",
 		"checkpoint_restore_failed": "Fehler beim Wiederherstellen des Checkpoints: {{error}}",
 		"checkpoint_rewind_failed": "Die Dateien wurden auf den Checkpoint zurückgesetzt, aber die Unterhaltung konnte nicht zurückgespult werden: {{error}}. Die Aufgabe wurde mit der bisherigen Unterhaltung neu gestartet; stelle den Checkpoint erneut wieder her, um sie zurückzuspulen.",
+		"checkpoint_rewind_restart_failed": "Die Dateien wurden auf den Checkpoint zurückgesetzt, aber die Unterhaltung konnte nicht zurückgespult werden: {{error}}. Die Aufgabe konnte auch nicht neu gestartet werden; starte sie neu oder stelle den Checkpoint erneut wieder her, um die Unterhaltung zurückzuspulen.",
 		"checkpoint_missing": "Checkpoint {{commitHash}} kann nicht wiederhergestellt werden: Dieser Checkpoint existiert nicht mehr im Checkpoint-Repository. Es wurden keine Dateien geändert.",
 		"checkpoint_invalid_hash": "Checkpoint kann nicht wiederhergestellt oder verglichen werden: Die Referenz ist kein gültiger Checkpoint dieser Aufgabe. Es wurden keine Dateien geändert.",
 		"git_not_installed": "Git ist für die Checkpoint-Funktion erforderlich. Bitte installiere Git, um Checkpoints zu aktivieren.",

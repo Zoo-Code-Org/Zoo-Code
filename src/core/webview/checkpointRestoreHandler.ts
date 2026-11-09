@@ -88,9 +88,23 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 	} catch (error) {
 		// The files were restored and the task is started again (see `ConversationRewindError`): the starting task
 		// takes the pending edit, and hands it back to the user if it cannot apply it, and there is nothing to restart.
-		const taskRestarted = error instanceof ConversationRewindError
+		const taskRestarted = error instanceof ConversationRewindError && error.restarted
 		if (operation === "edit" && !checkpointRestored && pendingEditOwner && !taskRestarted) {
 			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
+			// The rewind failed and the task could not be started again either: nothing will apply the edit, so it is
+			// put back in the chat box, as the provider does when it cannot apply it.
+			if (error instanceof ConversationRewindError && editData) {
+				try {
+					await provider.postMessageToWebview({
+						type: "invoke",
+						invoke: "setChatBoxMessage",
+						text: editData.editedContent,
+						images: editData.images,
+					})
+				} catch {
+					// The failure is reported below; the edit cannot be shown if the webview is gone.
+				}
+			}
 		}
 		console.error(`Error in checkpoint restore (${operation}):`, error)
 		void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))

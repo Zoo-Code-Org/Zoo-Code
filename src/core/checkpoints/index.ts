@@ -268,8 +268,8 @@ export async function checkpointRestore(
 				deletedRequests = await rewindConversation(task, ts, index, operation)
 			} catch (error) {
 				// The workspace is already restored: the task still has to be started again, as after a rewind that worked.
-				provider?.cancelTask()
-				throw new ConversationRewindError(error)
+				// A restart that fails is not hidden by the rewind failure, nor does it hide it: both are told.
+				throw new ConversationRewindError(error, await startTaskAgain(provider))
 			}
 
 			// The rewind is saved. The row that reports the deleted requests is only a note: a task that cannot say it
@@ -296,10 +296,25 @@ export async function checkpointRestore(
 		// I'd like to revisit this in the future and try to improve the
 		// task flow and the communication between the webview and the
 		// `Task` instance.
-		provider?.cancelTask()
+		void startTaskAgain(provider)
 	} catch (error) {
 		provider?.log("[checkpointRestore] failed to restore checkpoint")
 		throw error
+	}
+}
+
+/** Starts the task again (the provider cancels it, and it is rehydrated). Resolves to what failed, if the restart did. */
+async function startTaskAgain(
+	provider: ReturnType<Task["providerRef"]["deref"]>,
+): Promise<{ error: unknown } | undefined> {
+	try {
+		await provider?.cancelTask()
+		return undefined
+	} catch (error) {
+		provider?.log(
+			`[checkpointRestore] the task could not be started again: ${error instanceof Error ? error.message : String(error)}`,
+		)
+		return { error }
 	}
 }
 

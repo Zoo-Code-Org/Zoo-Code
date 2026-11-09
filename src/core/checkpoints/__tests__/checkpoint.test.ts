@@ -334,6 +334,64 @@ describe("Checkpoint functionality", () => {
 			expect(error.cause).toBe(cause)
 		})
 
+		it("awaits the restart after a failed rewind, and tells the caller when the task could not be started again either", async () => {
+			const failure = new Error("Failed to save the messages")
+			const restartFailure = new Error("cannot rehydrate")
+			mockTask.overwriteClineMessages.mockRejectedValueOnce(failure)
+			mockProvider.cancelTask.mockRejectedValueOnce(restartFailure)
+
+			const restoring = checkpointRestore(mockTask, {
+				ts: 2,
+				commitHash: RESTORE_HASH,
+				mode: "restore",
+				operation: "edit",
+			})
+
+			await expect(restoring).rejects.toMatchObject({
+				name: "ConversationRewindError",
+				cause: failure, // the rewind failure is not hidden by the restart failure
+				restarted: false,
+				restartFailure: { error: restartFailure }, // nor the other way round
+			})
+			expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+			expect(mockProvider.log).toHaveBeenCalledWith(
+				expect.stringContaining("could not be started again: cannot rehydrate"),
+			)
+		})
+
+		it("says the task was restarted after a failed rewind when it was", async () => {
+			mockTask.overwriteClineMessages.mockRejectedValueOnce(new Error("Failed to save the messages"))
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "edit" }),
+			).rejects.toMatchObject({ restarted: true, restartFailure: undefined })
+		})
+
+		it("does not leave a rejection unhandled when the restart after a rewind that worked fails: it is logged", async () => {
+			const unhandled = vi.fn()
+			process.on("unhandledRejection", unhandled)
+			try {
+				mockProvider.cancelTask.mockRejectedValueOnce(new Error("cannot rehydrate"))
+
+				await expect(
+					checkpointRestore(mockTask, {
+						ts: 2,
+						commitHash: RESTORE_HASH,
+						mode: "restore",
+						operation: "delete",
+					}),
+				).resolves.toBeUndefined()
+				await new Promise((resolve) => setTimeout(resolve, 20)) // a stray rejection surfaces a turn later
+
+				expect(unhandled).not.toHaveBeenCalled()
+				expect(mockProvider.log).toHaveBeenCalledWith(
+					expect.stringContaining("could not be started again: cannot rehydrate"),
+				)
+			} finally {
+				process.off("unhandledRejection", unhandled)
+			}
+		})
+
 		it("does not start the task again when the files could not be restored", async () => {
 			mockCheckpointService.restoreCheckpoint.mockRejectedValueOnce(new Error("no such commit"))
 
