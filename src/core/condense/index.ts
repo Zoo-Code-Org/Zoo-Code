@@ -116,7 +116,10 @@ export function transformMessagesForCondensing<
  * drops plain-text reasoning as well (buildCleanConversationHistory in Task.ts); without this
  * filter the condense request can exceed the context window that the normal request fits in.
  *
- * Messages whose content becomes empty after filtering are dropped.
+ * Standalone reasoning items are dropped, as the normal request path skips them. A message
+ * whose content is only reasoning keeps its turn with a short placeholder, so user and
+ * assistant turns still alternate for providers such as Bedrock that reject adjacent user
+ * messages.
  *
  * @param messages - The messages to filter
  * @returns The messages without reasoning blocks
@@ -136,12 +139,10 @@ export function stripReasoningForCondensing(messages: ApiMessage[]): ApiMessage[
 			result.push(message)
 			continue
 		}
-		const content = message.content.filter(
-			(block) => (block as { type?: string }).type !== "reasoning",
+		const remaining = message.content.filter((block) => (block as { type?: string }).type !== "reasoning")
+		const content = (
+			remaining.length > 0 ? remaining : [{ type: "text", text: "[Reasoning omitted]" }]
 		) as ApiMessage["content"]
-		if (Array.isArray(content) && content.length === 0) {
-			continue
-		}
 		result.push({ ...message, content })
 	}
 	return result
