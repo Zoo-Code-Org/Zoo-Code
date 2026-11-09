@@ -1350,16 +1350,11 @@ function scanShellSyntax(text: string): ScanOutcome {
 				finalEnd = chainBody.rawIndex
 				searchStart = chainBody.rawIndex < text.length ? chainBody.rawIndex + 1 : chainBody.rawIndex
 			}
-			if (frames.length > 0) {
-				// Inside an expansion, no H placeholder is emitted. Without this
-				// routing, the collected payloads would never reach a re-scan.
-				// Hand them to the innermost parameter-expansion ancestor,
-				// exactly as a directly nested substitution close does. A
-				// heredoc opened inside $(…)/backtick/<( has no such ancestor.
-				// The enclosing substitution's payload is re-scanned whole and
-				// recovers them there.
-				innermostParam(frames, paramFramesOpen)?.payloads?.push(...payloads)
-			}
+			// Inside an expansion no H placeholder is emitted, but the
+			// enclosing frame's close hands its whole text to the expansion's
+			// payload list, and re-scanning that text re-enters this heredoc
+			// and collects these payloads there. Pushing them here as well
+			// would emit each one twice.
 			return emitMask(finalEnd)
 		}
 		// No delimiter token appeared, and the break was not metacharacter-caused
@@ -1500,26 +1495,34 @@ function scanShellSyntax(text: string): ScanOutcome {
 						i++
 						continue
 					}
+					// One emission channel per payload, as in the main scan: a
+					// frame delivers only when a parameter expansion is its
+					// directly enclosing frame. A deeper close rides the
+					// enclosing chain's outermost slice and is recovered when
+					// that payload is re-scanned; pushing its slice here too
+					// would emit it twice. Slicing every close eagerly would
+					// also cost O(n²) on adversarial nesting.
 					if (closed.kind === "parameter-expansion") {
 						localParamOpen--
+						const parent = frames[frames.length - 1]
 						if (frames.length === 0) {
 							collect.push(...(closed.payloads ?? []))
 						} else {
-							innermostParam(frames, localParamOpen)?.payloads?.push(...(closed.payloads ?? []))
+							// Stryker disable next-line ConditionalExpression: a non-parameter parent carries a null payload list, so an always-true gate short-circuits on the same optional chain the real gate's false branch already skips, and no reachable input differs.
+							if (parent === innermostParam(frames, localParamOpen)) {
+								// Stryker disable next-line ArrayDeclaration,OptionalChaining: the gate restricts this push to a parameter-expansion parent, which always carries a payload list, so the optional chain and the empty-coalesce default are both unreachable branches of the same invariant.
+								parent.payloads?.push(...(closed.payloads ?? []))
+							}
 						}
 					} else {
-						// Slice the inner text only where a consumer exists. A
-						// nested close with no parameter-expansion ancestor is
-						// recovered when the enclosing payload is re-scanned.
-						// Slicing every close eagerly would cost O(n²) on
-						// adversarial nesting.
-						const paramAncestor = innermostParam(frames, localParamOpen)
-						if (frames.length === 0 || paramAncestor) {
-							const inner = trimScanBlanks(text.slice(closed.contentStart, i))
-							if (paramAncestor) {
-								paramAncestor.payloads?.push(inner)
-							} else {
-								collect.push(inner)
+						const parent = frames[frames.length - 1]
+						if (frames.length === 0) {
+							collect.push(trimScanBlanks(text.slice(closed.contentStart, i)))
+						} else {
+							// Stryker disable next-line ConditionalExpression: a non-parameter parent carries a null payload list, so an always-true gate short-circuits on the same optional chain the real gate's false branch already skips, and no reachable input differs.
+							if (parent === innermostParam(frames, localParamOpen)) {
+								// Stryker disable next-line OptionalChaining: the gate restricts this push to a parameter-expansion parent, which always carries a payload list, so removing the optional chain changes no observable output.
+								parent.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
 							}
 						}
 					}
@@ -2020,18 +2023,32 @@ function scanShellSyntax(text: string): ScanOutcome {
 					}
 					expansionCloseEnd = closeEnd
 				} else {
-					// The frame is nested inside an expansion region. A
-					// substitution inside a parameter expansion belongs to that
-					// expansion's payload list. Anything deeper is recovered
-					// when the enclosing payload is re-scanned. Slice its inner
-					// text only where a consumer exists. Otherwise deep nesting
-					// would cost O(n²).
+					// The frame is nested inside an open region. Its content
+					// reaches the segment list through one channel: when the
+					// enclosing chain's outermost member closes directly inside
+					// a parameter expansion, its text joins that expansion's
+					// payload list, and re-scanning that payload extracts every
+					// substitution nested anywhere beneath it. Delivering a
+					// deeper frame's slice as well would emit its content
+					// twice — once directly, once through the enclosing
+					// payload's re-scan — and slicing every close eagerly would
+					// cost O(n²) on adversarial nesting. So a frame delivers
+					// only when the expansion is its directly enclosing frame.
+					// A parameter-expansion frame carries its payload list
+					// rather than its text: an enclosing expansion restores its
+					// text verbatim and never re-scans it, so merging the list
+					// into the enclosing expansion is that list's only carrier.
 					frameCloseEnd = closeEnd
-					const paramAncestor = innermostParam(stack, paramFramesOpen)
-					if (closed.kind === "parameter-expansion") {
-						paramAncestor?.payloads?.push(...(closed.payloads ?? []))
-					} else if (paramAncestor) {
-						paramAncestor.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
+					const parent = stack[stack.length - 1]
+					// Stryker disable next-line ConditionalExpression: a non-parameter parent carries a null payload list, so an always-true gate short-circuits on the same optional chain the real gate's false branch already skips, and no reachable input differs.
+					if (parent === innermostParam(stack, paramFramesOpen)) {
+						if (closed.kind === "parameter-expansion") {
+							// Stryker disable next-line ArrayDeclaration,OptionalChaining: the gate restricts this push to a parameter-expansion parent, which always carries a payload list, so the optional chain and the empty-coalesce default cannot be observed.
+							parent.payloads?.push(...(closed.payloads ?? []))
+						} else {
+							// Stryker disable next-line OptionalChaining: the same gate guarantees a payload-carrying parent, so removing the optional chain changes no observable output.
+							parent.payloads?.push(trimScanBlanks(text.slice(closed.contentStart, i)))
+						}
 					}
 				}
 				i = closeEnd
@@ -2133,9 +2150,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 							return outcome
 						}
 						// The enclosing region is masked wholesale. Route the
-						// substitutions to the innermost expansion ancestor, like
-						// a nested close does.
-						innermostParam(stack, paramFramesOpen)?.payloads?.push(...arithPayloads)
+						// substitutions into the payload list only when the
+						// arithmetic sits directly inside an expansion: from any
+						// deeper frame the enclosing chain's delivered text
+						// re-scan re-enters this arithmetic and collects them
+						// there, so a push here would emit each twice.
+						if (stack[stack.length - 1] === innermostParam(stack, paramFramesOpen)) {
+							// Stryker disable next-line OptionalChaining: the guard just proved the innermost expansion exists and every expansion frame carries a payload list, so neither optional chain here can short-circuit on reachable input.
+							innermostParam(stack, paramFramesOpen)?.payloads?.push(...arithPayloads)
+						}
 						frameCloseEnd = arith.end
 						i = arith.end
 						continue

@@ -2329,11 +2329,13 @@ describe("parseCommand", () => {
 			// only after the line ends, and a joined `{` whose expansion must
 			// stay accounted inside its enclosing one. Every payload bash
 			// substitutes here must reach the segment list exactly once.
+			// A payload nested in a joined expansion reaches the list through
+			// the re-scan of its enclosing payload, so the enclosing command is
+			// emitted before it — the same order the top-level twins show.
 			const outNested = parseCommand("echo ${x:-$(cat >\\\n(printf b > b.marker))}\n")
 			expect(outNested.parseError).toBeNull()
 			expect(outNested.commands).toEqual([
 				"echo ${x:-$(cat >\\\n(printf b > b.marker))}",
-				"printf b > b.marker",
 				"cat",
 				"printf b > b.marker",
 			])
@@ -2348,18 +2350,42 @@ describe("parseCommand", () => {
 			expect(comment.commands).toEqual(["echo", "cat", "printf x"])
 			const commentNested = parseCommand("echo ${x:-$(cat <\\\n(printf x # )y\n))}\n")
 			expect(commentNested.parseError).toBeNull()
-			expect(commentNested.commands).toEqual([
-				"echo ${x:-$(cat <\\\n(printf x # )y\n))}",
-				"printf x",
-				"cat",
-				"printf x",
-			])
+			expect(commentNested.commands).toEqual(["echo ${x:-$(cat <\\\n(printf x # )y\n))}", "cat", "printf x"])
+			// Drop guard: dedup must remove the duplicate emission, not a real
+			// segment. A fix that dropped the payload (or the host word) instead
+			// of its second emission would still produce a three-element list, so
+			// each payload and host word is additionally asserted to appear
+			// exactly once.
+			const countSegments = (list: string[], segment: string): number =>
+				list.filter((command) => command === segment).length
+			expect(countSegments(outNested.commands, "printf b > b.marker")).toBe(1)
+			expect(countSegments(outNested.commands, "cat")).toBe(1)
+			expect(countSegments(commentNested.commands, "printf x")).toBe(1)
+			expect(countSegments(commentNested.commands, "cat")).toBe(1)
 			const braceNested = parseCommand("echo ${x:-a$\\\n{y:-2}}")
 			expect(braceNested.parseError).toBeNull()
 			expect(braceNested.commands).toEqual(["echo ${x:-a$\\\n{y:-2}}"])
 			const bracePayload = parseCommand("echo ${x:-$\\\n{y:$(printf X > x.marker)}}")
 			expect(bracePayload.parseError).toBeNull()
 			expect(bracePayload.commands).toEqual(["echo ${x:-$\\\n{y:$(printf X > x.marker)}}", "printf X > x.marker"])
+		})
+
+		it("routes arithmetic payloads through the directly enclosing expansion", () => {
+			// The arithmetic branch delivers its collected payloads only when a
+			// parameter expansion is the frame directly enclosing it. Payloads
+			// deeper in a chain arrive when the enclosing frame's text is
+			// re-scanned, so an unconditional push would emit them a second
+			// time, and skipping the directly-enclosing case would drop them.
+			const arithInParam = parseCommand("echo ${p:-$(( $(printf b) * 1 ))}\n")
+			expect(arithInParam.parseError).toBeNull()
+			expect(arithInParam.commands).toEqual(["echo ${p:-$(( $(printf b) * 1 ))}", "printf b"])
+			const arithInSubInParam = parseCommand("echo ${p:-$(echo $(( $(printf d) * 1 )))}\n")
+			expect(arithInSubInParam.parseError).toBeNull()
+			expect(arithInSubInParam.commands).toEqual([
+				"echo ${p:-$(echo $(( $(printf d) * 1 )))}",
+				"echo $(( $(printf d) * 1 ))",
+				"printf d",
+			])
 		})
 	})
 
