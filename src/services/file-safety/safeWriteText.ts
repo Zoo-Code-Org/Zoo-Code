@@ -19,8 +19,17 @@ export interface SafeWriteTextOptions {
 	 * rename below refuses unless the target is still that same file, so an authorization made
 	 * outside this module cannot be spent on a link or a different file swapped in for the pathname
 	 * afterwards. A failure to read the identity counts as "not that file": the guard fails closed.
+	 *
+	 * Both halves are bigint because they are read from `stat(..., { bigint: true })`, on both sides
+	 * of the comparison. A plain stat returns a 64-bit NTFS file id rounded to a double, so above
+	 * 2**53 two different files can be reported with the same number and the guard would accept one
+	 * for the other; there is no way to recover the lost bits from the rounded value, so the capture
+	 * spelling has to be right rather than the comparison. Measured on this box's NTFS volume, three
+	 * identities came back as 281474990289684, 4503599627490809 and 5629499534337367 - all below
+	 * 2**53, so this volume cannot exhibit the collision, which is why the fix is the type and the
+	 * capture and not a test here.
 	 */
-	authorizedTarget?: { dev: number; ino: number }
+	authorizedTarget?: { dev: bigint; ino: bigint }
 
 	/**
 	 * Platform override for testing.  When omitted the real process.platform
@@ -749,7 +758,7 @@ export async function safeWriteText(
 			// narrows the window to this stat-plus-rename pair - the most a rename-based writer can do.
 			const authorizedTarget = options?.authorizedTarget
 			if (authorizedTarget) {
-				const identity = await fs.stat(targetPath).catch(() => undefined)
+				const identity = await fs.stat(targetPath, { bigint: true }).catch(() => undefined)
 				if (!identity || identity.dev !== authorizedTarget.dev || identity.ino !== authorizedTarget.ino) {
 					throw new Error(`safeWriteText: ${absoluteFilePath} changed identity after it was authorized`)
 				}

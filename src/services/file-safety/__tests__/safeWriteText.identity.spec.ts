@@ -10,7 +10,11 @@ import { safeWriteText } from "../safeWriteText"
 // in and the identity of the path about to be written - and it refuses rather than publishing
 // when they disagree or when the identity cannot be read at all. These rows run against the real
 // filesystem, with no stubbing of fs.stat, because the assertion that matters is about what the
-// path actually is at the moment of the commit.
+// path actually is at the moment of the commit. The identities below are read with
+// { bigint: true } because the guard compares bigints: a plain stat hands back a 64-bit NTFS file
+// id rounded to a double, so the guard would be comparing rounded numbers, and above 2**53 two
+// different files can round to the same one. This volume's measured ids are all below 2**53 (see
+// the option's comment), so these rows exercise the comparison and not the rounding.
 describe("safeWriteText authorized identity", () => {
 	let dir: string
 	beforeEach(async () => {
@@ -23,7 +27,7 @@ describe("safeWriteText authorized identity", () => {
 	it("publishes when the target is still the file the caller authorized", async () => {
 		const file = path.join(dir, "target.txt")
 		await fs.promises.writeFile(file, "before")
-		const authorized = await fs.promises.stat(file)
+		const authorized = await fs.promises.stat(file, { bigint: true })
 		await safeWriteText(file, "after", { authorizedTarget: { dev: authorized.dev, ino: authorized.ino } })
 		expect(await fs.promises.readFile(file, "utf8")).toBe("after")
 	})
@@ -40,7 +44,7 @@ describe("safeWriteText authorized identity", () => {
 		const other = path.join(dir, "other.txt")
 		await fs.promises.writeFile(file, "before")
 		await fs.promises.writeFile(other, "someone else's")
-		const otherIdentity = await fs.promises.stat(other)
+		const otherIdentity = await fs.promises.stat(other, { bigint: true })
 		await expect(
 			safeWriteText(file, "after", { authorizedTarget: { dev: otherIdentity.dev, ino: otherIdentity.ino } }),
 		).rejects.toThrow(/changed identity after it was authorized/)
@@ -53,7 +57,7 @@ describe("safeWriteText authorized identity", () => {
 	it("refuses rather than reporting a raw stat failure when the authorized file is gone", async () => {
 		const file = path.join(dir, "target.txt")
 		await fs.promises.writeFile(file, "before")
-		const authorized = await fs.promises.stat(file)
+		const authorized = await fs.promises.stat(file, { bigint: true })
 		await fs.promises.unlink(file)
 		await expect(
 			safeWriteText(file, "after", { authorizedTarget: { dev: authorized.dev, ino: authorized.ino } }),
