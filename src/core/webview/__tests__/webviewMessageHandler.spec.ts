@@ -2535,6 +2535,26 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			expect(vi.getTimerCount()).toBe(0)
 		})
 
+		it("puts the values back together, so the answer does not wait one write time for each of them", async () => {
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			// The saves of the new values go through; so does nothing that restores an old one (the storage stalls), and
+			// the later setting never settles either.
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				(k: string, v: unknown): Promise<void> =>
+					k === "timeFormat" || v === 100 || v === 12
+						? new Promise<void>(() => {})
+						: (real(k as never, v as never) as Promise<void>),
+			)
+
+			const saving = save({ interfaceFontScale: 120, terminalFontSize: 14, timeFormat: "24h" })
+			const failed = expect(saving).rejects.toThrow("did not finish in 15 seconds")
+			await vi.advanceTimersByTimeAsync(15_000) // the later setting gives up; the two restores start together
+			await vi.advanceTimersByTimeAsync(15_000) // and both give up after one write time, not one after the other
+
+			await failed
+			expect(resultsOf()).toEqual([expect.objectContaining({ success: false })]) // told after 30 s, not 45
+		})
+
 		it("keeps nothing for repeated saves that time out", async () => {
 			hangOn("timeFormat")
 

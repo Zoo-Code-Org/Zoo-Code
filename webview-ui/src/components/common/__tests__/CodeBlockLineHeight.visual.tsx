@@ -1,7 +1,8 @@
 import { expect, test } from "../../../../playwright/coverage-fixture"
 import { mountedStory } from "../../../../playwright/mounted-story"
 
-// Computed values only: no screenshot, so there is no baseline to keep.
+// The computed values say what the line height is; the picture shows the lines of a code block with a large editor size
+// not overlapping inside a list.
 test.describe("the line height of a code block inside a list", () => {
 	const lineHeights = (component: ReturnType<typeof mountedStory>) =>
 		component.evaluate((root) => {
@@ -35,6 +36,7 @@ test.describe("the line height of a code block inside a list", () => {
 		expect(codeFont).toBe(32)
 		expect(code).toBeCloseTo(32 * 1.35, 5)
 		expect(code).toBeGreaterThan(item) // the list's own line height would be smaller than the font
+		await expect(component).toHaveScreenshot("markdown-list-code-editor-size.png")
 		await page.evaluate(() => document.documentElement.style.removeProperty("--zoo-editor-font-size"))
 	})
 })

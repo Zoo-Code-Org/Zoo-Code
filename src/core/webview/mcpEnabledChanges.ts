@@ -109,12 +109,22 @@ export async function reconcileMcpEnabled(hub: McpEnabledTarget, getStored: () =
 	try {
 		for (;;) {
 			// A change that waits is only ever behind one that runs: when that one settles, the next one is running.
-			const latest = changes.running?.promise
-			if (!latest) break
-			await latest.catch(() => undefined)
+			const running = changes.running?.promise
+			if (running) {
+				await running.catch(() => undefined)
+				continue
+			}
+			// Nothing is running: the hub has what the last change gave it. If a change that came in while this one was under
+			// way (a save that timed out and joined the reconciliation) moved it from what is stored, bring it back.
+			const stored = getStored()
+			if (stored === changes.last) break
+			let failed = false
+			await changeMcpEnabled(hub, stored).catch(() => {
+				failed = true
+			})
+			// A change that failed is not repeated here: the loop would not end.
+			if (failed) break
 		}
-		const stored = getStored()
-		if (stored !== changes.last) await changeMcpEnabled(hub, stored).catch(() => undefined)
 	} finally {
 		changes.reconciling = false
 	}

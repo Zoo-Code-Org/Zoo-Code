@@ -977,7 +977,9 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				failure = error instanceof Error ? error.message : String(error)
 
-				for (const write of written.reverse()) {
+				// The restores are of different keys, so none waits for another: started together (in reverse order, each
+				// queues its store at once), a stalled one costs the save one write time, not one per key.
+				const restores = written.reverse().map(async (write) => {
 					try {
 						await undoSettingWrite(provider.contextProxy, write, {
 							owner: provider,
@@ -997,7 +999,8 @@ export const webviewMessageHandler = async (
 							`[updateSettings] Could not restore ${write.key}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
 						)
 					}
-				}
+				})
+				await Promise.all(restores)
 
 				provider.log(`[updateSettings] Save failed: ${failure}`)
 

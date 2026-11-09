@@ -166,7 +166,7 @@ describe("changeMcpEnabled", () => {
 			await Promise.all(reconciles)
 
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]])
-			expect(getStored).toHaveBeenCalledTimes(1) // not a waiting reconciliation for each save
+			expect(getStored).toHaveBeenCalledTimes(2) // read before the change and checked after it, not once for each of the 20 saves
 		})
 
 		it("waits for a change that was queued after the first one, and looks at what is stored then", async () => {
@@ -186,6 +186,35 @@ describe("changeMcpEnabled", () => {
 			await reconcile
 
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true], [false]])
+		})
+
+		it("checks again after its own change, so a change that joined while it ran does not leave the hub other than what is stored", async () => {
+			const { hub, releases } = createHub()
+			const stored = () => true // MCP stays stored as enabled: a later save that asked for false never stored it
+
+			const reconcile = reconcileMcpEnabled(hub, stored) // nothing was applied before: it applies true, which stalls
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			const timedOut = changeMcpEnabled(hub, false) // a second save: queued behind it
+			const second = reconcileMcpEnabled(hub, stored) // and its reconciliation joins the one that runs
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
+
+			releases[0]() // true settles, and the waiting false starts
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]() // false settles
+			await timedOut
+			await vi.waitFor(() => expect(releases).toHaveLength(3)) // the hub is brought back to the stored value
+			releases[2]()
+			await Promise.all([reconcile, second])
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false], [true]])
+		})
+
+		it("does not repeat a change that failed, so it cannot loop", async () => {
+			const failing = { handleMcpEnabledChange: vi.fn(async () => Promise.reject(new Error("transport stuck"))) }
+
+			await reconcileMcpEnabled(failing, () => true)
+
+			expect(failing.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		})
 
 		it("applies nothing when the stored value is the one the hub got last", async () => {
