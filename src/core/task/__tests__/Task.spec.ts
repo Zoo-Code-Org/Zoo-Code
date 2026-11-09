@@ -25,7 +25,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { MODEL_FETCH_TIMEOUT_MS, Task } from "../Task"
 import { SYSTEM_PROMPT } from "../../prompts/system"
-import { createRateLimitClock } from "../RateLimitClock"
+import { createRateLimitClock, type RateLimitClock } from "../RateLimitClock"
 import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
@@ -56,6 +56,7 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<ModelInfo>
 	backoffAndAnnounce: (retryAttempt: number, error: unknown) => Promise<void>
+	reserveProviderRateLimitSlot: (retryAttempt: number) => Promise<void>
 	requestPolicySnapshot?: RequestPolicySnapshot
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
@@ -4023,6 +4024,113 @@ describe("Cline", () => {
 				const lastTime = clock.getLastRequestTime()
 				expect(lastTime).toBeDefined()
 				expect(lastTime).toBeGreaterThan(0)
+			})
+
+			describe("dispatch revalidation against other requests on the shared clock", () => {
+				// `delay` advances a controlled `performance.now()` like a real wait,
+				// so dispatch times can be compared against the 5s window.
+				let now: number
+
+				beforeEach(() => {
+					now = 1_000_000
+					vi.spyOn(performance, "now").mockImplementation(() => now)
+					mockDelay.mockImplementation((ms: number) => {
+						now += ms
+						return Promise.resolve(undefined)
+					})
+				})
+
+				afterEach(() => {
+					vi.mocked(performance.now).mockRestore()
+					mockDelay.mockReset().mockResolvedValue(undefined)
+				})
+
+				function createDispatchTask(clock: RateLimitClock) {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+						rateLimitClock: clock,
+					})
+					vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+					vi.spyOn(task, "say").mockResolvedValue(undefined)
+					const dispatchedAt: number[] = []
+					const createMessage = vi.spyOn(task.api, "createMessage")
+					createMessage.mockImplementation(() => {
+						dispatchedAt.push(now)
+						return asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "response" }])
+					})
+					return { task, dispatchedAt, createMessage }
+				}
+
+				it("waits out a request that dispatched while the agent prepared longer than the window", async () => {
+					const clock = createRateLimitClock()
+					const { task, dispatchedAt } = createDispatchTask(clock)
+
+					// The agent reserves before building environment details...
+					await getTaskTestAccess(task).reserveProviderRateLimitSlot(0)
+					// ...which takes longer than the window, so a title request dispatches meanwhile.
+					now += 7_000
+					clock.recordRequest()
+					const otherDispatchAt = now
+
+					await task.attemptApiRequest(0, { skipProviderRateLimit: true }).next()
+
+					expect(dispatchedAt).toHaveLength(1)
+					expect((dispatchedAt[0] ?? 0) - otherDispatchAt).toBeGreaterThanOrEqual(5_000)
+				})
+
+				it("dispatches without waiting when only its own earlier reservation is on the clock", async () => {
+					const clock = createRateLimitClock()
+					const { task, dispatchedAt } = createDispatchTask(clock)
+
+					await getTaskTestAccess(task).reserveProviderRateLimitSlot(0)
+					const reservedAt = now
+					now += 1_000
+
+					await task.attemptApiRequest(0, { skipProviderRateLimit: true }).next()
+
+					expect(mockDelay).not.toHaveBeenCalled()
+					expect(dispatchedAt).toEqual([reservedAt + 1_000])
+				})
+
+				it.each([
+					{ path: "the rate-limited path", options: {} },
+					{ path: "the inherited skipProviderRateLimit path", options: { skipProviderRateLimit: true } },
+				])("waits out a request that dispatched during retry backoff on $path", async ({ options }) => {
+					mockProvider.getState.mockResolvedValue({
+						apiConfiguration: mockApiConfig,
+						mcpEnabled: false,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 1,
+					})
+					const clock = createRateLimitClock()
+					const { task, dispatchedAt, createMessage } = createDispatchTask(clock)
+					createMessage.mockImplementationOnce(() => {
+						dispatchedAt.push(now)
+						return (async function* (): AsyncGenerator<ApiStreamChunk> {
+							yield* []
+							throw Object.assign(new Error("server error"), { status: 500 })
+						})()
+					})
+					// A title request dispatches on the first backoff tick.
+					let otherDispatchAt: number | undefined
+					mockDelay.mockImplementation((ms: number) => {
+						now += ms
+						if (otherDispatchAt === undefined) {
+							clock.recordRequest()
+							otherDispatchAt = now
+						}
+						return Promise.resolve(undefined)
+					})
+
+					await task.attemptApiRequest(0, options).next()
+
+					expect(dispatchedAt).toHaveLength(2)
+					expect(otherDispatchAt).toBeDefined()
+					expect((dispatchedAt[1] ?? 0) - (otherDispatchAt ?? 0)).toBeGreaterThanOrEqual(5_000)
+				})
 			})
 		})
 

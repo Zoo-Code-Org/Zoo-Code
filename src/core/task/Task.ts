@@ -437,6 +437,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** Handlers replaced during in-flight work; disposed when that work settles, or with the task. */
 	private retiredApis = new Set<ApiHandler>()
 	private rateLimitClock: RateLimitClock
+	/** Shared-clock timestamp this task's agent loop last recorded; background requests never set it. */
+	private ownRateLimitReservation?: number
 	private autoApprovalHandler: AutoApprovalHandler
 
 	toolRepetitionDetector: ToolRepetitionDetector
@@ -5808,7 +5810,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		let lastRequestTime = this.rateLimitClock.getLastRequestTime()
 		// Only show the countdown UX on the first attempt. Retry flows have their own delay messaging.
 		if (rateLimitSeconds <= 0 || !lastRequestTime || retryAttempt !== 0) {
-			this.rateLimitClock.recordRequest()
+			await this.reserveAgentDispatchSlot()
 			return
 		}
 
@@ -5840,12 +5842,44 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			lastRequestTime = latestRequestTime
 		}
 
-		this.rateLimitClock.recordRequest()
+		this.recordAgentRateLimitReservation()
 
 		if (waited) {
 			// Finalize the partial message so the UI doesn't keep rendering an in-progress spinner.
 			await this.say("api_req_rate_limit_wait", undefined, undefined, false)
 		}
+	}
+
+	private recordAgentRateLimitReservation(): void {
+		this.rateLimitClock.recordRequest()
+		this.ownRateLimitReservation = this.rateLimitClock.getLastRequestTime()
+	}
+
+	/**
+	 * Reserve the agent's dispatch slot without the countdown UX. When the
+	 * latest timestamp on the shared clock is this task's own earlier
+	 * reservation (e.g. one taken before building environment details), the
+	 * slot is recorded immediately. When another request — such as background
+	 * title generation, during preparation or retry backoff — recorded since,
+	 * the window is silently waited out from that dispatch first.
+	 */
+	private async reserveAgentDispatchSlot(): Promise<void> {
+		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
+
+		while (!this.abort && !this.abandoned) {
+			const lastRequestTime = this.rateLimitClock.getLastRequestTime()
+			const remainingMs =
+				lastRequestTime && lastRequestTime !== this.ownRateLimitReservation
+					? rateLimitSeconds * 1000 - (performance.now() - lastRequestTime)
+					: 0
+			if (remainingMs <= 0) {
+				break
+			}
+
+			await delay(remainingMs)
+		}
+
+		this.recordAgentRateLimitReservation()
 	}
 
 	/**
@@ -5917,11 +5951,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// requests — even from new subtasks — will honour the provider's rate-limit.
 		//
 		// NOTE: When recursivelyMakeClineRequests handles rate limiting, it reserves the
-		// slot earlier to include the environment details build. We still record it
-		// here for direct callers (tests) and for the case where we didn't rate-limit
-		// in the caller.
+		// slot earlier to include the environment details build. Re-reserving here
+		// waits out any request (e.g. title generation) that dispatched on the shared
+		// clock since then, including during retry backoff.
 		if (options.skipProviderRateLimit) {
-			this.rateLimitClock.recordRequest()
+			await this.reserveAgentDispatchSlot()
 		} else {
 			await this.reserveProviderRateLimitSlot(retryAttempt)
 		}
