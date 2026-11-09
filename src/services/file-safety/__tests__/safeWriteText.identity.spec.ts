@@ -28,18 +28,24 @@ describe("safeWriteText authorized identity", () => {
 		expect(await fs.promises.readFile(file, "utf8")).toBe("after")
 	})
 
-	// The pathname is the same and the file is not: that is exactly the case a textual re-check
-	// cannot see, because both spellings of the swap land on the same path.
-	it("refuses to publish over a different file that took the authorized path", async () => {
+	// Two live files on one filesystem have different inodes unless they are hard links of each
+	// other, so the guard is asked about an identity that provably is not the target's. The first
+	// draft of this row unlinked the target and wrote a different file to the same pathname, which
+	// passed on Windows and failed on the ubuntu runner: the freshly freed inode came back, so the
+	// swapped-in file answered with the authorized identity and the guard correctly accepted it.
+	// A test that asserts what a filesystem does with an inode it just released is not a test of
+	// this guard.
+	it("refuses to publish when the target is not the file whose identity was authorized", async () => {
 		const file = path.join(dir, "target.txt")
+		const other = path.join(dir, "other.txt")
 		await fs.promises.writeFile(file, "before")
-		const authorized = await fs.promises.stat(file)
-		await fs.promises.unlink(file)
-		await fs.promises.writeFile(file, "someone else's")
+		await fs.promises.writeFile(other, "someone else's")
+		const otherIdentity = await fs.promises.stat(other)
 		await expect(
-			safeWriteText(file, "after", { authorizedTarget: { dev: authorized.dev, ino: authorized.ino } }),
+			safeWriteText(file, "after", { authorizedTarget: { dev: otherIdentity.dev, ino: otherIdentity.ino } }),
 		).rejects.toThrow(/changed identity after it was authorized/)
-		expect(await fs.promises.readFile(file, "utf8")).toBe("someone else's")
+		expect(await fs.promises.readFile(file, "utf8")).toBe("before")
+		expect(await fs.promises.readFile(other, "utf8")).toBe("someone else's")
 	})
 
 	// Failing closed: an unreadable identity is not the authorized file either, so the write refuses
