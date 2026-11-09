@@ -33,7 +33,8 @@ type TaskTitleAccess = {
 	cancelCurrentRequest(): void
 	requestAbort(isAbandoned: boolean): void
 	cancelTitleGeneration(): void
-	maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void>
+	reserveProviderRateLimitSlot(retryAttempt: number): Promise<void>
+	reserveBackgroundRateLimitSlot(signal: AbortSignal): Promise<boolean>
 	titleAbortController?: AbortController
 	abort: boolean
 	abandoned: boolean
@@ -484,14 +485,69 @@ describe("Task title generation", () => {
 			})
 			clock.recordRequest()
 
-			await getTaskTitleAccess(task).maybeWaitForProviderRateLimit(0)
-			const agentDispatchTime = now
+			await getTaskTitleAccess(task).reserveProviderRateLimitSlot(0)
+			const agentDispatchTime = clock.getLastRequestTime() ?? 0
 
 			// The agent is spaced a full window from the title dispatch instead
 			// of proceeding from the deadline it computed before the countdown.
 			expect(titleDispatchTime).toBeDefined()
 			expect(agentDispatchTime - (titleDispatchTime ?? 0)).toBeGreaterThanOrEqual(10_000)
 		})
+
+		it.each([
+			{ window: "an empty clock", first: "title" },
+			{ window: "an empty clock", first: "agent" },
+			{ window: "an expired window", first: "title" },
+			{ window: "an expired window", first: "agent" },
+			{ window: "a pending window", first: "title" },
+			{ window: "a pending window", first: "agent" },
+		])(
+			"spaces concurrent title and agent reservations with $window when the $first starts first",
+			async ({ window, first }) => {
+				const clock = createRateLimitClock()
+				const task = createTestTask({
+					rateLimitClock: clock,
+					apiConfiguration: { ...mockApiConfig, rateLimitSeconds: 10 },
+				})
+				const access = getTaskTitleAccess(task)
+				if (window !== "an empty clock") {
+					clock.recordRequest()
+				}
+				if (window === "an expired window") {
+					now += 20_000
+				}
+				const recordedAt: number[] = []
+				const record = clock.recordRequest.bind(clock)
+				vi.spyOn(clock, "recordRequest").mockImplementation(() => {
+					recordedAt.push(now)
+					record()
+				})
+				const startTitle = async () => {
+					expect(await access.reserveBackgroundRateLimitSlot(new AbortController().signal)).toBe(true)
+				}
+				const startAgent = () => access.reserveProviderRateLimitSlot(0)
+				const [startFirst, startSecond] =
+					first === "title" ? [startTitle, startAgent] : [startAgent, startTitle]
+				// Start the second request on the next microtask after the first one
+				// reads the clock: any await between that read and its reservation
+				// would let both requests observe the same open window.
+				let second: Promise<void> | undefined
+				const read = clock.getLastRequestTime.bind(clock)
+				vi.spyOn(clock, "getLastRequestTime").mockImplementation(() => {
+					if (!second) {
+						second = Promise.resolve().then(startSecond)
+					}
+					return read()
+				})
+
+				await startFirst()
+				await second
+
+				// Each request reserves its own slot, a full window after the other.
+				expect(recordedAt).toHaveLength(2)
+				expect(Math.abs((recordedAt[1] ?? 0) - (recordedAt[0] ?? 0))).toBeGreaterThanOrEqual(10_000)
+			},
+		)
 
 		it("reads the support prompts before the rate-limit wait", async () => {
 			const clock = createRateLimitClock()

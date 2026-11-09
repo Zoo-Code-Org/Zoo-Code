@@ -3241,13 +3241,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}),
 			])
 
-			await this.waitForProviderRateLimitWindow(controller.signal)
-
-			if (controller.signal.aborted || this.abort || this.abandoned) {
+			if (!(await this.reserveBackgroundRateLimitSlot(controller.signal))) {
 				return
 			}
-
-			this.rateLimitClock.recordRequest()
 
 			const generated = await generateTaskTitle(taskText, this.apiConfiguration, {
 				abortSignal: controller.signal,
@@ -4149,8 +4145,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// we build environment details (which can take time). This ensures
 			// subsequent requests (including subtasks) still honour the
 			// provider rate-limit window.
-			await this.maybeWaitForProviderRateLimit(currentItem.retryAttempt ?? 0)
-			this.rateLimitClock.recordRequest()
+			await this.reserveProviderRateLimitSlot(currentItem.retryAttempt ?? 0)
 
 			await this.say(
 				"api_req_started",
@@ -5797,17 +5792,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Enforce the user-configured provider rate limit.
+	 * Enforce the user-configured provider rate limit and reserve the request
+	 * slot on the shared clock.
+	 *
+	 * The slot is recorded synchronously at the point the window is found open,
+	 * so a concurrent background request on the same clock cannot also observe
+	 * the open window across an `await` before either one records.
 	 *
 	 * NOTE: This is intentionally treated as expected behavior and is surfaced via
 	 * the `api_req_rate_limit_wait` say type (not an error).
 	 */
-	private async maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void> {
+	private async reserveProviderRateLimitSlot(retryAttempt: number): Promise<void> {
 		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
 
 		let lastRequestTime = this.rateLimitClock.getLastRequestTime()
 		// Only show the countdown UX on the first attempt. Retry flows have their own delay messaging.
 		if (rateLimitSeconds <= 0 || !lastRequestTime || retryAttempt !== 0) {
+			this.rateLimitClock.recordRequest()
 			return
 		}
 
@@ -5839,6 +5840,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			lastRequestTime = latestRequestTime
 		}
 
+		this.rateLimitClock.recordRequest()
+
 		if (waited) {
 			// Finalize the partial message so the UI doesn't keep rendering an in-progress spinner.
 			await this.say("api_req_rate_limit_wait", undefined, undefined, false)
@@ -5846,40 +5849,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Silent companion to `maybeWaitForProviderRateLimit` for background provider
+	 * Silent companion to `reserveProviderRateLimitSlot` for background provider
 	 * requests (e.g. title generation): waits out the remaining provider
 	 * rate-limit window without emitting the task-loop countdown UX, since a
 	 * second concurrent partial `api_req_rate_limit_wait` say would interleave
-	 * with the task's own countdown. Resolves early (not rejects) when the given
-	 * signal aborts; callers must still re-check abort state after the wait and
-	 * call `rateLimitClock.recordRequest()` right before issuing the request,
-	 * mirroring the task loop.
+	 * with the task's own countdown.
 	 *
-	 * A task request can dispatch on the shared clock while this one waits, so
-	 * the latest timestamp is re-read after every wait: the request is spaced
-	 * from the most recent dispatch, not from the timestamp it first read.
+	 * The latest timestamp is re-read after every wait so the request is spaced
+	 * from the most recent dispatch. Returns `true` after recording the slot
+	 * synchronously with the open-window check; returns `false` without
+	 * recording when the signal aborts or the task is aborted or abandoned.
 	 */
-	private async waitForProviderRateLimitWindow(signal: AbortSignal): Promise<void> {
+	private async reserveBackgroundRateLimitSlot(signal: AbortSignal): Promise<boolean> {
 		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
-		if (rateLimitSeconds <= 0) {
-			return
-		}
 
-		while (!signal.aborted) {
+		while (!signal.aborted && !this.abort && !this.abandoned) {
 			const lastRequestTime = this.rateLimitClock.getLastRequestTime()
-			if (!lastRequestTime) {
-				return
-			}
-
-			const remainingMs = rateLimitSeconds * 1000 - (performance.now() - lastRequestTime)
+			const remainingMs = lastRequestTime ? rateLimitSeconds * 1000 - (performance.now() - lastRequestTime) : 0
 			if (remainingMs <= 0) {
-				return
+				this.rateLimitClock.recordRequest()
+				return true
 			}
 
 			await delay(remainingMs, { signal }).catch(() => {
 				// Aborted mid-wait: cancellation, not a failure.
 			})
 		}
+
+		return false
 	}
 
 	public async *attemptApiRequest(
@@ -5916,18 +5913,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Get condensing configuration for automatic triggers.
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
 
-		if (!options.skipProviderRateLimit) {
-			await this.maybeWaitForProviderRateLimit(retryAttempt)
-		}
-
 		// Update last request time right before making the request so that subsequent
 		// requests — even from new subtasks — will honour the provider's rate-limit.
 		//
-		// NOTE: When recursivelyMakeClineRequests handles rate limiting, it sets the
-		// timestamp earlier to include the environment details build. We still set it
+		// NOTE: When recursivelyMakeClineRequests handles rate limiting, it reserves the
+		// slot earlier to include the environment details build. We still record it
 		// here for direct callers (tests) and for the case where we didn't rate-limit
 		// in the caller.
-		this.rateLimitClock.recordRequest()
+		if (options.skipProviderRateLimit) {
+			this.rateLimitClock.recordRequest()
+		} else {
+			await this.reserveProviderRateLimitSlot(retryAttempt)
+		}
 
 		// Thread the request state snapshot into prompt generation so the prompt
 		// and the runtime tools (built below from the same `state`) stay aligned
