@@ -101,14 +101,14 @@ describe("Task run-state write helpers", () => {
 		task.requestAbort(false)
 
 		expect([task.abort, task.abandoned]).toEqual([true, false])
-		expect(task.runState.latches).toMatchObject({ abort: true, abandoned: false })
+		expect(task.runState.latches.abandoned).toBe(false)
 	})
 
 	it("requestAbort(true) sets abort and abandoned", () => {
 		task.requestAbort(true)
 
 		expect([task.abort, task.abandoned]).toEqual([true, true])
-		expect(task.runState.latches).toMatchObject({ abort: true, abandoned: true })
+		expect(task.runState.latches.abandoned).toBe(true)
 	})
 
 	it("requestAbandon sets abandoned after an abort", () => {
@@ -124,7 +124,7 @@ describe("Task run-state write helpers", () => {
 		task.requestDispose()
 
 		expect(task.abort).toBe(true)
-		expect(task.runState.latches).toMatchObject({ abort: true, disposed: true })
+		expect(task.runState.latches.disposed).toBe(true)
 	})
 
 	it("drives the ask events", () => {
@@ -149,12 +149,15 @@ describe("Task run-state write helpers", () => {
 		expect(task.runRejections).toEqual([{ event: { tag: "abandonRequested" }, state: initialRunState }])
 	})
 
-	it("keeps the first abort reason in the field and in the kernel", () => {
+	it("has no abort reason before one is set", () => {
+		expect(task.abortReason).toBeUndefined()
+	})
+
+	it("keeps the first abort reason", () => {
 		task.setAbortReason("user_cancelled")
 		task.setAbortReason("streaming_failed")
 
 		expect(task.abortReason).toBe("user_cancelled")
-		expect(task.runState.latches.reason).toBe("user_cancelled")
 		expect(task.runRejections).toEqual([])
 	})
 })

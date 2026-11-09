@@ -1122,7 +1122,7 @@ describe("ClineProvider", () => {
 		test("does not log when the active task is aborted", async () => {
 			const task = new Task(defaultTaskOptions)
 			Object.defineProperty(task, "taskId", { value: "aborted-task", writable: true })
-			task.abort = true
+			Object.assign(task, { abort: true })
 			await provider.addClineToStack(task)
 			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
 			visibilityCallback()
@@ -1316,7 +1316,7 @@ describe("ClineProvider", () => {
 			async (interrupted) => {
 				await provider.resolveWebviewView(mockWebviewView)
 				const task = new Task(defaultTaskOptions)
-				task.abort = interrupted
+				Object.assign(task, { abort: interrupted })
 				provider["taskRegistry"].push(task)
 				const evict = vi.spyOn(provider, "evictCurrentTask")
 				const remove = vi.spyOn(provider, "removeClineFromStack")
@@ -1382,7 +1382,7 @@ describe("ClineProvider", () => {
 				async (reopened) => {
 					await provider.resolveWebviewView(mockWebviewView)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					let choose: (value: string) => void = () => {
@@ -1481,7 +1481,7 @@ describe("ClineProvider", () => {
 				async (delay) => {
 					await provider.resolveWebviewView(mockWebviewView)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					removeSidebarOnCommand()
@@ -1511,7 +1511,7 @@ describe("ClineProvider", () => {
 				async (stage) => {
 					await provider.resolveWebviewView(mockWebviewView)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
@@ -1620,7 +1620,7 @@ describe("ClineProvider", () => {
 			test("retains recovery intent and remaining attempts while replacement HTML generation outlasts the wait", async () => {
 				await provider.resolveWebviewView(mockWebviewView)
 				const task = new Task(defaultTaskOptions)
-				task.abort = true
+				Object.assign(task, { abort: true })
 				provider["taskRegistry"].push(task)
 				const remove = vi.spyOn(provider, "removeClineFromStack")
 				removeSidebarOnCommand()
@@ -1754,7 +1754,7 @@ describe("ClineProvider", () => {
 		test("clears a failed focus incident before a manual sidebar open", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const task = new Task(defaultTaskOptions)
-			task.abort = true
+			Object.assign(task, { abort: true })
 			provider["taskRegistry"].push(task)
 			const remove = vi.spyOn(provider, "removeClineFromStack")
 			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
@@ -2813,7 +2813,7 @@ describe("ClineProvider", () => {
 					mockWebviewPanel.title = "Zoo Code task"
 					await provider.resolveWebviewView(mockWebviewPanel)
 					const task = new Task(defaultTaskOptions)
-					task.abort = interrupted
+					Object.assign(task, { abort: interrupted })
 					provider["taskRegistry"].push(task)
 					const evict = vi.spyOn(provider, "evictCurrentTask")
 					const remove = vi.spyOn(provider, "removeClineFromStack")
@@ -2846,7 +2846,7 @@ describe("ClineProvider", () => {
 			test("explicit retry replaces an exhausted tab without evicting its interrupted task", async () => {
 				await provider.resolveWebviewView(mockWebviewPanel)
 				const task = new Task(defaultTaskOptions)
-				task.abort = true
+				Object.assign(task, { abort: true })
 				provider["taskRegistry"].push(task)
 				const remove = vi.spyOn(provider, "removeClineFromStack")
 				provider["reportWebviewRecoveryFailure"]("Exhausted incident")
@@ -2898,7 +2898,7 @@ describe("ClineProvider", () => {
 				async (stage) => {
 					await provider.resolveWebviewView(mockWebviewPanel)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
