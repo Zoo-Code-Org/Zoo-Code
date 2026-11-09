@@ -1052,7 +1052,9 @@ describe("Task idle condensing — history barrier serializes ask responses", ()
 describe("Task idle condensing — re-evaluation after settings save", () => {
 	// Saving idle-condense settings re-evaluates the waiting task: enabling
 	// the feature (or loosening a threshold) while the task is already idle
-	// above the threshold must start a countdown that nothing else armed.
+	// above the threshold must start a countdown that nothing else armed, and
+	// an already-armed countdown must be replaced so it honours the newly
+	// saved wait instead of firing on the stale deadline.
 	beforeEach(() => {
 		vi.useFakeTimers()
 	})
@@ -1089,17 +1091,65 @@ describe("Task idle condensing — re-evaluation after settings save", () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
-	test("keeps an already-armed countdown untouched", async () => {
-		const { task } = buildTask()
-		task["idleCondenseTimeoutRef"] = setTimeout(() => {}, 30_000)
+	test("re-arms an already-armed countdown with the newly saved longer delay", async () => {
+		const state = baseState()
+		const { task, condense } = buildTask({ state })
+		await task["maybeStartIdleCondenseTimer"]()
+		const originalRef = task["idleCondenseTimeoutRef"]
+		expect(originalRef).toBeDefined()
 
+		// The user saves a longer idle delay while the countdown is armed.
+		state.idleCondenseTimeInSeconds = 300
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		// Flush the re-evaluation's promise chain so the new countdown is armed.
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
+		expect(task["idleCondenseTimeoutRef"]).not.toBe(originalRef)
+		expect(vi.getTimerCount()).toBe(1)
+
+		// The stale 30s deadline no longer fires.
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(condense).not.toHaveBeenCalled()
+		// The full newly saved 300s wait elapses.
+		await vi.advanceTimersByTimeAsync(270_000)
+		expect(condense).toHaveBeenCalledTimes(1)
+	})
+
+	test("re-arms an already-armed countdown with the newly saved shorter delay", async () => {
+		const state = baseState({ idleCondenseTimeInSeconds: 300 })
+		const { task, condense } = buildTask({ state })
+		await task["maybeStartIdleCondenseTimer"]()
+
+		// The user saves a shorter idle delay while the countdown is armed.
+		state.idleCondenseTimeInSeconds = 30
 		task.reevaluateIdleCondenseAfterSettingsSave()
 		await vi.advanceTimersByTimeAsync(0)
 
-		// maybeStartIdleCondenseTimer no-ops while a timer is armed: still one,
-		// and the fake clock never reached its deadline.
-		expect(task["idleCondenseTimeoutRef"]).toBeDefined()
 		expect(vi.getTimerCount()).toBe(1)
+
+		await vi.advanceTimersByTimeAsync(29_999)
+		expect(condense).not.toHaveBeenCalled()
+		// The shortened saved wait fires well before the stale 300s deadline.
+		await vi.advanceTimersByTimeAsync(1)
+		expect(condense).toHaveBeenCalledTimes(1)
+	})
+
+	test("a save that disables the feature cancels an already-armed countdown", async () => {
+		const state = baseState()
+		const { task, condense } = buildTask({ state })
+		await task["maybeStartIdleCondenseTimer"]()
+		expect(vi.getTimerCount()).toBe(1)
+
+		state.idleCondenseContext = false
+		task.reevaluateIdleCondenseAfterSettingsSave()
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(task["idleCondenseTimeoutRef"]).toBeUndefined()
+		expect(vi.getTimerCount()).toBe(0)
+
+		await vi.advanceTimersByTimeAsync(300_000)
+		expect(condense).not.toHaveBeenCalled()
 	})
 
 	test("a save that disables the feature does not arm a countdown", async () => {

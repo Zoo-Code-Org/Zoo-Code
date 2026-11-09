@@ -2648,13 +2648,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * countdown armed, and nothing else arms one for it; this gives it a fresh
 	 * evaluation. A task with API work in flight stays ineligible, and every
 	 * other existing gate (abort, active task, enabled flags, thresholds,
-	 * in-flight condense, already-armed countdown) is re-checked by the shared
-	 * arming path.
+	 * in-flight condense) is re-checked by the shared arming path.
+	 *
+	 * An already-armed countdown is cancelled first: otherwise the shared
+	 * arming path would no-op and the countdown could fire on a stale deadline
+	 * saved before the user increased the idle delay (or condense at a delay
+	 * the user just shortened/disabled). Re-arming applies the newly saved
+	 * wait from this point on.
 	 */
 	public reevaluateIdleCondenseAfterSettingsSave(): void {
 		if (this.activeApiWork > 0) {
 			return
 		}
+		this.cancelIdleCondenseTimer()
 		void this.maybeStartIdleCondenseTimer()
 	}
 
