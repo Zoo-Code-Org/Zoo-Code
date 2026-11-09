@@ -974,6 +974,35 @@ describe("ChatTextArea", () => {
 				expect(onSend).not.toHaveBeenCalled()
 			})
 
+			it("should fill and dismiss the picker when a history row is clicked", () => {
+				const onSend = vi.fn()
+
+				const ControlledArea = () => {
+					const [value, setValue] = useState("")
+
+					return (
+						<ChatTextArea {...defaultProps} inputValue={value} setInputValue={setValue} onSend={onSend} />
+					)
+				}
+
+				const { container } = render(<ControlledArea />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
+
+				// Click a row other than the default one to prove the click picks
+				// the row under the pointer, not the first entry.
+				const row = container.querySelector('[title="Second prompt"]')
+				expect(row).not.toBeNull()
+				fireEvent.click(row!)
+
+				expect(textarea.value).toBe("Second prompt")
+				expect(container.querySelector('[data-testid="context-menu"]')).toBeNull()
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
 			it("should not reopen the picker when typing after a recalled trigger-shaped prompt", () => {
 				// A prompt that is itself shaped like the "!" trigger: typing more
 				// after recalling it would reopen the picker without the dismissal
