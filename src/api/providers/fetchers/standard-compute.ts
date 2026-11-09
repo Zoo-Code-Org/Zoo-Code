@@ -40,7 +40,7 @@ export const parseStandardComputeModel = (model: StandardComputeModel): ModelInf
 	return {
 		// Keep the output budget within 20% of the context window, matching the
 		// reservation used by context management, so small-window models still fit.
-		maxTokens: Math.min(standardComputeDefaultModelInfo.maxTokens, Math.floor(contextWindow * 0.2)),
+		maxTokens: Math.min(standardComputeDefaultModelInfo.maxTokens ?? Infinity, Math.floor(contextWindow * 0.2)),
 		contextWindow,
 		// The routed model sends image requests to a vision model, so it accepts
 		// images although the catalog entry lists no modalities.
