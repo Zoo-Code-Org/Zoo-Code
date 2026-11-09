@@ -4335,20 +4335,54 @@ Instructions`)
 		// a live write in another process, and nothing else ever revisits them. The one delayed retry
 		// is what does, so both halves are pinned: no second sweep inside the window, one after it.
 		vi.useFakeTimers()
+		// vi.useFakeTimers() takes over Date as well as the timers, so a sidecar stamped with the
+		// planted reading ages exactly as the clock is advanced: the retry's verdict changes because
+		// the window closed, not because the fixture changed.
+		const sidecarName = ".SKILL.md.789.ghi.tmp"
+		const sidecarPath = p(globalSkillsDir, sidecarName)
+		// What the retry changes is the sidecar's age relative to now, and this suite's fake timers do
+		// not fake Date (measured: the two fires land milliseconds apart on the real clock), so the
+		// fixture ages the sidecar between the fires instead of pretending the clock carried it past
+		// the window.
+		let sidecarAgeMs = 0
+		mockReaddir.mockImplementation(async (_dir: string, options?: { withFileTypes?: boolean }) =>
+			options?.withFileTypes ? [] : [sidecarName],
+		)
+		mockStat.mockImplementation(async (pathArg: string) =>
+			pathArg.endsWith(sidecarName) ? { mtimeMs: Date.now() - sidecarAgeMs } : Promise.reject(enoent()),
+		)
+		mockUnlink.mockResolvedValue(undefined)
+		const unlinkedSoFar = () => mockUnlink.mock.calls.map((call) => String(call[0]))
 		let sweeps = 0
 		const originalSweep = skillsManager["sweepStaleSkillTempFiles"]
 		skillsManager["sweepStaleSkillTempFiles"] = async () => {
 			sweeps += 1
+			// Count the fires and let the real sweep run beneath the counter: a counter that swallowed
+			// the body would pin the timing without proving the removal the retry exists to perform.
+			// call() rather than originalSweep(): the captured method is unbound, and an unbound call
+			// loses the manager instance, throws inside the sweep, and gets swallowed by the retry's own
+			// catch - which is how the first version of this test passed while never removing anything.
+			await originalSweep.call(skillsManager)
+			if (sweeps === 1) {
+				// The retry only makes sense once the freshness window has closed on this sidecar.
+				sidecarAgeMs = 10 * 60 * 1000
+			}
 		}
 		try {
 			await skillsManager.initialize()
 			expect(sweeps).toBe(1)
+			expect(unlinkedSoFar(), "the first sweep leaves a fresh sidecar alone").not.toContain(sidecarPath)
 			// SKILL_TEMP_SIDECAR_STALE_MS is ten minutes and module-private, so the window is written
 			// here and the assertions below pin which side of it fires.
 			await vi.advanceTimersByTimeAsync(10 * 60 * 1000 - 1)
 			expect(sweeps).toBe(1)
+			expect(unlinkedSoFar()).not.toContain(sidecarPath)
 			await vi.advanceTimersByTimeAsync(1)
 			expect(sweeps).toBe(2)
+			// The removal itself: the retry is what turns a skipped sidecar into a deleted one.
+			expect(unlinkedSoFar(), "the delayed sweep removes the sidecar the first sweep skipped").toContain(
+				sidecarPath,
+			)
 		} finally {
 			skillsManager["sweepStaleSkillTempFiles"] = originalSweep
 			vi.useRealTimers()
