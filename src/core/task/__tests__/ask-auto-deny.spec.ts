@@ -5,6 +5,7 @@ import { type ClineMessage, type ExtensionState, RooCodeEventName } from "@roo-c
 import * as autoApprovalModule from "../../auto-approval"
 import { createRateLimitClock } from "../RateLimitClock"
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // The streaming-loop drive below never asserts on environment details; the
 // real collector reaches into the VS Code window API, which this file's
@@ -31,7 +32,7 @@ type ProviderStub = {
 
 function buildTask(provider: ProviderStub, taskCwd: string) {
 	const task = Object.create(Task.prototype) as Task
-	task["abort"] = false
+	setAbortLatch(task, false)
 	task["clineMessages"] = []
 	task["askResponse"] = undefined
 	task["askResponseText"] = undefined
@@ -743,7 +744,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
 		// settle from a hang on the pending read.
@@ -830,7 +831,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// longer this wait runs, the less event-loop-stall slack is left before
 		// the 2 s timer could legitimately fire while the task is still live.
 		await vi.waitFor(() => expect(Date.now() - armedAt).toBeGreaterThanOrEqual(300), { timeout: 2_000 })
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		const outcome = await toolAsk.then(
 			() => "resolved",
@@ -931,7 +932,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
 		// settle from a hang on the pending read.
@@ -993,7 +994,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
 		// settle from a hang on the pending read.
