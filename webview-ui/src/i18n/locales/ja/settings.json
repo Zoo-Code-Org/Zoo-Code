@@ -394,6 +394,12 @@
 			"getApiKey": "IO Intelligence APIキーを取得",
 			"model": "モデル"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute APIキー",
+			"getApiKey": "Standard Compute APIキーを取得",
+			"model": "モデル"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT APIキー",

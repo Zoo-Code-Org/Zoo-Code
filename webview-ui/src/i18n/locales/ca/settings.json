@@ -394,6 +394,12 @@
 			"getApiKey": "Obtenir clau API de IO Intelligence",
 			"model": "Model"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Clau API de Standard Compute",
+			"getApiKey": "Obtenir clau API de Standard Compute",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Clau API de NanoGPT",

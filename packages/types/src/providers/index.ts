@@ -31,6 +31,7 @@ export * from "./vercel-ai-gateway.js"
 export * from "./opencode-go.js"
 export * from "./kenari.js"
 export * from "./io-intelligence.js"
+export * from "./standard-compute.js"
 export * from "./nanogpt.js"
 export * from "./kimi-code.js"
 export * from "./zai.js"
@@ -69,6 +70,7 @@ import { poeProviderDefinition } from "./poe.js"
 import { qwenCodeProviderDefinition } from "./qwen-code.js"
 import { requestyProviderDefinition } from "./requesty.js"
 import { sambaNovaProviderDefinition } from "./sambanova.js"
+import { standardComputeProviderDefinition } from "./standard-compute.js"
 import { unboundProviderDefinition } from "./unbound.js"
 import { vercelAiGatewayProviderDefinition } from "./vercel-ai-gateway.js"
 import { vertexProviderDefinition } from "./vertex.js"
@@ -115,6 +117,7 @@ export const providerDefinitionList = [
 	kenariProviderDefinition,
 	nanoGptProviderDefinition,
 	ioIntelligenceProviderDefinition,
+	standardComputeProviderDefinition,
 	zooGatewayProviderDefinition,
 	basetenProviderDefinition,
 ] as const satisfies readonly ProviderDefinition[]

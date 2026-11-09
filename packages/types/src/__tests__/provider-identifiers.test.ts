@@ -36,6 +36,7 @@ const expectedProviderIdentifiers = [
 	"kenari",
 	"nanogpt",
 	"io-intelligence",
+	"standard-compute",
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
@@ -113,6 +114,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.kenari,
 			providerIdentifiers.nanogpt,
 			providerIdentifiers.ioIntelligence,
+			providerIdentifiers.standardCompute,
 			providerIdentifiers.kimiCode,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])

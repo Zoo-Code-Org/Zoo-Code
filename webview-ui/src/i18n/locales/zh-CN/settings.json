@@ -394,6 +394,12 @@
 			"getApiKey": "获取 IO Intelligence API 密钥",
 			"model": "模型"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute API 密钥",
+			"getApiKey": "获取 Standard Compute API 密钥",
+			"model": "模型"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 密钥",

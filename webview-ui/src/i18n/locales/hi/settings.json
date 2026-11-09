@@ -394,6 +394,12 @@
 			"getApiKey": "IO Intelligence API कुंजी प्राप्त करें",
 			"model": "मॉडल"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute API कुंजी",
+			"getApiKey": "Standard Compute API कुंजी प्राप्त करें",
+			"model": "मॉडल"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API कुंजी",

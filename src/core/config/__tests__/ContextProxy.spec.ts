@@ -758,6 +758,22 @@ describe("ContextProxy", () => {
 			})
 		})
 
+		it("stores and returns the complete Standard Compute configuration across secret and global state", async () => {
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.standardCompute,
+				standardComputeApiKey: "sc-secret",
+				standardComputeModelId: "moonshotai/kimi-k3",
+			})
+
+			expect(mockSecrets.store).toHaveBeenCalledWith("standardComputeApiKey", "sc-secret")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("standardComputeModelId", "moonshotai/kimi-k3")
+			expect(proxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.standardCompute,
+				standardComputeApiKey: "sc-secret",
+				standardComputeModelId: "moonshotai/kimi-k3",
+			})
+		})
+
 		it("stores and returns the complete NanoGPT configuration across secret and global state", async () => {
 			await proxy.setProviderSettings({
 				apiProvider: providerIdentifiers.nanogpt,

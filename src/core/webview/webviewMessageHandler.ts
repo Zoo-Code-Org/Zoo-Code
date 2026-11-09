@@ -1200,6 +1200,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.ioIntelligence]: {},
+						[providerIdentifiers.standardCompute]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 					}
@@ -1396,6 +1397,23 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: providerIdentifiers.ioIntelligence,
 				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
+			})
+
+			// Standard Compute's /models catalog is public; an optional key can scope
+			// the visible model set. Prefer an explicitly supplied unsaved key.
+			const standardComputeApiKey =
+				message?.values?.standardComputeApiKey ?? apiConfiguration.standardComputeApiKey
+			if (message?.values?.standardComputeApiKey !== undefined) {
+				await flushModels(
+					{ provider: providerIdentifiers.standardCompute, apiKey: standardComputeApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.standardCompute),
+					true,
+				)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.standardCompute,
+				options: { provider: providerIdentifiers.standardCompute, apiKey: standardComputeApiKey },
 			})
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a

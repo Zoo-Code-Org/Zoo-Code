@@ -498,6 +498,7 @@ describe("ApiOptions", () => {
 		expect(optionTexts).toContain("Anthropic")
 		expect(optionTexts).toContain("NanoGPT")
 		expect(optionTexts).toContain("IO Intelligence")
+		expect(optionTexts).toContain("Standard Compute")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options

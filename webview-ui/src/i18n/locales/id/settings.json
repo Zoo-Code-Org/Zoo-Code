@@ -394,6 +394,12 @@
 			"getApiKey": "Dapatkan Kunci API IO Intelligence",
 			"model": "Model"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Kunci API Standard Compute",
+			"getApiKey": "Dapatkan Kunci API Standard Compute",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",

@@ -394,6 +394,12 @@
 			"getApiKey": "IO Intelligence API-sleutel ophalen",
 			"model": "Model"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute API-sleutel",
+			"getApiKey": "Standard Compute API-sleutel ophalen",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API-sleutel",

@@ -394,6 +394,12 @@
 			"getApiKey": "IO Intelligence API 키 받기",
 			"model": "모델"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute API 키",
+			"getApiKey": "Standard Compute API 키 받기",
+			"model": "모델"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 키",

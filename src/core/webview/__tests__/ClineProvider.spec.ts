@@ -6770,6 +6770,7 @@ describe("ClineProvider - Router Models", () => {
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
+				"standard-compute": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -6806,6 +6807,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
 			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
+			.mockResolvedValueOnce(mockModels) // standard-compute (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
@@ -6828,6 +6830,7 @@ describe("ClineProvider - Router Models", () => {
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
+				"standard-compute": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -6934,6 +6937,7 @@ describe("ClineProvider - Router Models", () => {
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
+				"standard-compute": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},

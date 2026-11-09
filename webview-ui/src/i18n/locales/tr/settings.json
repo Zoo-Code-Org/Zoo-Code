@@ -394,6 +394,12 @@
 			"getApiKey": "IO Intelligence API Anahtarı Al",
 			"model": "Model"
 		},
+		"standardCompute": {
+			"provider": "Standard Compute",
+			"apiKey": "Standard Compute API Anahtarı",
+			"getApiKey": "Standard Compute API Anahtarı Al",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Anahtarı",

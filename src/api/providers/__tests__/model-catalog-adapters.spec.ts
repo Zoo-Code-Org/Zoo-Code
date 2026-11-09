@@ -12,6 +12,7 @@ import type { ApiHandler, ModelCacheScope } from "../../index"
 const fetchers = vi.hoisted(() => ({
 	getDeepSeekModels: vi.fn(),
 	getIOIntelligenceModels: vi.fn(),
+	getStandardComputeModels: vi.fn(),
 	getKenariModels: vi.fn(),
 	getKimiCodeModels: vi.fn(),
 	getLiteLLMModels: vi.fn(),
@@ -49,6 +50,10 @@ vi.mock("../fetchers/deepseek", async (importOriginal) => ({
 vi.mock("../fetchers/io-intelligence", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/io-intelligence")>()),
 	getIOIntelligenceModels: fetchers.getIOIntelligenceModels,
+}))
+vi.mock("../fetchers/standard-compute", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../fetchers/standard-compute")>()),
+	getStandardComputeModels: fetchers.getStandardComputeModels,
 }))
 vi.mock("../fetchers/kenari", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/kenari")>()),
@@ -121,6 +126,7 @@ import { OpencodeGoHandler } from "../opencode-go"
 import { OpenRouterHandler } from "../openrouter"
 import { PoeHandler } from "../poe"
 import { RequestyHandler } from "../requesty"
+import { StandardComputeHandler } from "../standard-compute"
 import { UnboundHandler } from "../unbound"
 import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
 import { ZooGatewayHandler } from "../zoo-gateway"
@@ -159,6 +165,15 @@ const cases: AdapterCase[] = [
 		name: "IO Intelligence",
 		create: () => new IOIntelligenceHandler({ ioIntelligenceApiKey: API_KEY }),
 		fetcher: "getIOIntelligenceModels",
+		scope: { urlScoped: false, keyScoped: true, authScoped: false },
+		expectedArgs: [API_KEY],
+		forwardsSignal: true,
+		prewarms: false,
+	},
+	{
+		name: "Standard Compute",
+		create: () => new StandardComputeHandler({ standardComputeApiKey: API_KEY }),
+		fetcher: "getStandardComputeModels",
 		scope: { urlScoped: false, keyScoped: true, authScoped: false },
 		expectedArgs: [API_KEY],
 		forwardsSignal: true,

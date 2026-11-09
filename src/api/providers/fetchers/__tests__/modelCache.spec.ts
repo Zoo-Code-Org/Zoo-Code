@@ -78,6 +78,7 @@ const LITELLM_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authS
 const REQUESTY_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const IOINTELLIGENCE_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
+const STANDARDCOMPUTE_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
 const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 
@@ -86,6 +87,7 @@ const zooGatewayHandler = makeHandler(ZOO_SCOPE, vi.fn())
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 const DUMMY_IOINTELLIGENCE_KEY = "io-intelligence-key-for-testing"
+const DUMMY_STANDARDCOMPUTE_KEY = "standard-compute-key-for-testing"
 
 describe("getModels with new GetModelsOptions", () => {
 	beforeEach(() => {
@@ -243,6 +245,24 @@ describe("getModels with new GetModelsOptions", () => {
 		const handler = makeHandler(IOINTELLIGENCE_SCOPE, fetchModels)
 
 		const options = { provider: providerIdentifiers.ioIntelligence, apiKey: DUMMY_IOINTELLIGENCE_KEY } as const
+		const result = await getModels(options, handler)
+
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches Standard Compute with an optional API key", async () => {
+		const mockModels = {
+			"moonshotai/kimi-k3": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(STANDARDCOMPUTE_SCOPE, fetchModels)
+
+		const options = { provider: providerIdentifiers.standardCompute, apiKey: DUMMY_STANDARDCOMPUTE_KEY } as const
 		const result = await getModels(options, handler)
 
 		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
@@ -1282,6 +1302,33 @@ describe("IO Intelligence key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("io-intelligence")
 		expect(cacheKeys.every((key) => !key.includes("ionet-key-a") && !key.includes("ionet-key-b"))).toBe(true)
+	})
+})
+
+describe("Standard Compute key-scoped cache isolation", () => {
+	const standardComputeModels = {
+		"moonshotai/kimi-k3": { maxTokens: 8_192, contextWindow: 128_000, supportsPromptCache: false },
+	}
+
+	let handler: ApiHandler
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		handler = makeHandler(STANDARDCOMPUTE_SCOPE, vi.fn().mockResolvedValue(standardComputeModels))
+	})
+
+	it("separates public, key A, and key B cache identities without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.standardCompute }, handler)
+		await getModels({ provider: providerIdentifiers.standardCompute, apiKey: "sc-key-a" }, handler)
+		await getModels({ provider: providerIdentifiers.standardCompute, apiKey: "sc-key-b" }, handler)
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(3)
+		expect(cacheKeys).toContain("standard-compute")
+		expect(cacheKeys.every((key) => !key.includes("sc-key-a") && !key.includes("sc-key-b"))).toBe(true)
 	})
 })
 
