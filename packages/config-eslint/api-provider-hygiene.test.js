@@ -306,6 +306,13 @@ describe("abort assertions in the extension ESLint config", () => {
 				// An escaped dot in the source text is still a bare abort substring: the pattern
 				// keeps a backslash, so the matcher must allow it before the trailing dot or anchor.
 				["await expect(p).rejects.toThrow(/^aborted$/)", 1],
+				["await expect(p).rejects.toThrow(/.*aborted.*/i)", 1],
+				["await expect(p).rejects.toThrowError(/abort(?:ed)/i)", 1],
+				["await expect(p).rejects.toThrow(/aborted\\b/i)", 1],
+				['await expect(p).rejects.toThrow("abort$")', 0],
+				['await expect(p).rejects.toThrow("^abort")', 0],
+				["await expect(p).rejects.toThrow(/.*The Requesty request was aborted.*/i)", 0],
+				["await expect(p).rejects.toThrow(/The Requesty request was aborted\\b/i)", 0],
 				["await expect(p).rejects.toThrow(/^Request was aborted\\.$/)", 1],
 				["await expect(p).rejects.toThrowError(/request aborted\\.$/i)", 1],
 				["await expect(p).rejects.toThrow(/^request aborted\\$/)", 1],

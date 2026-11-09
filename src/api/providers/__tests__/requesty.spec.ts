@@ -1012,6 +1012,9 @@ describe("RequestyHandler", () => {
 				name: "AbortError",
 				message: "The Requesty request was aborted",
 			})
+			const lookupSignal = vitest.mocked(getModels).mock.calls.at(-1)?.[0].signal
+			expect(lookupSignal).toBeInstanceOf(AbortSignal)
+			expect(lookupSignal?.aborted, "the timeout must cancel the model lookup").toBe(true)
 			expect(controller.signal.aborted, "the timeout must not surface through the caller signal").toBe(false)
 			expect(mockCreate, "the lookup must not fall through into a completion").not.toHaveBeenCalled()
 		})

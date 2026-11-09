@@ -356,9 +356,12 @@ describe("Task.ask queued message drain", () => {
 
 		// The abort must name this task and this instance: a regex that accepts any id would also
 		// pass for another task's abort or a different prefix.
-		const rejection = await ask.catch((e: unknown) => e)
-		expect((rejection as Error).message).toBe(`[ZooCode#ask] task ${task.taskId}.${task.instanceId} aborted`)
-		expect((rejection as Error).message).toBe("[ZooCode#ask] task task-ask-drain.instance-ask-drain aborted")
+		await expect(ask).rejects.toMatchObject({
+			message: `[ZooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
+		await expect(ask).rejects.toMatchObject({
+			message: "[ZooCode#ask] task task-ask-drain.instance-ask-drain aborted",
+		})
 		expect(task.messageQueueService.messages).toHaveLength(1)
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Persist me later")
 	})

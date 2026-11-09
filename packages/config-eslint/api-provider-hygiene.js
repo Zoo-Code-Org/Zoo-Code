@@ -66,13 +66,9 @@ export const apiProviderHygieneConfig = {
 // Shared by every spec lane, not only src/api: an abort assertion must not pass on a raw SDK error.
 export const abortSubstringSelector = {
 	selector:
-		// The escaped-dot and escaped-anchor forms keep a backslash in the pattern text, so the tail
-		// has to allow one before the dot or anchor; without it /^Request was aborted\\.$/ slips
-		// through the rule while the same message written as a string is flagged. The pattern
-		// branch also has to consume a non-capturing group verbatim, because an inline
-		// (?:ed)? is regex source, not a message character, and an anchored match that stops
-		// short of it leaves /abort(?:ed)?/i unflagged.
-		"CallExpression[callee.property.name=/^toThrow(Error)?$/]:not([callee.object.property.name='not']):matches([arguments.0.value=/^[$^]?(the )?(request )?(was )?abort(ed)?[\\\\.$]*$/i], [arguments.0.regex.pattern=/^[$^]?(the )?(request )?(was )?abort(ed)?(?:\\(\\?:(?:ed|ion|al)\\)\\?)?[\\\\.$]*$/i])",
+		// Strings contain literal punctuation; only regex source can contain anchors, wildcards,
+		// optional suffix groups, or word boundaries around the generic abort wording.
+		"CallExpression[callee.property.name=/^toThrow(Error)?$/]:not([callee.object.property.name='not']):matches([arguments.0.value=/^(the )?(request )?(was )?abort(ed)?[.]*$/i], [arguments.0.regex.pattern=/^[$^]?(?:\\.\\*)?(the )?(request )?(was )?abort(ed)?(?:\\(\\?:(?:ed|ion|al)\\)\\??)?(?:\\\\b)?(?:\\.\\*)?[\\\\.$]*$/i])",
 	message:
 		"A bare 'abort' substring also matches a raw SDK error. Assert the AbortError name and the full provider message.",
 }
