@@ -10,7 +10,10 @@ vi.mock("shell-quote", async (importOriginal) => {
 		...actual,
 		parse: (...args: Parameters<typeof actual.parse>) => {
 			if (forceShellQuoteFailure) {
-				throw new Error("forced parse failure")
+				// The real library's "Bad substitution" errors embed slices of
+				// the offending input, so the throw echoes it too — letting
+				// tests prove no payload content reaches the logs.
+				throw new Error(`forced parse failure: ${String(args[0])}`)
 			}
 			return actual.parse(...args)
 		},
@@ -214,6 +217,43 @@ describe("parseCommand", () => {
 			const { commands, parseError } = parseCommand(input)
 			expect(commands).toEqual([input])
 			expect(parseError?.quoteType).toBe("tokenize-failure")
+		})
+
+		// The rejected line and the tokenizer error text can both carry
+		// payload content (shell-quote embeds slices of the offending input),
+		// so the warning must stay content-free: a planted secret has to be
+		// absent from everything logged, while the fail-closed decision stands.
+		it("logs no payload content when the tokenizer throws", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			forceShellQuoteFailure = true
+			try {
+				const secret = "SUPERSECRET_TOKEN_9f3k"
+				const input = `aws s3 ls --token ${secret} && echo done`
+				const { commands, parseError } = parseCommand(input)
+				// Fail-closed decision unchanged: raw input as one opaque token.
+				expect(commands).toEqual([input])
+				expect(parseError?.quoteType).toBe("tokenize-failure")
+				// The diagnostic warning still fires, exactly once, but carries
+				// neither the command line nor the error text it derived from.
+				expect(warnSpy).toHaveBeenCalledTimes(1)
+				const logged = warnSpy.mock.calls.map((call) => call.map(String).join(" ")).join("\n")
+				expect(logged).not.toContain(secret)
+				expect(logged).not.toContain(input)
+			} finally {
+				warnSpy.mockRestore()
+			}
+		})
+
+		it("does not warn when the tokenizer succeeds", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				const { commands, parseError } = parseCommand("git status && echo done")
+				expect(parseError).toBeNull()
+				expect(commands).toEqual(["git status", "echo done"])
+				expect(warnSpy).not.toHaveBeenCalled()
+			} finally {
+				warnSpy.mockRestore()
+			}
 		})
 	})
 

@@ -2830,7 +2830,10 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number): string[] 
 		// on the shared error channel: the caller re-checks `outcome` after
 		// every line and returns the raw input as one opaque token.
 		const message = error instanceof Error ? error.message : String(error)
-		console.warn("shell-quote parse error:", message, "for command:", line)
+		// Both the line and the tokenizer's error text may echo payload
+		// content (shell-quote embeds slices of the offending input), so
+		// neither is logged; the console gets only non-content metadata.
+		console.warn(`shell-quote parse error: tokenizer rejected a ${line.length}-character command line`)
 		outcome.error = {
 			quoteType: "tokenize-failure",
 			openIndex: 0,
