@@ -1409,21 +1409,33 @@ describe("OpencodeGoHandler", () => {
 			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
 		})
 
-		it("completePrompt preserves abort identity when the caller aborts (Anthropic path)", async () => {
-			// Emulate the Anthropic SDK: an aborted request signal rejects with
-			// APIUserAbortError ("Request was aborted." — the trailing period would
-			// fail task-level abort detection, so the provider must normalize it).
-			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
-				if (options?.signal?.aborted) {
-					throw new AnthropicAbortError()
-				}
-				throw new Error("boom")
-			})
+		it("completePrompt preserves abort identity when the caller aborts mid-request (Anthropic path)", async () => {
+			// The abort has to land after the request starts. A pre-aborted signal is
+			// caught by resolveModelWithAbort during model resolution, so the completion
+			// catch in opencode-go.ts (the isRequestAborted branch) never runs and the
+			// test would pass without exercising it. The mock rejects with a generic
+			// Error rather than an abort-shaped one, exactly the shape the sibling
+			// Responses test uses, so normalizing it proves the catch consults the
+			// caller signal argument and not just the error name or message.
+			mockAnthropicCreate.mockImplementation(
+				(_params: unknown, options: { signal?: AbortSignal }) =>
+					new Promise<never>((_resolve, reject) => {
+						const signal = options?.signal
+						if (!signal) {
+							reject(new Error("the provider forwarded no request signal"))
+							return
+						}
+						signal.addEventListener("abort", () => reject(new Error("boom")), { once: true })
+					}),
+			)
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const controller = new AbortController()
+			const completion = handler.completePrompt("ping", { abortSignal: controller.signal })
+
+			await vitest.waitFor(() => expect(mockAnthropicCreate).toHaveBeenCalled())
 			controller.abort()
 
-			const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+			const error = await completion.then(
 				() => undefined,
 				(e: unknown) => e,
 			)
