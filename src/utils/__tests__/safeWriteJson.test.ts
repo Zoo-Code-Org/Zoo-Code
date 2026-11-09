@@ -968,26 +968,54 @@ describe("safeWriteJson", () => {
 		// cannot collect on the underscore-anchored prefix, where the token is the only thing that
 		// attributes the name to this target. The other half of the guarantee: a non-zero random still has
 		// to produce its own token rather than a constant.
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-json-token-"))
+		// The suite's own directory rather than a second mkdtemp: this row writes two files and a rejection
+		// anywhere inside it would leave a per-test directory behind, whereas afterEach removes tempDir
+		// whatever happens.
 		const stagedName = async (name: string): Promise<string> => {
-			const file = path.join(dir, name)
+			const file = path.join(tempDir, name)
 			await safeWriteJson(file, { committed: true })
 			const calls = vi.mocked(fs.rename).mock.calls
 			// The commit rename is the last rename of the write: its source is the staging file.
 			return path.basename(String(calls[calls.length - 1][0]))
 		}
 		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0)
-		const zeroName = await stagedName("zero.json")
-		randomSpy.mockReturnValue(0.5)
-		const halfName = await stagedName("half.json")
-		randomSpy.mockRestore()
-		await fs.rm(dir, { recursive: true, force: true })
+		let zeroName: string
+		let halfName: string
+		try {
+			zeroName = await stagedName("zero.json")
+			randomSpy.mockReturnValue(0.5)
+			halfName = await stagedName("half.json")
+		} finally {
+			randomSpy.mockRestore()
+		}
 
 		expect(zeroName).toMatch(/^\.new_zero\.json_\d+_[^_]+\.tmp$/)
 		expect(halfName).toMatch(/^\.new_half\.json_\d+_[0-9a-z]+\.tmp$/)
 		// "i" is what 0.5 answers in this shape: 0.5.toString(36) is "0.i", so substring(2) is "i"
 		// (measured with node 22.23.4). The staging name has to carry it, not a constant.
 		expect(halfName).toContain("_i.tmp")
+	})
+
+	// The other builder that reads the same expression: the EPERM fallback moves the target to a backup
+	// name, and jsonFileRecovery only collects that name when the token part is non-empty. Forcing the
+	// Windows-style commit failure while Math.random() answers 0 reads the backup destination out of the
+	// rename that actually ran, so removing the fallback in createBackupFilePath cannot pass unnoticed.
+	it("backs up under a token that a zero random still fills when the commit rename hits EPERM", async () => {
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0)
+		try {
+			// Cleared first: the mock's call history survives between tests in this file, and without this the
+			// assertion below could be satisfied by another test's backup rename.
+			vi.mocked(fs.rename).mockClear()
+			vi.mocked(fs.rename).mockImplementationOnce(async () => {
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			})
+			await safeWriteJson(currentTestFilePath, { committed: true })
+			const backupRename = vi.mocked(fs.rename).mock.calls.find((call) => String(call[1]).includes(".bak_"))
+			expect(backupRename).toBeDefined()
+			expect(path.basename(String(backupRename![1]))).toMatch(/^\.test-file\.json\.bak_\d+_[0-9a-z]+\.tmp$/)
+		} finally {
+			randomSpy.mockRestore()
+		}
 	})
 
 	it("keeps the published target with its new content when the post-commit directory fsync fails", async () => {

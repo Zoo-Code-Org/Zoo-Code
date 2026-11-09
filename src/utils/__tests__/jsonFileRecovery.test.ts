@@ -164,6 +164,17 @@ describe("replacement leftover name patterns", () => {
 		await expect(fs.access(leftover)).rejects.toMatchObject({ code: "ENOENT" })
 	})
 
+	// The same name on the reader's restore path, which is the half the rows above leave untested: with the
+	// target gone the empty-token backup has to be what the reader returns, not merely a name the
+	// scanner is willing to unlink.
+	it("restores a dot-anchored backup whose random token came out empty", async () => {
+		const leftover = path.join(dir, ".a.json.bak_1730000000000_.tmp")
+		await fs.unlink(target)
+		await fs.writeFile(leftover, JSON.stringify({ committed: true }))
+		expect(JSON.parse(await readFileWithMissingRetry(target))).toEqual({ committed: true })
+		await expect(fs.access(leftover)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
 	// And the name the writer produces out of that same answer: safeWriteJson guarantees a token, so the
 	// staged name carries the empty token's stand-in, and the staged prefix - where the token is the only
 	// thing that attributes the name - still recognises it.
