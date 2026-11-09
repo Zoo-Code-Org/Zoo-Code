@@ -229,11 +229,13 @@ describe("getGitHubCopilotQuota", () => {
 		it("fetches again when the session cannot be looked up", async () => {
 			await getGitHubCopilotQuota({}, vi.fn(async () => json(businessPayload)) as never)
 
-			getSession.mockRejectedValue(new Error("auth broken"))
+			// The lookup that checks the cache fails once; the session is there for the fetch that follows.
+			getSession.mockRejectedValueOnce(new Error("auth broken")).mockResolvedValue({ accessToken: "gho_token" })
 			const fetchSpy = vi.fn(async () => json(other))
 			const result = await getGitHubCopilotQuota({}, fetchSpy as never)
 
-			expect(result).not.toMatchObject({ ok: true, quota: { plan: "business" } })
+			expect(result).toMatchObject({ ok: true, quota: { plan: "individual" } }) // fetched again, not the cached one
+			expect(fetchSpy).toHaveBeenCalledTimes(1)
 		})
 
 		it("rejects with the cancellation when the caller leaves while the session is looked up", async () => {

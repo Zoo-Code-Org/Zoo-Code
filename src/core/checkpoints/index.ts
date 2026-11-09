@@ -246,12 +246,16 @@ export async function checkpointRestore(
 	const service = await getCheckpointService(task)
 
 	if (!service) {
+		// A restore that did nothing is not a restore that worked: the caller has stopped the task for it, and has to be
+		// told so that it can offer to start the task again. A preview has nothing to report.
+		if (mode === "restore") throw new Error("Checkpoints are not available for this task")
 		return
 	}
 
 	const index = task.clineMessages.findIndex((m) => m.ts === ts)
 
 	if (index === -1) {
+		if (mode === "restore") throw new Error("The message to restore to is no longer in the conversation")
 		return
 	}
 
@@ -349,16 +353,40 @@ async function rewindConversation(
 		task.combineMessages(deletedMessages),
 	)
 
-	// Use MessageManager to properly handle context-management events
-	// This ensures orphaned Summary messages and truncation markers are cleaned up
-	await task.messageManager.rewindToTimestamp(ts, {
-		includeTargetMessage: operation === "edit",
-	})
+	const messagesBefore = [...task.clineMessages]
+	let failure: unknown
+	try {
+		// Use MessageManager to properly handle context-management events
+		// This ensures orphaned Summary messages and truncation markers are cleaned up
+		await task.messageManager.rewindToTimestamp(ts, {
+			includeTargetMessage: operation === "edit",
+		})
 
-	// The cut of the API history has to be on disk before the task is started again from it: a write that was lost is
-	// retried, and a cut that cannot be stored is a failed rewind, not one that the restart would then undo silently.
-	if (!(await task.ensureApiConversationHistoryStored())) {
-		throw new Error("The API conversation history could not be saved")
+		// The cut of the API history has to be on disk before the task is started again from it: a write that was lost is
+		// retried, and a cut that cannot be stored is a failed rewind, not one that the restart would then undo silently.
+		if (!(await task.ensureApiConversationHistoryStored())) {
+			throw new Error("The API conversation history could not be saved")
+		}
+	} catch (error) {
+		failure = error
+	}
+
+	if (failure !== undefined) {
+		// The messages were cut first: when the API history could not follow, the two are not the same conversation, and the
+		// task that is started again would show a conversation shorter than the one the model is given. The messages are put
+		// back, so that both are what they were before the rewind.
+		if (task.clineMessages.length !== messagesBefore.length) {
+			try {
+				await task.overwriteClineMessages(messagesBefore)
+			} catch (restoreError) {
+				const reason = failure instanceof Error ? failure.message : String(failure)
+				const restoreReason = restoreError instanceof Error ? restoreError.message : String(restoreError)
+				throw new Error(
+					`${reason}, and the messages could not be put back (${restoreReason}): the conversation is only partly rewound`,
+				)
+			}
+		}
+		throw failure
 	}
 
 	return {

@@ -510,14 +510,126 @@ describe("Checkpoint functionality", () => {
 			expect(mockProvider.cancelTask).toHaveBeenCalled()
 		})
 
-		it("should handle missing message gracefully", async () => {
-			await checkpointRestore(mockTask, {
-				ts: 999, // Non-existent timestamp
-				commitHash: RESTORE_HASH,
-				mode: "restore",
-			})
+		it("reports a restore to a message that is no longer there, and restores nothing", async () => {
+			await expect(
+				checkpointRestore(mockTask, {
+					ts: 999, // Non-existent timestamp
+					commitHash: RESTORE_HASH,
+					mode: "restore",
+				}),
+			).rejects.toThrow("no longer in the conversation")
 
 			expect(mockCheckpointService.restoreCheckpoint).not.toHaveBeenCalled()
+		})
+
+		it("has nothing to report for a preview of a message that is no longer there", async () => {
+			await expect(
+				checkpointRestore(mockTask, { ts: 999, commitHash: RESTORE_HASH, mode: "preview" }),
+			).resolves.toBeUndefined()
+
+			expect(mockCheckpointService.restoreCheckpoint).not.toHaveBeenCalled()
+		})
+
+		it.each(["delete", "edit"] as const)(
+			"reports a restore when checkpoints were disabled after the checkpoint was recorded, instead of returning as if it worked (%s)",
+			async (operation) => {
+				mockTask.enableCheckpoints = false
+
+				await expect(
+					checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation }),
+				).rejects.toThrow("Checkpoints are not available for this task")
+
+				// Nothing was restored or rewound, and nothing was started: the caller is told, and can offer to start the task.
+				expect(mockCheckpointService.restoreCheckpoint).not.toHaveBeenCalled()
+				expect(mockTask.overwriteClineMessages).not.toHaveBeenCalled()
+				expect(mockProvider.cancelTask).not.toHaveBeenCalled()
+			},
+		)
+
+		it("has nothing to report for a preview when checkpoints are disabled", async () => {
+			mockTask.enableCheckpoints = false
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "preview" }),
+			).resolves.toBeUndefined()
+		})
+
+		describe("when the API history cannot follow the cut of the messages", () => {
+			const original = () => [
+				{ ts: 1, say: "user", text: "Message 1" },
+				{ ts: 2, say: "assistant", text: "Message 2" },
+				{ ts: 3, say: "user", text: "Message 3" },
+				{ ts: 4, say: "checkpoint_saved", text: RESTORE_HASH },
+			]
+			// The task keeps what it is given, as the real one does.
+			const keepWhatIsWritten = () =>
+				mockTask.overwriteClineMessages.mockImplementation(async (messages: unknown[]) => {
+					mockTask.clineMessages = messages
+				})
+
+			it("puts the messages back, so the task is started again with both histories as they were", async () => {
+				keepWhatIsWritten()
+				mockTask.ensureApiConversationHistoryStored.mockResolvedValueOnce(false)
+
+				await expect(
+					checkpointRestore(mockTask, {
+						ts: 2,
+						commitHash: RESTORE_HASH,
+						mode: "restore",
+						operation: "delete",
+					}),
+				).rejects.toMatchObject({
+					name: "ConversationRewindError",
+					message: "The API conversation history could not be saved",
+					restarted: true,
+				})
+
+				// The cut was written, and then the messages that were there before it.
+				expect(mockTask.overwriteClineMessages).toHaveBeenCalledTimes(2)
+				expect(mockTask.overwriteClineMessages.mock.calls[0][0]).toHaveLength(1)
+				expect(mockTask.overwriteClineMessages.mock.calls[1][0]).toEqual(original())
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1) // restarted, from what is on disk
+			})
+
+			it("says that the conversation is only partly rewound when the messages cannot be put back either", async () => {
+				keepWhatIsWritten()
+				mockTask.ensureApiConversationHistoryStored.mockResolvedValueOnce(false)
+				mockTask.overwriteClineMessages
+					.mockImplementationOnce(async (messages: unknown[]) => {
+						mockTask.clineMessages = messages
+					})
+					.mockRejectedValueOnce(new Error("disk full"))
+
+				const restoring = checkpointRestore(mockTask, {
+					ts: 2,
+					commitHash: RESTORE_HASH,
+					mode: "restore",
+					operation: "delete",
+				})
+
+				await expect(restoring).rejects.toMatchObject({ name: "ConversationRewindError" })
+				await expect(restoring).rejects.toThrow(
+					/could not be saved, and the messages could not be put back \(disk full\).*only partly rewound/,
+				)
+				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+			})
+
+			it("puts nothing back when the messages were not cut", async () => {
+				keepWhatIsWritten()
+				mockTask.overwriteClineMessages.mockReset()
+				mockTask.overwriteClineMessages.mockRejectedValueOnce(new Error("Failed to save the messages"))
+
+				await expect(
+					checkpointRestore(mockTask, {
+						ts: 2,
+						commitHash: RESTORE_HASH,
+						mode: "restore",
+						operation: "delete",
+					}),
+				).rejects.toMatchObject({ name: "ConversationRewindError" })
+
+				expect(mockTask.overwriteClineMessages).toHaveBeenCalledTimes(1) // the one that failed, and no put-back
+			})
 		})
 
 		it.each(["delete", "edit"] as const)(

@@ -3943,6 +3943,7 @@ describe("Cline", () => {
 			it("records neither provider nor model when the profile sets no provider", async () => {
 				const payload = await firstApiReqPayload({} as ProviderSettings)
 				expect(payload.apiProvider).toBeUndefined()
+				expect(payload.modelId).toBeUndefined()
 			})
 
 			it("stops, and relabels no other request, when the placeholder of the request is deleted while it is prepared", async () => {

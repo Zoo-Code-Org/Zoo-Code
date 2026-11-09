@@ -700,12 +700,16 @@ describe("ProviderSettingsManager", () => {
 
 				const first = providerSettingsManager.listConfig() // holds the lock, and cannot be cancelled
 				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
-				const queued = [
-					providerSettingsManager.listConfig({ signal: controller.signal }),
-					providerSettingsManager.getAllProfiles({ signal: controller.signal }),
-					providerSettingsManager.getProfile({ id: "other-id" }, { signal: controller.signal }),
+				// Each read wraps the cancellation with its own prefix.
+				const queued: Array<[Promise<unknown>, RegExp]> = [
+					[providerSettingsManager.listConfig({ signal: controller.signal }), /^Failed to list configs/],
+					[providerSettingsManager.getAllProfiles({ signal: controller.signal }), /^Failed to get profiles/],
+					[
+						providerSettingsManager.getProfile({ id: "other-id" }, { signal: controller.signal }),
+						/^Failed to get profile: /,
+					],
 				]
-				const failures = queued.map((read) => expect(read).rejects.toBeDefined())
+				const failures = queued.map(([read, message]) => expect(read).rejects.toThrow(message))
 				const write = providerSettingsManager.saveConfig("other", {
 					id: "other-id",
 					apiProvider: providerIdentifiers.anthropic,
@@ -728,11 +732,16 @@ describe("ProviderSettingsManager", () => {
 			it("leaves no listener on a signal that is never aborted", async () => {
 				mockSecrets.get.mockResolvedValue(text())
 				const controller = new AbortController()
+				const add = vi.spyOn(controller.signal, "addEventListener")
 				const remove = vi.spyOn(controller.signal, "removeEventListener")
 
 				await providerSettingsManager.getAllProfiles({ signal: controller.signal })
 
-				expect(remove).toHaveBeenCalledWith("abort", expect.any(Function))
+				// The listener that was added is the one that is removed.
+				const added = add.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+				const removed = remove.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+				expect(added).toHaveLength(1)
+				expect(removed).toEqual(added)
 			})
 		})
 
