@@ -349,7 +349,7 @@ export const UsageSettings = ({ className, providerLimitsEnabled = true, ...prop
 													vscode.postMessage({ type: "showTaskWithId", text: task.id })
 												}>
 												<span className="min-w-0">
-													<span className="block break-words">{task.task}</span>
+													<span className="block break-words">{task.title || task.task}</span>
 													{primaryUsage(task) && (
 														<span className="block break-words text-xs text-vscode-descriptionForeground">
 															{[

@@ -309,6 +309,19 @@ describe("UsageSettings", () => {
 			expect(post).toHaveBeenCalledWith({ type: "showTaskWithId", text: t.id })
 		})
 
+		it.each([
+			["the name the user gave", { title: "My renamed task" }, "My renamed task"],
+			["the original prompt when there is no name", {}, "Original prompt"],
+			["the original prompt for an empty name", { title: "" }, "Original prompt"],
+		])("labels a task in the top list with %s, as the CSV does", (_label, overrides, shown) => {
+			state.taskHistory = [priced(1, { task: "Original prompt", ...overrides })]
+			render(<UsageSettings />)
+
+			const row = within(screen.getByTestId("usage-top-tasks")).getByRole("button")
+			expect(row.textContent).toContain(shown)
+			if (overrides.title) expect(row.textContent).not.toContain("Original prompt")
+		})
+
 		it("asks the host to save a CSV of the filtered range, and does not download it itself", () => {
 			const daysAgo = (days: number) => {
 				const day = new Date()
