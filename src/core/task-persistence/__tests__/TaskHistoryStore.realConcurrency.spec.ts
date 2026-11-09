@@ -526,6 +526,69 @@ describe("TaskHistoryStore real cross-host locking", () => {
 				expect(store.get("solo-task")?.title).toBeUndefined()
 			})
 		})
+
+		it("skips the write when cancelled while waiting on the per-file lock", async () => {
+			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			await withSingleStore(async (store, filePath, onWrite) => {
+				const before = await fs.readFile(filePath, "utf8")
+				const controller = new AbortController()
+				let signalReadStarted!: () => void
+				const readStarted = new Promise<void>((resolve) => {
+					signalReadStarted = resolve
+				})
+				let releaseRead!: () => void
+				const readCanContinue = new Promise<void>((resolve) => {
+					releaseRead = resolve
+				})
+				// Pause inside the per-file lock's disk read, before the merge.
+				vi.mocked(fs.readFile).mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+					if (args[0] === filePath) {
+						signalReadStarted()
+						await readCanContinue
+					}
+					return actualFs.readFile(...args)
+				})
+
+				try {
+					const write = store.setGeneratedTitleIfUnset("solo-task", "Generated Title", {
+						signal: controller.signal,
+					})
+					await readStarted
+					controller.abort()
+					releaseRead()
+
+					await expect(write).resolves.toMatchObject({ applied: false })
+				} finally {
+					vi.mocked(fs.readFile).mockImplementation(actualFs.readFile)
+				}
+				expect(await fs.readFile(filePath, "utf8")).toBe(before)
+				expect(onWrite).not.toHaveBeenCalled()
+				expect(store.get("solo-task")?.title).toBeUndefined()
+			})
+		})
+
+		it("propagates an ordinary storage failure and keeps the cached task", async () => {
+			const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			await withSingleStore(async (store, filePath, onWrite) => {
+				const storageError = Object.assign(new Error("permission denied"), { code: "EACCES" })
+				vi.mocked(fs.readFile).mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+					if (args[0] === filePath) {
+						throw storageError
+					}
+					return actualFs.readFile(...args)
+				})
+
+				try {
+					await expect(store.setGeneratedTitleIfUnset("solo-task", "Generated Title")).rejects.toBe(
+						storageError,
+					)
+				} finally {
+					vi.mocked(fs.readFile).mockImplementation(actualFs.readFile)
+				}
+				expect(store.get("solo-task")).toMatchObject({ id: "solo-task" })
+				expect(onWrite).not.toHaveBeenCalled()
+			})
+		})
 	})
 
 	describe("setGeneratedTitleIfUnset with a rejected disk record", () => {

@@ -792,16 +792,46 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(cancelTitleGeneration).toHaveBeenCalledTimes(1)
 		})
 
-		it("skips the write when the signal is aborted before the queued write runs", async () => {
+		it("skips a queued write when the task is cancelled before the write runs", async () => {
 			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-abort", task: "Original prompt" }), {
 				broadcast: false,
 			})
+			// Hold the store lock so the generated-title write queues behind it.
+			let releaseLock: (() => void) | undefined
+			const held = provider.taskHistoryStore["withLock"](
+				() =>
+					new Promise<void>((resolve) => {
+						releaseLock = resolve
+					}),
+			)
+			await vi.waitFor(() => expect(releaseLock).toBeDefined())
+			const controller = new AbortController()
 
-			await expect(
-				provider.setGeneratedTaskTitle("task-gen-abort", "Generated Title", AbortSignal.abort()),
-			).resolves.toBe(false)
+			const generated = provider.setGeneratedTaskTitle("task-gen-abort", "Generated Title", controller.signal)
+			controller.abort()
+			releaseLock?.()
+			await held
 
+			await expect(generated).resolves.toBe(false)
 			expect(getStored("task-gen-abort")?.title).toBeUndefined()
+		})
+
+		it("refreshes the task list when the store drops a task deleted by another host", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-gen-deleted", task: "Original prompt" }), {
+				broadcast: false,
+			})
+			vi.spyOn(provider.taskHistoryStore, "setGeneratedTitleIfUnset").mockResolvedValueOnce({
+				item: undefined,
+				applied: false,
+			})
+			mockPostMessage.mockClear()
+
+			await expect(provider.setGeneratedTaskTitle("task-gen-deleted", "Generated Title")).resolves.toBe(false)
+
+			expect(findCallsByType(mockPostMessage.mock.calls, "taskHistoryUpdated")).toHaveLength(1)
+			expect(findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")).toHaveLength(0)
 		})
 
 		it("throws when the task is not yet recorded so the caller can retry", async () => {

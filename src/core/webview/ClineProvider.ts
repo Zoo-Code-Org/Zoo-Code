@@ -2843,7 +2843,8 @@ export class ClineProvider
 	 * provider's store after this store's cache was last refreshed is never
 	 * overwritten by the generated title. The store's authoritative item is
 	 * published even when the generated title is not applied, so a title
-	 * preserved from another host reaches the local header and task list. A
+	 * preserved from another host reaches the local header and task list; a
+	 * task the store dropped as deleted on disk refreshes the task list. A
 	 * signal aborted while the write is queued skips it. Returns true when the
 	 * title was applied, false otherwise. Throws when the task is not in the
 	 * store yet so the caller can retry.
@@ -2856,7 +2857,12 @@ export class ClineProvider
 
 		const { item, applied } = await this.taskHistoryStore.setGeneratedTitleIfUnset(id, trimmed, { signal })
 
-		if (item && item.title) {
+		if (!item) {
+			// The store dropped a task deleted or invalidated on disk by another
+			// host; refresh the task list so it no longer shows the stale entry.
+			this.recentTasksCache = undefined
+			await this.broadcastTaskHistoryUpdate()
+		} else if (item.title) {
 			this.recentTasksCache = undefined
 
 			if (this.isViewLaunched) {

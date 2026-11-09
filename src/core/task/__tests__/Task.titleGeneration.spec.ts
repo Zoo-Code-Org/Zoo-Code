@@ -33,6 +33,7 @@ type TaskTitleAccess = {
 	cancelCurrentRequest(): void
 	requestAbort(isAbandoned: boolean): void
 	cancelTitleGeneration(): void
+	maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void>
 	titleAbortController?: AbortController
 	abort: boolean
 	abandoned: boolean
@@ -224,6 +225,20 @@ describe("Task title generation", () => {
 
 			await getTaskTitleAccess(task).generateTitleInBackground("Initial prompt message")
 
+			expect(mockSetGeneratedTaskTitle).not.toHaveBeenCalled()
+		})
+
+		it("stops without a title request when cancelled during a stalled state read", async () => {
+			mockProvider.getState.mockReturnValueOnce(new Promise(() => {}))
+			const task = createTestTask()
+			const access = getTaskTitleAccess(task)
+
+			const generation = access.generateTitleInBackground("Initial prompt message")
+			await vi.waitFor(() => expect(mockProvider.getState).toHaveBeenCalled())
+			access.cancelTitleGeneration()
+			await generation
+
+			expect(taskTitleGen.generateTaskTitle).not.toHaveBeenCalled()
 			expect(mockSetGeneratedTaskTitle).not.toHaveBeenCalled()
 		})
 
@@ -446,6 +461,53 @@ describe("Task title generation", () => {
 			expect(titleDispatchTime).toBeDefined()
 			expect(taskDispatchTime).toBeDefined()
 			expect((titleDispatchTime ?? 0) - (taskDispatchTime ?? 0)).toBeGreaterThanOrEqual(10_000)
+		})
+
+		it("re-waits the agent countdown when a title request dispatches during it", async () => {
+			const clock = createRateLimitClock()
+			const task = createTestTask({
+				rateLimitClock: clock,
+				apiConfiguration: { ...mockApiConfig, rateLimitSeconds: 10 },
+			})
+			let titleDispatchTime: number | undefined
+			let countdownTicks = 0
+			// Each countdown tick advances one second; midway through the agent's
+			// countdown, the title request's wait ends and it dispatches first.
+			vi.mocked(delay).mockImplementation((ms: number) => {
+				now += ms
+				countdownTicks++
+				if (countdownTicks === 5) {
+					clock.recordRequest()
+					titleDispatchTime = now
+				}
+				return Promise.resolve(undefined)
+			})
+			clock.recordRequest()
+
+			await getTaskTitleAccess(task).maybeWaitForProviderRateLimit(0)
+			const agentDispatchTime = now
+
+			// The agent is spaced a full window from the title dispatch instead
+			// of proceeding from the deadline it computed before the countdown.
+			expect(titleDispatchTime).toBeDefined()
+			expect(agentDispatchTime - (titleDispatchTime ?? 0)).toBeGreaterThanOrEqual(10_000)
+		})
+
+		it("reads the support prompts before the rate-limit wait", async () => {
+			const clock = createRateLimitClock()
+			const task = createTestTask({
+				rateLimitClock: clock,
+				apiConfiguration: { ...mockApiConfig, rateLimitSeconds: 10 },
+			})
+			vi.mocked(taskTitleGen.generateTaskTitle).mockResolvedValueOnce("Summarized Title")
+			clock.recordRequest()
+
+			await getTaskTitleAccess(task).generateTitleInBackground("Initial prompt message")
+
+			// Nothing awaits between recording on the shared clock and dispatching.
+			expect(mockProvider.getState.mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(delay).mock.invocationCallOrder[0],
+			)
 		})
 	})
 

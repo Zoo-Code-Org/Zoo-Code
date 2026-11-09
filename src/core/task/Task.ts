@@ -3229,6 +3229,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// records on the shared clock so subsequent task/subtask requests
 			// honour it. `startTask` schedules this method with `void`, so the
 			// agent never waits on the title result.
+			//
+			// A saved TASK_TITLE support prompt replaces the built-in template. The
+			// state is read before the rate-limit wait so nothing awaits between
+			// recording on the shared clock and dispatching; an unreadable state
+			// falls back to the built-in template, and cancellation ends the read.
+			const state = await Promise.race([
+				provider.getState().catch(() => undefined),
+				new Promise<undefined>((resolve) => {
+					controller.signal.addEventListener("abort", () => resolve(undefined), { once: true })
+				}),
+			])
+
 			await this.waitForProviderRateLimitWindow(controller.signal)
 
 			if (controller.signal.aborted || this.abort || this.abandoned) {
@@ -3236,10 +3248,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			this.rateLimitClock.recordRequest()
-
-			// A saved TASK_TITLE support prompt replaces the built-in template;
-			// an unreadable state falls back to the built-in template.
-			const state = await provider.getState().catch(() => undefined)
 
 			const generated = await generateTaskTitle(taskText, this.apiConfiguration, {
 				abortSignal: controller.signal,
@@ -5797,25 +5805,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void> {
 		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
 
-		const lastRequestTime = this.rateLimitClock.getLastRequestTime()
-		if (rateLimitSeconds <= 0 || !lastRequestTime) {
+		let lastRequestTime = this.rateLimitClock.getLastRequestTime()
+		// Only show the countdown UX on the first attempt. Retry flows have their own delay messaging.
+		if (rateLimitSeconds <= 0 || !lastRequestTime || retryAttempt !== 0) {
 			return
 		}
 
-		const now = performance.now()
-		const timeSinceLastRequest = now - lastRequestTime
-		const rateLimitDelay = Math.ceil(
-			Math.min(rateLimitSeconds, Math.max(0, rateLimitSeconds * 1000 - timeSinceLastRequest) / 1000),
-		)
+		let waited = false
+		while (lastRequestTime) {
+			const timeSinceLastRequest = performance.now() - lastRequestTime
+			const rateLimitDelay = Math.ceil(
+				Math.min(rateLimitSeconds, Math.max(0, rateLimitSeconds * 1000 - timeSinceLastRequest) / 1000),
+			)
+			if (rateLimitDelay <= 0) {
+				break
+			}
 
-		// Only show the countdown UX on the first attempt. Retry flows have their own delay messaging.
-		if (rateLimitDelay > 0 && retryAttempt === 0) {
+			waited = true
 			for (let i = rateLimitDelay; i > 0; i--) {
 				// Send structured JSON data for i18n-safe transport
 				const delayMessage = JSON.stringify({ seconds: i })
 				await this.say("api_req_rate_limit_wait", delayMessage, undefined, true)
 				await delay(1000)
 			}
+
+			// A background title request can dispatch on the shared clock during
+			// the countdown; re-wait from that dispatch instead of proceeding
+			// from the stale deadline.
+			const latestRequestTime = this.rateLimitClock.getLastRequestTime()
+			if (latestRequestTime === lastRequestTime) {
+				break
+			}
+			lastRequestTime = latestRequestTime
+		}
+
+		if (waited) {
 			// Finalize the partial message so the UI doesn't keep rendering an in-progress spinner.
 			await this.say("api_req_rate_limit_wait", undefined, undefined, false)
 		}

@@ -1202,8 +1202,9 @@ export class TaskHistoryStore {
 	 * Deletion by another host is authoritative: when no persisted record
 	 * exists, or the persisted record is malformed or carries a different task
 	 * ID, nothing is written, the stale cache entry is dropped, and the result
-	 * has no item. A signal aborted while the call waits on the store lock
-	 * skips the write, so a cancelled task's title is never persisted.
+	 * has no item. A signal aborted while the call waits on the store lock or
+	 * the per-file lock skips the write, so a cancelled task's title is never
+	 * persisted.
 	 *
 	 * @returns The authoritative record (absent when the write was rejected)
 	 * and whether the generated title was applied.
@@ -1233,9 +1234,16 @@ export class TaskHistoryStore {
 			let applied = !cached.title
 			let authoritative: HistoryItem = cached.title ? cached : incoming
 			let rejectedDiskRecord = false
+			let cancelled = false
 			try {
 				await safeWriteJson(filePath, incoming, {
 					merge: (existing) => {
+						// Cancellation can land while waiting on the per-file lock;
+						// a throwing merge writes nothing.
+						if (options.signal?.aborted) {
+							cancelled = true
+							throw new Error(`[TaskHistoryStore] setGeneratedTitleIfUnset: task ${taskId} cancelled`)
+						}
 						// Writing the cached item back would recreate a task another
 						// host deleted or overwrite a record that is not this task's,
 						// so a missing, malformed, or mismatched record fails closed.
@@ -1263,6 +1271,9 @@ export class TaskHistoryStore {
 					},
 				})
 			} catch (error) {
+				if (cancelled) {
+					return { item: cached, applied: false }
+				}
 				if (!rejectedDiskRecord) {
 					throw error
 				}
