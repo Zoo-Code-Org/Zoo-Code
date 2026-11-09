@@ -58,13 +58,18 @@ function nearestExistingDirectory(absolutePath: string): { directory: string; re
 
 /**
  * The identity a lock is keyed on: the device and inode of the nearest directory that actually
- * exists, plus the components below it that do not exist yet. An 8.3 alias and its long form, a
- * link and its target, and a case variant on a case-insensitive volume all arrive at the same
- * identity, whether or not the leaf has been created. That is the case a canonical spelling
- * cannot serve: a leaf that does not exist yet has no canonical spelling, which is what the
- * `realpath: false` in `acquireFileLock` is there for. And nothing here rewrites a caller's
- * path - the key is for comparing locks, never for opening files - so the strings callers hand
- * to unlink and readFile stay the strings those callers built.
+ * exists, plus the components below it that do not exist yet. Aliasing at or above that directory
+ * converges - an 8.3 alias of it, a link to it, and a case variant of it on a case-insensitive
+ * volume all arrive at the same identity, because the identity is the directory's and only the
+ * surviving components are compared. Aliasing OF THE FINAL COMPONENT does not: those components
+ * are compared as the strings the caller wrote, so an 8.3 alias of the file itself, or a case
+ * variant of it, arrives as a second key - and lockArtefactPath names the artefact by
+ * concatenating that same spelling, so it arrives as a second artefact beside it, and two writers
+ * that believe they hold the same lock do not. A canonical spelling cannot serve the general
+ * case here: a leaf that does not exist yet has no canonical spelling, which is what the
+ * `realpath: false` in `acquireFileLock` is there for. And nothing here rewrites a caller's path
+ * - the key is for comparing locks, never for opening files - so the strings callers hand to
+ * unlink and readFile stay the strings those callers built.
  */
 export function canonicalLockKey(filePath: string): string {
 	const absolute = path.resolve(filePath)
