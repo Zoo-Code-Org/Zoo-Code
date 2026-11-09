@@ -530,6 +530,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return { ok: false, mutated }
 			}
 
+			// A patch whose "Move to" resolves back onto its own source path is a rewrite of
+			// that path, not a relocation: once the staged content is renamed onto the destination
+			// there is no second file left, and unlinking the source would delete the content that
+			// was just committed. Computed from resolved paths because case-insensitive and
+			// normalized spellings can name the same file differently.
+			const isMoveOntoSource = path.resolve(moveAbsolutePath) === path.resolve(absolutePath)
+
 			// Capture the destination state before either supported write path: a
 			// failed move must restore an existing destination instead of deleting
 			// whatever lived there. A read error other than ENOENT means the
@@ -638,9 +645,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return { ok: false, mutated }
 			}
 
-			// Delete the original file
+			// Delete the original file, unless the move renamed its own path: there is no
+			// second copy to remove in that case, and this is the step that would erase the
+			// freshly written content.
 			try {
-				await fs.unlink(absolutePath)
+				if (!isMoveOntoSource) {
+					await fs.unlink(absolutePath)
+				}
 			} catch (error) {
 				// The source is still present (locked or protected): undo the destination
 				// so the file does not live in two places, and report the move as
