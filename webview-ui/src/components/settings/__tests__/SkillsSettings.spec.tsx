@@ -244,13 +244,23 @@ describe("SkillsSettings", () => {
 				message: "bad indentation of a mapping entry",
 				line: 7,
 			},
+			{
+				path: "/workspace/.roo/skills/broken-4/SKILL.md",
+				source: "project",
+				message: "found character that cannot start any token",
+				line: 12,
+				column: 3,
+			},
 		])
 
 		const warning = screen.getByRole("alert")
-		expect(warning).toHaveTextContent("/workspace/.roo/skills/broken-2/SKILL.md")
+		const rows = Array.from(warning.querySelectorAll("li"))
+		expect(rows[0]?.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/broken-2/SKILL.md")
+		expect(rows[1]?.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/broken-3/SKILL.md:7")
+		expect(rows[2]?.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/broken-4/SKILL.md:12:3")
 		expect(warning).toHaveTextContent("unexpected end of the stream")
-		expect(warning).toHaveTextContent("/workspace/.roo/skills/broken-3/SKILL.md:7")
 		expect(warning).toHaveTextContent("bad indentation of a mapping entry")
+		expect(warning).toHaveTextContent("found character that cannot start any token")
 	})
 
 	it("displays project skills section when in a workspace", () => {

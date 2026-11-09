@@ -11,6 +11,8 @@ import {
 	type MarketplaceItem,
 	type MarketplaceInstalledMetadata,
 	type RouterModels,
+	type SkillDiagnostic,
+	type SkillMetadata,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
@@ -863,6 +865,49 @@ describe("ExtensionStateContext", () => {
 			marketplaceItems,
 			marketplaceInstalledMetadata,
 		})
+	})
+
+	it("initializes skills and skillDiagnostics from initialState", () => {
+		const seededSkills: SkillMetadata[] = [
+			{
+				name: "seeded-skill",
+				description: "A seeded skill",
+				path: "/workspace/.roo/skills/seeded-skill/SKILL.md",
+				source: "project",
+			},
+		]
+		const seededDiagnostics: SkillDiagnostic[] = [
+			{
+				path: "/workspace/.roo/skills/seeded-skill/SKILL.md",
+				source: "project",
+				message: "bad indentation of a mapping entry",
+				line: 2,
+			},
+		]
+
+		render(
+			<ExtensionStateContextProvider initialState={{ skills: seededSkills, skillDiagnostics: seededDiagnostics }}>
+				<SkillsTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("skills").textContent!)).toEqual([
+			expect.objectContaining({ name: "seeded-skill" }),
+		])
+		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([
+			expect.objectContaining({ path: "/workspace/.roo/skills/seeded-skill/SKILL.md" }),
+		])
+	})
+
+	it("defaults skills and skillDiagnostics to empty arrays when initialState omits them", () => {
+		render(
+			<ExtensionStateContextProvider initialState={{}}>
+				<SkillsTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("skills").textContent!)).toEqual([])
+		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([])
 	})
 
 	it("updates showRooIgnoredFiles through setShowRooIgnoredFiles", () => {
