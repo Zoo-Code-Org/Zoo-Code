@@ -141,4 +141,32 @@ describe("AppearancePreview", () => {
 		const sample = container.querySelector("pre")!
 		expect(sample.style.fontSize).toBe("var(--zoo-editor-font-size, 0.9025em)")
 	})
+
+	describe("the two code-block contexts that the editor size applies to", () => {
+		it("shows the sample of the code blocks of commands, which follow the VS Code text and the interface scale", () => {
+			const { getByTestId, container } = render(<AppearancePreview values={{}} chatFontSize={20} />)
+			const chatSample = container.querySelector("pre")!
+			const commandSample = getByTestId("appearance-preview-command-code")
+
+			// Both are the size a code block renders with no editor size set; they differ in the text they are relative to.
+			expect(commandSample.style.fontSize).toBe(chatSample.style.fontSize)
+			expect(commandSample.parentElement!.style.fontSize).toBe(
+				"calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))",
+			)
+			// The chat sample keeps the size of the chat text (its row), the command sample sets its own base.
+			expect(chatSample.parentElement!.style.fontSize).toContain("zoo-chat-font-size")
+		})
+
+		it("sets an editor size on both samples", () => {
+			const { getByTestId, container } = render(<AppearancePreview values={{ editorFontSize: 22 }} />)
+
+			expect(container.querySelector("pre")!.style.getPropertyValue("font-size")).toBe(
+				"var(--zoo-editor-font-size, 0.9025em)",
+			)
+			expect(getByTestId("appearance-preview-command-code").style.getPropertyValue("font-size")).toBe(
+				"var(--zoo-editor-font-size, 0.9025em)",
+			)
+			expect(getByTestId("appearance-preview").style.getPropertyValue("--zoo-editor-font-size")).toBe("22px")
+		})
+	})
 })

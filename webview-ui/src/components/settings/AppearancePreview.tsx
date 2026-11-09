@@ -87,6 +87,16 @@ export const AppearancePreview = ({ values, chatFontSize }: AppearancePreviewPro
 					style={{ ...mono, fontSize: `var(--zoo-editor-font-size, ${EDITOR_DEFAULT_EM}em)` }}>
 					{'const isLoading = status === "saving"'}
 				</pre>
+				{/* The code blocks of commands and tool rows follow the VS Code text and the interface scale, not the chat
+				    font size: with no editor size set they are another size than the one above, and both are shown. */}
+				<div style={{ fontSize: "calc(var(--vscode-font-size) * var(--zoo-ui-scale, 1))" }}>
+					<pre
+						className="bg-vscode-textCodeBlock-background mb-2"
+						data-testid="appearance-preview-command-code"
+						style={{ ...mono, fontSize: `var(--zoo-editor-font-size, ${EDITOR_DEFAULT_EM}em)` }}>
+						{'git commit -m "Add the spinner"'}
+					</pre>
+				</div>
 
 				<div className="text-[11px] text-vscode-descriptionForeground mb-1">
 					{t("settings:ui.appearance.terminalFontSize.label")}

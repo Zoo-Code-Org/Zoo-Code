@@ -931,7 +931,20 @@ export const webviewMessageHandler = async (
 							const change = changeMcpEnabled(mcpHub, newValue as boolean)
 							// In a save with appearance values, a change that does not finish must not keep their records for
 							// good: the save fails after the usual time, and the change goes on (it is not repeated).
-							await (boundsStores ? withinSettingWriteTime(change, key) : change)
+							try {
+								await (boundsStores ? withinSettingWriteTime(change, key) : change)
+							} catch (error) {
+								// The save fails, and the setting stays as it was stored, but the change may still land: when it
+								// has settled (however it ends) the hub is brought back to the setting that is stored, so servers
+								// that a late disable closed do not stay disconnected while MCP is stored as enabled.
+								const reconcile = () => {
+									const stored = provider.contextProxy.getValue("mcpEnabled") ?? true
+									if (stored !== newValue)
+										void changeMcpEnabled(mcpHub, stored as boolean).catch(() => undefined)
+								}
+								void change.then(reconcile, reconcile)
+								throw error
+							}
 						}
 					} else if (key === "experiments") {
 						if (!value) {

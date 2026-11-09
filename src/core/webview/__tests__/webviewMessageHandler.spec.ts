@@ -2607,10 +2607,15 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 
 				releases[0]() // the disconnect finishes at last
 				await vi.advanceTimersByTimeAsync(0)
+				// The saves failed and MCP is still stored as enabled: the hub is brought back to it (once, not once per save).
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]])
+				releases[1]()
+				await vi.advanceTimersByTimeAsync(0)
+
 				const third = save({ interfaceFontScale: 120, mcpEnabled: false }, "save-3") // and a later save is a new change
 				await vi.advanceTimersByTimeAsync(0)
-				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(2)
-				releases[1]()
+				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(3)
+				releases[2]()
 				await third
 			})
 
@@ -2634,6 +2639,54 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 				expect(vi.getTimerCount()).toBe(0)
 				releases[0]()
+			})
+
+			it("brings the hub back to the stored setting when a timed-out disable lands late", async () => {
+				const { hub, releases } = stalledHub()
+				const first = expect(save({ mcpEnabled: false, interfaceFontScale: 120 }, "save-1")).rejects.toThrow(
+					"did not finish in 15 seconds",
+				)
+				await vi.advanceTimersByTimeAsync(15_000)
+				await first
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false]])
+
+				releases[0]() // the servers are disconnected at last, though MCP was never stored as disabled
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]]) // reconnected to match the setting
+				releases[1]()
+			})
+
+			it("does not reconcile when what is stored is what the change applied", async () => {
+				const { hub, releases } = stalledHub()
+				stored.mcpEnabled = false // an earlier save stored it, or the user set it elsewhere
+				const first = expect(save({ mcpEnabled: false, interfaceFontScale: 120 }, "save-1")).rejects.toThrow(
+					"did not finish in 15 seconds",
+				)
+				await vi.advanceTimersByTimeAsync(15_000)
+				await first
+
+				releases[0]()
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
+			})
+
+			it("reconciles after a change that failed before the save gave up, too", async () => {
+				const hub = {
+					handleMcpEnabledChange: vi
+						.fn<(enabled: boolean) => Promise<void>>()
+						.mockRejectedValueOnce(new Error("transport stuck"))
+						.mockResolvedValue(undefined),
+				}
+				;(mockClineProvider as unknown as { getMcpHub: () => typeof hub }).getMcpHub = vi.fn(() => hub)
+
+				await expect(save({ mcpEnabled: false, interfaceFontScale: 120 }, "save-1")).rejects.toThrow(
+					"transport stuck",
+				)
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]])
 			})
 
 			it("does not bound or repeat anything for a save without appearance values: it waits for the one change", async () => {
