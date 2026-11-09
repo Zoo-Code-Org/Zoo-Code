@@ -83,8 +83,17 @@ describe("safeWriteJson", () => {
 	let currentTestFilePath: string
 
 	beforeEach(async () => {
-		// Create a temporary directory for each test
-		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safeWriteJson-test-"))
+		// Create a temporary directory for each test, in the spelling the writer itself uses.
+		// safeWriteJson works on a path that fs.realpath returned (the lock key, and now the
+		// recovery scan keyed to it, are realpath results), and every path-keyed double in this
+		// file compares against strings derived from tempDir. On the windows CI runner os.tmpdir()
+		// reports the profile directory in its 8.3 form - C:\Users\RUNNER~1\AppData\Local\Temp -
+		// while fs.realpath reports C:\Users\runneradmin\AppData\Local\Temp for the same
+		// directory, and six rows here (three of them pre-existing) failed on that runner for
+		// nothing but the spelling: the doubles that inject a failure at a named path never saw
+		// that path, and the fsync row never saw the directory handle it opened. Canonicalising
+		// the fixture root makes the fixture's paths and the product's paths one string.
+		tempDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "safeWriteJson-test-")))
 
 		// Create a unique file path for each test
 		currentTestFilePath = path.join(tempDir, "test-file.json")
