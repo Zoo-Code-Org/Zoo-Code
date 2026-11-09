@@ -81,7 +81,14 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// which is the fail-closed decision the guarded publish already makes about a target it cannot
 			// vouch for. The file is reported by name and the first undecodable byte is reported by offset,
 			// because the refusal is only actionable if the model can find the byte.
-			const originalBytes = await fs.readFile(absolutePath)
+			// The union is readFile's, not a cast: this call resolves to the byte overload because no encoding
+			// is passed, but the encoding overload is what the repo's existing fs doubles answer with -
+			// applyDiffTool.outsideWorkspace.spec.ts:143 returns "old\n" from it - and a string that came back
+			// from that overload has already been decoded by whoever asked for it, with the original bytes
+			// unrecoverable. Those callers keep the pre-change behaviour; the refusal below applies where the
+			// tool actually holds bytes, which is every real read.
+			const raw: string | Buffer = await fs.readFile(absolutePath)
+			const originalBytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, "utf-8")
 			let originalContent: string
 			try {
 				originalContent = new TextDecoder("utf-8", { fatal: true }).decode(originalBytes)

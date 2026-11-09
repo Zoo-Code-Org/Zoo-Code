@@ -21,7 +21,9 @@ vi.mock("fs/promises", () => ({
 // ApplyDiffTool reads the file with no encoding, so the call the double stands in for is the
 // byte-returning one: fs.readFile returns Buffer unless an encoding is passed. vi.mocked resolves
 // the encoding overload, so the mock is typed against the signature the tool actually calls.
-const mockedReadFile = vi.mocked(fs.readFile as (path: string) => Promise<Buffer>)
+// readFile returns string or Buffer across its overloads; the tool calls the byte overload and the
+// double answers both, so the double is typed against the union rather than against one overload.
+const mockedReadFile = vi.mocked(fs.readFile as (path: string) => Promise<string | Buffer>)
 
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(true),
@@ -152,7 +154,7 @@ describe("ApplyDiffTool failure reporting", () => {
 	}
 
 	describe("bytes the decoder cannot read", () => {
-		async function runOnBytes(bytes: Buffer): Promise<string> {
+		async function runOnBytes(bytes: string | Buffer): Promise<string> {
 			mockedReadFile.mockResolvedValue(bytes)
 			const applyDiff = vi.fn().mockResolvedValue({ success: true, content: "unused" })
 			mockTask.diffStrategy = { getName: () => "test", applyDiff }
@@ -197,6 +199,18 @@ describe("ApplyDiffTool failure reporting", () => {
 			const output = await runOnBytes(Buffer.from("héllo 中文 ✅\n", "utf8"))
 
 			expect(output).not.toContain("is not valid UTF-8")
+			expect(output).toContain("Changes successfully applied.")
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+		})
+
+		// The tolerance above is not free: it means a caller that pre-decoded the file keeps the lossy
+		// behaviour. It exists because CI runs main's applyDiffTool.outsideWorkspace.spec.ts against this
+		// file (the merge ref of 1910 onto main failed 9 of its rows under the strict read), and that spec
+		// is main's, so this branch cannot edit it. This row is the pin: it says which side gives way.
+		it("edits a file a caller already decoded, which is what the encoding overload hands back", async () => {
+			const output = await runOnBytes("line one\nline two\nline three\n")
+
 			expect(output).toContain("Changes successfully applied.")
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
