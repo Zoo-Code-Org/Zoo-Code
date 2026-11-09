@@ -2,6 +2,8 @@
 
 import axios from "axios"
 
+import { openAiModelInfoSaneDefaults } from "@roo-code/types"
+
 import { getFriendliModels } from "../friendli"
 
 vi.mock("axios")
@@ -55,6 +57,8 @@ describe("getFriendliModels", () => {
 		})
 		expect(models["google/gemma-4-31B-it"].supportsReasoningEffort).toBeUndefined()
 		expect(models["google/gemma-4-31B-it"].supportsPromptCache).toBe(false)
+		// A model without context_length gets the sane default window.
+		expect(models["google/gemma-4-31B-it"].contextWindow).toBe(openAiModelInfoSaneDefaults.contextWindow)
 		// Missing input_modalities and a text-only list both mean no image input.
 		expect(models["google/gemma-4-31B-it"].supportsImages).toBe(false)
 		expect(models["zai-org/GLM-5.2"].supportsImages).toBe(false)
