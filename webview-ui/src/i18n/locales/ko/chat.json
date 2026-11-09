@@ -322,10 +322,10 @@
 		"title": "Zoo Code {{version}} 출시",
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
-			"heading": "Zoo Code v3.94.0의 새로운 기능",
-			"highlight1": "✨ 더 넓어진 모델 및 공급자 지원: Anthropic을 통해 Claude Haiku 5.5를 사용하고, 호환되는 VS Code LM 모델에 이미지를 보내고, OpenCode Go Responses 모델의 temperature를 조정하고, 더 많은 공급자에서 요청을 깔끔하게 취소하세요.",
-			"highlight2": "🔐 더 유연한 MCP OAuth: 정적 OAuth 클라이언트 설정을 구성하고, 사용자 지정 콜백 경로를 사용하고, WWW-Authenticate에서 인증 세부 정보를 확인하고, 재시도 전에 콜백 실패를 확인하세요.",
-			"highlight3": "🧭 더 원활한 채팅과 긴 세션: 기록에서 작업 이름을 바꾸고, Shift를 누르지 않고도 파일을 채팅으로 드래그하고, 긴 세션 동안 유지되는 메모리를 줄이고, 하위 작업 링크와 교체된 웹뷰를 안정적으로 유지하세요."
+			"heading": "Zoo Code v3.96.0의 새로운 기능",
+			"highlight1": "✨ 새로운 채팅 설정 및 진단: 구성 가능한 시간·날짜 형식으로 메시지 타임스탬프를 표시하고, Anthropic 프로필의 prompt-cache TTL을 조정하고, 개인정보를 보호하는 진단 리포트를 생성합니다.",
+			"highlight2": "💸 더 정확한 프로바이더 비용과 캐싱: Anthropic 도구 결과를 그대로 유지하고, Anthropic·MiniMax 비용에 누적 output token을 반영하고, DeepSeek의 prompt-cache 카운터를 읽고, xAI Responses 캐시를 타깃으로 지정하고, Mistral 캐시 읽기를 0.1x로 청구합니다.",
+			"highlight3": "🧭 더 안정적이고 빠른 채팅: 재시작 후 완료된 작업을 재개하고, 저장된 commit이 없을 때에도 checkpoint를 복원하고, 응답하지 않는 webview 렌더러를 자동으로 다시 로드하고, 스트리밍 업데이트를 조절하고, 로케일을 필요할 때 로드합니다."
 		}
 	},
 	"costs": {
