@@ -145,6 +145,20 @@ export default [
 		},
 	},
 	{
+		// The four workflow tests ignored above are exempt from the path-traversal selectors
+		// because they read root-level config. That exception was never about abort
+		// assertions, so re-apply the abort rule for exactly those files.
+		files: [
+			"**/services/__tests__/pr-review-state-workflow.test.ts",
+			"**/services/__tests__/stale-pr-clock-workflow.test.ts",
+			"**/services/__tests__/fork-review-followup-workflow.test.ts",
+			"**/services/__tests__/workflow-self-listen.test.ts",
+		],
+		rules: {
+			"no-restricted-syntax": ["error", abortSubstringSelector],
+		},
+	},
+	{
 		// A later block replaces no-restricted-syntax for the same files, so repeat the traversal selectors.
 		files: ["api/**/__tests__/**/*.spec.ts"],
 		rules: {

@@ -15,7 +15,12 @@ const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestA
 
 describe("Task.ask queued message drain", () => {
 	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
-		const task = Object.create(Task.prototype) as Task
+		// Distinct task and instance ids, so an abort assertion can name this task instead of
+		// accepting whatever the fixture left unset.
+		const task = Object.create(Task.prototype, {
+			taskId: { value: "task-ask-drain", enumerable: true },
+			instanceId: { value: "instance-ask-drain", enumerable: true },
+		}) as Task
 		setAbortLatch(task, false)
 		;(task as any).clineMessages = []
 		;(task as any).askResponse = undefined
@@ -349,7 +354,11 @@ describe("Task.ask queued message drain", () => {
 		setAbortLatch(task, true)
 		finishAddingAsk()
 
-		await expect(ask).rejects.toThrow(/#ask\] task \S+ aborted$/)
+		// The abort must name this task and this instance: a regex that accepts any id would also
+		// pass for another task's abort or a different prefix.
+		const rejection = await ask.catch((e: unknown) => e)
+		expect((rejection as Error).message).toBe(`[ZooCode#ask] task ${task.taskId}.${task.instanceId} aborted`)
+		expect((rejection as Error).message).toBe("[ZooCode#ask] task task-ask-drain.instance-ask-drain aborted")
 		expect(task.messageQueueService.messages).toHaveLength(1)
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Persist me later")
 	})

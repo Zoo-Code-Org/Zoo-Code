@@ -284,7 +284,13 @@ describe("abort assertions in the extension ESLint config", () => {
 	const srcRoot = fileURLToPath(new URL("../../src/", import.meta.url))
 	const eslint = new ESLint({ cwd: srcRoot })
 
-	for (const filename of ["core/task/__tests__/example.spec.ts", "core/config/__tests__/example.spec.ts"]) {
+	for (const filename of [
+		"core/task/__tests__/example.spec.ts",
+		"core/config/__tests__/example.spec.ts",
+		// The workflow tests are exempt from the path-traversal selectors, not from the abort
+		// rule; listing one proves the lane that re-applies it actually resolves for them.
+		"services/__tests__/pr-review-state-workflow.test.ts",
+	]) {
 		it(`checks rejected and accepted assertions in ${filename}`, async () => {
 			const resolved = await eslint.calculateConfigForFile(filename)
 			const syntaxConfig = [
@@ -303,6 +309,15 @@ describe("abort assertions in the extension ESLint config", () => {
 				["await expect(p).rejects.toThrow(/^Request was aborted\\.$/)", 1],
 				["await expect(p).rejects.toThrowError(/request aborted\\.$/i)", 1],
 				["await expect(p).rejects.toThrow(/^request aborted\\$/)", 1],
+				// An inline non-capturing group is regex source, not part of the asserted
+				// message: an anchored match that stops short of it lets a bare abort through.
+				["await expect(p).rejects.toThrow(/abort(?:ed)?/i)", 1],
+				["await expect(p).rejects.toThrowError(/^request aborted(?:ed)?$/i)", 1],
+				["await expect(p).rejects.toThrow(/cancel(?:ed)?/i)", 0],
+				[
+					"await expect(p).rejects.toThrow(/^The Requesty request was aborted(?:ed)? because the peer closed the stream\\.$/)",
+					0,
+				],
 				['await expect(p).rejects.not.toThrow("aborted")', 0],
 				["await expect(p).rejects.toThrow(/^Request was aborted because the peer closed the stream\\.$/)", 0],
 				[

@@ -764,7 +764,10 @@ describe("RequestyHandler", () => {
 
 				expect(error).toBeInstanceOf(Error)
 				expect((error as Error).name).not.toBe("AbortError")
-				expect((error as Error).message).toContain("API Error")
+				// Assert the normalised message, not a substring: "API Error" is also the message of
+				// the unwrapped SDK error, so a catch that skipped handleOpenAIError would pass a
+				// contains-check while the provider contract was gone.
+				expect((error as Error).message).toBe("Requesty completion error: API Error")
 			},
 		)
 
@@ -998,7 +1001,9 @@ describe("RequestyHandler", () => {
 				return Promise.reject(lookupError)
 			})
 
-			await expect(handler.completePrompt("test prompt")).rejects.toThrow("lookup failed")
+			// The handler rethrows this exact object, and the fixture owns it: pin the identity rather
+			// than the message text, which a rebuilt copy of the same failure would also satisfy.
+			await expect(handler.completePrompt("test prompt")).rejects.toBe(lookupError)
 		})
 
 		it("normalizes raw AbortError lookup failures to the provider AbortError", async () => {
@@ -1205,6 +1210,44 @@ describe("RequestyHandler", () => {
 					timeout: 100_000,
 				}),
 			)
+		})
+
+		it("lets the per-request timeout abort the request while the caller signal stays live", async () => {
+			// The caller signal is live and never aborted here, so only the timer may end the request.
+			// The combined-options test above aborts through the controller and cannot see a merged
+			// signal that drops the timeout whenever a caller signal exists; this one hangs if it does.
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
+				requestSignal = options?.signal
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 25 })
+			void promise.catch(() => {})
+			await withSettleGuard(createStarted)
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({ name: "AbortError" })
+			expect(controller.signal.aborted).toBe(false)
+			expect(requestSignal).toBeDefined()
+			expect(requestSignal).not.toBe(controller.signal)
+			expect(requestSignal?.aborted).toBe(true)
 		})
 
 		it("settles on abort while the SDK is sleeping between retries instead of waiting for the completion", async () => {
