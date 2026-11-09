@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
+import { fileURLToPath, URL } from "node:url"
 
-import { Linter } from "eslint"
+import { ESLint, Linter } from "eslint"
 import typescriptEslint from "typescript-eslint"
 
 import { apiProviderHygieneConfig, apiProviderTestSelectors, apiSpecTsIgnoreConfig } from "./api-provider-hygiene.js"
@@ -174,7 +175,13 @@ describe("api provider hygiene: spec loops", () => {
 		})
 	}
 
-	for (const code of ['await expect(p).rejects.toThrow("aborted")', "expect(() => f()).toThrow('abort')"]) {
+	for (const code of [
+		'await expect(p).rejects.toThrow("aborted")',
+		"expect(() => f()).toThrow('abort')",
+		'await expect(p).rejects.toThrowError("aborted")',
+		"expect(() => f()).toThrow(/abort/i)",
+		"await expect(p).rejects.toThrowError(/aborted/i)",
+	]) {
 		it(`flags a bare abort substring: ${code}`, () => {
 			assert.equal(lintSpec(code).length, 1)
 		})
@@ -184,6 +191,11 @@ describe("api provider hygiene: spec loops", () => {
 		'await expect(p).rejects.toThrow("The Requesty request was aborted")',
 		'await expect(p).rejects.toMatchObject({ name: "AbortError" })',
 		'await expect(p).rejects.toThrow("API Error")',
+		'expect(() => f()).not.toThrow("aborted")',
+		'await expect(p).rejects.not.toThrow("aborted")',
+		"expect(() => f()).not.toThrowError(/abort/i)",
+		"await expect(p).rejects.not.toThrowError(/aborted/i)",
+		"await expect(p).rejects.toThrow(/^The Requesty request was aborted$/)",
 	]) {
 		it(`allows: ${code}`, () => {
 			assert.deepEqual(lintSpec(code), [])
@@ -260,4 +272,40 @@ describe("api provider hygiene: @ts-ignore in specs", () => {
 	it("does not apply outside src/api", () => {
 		assert.deepEqual(lintSpecFile("// @ts-ignore x\nhandler.client", "services/__tests__/example.spec.ts"), [])
 	})
+})
+
+// Resolve each lane through the extension's real config before exercising its syntax rules.
+// Isolating syntax rules avoids requiring fixture files in the TypeScript project.
+describe("abort assertions in the extension ESLint config", () => {
+	const srcRoot = fileURLToPath(new URL("../../src/", import.meta.url))
+	const eslint = new ESLint({ cwd: srcRoot })
+
+	for (const filename of ["core/task/__tests__/example.spec.ts", "core/config/__tests__/example.spec.ts"]) {
+		it(`checks rejected and accepted assertions in ${filename}`, async () => {
+			const resolved = await eslint.calculateConfigForFile(filename)
+			const syntaxConfig = [
+				{
+					files: ["**/*.ts"],
+					languageOptions: { parser: typescriptEslint.parser },
+					rules: { "no-restricted-syntax": resolved.rules["no-restricted-syntax"] },
+				},
+			]
+			for (const [code, expectedCount] of [
+				['await expect(p).rejects.toThrow("aborted")', 1],
+				["await expect(p).rejects.toThrowError(/abort/i)", 1],
+				['await expect(p).rejects.not.toThrow("aborted")', 0],
+				[
+					'await expect(p).rejects.toMatchObject({ name: "AbortError", message: "The Requesty request was aborted" })',
+					0,
+				],
+			]) {
+				const messages = linter.verify(code, syntaxConfig, { filename })
+				assert.equal(messages.length, expectedCount, code)
+				if (expectedCount) {
+					assert.equal(messages[0].ruleId, "no-restricted-syntax")
+					assert.match(messages[0].message, /bare 'abort' substring/)
+				}
+			}
+		})
+	}
 })

@@ -65,7 +65,8 @@ export const apiProviderHygieneConfig = {
 
 // Shared by every spec lane, not only src/api: an abort assertion must not pass on a raw SDK error.
 export const abortSubstringSelector = {
-	selector: "CallExpression[callee.property.name='toThrow'][arguments.0.value=/^[Aa]bort(ed)?$/]",
+	selector:
+		"CallExpression[callee.property.name=/^toThrow(Error)?$/]:not([callee.object.property.name='not']):matches([arguments.0.value=/^[Aa]bort(ed)?$/], [arguments.0.regex.pattern=/^[Aa]bort(ed)?$/])",
 	message:
 		"A bare 'abort' substring also matches a raw SDK error. Assert the AbortError name and the full provider message.",
 }
