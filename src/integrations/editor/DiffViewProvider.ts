@@ -977,9 +977,10 @@ export class DiffViewProvider {
 					() => {
 						// Command executed successfully, now wait for the editor to appear
 					},
-					(err: any) => {
+					(err: unknown) => {
 						cleanup()
-						reject(new Error(`Failed to execute diff command for ${uri.fsPath}: ${err.message}`))
+						const message = err instanceof Error ? err.message : String(err)
+						reject(new Error(`Failed to execute diff command for ${uri.fsPath}: ${message}`))
 					},
 				)
 		})

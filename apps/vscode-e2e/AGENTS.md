@@ -140,11 +140,13 @@ The `model` field can be added to either match when a test targets a specific mo
 Use `streamingProfile: { ttft: <ms> }` on a fixture, not a flat `latency: <ms>`, when a test needs
 to simulate a slow or hung provider (e.g. to cancel an in-flight request mid-stream). `ttft` delays
 only the first SSE chunk, so the pending window is exactly the configured value. Flat `latency`
-delays _every_ chunk, and aimock never observes client disconnects — after a test cancels the
-request, a flat-latency stream keeps flushing chunks server-side for `chunks × latency` before
-reaching the dead socket, which can interleave with the next test's request against the same mock
-server. See `SUBTASK_API_HANG_RESPONSE_LATENCY_MS` in `fixtures/subtasks.ts` for an example,
-including the bounded post-test drain the calling suite uses to wait out that window.
+delays _every_ chunk. Before aimock 1.47.0, the mock did not observe client disconnects — after a
+test cancelled the request, a flat-latency stream kept flushing chunks server-side for
+`chunks × latency` before reaching the dead socket, which could interleave with the next test's
+request against the same mock server. Version 1.47.0 stops the reply on disconnect, but the
+suite keeps its drain wait until an e2e run shows it is not needed. See
+`SUBTASK_API_HANG_RESPONSE_LATENCY_MS` in `fixtures/subtasks.ts` for an example, including the
+bounded post-test drain the calling suite uses to wait out that window.
 
 ## 404 errors in logs are expected
 
