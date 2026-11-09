@@ -29,7 +29,10 @@ export interface FileLockOptions {
  */
 function statIdentity(target: string): string | null {
 	try {
-		const stats = fs.statSync(target)
+		// BigInt stats, because the identity is a string and a plain number is not lossless: two
+		// adjacent inodes above 2^53 are the same Number, so the numeric form can key two
+		// neighbouring directories alike and let them share a lock nobody asked for.
+		const stats = fs.statSync(target, { bigint: true })
 		return String(stats.dev) + ":" + String(stats.ino)
 	} catch {
 		return null
