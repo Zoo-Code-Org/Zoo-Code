@@ -8097,7 +8097,9 @@ describe("Cline", () => {
 			// The streaming loop checks this.abort right after the presenter hands off a chunk, so the
 			// cancel lands mid-stream and reaches abortStream(-"user_cancelled") with the view open.
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
-				task.abort = true
+				// Task.abort is a getter over the run-state latch; the method the tree declares is
+				// abortTask(), which latches the abort synchronously and returns the shared promise.
+				void task.abortTask()
 			})
 			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
 				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "partial model output" }]),
@@ -8129,7 +8131,9 @@ describe("Cline", () => {
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
-				task.abort = true
+				// Task.abort is a getter over the run-state latch; the method the tree declares is
+				// abortTask(), which latches the abort synchronously and returns the shared promise.
+				void task.abortTask()
 			})
 			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
 				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "partial model output" }]),

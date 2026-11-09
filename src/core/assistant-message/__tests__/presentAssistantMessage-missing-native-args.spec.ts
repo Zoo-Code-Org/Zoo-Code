@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
+import { DispatchState } from "../../task/dispatchState"
 import { type RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { isValidToolName, validateToolUse } from "../../tools/validateToolUse"
 
@@ -50,8 +51,10 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			// main renamed the dispatcher fields (src/core/task/dispatchState.ts): the presenter reads
+			// dispatchState and pendingWork, not the old lock/flag pair.
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [
 				{
