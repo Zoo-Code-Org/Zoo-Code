@@ -2,6 +2,7 @@ import * as fs from "fs"
 import * as path from "path"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
+import { canonicalLeafSpelling } from "./lockLeafSpelling"
 
 /**
  * Shared staleness window for per-file advisory locks. This module owns the
@@ -84,13 +85,16 @@ export function canonicalLockKey(filePath: string): string {
 }
 
 /**
- * Where the artefact lives: beside the file in the caller's own spelling. The key above is the
- * identity, and the artefact stays a path, because `safeWriteJson` and the interruption tests
- * address `<file>.lock` directly - moving it is what made a green suite red, so the location is
- * pinned by a test rather than left to taste.
+ * Where the artefact lives: beside the file, named by the spelling the volume holds for that leaf,
+ * so two spellings of one file contend with one another instead of each taking its own lock. The
+ * key above is the identity, and the artefact stays a path, because `safeWriteJson` and the
+ * interruption tests address `<file>.lock` directly - moving it is what made a green suite red, so
+ * the location is pinned by a test rather than left to taste. Only the final component is
+ * re-spelled: a caller that reaches the file through a junction or an 8.3 alias of a DIRECTORY
+ * still gets the artefact inside that directory, because the re-spelling never moves the file.
  */
 function lockArtefactPath(absolutePath: string): string {
-	return absolutePath + ".lock"
+	return canonicalLeafSpelling(absolutePath) + ".lock"
 }
 
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
