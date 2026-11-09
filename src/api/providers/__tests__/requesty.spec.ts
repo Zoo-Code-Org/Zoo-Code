@@ -20,6 +20,7 @@ import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { withSettleGuard } from "../../../test-utils/settle-guard"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 const mockCreate = vitest.fn()
 
@@ -960,8 +961,10 @@ describe("RequestyHandler", () => {
 
 				// The lookup fails after the request already settled as aborted.
 				rejectLookup(new Error("late lookup failure"))
-				// Node reports an unhandled rejection only after the microtask queue drains.
-				await new Promise((resolve) => setTimeout(resolve, 0))
+				// Node reports an unhandled rejection only after the queue drains, and a rejection
+				// that ends up handled has no observable state to poll, so drain the queue through
+				// the shared helper instead of sleeping.
+				await flushMacrotasks()
 				expect(unhandled).toHaveLength(0)
 			} finally {
 				process.off("unhandledRejection", onUnhandledRejection)
