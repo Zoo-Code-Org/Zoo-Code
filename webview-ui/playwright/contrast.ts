@@ -87,17 +87,6 @@ export function requiredTextContrast(fontSize: number, fontWeight: number): numb
 }
 
 export async function expectContrast(foreground: Locator, options: ContrastOptions) {
-	// A colour that is still changing is not the one the user ends up with (a theme that was just applied makes borders
-	// and backgrounds transition): wait for the transitions to end, so the colour measured is the settled one. Reading
-	// the animations also brings the styles up to date, so a transition that was just triggered is among them.
-	await foreground.evaluate(() =>
-		Promise.allSettled(
-			document
-				.getAnimations()
-				.filter((animation) => animation instanceof CSSTransition)
-				.map((animation) => animation.finished),
-		),
-	)
 	const backgroundToken = options.background ? `contrast-${Date.now()}-${Math.random()}` : null
 	if (options.background && backgroundToken) {
 		await options.background.evaluate(

@@ -3183,8 +3183,9 @@ export class ClineProvider
 	}
 
 	/**
-	 * Throws `StateBuildAbandonedError` when the provider is disposed before or while the state is built; it is checked
-	 * before a sequence number is spent and after every step that waits. The posting methods catch it.
+	 * Throws `StateBuildAbandonedError` when the provider is disposed before the build, or while its settings are read
+	 * (the step that reads the appearance values); it is checked before a sequence number is spent. The posting methods
+	 * catch it, and drop a state that was finished after the provider was disposed.
 	 */
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
 		this.throwIfDisposed()
@@ -3318,7 +3319,6 @@ export class ClineProvider
 		} catch {
 			// Ignore this error.
 		}
-		this.throwIfDisposed()
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
@@ -3366,35 +3366,6 @@ export class ClineProvider
 		} catch {
 			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
 		}
-		this.throwIfDisposed()
-
-		const openAiCodexIsAuthenticated = await (async () => {
-			try {
-				const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
-				return await openAiCodexOAuthManager.isAuthenticated()
-			} catch {
-				return false
-			}
-		})()
-		this.throwIfDisposed()
-		const kimiCodeIsAuthenticated = await (async () => {
-			try {
-				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-				return await kimiCodeOAuthManager.isAuthenticated()
-			} catch {
-				return false
-			}
-		})()
-		this.throwIfDisposed()
-		const kimiCodeOAuthState = await (async () => {
-			try {
-				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-				return kimiCodeOAuthManager.getState()
-			} catch {
-				return undefined
-			}
-		})()
-		this.throwIfDisposed()
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -3535,9 +3506,30 @@ export class ClineProvider
 			autoCloseZooOpenedFilesAfterUserEdited:
 				autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 			autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			openAiCodexIsAuthenticated,
-			kimiCodeIsAuthenticated,
-			kimiCodeOAuthState,
+			openAiCodexIsAuthenticated: await (async () => {
+				try {
+					const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
+					return await openAiCodexOAuthManager.isAuthenticated()
+				} catch {
+					return false
+				}
+			})(),
+			kimiCodeIsAuthenticated: await (async () => {
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					return await kimiCodeOAuthManager.isAuthenticated()
+				} catch {
+					return false
+				}
+			})(),
+			kimiCodeOAuthState: await (async () => {
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					return kimiCodeOAuthManager.getState()
+				} catch {
+					return undefined
+				}
+			})(),
 			...zooCodeState,
 			platform: process.platform,
 			arch: process.arch,

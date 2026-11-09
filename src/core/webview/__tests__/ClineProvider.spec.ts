@@ -41,9 +41,6 @@ import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
 import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
-import { CloudService } from "@roo-code/cloud"
-import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
-import { kimiCodeOAuthManager } from "../../../integrations/kimi-code/oauth"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
@@ -3894,32 +3891,6 @@ describe("ClineProvider", () => {
 			return replaced
 		}
 
-		const cloudWith = (organizations: () => Promise<unknown[]>) => {
-			const getOrganizationMemberships = vi.fn(organizations)
-			// The rest of the instance stays what it is (the provider unhooks itself from it when it is disposed).
-			// A partial double of the service: the build reads only the two members that are replaced.
-			const instance = {
-				...CloudService.instance,
-				isCloudAgent: false,
-				getOrganizationMemberships,
-			} as unknown as typeof CloudService.instance
-			track(vi.spyOn(CloudService, "instance", "get").mockReturnValue(instance))
-			return getOrganizationMemberships
-		}
-
-		// The mocked modules have no such members: they are put there for the test, and taken away after it.
-		const withMembers = <Target extends object>(target: Target, members: Record<string, unknown>) => {
-			const record = target as Record<string, unknown>
-			const before = Object.fromEntries(Object.keys(members).map((key) => [key, record[key]]))
-			Object.assign(record, members)
-			undo.push(() => {
-				for (const key of Object.keys(members)) {
-					if (before[key] === undefined) delete record[key]
-					else record[key] = before[key]
-				}
-			})
-		}
-
 		const cases: Case[] = [
 			{
 				name: "the task history is initialised",
@@ -3943,67 +3914,9 @@ describe("ClineProvider", () => {
 						await current.dispose()
 						return state
 					})
-					return cloudWith(async () => [])
-				},
-			},
-			{
-				name: "the organisations of the user are read",
-				setup: async (current) => {
-					cloudWith(async () => {
-						await current.dispose()
-						return []
-					})
 					// A private method: no typed alternative lets a spy name it.
 					const privateMembers = current as unknown as { mergeAllowedCommands: () => string[] }
 					return track(vi.spyOn(privateMembers, "mergeAllowedCommands"))
-				},
-			},
-			{
-				name: "the Zoo Code sign-in is read",
-				setup: async (current) => {
-					const codexSignIn = vi.fn(async () => false)
-					const zooCodeAuth = await import("../../../services/zoo-code-auth")
-					track(vi.mocked(zooCodeAuth.getCachedZooCodeUserInfo).mockReturnValue({} as never))
-					track(
-						vi.mocked(zooCodeAuth.isZooCodeAuthenticated).mockImplementation(async () => {
-							await current.dispose()
-							return true
-						}),
-					)
-					withMembers(openAiCodexOAuthManager, { isAuthenticated: codexSignIn })
-					return codexSignIn
-				},
-			},
-			{
-				name: "the OpenAI Codex sign-in is read",
-				setup: async (current) => {
-					withMembers(openAiCodexOAuthManager, {
-						isAuthenticated: async () => {
-							await current.dispose()
-							return true
-						},
-					})
-					return track(vi.spyOn(kimiCodeOAuthManager, "isAuthenticated"))
-				},
-			},
-			{
-				name: "the Kimi Code sign-in is read",
-				setup: async (current) => {
-					track(vi.spyOn(kimiCodeOAuthManager, "isAuthenticated")).mockImplementation(async () => {
-						await current.dispose()
-						return true
-					})
-					return track(vi.spyOn(kimiCodeOAuthManager, "getState"))
-				},
-			},
-			{
-				name: "the Kimi Code state is read",
-				setup: async (current) => {
-					track(vi.spyOn(kimiCodeOAuthManager, "getState")).mockImplementation(() => {
-						void current.dispose() // disposed synchronously: the build is over but for its last check
-						return { status: "idle" }
-					})
-					return track(vi.spyOn(current, "postMessageToWebview"))
 				},
 			},
 		]
