@@ -302,7 +302,9 @@ describe("Task idle condensing — arming the timer", () => {
 
 	test("does not arm for an aborted task", async () => {
 		const { task } = buildTask()
-		task["abort"] = true
+		// Redefine rather than assign: `abort` may be a getter-only accessor,
+		// and the shadowing own property from buildTask is writable at runtime.
+		Object.defineProperty(task, "abort", { value: true, configurable: true, writable: true })
 
 		await task["maybeStartIdleCondenseTimer"]()
 
