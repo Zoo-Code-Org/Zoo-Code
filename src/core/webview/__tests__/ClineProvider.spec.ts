@@ -4226,21 +4226,35 @@ describe("ClineProvider", () => {
 			expect((await provider.getStateToPostToWebview()).settingsImportRefreshedAt).toBeUndefined()
 		})
 
-		test("gives overlapping posts their own marks", async () => {
+		test("gives overlapping posts their own marks, also when the one that began first is built last", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
+			const build = provider.getStateToPostToWebview.bind(provider)
+			let releaseFirst: () => void = () => {}
+			vi.spyOn(provider, "getStateToPostToWebview").mockImplementationOnce(async (options) => {
+				// The first post is held while its state is built: the second one is built, and posted, first.
+				await new Promise<void>((resolve) => (releaseFirst = resolve))
+				return build(options)
+			})
 
-			await Promise.all([
-				provider.postStateToWebview({ at: 1, storedKeys: ["mode"], late: false }),
-				provider.postStateToWebview({ at: 2, storedKeys: ["terminalFontSize"], late: true }),
-			])
+			const first = provider.postStateToWebview({ at: 1, storedKeys: ["mode"], late: false })
+			const second = provider.postStateToWebview({ at: 2, storedKeys: ["terminalFontSize"], late: true })
+			await second
+			releaseFirst()
+			await first
 
-			const marked = postedStates().filter((state) => state.settingsImportRefreshedAt !== undefined)
-			expect(marked.map((state) => [state.settingsImportRefreshedAt, state.settingsImportStoredKeys])).toEqual(
-				expect.arrayContaining([
-					[1, ["mode"]],
-					[2, ["terminalFontSize"]],
-				]),
-			)
+			const [secondPosted, firstPosted] = postedStates()
+			// Each state has the whole mark of its own post, whichever order they were posted in.
+			expect(secondPosted).toMatchObject({
+				settingsImportRefreshedAt: 2,
+				settingsImportStoredKeys: ["terminalFontSize"],
+				settingsImportRefreshIsLate: true,
+			})
+			expect(firstPosted).toMatchObject({
+				settingsImportRefreshedAt: 1,
+				settingsImportStoredKeys: ["mode"],
+			})
+			expect(firstPosted.settingsImportRefreshIsLate).toBeUndefined()
+			expect(postedStates()).toHaveLength(2)
 		})
 	})
 
