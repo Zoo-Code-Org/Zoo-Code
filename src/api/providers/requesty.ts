@@ -104,7 +104,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		return getRequestyModels(options.baseUrl, options.apiKey, ...fetchOpts)
 	}
 
-	public async fetchModel() {
+	public async fetchModel(signal?: AbortSignal) {
 		// Pass the API key so the catalog request is authenticated and the cache entry is
 		// key-scoped. Requesty enforces per-key model allowlists, so a keyless (URL-only)
 		// entry would let one key's catalog be served to another key on the same server.
@@ -113,6 +113,9 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				provider: providerIdentifiers.requesty,
 				apiKey: this.options.requestyApiKey,
 				baseUrl: this.baseURL,
+				// Per-waiter: modelCache detaches this caller and aborts the shared fetch only
+				// when the last waiter leaves.
+				...(signal && { signal }),
 			},
 			this,
 		)
@@ -281,7 +284,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			let modelData: Awaited<ReturnType<RequestyHandler["fetchModel"]>>
 			try {
 				modelData = requestAbortSignal
-					? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
+					? await rejectOnAbort(this.fetchModel(requestAbortSignal), requestAbortSignal, this.providerName)
 					: await this.fetchModel()
 			} catch (error) {
 				if (isRequestAborted(error, requestAbortSignal)) {

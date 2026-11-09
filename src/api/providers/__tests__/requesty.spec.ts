@@ -903,6 +903,71 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("forwards the request signal to the model lookup", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const { getModels } = await import("../fetchers/modelCache")
+			let lookupSignal: AbortSignal | undefined
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			vitest.mocked(getModels).mockImplementationOnce((options) => {
+				lookupSignal = options.signal
+				notifyLookupStarted()
+				return new Promise<ModelRecord>(() => {})
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			void promise.catch(() => {})
+			await withSettleGuard(lookupStarted)
+			expect(lookupSignal).toBeDefined()
+			expect(lookupSignal?.aborted).toBe(false)
+			controller.abort()
+
+			await expect(withSettleGuard(promise)).rejects.toMatchObject({ name: "AbortError" })
+			expect(lookupSignal?.aborted).toBe(true)
+		})
+
+		it("does not leak an unhandled rejection when the lookup rejects after abort", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			const { getModels } = await import("../fetchers/modelCache")
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			let rejectLookup!: (error: Error) => void
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return new Promise<ModelRecord>((_resolve, reject) => {
+					rejectLookup = reject
+				})
+			})
+
+			const unhandled: unknown[] = []
+			const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+			process.on("unhandledRejection", onUnhandledRejection)
+			try {
+				const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+				void promise.catch(() => {})
+				await withSettleGuard(lookupStarted)
+				controller.abort()
+				await expect(withSettleGuard(promise)).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The Requesty request was aborted",
+				})
+
+				// The lookup fails after the request already settled as aborted.
+				rejectLookup(new Error("late lookup failure"))
+				// Node reports an unhandled rejection only after the microtask queue drains.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				expect(unhandled).toHaveLength(0)
+			} finally {
+				process.off("unhandledRejection", onUnhandledRejection)
+			}
+		})
+
 		it("applies timeoutMs to model lookup with no caller signal at all", async () => {
 			// The comment above completePrompt claims timeoutMs covers model lookup too. With no
 			// caller signal the only cancellation source is the timeout this method configures, so

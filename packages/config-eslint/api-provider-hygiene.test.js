@@ -181,6 +181,10 @@ describe("api provider hygiene: spec loops", () => {
 		'await expect(p).rejects.toThrowError("aborted")',
 		"expect(() => f()).toThrow(/abort/i)",
 		"await expect(p).rejects.toThrowError(/aborted/i)",
+		'await expect(p).rejects.toThrow("was aborted")',
+		'await expect(p).rejects.toThrow("Request was aborted.")',
+		'await expect(p).rejects.toThrow("The request was aborted")',
+		"await expect(p).rejects.toThrow(/was aborted/)",
 	]) {
 		it(`flags a bare abort substring: ${code}`, () => {
 			assert.equal(lintSpec(code).length, 1)
