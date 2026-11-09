@@ -9,6 +9,27 @@ import { acquireFileLock, canonicalLockKey, LOCK_STALE_MS, withFileLock } from "
 
 vi.mock("proper-lockfile", () => ({ lock: vi.fn() }))
 
+type StatSyncOverride = (
+	target: string,
+	options?: { bigint?: boolean },
+) => { dev: number | bigint; ino: number | bigint }
+
+/**
+ * A delegating filesystem double, armed only by the inode-precision suite below. Everything else
+ * in this file keeps using the real filesystem, because the wrapper forwards to the actual module
+ * whenever no override is installed.
+ */
+let statSyncOverride: StatSyncOverride | null = null
+
+vi.mock("fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("fs")>()
+	const statSync = ((target: string, options?: unknown) =>
+		statSyncOverride === null
+			? (actual.statSync as (path: string, opts?: unknown) => unknown)(target, options)
+			: statSyncOverride(target, options as { bigint?: boolean } | undefined)) as typeof actual.statSync
+	return { ...actual, statSync }
+})
+
 describe("file lock protocol", () => {
 	beforeEach(() => vi.clearAllMocks())
 
@@ -303,5 +324,58 @@ describe("two spellings contend with the real library", () => {
 		const aliasFile = path.join(aliasOf(longDir), "history.json")
 		expect(fs.statSync(aliasFile).ino).toBe(fs.statSync(file).ino)
 		await expectOneLockAcrossSpellings(aliasFile, file)
+	})
+})
+
+/**
+ * The identity is a string built from device and inode, and node hands those over as plain numbers
+ * unless asked otherwise. Above 2^53 an inode is no longer a distinct number - 17451448568457636
+ * and 17451448568457637 are adjacent integers and one double - so the identity has to be read with
+ * `{ bigint: true }` or two neighbouring directories collapse into one key and one lock.
+ *
+ * The double is the row: it answers a plain stat with **rounded numbers**, the way node does, and
+ * hands back BigInts only when the caller asks for them. A double that returned BigInts
+ * unconditionally would read green before the fix and prove nothing about the numeric path.
+ */
+describe("identity keeps inodes above 2^53 distinct", () => {
+	const inodeLow = 17451448568457636n
+	const inodeHigh = 17451448568457637n
+	const dev = 7n
+	// Two existing directories one inode apart, each holding a file of the same name, so the only
+	// thing that can separate the two keys is the inode the identity is built from. These paths are
+	// synthetic - the fake statSync answers for them - so nothing is created on disk.
+	const precisionRoot = path.resolve("zoo-identity-precision")
+	const directoryLow = path.join(precisionRoot, "a")
+	const directoryHigh = path.join(precisionRoot, "b")
+
+	let statCalls: Array<{ target: string; bigintRequested: boolean }> = []
+	beforeEach(() => {
+		statCalls = []
+		statSyncOverride = (target, options) => {
+			const bigintRequested = options?.bigint === true
+			statCalls.push({ target, bigintRequested })
+			const ino = target === directoryLow ? inodeLow : target === directoryHigh ? inodeHigh : 1n
+			// Fidelity: BigInts only when they were asked for, rounded numbers otherwise.
+			return bigintRequested ? { dev, ino } : { dev: Number(dev), ino: Number(ino) }
+		}
+	})
+	afterEach(() => {
+		statSyncOverride = null
+	})
+
+	it("pairs the adjacent inodes named by the precision loss", () => {
+		expect(Number(inodeLow)).toBe(Number(inodeHigh))
+		expect(String(inodeLow)).not.toBe(String(inodeHigh))
+	})
+
+	it("keys two directories one inode apart above 2^53 by different identities", () => {
+		const low = canonicalLockKey(path.join(directoryLow, "history.json"))
+		const high = canonicalLockKey(path.join(directoryHigh, "history.json"))
+		expect(low).not.toBe(high)
+	})
+
+	it("asks the filesystem for the identity in bigint form", () => {
+		canonicalLockKey(path.join(directoryLow, "history.json"))
+		expect(statCalls.some((call) => call.bigintRequested)).toBe(true)
 	})
 })
