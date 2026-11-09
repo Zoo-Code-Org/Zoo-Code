@@ -311,17 +311,32 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			return { ok: false, mutated }
 		}
 
-		// Save the changes
-		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
-		} else {
-			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+		// The write lands inside the save call below, which can still reject afterwards
+		// (opening the document, collecting diagnostics) once the new file is on disk. The
+		// mutation is therefore recorded at the write boundary: this handler never returns in
+		// that case, and without the flag the retained file would hand off the queued turn
+		// with no partial-state checkpoint (see the catch and finally in execute()).
+		mutated = true
+		mutation.committed = true
+		try {
+			if (isPreventFocusDisruptionEnabled) {
+				await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			} else {
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			}
+		} catch (error) {
+			// A save that failed before writing any bytes left no file behind, so the add did
+			// not mutate the workspace after all and must not be checkpointed as a retained
+			// write. Untrack it and let the outer error path report the failure.
+			if (!(await fileExistsAtPath(absolutePath))) {
+				mutated = false
+				mutation.committed = false
+			}
+			throw error
 		}
 
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
-		mutated = true
-		mutation.committed = true
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
@@ -594,12 +609,29 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (destinationCommitted) {
 					await fs.rm(moveAbsolutePath, { force: true }).catch(() => {})
 				}
+				let destinationMissing = false
 				if (destinationBackup !== undefined) {
-					await fs.rename(backupPath, moveAbsolutePath).catch(() => {})
+					// Put the captured destination bytes back with one rename. If that rename
+					// fails as well, the destination is missing and its content survives only
+					// under the backup name, so the report has to say where it is.
+					await fs.rename(backupPath, moveAbsolutePath).catch(() => {
+						destinationMissing = true
+					})
+				}
+				if (destinationMissing) {
+					// A missing destination is a workspace mutation: record it so the
+					// partial-state checkpoint runs before the queued-message handoff, exactly
+					// as the failed source deletion below does.
+					mutated = true
+					mutation.committed = true
 				}
 				task.consecutiveMistakeCount++
 				task.recordToolError("apply_patch")
-				const writeErrorMessage = `Failed to write move destination '${change.movePath}': ${writeError instanceof Error ? writeError.message : String(writeError)}`
+				const writeErrorMessage =
+					`Failed to write move destination '${change.movePath}': ${writeError instanceof Error ? writeError.message : String(writeError)}` +
+					(destinationMissing && backupPath !== undefined
+						? ` The original content is preserved at '${getReadablePath(task.cwd, path.relative(task.cwd, backupPath))}'.`
+						: "")
 				await task.say("error", writeErrorMessage)
 				pushToolResult(formatResponse.toolError(writeErrorMessage))
 				await task.diffViewProvider.reset()

@@ -285,6 +285,56 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
 		})
 
+		it("names the retained backup and records a checkpoint when the move write fails and the restore rename fails", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The destination exists, so the write-catch path puts it back by renaming the
+			// on-disk backup over the destination.
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("new.ts")) {
+					return "existing destination content"
+				}
+				return "original file content\n"
+			})
+			// The staging write succeeds, the staging -> destination rename fails, and the
+			// backup -> destination restore rename fails as well: the destination is now
+			// missing and its content survives only under the backup name.
+			mockedFsPromises.default.rename.mockImplementation(async (from: unknown, to: unknown) => {
+				const source = String(from)
+				const target = String(to)
+				if (target.includes("new.ts") && source.includes(".staging")) {
+					throw Object.assign(new Error("EACCES: permission denied, rename"), { code: "EACCES" })
+				}
+				if (target.includes("new.ts") && source.includes(".backup")) {
+					throw Object.assign(new Error("EPERM: operation not permitted, restore"), { code: "EPERM" })
+				}
+				return undefined
+			})
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Failed to write move destination"))
+			// A user who lost the destination has to be told where its bytes are.
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringMatching(/preserved at '[^']*\.backup[^']*'/))
+			// A missing destination is a workspace mutation: the partial-state checkpoint and
+			// the queued-message handoff both have to run.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true)
+			expect(mockTask.processQueuedMessages).toHaveBeenCalledOnce()
+			// Restore the default mock behavior for later tests.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
+			mockedFsPromises.default.rename.mockResolvedValue(undefined)
+		})
+
 		it("refuses the move before writing when the destination cannot be inspected", async () => {
 			const patch = `*** Begin Patch
 *** Update File: src/old.ts
@@ -381,6 +431,41 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(checkpointAt).toBeLessThan(handoffAt)
 			expect(mockHandleError).toHaveBeenCalled()
 		})
+		it("records the partial-state checkpoint when the add save rejects after its bytes landed", async () => {
+			const patch = `*** Begin Patch
+*** Add File: src/new.ts
++file content
+*** End Patch`
+			// The add does not exist yet, and the focus-preserving save path is enabled, so the
+			// bytes are written by saveDirectly.
+			mockedFileExistsAtPath.mockResolvedValueOnce(false)
+			const provider = {
+				getState: vi.fn().mockResolvedValue({ experiments: { preventFocusDisruption: true } }),
+			}
+			mockTask.providerRef = { deref: () => provider } as unknown as Task["providerRef"]
+			// The file lands on disk inside the save, which then rejects while finishing the
+			// document, so the handler never returns and never reaches its own tracking lines.
+			vi.mocked(mockTask.diffViewProvider.saveDirectly).mockRejectedValueOnce(
+				new Error("EPERM: operation not permitted, open 'src/new.ts'"),
+			)
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledOnce()
+			// The failure is the save itself, not the bookkeeping after it.
+			expect(mockTask.diffViewProvider.pushToolWriteResult).not.toHaveBeenCalled()
+			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(Error))
+			// The retained file is a workspace mutation, so the partial-state checkpoint runs
+			// before the queued-message handoff even though the patch reports failure.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true)
+			expect(mockTask.processQueuedMessages).toHaveBeenCalledOnce()
+		})
+
 		it("records one suppressed checkpoint for the whole patch (default-on)", async () => {
 			await tool.execute({ patch: deletePatch }, mockTask as Task, {
 				askApproval: mockAskApproval,

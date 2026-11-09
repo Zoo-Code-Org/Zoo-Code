@@ -308,6 +308,37 @@ describe("Checkpoint functionality", () => {
 			expect(mockCheckpointService.restoreCheckpoint).not.toHaveBeenCalled()
 		})
 
+		it("serializes a restore against a queued save so no save stages over a restore", async () => {
+			const order: string[] = []
+			let resolveRestore: () => void = () => {}
+			mockCheckpointService.restoreCheckpoint.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						order.push("restore:start")
+						resolveRestore = resolve as () => void
+					}),
+			)
+			mockCheckpointService.saveCheckpoint.mockImplementationOnce(async () => {
+				order.push("save:start")
+				return { commit: "queued-commit" }
+			})
+
+			const restore = checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "preview" })
+			// Let the restore reach the shadow-git reset.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			const save = checkpointSave(mockTask, false, true)
+			// The save must not reach stageAll + commit while the restore is resetting the
+			// workspace: that commit would record the restored bytes and drop the write's own
+			// checkpoint.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(order).toEqual(["restore:start"])
+
+			resolveRestore()
+			await Promise.all([restore, save])
+			expect(order).toEqual(["restore:start", "save:start"])
+		})
+
 		it.each(["delete", "edit"] as const)(
 			"propagates restore failures for %s without rewinding",
 			async (operation) => {

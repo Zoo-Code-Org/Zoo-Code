@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Her dosya yazımından sonra kontrol noktası",
-			"description": "Her başarılı yazma işleminden sonra bir kontrol noktası anlık görüntüsü kaydeder; çok dosyalı bir yama tek bir kontrol noktası üretir."
+			"description": "Aracın write_to_file, edit_file veya apply_patch araçlarıyla yapılan her başarılı dosya yazmasından sonra bir kontrol noktası kaydedin; çok dosyalı bir yama tek bir kontrol noktası üretir. Bir dosyayı düzenleyiciden kaydetmek kontrol noktası kaydetmez."
 		}
 	},
 	"notifications": {
