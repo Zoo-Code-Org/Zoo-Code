@@ -893,6 +893,9 @@ describe("SettingsView - Experimental Settings", () => {
 		const checkbox = within(label).getByRole("checkbox")
 		expect(checkbox).not.toBeChecked()
 		fireEvent.click(checkbox)
+		// The toggle only buffers the edit in cachedState. Nothing may reach the
+		// extension host before Save, or a discarded edit would persist.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -921,6 +924,43 @@ describe("SettingsView - Experimental Settings", () => {
 				type: "updateSettings",
 				updatedSettings: expect.objectContaining({
 					experiments: expect.objectContaining({ dynamicThinkingEffort: false }),
+				}),
+			}),
+		)
+	})
+
+	// The false case has to survive being loaded, not only being toggled: an
+	// explicit hydrated false must come back unchanged in the payload when the
+	// edit the user actually made is a different experiment.
+	it("keeps a hydrated false dynamicThinkingEffort in the payload when another experiment is edited", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			experiments: { ...experimentDefault, dynamicThinkingEffort: false },
+		})
+		activateTab("experimental")
+		const content = getSettingsContent()
+		const effortLabel = within(content)
+			.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name")
+			.closest("label")!
+		const effortCheckbox = within(effortLabel).getByRole("checkbox")
+		expect(effortCheckbox).not.toBeChecked()
+
+		const focusLabel = within(content)
+			.getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name")
+			.closest("label")!
+		const focusCheckbox = within(focusLabel).getByRole("checkbox")
+		expect(focusCheckbox).not.toBeChecked()
+		fireEvent.click(focusCheckbox)
+		expect(focusCheckbox).toBeChecked()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					experiments: expect.objectContaining({
+						dynamicThinkingEffort: false,
+						preventFocusDisruption: true,
+					}),
 				}),
 			}),
 		)
