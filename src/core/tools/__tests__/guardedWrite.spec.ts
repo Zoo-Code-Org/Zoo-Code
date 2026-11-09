@@ -18,7 +18,9 @@ import { resolvePublishTarget, safeWriteText } from "../../../services/file-safe
 import { computeVersionToken } from "../../../utils/versionToken"
 import { acquireFileLock } from "../../../utils/fileLock"
 import { ObservationRegistry } from "../../task/observationRegistry"
-import type { Task } from "../../task/Task"
+import { Task } from "../../task/Task"
+import { initialRunState, type RunState } from "../../task/run-state/runState"
+import type { RunRejection } from "../../task/run-state/runStateShadow"
 
 // -- Mocks -------------------------------------------------------------------
 
@@ -61,31 +63,52 @@ interface MockTaskOptions {
 }
 
 /**
- * Minimal structural Task: guardedWrite reads task.cwd, task.observationRegistry and
- * task.abort. The real Task constructor needs the full provider machinery, so a single
- * documented double cast stands in for the class.
+ * Task stand-in that runs the production cancellation path instead of re-implementing it.
  *
- * The double carries requestAbort rather than letting a test write the flag, because that
- * is the surface Task uses to set it: requestAbort on this branch's Task.ts:3591, and on
- * main's Task.ts:3594, where abort itself is a get-only accessor fed by the run-state
- * kernel (run-state/runState.ts:188). Writing task.abort from a test still compiles
- * against this branch's Task and stops compiling against main's, which is the difference
- * the merged-tree typecheck sees; calling the same entry point production calls does not
- * depend on which of the two shapes the tree carries. abandoned is carried only so the
- * method matches the one it replaces - nothing here asserts it, and guardedWrite.ts:420
- * reads only abort.
+ * guardedWrite reads three things off the task - cwd, observationRegistry and abort
+ * (src/core/tools/guardedWrite.ts:407, :413, :420) - and building a real Task needs the full
+ * provider machinery: the smallest spec on this branch that does it,
+ * src/core/task/__tests__/Task.abort-reason-race.spec.ts, carries 12 vi.mock blocks and a
+ * 34-line provider double (:88-121) for exactly that reason. So this stands on Task.prototype
+ * and supplies only the values the constructor would have initialized. requestAbort is then
+ * the class's own method: the flag write at Task.ts:3595 and the run-state kernel it drives
+ * (Task.ts:3591-3597, driveRunEvent at :3609-3630 over runState and runRejections) are
+ * production code rather than a re-implementation in the double, so the cancellation rows
+ * below fail when requestAbort stops setting abort. That is the gap the hand-written setter
+ * this replaced left open - with that setter, deleting the assignment at Task.ts:3595 changed
+ * no row in this file.
+ *
+ * Nothing here depends on which spelling of abort the tree carries. cwd is an accessor on
+ * Task.prototype (Task.ts:6487), so it is shadowed with an own property instead of assigned;
+ * abort and abandoned are left to production - undefined until requestAbort runs, which reads
+ * the same as false at the truthy check in guardedWrite.ts:420 - because that call site reads
+ * only abort, while main reads both flags from the kernel latches
+ * (src/core/task/run-state/runState.ts:188, :190) and exposes abort as a get-only accessor
+ * (main's Task.ts:3582), where a test that wrote the field would not compile.
  */
+
+/** The fields Task's constructor initializes that this stand-in has to supply by hand. */
+interface TaskDoubleFields {
+	cwd?: string
+	observationRegistry?: ObservationRegistry
+	runState?: RunState
+	runRejections?: RunRejection[]
+}
+
 function createMockTask(options: MockTaskOptions = {}): Task {
-	const task = {
-		cwd: options.cwd ?? WORKSPACE,
-		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
-		abort: false,
-		abandoned: false,
-		requestAbort(isAbandoned: boolean): void {
-			this.abandoned = isAbandoned === true
-			this.abort = true
-		},
-	}
+	// Object.create is untyped in this lib: its signature takes no type argument, so the shape
+	// comes from the structural type above rather than from a generic parameter.
+	const task: TaskDoubleFields = Object.create(Task.prototype)
+	Object.defineProperty(task, "cwd", {
+		value: options.cwd ?? WORKSPACE,
+		writable: true,
+		configurable: true,
+	})
+	task.observationRegistry = options.observationRegistry ?? new ObservationRegistry()
+	task.runState = initialRunState
+	task.runRejections = []
+	// The stand-in covers only the members guardedWrite touches; Task's own surface is wider and
+	// no constructor runs here, so the double assertion stands in for that gap.
 	return task as unknown as Task
 }
 
