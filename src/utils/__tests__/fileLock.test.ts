@@ -574,18 +574,28 @@ describe("two spellings contend with the real library", () => {
 		const sibling = path.join(directory, "history.json")
 		fs.writeFileSync(sibling, JSON.stringify({ writer: "sibling" }), "utf8")
 		expect(canonicalLockKey(link)).not.toBe(canonicalLockKey(sibling))
-		const releaseLink = await acquireFileLock(link, { immediate: true })
+		// Ownership is tracked before anything is acquired: if the assertion below fails between
+		// taking the link lock and releasing it, the release still has to run, because teardown
+		// removes the lock directory and a renewal timer still armed on it raises ECOMPROMISED
+		// inside some later row.
+		let releaseLink: (() => Promise<void>) | null = null
+		let linkReleased = false
 		let releaseSibling: (() => Promise<void>) | null = null
 		try {
+			releaseLink = await acquireFileLock(link, { immediate: true })
 			await expect(acquireFileLock(sibling, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
 			const queued = acquireFileLock(sibling)
 			await releaseLink()
+			linkReleased = true
 			releaseSibling = await queued
 			await expect(releaseLink()).rejects.toMatchObject({ code: "ERELEASED" })
 			expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual(["history.json.lock"])
 		} finally {
 			if (releaseSibling !== null) {
 				await releaseSibling()
+			}
+			if (releaseLink !== null && !linkReleased) {
+				await releaseLink()
 			}
 		}
 		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
