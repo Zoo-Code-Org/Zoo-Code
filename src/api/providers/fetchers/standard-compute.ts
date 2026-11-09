@@ -45,7 +45,8 @@ export const parseStandardComputeModel = (model: StandardComputeModel): ModelInf
 		// The routed model sends image requests to a vision model, so it accepts
 		// images although the catalog entry lists no modalities.
 		supportsImages:
-			model.architecture?.input_modalities?.includes("image") ?? model.id === standardComputeDefaultModelId,
+			model.id === standardComputeDefaultModelId ||
+			(model.architecture?.input_modalities?.includes("image") ?? false),
 		supportsPromptCache: false,
 		// Catalog strings are remote and ModelInfo.description is rendered as
 		// Markdown, so only the plain-text display name is copied.
@@ -91,7 +92,14 @@ export async function getStandardComputeModels(apiKey?: string, opts?: { signal?
 				continue
 			}
 
-			models[modelResult.data.id] = parseStandardComputeModel(modelResult.data)
+			const modelInfo = parseStandardComputeModel(modelResult.data)
+			// A context window too small to leave any output budget cannot
+			// produce a useful completion, so the entry is not advertised.
+			if ((modelInfo.maxTokens ?? 0) < 1) {
+				continue
+			}
+
+			models[modelResult.data.id] = modelInfo
 		}
 
 		return models

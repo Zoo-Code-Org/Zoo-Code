@@ -106,6 +106,29 @@ describe("Standard Compute model fetcher", () => {
 		expect(info.contextWindow).toBe(1_000_000)
 	})
 
+	it("keeps the routed model image capable when its modality list omits images", () => {
+		const info = parseStandardComputeModel({
+			id: standardComputeDefaultModelId,
+			architecture: { input_modalities: ["text"] },
+		})
+		expect(info.supportsImages).toBe(true)
+	})
+
+	it("skips models whose context window leaves no output budget", async () => {
+		vi.mocked(axios.get).mockResolvedValue({
+			data: {
+				data: [
+					{ id: "tiny-1", context_length: 1 },
+					{ id: "tiny-4", context_length: 4 },
+					{ id: "smallest-usable", context_length: 5 },
+				],
+			},
+		})
+		const models = await getStandardComputeModels()
+		expect(Object.keys(models)).toEqual(["smallest-usable"])
+		expect(models["smallest-usable"]).toMatchObject({ contextWindow: 5, maxTokens: 1 })
+	})
+
 	it("skips malformed records and models without tool support", async () => {
 		vi.mocked(axios.get).mockResolvedValue({
 			data: {
@@ -131,12 +154,12 @@ describe("Standard Compute model fetcher", () => {
 
 	it("keeps a hostile catalog id as an own entry instead of polluting the prototype chain", async () => {
 		vi.mocked(axios.get).mockResolvedValue({
-			data: { data: [{ id: "__proto__", context_length: 1 }, { id: "constructor" }] },
+			data: { data: [{ id: "__proto__", context_length: 8_192 }, { id: "constructor" }] },
 		})
 		const models = await getStandardComputeModels()
 		expect(Object.getPrototypeOf(models)).toBeNull()
 		expect(Object.keys(models)).toEqual(["__proto__", "constructor"])
-		expect(models["__proto__"]).toMatchObject({ contextWindow: 1 })
+		expect(models["__proto__"]).toMatchObject({ contextWindow: 8_192 })
 		expect(({} as Record<string, unknown>).contextWindow).toBeUndefined()
 	})
 
