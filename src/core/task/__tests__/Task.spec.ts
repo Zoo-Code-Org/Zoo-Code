@@ -4790,7 +4790,7 @@ describe("Cline", () => {
 					expect(options.metadata?.abortSignal).toBe(task.currentRequestAbortController!.signal)
 				})
 
-				it("should omit abortSignal from condenseContext metadata when no current request exists", async () => {
+				it("creates a cancellable condenseContext request when no current request exists", async () => {
 					const task = new Task({
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
@@ -4805,7 +4805,8 @@ describe("Cline", () => {
 					expect(summarizeConversation).toHaveBeenCalled()
 					const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
 					expect(options.metadata).toBeDefined()
-					expect("abortSignal" in (options.metadata ?? {})).toBe(false)
+					expect(options.metadata?.abortSignal).toBe(task.currentRequestAbortController?.signal)
+					expect(options.metadata?.abortSignal).toBeDefined()
 				})
 
 				it("should pass AbortController signal to createMessage metadata", async () => {
@@ -5091,9 +5092,13 @@ describe("Cline", () => {
 					},
 				)
 
-				it.each(["manual", "recovery", "automatic"] as const)(
-					"passes task routing settings to the %s condensation build",
-					async (path) => {
+				it.each(
+					(["manual", "recovery", "automatic"] as const).flatMap((path) =>
+						(["none", "build", "summary"] as const).map((cancelAt) => ({ path, cancelAt })),
+					),
+				)(
+					"passes tools and handles cancellation in $path condensation ($cancelAt)",
+					async ({ path, cancelAt }) => {
 						const task = new Task({
 							provider: mockProvider,
 							apiConfiguration: mockApiConfig,
@@ -5127,13 +5132,50 @@ describe("Cline", () => {
 						task.apiConversationHistory = [
 							{ role: "user", content: [{ type: "text", text: "search tickets" }], ts: Date.now() },
 						]
+						const tools: Awaited<
+							ReturnType<typeof buildTools.buildNativeToolsArrayWithRestrictions>
+						>["tools"] = [
+							{
+								type: "function",
+								function: {
+									name: "mcp--catalog--selected",
+									parameters: { type: "object", properties: {} },
+								},
+							},
+						]
 						const build = vi
 							.spyOn(buildTools, "buildNativeToolsArrayWithRestrictions")
-							.mockResolvedValue({ tools: [] })
+							.mockResolvedValue({ tools })
+						const summariesBefore = vi.mocked(summarizeConversation).mock.calls.length
+						const overwrite = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+						if (cancelAt === "build")
+							build.mockImplementationOnce(async () => {
+								task["abort"] = true
+								return { tools }
+							})
+						if (cancelAt === "summary")
+							vi.mocked(summarizeConversation).mockImplementationOnce(async ({ metadata }) => {
+								expect(metadata?.abortSignal).toBeDefined()
+								task["abort"] = true
+								task["currentRequestAbortController"]?.abort()
+								expect(metadata?.abortSignal?.aborted).toBe(true)
+								return { messages: [], summary: "canceled", cost: 0, newContextTokens: 1 }
+							})
 						try {
 							if (path === "manual") await task.condenseContext()
 							else if (path === "recovery") await access.handleContextWindowExceededError(model)
 							else await task.attemptApiRequest(0).next()
+							if (cancelAt !== "none") {
+								expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(
+									summariesBefore + (cancelAt === "summary" ? 1 : 0),
+								)
+								expect(overwrite).not.toHaveBeenCalled()
+								return
+							}
+							expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summariesBefore + 1)
+							expect(vi.mocked(summarizeConversation).mock.calls.at(-1)?.[0].metadata?.tools).toEqual(
+								tools,
+							)
 							expect(build).toHaveBeenCalledTimes(path === "automatic" ? 2 : 1)
 							for (const [options] of build.mock.calls) {
 								expect(options).toEqual(

@@ -1,3 +1,4 @@
+import { buildMcpToolName, toolNamesMatch } from "../../utils/mcp-name"
 import { markToolRejected } from "../task/toolExecutionContext"
 import { DispatchState, transitionDispatch } from "../task/dispatchState"
 import { serializeError } from "serialize-error"
@@ -323,10 +324,27 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 			// We need the original name to find the actual MCP connection
 			const mcpHub = cline.providerRef.deref()?.getMcpHub()
 			let resolvedServerName = mcpBlock.serverName
+			let resolvedToolName = mcpBlock.toolName
 			if (mcpHub) {
 				const originalName = mcpHub.findServerNameBySanitizedName(mcpBlock.serverName)
 				if (originalName) {
 					resolvedServerName = originalName
+				}
+			}
+
+			// Truncated generated names cannot be reversed by splitting separators.
+			// Recover the original pair from the catalog; normal policy checks still apply.
+			if (mcpHub && mcpBlock.name.length === 64) {
+				const matches = mcpHub
+					.getAllServers()
+					.flatMap((server) =>
+						(server.tools ?? [])
+							.filter((tool) => toolNamesMatch(buildMcpToolName(server.name, tool.name), mcpBlock.name))
+							.map((tool) => ({ serverName: server.name, toolName: tool.name })),
+					)
+				if (matches.length === 1 && matches[0]) {
+					resolvedServerName = matches[0].serverName
+					resolvedToolName = matches[0].toolName
 				}
 			}
 
@@ -338,13 +356,13 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				name: "use_mcp_tool",
 				params: {
 					server_name: resolvedServerName,
-					tool_name: mcpBlock.toolName,
+					tool_name: resolvedToolName,
 					arguments: JSON.stringify(mcpBlock.arguments),
 				},
 				partial: mcpBlock.partial,
 				nativeArgs: {
 					server_name: resolvedServerName,
-					tool_name: mcpBlock.toolName,
+					tool_name: resolvedToolName,
 					arguments: mcpBlock.arguments,
 				},
 			}

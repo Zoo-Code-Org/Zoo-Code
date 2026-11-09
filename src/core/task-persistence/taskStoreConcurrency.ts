@@ -1,5 +1,5 @@
 import deepEqual from "fast-deep-equal"
-import type { HistoryItem } from "@roo-code/types"
+import { attachedMcpToolNamesSchema, type HistoryItem } from "@roo-code/types"
 
 import { type HistoryItemStatus, VALID_TASK_STATUS_TRANSITIONS } from "./taskLifecycle"
 
@@ -40,10 +40,9 @@ export function mergeHistoryDelta(existing: unknown, incoming: HistoryItem, delt
 	const merged = { ...disk, ...normalizedDelta }
 	// Attachments accumulate for history compatibility. Merge under the disk lock
 	// so a delayed metadata snapshot cannot remove a newer historical name.
-	if (normalizedDelta.attachedMcpToolNames && disk.attachedMcpToolNames) {
-		merged.attachedMcpToolNames = [
-			...new Set([...disk.attachedMcpToolNames, ...normalizedDelta.attachedMcpToolNames]),
-		]
+	const diskNames = attachedMcpToolNamesSchema.parse(disk.attachedMcpToolNames)
+	if (normalizedDelta.attachedMcpToolNames && diskNames) {
+		merged.attachedMcpToolNames = [...new Set([...diskNames, ...normalizedDelta.attachedMcpToolNames])]
 	}
 	if (normalizedDelta.childIds && disk.childIds) {
 		merged.childIds = [...new Set([...disk.childIds, ...normalizedDelta.childIds])]

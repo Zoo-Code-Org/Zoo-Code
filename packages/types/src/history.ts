@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { isCanonicalMcpToolName } from "./mcp.js"
+
 import { todoItemSchema } from "./todo.js"
 
 /**
@@ -30,9 +32,7 @@ export type PendingTaskAction = z.infer<typeof pendingTaskActionSchema>
 // discard the task record or mark a non-array value as an initialized selection.
 export const attachedMcpToolNamesSchema = z.preprocess((value) => {
 	if (!Array.isArray(value)) return undefined
-	const names = value.filter(
-		(name): name is string => typeof name === "string" && /^mcp--[A-Za-z_][\w-]*--[A-Za-z_][\w-]*$/.test(name),
-	)
+	const names = value.filter((name): name is string => typeof name === "string" && isCanonicalMcpToolName(name))
 	return value.length > 0 && names.length === 0 ? undefined : names
 }, z.array(z.string()).optional())
 
