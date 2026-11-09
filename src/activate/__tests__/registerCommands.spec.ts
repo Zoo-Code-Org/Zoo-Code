@@ -722,6 +722,12 @@ describe("openClineInNewTab", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Reset the instance-lookup double for every test of this suite: vi.clearAllMocks clears
+		// calls but keeps mockReturnValue and mockImplementation, so a provider installed by an
+		// earlier test would decide which provider the next test resolves - the leak the per-test
+		// mockReturnValue(undefined) lines below exist to dodge. The guard row at the end of this
+		// suite is what pins it.
+		vi.mocked(ClineProvider.getInstanceForView).mockReset()
 
 		mockOutputChannel = {
 			appendLine: vi.fn(),
@@ -2009,5 +2015,15 @@ describe("openClineInNewTab", () => {
 			resolveSpy.mockRestore()
 			disposeSpy.mockRestore()
 		})
+	})
+	// Determinism guard for this suite: vi.clearAllMocks clears calls but keeps
+	// mockReturnValue and mockImplementation, so an instance-lookup double installed by any
+	// test above would decide which provider a later test resolves. The lookup must enter
+	// every test of this suite unset: this row fails on the residue of the tests above it,
+	// not on any behaviour of its own.
+	it("enters each tab test with no installed instance-lookup double", () => {
+		const lookup = vi.mocked(ClineProvider.getInstanceForView)
+		expect(lookup({} as vscode.WebviewPanel)).toBeUndefined()
+		expect(lookup.getMockImplementation()).toBeUndefined()
 	})
 })
