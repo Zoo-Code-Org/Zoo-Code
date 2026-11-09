@@ -1100,13 +1100,19 @@ describe("OpencodeGoHandler", () => {
 
 		it("stops an in-flight Responses iterator when its abort signal rejects the read", async () => {
 			const controller = new AbortController()
+			// The iterator's own listener and the request-level listener race to reject the same
+			// promise, so the double is one object and the assertion below pins which rejection
+			// propagated. opencode-go hands the caller's signal straight to the SDK and never
+			// normalises it into a provider AbortError, so there is no provider message to assert
+			// on this path: identity is the strongest statement that is true here.
+			const abortDouble = new Error("request aborted")
 			let rejectNext: ((reason?: unknown) => void) | undefined
 			const iterator = {
 				next: vitest.fn().mockImplementation(
 					() =>
 						new Promise((_resolve, reject) => {
 							rejectNext = reject
-							controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), {
+							controller.signal.addEventListener("abort", () => reject(abortDouble), {
 								once: true,
 							})
 						}),
@@ -1117,7 +1123,7 @@ describe("OpencodeGoHandler", () => {
 				},
 			}
 			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
-				options.signal?.addEventListener("abort", () => rejectNext?.(new Error("request aborted")), {
+				options.signal?.addEventListener("abort", () => rejectNext?.(abortDouble), {
 					once: true,
 				})
 				return iterator
@@ -1132,7 +1138,7 @@ describe("OpencodeGoHandler", () => {
 			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
 			controller.abort()
 
-			await expect(nextPromise).rejects.toThrow("request aborted")
+			await expect(nextPromise).rejects.toBe(abortDouble)
 			expect(iterator.return).toHaveBeenCalled()
 		})
 
@@ -1473,8 +1479,14 @@ describe("OpencodeGoHandler", () => {
 
 		it("rejects non-streaming Responses completion when the abort signal fires", async () => {
 			const controller = new AbortController()
+			// One double object here too. The Responses completion path wraps every failure
+			// (`opencode-go.ts:439` throws `Opencode Go completion error: <message>`), so the
+			// abort surfaces as a new Error carrying the double's text behind the provider prefix,
+			// not as the double and not as an AbortError. The assertion below pins that whole
+			// message; a bare "abort" substring would also match a raw SDK error.
+			const abortDouble = new Error("request aborted")
 			const request = new Promise<never>((_resolve, reject) => {
-				controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true })
+				controller.signal.addEventListener("abort", () => reject(abortDouble), { once: true })
 			})
 			mockResponsesCreate.mockReturnValue(request)
 			const handler = new OpencodeGoHandler(lunaOptions)
@@ -1483,7 +1495,10 @@ describe("OpencodeGoHandler", () => {
 			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
 			controller.abort()
 
-			await expect(completion).rejects.toThrow("request aborted")
+			await expect(completion).rejects.toMatchObject({
+				name: "Error",
+				message: `Opencode Go completion error: ${abortDouble.message}`,
+			})
 		})
 
 		it("completePrompt calls responses.create and returns output_text", async () => {

@@ -63,6 +63,16 @@ export const apiProviderHygieneConfig = {
 	},
 }
 
+// Shared by every spec lane, not only src/api: an abort assertion must not pass on a raw SDK error.
+export const abortSubstringSelector = {
+	selector:
+		// Strings contain literal punctuation; only regex source can contain anchors, wildcards,
+		// optional suffix groups, or word boundaries around the generic abort wording.
+		"CallExpression[callee.property.name=/^toThrow(Error)?$/]:not([callee.object.property.name='not']):matches([arguments.0.value=/^(the )?(request )?(was )?abort(ed)?[.]*$/i], [arguments.0.regex.pattern=/^[$^]?(?:\\.\\*)?(the )?(request )?(was )?abort(ed)?(?:\\(\\?:(?:ed|ion|al)\\)\\??)?(?:\\\\b)?(?:\\.\\*)?[\\\\.$]*$/i])",
+	message:
+		"A bare 'abort' substring also matches a raw SDK error. Assert the AbortError name and the full provider message.",
+}
+
 // Spec files under src/api. A loop of expects in one test stops at the first failing case and hides the rest.
 export const apiProviderTestSelectors = [
 	{
@@ -70,6 +80,7 @@ export const apiProviderTestSelectors = [
 		message:
 			"Use it.each for repeated cases. A loop of expects in one test stops at the first failing case and does not name it.",
 	},
+	abortSubstringSelector,
 ]
 
 // A new @ts-ignore in a provider spec hides a private-member access. Use bracket notation or a typed double.
