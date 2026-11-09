@@ -2,7 +2,9 @@
 	"$schema": "https://turbo.build/schema.json",
 	"tasks": {
 		"lint": {},
-		"check-types": {},
+		"check-types": {
+			"dependsOn": ["@roo-code/types#build"]
+		},
 		"test": {
 			"dependsOn": ["@roo-code/types#build"]
 		},
@@ -17,7 +19,7 @@
 		"build": {
 			"dependsOn": ["^build"],
 			"outputs": ["dist/**"],
-			"inputs": ["src/**", "package.json", "tsconfig.json", "tsup.config.ts", "vite.config.ts"]
+			"inputs": ["$TURBO_DEFAULT$"]
 		},
 		"watch:tsc": {
 			"cache": false
