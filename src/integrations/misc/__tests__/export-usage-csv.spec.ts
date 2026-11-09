@@ -136,8 +136,13 @@ describe("exportUsageCsv", () => {
 		expect(await exportUsageCsv("a".repeat(20_000_001), "all", context)).toBeUndefined()
 		expect(showSaveDialog).not.toHaveBeenCalled()
 		expect(writeFile).not.toHaveBeenCalled()
+		// The user is told, and not left with a click that does nothing.
+		expect(showErrorMessage).toHaveBeenCalledTimes(1)
+		expect(showErrorMessage).toHaveBeenCalledWith(expect.stringMatching(/usage_export_too_large|too large to save/))
+		showErrorMessage.mockClear()
 
 		expect(await exportUsageCsv("a".repeat(20_000_000), "all", context)).toBe(saveUri)
+		expect(showErrorMessage).not.toHaveBeenCalled() // a text at the limit is not an error
 		expect(writeFile).toHaveBeenCalledTimes(1)
 		const [target, bytes] = writeFile.mock.calls[0]
 		expect(target).toBe(saveUri)

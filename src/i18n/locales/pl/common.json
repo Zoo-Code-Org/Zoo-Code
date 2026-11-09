@@ -21,6 +21,7 @@
 		"checkpoint_rewind_failed": "Pliki zostały przywrócone do punktu kontrolnego, ale nie udało się cofnąć rozmowy: {{error}}. Zadanie uruchomiono ponownie z poprzednią rozmową; przywróć punkt kontrolny jeszcze raz, aby ją cofnąć.",
 		"checkpoint_rewind_restart_failed": "Pliki zostały przywrócone do punktu kontrolnego, ale nie udało się cofnąć rozmowy: {{error}}. Nie udało się też ponownie uruchomić zadania ({{restartError}}); uruchom je ponownie albo przywróć punkt kontrolny jeszcze raz, aby cofnąć rozmowę.",
 		"checkpoint_restart_failed": "Pliki zostały przywrócone, a rozmowa cofnięta, ale nie udało się ponownie uruchomić zadania: {{error}}. Otwórz je z historii, aby kontynuować.",
+		"usage_export_too_large": "Eksport użycia jest zbyt duży, aby go zapisać. Wybierz krótszy zakres i spróbuj ponownie.",
 		"checkpoint_missing": "Nie można przywrócić punktu kontrolnego {{commitHash}}: ten punkt kontrolny nie istnieje już w repozytorium punktów kontrolnych. Żadne pliki nie zostały zmienione.",
 		"checkpoint_invalid_hash": "Nie można przywrócić ani porównać punktu kontrolnego: odwołanie nie jest prawidłowym punktem kontrolnym tego zadania. Żadne pliki nie zostały zmienione.",
 		"git_not_installed": "Funkcja punktów kontrolnych wymaga oprogramowania Git. Zainstaluj Git, aby włączyć punkty kontrolne.",

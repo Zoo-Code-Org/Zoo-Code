@@ -25,6 +25,7 @@
 		"checkpoint_rewind_failed": "Els fitxers s'han restaurat al punt de control, però no s'ha pogut rebobinar la conversa: {{error}}. La tasca s'ha reiniciat amb la conversa anterior; torna a restaurar el punt de control per rebobinar-la.",
 		"checkpoint_rewind_restart_failed": "Els fitxers s'han restaurat al punt de control, però no s'ha pogut rebobinar la conversa: {{error}}. Tampoc no s'ha pogut reiniciar la tasca ({{restartError}}); reinicia-la o torna a restaurar el punt de control per rebobinar la conversa.",
 		"checkpoint_restart_failed": "Els fitxers s'han restaurat i la conversa s'ha rebobinat, però no s'ha pogut reiniciar la tasca: {{error}}. Obre-la des de l'historial per continuar.",
+		"usage_export_too_large": "L'exportació d'ús és massa gran per desar-la. Tria un interval més curt i torna-ho a provar.",
 		"checkpoint_missing": "No es pot restaurar el punt de control {{commitHash}}: aquest punt de control ja no existeix al repositori de punts de control. No s'ha modificat cap fitxer.",
 		"checkpoint_invalid_hash": "No es pot restaurar ni comparar el punt de control: la referència no correspon a cap punt de control vàlid d'aquesta tasca. No s'ha modificat cap fitxer.",
 		"git_not_installed": "Git és necessari per a la funció de punts de control. Si us plau, instal·la Git per activar els punts de control.",

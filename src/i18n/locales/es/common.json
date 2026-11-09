@@ -21,6 +21,7 @@
 		"checkpoint_rewind_failed": "Los archivos se restauraron al punto de control, pero no se pudo retroceder la conversación: {{error}}. La tarea se reinició con su conversación anterior; restaura el punto de control de nuevo para retroceder la conversación.",
 		"checkpoint_rewind_restart_failed": "Los archivos se restauraron al punto de control, pero no se pudo retroceder la conversación: {{error}}. Tampoco se pudo reiniciar la tarea ({{restartError}}); reiníciala o restaura el punto de control de nuevo para retroceder la conversación.",
 		"checkpoint_restart_failed": "Los archivos se restauraron y la conversación se retrocedió, pero no se pudo reiniciar la tarea: {{error}}. Ábrela desde el historial para continuar.",
+		"usage_export_too_large": "La exportación de uso es demasiado grande para guardarla. Elige un intervalo más corto e inténtalo de nuevo.",
 		"checkpoint_missing": "No se puede restaurar el punto de control {{commitHash}}: este punto de control ya no existe en el repositorio de puntos de control. No se ha modificado ningún archivo.",
 		"checkpoint_invalid_hash": "No se puede restaurar ni comparar el punto de control: la referencia no es un punto de control válido de esta tarea. No se ha modificado ningún archivo.",
 		"git_not_installed": "Git es necesario para la función de puntos de control. Por favor, instala Git para activar los puntos de control.",

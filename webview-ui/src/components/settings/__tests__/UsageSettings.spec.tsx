@@ -309,7 +309,7 @@ describe("UsageSettings", () => {
 			expect(post).toHaveBeenCalledWith({ type: "showTaskWithId", text: t.id })
 		})
 
-		it.each([
+		it.each<[string, Partial<HistoryItem>, string]>([
 			["the name the user gave", { title: "My renamed task" }, "My renamed task"],
 			["the original prompt when there is no name", {}, "Original prompt"],
 			["the original prompt for an empty name", { title: "" }, "Original prompt"],

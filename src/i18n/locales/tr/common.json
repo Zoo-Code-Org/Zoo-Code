@@ -21,6 +21,7 @@
 		"checkpoint_rewind_failed": "Dosyalar kontrol noktasına geri yüklendi ancak konuşma geri sarılamadı: {{error}}. Görev önceki konuşmasıyla yeniden başlatıldı; konuşmayı geri sarmak için kontrol noktasını yeniden geri yükleyin.",
 		"checkpoint_rewind_restart_failed": "Dosyalar kontrol noktasına geri yüklendi ancak konuşma geri sarılamadı: {{error}}. Görev de yeniden başlatılamadı ({{restartError}}); görevi yeniden başlatın veya konuşmayı geri sarmak için kontrol noktasını yeniden geri yükleyin.",
 		"checkpoint_restart_failed": "Dosyalar geri yüklendi ve konuşma geri sarıldı ancak görev yeniden başlatılamadı: {{error}}. Devam etmek için geçmişten açın.",
+		"usage_export_too_large": "Kullanım dışa aktarımı kaydedilemeyecek kadar büyük. Daha kısa bir aralık seçip yeniden deneyin.",
 		"checkpoint_missing": "{{commitHash}} kontrol noktası geri yüklenemiyor: bu kontrol noktası artık kontrol noktası deposunda mevcut değil. Hiçbir dosya değiştirilmedi.",
 		"checkpoint_invalid_hash": "Kontrol noktası geri yüklenemiyor veya karşılaştırılamıyor: bu başvuru, bu görevin geçerli bir kontrol noktası değil. Hiçbir dosya değiştirilmedi.",
 		"git_not_installed": "Kontrol noktaları özelliği için Git gereklidir. Kontrol noktalarını etkinleştirmek için lütfen Git'i yükleyin.",

@@ -2,6 +2,7 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
+import { t } from "../../i18n"
 import { resolveDefaultSaveUri, saveLastExportPath, type ExportContext } from "../../utils/export"
 
 const LAST_EXPORT_PATH_KEY = "lastUsageExportPath"
@@ -111,7 +112,13 @@ export async function exportUsageCsv(
 	range: unknown,
 	context: ExportContext,
 ): Promise<vscode.Uri | undefined> {
-	if (typeof csv !== "string" || csv.length === 0 || csv.length > MAX_USAGE_CSV_LENGTH) return undefined
+	if (typeof csv !== "string" || csv.length === 0) return undefined
+	if (csv.length > MAX_USAGE_CSV_LENGTH) {
+		// The webview cuts every text cell, which does not bound a very large history: the user is told, not left with a
+		// click that does nothing.
+		vscode.window.showErrorMessage(t("common:errors.usage_export_too_large"))
+		return undefined
+	}
 	// The text comes from a webview: whatever it holds, no cell of the saved file is a formula.
 	const safeCsv = neutralizeCsvFormulas(csv)
 	if (safeCsv === undefined) return undefined
