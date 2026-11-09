@@ -286,13 +286,16 @@ describe("SettingsView – save acknowledgement", () => {
 
 		it("goes back to the live state for a value that no save stored", async () => {
 			renderUiTab()
-			fireEvent.click(await screen.findByTestId("appearance-spacingScale-increment"))
+			const spacing = () => (screen.getByTestId("appearance-spacingScale-input") as HTMLInputElement).value
+			await screen.findByTestId("appearance-spacingScale-input")
+			const live = spacing() // the value before any edit
+			fireEvent.click(screen.getByTestId("appearance-spacingScale-increment"))
 			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
-			const before = (screen.getByTestId("appearance-spacingScale-input") as HTMLInputElement).value
+			expect(spacing()).not.toBe(live) // the edit moved it
 
 			await discard()
 
-			expect((screen.getByTestId("appearance-spacingScale-input") as HTMLInputElement).value).not.toBe(before)
+			expect(spacing()).toBe(live) // and discarding put back exactly the live value, not another one
 		})
 	})
 

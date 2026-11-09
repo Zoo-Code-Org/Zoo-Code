@@ -151,6 +151,10 @@ export const StyledPre = styled.div<{
 		word-break: ${({ wordwrap }) => (wordwrap === "false" ? "normal" : "normal")};
 		overflow-wrap: ${({ wordwrap }) => (wordwrap === "false" ? "normal" : "break-word")};
 		font-size: var(--zoo-editor-font-size, 0.95em);
+		/* A line height that a list gives its text is a length, not a ratio: with an editor size set, code inside a list would
+		   keep the one of the chat text and its lines would overlap. With no size set the var is undefined, the declaration is
+		   invalid at computed-value time, and the line height is the inherited one as before. */
+		line-height: calc(var(--zoo-editor-font-size) * 1.35);
 		font-family: var(--vscode-editor-font-family);
 	}
 
@@ -316,6 +320,22 @@ const CodeBlock = memo(
 				const actualHeight = codeBlock.scrollHeight
 				setShowCollapseButton(actualHeight >= (collapsedHeight || WINDOW_SHADE_SETTINGS.collapsedHeight))
 			}
+		}, [highlightedCode, collapsedHeight])
+
+		// The size of the block changes without its content changing: the editor font size, the chat font size or the
+		// interface scale is saved, or the chat is shown again after being hidden (its height was 0). The control is
+		// worked out again then, so a block that has grown past the collapsed height gets its button.
+		useEffect(() => {
+			const codeBlock = codeBlockRef.current
+			if (!codeBlock || typeof ResizeObserver === "undefined") return
+
+			const observer = new ResizeObserver(() => {
+				setShowCollapseButton(
+					codeBlock.scrollHeight >= (collapsedHeight || WINDOW_SHADE_SETTINGS.collapsedHeight),
+				)
+			})
+			observer.observe(codeBlock)
+			return () => observer.disconnect()
 		}, [highlightedCode, collapsedHeight])
 
 		// Ref to track if user was scrolled up *before* the source update

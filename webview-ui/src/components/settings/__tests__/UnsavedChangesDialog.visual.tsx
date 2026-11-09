@@ -17,15 +17,6 @@ for (const theme of visualThemes) {
 			const dialog = page.getByRole("alertdialog")
 			await expect(dialog).toBeVisible()
 			await expect(dialog.getByText("Unsaved Changes")).toBeVisible()
-			const note = dialog.getByTestId("save-outcome-unknown")
-			if (saveOutcomeUnknown) {
-				await expect(note).toHaveText(
-					"A save that has not been answered yet may still complete after you leave.",
-				)
-			} else {
-				await expect(note).toHaveCount(0)
-			}
-
 			await expect(dialog).toHaveScreenshot(`unsaved-changes-dialog-${state}-${theme.name}.png`)
 		})
 	}

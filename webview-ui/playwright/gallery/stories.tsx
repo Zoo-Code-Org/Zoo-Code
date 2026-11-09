@@ -284,6 +284,21 @@ export const stories: Record<string, Story> = {
 			</div>
 		</div>
 	),
+	// A multiline code block inside a list item: it inherits the line height that the list gives its text.
+	"markdown-list-code": async () => {
+		const [{ AppProviders }, { default: MarkdownBlock }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/common/MarkdownBlock"),
+		])
+		const markdown = "- Run the command:\n\n  ```bash\n  first line\n  second line\n  third line\n  ```\n"
+		return (
+			<AppProviders>
+				<div className="w-[420px] p-4 bg-vscode-editor-background text-vscode-editor-foreground">
+					<MarkdownBlock markdown={markdown} />
+				</div>
+			</AppProviders>
+		)
+	},
 	"mermaid-gantt": async () => {
 		const { default: MermaidBlock } = await import("@/components/common/MermaidBlock")
 		return <MermaidBlock code={mermaidGantt} />

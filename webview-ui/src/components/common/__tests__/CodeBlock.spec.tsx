@@ -1,5 +1,6 @@
 // npx vitest run src/components/common/__tests__/CodeBlock.spec.tsx
 
+import type { Mock } from "vitest"
 import { render, screen, fireEvent, act, waitFor } from "@/utils/test-utils"
 
 import CodeBlock, { getCodeBlockTheme } from "../CodeBlock"
@@ -159,6 +160,74 @@ describe("CodeBlock", () => {
 
 		await waitFor(() => expect(screen.getByText(/const second = 2/)).toBeInTheDocument())
 		await waitFor(() => expect(scroller.scrollTop).toBe(600))
+	})
+
+	describe("the collapse control when the block is resized", () => {
+		const observers: Array<{ callback: () => void; target?: Element; disconnect: Mock<() => void> }> = []
+		const originalResizeObserver = global.ResizeObserver
+
+		beforeEach(() => {
+			observers.length = 0
+			global.ResizeObserver = class {
+				private entry: (typeof observers)[number]
+				constructor(callback: () => void) {
+					this.entry = { callback, disconnect: vi.fn<() => void>() }
+					observers.push(this.entry)
+				}
+				observe(target: Element) {
+					this.entry.target = target
+				}
+				unobserve() {}
+				disconnect() {
+					this.entry.disconnect()
+				}
+			} as unknown as typeof ResizeObserver
+		})
+		afterEach(() => {
+			global.ResizeObserver = originalResizeObserver
+		})
+
+		const collapseButton = () => screen.queryByLabelText(/(Expand|Collapse) code block/)
+		const setHeight = (element: Element, value: number) =>
+			Object.defineProperty(element, "scrollHeight", { configurable: true, value })
+		const lastObserverOf = (element: Element) => observers.filter((o) => o.target === element).at(-1)!
+
+		it("shows the button when a block that fitted grows past the collapsed height, and hides it when it shrinks back", async () => {
+			const { container } = render(<CodeBlock source="const x = 1;" language="typescript" />)
+			const block = container.firstElementChild as HTMLElement
+			setHeight(block, 100)
+			await act(async () => lastObserverOf(block).callback())
+			expect(collapseButton()).toBeNull() // a short block has nothing to collapse
+
+			setHeight(block, 600) // the font size was saved: the block grew
+			await act(async () => lastObserverOf(block).callback())
+			expect(collapseButton()).not.toBeNull()
+
+			setHeight(block, 100) // and shrank again
+			await act(async () => lastObserverOf(block).callback())
+			expect(collapseButton()).toBeNull()
+		})
+
+		it("works the control out again when the chat is shown after being hidden", async () => {
+			const { container } = render(<CodeBlock source="const x = 1;" language="typescript" />)
+			const block = container.firstElementChild as HTMLElement
+			setHeight(block, 0) // hidden: no height at all
+			await act(async () => lastObserverOf(block).callback())
+			expect(collapseButton()).toBeNull()
+
+			setHeight(block, 800) // shown again
+			await act(async () => lastObserverOf(block).callback())
+			expect(collapseButton()).not.toBeNull()
+		})
+
+		it("stops observing when the block is removed", async () => {
+			const { container, unmount } = render(<CodeBlock source="const x = 1;" language="typescript" />)
+			const observer = lastObserverOf(container.firstElementChild as Element)
+
+			unmount()
+
+			expect(observer.disconnect).toHaveBeenCalled()
+		})
 	})
 
 	it("handles theme switching", async () => {
