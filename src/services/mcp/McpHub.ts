@@ -2448,6 +2448,11 @@ export class McpHub {
 	 * @returns Promise<void>
 	 */
 	async handleMcpEnabledChange(enabled: boolean): Promise<void> {
+		// A hub that was disposed (the last provider that owned it was closed) has nothing to connect or disconnect: a
+		// change that lands late (a reconciliation after a save that timed out) must not open connections on it, which
+		// nothing would close. A hub that another provider still owns is not disposed, and applies the change.
+		if (this.isDisposed) return
+
 		if (!enabled) {
 			// If MCP is being disabled, disconnect all servers with error handling
 			const existingConnections = [...this.connections]

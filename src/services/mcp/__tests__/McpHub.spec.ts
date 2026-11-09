@@ -604,6 +604,36 @@ describe("McpHub", () => {
 		})
 	})
 
+	describe("handleMcpEnabledChange on a hub that was disposed", () => {
+		it("connects and disconnects nothing, so a late change opens no connection that nothing would close", async () => {
+			const hub = new McpHub(mockProvider as ClineProvider)
+			await hub.waitUntilReady()
+			const refresh = vi.spyOn(hub, "refreshAllConnections").mockResolvedValue(undefined)
+			const deleteConnection = vi.spyOn(hub, "deleteConnection").mockResolvedValue(undefined)
+			await hub.dispose()
+
+			await hub.handleMcpEnabledChange(true)
+			await hub.handleMcpEnabledChange(false)
+
+			expect(refresh).not.toHaveBeenCalled()
+			expect(deleteConnection).not.toHaveBeenCalled()
+		})
+
+		it("still applies the change on a hub that another provider keeps alive", async () => {
+			const hub = new McpHub(mockProvider as ClineProvider)
+			await hub.waitUntilReady()
+			const refresh = vi.spyOn(hub, "refreshAllConnections").mockResolvedValue(undefined)
+			hub.registerClient() // two providers own it
+			hub.registerClient()
+			await hub.unregisterClient() // and one of them is closed: the hub is not disposed
+
+			await hub.handleMcpEnabledChange(true)
+
+			expect(refresh).toHaveBeenCalledTimes(1)
+			await hub.dispose()
+		})
+	})
+
 	describe("Discriminated union type handling", () => {
 		it("should create connected connections with proper type", async () => {
 			// Mock StdioClientTransport
