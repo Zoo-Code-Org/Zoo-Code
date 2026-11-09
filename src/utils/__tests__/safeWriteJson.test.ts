@@ -962,6 +962,34 @@ describe("safeWriteJson", () => {
 
 	// ── post-commit durability: the published target must survive (PI regression) ──
 
+	it("stages under a token that a zero random still fills", async () => {
+		// Math.random() === 0 stringifies to "0", so substring(2) answers the empty string and the staging
+		// name would end <timestamp>_.tmp (measured with node 22.23.4) - the one tail jsonFileRecovery
+		// cannot collect on the underscore-anchored prefix, where the token is the only thing that
+		// attributes the name to this target. The other half of the guarantee: a non-zero random still has
+		// to produce its own token rather than a constant.
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-json-token-"))
+		const stagedName = async (name: string): Promise<string> => {
+			const file = path.join(dir, name)
+			await safeWriteJson(file, { committed: true })
+			const calls = vi.mocked(fs.rename).mock.calls
+			// The commit rename is the last rename of the write: its source is the staging file.
+			return path.basename(String(calls[calls.length - 1][0]))
+		}
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0)
+		const zeroName = await stagedName("zero.json")
+		randomSpy.mockReturnValue(0.5)
+		const halfName = await stagedName("half.json")
+		randomSpy.mockRestore()
+		await fs.rm(dir, { recursive: true, force: true })
+
+		expect(zeroName).toMatch(/^\.new_zero\.json_\d+_[^_]+\.tmp$/)
+		expect(halfName).toMatch(/^\.new_half\.json_\d+_[0-9a-z]+\.tmp$/)
+		// "i" is what 0.5 answers in this shape: 0.5.toString(36) is "0.i", so substring(2) is "i"
+		// (measured with node 22.23.4). The staging name has to carry it, not a constant.
+		expect(halfName).toContain("_i.tmp")
+	})
+
 	it("keeps the published target with its new content when the post-commit directory fsync fails", async () => {
 		const fsSyncMod = await import("fs")
 		const realFsync = fsSyncMod.fsyncSync

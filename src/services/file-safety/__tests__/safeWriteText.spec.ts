@@ -1621,7 +1621,10 @@ describe("resolveLockKey", () => {
 		vi.mocked(fs.readlink).mockImplementation(async () => "a.json")
 
 		await expect(resolveLockKey("/tmp/linkdir/a.json")).rejects.toThrow("the symlink chain is deeper than 8 links")
-		expect(fs.readlink).toHaveBeenCalledTimes(8)
+		// Eight reads advance the walk and the ninth is the terminal check that finds the link past the
+		// bound. A cycle still stops on this count; it is the count that bounds the walk, not the count
+		// it used before the walk could tell a chain ending at the bound from one running past it.
+		expect(fs.readlink).toHaveBeenCalledTimes(9)
 	})
 
 	it("propagates a readlink failure that is not a not-a-link or absent answer", async () => {

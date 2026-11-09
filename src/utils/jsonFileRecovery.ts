@@ -28,7 +28,10 @@ function getStagedReplacementPrefix(absoluteFilePath: string): string {
  * core/task-persistence/__tests__/TaskHistoryStore.realConcurrency.spec.ts still plants and
  * migration must still recover, is a backup of this target. Current writers append
  * `_<timestamp>_<random>.tmp` (see safeWriteJson's createStagingFilePath and createBackupFilePath);
- * the base36 token never contains an underscore and the timestamp is all digits.
+ * the base36 token never contains an underscore, and both writers now guarantee it is not empty:
+ * Math.random() === 0 stringifies to "0", so substring(2) answers the empty string and the tail
+ * would be `<timestamp>_.tmp` (measured with node 22.23.4). This pattern still accepts that tail,
+ * because a leftover written before the guarantee is not distinguishable from one written after it.
  *
  * The underscore-anchored staged prefix `.new_<basename>_` is not scoped by its prefix alone. A
  * basename that starts with this basename plus an underscore - `a.json_extra.json` beside `a.json` -
@@ -38,7 +41,7 @@ function getStagedReplacementPrefix(absoluteFilePath: string): string {
  * the full `<ts>_<rand>.tmp` tail attributes a staged-looking name, so without the token it is not
  * this target's leftover.
  */
-const ANCHORED_LEFTOVER_TAIL = /^\d+(_[^_]+)?\.tmp$/
+const ANCHORED_LEFTOVER_TAIL = /^\d+(_[^_]*)?\.tmp$/
 const STAGED_LEFTOVER_TAIL = /^\d+_[^_]+\.tmp$/
 
 /** Whether `entry` is a leftover this target's own writer staged. */

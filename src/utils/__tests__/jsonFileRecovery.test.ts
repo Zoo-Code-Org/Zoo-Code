@@ -152,6 +152,29 @@ describe("replacement leftover name patterns", () => {
 	// The other half of the same rule: on the underscore-anchored staged prefix the token is the only
 	// thing that attributes a staged-looking name to this target, so the very same tail shape there
 	// is somebody else's in-flight file and must survive.
+	// The token a writer can actually be handed: Math.random() === 0 stringifies to "0", so
+	// substring(2) answers the empty string and the name ends timestamp-underscore-dot-tmp (measured
+	// with node 22.23.4). Under the dot-anchored prefix that name is still this target's own leftover -
+	// the literal dot already pins the basename - so recovery has to take it.
+	it("collects a dot-anchored backup whose random token came out empty", async () => {
+		const leftover = path.join(dir, ".a.json.bak_1730000000000_.tmp")
+		await fs.writeFile(leftover, "stale")
+		await expect(recoverMissingJsonFile(target)).resolves.toBe(true)
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+		await expect(fs.access(leftover)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
+	// And the name the writer produces out of that same answer: safeWriteJson guarantees a token, so the
+	// staged name carries the empty token's stand-in, and the staged prefix - where the token is the only
+	// thing that attributes the name - still recognises it.
+	it("collects a staged leftover whose token is the empty-token stand-in", async () => {
+		const leftover = path.join(dir, ".new_a.json_1730000000000_0.tmp")
+		await fs.writeFile(leftover, "stale")
+		await expect(recoverMissingJsonFile(target)).resolves.toBe(true)
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ committed: true })
+		await expect(fs.access(leftover)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
 	it("does not collect a staged-looking name that lacks the token", async () => {
 		const unscoped = path.join(dir, ".new_a.json_1.tmp")
 		await fs.writeFile(unscoped, "someone else's staging file")

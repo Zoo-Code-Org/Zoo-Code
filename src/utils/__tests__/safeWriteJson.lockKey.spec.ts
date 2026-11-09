@@ -194,6 +194,85 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		await expect(resolveLockKey(file)).rejects.toBe(eacces)
 	})
 
+	it("propagates a parent-directory error instead of joining the referent onto the spelled parent", async () => {
+		// The link's parent is itself a directory link and its realpath answers EACCES while the referent
+		// is relative and dangling. Joining the referent onto the spelled parent names dir/aliasdir/other
+		// - a key no writer that reached the referent uses - and those two writers then hold two locks for
+		// one file. Only ENOENT, the chain simply not being there, may fall back to that join.
+		const dir = await makeDir("lockkey-")
+		const spelledParent = path.join(dir, "aliasdir", "notes")
+		const link = path.join(spelledParent, "link.json")
+		currentLink = link
+		const referent = "../other/x.json"
+		const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		mockedRealpath.mockImplementation(async (target) => {
+			const p = String(target)
+			if (p === link) {
+				throw enoent // peer mid-commit: the referent is renamed away from this name
+			}
+			if (p === spelledParent) {
+				throw eacces // this directory link cannot be canonicalized right now
+			}
+			return p
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			String(target) === link ? referent : Promise.reject(enoent),
+		)
+
+		await expect(resolveLockKey(link)).rejects.toBe(eacces)
+	})
+
+	it("keys the file a chain lands on exactly at its bound", async () => {
+		// A peer that pulls the referent away mid-EPERM-fallback can leave this writer walking a chain
+		// it only finishes at the bound. Eight links land on the file, and the bound has to name that
+		// file - not whichever link the walk happened to stop on - or the write fails where waiting for
+		// the peer would have committed.
+		const dir = await makeDir("lockkey-")
+		const spelling = (n: number) => path.join(dir, "l" + n + ".json")
+		currentLink = spelling(0)
+		const hops = new Map<string, string>()
+		for (let n = 0; n < 8; n++) {
+			hops.set(spelling(n), spelling(n + 1))
+		}
+		const einval = Object.assign(new Error("EINVAL: invalid argument"), { code: "EINVAL" })
+		mockedRealpath.mockImplementation(async (target) =>
+			String(target) === currentLink ? Promise.reject(enoent) : String(target),
+		)
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) => {
+			const hop = hops.get(String(target))
+			// l8 is a regular file: a real readlink answers EINVAL for it (measured with node 22.23.4
+			// on win32), which is the answer that ends the walk.
+			return hop === undefined ? Promise.reject(einval) : hop
+		})
+
+		expect(await resolveLockKey(spelling(0))).toBe(spelling(8))
+	})
+
+	it("rejects a chain that runs past its bound instead of naming whichever link it stopped on", async () => {
+		// The other side of the same bound: nine links name no file this writer can lock, and the
+		// caller has to be told rather than handed l8, which two writers entering the chain from
+		// opposite ends would not both name.
+		const dir = await makeDir("lockkey-")
+		const spelling = (n: number) => path.join(dir, "l" + n + ".json")
+		currentLink = spelling(0)
+		const hops = new Map<string, string>()
+		for (let n = 0; n < 9; n++) {
+			hops.set(spelling(n), spelling(n + 1))
+		}
+		mockedRealpath.mockImplementation(async (target) =>
+			String(target) === currentLink ? Promise.reject(enoent) : String(target),
+		)
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) => {
+			const hop = hops.get(String(target))
+			return hop === undefined ? Promise.reject(new Error("readlink answered no code")) : hop
+		})
+
+		await expect(resolveLockKey(spelling(0))).rejects.toThrow(/deeper than 8 links/)
+	})
+
 	it("keys a relative referent through the link's real parent, not the spelled one", async () => {
 		// The link lives under a directory that is itself a link and its referent is relative.
 		// `..` names the referent's parent, so joining the referent onto the spelling the caller

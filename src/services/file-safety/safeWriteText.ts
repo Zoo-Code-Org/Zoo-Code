@@ -342,28 +342,39 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 		// loss this function exists to prevent, and guessing it is how that loss arrives.
 		const linkWalkLimit = 8
 		let key = absoluteFilePath
-		for (let depth = 0; depth < linkWalkLimit; depth++) {
+		// No condition: the bound check inside the loop is what ends the walk, and an exit-never loop is
+		// what keeps this function from needing an unreachable return after it.
+		for (let depth = 0; ; depth++) {
 			const target = await fs.readlink(key).catch((linkError: unknown) => {
 				const code = errorCode(linkError)
 				if (code === "ENOENT" || code === "EINVAL") return undefined
 				throw linkError
 			})
 			if (target === undefined) return await canonicalDirKey(key)
+			// At the bound the walk has followed linkWalkLimit links and `key` is what the last of them names.
+			// A link there is one link past what this bound can name, so it rejects; a non-link there is the
+			// file the chain ends on, and that is a key even when the chain arrived at it exactly at the bound.
+			if (depth === linkWalkLimit) {
+				throw new Error(
+					`safeWriteText: could not resolve a lock key for ${absoluteFilePath}: the symlink chain is deeper than ${linkWalkLimit} links`,
+				)
+			}
 			// A relative referent is relative to the link's REAL parent, not to the spelling the
 			// caller arrived with: under a symlinked directory `..` names the referent's parent,
 			// so a lexical join keys a different file and the writer through the alias stops
-			// excluding the writer through the referent. When the link's own parent cannot be
-			// canonicalized - a dangling chain - the lexical join is the only answer available.
+			// excluding the writer through the referent. Only a parent that is not there at all - ENOENT, the
+			// dangling chain - may fall back to that join, because there the join is the only answer
+			// available. EACCES or EIO says nothing about where this link lives, and joining onto the spelled
+			// parent keys this writer where no writer that reached the referent keys: the two locks for one
+			// file that this walk exists to prevent.
 			const referentParent = path.isAbsolute(target)
 				? undefined
-				: await fs.realpath(path.dirname(key)).catch(() => undefined)
+				: await fs.realpath(path.dirname(key)).catch((parentError: unknown) => {
+						if (errorCode(parentError) !== "ENOENT") throw parentError
+						return undefined
+					})
 			key = await canonicalDirKey(path.resolve(referentParent ?? path.dirname(key), target))
 		}
-		// The bound only exists to terminate a cycle. Past it the chain names no file, so
-		// the caller is told instead of handed whichever link the walk stopped on.
-		throw new Error(
-			`safeWriteText: could not resolve a lock key for ${absoluteFilePath}: the symlink chain is deeper than ${linkWalkLimit} links`,
-		)
 	}
 }
 

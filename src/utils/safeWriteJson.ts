@@ -68,14 +68,14 @@ export interface SafeWriteJsonOptions {
 function createStagingFilePath(absoluteFilePath: string): string {
 	return path.join(
 		path.dirname(absoluteFilePath),
-		`.new_${path.basename(absoluteFilePath)}_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+		`.new_${path.basename(absoluteFilePath)}_${Date.now()}_${Math.random().toString(36).substring(2) || "0"}.tmp`,
 	)
 }
 
 function createBackupFilePath(absoluteFilePath: string): string {
 	return path.join(
 		path.dirname(absoluteFilePath),
-		`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+		`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2) || "0"}.tmp`,
 	)
 }
 

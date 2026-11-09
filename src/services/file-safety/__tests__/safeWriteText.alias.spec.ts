@@ -152,6 +152,34 @@ describe("safeWriteText staging guard against a second spelling of the target di
 		},
 	)
 
+	// The probe above is the harness for every row in this file, so a command that quotes the directory
+	// badly answers null for the probe directory and it.runIf skips the whole file: the suite cannot tell
+	// "this volume generates no 8.3 names" from "our cmd command broke". This row asks its own question,
+	// about its own directory, and skips only on the platform that has no cmd.exe to ask.
+	it.runIf(IS_WINDOWS)("checks alias discovery without going through the capability flag", () => {
+		const spacedDir = path.join(tempDir, "SELF CHECKING TARGET DIRECTORY")
+		fs.mkdirSync(spacedDir)
+		// The same command shortPathOf runs, with the answer kept instead of collapsed to null.
+		const query = 'for %A in ("' + spacedDir + '") do @echo %~sA'
+		const raw = spawnSync(SHORT_NAME_PROBE_BIN, ["/c", query], {
+			encoding: "utf8",
+			windowsVerbatimArguments: true,
+		})
+		const answers = raw.stdout.trim().split(/\r?\n/)
+		// One answer, not one answer per word of the directory name.
+		expect(answers).toHaveLength(1)
+		expect(fs.existsSync(answers[0])).toBe(true)
+		expect(fs.statSync(answers[0]).isDirectory()).toBe(true)
+		// Where this volume really does hand out an alias - the answer carries the short-name marker - the
+		// production probe has to answer it for the same directory. A command that lost its quotes answers
+		// one line per word here and fails this row, where the flag above would only have skipped it.
+		if (answers[0].includes(SHORT_NAME_MARKER)) {
+			const short = shortPathOf(spacedDir)
+			expect(short).not.toBeNull()
+			expect(short).toBe(answers[0])
+		}
+	})
+
 	// The probe is the harness for both rows below, and its own answer is what breaks when the
 	// directory is quoted badly: a space in a directory name is not exotic on Windows - every
 	// profile path under "Documents and Settings" has one - and an unquoted for-set turns one
