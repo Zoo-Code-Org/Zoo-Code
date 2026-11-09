@@ -1265,10 +1265,14 @@ Add your skill instructions here.
 		// another update, or a stale-sidecar sweep - cannot land between reading SKILL.md and
 		// renaming the staged file over it, and an edit that landed while this call waited in the
 		// queue is read here instead of being silently discarded.
+		// Every step of that queued unit is bound to targetPath, the file this call resolved, and
+		// not to skill.path: a container symlink can be retargeted while the update waits in the
+		// directory queue, and reading through skill.path then composes the new target's contents
+		// and renames them over the file the update was asked for.
 		await this.writeSkillFileAtomically(
 			targetPath,
 			async () => {
-				const fileContent = await fs.readFile(skill.path, "utf-8")
+				const fileContent = await fs.readFile(targetPath, "utf-8")
 				const { data: frontmatter, content: body } = matter(fileContent)
 
 				// Update the frontmatter with new modeSlugs
@@ -1292,6 +1296,17 @@ Add your skill instructions here.
 				// and the rename is skipped, rather than publishing through a stale path.
 				const freshTarget = await fs.realpath(target)
 				await this.assertTargetWithinSkillsRoots(freshTarget, source)
+				// Fail closed on a retarget that landed after this call resolved skill.path: the path
+				// the caller named now resolves to a different file, so publishing would report
+				// success for a skill the user is no longer looking at. A resolution failure counts
+				// as a change. The literal message follows the disposal guard inside
+				// writeSkillFileAtomically, which is also a race guard rather than a translated error.
+				const stillResolved = await fs.realpath(skill.path).catch(() => undefined)
+				if (stillResolved !== targetPath) {
+					throw new Error(
+						`Refusing to update skill "${name}": ${skill.path} no longer resolves to ${targetPath}`,
+					)
+				}
 			},
 		)
 

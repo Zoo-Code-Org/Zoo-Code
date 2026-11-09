@@ -2717,15 +2717,27 @@ Body.`
 			// Discovery is finished reading: from here every read of this SKILL.md belongs to an
 			// update, so the recorded order is the write path's own.
 			mockDirectoryExists.mockResolvedValue(false)
+			// What SKILL.md holds right now. A rename publishes what that update staged, so from the
+			// first rename on the file no longer holds the text the first update read. Returning one
+			// constant for both reads let a producer whose queued read was discarded look correct,
+			// because nothing distinguished the two reads.
+			let diskContent = skillContent
+			const editedContent =
+				"---\nname: queue-order\ndescription: A skill\nmodeSlugs:\n  - code\n---\nInstructions edited after the first rename"
+			const stagedPayloads: string[] = []
 			mockReadFile.mockImplementation(async (file: string) => {
 				if (file === skillMd) {
 					events.push("read")
 				}
-				return skillContent
+				return diskContent
+			})
+			mockWriteFile.mockImplementation(async (_file: string, payload: string) => {
+				stagedPayloads.push(payload)
 			})
 			mockRename.mockImplementation(async (_from: string, to: string) => {
 				if (to === skillMd) {
 					events.push("rename")
+					diskContent = editedContent
 				}
 			})
 
@@ -2736,6 +2748,68 @@ Body.`
 			// Each update reads and publishes before the next update reads.
 			expect(events).toEqual(["read", "rename", "read", "rename"])
 			expect(mockRename).toHaveBeenCalledTimes(2)
+			expect(stagedPayloads.length).toBe(2)
+			// The second update's staged payload carries the body that follows the first rename: an
+			// update whose queued read was discarded would republish the body the first update read.
+			expect(stagedPayloads[0]).not.toContain("edited after the first rename")
+			expect(stagedPayloads[1]).toContain("edited after the first rename")
+		})
+
+		it("binds the queued read and the publish to the target resolved before the queue", async () => {
+			// The path discovery saw is a link whose resolution this update must keep. The retarget
+			// lands after this call resolved the link and while it waits in the directory queue,
+			// which is the window where reading through the link would compose the new target's
+			// contents and rename them over the file the update was asked for.
+			const skillDir = p(globalSkillsDir, "retargeted")
+			const linkMd = p(skillDir, "SKILL.md")
+			const originalTarget = p(globalSkillsDir, "shared-target", "SKILL.md")
+			const movedTarget = p(globalSkillsDir, "moved-target", "SKILL.md")
+			const originalContent =
+				"---\nname: retargeted\ndescription: A skill\n---\nInstructions on the file the update was asked for"
+			const movedContent =
+				"---\nname: retargeted\ndescription: A skill\n---\nInstructions on the file the link moved to"
+			let retargeted = false
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["retargeted"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === linkMd)
+			// Both targets stay inside the skills roots, so the publish-time containment check cannot
+			// be what rejects this update.
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === linkMd) {
+					return retargeted ? movedTarget : originalTarget
+				}
+				return pathArg
+			})
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === originalTarget) {
+					// The queued read is the moment the retarget becomes visible.
+					retargeted = true
+					return originalContent
+				}
+				return file === linkMd || file === movedTarget ? movedContent : originalContent
+			})
+			mockWriteFile.mockResolvedValue(undefined)
+			mockUnlink.mockResolvedValue(undefined)
+			mockRename.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+
+			await expect(skillsManager.updateSkillModes("retargeted", "global", ["code"])).rejects.toThrow(
+				"no longer resolves to",
+			)
+			// Discovery read through the link; every read that belongs to the update read the target.
+			expect(mockReadFile.mock.calls.filter((call: unknown[]) => call[0] === linkMd).length).toBe(1)
+			expect(mockReadFile.mock.calls.some((call: unknown[]) => call[0] === originalTarget)).toBe(true)
+			// The payload was composed from the original target, and nothing was renamed over it.
+			expect(String(mockWriteFile.mock.calls[0][1])).toContain("the file the update was asked for")
+			expect(mockRename).not.toHaveBeenCalled()
+			expect(mockUnlink).toHaveBeenCalledWith(String(mockWriteFile.mock.calls[0][0]))
 		})
 
 		it("fails closed when the pre-rename target resolution fails", async () => {
@@ -4254,6 +4328,52 @@ Instructions`)
 		expect(mockUnlink).toHaveBeenCalledWith(p(globalSkillsDir, staleName))
 		// A fresh matching sidecar may belong to a live write and must survive.
 		expect(mockUnlink).not.toHaveBeenCalledWith(p(globalSkillsDir, freshName))
+	})
+
+	it("revisits fresh sidecars once the delayed sweep fires", async () => {
+		// The first sweep skips sidecars younger than the freshness window because they may belong to
+		// a live write in another process, and nothing else ever revisits them. The one delayed retry
+		// is what does, so both halves are pinned: no second sweep inside the window, one after it.
+		vi.useFakeTimers()
+		let sweeps = 0
+		const originalSweep = skillsManager["sweepStaleSkillTempFiles"]
+		skillsManager["sweepStaleSkillTempFiles"] = async () => {
+			sweeps += 1
+		}
+		try {
+			await skillsManager.initialize()
+			expect(sweeps).toBe(1)
+			// SKILL_TEMP_SIDECAR_STALE_MS is ten minutes and module-private, so the window is written
+			// here and the assertions below pin which side of it fires.
+			await vi.advanceTimersByTimeAsync(10 * 60 * 1000 - 1)
+			expect(sweeps).toBe(1)
+			await vi.advanceTimersByTimeAsync(1)
+			expect(sweeps).toBe(2)
+		} finally {
+			skillsManager["sweepStaleSkillTempFiles"] = originalSweep
+			vi.useRealTimers()
+		}
+	})
+
+	it("cancels the delayed sweep when disposal lands inside the window", async () => {
+		// A host that stops inside the freshness window must not sweep again after it: dispose()
+		// clears the retry timer, and without that clear the pending callback would run.
+		vi.useFakeTimers()
+		let sweeps = 0
+		const originalSweep = skillsManager["sweepStaleSkillTempFiles"]
+		skillsManager["sweepStaleSkillTempFiles"] = async () => {
+			sweeps += 1
+		}
+		try {
+			await skillsManager.initialize()
+			expect(sweeps).toBe(1)
+			await skillsManager.dispose()
+			await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1)
+			expect(sweeps).toBe(1)
+		} finally {
+			skillsManager["sweepStaleSkillTempFiles"] = originalSweep
+			vi.useRealTimers()
+		}
 	})
 
 	it("shares one directory queue across symlink aliases", async () => {
