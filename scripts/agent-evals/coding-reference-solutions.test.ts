@@ -79,7 +79,7 @@ ${file.content}`,
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v7")
+		assert.equal(GRADER_VERSION, "coding-grader-v8")
 		assert.equal(CODING_GRADER_RESOURCES.image, "docker.io/library/node:22-bookworm")
 	})
 })

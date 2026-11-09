@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { createSideProcessGuard } from "./side-process-guard.ts"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -10,7 +11,7 @@ import type { Measured } from "./trace.ts"
 
 // The grader version is a pinned comparison input. Any change to the driver,
 // the image, or the verdict rules must bump it.
-export const GRADER_VERSION = "coding-grader-v7"
+export const GRADER_VERSION = "coding-grader-v8"
 
 export interface GraderResources {
 	timeoutMs: number
@@ -45,6 +46,7 @@ export interface GraderJob {
 	// Fresh copy of the final workspace plus the hidden acceptance tests.
 	gradingDir: string
 	driverPath: string
+	trustedTests?: { path: string; sha256: string }[]
 	resources: GraderResources
 }
 
@@ -92,6 +94,10 @@ export async function runGrader(inputs: {
 		verdict = await inputs.runtime.run({
 			gradingDir,
 			driverPath: driverFilePath(),
+			trustedTests: inputs.hiddenTests.map((file) => ({
+				path: file.path,
+				sha256: createHash("sha256").update(file.content).digest("hex"),
+			})),
 			resources: inputs.resources,
 		})
 	} catch {
@@ -125,12 +131,16 @@ export function createLocalSubprocessGradingRuntime(nodeExecutable = process.exe
 					const guard = createSideProcessGuard(100)
 					let timedOut = false
 					let cleanup: Promise<unknown> | undefined
-					const child = spawn(nodeExecutable, [job.driverPath, resultPath, "test"], {
-						cwd: job.gradingDir,
-						env,
-						stdio: "ignore",
-						detached: true,
-					})
+					const child = spawn(
+						nodeExecutable,
+						[job.driverPath, resultPath, "test", JSON.stringify(job.trustedTests ?? [])],
+						{
+							cwd: job.gradingDir,
+							env,
+							stdio: "ignore",
+							detached: true,
+						},
+					)
 					guard.track(child.pid)
 					const timer = setTimeout(() => {
 						timedOut = true

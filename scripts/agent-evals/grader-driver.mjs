@@ -5,7 +5,7 @@
 // The driver receives no credential and needs no network.
 import process from "node:process"
 import { run } from "node:test"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -15,6 +15,10 @@ if (!outPath) {
 	process.exit(2)
 }
 const testDir = process.argv[3] ?? "test"
+// Supplied by the trusted runtime, never loaded from the agent workspace.
+const trustedTests = new Map(
+	JSON.parse(process.argv[4] ?? "[]").map(({ path: file, sha256 }) => [path.resolve(file), sha256]),
+)
 
 // The result file is the host's only view of the grading outcome, so its
 // publication is atomic: the content lands in a unique same-directory temp
@@ -74,7 +78,10 @@ const runOneFile = async (file) => {
 		execArgv: [
 			process.allowedNodeEnvironmentFlags.has("--permission") ? "--permission" : "--experimental-permission",
 			`--allow-fs-read=${process.cwd()}`,
-			...(file.includes(".acceptance.test.") ? ["--allow-child-process"] : []),
+			...(trustedTests.get(path.resolve(file)) ===
+			createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+				? ["--allow-child-process"]
+				: []),
 		],
 	})
 	for await (const event of stream) {

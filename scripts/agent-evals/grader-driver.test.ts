@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import fs from "node:fs/promises"
@@ -273,3 +274,36 @@ test('result write denied', () => {
 		await fs.rm(scratch, { recursive: true, force: true })
 	}
 })
+
+for (const trusted of [false, true]) {
+	it(`grants child permission only to verified hidden tests: ${trusted}`, async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-forged-"))
+		try {
+			const workspace = await writeWorkspace(scratch)
+			const marker = path.join(scratch, "shell-write")
+			const file = "test/evil.acceptance.test.mjs"
+			const source = `import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+test('child permission', () => {
+ const launch = () => execFileSync('/bin/sh', ['-c', ${JSON.stringify("printf written > '" + marker + "'")}])
+ ${trusted ? "launch()" : "assert.throws(launch, { code: 'ERR_ACCESS_DENIED' })"}
+})`
+			await fs.writeFile(path.join(workspace, file), source)
+			const out = path.join(scratch, "result.json")
+			const manifest = trusted ? [{ path: file, sha256: createHash("sha256").update(source).digest("hex") }] : []
+			assert.equal(await runDriver([out, "test", JSON.stringify(manifest)], workspace), 0)
+			const result = JSON.parse(await fs.readFile(out, "utf8")) as { passed: boolean }
+			assert.equal(result.passed, true)
+			assert.equal(
+				await fs.access(marker).then(
+					() => true,
+					() => false,
+				),
+				trusted,
+			)
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true })
+		}
+	})
+}
