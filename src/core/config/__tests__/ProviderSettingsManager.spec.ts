@@ -639,6 +639,103 @@ describe("ProviderSettingsManager", () => {
 			load.mockRestore()
 		})
 
+		describe("a read that is given up on while it holds, or waits for, the lock", () => {
+			const text = () => JSON.stringify(stored)
+			const never = () => new Promise<string>(() => undefined)
+			const load = () => vi.spyOn(providerSettingsManager as unknown as { load(): Promise<unknown> }, "load")
+
+			it("does not hold the lock for good when its read never settles, once its caller has left", async () => {
+				mockSecrets.get.mockClear()
+				mockSecrets.store.mockClear()
+				mockSecrets.get.mockImplementationOnce(never).mockResolvedValue(text())
+				const controller = new AbortController()
+
+				const blocked = providerSettingsManager.getAllProfiles({ signal: controller.signal })
+				const failed = expect(blocked).rejects.toThrow("Failed to get profiles")
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1)) // its read has started, and hangs
+				const write = providerSettingsManager.saveConfig("other", {
+					id: "other-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				await Promise.resolve()
+				expect(mockSecrets.store).not.toHaveBeenCalled() // the write waits for the read
+
+				controller.abort() // the deadline of the quota request
+
+				await failed
+				await expect(write).resolves.toBe("other-id") // the write is not blocked any more
+				await expect(providerSettingsManager.listConfig()).resolves.toHaveLength(2)
+			})
+
+			it("writes nothing and changes nothing when a read that was given up on settles later", async () => {
+				mockSecrets.get.mockClear()
+				mockSecrets.store.mockClear()
+				let finish: (value: string) => void = () => undefined
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise<string>((resolve) => (finish = resolve)))
+					.mockResolvedValue(text())
+				const controller = new AbortController()
+				const read = providerSettingsManager.listConfig({ signal: controller.signal })
+				const failed = expect(read).rejects.toThrow("Failed to list configs")
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				controller.abort()
+				await failed
+
+				finish(text()) // what it loaded is thrown away
+				await Promise.resolve()
+
+				expect(mockSecrets.store).not.toHaveBeenCalled()
+				await expect(providerSettingsManager.listConfig()).resolves.toHaveLength(2)
+			})
+
+			it("answers the queued reads that are cancelled at once, reads nothing for them, and keeps the order of the others", async () => {
+				mockSecrets.get.mockClear()
+				mockSecrets.store.mockClear()
+				let finishFirst: (value: string) => void = () => undefined
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+					.mockResolvedValue(text())
+				const loadSpy = load()
+				const controller = new AbortController()
+
+				const first = providerSettingsManager.listConfig() // holds the lock, and cannot be cancelled
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				const queued = [
+					providerSettingsManager.listConfig({ signal: controller.signal }),
+					providerSettingsManager.getAllProfiles({ signal: controller.signal }),
+					providerSettingsManager.getProfile({ id: "other-id" }, { signal: controller.signal }),
+				]
+				const failures = queued.map((read) => expect(read).rejects.toBeDefined())
+				const write = providerSettingsManager.saveConfig("other", {
+					id: "other-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+
+				controller.abort()
+				await Promise.all(failures) // answered while the first read still holds the lock
+
+				// The write is behind the first read, whatever happened to the cancelled ones in between.
+				await Promise.resolve()
+				expect(mockSecrets.store).not.toHaveBeenCalled()
+				finishFirst(text())
+				await first
+				await expect(write).resolves.toBe("other-id")
+				// The first read and the write loaded the profiles: the cancelled ones never did.
+				expect(loadSpy).toHaveBeenCalledTimes(2)
+				loadSpy.mockRestore()
+			})
+
+			it("leaves no listener on a signal that is never aborted", async () => {
+				mockSecrets.get.mockResolvedValue(text())
+				const controller = new AbortController()
+				const remove = vi.spyOn(controller.signal, "removeEventListener")
+
+				await providerSettingsManager.getAllProfiles({ signal: controller.signal })
+
+				expect(remove).toHaveBeenCalledWith("abort", expect.any(Function))
+			})
+		})
+
 		it("reads every profile in one locked load, with its name and id", async () => {
 			mockSecrets.get.mockClear()
 			mockSecrets.get.mockResolvedValue(

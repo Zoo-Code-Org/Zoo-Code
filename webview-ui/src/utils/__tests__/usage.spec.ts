@@ -549,6 +549,32 @@ describe("usageToCsv formula safety", () => {
 	})
 })
 
+describe("usageToCsv formulas inside a cell", () => {
+	const cell = (csv: string) => csv.split("\n")[1].split(",")[1]
+
+	it.each([
+		["note; =1+1;end", `"note;' =1+1;end"`],
+		["a;-2+3", `"a;'-2+3"`],
+		["a;  @SUM(1)", `"a;'  @SUM(1)"`],
+		["x\t =1+1", `"x\t' =1+1"`],
+		["x;\u00A0=1", `"x;'\u00A0=1"`],
+		["note; plain; text", `"note; plain; text"`],
+		["a; b = c", `"a; b = c"`],
+	])("writes the title %j as %j", (title, written) => {
+		const csv = usageToCsv([item({ title })], { range: "all", now: NOW })
+
+		expect(cell(csv)).toBe(written)
+	})
+
+	it("breaks a formula after a separator in a cell that also starts with a sign, and in every text column", () => {
+		const csv = usageToCsv([item({ task: "=1+1; =2", mode: "a;=3" })], { range: "all", now: NOW })
+		const row = csv.split("\n")[1].split(",")
+
+		expect(row[1]).toBe(`"'=1+1;' =2"`)
+		expect(row[2]).toBe(`"a;'=3"`)
+	})
+})
+
 describe("usageToCsv text cell length", () => {
 	const cell = (csv: string) => csv.split("\n")[1].split(",")[1]
 

@@ -307,6 +307,28 @@ describe("Checkpoint functionality", () => {
 			},
 		)
 
+		it("logs a closing note that fails with something that is not an Error, as text", async () => {
+			mockTask.say.mockRejectedValueOnce("task aborted")
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" }),
+			).resolves.toBeUndefined()
+
+			expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("could not be noted: task aborted"))
+		})
+
+		it("logs a restart that fails with something that is not an Error, as text", async () => {
+			mockProvider.cancelTask.mockRejectedValueOnce("cannot rehydrate")
+
+			await expect(
+				checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation: "delete" }),
+			).rejects.toMatchObject({ name: "TaskNotRestartedError" })
+
+			expect(mockProvider.log).toHaveBeenCalledWith(
+				expect.stringContaining("could not be started again: cannot rehydrate"),
+			)
+		})
+
 		it("says the deleted requests when the task can, with their usage", async () => {
 			mockTask.combineMessages.mockReturnValue([])
 

@@ -148,15 +148,15 @@ export function getGitHubCopilotQuota(
 		)
 		return sameSession.then((same) => {
 			if (same) return cached.result
-			if (cache === cached) cache = undefined
+			cache = undefined
 			return getGitHubCopilotQuota({ force: true, signal }, fetchImpl)
 		})
 	}
 
 	if (!inFlight) {
 		const controller = new AbortController()
-		// The token of the session that this request is for (set once it is known).
-		let sessionToken: string | undefined
+		// The token of the session that this request is for (set as soon as it is known, and always before a success).
+		let sessionToken = ""
 		const fetchQuota = async (): Promise<GitHubCopilotQuotaResult> => {
 			try {
 				const token = await getGitHubToken(
@@ -197,7 +197,7 @@ export function getGitHubCopilotQuota(
 				// HTTP error, a thrown or cancelled request) drops an older success so it is not served as current.
 				// A cancelled request says nothing about the account, so it leaves the cache alone.
 				if (!controller.signal.aborted) {
-					cache = result.ok && sessionToken ? { at: Date.now(), result, token: sessionToken } : undefined
+					cache = result.ok ? { at: Date.now(), result, token: sessionToken } : undefined
 				}
 				return result
 			})

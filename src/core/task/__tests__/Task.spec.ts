@@ -634,6 +634,57 @@ describe("Cline", () => {
 			expect(call![1].inputTokens).toBe(100_000)
 			expect(call![1].cost).toBeCloseTo(0.6, 9)
 		})
+
+		it("writes the usage of a request into no other message when its own was removed while the usage is drained", async () => {
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+			captureLlmCompletion.mockClear()
+			const updateClineMessage = vi.spyOn(
+				task as unknown as { updateClineMessage: () => Promise<void> },
+				"updateClineMessage",
+			)
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			// An older request, whose record the removed one's must not overwrite.
+			const older = {
+				ts: 1,
+				type: "say" as const,
+				say: "api_req_started" as const,
+				text: '{"apiProvider":"older"}',
+			}
+			task.clineMessages.unshift(older)
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						yield { type: "text", text: "partial response" }
+						// A rewind removes this request's own record while its usage has not been collected yet.
+						task.clineMessages = task.clineMessages.filter(
+							(m) => m === older || m.say !== "api_req_started",
+						)
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 77_000,
+							cacheWrite1hTokens: 0,
+							cacheReadTokens: 0,
+						}
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 77_000),
+				).toBe(true),
+			)
+			expect(older.text).toBe('{"apiProvider":"older"}') // not written in its place
+			expect(updateClineMessage).not.toHaveBeenCalled() // and no row was posted for the removed record
+		})
 	})
 
 	describe("the protocol that prices a request follows the handler that serves it", () => {
@@ -3926,13 +3977,17 @@ describe("Cline", () => {
 					return undefined as never
 				})
 				// A deletion that is confirmed while the request is being prepared removes its placeholder.
-				vi.spyOn(task.diffViewProvider, "reset").mockImplementation(async () => {
+				vi.mocked(getEnvironmentDetails).mockImplementationOnce(async () => {
 					task.clineMessages = task.clineMessages.filter((message) => message.ts !== 2)
+					return ""
 				})
 
 				// The loop ends the request there, as it does for an abort.
-				await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+				await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])).rejects.toThrow(
+					"request was removed from the conversation",
+				)
 
+				expect(getEnvironmentDetails).toHaveBeenCalled() // the placeholder was removed during the waits
 				expect(older.text).toBe('{"apiProvider":"older"}') // not relabelled in its place
 				expect(attempt).not.toHaveBeenCalled() // and nothing was sent
 			})

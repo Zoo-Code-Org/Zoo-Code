@@ -3002,4 +3002,77 @@ describe("Task persistence", () => {
 			expect(task.userMessageContent).toEqual([])
 		})
 	})
+
+	// ── a checkpoint delete after an abort, with the real rewind and the real Task.say ──
+
+	describe("checkpointRestore (delete) on a task that was aborted", () => {
+		const HASH = "a".repeat(40)
+
+		const abortedTaskWithCheckpoint = () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.enableCheckpoints = true
+			task.checkpointService = {
+				isInitialized: true,
+				restoreCheckpoint: vi.fn().mockResolvedValue(undefined),
+			} as unknown as NonNullable<Task["checkpointService"]> // the members that checkpointRestore calls
+			task.clineMessages = [
+				{ ts: 1, type: "say", say: "text", text: "first" },
+				{ ts: 2, type: "say", say: "text", text: "second" },
+				{ ts: 3, type: "say", say: "checkpoint_saved", text: HASH },
+				{ ts: 4, type: "say", say: "text", text: "after the checkpoint" },
+			]
+			task.apiConversationHistory = [
+				{ ts: 1, role: "user", content: [{ type: "text", text: "first" }] },
+				{ ts: 2, role: "assistant", content: [{ type: "text", text: "second" }] },
+				{ ts: 4, role: "user", content: [{ type: "text", text: "after the checkpoint" }] },
+			]
+			// What the provider does when the user deletes: the task is aborted before the restore, and then started again.
+			setAbortLatch(task, true)
+			return task
+		}
+
+		it("really cannot say the closing note: the real say of an aborted task throws", async () => {
+			const task = abortedTaskWithCheckpoint()
+
+			await expect(task.say("api_req_deleted", "{}")).rejects.toThrow(/aborted/)
+		})
+
+		it("rewinds, stores both histories and starts the task again, though the note cannot be said", async () => {
+			const task = abortedTaskWithCheckpoint()
+			const cancelTask = vi.fn().mockResolvedValue(undefined)
+			mockProvider.cancelTask = cancelTask
+			mockProvider.getCurrentTask = vi.fn(() => ({ taskId: task.taskId, instanceId: "rehydrated" }) as Task)
+			const say = vi.spyOn(task, "say")
+			const { checkpointRestore } = await import("../../checkpoints")
+
+			await expect(
+				checkpointRestore(task, { ts: 3, commitHash: HASH, mode: "restore", operation: "delete" }),
+			).resolves.toBeUndefined()
+
+			// The note was tried, and the abort refused it.
+			expect(say).toHaveBeenCalledWith("api_req_deleted", expect.any(String))
+			await expect(say.mock.results[0].value).rejects.toThrow(/aborted/)
+			// Both histories were cut and stored, as the rewind left them.
+			expect(task.clineMessages.map((m) => m.ts)).toEqual([1, 2])
+			expect(task.apiConversationHistory.map((m) => m.ts)).toEqual([1, 2])
+			expect(mockSaveTaskMessages).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					messages: [expect.objectContaining({ ts: 1 }), expect.objectContaining({ ts: 2 })],
+				}),
+			)
+			expect(mockSaveApiMessages).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					messages: [expect.objectContaining({ ts: 1 }), expect.objectContaining({ ts: 2 })],
+					merge: false,
+				}),
+			)
+			// And the task is started again, once.
+			expect(cancelTask).toHaveBeenCalledTimes(1)
+		})
+	})
 })

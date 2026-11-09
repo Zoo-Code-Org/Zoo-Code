@@ -192,6 +192,11 @@ describe("neutralizeCsvFormulas", () => {
 		["\u0001\u0000@x", "'\u0001\u0000@x", "'\u0001\u0000@x"],
 		["\u00AD-2", "'\u00AD-2", "'\u00AD-2"],
 		["\u200E+1", "'\u200E+1", "'\u200E+1"],
+		// ... nor do spaces, for an import that trims them.
+		[" =1+1", "' =1+1", "' =1+1"],
+		["   @SUM(1)", "'   @SUM(1)", "'   @SUM(1)"],
+		["\u00A0-2+3", "'\u00A0-2+3", "'\u00A0-2+3"],
+		[" \u0000 +1", "' \u0000 +1", "' \u0000 +1"],
 	])("prefixes the formula-leading cell %j, quoted or not", (cell, unquotedOut, quotedInnerOut) => {
 		// The cell as the webview would write it, in quotes ...
 		expect(neutralizeCsvFormulas(`a,"${cell}",b`)).toBe(`a,"${quotedInnerOut.replace(/^"|"$/g, "")}",b`)
@@ -202,7 +207,6 @@ describe("neutralizeCsvFormulas", () => {
 	it.each([
 		["x=1"],
 		["a+b"],
-		[" =1"],
 		["'=1"],
 		["1-2"],
 		["\uFEFFtext"],
@@ -249,7 +253,8 @@ describe("neutralizeCsvFormulas", () => {
 		}
 		return fields
 	}
-	const startsAFormula = (field: string) => /^(?:(?!\n)[\p{Cc}\p{Cf}])*[=+\-@\t\r]/u.test(field)
+	// An import that trims spaces reads a formula behind them, so the spaces are skipped here too.
+	const startsAFormula = (field: string) => /^(?:(?!\n)[\p{Cc}\p{Cf}\p{Zs}])*[=+\-@\t\r]/u.test(field)
 
 	describe("for a quote after a separator inside a cell", () => {
 		// What is written when a cell has a formula behind quotes: a separator, quotes (doubled in the file), a sign.
@@ -376,6 +381,10 @@ describe("neutralizeCsvFormulas", () => {
 			["a formula after several separators", "task,x;;\t=1+1,1"],
 			["a formula after a semicolon and an invisible character", "task,x;\u0000=1+1,1"],
 			["a cell that is a semicolon and a formula", "task,;=1+1,1"],
+			["a formula after a semicolon and a space, for an import that trims spaces", "task,note; =1+1;end,1"],
+			["a formula after a tab and spaces", "task,x\t  @SUM(1),1"],
+			["a formula after a semicolon and a non-breaking space", "task,x;\u00A0-2+3,1"],
+			["a quoted cell with spaces before a formula after a semicolon", 'task,"note; =1+1;end",1'],
 		])("leaves no field that is a formula, whatever the separator: %s", (_name, csv) => {
 			const safe = neutralizeCsvFormulas(csv)!
 
@@ -399,6 +408,25 @@ describe("neutralizeCsvFormulas", () => {
 			const csv = 'task,"a; b;c\td",1'
 
 			expect(neutralizeCsvFormulas(csv)).toBe(csv)
+		})
+
+		it("shows that a field with spaces before the sign is a formula for an import that trims them, as written", () => {
+			expect(fieldsSplitOn(";", "task,note; =1+1;end,1").some(startsAFormula)).toBe(true)
+		})
+
+		it.each([
+			["a title with spaces before a formula after a semicolon", 'd,"note; =1+1;end"'],
+			["a cell that starts with spaces and a formula", 'd,"   =1+1"'],
+			["a cell that is spaces and a formula, not quoted", "d,  =1+1"],
+		])("writes %s as inert text from exportUsageCsv, whatever the webview sent", async (_name, row) => {
+			showSaveDialog.mockResolvedValue({ fsPath: "/tmp/chosen.csv" } as vscode.Uri)
+
+			await exportUsageCsv(`date,task\n${row}`, "all", context)
+
+			const written = writeFile.mock.calls[0][1].toString()
+			for (const delimiter of [",", ";", "\t"]) {
+				expect(fieldsSplitOn(delimiter, written).some(startsAFormula)).toBe(false)
+			}
 		})
 
 		it("writes the text that follows a semicolon as inert text from exportUsageCsv, whatever the webview sent", async () => {

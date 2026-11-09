@@ -9,12 +9,13 @@ const LAST_EXPORT_PATH_KEY = "lastUsageExportPath"
 const USAGE_RANGES: readonly string[] = ["today", "7d", "30d", "all"]
 
 /**
- * The characters that an application may skip before it reads a formula: control characters such as NUL and format
- * characters such as a byte order mark or the zero-width ones. A tab, a carriage return and a line feed are not among
+ * The characters that an application may skip before it reads a formula: spaces (an import that trims them reads
+ * "  =1+1" as a formula), control characters such as NUL and format characters such as a byte order mark or the
+ * zero-width ones. A tab, a carriage return and a line feed are not among
  * them: the first two start a formula themselves, and the line feed ends a line. Keeping them out also keeps the scans
  * below from overlapping, so they cost a pass over the text, not a pass for every separator.
  */
-const SKIPPED = String.raw`(?![\t\r\n])[\p{Cc}\p{Cf}]`
+const SKIPPED = String.raw`(?![\t\r\n])[\p{Cc}\p{Cf}\p{Zs}]`
 
 /** What starts a cell that a spreadsheet may evaluate: = + - @, a tab or a carriage return, after the characters it skips. */
 const FORMULA_START = new RegExp(`^(?:${SKIPPED})*[=+\\-@\\t\\r]`, "u")

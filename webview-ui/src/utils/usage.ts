@@ -375,7 +375,11 @@ export function usageToCsv(history: HistoryItem[], options: UsageOptions): strin
 		// nothing): each text cell is cut to a length that lets a very large history through.
 		const bounded = value.length > MAX_CSV_TEXT_LENGTH ? cutText(value) : value
 		const flat = bounded.replace(/\r?\n/g, " ")
-		const safe = /^[\s\p{Cc}\p{Cf}]*[=+\-@\t\r]/u.test(flat) ? `'${flat}` : flat
+		const started = /^[\s\p{Cc}\p{Cf}]*[=+\-@\t\r]/u.test(flat) ? `'${flat}` : flat
+		// A spreadsheet that splits on a semicolon or a tab starts a new field after one inside the cell: a sign that
+		// follows it (after spaces, for an import that trims them) is broken as well. The text is at most
+		// MAX_CSV_TEXT_LENGTH long, so the scan is bounded. The host does the same for whatever it is sent.
+		const safe = started.replace(/([;\t\r])(?=[\s\p{Cc}\p{Cf}]*[=+\-@\t\r])/gu, "$1'")
 		return `"${safe.replace(/"/g, '""')}"`
 	}
 

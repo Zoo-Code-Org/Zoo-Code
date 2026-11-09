@@ -100,6 +100,43 @@ export class ProviderSettingsManager {
 	}
 
 	/**
+	 * A read that only reads and maps what it loaded (it writes nothing), taking its turn in the same line as every other
+	 * operation. With a `signal` the caller is answered as soon as it aborts, and the read gives up its place then, wherever
+	 * it is: a read that has not started never starts, and one whose `secrets.get` never settles does not hold the lock for
+	 * good. The operations behind it still wait for the ones in front of it. What a read that was given up on loads later is
+	 * thrown away, and it writes nothing, so nothing runs beside a write or a migration.
+	 */
+	private lockRead<T>(cb: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		if (!signal) return this.lock(cb)
+
+		let leave!: () => void
+		const left = new Promise<void>((resolve) => (leave = resolve))
+		signal.addEventListener("abort", leave, { once: true })
+		if (signal.aborted) leave()
+
+		const previous = this._lock
+		const run = previous.then(() => {
+			signal.throwIfAborted()
+			return cb()
+		})
+		const settled = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		// The place in line is given up when the read is done, or when its caller has left, but not before the
+		// operations in front of it are done.
+		this._lock = previous.then(() => Promise.race([settled, left]))
+		void settled.then(() => signal.removeEventListener("abort", leave))
+
+		return Promise.race([
+			run,
+			left.then(() => {
+				throw signal.reason
+			}),
+		])
+	}
+
+	/**
 	 * Initialize config if it doesn't exist and run migrations.
 	 */
 	public async initialize() {
@@ -395,13 +432,12 @@ export class ProviderSettingsManager {
 	 * List all available configs with metadata.
 	 *
 	 * With `signal`, a call that is aborted by the time its turn comes (it waited behind other operations) reads
-	 * nothing from storage. A read that has started cannot be stopped: it holds the lock until it settles, because
-	 * a second `load` (which may migrate and write) must not run beside it.
+	 * nothing from storage, and one that is aborted while its read is under way is answered at once and gives up the lock
+	 * (see `lockRead`): a read that never settles cannot hold the profiles for good.
 	 */
 	public async listConfig(options?: { signal?: AbortSignal }): Promise<ProviderSettingsEntry[]> {
 		try {
-			return await this.lock(async () => {
-				options?.signal?.throwIfAborted()
+			return await this.lockRead(async () => {
 				const providerProfiles = await this.load()
 
 				return Object.entries(providerProfiles.apiConfigs).map(([name, apiConfig]) => ({
@@ -410,7 +446,7 @@ export class ProviderSettingsManager {
 					apiProvider: apiConfig.apiProvider,
 					modelId: this.cleanModelId(getModelId(apiConfig)),
 				}))
-			})
+			}, options?.signal)
 		} catch (error) {
 			throw new Error(`Failed to list configs: ${error}`)
 		}
@@ -425,13 +461,12 @@ export class ProviderSettingsManager {
 		signal?: AbortSignal
 	}): Promise<Array<ProviderSettingsWithId & { id: string; name: string }>> {
 		try {
-			return await this.lock(async () => {
-				options?.signal?.throwIfAborted()
+			return await this.lockRead(async () => {
 				const providerProfiles = await this.load()
 				return Object.entries(providerProfiles.apiConfigs).flatMap(([name, apiConfig]) =>
 					apiConfig.id ? [{ ...apiConfig, id: apiConfig.id, name }] : [],
 				)
-			})
+			}, options?.signal)
 		} catch (error) {
 			throw new Error(`Failed to get profiles: ${error instanceof Error ? error.message : error}`)
 		}
@@ -475,8 +510,7 @@ export class ProviderSettingsManager {
 		options?: { signal?: AbortSignal },
 	): Promise<ProviderSettingsWithId & { name: string }> {
 		try {
-			return await this.lock(async () => {
-				options?.signal?.throwIfAborted()
+			return await this.lockRead(async () => {
 				const providerProfiles = await this.load()
 				let name: string
 				let providerSettings: ProviderSettingsWithId
@@ -505,7 +539,7 @@ export class ProviderSettingsManager {
 				}
 
 				return { name, ...providerSettings }
-			})
+			}, options?.signal)
 		} catch (error) {
 			throw new Error(`Failed to get profile: ${error instanceof Error ? error.message : error}`)
 		}
