@@ -5094,7 +5094,7 @@ describe("Cline", () => {
 
 				it.each(
 					(["manual", "recovery", "automatic"] as const).flatMap((path) =>
-						(["none", "build", "summary"] as const).map((cancelAt) => ({ path, cancelAt })),
+						(["none", "build", "environment", "summary"] as const).map((cancelAt) => ({ path, cancelAt })),
 					),
 				)(
 					"passes tools and handles cancellation in $path condensation ($cancelAt)",
@@ -5153,6 +5153,11 @@ describe("Cline", () => {
 								task["abort"] = true
 								return { tools }
 							})
+						if (cancelAt === "environment")
+							vi.mocked(getEnvironmentDetails).mockImplementationOnce(async () => {
+								task["abort"] = true
+								return ""
+							})
 						if (cancelAt === "summary")
 							vi.mocked(summarizeConversation).mockImplementationOnce(async ({ metadata }) => {
 								expect(metadata?.abortSignal).toBeDefined()
@@ -5165,6 +5170,20 @@ describe("Cline", () => {
 							if (path === "manual") await task.condenseContext()
 							else if (path === "recovery") await access.handleContextWindowExceededError(model)
 							else await task.attemptApiRequest(0).next()
+							if (path !== "manual") {
+								const notifications = vi
+									.mocked(mockProvider.postMessageToWebview)
+									.mock.calls.map(([message]) => message)
+									.filter((message) =>
+										["condenseTaskContextStarted", "condenseTaskContextResponse"].includes(
+											message.type,
+										),
+									)
+								expect(notifications).toEqual([
+									{ type: "condenseTaskContextStarted", text: task.taskId },
+									{ type: "condenseTaskContextResponse", text: task.taskId },
+								])
+							}
 							if (cancelAt !== "none") {
 								expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(
 									summariesBefore + (cancelAt === "summary" ? 1 : 0),

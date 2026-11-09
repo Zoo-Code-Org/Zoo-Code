@@ -5501,49 +5501,49 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Send condenseTaskContextStarted to show in-progress indicator
 		await this.providerRef.deref()?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
 
-		// Build tools for condensing metadata (same tools used for normal API calls)
-		const provider = this.providerRef.deref()
-		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
-		if (provider) {
-			const toolsResult = await buildNativeToolsArrayWithRestrictions({
-				task: this,
-				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
-				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
-				provider,
-				cwd: this.cwd,
-				mode,
-				customModes: state?.customModes,
-				experiments: state?.experiments,
-				apiConfiguration,
-				disabledTools: state?.disabledTools,
-				modelInfo,
-				includeAllToolsWithRestrictions: false,
-			})
-			allTools = toolsResult.tools
-		}
-
-		if (this.abort || this.abandoned) return
-		this.currentRequestAbortController ??= new AbortController()
-
-		// Build metadata with tools and taskId for the condensing API call
-		const metadata: ApiHandlerCreateMessageMetadata = {
-			mode,
-			taskId: this.taskId,
-			...(this.currentRequestAbortController?.signal
-				? {
-						abortSignal: this.currentRequestAbortController.signal,
-					}
-				: {}),
-			...(allTools.length > 0
-				? {
-						tools: allTools,
-						tool_choice: "auto",
-						parallelToolCalls: true,
-					}
-				: {}),
-		}
-
 		try {
+			// Build tools for condensing metadata (same tools used for normal API calls)
+			const provider = this.providerRef.deref()
+			let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
+			if (provider) {
+				const toolsResult = await buildNativeToolsArrayWithRestrictions({
+					task: this,
+					mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+					mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+					provider,
+					cwd: this.cwd,
+					mode,
+					customModes: state?.customModes,
+					experiments: state?.experiments,
+					apiConfiguration,
+					disabledTools: state?.disabledTools,
+					modelInfo,
+					includeAllToolsWithRestrictions: false,
+				})
+				allTools = toolsResult.tools
+			}
+
+			if (this.abort || this.abandoned) return
+			this.currentRequestAbortController ??= new AbortController()
+
+			// Build metadata with tools and taskId for the condensing API call
+			const metadata: ApiHandlerCreateMessageMetadata = {
+				mode,
+				taskId: this.taskId,
+				...(this.currentRequestAbortController?.signal
+					? {
+							abortSignal: this.currentRequestAbortController.signal,
+						}
+					: {}),
+				...(allTools.length > 0
+					? {
+							tools: allTools,
+							tool_choice: "auto",
+							parallelToolCalls: true,
+						}
+					: {}),
+			}
+
 			// Generate environment details to include in the condensed summary
 			const environmentDetails = await getEnvironmentDetails(this, true)
 
@@ -5787,67 +5787,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
 			}
 
-			// Build tools for condensing metadata (same tools used for normal API calls)
-			// This ensures the condensing API call includes tool definitions for providers that need them
-			let contextMgmtTools: import("openai").default.Chat.ChatCompletionTool[] = []
-			{
-				const provider = this.providerRef.deref()
-				if (provider) {
-					const toolsResult = await buildNativeToolsArrayWithRestrictions({
-						task: this,
-						mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
-						mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
-						provider,
-						cwd: this.cwd,
-						mode,
-						customModes: state?.customModes,
-						experiments: state?.experiments,
-						apiConfiguration,
-						disabledTools: state?.disabledTools,
-						modelInfo: requestModelInfo,
-						includeAllToolsWithRestrictions: false,
-					})
-					contextMgmtTools = toolsResult.tools
+			try {
+				// Build tools for condensing metadata (same tools used for normal API calls)
+				// This ensures the condensing API call includes tool definitions for providers that need them
+				let contextMgmtTools: import("openai").default.Chat.ChatCompletionTool[] = []
+				{
+					const provider = this.providerRef.deref()
+					if (provider) {
+						const toolsResult = await buildNativeToolsArrayWithRestrictions({
+							task: this,
+							mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+							mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+							provider,
+							cwd: this.cwd,
+							mode,
+							customModes: state?.customModes,
+							experiments: state?.experiments,
+							apiConfiguration,
+							disabledTools: state?.disabledTools,
+							modelInfo: requestModelInfo,
+							includeAllToolsWithRestrictions: false,
+						})
+						contextMgmtTools = toolsResult.tools
+					}
 				}
-			}
 
-			if (this.abort || this.abandoned) return
-			this.currentRequestAbortController ??= new AbortController()
+				if (this.abort || this.abandoned) return
+				this.currentRequestAbortController ??= new AbortController()
 
-			// Build metadata with tools and taskId for the condensing API call
-			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
-				mode,
-				taskId: this.taskId,
-				...(this.currentRequestAbortController?.signal
-					? {
-							abortSignal: this.currentRequestAbortController.signal,
-						}
-					: {}),
-				...(contextMgmtTools.length > 0
-					? {
-							tools: contextMgmtTools,
-							tool_choice: "auto",
-							parallelToolCalls: true,
-						}
-					: {}),
-			}
+				// Build metadata with tools and taskId for the condensing API call
+				const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
+					mode,
+					taskId: this.taskId,
+					...(this.currentRequestAbortController?.signal
+						? {
+								abortSignal: this.currentRequestAbortController.signal,
+							}
+						: {}),
+					...(contextMgmtTools.length > 0
+						? {
+								tools: contextMgmtTools,
+								tool_choice: "auto",
+								parallelToolCalls: true,
+							}
+						: {}),
+				}
 
-			// Only generate environment details when context management will actually run.
-			// getEnvironmentDetails(this, true) triggers a recursive workspace listing which
-			// adds overhead - avoid this for the common case where context is below threshold.
-			const contextMgmtEnvironmentDetails = contextManagementWillRun
-				? await getEnvironmentDetails(this, true)
-				: undefined
-
-			// Get files read by Roo for code folding - only when context management will run
-			const contextMgmtFilesReadByRoo =
-				contextManagementWillRun && autoCondenseContext
-					? await this.getFilesReadByRooSafely("attemptApiRequest")
+				// Only generate environment details when context management will actually run.
+				// getEnvironmentDetails(this, true) triggers a recursive workspace listing which
+				// adds overhead - avoid this for the common case where context is below threshold.
+				const contextMgmtEnvironmentDetails = contextManagementWillRun
+					? await getEnvironmentDetails(this, true)
 					: undefined
 
-			if (this.abort || this.abandoned) return
+				// Get files read by Roo for code folding - only when context management will run
+				const contextMgmtFilesReadByRoo =
+					contextManagementWillRun && autoCondenseContext
+						? await this.getFilesReadByRooSafely("attemptApiRequest")
+						: undefined
 
-			try {
+				if (this.abort || this.abandoned) return
+
 				const truncateResult = await manageContext({
 					messages: this.apiConversationHistory,
 					totalTokens: contextTokens,
