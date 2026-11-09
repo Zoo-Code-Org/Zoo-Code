@@ -389,10 +389,14 @@ describe("StandardComputeHandler", () => {
 	it("does not send the OpenAI Compatible custom headers to the fixed endpoint", () => {
 		new StandardComputeHandler({
 			standardComputeApiKey: "test-key",
+			openAiBaseUrl: "https://other.example.com/v1",
+			openAiApiKey: "other-key",
 			openAiHeaders: { "X-Custom-Header": "leaked" },
 		})
 		expect(vi.mocked(OpenAI)).toHaveBeenCalledTimes(1)
 		const clientOptions = vi.mocked(OpenAI).mock.calls[0][0]
+		expect(clientOptions?.baseURL).toBe("https://api.stdcmpt.com/v1")
+		expect(clientOptions?.apiKey).toBe("test-key")
 		expect(clientOptions?.defaultHeaders).not.toHaveProperty("X-Custom-Header")
 	})
 
@@ -407,6 +411,32 @@ describe("StandardComputeHandler", () => {
 		})
 		const handler = new StandardComputeHandler({
 			standardComputeModelId: "openai/o3-mini",
+			modelTemperature: 0.7,
+		})
+
+		await collectStream(handler.createMessage("system", messages))
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+
+		mockCreate.mockClear()
+		mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+		expect(await handler.completePrompt("ping")).toBe("ok")
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
+	})
+
+	it("omits temperature when the model metadata does not support it", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"moonshotai/kimi-k3": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsImages: false,
+				supportsPromptCache: false,
+				supportsTemperature: false,
+			},
+		})
+		const handler = new StandardComputeHandler({
+			standardComputeModelId: "moonshotai/kimi-k3",
 			modelTemperature: 0.7,
 		})
 

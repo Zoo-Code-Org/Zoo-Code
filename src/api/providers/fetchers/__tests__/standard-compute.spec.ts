@@ -178,7 +178,7 @@ describe("Standard Compute model fetcher", () => {
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
 		expect(await getStandardComputeModels("secret-key")).toEqual({
-			valid: expect.objectContaining({ contextWindow: 8_192 }),
+			valid: expect.objectContaining({ contextWindow: 8_192, maxTokens: 1_638 }),
 		})
 		expect(await getStandardComputeModels("secret-key")).toEqual({})
 		expect(consoleError).toHaveBeenLastCalledWith(

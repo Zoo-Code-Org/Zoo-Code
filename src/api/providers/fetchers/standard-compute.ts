@@ -35,18 +35,23 @@ const standardComputeModelsResponseSchema = z.object({
 	data: z.array(z.unknown()),
 })
 
-export const parseStandardComputeModel = (model: StandardComputeModel): ModelInfo => ({
-	maxTokens: standardComputeDefaultModelInfo.maxTokens,
-	contextWindow: model.context_length ?? standardComputeDefaultModelInfo.contextWindow,
-	// The routed model sends image requests to a vision model, so it accepts
-	// images although the catalog entry lists no modalities.
-	supportsImages:
-		model.architecture?.input_modalities?.includes("image") ?? model.id === standardComputeDefaultModelId,
-	supportsPromptCache: false,
-	// Catalog strings are remote and ModelInfo.description is rendered as
-	// Markdown, so only the plain-text display name is copied.
-	...(model.display_name !== undefined ? { displayName: model.display_name } : {}),
-})
+export const parseStandardComputeModel = (model: StandardComputeModel): ModelInfo => {
+	const contextWindow = model.context_length ?? standardComputeDefaultModelInfo.contextWindow
+	return {
+		// Keep the output budget within 20% of the context window, matching the
+		// reservation used by context management, so small-window models still fit.
+		maxTokens: Math.min(standardComputeDefaultModelInfo.maxTokens, Math.floor(contextWindow * 0.2)),
+		contextWindow,
+		// The routed model sends image requests to a vision model, so it accepts
+		// images although the catalog entry lists no modalities.
+		supportsImages:
+			model.architecture?.input_modalities?.includes("image") ?? model.id === standardComputeDefaultModelId,
+		supportsPromptCache: false,
+		// Catalog strings are remote and ModelInfo.description is rendered as
+		// Markdown, so only the plain-text display name is copied.
+		...(model.display_name !== undefined ? { displayName: model.display_name } : {}),
+	}
+}
 
 /**
  * Fetches the public Standard Compute model catalog.
