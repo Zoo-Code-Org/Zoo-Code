@@ -297,7 +297,14 @@ describe("abort assertions in the extension ESLint config", () => {
 			for (const [code, expectedCount] of [
 				['await expect(p).rejects.toThrow("aborted")', 1],
 				["await expect(p).rejects.toThrowError(/abort/i)", 1],
+				// An escaped dot in the source text is still a bare abort substring: the pattern
+				// keeps a backslash, so the matcher must allow it before the trailing dot or anchor.
+				["await expect(p).rejects.toThrow(/^aborted$/)", 1],
+				["await expect(p).rejects.toThrow(/^Request was aborted\\.$/)", 1],
+				["await expect(p).rejects.toThrowError(/request aborted\\.$/i)", 1],
+				["await expect(p).rejects.toThrow(/^request aborted\\$/)", 1],
 				['await expect(p).rejects.not.toThrow("aborted")', 0],
+				["await expect(p).rejects.toThrow(/^Request was aborted because the peer closed the stream\\.$/)", 0],
 				[
 					'await expect(p).rejects.toMatchObject({ name: "AbortError", message: "The Requesty request was aborted" })',
 					0,
