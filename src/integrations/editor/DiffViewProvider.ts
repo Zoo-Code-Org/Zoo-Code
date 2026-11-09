@@ -24,6 +24,23 @@ import { DecorationController } from "./DecorationController"
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
+/**
+ * Resolves with undefined once the signal aborts, and never rejects. Some awaits on
+ * the post-save diagnostics path - the provider settings read above all - cannot be
+ * interrupted by an AbortSignal, so a cancelled tail would stay parked on them until
+ * they settle, holding the task and the pre-save diagnostics snapshot the tail
+ * captured. Racing such an await against this settles the tail as soon as the task is
+ * gone; the caller's own abort guard still decides what happens next.
+ */
+function settlesOnAbort(signal: AbortSignal): Promise<undefined> {
+	if (signal.aborted) {
+		return Promise.resolve(undefined)
+	}
+	return new Promise((resolve) => {
+		signal.addEventListener("abort", () => resolve(undefined), { once: true })
+	})
+}
+
 // TODO: https://github.com/cline/cline/pull/3354
 export class DiffViewProvider {
 	// Properties to store the results of saveChanges
@@ -54,6 +71,15 @@ export class DiffViewProvider {
 	// its file operations can still reach the tail start after that point, and a tail that
 	// begins after disposal would emit into a dead task and keep its providers alive.
 	private tailsDisposed = false
+	// Report ownership across overlapping saves of one path. saveDirectly registers the
+	// newest save together with the earliest baseline of the saves it supersedes, and only
+	// the tail whose generation is still current may report. Without it, two saves that
+	// both finish before the LSP answers each diff the same later problem and the user
+	// gets one error row per save - the older one blaming a write that was clean.
+	private readonly pendingSaveReports = new Map<
+		string,
+		{ baseline: [vscode.Uri, vscode.Diagnostic[]][]; generation: number }
+	>()
 	// Tracks whether the user activated the target file's editor tab during the
 	// diff session. When the file was not already open before the edit, we only
 	// keep it open afterward if the user explicitly interacted with it.
@@ -1129,6 +1155,10 @@ export class DiffViewProvider {
 		this.activeLineController = undefined
 		this.streamedLines = []
 		this.preDiagnostics = []
+		// A reset ends any run of overlapping saves whose report was still pending: the
+		// tail that owned it will never run again, and a stale entry would suppress the
+		// next save's report.
+		this.pendingSaveReports.clear()
 		this.preEditScrollLine = undefined
 		this.diffScrollLine = undefined
 		this.targetFileScrollLine = undefined
@@ -1198,9 +1228,20 @@ export class DiffViewProvider {
 		// problems via the existing "error" ClineSay type; the returned
 		// newProblemsMessage is therefore always undefined.
 		if (diagnosticsEnabled) {
+			// The newest save of this path takes over the report, and it inherits the
+			// earliest baseline of the saves it supersedes: the problem an earlier save
+			// exposed is still reported, but by the tail that describes the newest revision
+			// and exactly once instead of once per save.
+			const pendingReport = this.pendingSaveReports.get(absolutePath)
+			const reportBaseline = pendingReport?.baseline ?? preDiagnostics
+			const reportGeneration = (pendingReport?.generation ?? 0) + 1
+			this.pendingSaveReports.set(absolutePath, {
+				baseline: reportBaseline,
+				generation: reportGeneration,
+			})
 			// The method's outer try/catch guarantees it never rejects, so the
 			// fire-and-forget call needs no .catch wrapper.
-			void this.emitPostSaveDiagnostics(relPath, writeDelayMs, preDiagnostics, !openFile)
+			void this.emitPostSaveDiagnostics(relPath, writeDelayMs, reportBaseline, !openFile, reportGeneration)
 		}
 
 		// Store the results for formatFileWriteResponse
@@ -1231,6 +1272,7 @@ export class DiffViewProvider {
 		writeDelayMs: number,
 		preDiagnostics: [vscode.Uri, vscode.Diagnostic[]][],
 		inMemoryDocument = false,
+		saveGeneration: number,
 	): Promise<void> {
 		if (this.tailsDisposed) {
 			// Disposal already ran: emitting now would call say() on a disposed task.
@@ -1264,15 +1306,29 @@ export class DiffViewProvider {
 			// completes, so in a multi-file write sequence (e.g. apply_patch)
 			// a later file's problems must not be attributed to this relPath.
 			const savedFilePath = path.resolve(this.cwd, relPath)
+			// A newer save of this path owns the report. Reading the workspace snapshot here
+			// would read it after that newer write and re-report its problems against the
+			// save this tail describes, so the superseded tail stops before any diagnostics
+			// work; the survivor holds this run's earliest baseline.
+			if (this.pendingSaveReports.get(savedFilePath)?.generation !== saveGeneration) {
+				return
+			}
+			this.pendingSaveReports.delete(savedFilePath)
 			// arePathsEqual: case-insensitive on Windows, where a relPath whose
 			// casing differs from the diagnostic URI is still the same file.
 			const postDiagnostics = vscode.languages
 				.getDiagnostics()
 				.filter(([uri]) => arePathsEqual(uri.fsPath, savedFilePath))
 
-			// Get diagnostic settings from state
+			// Get diagnostic settings from state. The read is an await the signal cannot
+			// interrupt, so it is raced against the tail's own abort: a slow settings read
+			// used to keep this tail - the task and the pre-save snapshot it captured with
+			// it - alive until it settled, even after the task was disposed.
 			const task = this.taskRef.deref()
-			const state = await task?.providerRef.deref()?.getState()
+			const provider = task?.providerRef.deref()
+			const state = provider
+				? await Promise.race([provider.getState(), settlesOnAbort(controller.signal)])
+				: undefined
 			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 

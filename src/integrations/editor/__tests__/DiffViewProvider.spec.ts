@@ -1014,6 +1014,53 @@ describe("DiffViewProvider", () => {
 			mockDelay.mockImplementation(() => Promise.resolve())
 		})
 
+		it("reports a run of overlapping saves of one file once, from the newest save", async () => {
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+
+			// Both saves finish before the LSP answers, so each captured an empty baseline:
+			// without supersession every tail diffs the same later problem and the user gets
+			// one error row per save, the older row blaming a write that was clean.
+			const diag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "superseded-run-problem",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(mockCwd + "/test.ts"), [diag]]]
+			vi.mocked(vscode.languages.getDiagnostics)
+				.mockReturnValueOnce([])
+				.mockReturnValueOnce([])
+				.mockReturnValue(postDiagnostics)
+
+			// Gate both delays so neither tail can run until both saves have registered.
+			const releases: Array<() => void> = []
+			mockDelay.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						releases.push(resolve)
+					}),
+			)
+
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "first", true, true, 100)
+				await diffViewProvider.saveDirectly("test.ts", "second", true, true, 100)
+				expect(releases).toHaveLength(2)
+
+				releases.forEach((release) => release())
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				// Only the newest save's tail reports, and the superseded tail stops before
+				// querying diagnostics: the workspace snapshot is read three times (the two
+				// baselines plus one post) instead of four, and one row reaches the task.
+				expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(3)
+				expect(mockTask.say).toHaveBeenCalledTimes(1)
+				expect(mockTask.say.mock.calls[0]?.[1]).toContain("superseded-run-problem")
+			} finally {
+				mockDelay.mockImplementation(() => Promise.resolve())
+			}
+		})
+
 		it("stops a tail whose delay is aborted before any diagnostics work", async () => {
 			const mockDelay = vi.mocked(delay)
 			mockDelay.mockClear()
@@ -1137,6 +1184,11 @@ describe("DiffViewProvider", () => {
 			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/test.ts`), [ownDiag]]]
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
 
+			// diagnosticsToProblemsString starts its formatting pass with a
+			// vscode.workspace.fs.stat per problem file, so clearing it here makes the
+			// "no stat call" assertion below about this row's formatting pass only.
+			vi.mocked(vscode.workspace.fs.stat).mockClear()
+
 			// The settings read is the last await before the formatting and the emit. Resolving
 			// it AFTER the cancellation is how a cancellation lands inside it: the await returns
 			// normally and only the signal shows that the task is gone.
@@ -1166,9 +1218,41 @@ describe("DiffViewProvider", () => {
 				// emitted into a task that no longer exists.
 				expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(2)
 				expect(mockTask.say).not.toHaveBeenCalled()
+				// The re-check after the settings read exists to skip the formatting pass, and
+				// its first observable effect is the stat call above. Asserting on it is what
+				// makes deleting that re-check fail this row: the emit guard further down would
+				// otherwise hide the regression by suppressing say() all over again.
+				expect(vscode.workspace.fs.stat).not.toHaveBeenCalled()
 			} finally {
 				provider.getState = originalGetState
 			}
+		})
+
+		it("releases a tail whose cancellation lands inside a settings read that never returns", async () => {
+			const mockDelay = vi.mocked(delay)
+			mockDelay.mockImplementation(() => Promise.resolve())
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+
+			// The hardest shape of the same race: a settings read that never settles, so the
+			// tail's own signal is the only thing that can end it. The tail unregisters its
+			// controller in its finally block, so an entry still sitting in postSaveTails
+			// after the abort proves the tail is parked on the read - holding the task and
+			// the pre-save snapshot - instead of settling when the task is disposed.
+			const provider = mockTask.providerRef.deref()
+			provider.getState = vi.fn(() => new Promise<never>(() => {}))
+
+			await diffViewProvider.saveDirectly("test.ts", "content", true, true, 0)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			const waiting = [...diffViewProvider["postSaveTails"]]
+			expect(waiting).toHaveLength(1)
+
+			// Disposal aborts the registered controller; here that is done directly so the
+			// never-settling read cannot be the thing that ends the tail.
+			waiting[0].abort()
+			await new Promise((resolve) => setTimeout(resolve, 20))
+
+			expect(diffViewProvider["postSaveTails"].size).toBe(0)
+			expect(mockTask.say).not.toHaveBeenCalled()
 		})
 
 		it("attributes diagnostics to the saved file when the URI casing differs (Windows)", async () => {
