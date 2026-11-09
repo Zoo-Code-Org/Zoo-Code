@@ -3223,6 +3223,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.titleAbortController = controller
 
 		try {
+			// The title request participates in the same provider rate-limit
+			// coordination as task requests: it waits out the configured window
+			// (silently — the countdown say UX belongs to the task loop) and
+			// records on the shared clock so subsequent task/subtask requests
+			// honour it. `startTask` schedules this method with `void`, so the
+			// agent never waits on the title result.
+			await this.waitForProviderRateLimitWindow(controller.signal)
+
+			if (controller.signal.aborted || this.abort || this.abandoned) {
+				return
+			}
+
+			this.rateLimitClock.recordRequest()
+
 			const generated = await generateTaskTitle(taskText, this.apiConfiguration, {
 				abortSignal: controller.signal,
 				timeoutMs: DEFAULT_TITLE_TIMEOUT_MS,
@@ -5790,6 +5804,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Finalize the partial message so the UI doesn't keep rendering an in-progress spinner.
 			await this.say("api_req_rate_limit_wait", undefined, undefined, false)
 		}
+	}
+
+	/**
+	 * Silent companion to `maybeWaitForProviderRateLimit` for background provider
+	 * requests (e.g. title generation): waits out the remaining provider
+	 * rate-limit window without emitting the task-loop countdown UX, since a
+	 * second concurrent partial `api_req_rate_limit_wait` say would interleave
+	 * with the task's own countdown. Resolves early (not rejects) when the given
+	 * signal aborts; callers must still re-check abort state after the wait and
+	 * call `rateLimitClock.recordRequest()` right before issuing the request,
+	 * mirroring the task loop.
+	 */
+	private async waitForProviderRateLimitWindow(signal: AbortSignal): Promise<void> {
+		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
+		const lastRequestTime = this.rateLimitClock.getLastRequestTime()
+		if (rateLimitSeconds <= 0 || !lastRequestTime) {
+			return
+		}
+
+		const remainingMs = rateLimitSeconds * 1000 - (performance.now() - lastRequestTime)
+		if (remainingMs <= 0) {
+			return
+		}
+
+		await delay(remainingMs, { signal }).catch(() => {
+			// Aborted mid-wait: cancellation, not a failure.
+		})
 	}
 
 	public async *attemptApiRequest(
