@@ -1,4 +1,5 @@
 import * as path from "path"
+import * as fsSync from "fs"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
 
@@ -17,6 +18,56 @@ export interface FileLockOptions {
 	waitForStaleLock?: boolean
 	/** Startup scans defer locked files instead of waiting under the store mutex. */
 	immediate?: boolean
+	/**
+	 * An artefact spelling the caller captured before it started moving the leaf, used verbatim
+	 * for this acquisition. A writer that renames the leaf as part of its own write must capture
+	 * the spelling once, before the first rename, and hand it back here: re-deriving it after the
+	 * rename names a different artefact for one file.
+	 */
+	artefactSpelling?: string
+}
+
+/**
+ * The artefact a lock lives in: the caller's path with its nearest existing ancestor spelled
+ * the way the volume spells it, plus ".lock". Nothing in the name comes from what the leaf
+ * currently holds, because `safeWriteJson`'s EPERM fallback renames the leaf itself to a backup
+ * mid-write: a name derived from the leaf at that moment belongs to whichever spelling the
+ * volume happens to hold, so two writers that compute one identity take two artefacts and
+ * contend with nobody. The second then acquires while the first still holds, runs its recovery
+ * pass over the first writer's in-flight temp file, and the first fails its commit rename with
+ * ENOENT. Only the nearest EXISTING ancestor is canonicalized and the components below it are
+ * re-joined, which is what keeps the name computable while the leaf is absent or dangling. The
+ * basename below that ancestor is compared as written, so two spellings of the file itself (an
+ * 8.3 alias, a case variant on a case-insensitive volume) still take one artefact each: the
+ * same residual the identity key carries, and a residual this function does not remove.
+ */
+export function lockArtefactSpelling(absoluteFilePath: string): string {
+	const absolute = path.resolve(absoluteFilePath)
+	const dirPath = path.dirname(absolute)
+	let cursor = dirPath
+	const missing: string[] = []
+	for (;;) {
+		let canonical: string | undefined
+		try {
+			canonical = fsSync.realpathSync.native(cursor)
+		} catch {
+			// An ancestor that is not there yet, or that cannot be inspected, says nothing about the
+			// canonical spelling. Falling back to the caller's own parent is the conservative
+			// direction here: it can only ever give a writer the same artefact it takes today, never a
+			// second writer one it would not have taken.
+			canonical = undefined
+		}
+		if (canonical !== undefined) {
+			return path.join(canonical, ...missing.reverse(), path.basename(absolute)) + ".lock"
+		}
+		missing.push(path.basename(cursor))
+		const parent = path.dirname(cursor)
+		if (parent === cursor) {
+			// Nothing on the path exists yet, so the caller's spelling is the only name left.
+			return absolute + ".lock"
+		}
+		cursor = parent
+	}
 }
 
 /**
@@ -28,9 +79,11 @@ export interface FileLockOptions {
  */
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
 	const absoluteFilePath = path.resolve(filePath)
+	const lockfilePath = options?.artefactSpelling ?? lockArtefactSpelling(absoluteFilePath)
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
+			lockfilePath, // named by the caller's path and its canonical ancestor, never by what the leaf currently holds
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
