@@ -2201,7 +2201,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 						)
 						controller.enqueue(
 							new TextEncoder().encode(
-								'data: {"type":"response.error","error":{"message":"Model overloaded"}}\n\n',
+								'data: {"type":"response.error","error":{"message":"Model overloaded","code":"server_overloaded","type":"server_error","param":"model"}}\n\n',
 							),
 						)
 						// The error handler will throw, but we still need to close the stream
@@ -2227,7 +2227,9 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			// Should throw an error when encountering error event
 			await expect(async () => {
 				await collectStream(stream)
-			}).rejects.toThrow("Responses API error: Model overloaded")
+			}).rejects.toThrow(
+				"Responses API error: Model overloaded (code=server_overloaded, type=server_error, param=model)",
+			)
 		})
 
 		it("preserves rate-limit classification for in-band Responses API errors", async () => {

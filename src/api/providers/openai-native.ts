@@ -60,6 +60,21 @@ function getOpenAiNativeErrorStatus(error: unknown, message: string): number | u
 	return /rate[\s_-]*limit|too many requests|throttl(?:e|ed|ing)/i.test(message) ? 429 : undefined
 }
 
+/** Preserve the useful machine-readable fields carried by Responses API errors. */
+function formatOpenAiNativeErrorMessage(error: unknown, fallbackMessage: string): string {
+	if (!error || typeof error !== "object") {
+		return fallbackMessage
+	}
+
+	const details = error as Record<string, unknown>
+	const message = typeof details.message === "string" ? details.message : fallbackMessage
+	const detailFields = ["code", "type", "param", "status", "request_id"]
+		.filter((field) => typeof details[field] === "string" || typeof details[field] === "number")
+		.map((field) => `${field}=${String(details[field])}`)
+
+	return detailFields.length > 0 ? `${message} (${detailFields.join(", ")})` : message
+}
+
 function parseOpenAiNativeRetryAfter(value: unknown, milliseconds = false): number | undefined {
 	if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
 		return Math.ceil(milliseconds ? value / 1000 : value)
@@ -722,13 +737,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				try {
 					const errorJson = JSON.parse(errorText)
 					errorMetadata = errorJson.error ?? errorJson
-					if (errorJson.error?.message) {
-						errorDetails = errorJson.error.message
-					} else if (errorJson.message) {
-						errorDetails = errorJson.message
-					} else {
-						errorDetails = errorText
-					}
+					errorDetails = formatOpenAiNativeErrorMessage(errorMetadata, errorText)
 				} catch {
 					// If not JSON, use the raw text
 					errorDetails = errorText
@@ -1135,7 +1144,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							else if (parsed.type === "response.error" || parsed.type === "error") {
 								// Error event from the API
 								if (parsed.error || parsed.message) {
-									const message = parsed.error?.message || parsed.message || "Unknown error"
+									const message = formatOpenAiNativeErrorMessage(
+										parsed.error,
+										parsed.message || "Unknown error",
+									)
 									const streamError = new Error(`Responses API error: ${message}`)
 									const status = getOpenAiNativeErrorStatus(parsed.error, message)
 									const retryAfterSeconds =
@@ -1159,7 +1171,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							else if (parsed.type === "response.failed") {
 								// Response failed
 								if (parsed.error || parsed.message) {
-									const message = parsed.error?.message || parsed.message || "Unknown failure"
+									const message = formatOpenAiNativeErrorMessage(
+										parsed.error,
+										parsed.message || "Unknown failure",
+									)
 									const streamError = new Error(`Response failed: ${message}`)
 									const status = getOpenAiNativeErrorStatus(parsed.error, message)
 									const retryAfterSeconds =
