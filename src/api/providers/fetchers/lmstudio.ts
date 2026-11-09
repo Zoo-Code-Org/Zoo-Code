@@ -3,12 +3,13 @@ import { z } from "zod"
 
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
-import { throwIfAborted } from "../utils/abort-signal"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
 import { getLoggableOrigin } from "../utils/endpoint-origin"
+import { normalizeLMStudioBaseUrl } from "../utils/lmstudio"
 
 import type { ApiHandler } from "../../index"
 
-import { flushModels } from "./modelCache"
+import { flushModels, MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./modelCache"
 
 const contextLengthSchema = z.number().int().positive()
 const instanceSchema = z.object({
@@ -39,29 +40,38 @@ const openAIListSchema = z.object({ data: z.array(z.object({ id: z.string() })) 
 type NativeModel = z.infer<typeof nativeModelSchema>
 type Instance = z.infer<typeof instanceSchema>
 
-const normalizeBaseUrl = (baseUrl?: string): string => (baseUrl || "http://localhost:1234").replace(/\/+$/, "")
+// Loading large model files can take minutes; discovery keeps its shorter deadline.
+export const LM_STUDIO_MODEL_LOAD_TIMEOUT_MS = 10 * 60_000
 const modelsWithLoadedDetails = new Map<string, Set<string>>()
 const pendingLoads = new Map<string, Promise<void>>()
 // Runtime aliases support saved selections without adding entries to model dropdowns.
 const instanceAliases = new Map<string, Map<string, ModelInfo>>()
 
 export const getLMStudioModelAlias = (modelId: string, baseUrl?: string): ModelInfo | undefined =>
-	instanceAliases.get(normalizeBaseUrl(baseUrl))?.get(modelId)
+	instanceAliases.get(normalizeLMStudioBaseUrl(baseUrl))?.get(modelId)
 
 export const hasLoadedFullDetails = (modelId: string, baseUrl?: string): boolean =>
-	modelsWithLoadedDetails.get(normalizeBaseUrl(baseUrl))?.has(modelId) ?? false
+	modelsWithLoadedDetails.get(normalizeLMStudioBaseUrl(baseUrl))?.has(modelId) ?? false
 
 const isUnsupportedEndpoint = (error: unknown): boolean =>
 	axios.isAxiosError(error) && (error.response?.status === 404 || error.response?.status === 405)
 
-async function discoverModels(baseUrl: string, signal?: AbortSignal) {
+// Older APIs may return HTTP 200 with an error string for an unsupported route.
+const errorBodySchema = z.object({ error: z.string() })
+
+async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
+	const signal = mergeAbortSignalAndTimeout(externalSignal, MODEL_CATALOG_FETCH_TIMEOUT_MS)
 	try {
 		const { data } = await axios.get<unknown>(`${baseUrl}/api/v1/models`, { signal })
-		const models = nativeListSchema.parse(data).models.flatMap((entry) => {
-			const parsed = nativeModelSchema.safeParse(entry)
-			return parsed.success ? [parsed.data] : []
-		})
-		return { version: "v1" as const, models }
+		const parsedList = nativeListSchema.safeParse(data)
+		if (parsedList.success) {
+			const models = parsedList.data.models.flatMap((entry) => {
+				const parsed = nativeModelSchema.safeParse(entry)
+				return parsed.success ? [parsed.data] : []
+			})
+			return { version: "v1" as const, models }
+		}
+		if (!errorBodySchema.safeParse(data).success) throw parsedList.error
 	} catch (error) {
 		throwIfAborted(signal)
 		if (!isUnsupportedEndpoint(error)) throw error
@@ -69,7 +79,9 @@ async function discoverModels(baseUrl: string, signal?: AbortSignal) {
 
 	try {
 		const { data } = await axios.get<unknown>(`${baseUrl}/api/v0/models`, { signal })
-		return { version: "v0" as const, models: legacyListSchema.parse(data).data }
+		const parsedList = legacyListSchema.safeParse(data)
+		if (parsedList.success) return { version: "v0" as const, models: parsedList.data.data }
+		if (!errorBodySchema.safeParse(data).success) throw parsedList.error
 	} catch (error) {
 		throwIfAborted(signal)
 		if (!isUnsupportedEndpoint(error)) throw error
@@ -98,7 +110,10 @@ function logModelError(action: string, error: unknown, baseUrl: string) {
 	if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
 		console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 	} else {
-		console.error(`Error ${action} LMStudio models:`, error instanceof Error ? error.message : String(error))
+		console.error(
+			`Error ${action} LMStudio models at ${getLoggableOrigin(baseUrl)}:`,
+			error instanceof Error ? error.message : String(error),
+		)
 	}
 }
 
@@ -107,7 +122,7 @@ export const forceFullModelDetailsLoad = async (
 	modelId: string,
 	handler: ApiHandler,
 ): Promise<void> => {
-	baseUrl = normalizeBaseUrl(baseUrl)
+	baseUrl = normalizeLMStudioBaseUrl(baseUrl)
 	try {
 		// Acquire the slot before discovery so a late catalog response cannot start
 		// another load after an earlier caller has finished. An unloaded model can
@@ -126,7 +141,13 @@ export const forceFullModelDetailsLoad = async (
 				// Preserve unmatched SDK paths for chat rather than guessing a key.
 				if (!model) return
 				if (!selectInstance(model, modelId)) {
-					await axios.post(`${baseUrl}/api/v1/models/load`, { model: model.key })
+					await axios.post(
+						`${baseUrl}/api/v1/models/load`,
+						{ model: model.key },
+						{
+							signal: mergeAbortSignalAndTimeout(undefined, LM_STUDIO_MODEL_LOAD_TIMEOUT_MS),
+						},
+					)
 				}
 				await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, handler, true)
 			})().finally(() => pendingLoads.delete(loadKey))
@@ -139,11 +160,11 @@ export const forceFullModelDetailsLoad = async (
 }
 
 export async function getLMStudioModels(
-	baseUrl = "http://localhost:1234",
+	baseUrl?: string,
 	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
-	baseUrl = normalizeBaseUrl(baseUrl)
-	const models: Record<string, ModelInfo> = {}
+	baseUrl = normalizeLMStudioBaseUrl(baseUrl)
+	const models = Object.create(null) as Record<string, ModelInfo>
 	const loadedDetails = new Set<string>()
 	const aliases = new Map<string, ModelInfo>()
 	try {
@@ -159,7 +180,8 @@ export async function getLMStudioModels(
 			for (const model of catalog.models.filter(({ type }) => type === "llm")) {
 				for (const instance of model.loaded_instances) {
 					// Exact instance aliases preserve saved custom names and pre-variant IDs.
-					if (!(instance.id in models)) aliases.set(instance.id, parseLMStudioModel(model, instance.id))
+					if (!Object.hasOwn(models, instance.id))
+						aliases.set(instance.id, parseLMStudioModel(model, instance.id))
 					if (instance.config.context_length) loadedDetails.add(instance.id)
 				}
 			}
@@ -177,11 +199,13 @@ export async function getLMStudioModels(
 		} else {
 			// OpenAI-compatible discovery has no type, vision, or context metadata.
 			for (const model of catalog.models)
-				models[model.id] = { ...lMStudioDefaultModelInfo, description: model.id }
+				models[model.id] = { ...lMStudioDefaultModelInfo, description: model.id, supportsImages: false }
 		}
 		modelsWithLoadedDetails.set(baseUrl, loadedDetails)
 		instanceAliases.set(baseUrl, aliases)
 	} catch (error) {
+		modelsWithLoadedDetails.delete(baseUrl)
+		instanceAliases.delete(baseUrl)
 		throwIfAborted(opts?.signal)
 		logModelError("fetching", error, baseUrl)
 	}

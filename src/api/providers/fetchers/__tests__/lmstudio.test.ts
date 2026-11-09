@@ -1,14 +1,20 @@
-import axios, { AxiosError } from "axios"
+import axios, { AxiosError, type GenericAbortSignal } from "axios"
 
 import { lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
-import { forceFullModelDetailsLoad, getLMStudioModels, getLMStudioModelAlias, hasLoadedFullDetails } from "../lmstudio"
+import {
+	forceFullModelDetailsLoad,
+	getLMStudioModels,
+	getLMStudioModelAlias,
+	hasLoadedFullDetails,
+	LM_STUDIO_MODEL_LOAD_TIMEOUT_MS,
+} from "../lmstudio"
 import type { ApiHandler } from "../../../index"
 
 import nativeFixture from "./fixtures/lmstudio-model-details.json"
 
 const mockFlushModels = vi.hoisted(() => vi.fn())
-vi.mock("../modelCache", () => ({ flushModels: mockFlushModels }))
+vi.mock("../modelCache", () => ({ flushModels: mockFlushModels, MODEL_CATALOG_FETCH_TIMEOUT_MS: 15_000 }))
 
 const get = vi.spyOn(axios, "get")
 const post = vi.spyOn(axios, "post")
@@ -49,10 +55,56 @@ beforeEach(async () => {
 })
 
 describe("LM Studio HTTP discovery", () => {
+	it.each(["Unexpected endpoint or method", "Endpoint not found", "Unrecognized request", ""])(
+		"falls back for an explicit unsupported-route body: %s",
+		async (error) => {
+			get.mockResolvedValueOnce({ data: { error } })
+				.mockResolvedValueOnce({ data: { error } })
+				.mockResolvedValueOnce({ data: { data: [{ id: "legacy" }] } })
+			expect((await getLMStudioModels(baseUrl)).legacy.supportsImages).toBe(false)
+			expect(get).toHaveBeenCalledTimes(3)
+		},
+	)
+
+	it.each([undefined, 42, { message: "unsupported" }])(
+		"does not fall back for a malformed non-string error: %s",
+		async (error) => {
+			get.mockResolvedValueOnce({ data: { error } })
+			expect(await getLMStudioModels(baseUrl)).toEqual({})
+			expect(get).toHaveBeenCalledOnce()
+		},
+	)
+
+	it("prefers a valid native catalog over an accompanying error string", async () => {
+		get.mockResolvedValueOnce({ data: { ...nativeResponse().data, error: "ignored" } })
+		expect(Object.keys(await getLMStudioModels(baseUrl))).toEqual([modelKey])
+		expect(get).toHaveBeenCalledOnce()
+	})
+
+	it("expires loaded details and aliases after a failed refresh", async () => {
+		get.mockResolvedValueOnce(nativeResponse()).mockRejectedValueOnce(new Error("server offline"))
+		await getLMStudioModels(baseUrl)
+		expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(true)
+		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toBeDefined()
+		await getLMStudioModels(baseUrl)
+		expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(false)
+		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toBeUndefined()
+	})
+
+	it.each(["__proto__", "constructor"])("preserves catalog keys and aliases named %s", async (id) => {
+		get.mockResolvedValueOnce(nativeResponse([{ id, config: { context_length: 2048 } }]))
+		await getLMStudioModels(baseUrl)
+		expect(getLMStudioModelAlias(id, baseUrl)?.contextWindow).toBe(2048)
+		get.mockResolvedValueOnce({ data: { models: [{ ...nativeModel([]), key: id }] } })
+		const models = await getLMStudioModels(baseUrl)
+		expect(Object.keys(models)).toEqual([id])
+		expect(models[id].supportsImages).toBe(false)
+	})
+
 	it("returns only catalog keys while retaining saved instance aliases separately", async () => {
 		get.mockResolvedValueOnce({ data: nativeFixture })
 		const models = await getLMStudioModels(baseUrl)
-		expect(get).toHaveBeenCalledExactlyOnceWith(`${baseUrl}/api/v1/models`, { signal: undefined })
+		expect(get).toHaveBeenCalledExactlyOnceWith(`${baseUrl}/api/v1/models`, { signal: expect.any(AbortSignal) })
 		expect(models[modelKey]).toMatchObject({ contextWindow: 1024, maxTokens: 1024, supportsImages: false })
 		expect(Object.keys(models)).toEqual([modelKey])
 		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toEqual(models[modelKey])
@@ -121,7 +173,7 @@ describe("LM Studio HTTP discovery", () => {
 			.mockRejectedValueOnce(httpError(405))
 			.mockResolvedValueOnce({ data: { data: [{ id: "legacy" }] } })
 		expect(await getLMStudioModels(baseUrl)).toEqual({
-			legacy: { ...lMStudioDefaultModelInfo, description: "legacy" },
+			legacy: { ...lMStudioDefaultModelInfo, description: "legacy", supportsImages: false },
 		})
 		expect(get.mock.calls.map(([url]) => url)).toEqual([
 			`${baseUrl}/api/v1/models`,
@@ -181,7 +233,7 @@ describe("LM Studio HTTP discovery", () => {
 	it.each(["", `${baseUrl}/`])("normalizes the base URL %s", async (url) => {
 		get.mockResolvedValueOnce(nativeResponse())
 		await getLMStudioModels(url)
-		expect(get).toHaveBeenCalledWith(`${baseUrl}/api/v1/models`, { signal: undefined })
+		expect(get).toHaveBeenCalledWith(`${baseUrl}/api/v1/models`, { signal: expect.any(AbortSignal) })
 	})
 
 	it("does not request an invalid URL", async () => {
@@ -190,12 +242,17 @@ describe("LM Studio HTTP discovery", () => {
 	})
 
 	it("passes the signal through every fallback request", async () => {
-		const { signal } = new AbortController()
+		const controller = new AbortController()
+		const { signal } = controller
 		get.mockRejectedValueOnce(httpError(404))
 			.mockRejectedValueOnce(httpError(405))
 			.mockResolvedValueOnce({ data: { data: [] } })
 		await getLMStudioModels(baseUrl, { signal })
-		for (const [, config] of get.mock.calls) expect(config?.signal).toBe(signal)
+		const mergedSignal = get.mock.calls[0][1]?.signal
+		expect(mergedSignal).toBeInstanceOf(AbortSignal)
+		for (const [, config] of get.mock.calls) expect(config?.signal).toBe(mergedSignal)
+		controller.abort()
+		expect(mergedSignal?.aborted).toBe(true)
 	})
 
 	it("rejects on abort without falling back", async () => {
@@ -218,6 +275,78 @@ describe("LM Studio HTTP discovery", () => {
 })
 
 describe("LM Studio explicit loading", () => {
+	it("allows a successful model load to run beyond the catalog deadline", async () => {
+		vi.useFakeTimers()
+		const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+			const controller = new AbortController()
+			setTimeout(() => controller.abort(), ms)
+			return controller.signal
+		})
+		try {
+			get.mockResolvedValueOnce(nativeResponse([]))
+			let finishLoad: () => void = () => {
+				throw new Error("load not started")
+			}
+			let loadSignal: GenericAbortSignal | undefined
+			post.mockImplementationOnce(
+				(_url, _body, config) =>
+					new Promise((resolve, reject) => {
+						loadSignal = config?.signal
+						loadSignal?.addEventListener?.("abort", () => reject(new Error("load timed out")))
+						finishLoad = () => resolve({ data: {} })
+					}),
+			)
+			const pending = forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+			await vi.advanceTimersByTimeAsync(30_000)
+			expect(post).toHaveBeenCalledOnce()
+			expect(loadSignal?.aborted).toBe(false)
+			expect(mockFlushModels).not.toHaveBeenCalled()
+			finishLoad()
+			await pending
+			expect(mockFlushModels).toHaveBeenCalledOnce()
+		} finally {
+			timeout.mockRestore()
+			vi.useRealTimers()
+		}
+	})
+
+	it.each(["discovery", "load"])(
+		"bounds a hung %s request and releases the pending slot for retry",
+		async (phase) => {
+			const deadline = new AbortController()
+			const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal)
+			try {
+				get.mockResolvedValue(nativeResponse([]))
+				post.mockResolvedValue({ data: {} })
+				let requestSignal: AbortSignal | undefined
+				const hang = (_url: string, config?: { signal?: GenericAbortSignal }) =>
+					new Promise<never>((_resolve, reject) => {
+						requestSignal = config?.signal instanceof AbortSignal ? config.signal : undefined
+						requestSignal?.addEventListener(
+							"abort",
+							() => reject(new AxiosError("timeout", "ERR_CANCELED")),
+							{ once: true },
+						)
+					})
+				if (phase === "discovery") get.mockImplementationOnce(hang)
+				else post.mockImplementationOnce((url, _body, config) => hang(url, config))
+				const pending = forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+				await vi.waitFor(() => expect(requestSignal).toBe(deadline.signal))
+				expect(timeout).toHaveBeenLastCalledWith(
+					phase === "discovery" ? 15_000 : LM_STUDIO_MODEL_LOAD_TIMEOUT_MS,
+				)
+				deadline.abort()
+				await pending
+				expect(mockFlushModels).not.toHaveBeenCalled()
+				timeout.mockRestore()
+				await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+				expect(mockFlushModels).toHaveBeenCalledOnce()
+			} finally {
+				timeout.mockRestore()
+			}
+		},
+	)
+
 	it.each([modelKey, "custom"])("reuses an existing instance for %s and refreshes metadata", async (savedId) => {
 		get.mockResolvedValueOnce(nativeResponse([{ id: "custom", config: { context_length: 2048 } }]))
 		await forceFullModelDetailsLoad(baseUrl, savedId, handler)
@@ -231,12 +360,27 @@ describe("LM Studio explicit loading", () => {
 
 	it("loads by exact catalog key, then refreshes", async () => {
 		get.mockResolvedValueOnce(nativeResponse([]))
-		post.mockResolvedValueOnce({ data: { instance_id: modelKey } })
-		mockFlushModels.mockImplementationOnce(() => {
-			expect(post).toHaveBeenCalledExactlyOnceWith(`${baseUrl}/api/v1/models/load`, { model: modelKey })
-		})
-		await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+		let finishLoad: () => void = () => {
+			throw new Error("load not started")
+		}
+		post.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishLoad = () => resolve({ data: { instance_id: modelKey } })
+				}),
+		)
+		const pending = forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+		await vi.waitFor(() => expect(post).toHaveBeenCalledOnce())
+		expect(mockFlushModels).not.toHaveBeenCalled()
+		finishLoad()
+		await pending
 		expect(mockFlushModels).toHaveBeenCalledTimes(1)
+		expect(post).toHaveBeenCalledExactlyOnceWith(
+			`${baseUrl}/api/v1/models/load`,
+			{ model: modelKey },
+			{ signal: expect.any(AbortSignal) },
+		)
+		expect(post.mock.invocationCallOrder[0]).toBeLessThan(mockFlushModels.mock.invocationCallOrder[0])
 	})
 
 	it("shares one load and refresh across concurrent callers, including normalized URLs", async () => {
@@ -298,17 +442,23 @@ describe("LM Studio explicit loading", () => {
 			forceFullModelDetailsLoad(baseUrl, "another-model", handler),
 		])
 		expect(post).toHaveBeenCalledTimes(2)
-		expect(post).toHaveBeenCalledWith(`${baseUrl}/api/v1/models/load`, { model: "another-model" })
+		expect(post).toHaveBeenCalledWith(
+			`${baseUrl}/api/v1/models/load`,
+			{ model: "another-model" },
+			{ signal: expect.any(AbortSignal) },
+		)
 	})
 
 	it("records loaded details from the refreshed catalog rather than an optimistic load flag", async () => {
 		get.mockResolvedValueOnce(nativeResponse([])).mockResolvedValueOnce(nativeResponse())
 		post.mockResolvedValue({ data: {} })
+		let loadedBeforeRefresh: boolean | undefined
 		mockFlushModels.mockImplementationOnce(async () => {
-			expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(false)
+			loadedBeforeRefresh = hasLoadedFullDetails(modelKey, baseUrl)
 			await getLMStudioModels(baseUrl)
 		})
 		await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+		expect(loadedBeforeRefresh).toBe(false)
 		expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(true)
 	})
 
