@@ -2790,6 +2790,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			allTools = toolsResult.tools
 		}
 
+		if (this.abort || this.abandoned) return
+		this.currentRequestAbortController ??= new AbortController()
+
 		// Build metadata with tools and taskId for the condensing API call
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
@@ -3122,10 +3125,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.mcpToolsInitialization = (async () => {
 			if (this.restoredMcpToolsNeedValidation) {
 				const available = new Set(scopedTools.map((tool) => buildMcpToolName(tool.serverName, tool.toolName)))
-				for (const name of this.attachedMcpToolNames) {
-					if (!available.has(name)) this.attachedMcpToolNames.delete(name)
-				}
-				this.mcpToolsInitialized = this.attachedMcpToolNames.size > 0
+				// Scope can change when a server reconnects or the task changes mode.
+				// Keep saved names, and rerank only when none is currently available.
+				this.mcpToolsInitialized = [...this.attachedMcpToolNames].some((name) => available.has(name))
 				this.restoredMcpToolsNeedValidation = false
 			}
 
@@ -3155,7 +3157,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							limit,
 						)
 				if (!taskText && names.length === 0 && historicalNames.size === 0) return
-				this.attachedMcpToolNames.clear()
 				// History compatibility may require more than initialK definitions.
 				for (const name of [...historicalNames, ...names]) this.attachedMcpToolNames.add(name)
 				this.mcpToolsInitialized = true
@@ -5698,6 +5699,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			allTools = toolsResult.tools
 		}
 
+		if (this.abort || this.abandoned) return
+		this.currentRequestAbortController ??= new AbortController()
+
 		// Build metadata with tools and taskId for the condensing API call
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
@@ -5721,6 +5725,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const environmentDetails = await getEnvironmentDetails(this, true)
 			const filesReadByRoo = await this.getFilesReadByRooSafely("handleContextWindowExceededError")
 
+			const systemPrompt = await this.getSystemPrompt(state, modelInfo)
+			if (this.abort || this.abandoned) return
+
 			// Force aggressive truncation by keeping only 75% of the conversation history
 			const truncateResult = await manageContext({
 				messages: this.apiConversationHistory,
@@ -5730,7 +5737,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(state, modelInfo),
+				systemPrompt,
 				taskId: this.taskId,
 				// Recovery must summarize like the automatic path: same prompt and folded file context.
 				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
@@ -5743,6 +5750,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				rooIgnoreController: this.rooIgnoreController,
 				useAvailableInputForContextPercent,
 			})
+
+			if (this.abort || this.abandoned) return
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
@@ -5952,6 +5961,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
+			if (this.abort || this.abandoned) return
+			this.currentRequestAbortController ??= new AbortController()
+
 			// Build metadata with tools and taskId for the condensing API call
 			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
 				mode,
@@ -5983,6 +5995,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					? await this.getFilesReadByRooSafely("attemptApiRequest")
 					: undefined
 
+			if (this.abort || this.abandoned) return
+
 			try {
 				const truncateResult = await manageContext({
 					messages: this.apiConversationHistory,
@@ -6004,6 +6018,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				if (this.abort || this.abandoned) return
+
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}

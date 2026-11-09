@@ -333,7 +333,10 @@ describe("Task persistence", () => {
 		it.each([
 			{ names: [], savedNames: [] },
 			{ names: ["mcp--github--issues"], savedNames: ["mcp--github--issues"] },
-			{ names: ["mcp--github--issues"], savedNames: ["mcp--github--issues", "mcp--missing--tool"] },
+			{
+				names: ["mcp--github--issues", "mcp--missing--tool"],
+				savedNames: ["mcp--github--issues", "mcp--missing--tool"],
+			},
 		])("restores initialized selections without reranking: $names", async ({ names, savedNames }) => {
 			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial")
 			const task = new Task({
@@ -357,6 +360,24 @@ describe("Task persistence", () => {
 			rank.mockRestore()
 		})
 
+		it("retains unavailable restored names while reranking and when their scope returns", async () => {
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial").mockResolvedValue(["mcp--github--issues"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				historyItem: { ...legacyHistory(), attachedMcpToolNames: ["mcp--catalog--returning"] },
+			})
+			await task.initializeAttachedMcpTools([{ serverName: "github", toolName: "issues", description: "" }], 30)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--catalog--returning", "mcp--github--issues"])
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "catalog", toolName: "returning", description: "" }],
+				30,
+			)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--catalog--returning", "mcp--github--issues"])
+			expect(rank).toHaveBeenCalledTimes(1)
+		})
+
 		it.each(["history", "messages", "provider"] as const)(
 			"keeps selection without retrying on a %s save failure",
 			async (stage) => {
@@ -371,6 +392,11 @@ describe("Task persistence", () => {
 					startTask: false,
 				})
 				await task["taskApiConfigReady"]
+				const metadataResult = await mockTaskMetadata()
+				mockTaskMetadata.mockImplementation(async (options: { attachedMcpToolNames?: string[] }) => ({
+					...metadataResult,
+					historyItem: { ...metadataResult.historyItem, attachedMcpToolNames: options.attachedMcpToolNames },
+				}))
 				const lostProvider =
 					stage === "provider" ? vi.spyOn(task["providerRef"], "deref").mockReturnValue(undefined) : undefined
 				if (stage === "history")
@@ -397,6 +423,10 @@ describe("Task persistence", () => {
 				expect(mockTaskMetadata).toHaveBeenLastCalledWith(
 					expect.objectContaining({ attachedMcpToolNames: ["mcp--github--issues"] }),
 				)
+				expect(mockProvider.updateTaskHistory).toHaveBeenLastCalledWith(
+					expect.objectContaining({ attachedMcpToolNames: ["mcp--github--issues"] }),
+				)
+				mockTaskMetadata.mockResolvedValue(metadataResult)
 				log.mockRestore()
 				rank.mockRestore()
 			},
@@ -414,7 +444,7 @@ describe("Task persistence", () => {
 			}
 		}
 
-		it.each([undefined, null, "abc", 12, {}, [12], ["invalid"], ["mcp__github__issues"], ["mcp--missing--tool"]])(
+		it.each([undefined, null, "abc", 12, {}, [12], ["invalid"], ["mcp__github__issues"]])(
 			"treats invalid or absent persisted selection %j as uninitialized",
 			async (value) => {
 				const historyItem = legacyHistory()

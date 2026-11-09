@@ -1,5 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-usage-attribution.spec.ts
 
+import { buildMcpToolName } from "../../../utils/mcp-name"
+import { NativeToolCallParser } from "../NativeToolCallParser"
 import { DispatchState, type PendingWork } from "../../task/dispatchState"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { TelemetryEventName } from "@roo-code/types"
@@ -322,6 +324,40 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 	})
 
 	describe("native mcp_tool_use block", () => {
+		it.each([55, 57, 58, 59, 70])(
+			"resolves generated names truncated within a %s-character server",
+			async (length) => {
+				const serverName = "s".repeat(length)
+				const toolName = "original_tool"
+				const name = buildMcpToolName(serverName, toolName)
+				mockTask.providerRef = {
+					deref: () => ({
+						getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
+						getMcpHub: () => ({
+							findServerNameBySanitizedName: () => undefined,
+							getAllServers: () => [
+								{ name: serverName, tools: [{ name: toolName, enabledForPrompt: true }] },
+							],
+						}),
+					}),
+				}
+				const parsed = NativeToolCallParser.parseDynamicMcpTool({ id: "truncated", name, arguments: "{}" })
+				expect(parsed).not.toBeNull()
+				mockTask.assistantMessageContent = [parsed]
+				const handle = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+				// The structural task double provides the dispatch state, provider, API and callbacks used here.
+				await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
+				expect(handle).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({
+						params: expect.objectContaining({ server_name: serverName, tool_name: toolName }),
+					}),
+					expect.anything(),
+				)
+				handle.mockRestore()
+			},
+		)
+
 		it("records exactly one attempt once the MCP tool's own validation passes", async () => {
 			mockTask.providerRef = {
 				deref: () => ({

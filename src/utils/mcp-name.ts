@@ -1,3 +1,5 @@
+import { isCanonicalMcpToolName } from "@roo-code/types"
+
 /**
  * Utilities for sanitizing MCP server and tool names to conform to
  * API function name requirements across all providers.
@@ -161,13 +163,18 @@ export function parseMcpToolName(mcpToolName: string): { serverName: string; too
 	// Split on the separator to get server and tool names
 	const separatorIndex = remainder.indexOf(MCP_TOOL_SEPARATOR)
 	if (separatorIndex === -1) {
+		// A long server name can consume the entire generated name. Dispatch
+		// resolves these prefixes against the advertised catalog before execution.
+		if (normalizedName.length === 64 && isCanonicalMcpToolName(normalizedName)) {
+			return { serverName: remainder, toolName: "" }
+		}
 		return null
 	}
 
 	const serverName = remainder.slice(0, separatorIndex)
 	const toolName = remainder.slice(separatorIndex + MCP_TOOL_SEPARATOR.length)
 
-	if (!serverName || !toolName) {
+	if ((!serverName || !toolName) && !(normalizedName.length === 64 && isCanonicalMcpToolName(normalizedName))) {
 		return null
 	}
 
