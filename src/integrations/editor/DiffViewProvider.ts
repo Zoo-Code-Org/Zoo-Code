@@ -251,8 +251,44 @@ export class DiffViewProvider {
 			// recorded below would then describe the other writer's file, and the guard would
 			// accept a truncated baseline as the version this edit was built on. A lost race is
 			// reported, not absorbed.
+			// Opened exclusively, and held open until its identity has been taken: the version token below
+			// comes from this handle rather than from a stat of the path, so a rename landing after the
+			// create cannot make the token describe a different file. The token formula is unchanged
+			// (versionTokenOfStat over dev:ino:size:mtimeNs:ctimeNs) and the verification is the same S2
+			// stat-matched contract as the modify branch above: a mismatched identity or a non-empty read
+			// means another writer touched the placeholder in the window after the create wrote it, and that
+			// writer's token must not be observed as complete - observing it would claim we saw content we
+			// never read, and the token-guarded cleanup would unlink their file - so nothing is recorded and
+			// the save fails closed instead. When the placeholder is verified empty, its token replaces any
+			// prior observation for the path: a prior observation describes a file that no longer exists, and
+			// keeping it would make the accept-time CAS (the placeholder token on disk against the vanished
+			// file's token) fail every time. The cleanup token is captured whether or not the task is still
+			// live: a rejected save must not leave the placeholder behind even when the owning task has been
+			// collected.
+			let placeholderHandle: Awaited<ReturnType<typeof fs.open>> | undefined
 			try {
-				await fs.writeFile(absolutePath, "", { flag: "wx" })
+				placeholderHandle = await fs.open(absolutePath, "wx")
+				const placeholderPreStats = await placeholderHandle.stat({ bigint: true }).catch(() => undefined)
+				if (placeholderPreStats) {
+					const placeholderContent = await fs.readFile(absolutePath, "utf-8").catch(() => undefined)
+					const placeholderPostStats = await placeholderHandle.stat({ bigint: true }).catch(() => undefined)
+					const placeholderToken = versionTokenOfStat(placeholderPreStats)
+					// Stat-matched (S2): the read is trusted only while the bracketing identity reads agree and
+					// the content is exactly the empty placeholder.
+					if (
+						placeholderPostStats &&
+						placeholderToken === versionTokenOfStat(placeholderPostStats) &&
+						placeholderContent === ""
+					) {
+						// Remember the placeholder token so a rejected save can remove the placeholder only
+						// while it is still the exact file the create opened.
+						this.placeholderVersion = placeholderToken
+						const displayTask = this.taskRef.deref()
+						if (displayTask) {
+							displayTask.observationRegistry.observe(absolutePath, placeholderToken, true)
+						}
+					}
+				}
 			} catch (error: unknown) {
 				if (errorCode(error) === "EEXIST") {
 					throw new Error(
@@ -262,45 +298,9 @@ export class DiffViewProvider {
 					)
 				}
 				throw error
-			}
-			// S4b follow-up (#44 / epic #1375): the empty placeholder is fully
-			// known (empty), but verify it with the same S2 stat-matched contract
-			// as the modify branch above: a stat-mismatched or non-empty read
-			// means another writer touched the placeholder in the window after
-			// open() wrote it, and that writer's token must not be observed as
-			// complete (observing it would claim we saw content we never read, and
-			// the token-guarded cleanup would unlink their file) - nothing is
-			// recorded and the save fails closed instead. When the placeholder is
-			// verified empty, its token replaces any prior observation for the
-			// path: a prior observation describes a file that no longer exists, and
-			// keeping it would make the accept-time CAS (the placeholder token on
-			// disk vs. the vanished file's token) fail every time, so recreating
-			// the file would always fail. The placeholder token is the correct
-			// baseline for the new file: an external change to the placeholder
-			// before the accept moves the on-disk token and fails the CAS. The
-			// cleanup token is captured whether or not the task is still live:
-			// a rejected save must not leave the placeholder behind even when the
-			// owning task has been collected.
-			const placeholderPreStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-			if (placeholderPreStats) {
-				const placeholderContent = await fs.readFile(absolutePath, "utf-8").catch(() => undefined)
-				const placeholderPostStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-				const placeholderToken = versionTokenOfStat(placeholderPreStats)
-				// Stat-matched (S2): the read is trusted only while the bracketing
-				// stats agree and the content is exactly the empty placeholder.
-				if (
-					placeholderPostStats &&
-					placeholderToken === versionTokenOfStat(placeholderPostStats) &&
-					placeholderContent === ""
-				) {
-					// Remember the placeholder token so a rejected save can remove
-					// the placeholder only while it is still the exact file open()
-					// wrote.
-					this.placeholderVersion = placeholderToken
-					const displayTask = this.taskRef.deref()
-					if (displayTask) {
-						displayTask.observationRegistry.observe(absolutePath, placeholderToken, true)
-					}
+			} finally {
+				if (placeholderHandle) {
+					await placeholderHandle.close().catch(() => {})
 				}
 			}
 		}

@@ -40,6 +40,13 @@ vi.mock("fs/promises", () => ({
 	// guardedWrite resolves the workspace root (and the nearest existing ancestor of the
 	// target) before publishing. The double returns the path unchanged so the containment
 	// check sees the same spelling the rest of the test uses.
+	open: vi.fn(async (targetPath: string) => {
+		const mocked = await import("fs/promises")
+		return {
+			stat: (options?: Parameters<typeof mocked.stat>[1]) => mocked.stat(targetPath, options),
+			close: () => Promise.resolve(),
+		}
+	}),
 	realpath: vi.fn(async (p: string) => p),
 }))
 
@@ -2120,7 +2127,7 @@ describe("DiffViewProvider", () => {
 			// vanished file's stale token), and remembered for cleanup
 			// Created exclusively (#new row 4507851689): a plain write would truncate a file another
 			// process created after the absence was classified.
-			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "", { flag: "wx" })
+			expect(vi.mocked(fs.open)).toHaveBeenCalledWith(`${mockCwd}/t3-create.ts`, "wx")
 			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
 			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe(placeholderToken)
 			expect(diffViewProvider["placeholderVersion"]).toBe(placeholderToken)
@@ -2149,7 +2156,7 @@ describe("DiffViewProvider", () => {
 
 			// Created exclusively (#new row 4507851689): a plain write would truncate a file another
 			// process created after the absence was classified.
-			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/t3-dead-task.ts`, "", { flag: "wx" })
+			expect(vi.mocked(fs.open)).toHaveBeenCalledWith(`${mockCwd}/t3-dead-task.ts`, "wx")
 			// no live task: nothing observed, but the cleanup token is still
 			// captured (provider state) so the fail-closed save rejection can
 			// remove the placeholder instead of leaking it
@@ -2182,7 +2189,7 @@ describe("DiffViewProvider", () => {
 
 			// Created exclusively (#new row 4507851689): a plain write would truncate a file another
 			// process created after the absence was classified.
-			expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(`${mockCwd}/contested.ts`, "", { flag: "wx" })
+			expect(vi.mocked(fs.open)).toHaveBeenCalledWith(`${mockCwd}/contested.ts`, "wx")
 			// nothing recorded, and the vanished file's prior observation was
 			// not replaced with the writer's token
 			expect(mockTask.observationRegistry.get(`${mockCwd}/contested.ts`)?.version).toBe("model-token")
@@ -2203,15 +2210,15 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
 			vi.mocked(fs.stat).mockResolvedValue(previewStats)
 			vi.mocked(fs.readFile).mockResolvedValue("")
-			const write = vi.mocked(fs.writeFile)
-			write.mockRejectedValueOnce(
+			const create = vi.mocked(fs.open)
+			create.mockRejectedValueOnce(
 				Object.assign(new Error(`EEXIST: file already exists, open '${mockCwd}/race.ts'`), { code: "EEXIST" }),
 			)
 			diffViewProvider.editType = "create"
 			mockTask.observationRegistry.clear()
 
 			const failure = await diffViewProvider.open("race.ts").catch((error: unknown) => error)
-			expect(write).toHaveBeenCalledWith(`${mockCwd}/race.ts`, "", { flag: "wx" })
+			expect(create).toHaveBeenCalledWith(`${mockCwd}/race.ts`, "wx")
 			expect(failure).toBeInstanceOf(Error)
 			expect((failure as Error).message).toContain("another create won the race")
 			// Nothing was observed and no cleanup token was taken, so a later rejected save cannot
@@ -2273,6 +2280,70 @@ describe("DiffViewProvider", () => {
 
 			expect(mockTask.observationRegistry.get(`${mockCwd}/mutated-new.ts`)).toBeUndefined()
 			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+		})
+
+		it("open() records the placeholder token from the handle it created, not from the path it stats", async () => {
+			// Where the identity comes from, pinned. The doubles make the two sources disagree: the handle
+			// reports the identity of the file the exclusive create opened, and a path stat reports another file
+			// - which is the state a rename landing between the create and the identity read produces on a real
+			// filesystem. The token formula is unchanged (versionTokenOfStat over dev:ino:size:mtimeNs:ctimeNs);
+			// only its source moves. Nothing here compares a path spelling, because this path hands canonical
+			// paths to the lock, so a spelling pin would be a pin on the mock rather than on the file.
+			const handleStats = {
+				isDirectory: () => false,
+				dev: BigInt(1),
+				ino: BigInt(77),
+				size: BigInt(0),
+				mtimeNs: BigInt(4_000_000_000n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			const mockEditor = mockTextEditor(`${mockCwd}/handle-identity.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/handle-identity.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			vi.mocked(fs.open).mockResolvedValue({
+				stat: vi.fn().mockResolvedValue(handleStats),
+				close: vi.fn().mockResolvedValue(undefined),
+				// structural double; the cast matches the placeholder rows above it
+			} as unknown as Awaited<ReturnType<typeof fs.open>>)
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+			await diffViewProvider.open("handle-identity.ts")
+			expect(diffViewProvider["placeholderVersion"]).toBe(versionTokenOfStat(handleStats))
+			expect(diffViewProvider["placeholderVersion"]).not.toBe(versionTokenOfStat(previewStats))
+			expect(vi.mocked(fs.open)).toHaveBeenCalledWith(`${mockCwd}/handle-identity.ts`, "wx")
+		})
+
+		// The control: with the handle and the path naming the same file, the token is the same one the
+		// placeholder rows above already pin, so the row above is sensitive to the source of the identity and
+		// not to an unrelated property of the double.
+		it("the placeholder token is unchanged when the handle and the path name the same file", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/same-file.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/same-file.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			vi.mocked(fs.open).mockResolvedValue({
+				stat: vi.fn().mockResolvedValue(previewStats),
+				close: vi.fn().mockResolvedValue(undefined),
+				// structural double; the cast matches the placeholder rows above it
+			} as unknown as Awaited<ReturnType<typeof fs.open>>)
+			diffViewProvider.editType = "create"
+			mockTask.observationRegistry.clear()
+			await diffViewProvider.open("same-file.ts")
+			expect(diffViewProvider["placeholderVersion"]).toBe(versionTokenOfStat(previewStats))
+			expect(vi.mocked(fs.open)).toHaveBeenCalledWith(`${mockCwd}/same-file.ts`, "wx")
 		})
 
 		it("saveChanges() accepts a recreate after a prior read - the accept-time CAS checks the placeholder token", async () => {
