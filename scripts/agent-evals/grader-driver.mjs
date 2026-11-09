@@ -67,12 +67,14 @@ const runOneFile = async (file) => {
 	let failed = 0
 	let cancelled = 0
 	let fileFailed = false
+	let runnerFailed = false
 	const failures = []
 	const stream = run({
 		files: [path.resolve(file)],
 		execArgv: [
 			process.allowedNodeEnvironmentFlags.has("--permission") ? "--permission" : "--experimental-permission",
 			`--allow-fs-read=${process.cwd()}`,
+			...(file.includes(".acceptance.test.") ? ["--allow-child-process"] : []),
 		],
 	})
 	for await (const event of stream) {
@@ -80,7 +82,10 @@ const runOneFile = async (file) => {
 		const data = event.data
 		// File-level success is not evidence that any acceptance test ran.
 		if (data.name === path.resolve(file)) {
-			if (event.type === "test:fail") fileFailed = true
+			if (event.type === "test:fail") {
+				fileFailed = true
+				runnerFailed = data.details?.error?.failureType !== "subtestsFailed"
+			}
 			continue
 		}
 		if (data.details?.type !== "test") continue
@@ -104,7 +109,7 @@ const runOneFile = async (file) => {
 		failed++
 		failures.push({ name: "test process failed", file })
 	}
-	const complete = observed.length > 0 && expected.every((name) => observed.includes(name))
+	const complete = !runnerFailed && observed.length > 0 && expected.every((name) => observed.includes(name))
 	return { passed, failed, cancelled, failures, complete }
 }
 

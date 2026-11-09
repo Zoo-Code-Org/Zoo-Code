@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import { existsSync } from "node:fs"
@@ -486,6 +487,12 @@ it("releases the side output lock when execution or cleanup throws", async () =>
 				}),
 				/failed/,
 			)
+			await executeSideGeneration({
+				out: dir,
+				isInterrupted: () => false,
+				run: async () => {},
+				cleanup: async () => {},
+			})
 		}
 	} finally {
 		await fs.rm(dir, { recursive: true, force: true })
@@ -542,17 +549,31 @@ process.exit(interrupt.exitCode())
 			})
 			try {
 				await new Promise<void>((resolve, reject) => {
-					child.stdout.once("data", () => resolve())
+					const timer = setTimeout(() => reject(new Error("side readiness timeout")), 5000)
+					child.stdout.once("data", () => {
+						clearTimeout(timer)
+						resolve()
+					})
+					void closed.finally(() => clearTimeout(timer)).catch(() => {})
 					child.once("error", reject)
 					child.once("exit", () => reject(new Error("side exited before cleanup")))
 				})
 				await fs.access(path.join(dir, "side-results.json"))
 				child.kill(signal)
-				assert.equal(await closed, signal === "SIGINT" ? 130 : 143)
+				const timer = setTimeout(() => child.kill("SIGKILL"), 5000)
+				try {
+					assert.equal(await closed, signal === "SIGINT" ? 130 : 143)
+				} finally {
+					clearTimeout(timer)
+				}
 				assert.deepEqual(await fs.readdir(dir), [])
 			} finally {
 				child.kill("SIGKILL")
 				await closed
+				const key = createHash("sha256")
+					.update(await fs.realpath(dir))
+					.digest("hex")
+				await fs.rm(path.join(path.dirname(dir), `.coding-side-${key}.lock`), { recursive: true, force: true })
 				await fs.rm(dir, { recursive: true, force: true })
 			}
 		},
