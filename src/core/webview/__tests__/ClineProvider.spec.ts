@@ -30,7 +30,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
-import { makeWorkspaceConfiguration } from "../../../test-utils/vscode"
+import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
@@ -4105,6 +4105,7 @@ describe("ClineProvider", () => {
 				get: vi.fn().mockReturnValue([]),
 				update: vi.fn(),
 			} as unknown as vscode.WorkspaceConfiguration)
+			Reflect.deleteProperty(vscode.workspace, "workspaceFolders")
 		})
 
 		// The gate is a synchronous configuration read, so the doubles make the
@@ -4193,6 +4194,45 @@ describe("ClineProvider", () => {
 			expect(state.deniedCommands).toEqual(["pnpm docker"])
 		})
 
+		test("getState scopes its command-list lookups to the first workspace folder", async () => {
+			// Each folder carries its own distinct configuration, keyed by the
+			// resource the lookup was scoped with: any lookup that resolves to
+			// the second folder — or to no resource at all — reads the second
+			// folder's values, so the first folder's list can only come from a
+			// configuration scoped to the first folder's uri.
+			const firstFolder = { uri: makeUri("/root/one"), name: "first", index: 0 }
+			const secondFolder = { uri: makeUri("/root/two"), name: "second", index: 1 }
+			// The mocked module's workspaceFolders is readonly-typed, so the test
+			// installs it through defineProperty; the afterEach removes it again.
+			Reflect.defineProperty(vscode.workspace, "workspaceFolders", {
+				configurable: true,
+				value: [firstFolder, secondFolder],
+			})
+
+			const firstFolderConfig = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+			firstFolderConfig.inspect = vi
+				.fn()
+				.mockImplementation((key: string) =>
+					key === "deniedCommands"
+						? { key, workspaceValue: ["workspace docker"], workspaceFolderValue: ["pnpm docker"] }
+						: undefined,
+				)
+			const secondFolderConfig = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: false })
+			secondFolderConfig.inspect = vi
+				.fn()
+				.mockImplementation((key: string) =>
+					key === "deniedCommands" ? { key, workspaceFolderValue: ["curl"] } : undefined,
+				)
+			vi.mocked(vscode.workspace.getConfiguration).mockImplementation((_section?: string, scope?: unknown) =>
+				scope === firstFolder.uri ? firstFolderConfig : secondFolderConfig,
+			)
+
+			const state = await provider.getState()
+
+			expect(state.deniedCommands).toEqual(["pnpm docker"])
+			expect(state.workspaceCommandListsEnabled).toBe(true)
+		})
+
 		// A workspace-only allow entry is exactly what the gate decides: enabled
 		// it joins the effective lists enforcement uses; disabled enforcement ignores it.
 		function mockGateConfiguration(enabled: boolean) {
@@ -4200,6 +4240,21 @@ describe("ClineProvider", () => {
 			// is how the gate reader sees its value; the per-key `inspect`
 			// override supplies the allow-side workspace layer.
 			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: enabled })
+			const inspect = vi.fn()
+			inspect.mockImplementation((key: string) =>
+				key === "allowedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
+			)
+			config.inspect = inspect
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+		}
+
+		// Counterpart for a profile that never set the gate: the configuration
+		// reports nothing for the gate key, so the provider paths must apply the
+		// shared default themselves. The allow-side workspace layer is present so
+		// the asserted default direction (workspace entries stay inert) is
+		// observable, not just the boolean.
+		function mockUnsetGateConfiguration() {
+			const config = makeWorkspaceConfiguration()
 			const inspect = vi.fn()
 			inspect.mockImplementation((key: string) =>
 				key === "allowedCommands" ? { key, workspaceValue: ["docker"] } : undefined,
@@ -4262,6 +4317,27 @@ describe("ClineProvider", () => {
 			const state = await provider.getStateToPostToWebview()
 
 			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+		})
+
+		test("getState defaults the workspace command-list gate when the configuration is unset", async () => {
+			mockUnsetGateConfiguration()
+
+			const state = await provider.getState()
+
+			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+			// The default's direction, not just its value: an unset gate keeps the
+			// workspace entry out of the effective list.
+			expect(state.allowedCommands).toEqual([])
+		})
+
+		test("getStateToPostToWebview defaults the workspace command-list gate when the configuration is unset", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			mockUnsetGateConfiguration()
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
+			expect(state.allowedCommands).toEqual([])
 		})
 	})
 

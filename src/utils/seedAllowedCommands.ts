@@ -1,10 +1,15 @@
 import * as vscode from "vscode"
 
-import { commandListConfiguration } from "../core/auto-approval/commandScope"
+import { commandListConfiguration, workspaceCommandListsEnabled } from "../core/auto-approval/commandScope"
+import type { CommandListConfigKey } from "../core/auto-approval/commandScope"
 
 /**
- * Seeds the extension's global-state allowlist from the `allowedCommands`
- * setting, but only when global state holds no list yet (first run).
+ * Seeds one auto-approval command-list key (`allowedCommands` or
+ * `deniedCommands`) from its settings-file value into the extension's
+ * global state, but only when global state holds no list for that key yet
+ * (first run). Each key carries its own guard, so a profile whose allowlist
+ * was already seeded still gets an unseeded deny list migrated on the next
+ * activation.
  *
  * The seed reads scoped values via `inspect()` rather than the effective
  * `get()` on purpose: `get()` folds in workspace-scoped overrides, so a
@@ -22,14 +27,18 @@ import { commandListConfiguration } from "../core/auto-approval/commandScope"
  * fresh install) the declared package default is seeded, because the
  * enforcement path reads only global state plus workspace scopes and never
  * falls back to that default on its own. A workspace-scoped value is an
- * explicit choice and suppresses the default: array settings replace across
- * scopes, so seeding it would re-grant the auto-approvals the override
- * removed.
+ * explicit choice and suppresses the default — but only while the
+ * `workspaceCommandListsEnabled` gate lets that value take effect: with the
+ * gate off the workspace layer contributes nothing to enforcement, so
+ * withholding the default would leave commands unapproved that the override
+ * never actually governed. Array settings replace across scopes, so seeding
+ * past an enforced override would re-grant the approvals it removed.
  *
  * @param globalState - The extension global-state memento to seed.
+ * @param configKey - The command-list configuration key to seed.
  */
-export async function seedAllowedCommands(globalState: vscode.Memento): Promise<void> {
-	if (globalState.get("allowedCommands")) {
+export async function seedCommandList(globalState: vscode.Memento, configKey: CommandListConfigKey): Promise<void> {
+	if (globalState.get(configKey)) {
 		return
 	}
 
@@ -47,23 +56,23 @@ export async function seedAllowedCommands(globalState: vscode.Memento): Promise<
 		  }
 		| undefined
 	try {
-		inspected = commandListConfiguration().inspect<string[]>("allowedCommands")
+		inspected = commandListConfiguration().inspect<string[]>(configKey)
 	} catch {
 		return
 	}
 
 	// The `undefined` checks, not truthiness: an explicitly empty array still
 	// counts as an override.
+	const workspaceOverride = inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined
+
 	const seedValue =
 		inspected?.globalValue ??
-		(inspected?.workspaceValue === undefined && inspected?.workspaceFolderValue === undefined
-			? inspected?.defaultValue
-			: undefined)
+		(workspaceOverride && workspaceCommandListsEnabled() ? undefined : inspected?.defaultValue)
 
 	if (!Array.isArray(seedValue)) {
 		return
 	}
 
 	// Copy so global state never shares a reference with the configuration object.
-	await globalState.update("allowedCommands", [...seedValue])
+	await globalState.update(configKey, [...seedValue])
 }

@@ -492,14 +492,16 @@ function openMultiRootWindow() {
 
 // Scripts each folder's configuration independently so the test can tell
 // which folder's settings the enforcement path actually read.
-function mockFolderConfigurations(scripts: Record<string, { gate?: boolean; deny?: string[] }>) {
+function mockFolderConfigurations(scripts: Record<string, { gate?: boolean; deny?: string[]; allow?: string[] }>) {
 	vi.mocked(vscode.workspace.getConfiguration).mockImplementation(
 		(_section?: string, scope?: vscode.ConfigurationScope | null) => {
 			const entry = scripts[scope && "fsPath" in scope ? scope.fsPath : ""]
 			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: entry?.gate ?? false })
-			vi.mocked(config.inspect).mockImplementation((key: string) =>
-				key === "deniedCommands" && entry?.deny ? { key, workspaceFolderValue: entry.deny } : undefined,
-			)
+			vi.mocked(config.inspect).mockImplementation((key: string) => {
+				const layer =
+					key === "deniedCommands" ? entry?.deny : key === "allowedCommands" ? entry?.allow : undefined
+				return layer ? { key, workspaceFolderValue: layer } : undefined
+			})
 			return config
 		},
 	)
@@ -560,26 +562,94 @@ it("checkAutoApproval command: does not apply another root's deny entries to a t
 	expect(result).toEqual({ decision: "ask" })
 })
 
-it("checkAutoApproval command: falls back to the first folder when the cwd resolves to no workspace root", async () => {
+it("checkAutoApproval command: does not apply the first folder's allow list to a cwd naming no workspace root", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
+	// Folder A's layer allows "echo"; the cwd names a removed or relocated
+	// folder, so no folder's layer may decide the command. Consuming folder A's
+	// allow entry here would approve a command executing outside every
+	// workspace folder: a cwd naming no workspace root must not be approvable
+	// by any folder's allow list — the composition is judged by the (empty)
+	// global layers only.
 	mockFolderConfigurations({
-		[folderA.fsPath]: { gate: true, deny: ["echo"] },
+		[folderA.fsPath]: { gate: true, deny: [], allow: ["echo"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
 	})
 
-	// A removed or relocated folder names no root; enforcement stays on the
-	// first-folder configuration it used before per-task scoping existed.
 	const result = await checkAutoApproval({
-		state: taskFolderState(["echo"]),
+		state: taskFolderState([]),
+		cwd: "/mock/removed-folder",
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "ask" })
+})
+
+it("checkAutoApproval command: still lets a global deny entry veto a command whose cwd names no workspace root", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	// The global-only composition keeps the global layers authoritative: the
+	// unmatched cwd drops only the workspace layer, never the global deny.
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["rm"] },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: { ...taskFolderState([]), globalDeniedCommands: ["echo"] },
 		cwd: "/mock/removed-folder",
 		ask: "command",
 		text: "echo hi",
 	})
 
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
-	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
-	expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, folderB)
+})
+
+it("checkAutoApproval command: keeps the first-folder composition for a blank cwd", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	// A blank cwd is the cwd-absent case, not the unmatched case: it stays on
+	// the first-folder configuration it used before per-folder scoping existed.
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["echo"] },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: taskFolderState([]),
+		cwd: "",
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+})
+
+it("checkAutoApproval command: treats a throwing workspace-folder lookup as a cwd naming no folder", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	// The lookup guard exists so a broken lookup cannot fail the decision; the
+	// degradation it produces must be the global-only composition, not a
+	// first-folder guess — the same fail-closed direction as an unmatched cwd.
+	// Once-only: spies survive between tests in this file, and a leaked throwing
+	// lookup would change every later test's folder resolution.
+	vi.mocked(vscode.workspace.getWorkspaceFolder).mockImplementationOnce(() => {
+		throw new Error("workspace unavailable")
+	})
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: [], allow: ["echo"] },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: taskFolderState([]),
+		cwd: folderA.fsPath,
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "ask" })
 })
 
 it("checkAutoApproval command: in a single-folder window reads exactly the same configuration as before", async () => {

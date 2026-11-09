@@ -178,8 +178,11 @@ export async function checkAutoApproval({
 	 * Workspace root the allowlist patterns and the checked path are resolved
 	 * against.
 	 *
-	 * Must be the `cwd` of the task this ask belongs to, which is the root the
-	 * path in `text` was made relative to. It is not read from `state`, because
+	 * For every ask but a command, this is the `cwd` of the task the ask belongs
+	 * to — the root the path in `text` was made relative to. A command ask is
+	 * judged against the command's own resolved working directory when the
+	 * caller forwards `commandCwd`, which a custom working directory moves off
+	 * the task folder. It is not read from `state`, because
 	 * the provider's `cwd` follows the window (the focused editor in a multi-root
 	 * workspace, or a `refreshWorkspace()` while the task runs) and a resumed or
 	 * child task can run against another root entirely. Resolving against the
@@ -313,13 +316,20 @@ export async function checkAutoApproval({
 			}
 
 			// The pair on `state` was composed against the window's first
-			// folder; a task rooted in another folder must be judged by that
-			// folder's lists, so enforcement re-composes from the raw global
-			// layers at the folder the task's `cwd` resolves to (a cwd that
-			// names no workspace root keeps the first-folder configuration).
-			// Without the raw layers the pre-composed pair is all the state
-			// carries, and that pair is what enforcement consumes.
-			const taskFolder = commandListFolderForResource(cwd)
+			// folder; a command executing in another folder must be judged by
+			// that folder's lists, so enforcement re-composes from the raw
+			// global layers at the folder the command's `cwd` resolves to. A
+			// non-blank `cwd` that resolves to no workspace root names a
+			// directory outside every folder, and no folder's layer may decide
+			// it: the workspace layer is dropped (`enabled=false`) and only the
+			// global layers apply — fail-closed, so nothing on a folder's
+			// allow list can approve a command in a directory no folder
+			// claims. A blank or absent `cwd` keeps the first-folder
+			// configuration. Without the raw layers the pre-composed pair is
+			// all the state carries, and that pair is what enforcement
+			// consumes.
+			const commandFolder = commandListFolderForResource(cwd)
+			const cwdNamesNoFolder = Boolean(cwd) && commandFolder === undefined
 			const effectiveLists =
 				state.globalAllowedCommands !== undefined && state.globalDeniedCommands !== undefined
 					? resolveEffectiveCommandLists(
@@ -327,10 +337,15 @@ export async function checkAutoApproval({
 								"allowedCommands",
 								state.globalAllowedCommands,
 								undefined,
-								taskFolder,
+								commandFolder,
 							),
-							readCommandListScopes("deniedCommands", state.globalDeniedCommands, undefined, taskFolder),
-							workspaceCommandListsEnabled(),
+							readCommandListScopes(
+								"deniedCommands",
+								state.globalDeniedCommands,
+								undefined,
+								commandFolder,
+							),
+							workspaceCommandListsEnabled() && !cwdNamesNoFolder,
 						)
 					: { allowed: state.allowedCommands || [], denied: state.deniedCommands || [] }
 

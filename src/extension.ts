@@ -42,7 +42,7 @@ import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manag
 import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
-import { seedAllowedCommands } from "./utils/seedAllowedCommands"
+import { seedCommandList } from "./utils/seedAllowedCommands"
 import { autoImportSettings } from "./utils/autoImportSettings"
 import { API } from "./extension/api"
 
@@ -173,7 +173,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)
 
-	await seedAllowedCommands(context.globalState)
+	// Each list key carries its own first-run guard, so a profile whose
+	// allowlist was seeded by an earlier version still gets the deny-list
+	// migration on the next activation.
+	await seedCommandList(context.globalState, "allowedCommands")
+	await seedCommandList(context.globalState, "deniedCommands")
 
 	const contextProxy = await ContextProxy.getInstance(context)
 	const updateTelemetryState = () => {

@@ -3,6 +3,7 @@
 import type { ToolUsage } from "@roo-code/types"
 import fs from "fs/promises"
 import { constants as fsConstants, type Stats } from "fs"
+import * as path from "path"
 import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
@@ -206,7 +207,9 @@ describe("executeCommandTool", () => {
 			})
 
 			// Verify
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/test/workspace",
+			})
 			expect(mockPushToolResult).toHaveBeenCalled()
 			// The exact message depends on the terminal mock's behavior
 			const result = mockPushToolResult.mock.calls[0][0]
@@ -228,11 +231,42 @@ describe("executeCommandTool", () => {
 			})
 
 			// Verify - command approved, result pushed, and custom cwd passed to terminal
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			// The approval context carries the same directory the terminal will
+			// spawn in, so the folder-scoped command policy judges that folder.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/custom/path",
+			})
 			expect(mockPushToolResult).toHaveBeenCalled()
 			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
 			const firstArg = (TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mock.calls[0][0]
 			expect(firstArg).toBe("/custom/path")
+		})
+
+		it("reports a relative custom cwd resolved against the task's workspace", async () => {
+			// A relative custom cwd runs the command in a subdirectory of the task
+			// folder, so the approval must name the resolved absolute path: the
+			// policy lookup resolves against workspace folders, which a relative
+			// path never names.
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "sub/dir"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "sub/dir" }
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith(
+				"command",
+				"echo test",
+				undefined,
+				false,
+				expect.objectContaining({
+					commandCwd: path.resolve("/test/workspace", "sub/dir"),
+				}),
+			)
 		})
 	})
 
@@ -342,7 +376,9 @@ describe("executeCommandTool", () => {
 				"error",
 				"executeCommand.destructiveCommandGuard.blockedWithReasonAndRule",
 			)
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("requests normal approval when DCG allows the command", async () => {
@@ -366,6 +402,7 @@ describe("executeCommandTool", () => {
 			// the verdict itself rather than inferring it from settings alone.
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
 				dcgDecision: { decision: "allow" },
+				commandCwd: "/test/workspace",
 			})
 			expect(mockPushToolResult).toHaveBeenCalled()
 		})
@@ -395,6 +432,7 @@ describe("executeCommandTool", () => {
 			// an automatic denial carrying the DCG reason instead of prompting.
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
 				dcgDecision: { decision: "deny", reason: "matches a destructive pattern" },
+				commandCwd: "/test/workspace",
 			})
 		})
 
@@ -419,7 +457,9 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("keeps the protected prompt when blanket auto-deny is on but command auto-approval is off", async () => {
@@ -443,7 +483,9 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("keeps the protected prompt when blanket auto-deny is on but execute auto-approval is off", async () => {
@@ -471,7 +513,9 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("denies an approved command at execute time when blanket deny engages during the approval dwell", async () => {
@@ -621,7 +665,9 @@ describe("executeCommandTool", () => {
 
 			// The prompt shown was the protected one — the blanket setting was off
 			// when the ask was built.
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 
 			// The blanket denial wins over the affirmative approval: the command
 			// never reaches the terminal. The provider-level assertion is the
@@ -659,6 +705,53 @@ describe("executeCommandTool", () => {
 			// evaluating the now-engaged blanket denial.
 			expect(recheckSpy).toHaveBeenCalledWith(expect.objectContaining({ ask: "command", isProtected: false }))
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+		})
+
+		it("re-checks the command policy against the custom working directory", async () => {
+			// The folder-scoped command policy must judge the directory the command
+			// actually runs in. Forwarding `task.cwd` here would let folder A's
+			// allow entry approve a command executing in folder B, so the same
+			// resolved directory the terminal will spawn in rides the re-check.
+			await setupProtectedDwellFlip()
+			mockToolUse.params.cwd = "/custom/path"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/custom/path" }
+			// Delegates to the import-time real check: re-reading the module
+			// property here would capture this file's own leaked spy and recurse.
+			const recheckSpy = vitest
+				.spyOn(autoApprovalModule, "checkAutoApproval")
+				.mockImplementation((args) => realCheckAutoApproval(args))
+
+			await executeCommandTool.handle(mockCline, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+			expect(recheckSpy).toHaveBeenCalledTimes(1)
+			expect(recheckSpy).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/custom/path" }))
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/custom/path",
+			})
+		})
+
+		it("spawns in the approval's working directory rather than re-deriving from the raw custom cwd", async () => {
+			// The executor must honor the directory the tool resolved for
+			// approval verbatim, even though a different raw `customCwd` rides
+			// the options. Re-deriving from `customCwd` would spawn the command
+			// somewhere other than the directory the command policy approved.
+			vitest.spyOn(executeCommandModule, "executeCommandInTerminal").mockRestore()
+
+			const [rejected] = await executeCommandModule.executeCommandInTerminal(mockCline, {
+				executionId: "test-exec",
+				command: "echo test",
+				customCwd: "sub/dir",
+				workingDirectory: "/approved/folder",
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(rejected).toBe(false)
+			const firstArg = (TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+			expect(firstArg).toBe("/approved/folder")
 		})
 
 		it("fails closed when the execute-time recheck returns a non-approval other than deny", async () => {
@@ -961,7 +1054,9 @@ describe("executeCommandTool", () => {
 			})
 
 			// Verify
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/test/workspace",
+			})
 			// executeCommandInTerminal should not be called since approval was denied
 			expect(mockPushToolResult).not.toHaveBeenCalled()
 		})

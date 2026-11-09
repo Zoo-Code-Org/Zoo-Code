@@ -539,26 +539,35 @@ describe("extension.ts", () => {
 		expect(dotenv.config).toHaveBeenCalledTimes(1)
 	})
 
-	describe("allowedCommands activation seeding", () => {
+	describe("command-list activation seeding", () => {
 		function setConfigScope(
 			vscode: typeof import("vscode"),
-			scope: { globalValue?: string[]; workspaceValue?: string[] },
+			scope: { globalValue?: string[]; workspaceValue?: string[]; deniedGlobalValue?: string[]; gate?: boolean },
 		) {
-			const { globalValue, workspaceValue } = scope
+			const { globalValue, workspaceValue, deniedGlobalValue, gate = false } = scope
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				// Key-scoped so proxy/other activation reads still see no value.
-				get: vi.fn((key: string) =>
-					key === "allowedCommands" ? [...(globalValue ?? []), ...(workspaceValue ?? [])] : undefined,
-				),
-				inspect: vi.fn().mockReturnValue({
-					key: "allowedCommands",
-					// Real inspect() always reports the declared package default;
-					// including it here lets the workspace-override test prove the
-					// default stays unseeded beside an override, not just absent.
-					defaultValue: ["git log", "git diff", "git show"],
-					globalValue,
-					workspaceValue,
+				get: vi.fn((key: string) => {
+					if (key === "workspaceCommandListsEnabled") {
+						return gate
+					}
+					return key === "allowedCommands" ? [...(globalValue ?? []), ...(workspaceValue ?? [])] : undefined
 				}),
+				// Key-scoped inspect: the deny seed must not read the allow scope's
+				// values through the same fixture object.
+				inspect: vi.fn().mockImplementation((key: string) =>
+					key === "deniedCommands"
+						? { key, defaultValue: [], globalValue: deniedGlobalValue }
+						: {
+								key,
+								// Real inspect() always reports the declared package default;
+								// including it here lets the workspace-override test prove the
+								// default stays unseeded beside an override, not just absent.
+								defaultValue: ["git log", "git diff", "git show"],
+								globalValue,
+								workspaceValue,
+							},
+				),
 				update: vi.fn(),
 				// The double scripts key-scoped get() and per-scope inspect()
 				// shapes the shared helper cannot express without obscuring them.
@@ -579,9 +588,13 @@ describe("extension.ts", () => {
 			} as unknown as vscode.WorkspaceConfiguration)
 		})
 
-		test("does not seed global state from a workspace-scoped override", async () => {
+		test("does not seed global state from an enforced workspace-scoped override", async () => {
 			const vscode = await import("vscode")
-			setConfigScope(vscode, { workspaceValue: ["docker"] })
+			// The gate is on: an enforced workspace list replaces the default across
+			// scopes, so the seed must not re-grant the approvals it removed. (With
+			// the gate off the workspace layer is inert and the default is seeded —
+			// pinned in the seed module's own spec.)
+			setConfigScope(vscode, { workspaceValue: ["docker"], gate: true })
 
 			const { activate } = await import("../extension")
 			await activate(mockContext)
@@ -610,6 +623,17 @@ describe("extension.ts", () => {
 
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("allowedCommands", expect.anything())
 			expect(globalStateValues.get("allowedCommands")).toEqual(["npm"])
+		})
+
+		test("seeds both command-list keys on a fresh profile", async () => {
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("allowedCommands", ["git"])
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("deniedCommands", ["docker"])
 		})
 	})
 

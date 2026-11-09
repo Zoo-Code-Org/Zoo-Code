@@ -2260,20 +2260,28 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 
 	it("restores the raw workspace value when a workspace-target global write fails", async () => {
 		// With no folder layer the rewind must read the workspace value, not
-		// the absent folder value. The raw value holds the entry this save
-		// dropped, so the restore call is distinguishable from the workspace
-		// write itself and provably uses the raw inspected value.
-		const { update } = mockCommandConfiguration({ workspaceValue: ["npm docker", "docker"] }, [
+		// the absent folder value. The gate is on so the kept workspace entry is
+		// visible and the workspace write (`["docker"]`) differs from the raw
+		// rollback value (which still holds the entry this save dropped); the
+		// gate-off alternative would make the first write re-add the hidden
+		// entries and duplicate the rollback value, letting a call-agnostic
+		// assertion match a write that is not the rewind.
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["npm docker", "docker"] },
+			[undefined, Promise.reject(new Error("disk on fire"))],
 			undefined,
-			Promise.reject(new Error("disk on fire")),
-		])
+			true,
+		)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
 			updatedSettings: { deniedCommands: ["docker", "aws"] },
 		})
 
-		expect(update).toHaveBeenCalledWith(
+		// Call order: workspace write, failed global write, rewind — so the
+		// rewind is pinned by position, not just by matching some call.
+		expect(update).toHaveBeenNthCalledWith(
+			3,
 			"deniedCommands",
 			["npm docker", "docker"],
 			vscode.ConfigurationTarget.Workspace,
@@ -2287,9 +2295,14 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		// The raw folder-layer value differs from the sanitized post-split layer
 		// (and from the workspace-layer value), so the restore call is uniquely
 		// identifiable and provably reads the folder value for a folder target.
+		// The gate is on so the workspace write keeps only the visible entry and
+		// cannot match the raw rollback value; the rewind is asserted by call
+		// position.
 		const { update } = mockCommandConfiguration(
 			{ workspaceValue: ["npm"], workspaceFolderValue: ["pnpm docker", "docker"] },
 			[undefined, Promise.reject(new Error("disk on fire"))],
+			undefined,
+			true,
 		)
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -2302,8 +2315,9 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		// configuration scoped to the first workspace folder.
 		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, mockWorkspaceFolderUri)
 		// The raw previous folder value (entries this save dropped included) is
-		// written back at the target the failed save chose.
-		expect(update).toHaveBeenCalledWith(
+		// written back at the target the failed save chose, as the third write.
+		expect(update).toHaveBeenNthCalledWith(
+			3,
 			"deniedCommands",
 			["pnpm docker", "docker"],
 			vscode.ConfigurationTarget.WorkspaceFolder,
@@ -2413,12 +2427,15 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	it("reports partial failure when the compensating restore also fails", async () => {
 		// update() call order: workspace write succeeds, global write rejects,
 		// restore write rejects too. The raw workspace value differs from the
-		// post-split layer so the restore call is uniquely identifiable.
-		const { update } = mockCommandConfiguration({ workspaceValue: ["docker", "old"] }, [
+		// post-split layer so the restore call is uniquely identifiable. The
+		// gate is on so the workspace write (`["docker"]`) stays distinct from
+		// the raw rollback value, and the rewind is pinned by call position.
+		const { update } = mockCommandConfiguration(
+			{ workspaceValue: ["docker", "old"] },
+			[undefined, Promise.reject(new Error("disk on fire")), Promise.reject(new Error("restore also failed"))],
 			undefined,
-			Promise.reject(new Error("disk on fire")),
-			Promise.reject(new Error("restore also failed")),
-		])
+			true,
+		)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
@@ -2426,7 +2443,12 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		})
 
 		// The restore was attempted at the owning target even though it failed.
-		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "old"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			["docker", "old"],
+			vscode.ConfigurationTarget.Workspace,
+		)
 		expect(update).toHaveBeenCalledTimes(3)
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(

@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { readCommandListScopes } from "../../core/auto-approval/commandScope"
 import { Package } from "../../shared/package"
 import { makeUri, makeWorkspaceConfiguration } from "../../test-utils/vscode"
-import { seedAllowedCommands } from "../seedAllowedCommands"
+import { seedCommandList } from "../seedAllowedCommands"
 
 // Scriptable stand-in for `vscode.workspace.workspaceFolders`: the module
 // mock's getter reads through this object, so a test can change the open
@@ -33,9 +33,10 @@ interface ConfigDouble {
 	}
 	effective?: string[]
 	inspectThrows?: boolean
+	gate?: boolean
 }
 
-function mockConfiguration({ inspect, effective = [], inspectThrows = false }: ConfigDouble = {}) {
+function mockConfiguration({ inspect, effective = [], inspectThrows = false, gate = false }: ConfigDouble = {}) {
 	// Real VS Code reports `workspaceFolderValue` only for a configuration
 	// looked up against a resource; an unscoped lookup reports no folder
 	// layer no matter what any folder's settings contain. Scripting that
@@ -45,8 +46,13 @@ function mockConfiguration({ inspect, effective = [], inspectThrows = false }: C
 		(_section?: string, scope?: vscode.ConfigurationScope | null) => {
 			const config = makeWorkspaceConfiguration()
 			// The shared double is scripted per call so the per-test fixture
-			// values need no type assertion at the construction site.
-			vi.mocked(config.get).mockReturnValue(effective)
+			// values need no type assertion at the construction site. The gate
+			// section reads independently of the list values: its shipped
+			// default is off, so a test only gets an enforced workspace layer
+			// by asking for one.
+			vi.mocked(config.get).mockImplementation((section: string) =>
+				section === "workspaceCommandListsEnabled" ? gate : effective,
+			)
 			vi.mocked(config.inspect).mockImplementation(() => {
 				if (inspectThrows) {
 					throw new Error("configuration access failed")
@@ -63,10 +69,13 @@ function mockConfiguration({ inspect, effective = [], inspectThrows = false }: C
 	)
 }
 
-function mockMemento(existing: unknown = undefined) {
+function mockMemento(existing: unknown = undefined, deniedExisting: unknown = undefined) {
 	const store = new Map<string, unknown>()
 	if (existing !== undefined) {
 		store.set("allowedCommands", existing)
+	}
+	if (deniedExisting !== undefined) {
+		store.set("deniedCommands", deniedExisting)
 	}
 
 	// Structurally complete Memento double (keys/get/update), so the call
@@ -80,7 +89,7 @@ function mockMemento(existing: unknown = undefined) {
 	}
 }
 
-describe("seedAllowedCommands", () => {
+describe("seedCommandList", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		workspaceState.workspaceFolders = undefined
@@ -101,10 +110,13 @@ describe("seedAllowedCommands", () => {
 				workspaceValue: ["docker"],
 			},
 			effective: ["docker"],
+			// Suppression only applies while the gate lets the workspace layer
+			// take effect in enforcement.
+			gate: true,
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).not.toHaveBeenCalled()
 		expect(globalState.get("allowedCommands")).toBeUndefined()
@@ -126,10 +138,11 @@ describe("seedAllowedCommands", () => {
 				globalValue: undefined,
 				workspaceFolderValue: ["docker"],
 			},
+			gate: true,
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		// The folder layer only reaches the seed through a resource-scoped
 		// lookup, so the seed must request one (same pin as the save path).
@@ -150,10 +163,11 @@ describe("seedAllowedCommands", () => {
 				defaultValue: ["git log", "git diff", "git show"],
 				workspaceFolderValue: ["docker"],
 			},
+			gate: true,
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
 		expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, folderB)
@@ -171,10 +185,11 @@ describe("seedAllowedCommands", () => {
 				globalValue: undefined,
 				workspaceValue: [],
 			},
+			gate: true,
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).not.toHaveBeenCalled()
 		expect(globalState.get("allowedCommands")).toBeUndefined()
@@ -188,19 +203,33 @@ describe("seedAllowedCommands", () => {
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", defaultValue)
 		// Copy, like the global-value path: global state must not share a
 		// reference with the configuration object.
 		expect(globalState.update.mock.calls[0][1]).not.toBe(defaultValue)
+
+		// A later activation with the gate on but still no workspace-scoped
+		// value: only an actual override suppresses the default, so the gate
+		// alone must not withhold it.
+		mockConfiguration({
+			inspect: { key: "allowedCommands", defaultValue },
+			effective: defaultValue,
+			gate: true,
+		})
+		const secondGlobalState = mockMemento()
+
+		await seedCommandList(secondGlobalState, "allowedCommands")
+
+		expect(secondGlobalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", defaultValue)
 	})
 
 	it("seeds from the global-scope value when global state is empty", async () => {
 		mockConfiguration({ inspect: { key: "allowedCommands", globalValue: ["git"] }, effective: ["git"] })
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", ["git"])
 		expect(globalState.get("allowedCommands")).toEqual(["git"])
@@ -219,7 +248,7 @@ describe("seedAllowedCommands", () => {
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", [])
 		expect(globalState.get("allowedCommands")).toEqual([])
@@ -229,7 +258,7 @@ describe("seedAllowedCommands", () => {
 		mockConfiguration({ inspect: { key: "allowedCommands", globalValue: ["git"] }, effective: ["git"] })
 		const globalState = mockMemento(["npm"])
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).not.toHaveBeenCalled()
 		expect(globalState.get("allowedCommands")).toEqual(["npm"])
@@ -242,7 +271,7 @@ describe("seedAllowedCommands", () => {
 		mockConfiguration({ inspect: { key: "allowedCommands", defaultValue: ["git log", "git diff", "git show"] } })
 		const globalState = mockMemento([])
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).not.toHaveBeenCalled()
 		expect(globalState.get("allowedCommands")).toEqual([])
@@ -262,7 +291,7 @@ describe("seedAllowedCommands", () => {
 		})
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", defaultValue)
 
 		// A later activation in a workspace whose settings file sets the list:
@@ -272,7 +301,7 @@ describe("seedAllowedCommands", () => {
 			effective: ["docker ps"],
 		})
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 		expect(globalState.update).toHaveBeenCalledTimes(1)
 		expect(globalState.get("allowedCommands")).toEqual(defaultValue)
 
@@ -299,7 +328,7 @@ describe("seedAllowedCommands", () => {
 			update: vi.fn(),
 		}
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, undefined)
 		const config = vi.mocked(vscode.workspace.getConfiguration).mock.results[0].value
@@ -311,7 +340,7 @@ describe("seedAllowedCommands", () => {
 		mockConfiguration({ inspect: undefined, effective: ["git"] })
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).not.toHaveBeenCalled()
 	})
@@ -320,7 +349,7 @@ describe("seedAllowedCommands", () => {
 		mockConfiguration({ inspectThrows: true })
 		const globalState = mockMemento()
 
-		await expect(seedAllowedCommands(globalState)).resolves.toBeUndefined()
+		await expect(seedCommandList(globalState, "allowedCommands")).resolves.toBeUndefined()
 
 		expect(globalState.update).not.toHaveBeenCalled()
 	})
@@ -330,9 +359,85 @@ describe("seedAllowedCommands", () => {
 		mockConfiguration({ inspect: { key: "allowedCommands", globalValue } })
 		const globalState = mockMemento()
 
-		await seedAllowedCommands(globalState)
+		await seedCommandList(globalState, "allowedCommands")
 
 		expect(globalState.update).toHaveBeenCalledWith("allowedCommands", expect.arrayContaining(["git"]))
 		expect(globalState.update.mock.calls[0][1]).not.toBe(globalValue)
+	})
+
+	it("seeds the deny list from its settings-file global value on a fresh profile", async () => {
+		// Symmetric with the allow side: a user-level `deniedCommands` edit in
+		// settings.json has a one-time migration role, and the enforcement
+		// global layer reads extension state only, so an unseeded deny list
+		// silently drops the user's denials.
+		mockConfiguration({ inspect: { key: "deniedCommands", globalValue: ["docker"] }, effective: ["docker"] })
+		const globalState = mockMemento()
+
+		await seedCommandList(globalState, "deniedCommands")
+
+		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("deniedCommands", ["docker"])
+		expect(globalState.get("deniedCommands")).toEqual(["docker"])
+	})
+
+	it("does not overwrite an existing deniedCommands global state", async () => {
+		mockConfiguration({ inspect: { key: "deniedCommands", globalValue: ["docker"] }, effective: ["docker"] })
+		const globalState = mockMemento(undefined, ["rm"])
+
+		await seedCommandList(globalState, "deniedCommands")
+
+		expect(globalState.update).not.toHaveBeenCalled()
+		expect(globalState.get("deniedCommands")).toEqual(["rm"])
+	})
+
+	it("seeds the deny list when only the allow list was already seeded", async () => {
+		// Per-key guards: an install whose allowlist was seeded by an earlier
+		// version must still get the deny migration on the next activation.
+		mockConfiguration({ inspect: { key: "deniedCommands", globalValue: ["docker"] }, effective: ["docker"] })
+		const globalState = mockMemento(["npm"])
+
+		await seedCommandList(globalState, "deniedCommands")
+
+		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("deniedCommands", ["docker"])
+		expect(globalState.get("allowedCommands")).toEqual(["npm"])
+	})
+
+	it("seeds the declared default when a workspace value exists but the gate is off", async () => {
+		// With the gate off the workspace layer contributes nothing to
+		// enforcement, so withholding the default would leave commands
+		// unapproved that the override never actually governed.
+		const defaultValue = ["git log", "git diff", "git show"]
+		mockConfiguration({
+			inspect: {
+				key: "allowedCommands",
+				defaultValue,
+				workspaceValue: ["docker"],
+			},
+			effective: ["docker"],
+		})
+		const globalState = mockMemento()
+
+		await seedCommandList(globalState, "allowedCommands")
+
+		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", defaultValue)
+	})
+
+	it("suppresses the declared default for a workspace value while the gate is on", async () => {
+		// Pins the explicit-override semantics: an enforced workspace list
+		// replaces the default across scopes, so the seed must not re-grant
+		// the approvals the override removed.
+		mockConfiguration({
+			inspect: {
+				key: "allowedCommands",
+				defaultValue: ["git log", "git diff", "git show"],
+				workspaceValue: ["docker"],
+			},
+			effective: ["docker"],
+			gate: true,
+		})
+		const globalState = mockMemento()
+
+		await seedCommandList(globalState, "allowedCommands")
+
+		expect(globalState.update).not.toHaveBeenCalled()
 	})
 })
