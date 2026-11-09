@@ -26,6 +26,7 @@ import type {
 } from "../index"
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
 import { getLMStudioModels, getLMStudioModelAlias } from "./fetchers/lmstudio"
+import { normalizeLMStudioBaseUrl } from "./utils/lmstudio"
 import {
 	mergeAbortSignalAndTimeout,
 	throwIfAborted,
@@ -54,7 +55,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		const apiKey = "noop"
 
 		this.client = new OpenAI({
-			baseURL: (this.options.lmStudioBaseUrl || "http://localhost:1234").replace(/\/+$/, "") + "/v1",
+			baseURL: normalizeLMStudioBaseUrl(this.options.lmStudioBaseUrl) + "/v1",
 			apiKey: apiKey,
 			timeout: this.timeoutMs,
 		})
@@ -74,7 +75,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			const models = await getModels(
 				{
 					provider: providerIdentifiers.lmstudio,
-					baseUrl: this.options.lmStudioBaseUrl || "http://localhost:1234",
+					baseUrl: normalizeLMStudioBaseUrl(this.options.lmStudioBaseUrl),
 				},
 				this,
 			)
@@ -336,7 +337,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		const models = getModelsFromCache(
 			{
 				provider: providerIdentifiers.lmstudio,
-				baseUrl: this.options.lmStudioBaseUrl || "http://localhost:1234",
+				baseUrl: normalizeLMStudioBaseUrl(this.options.lmStudioBaseUrl),
 			},
 			this,
 		)
