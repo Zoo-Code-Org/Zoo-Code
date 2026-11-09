@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.92.0
+## What's New in v3.96.0
 
-- ✨ **Faster model choice and stronger model support:** Switch models from the chat composer. Use Claude Haiku 5.5 on Amazon Bedrock, get more accurate Kimi K3 capabilities on OpenRouter, and use corrected Gemini 4 Argon limits on Vercel AI Gateway.
-- 🧭 **More reliable terminal, editing, chat, and remote workflows:** Collapse command output by default when you choose, get clearer editing failures, keep reasoning and API rows visible, and avoid startup and proxy issues in remote workspaces.
-- 🔌 **Expanded MCP marketplace:** Connect Zoo Code to AnySearch, Mailtea, and Tradehand through the MCP marketplace.
+- ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.
+- 💸 **More accurate provider costs and caching:** Keep Anthropic tool results intact, adopt cumulative output tokens in Anthropic and MiniMax costs, read DeepSeek prompt-cache counters, target the xAI Responses cache, and bill Mistral cache reads at 0.1x.
+- 🧭 **More reliable and faster chats:** Resume completed tasks after a restart, restore checkpoints when the saved commit is missing, auto-reload a dead webview renderer, throttle streaming updates, and load locales on demand.
 
 <details>
   <summary>🌐 Available languages</summary>

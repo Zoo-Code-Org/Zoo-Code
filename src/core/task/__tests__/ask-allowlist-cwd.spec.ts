@@ -3,6 +3,7 @@
 import type { ExtensionState } from "@roo-code/types"
 
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // The allowlist patterns are resolved against a workspace root, and the path in
 // the tool message was made relative by `getReadablePath(task.cwd, ...)`. So the
@@ -23,7 +24,7 @@ type ProviderStub = {
 
 function buildTask(provider: ProviderStub, taskCwd: string) {
 	const task = Object.create(Task.prototype) as Task
-	task["abort"] = false
+	setAbortLatch(task, false)
 	task["clineMessages"] = []
 	task["askResponse"] = undefined
 	task["askResponseText"] = undefined
