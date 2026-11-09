@@ -325,6 +325,37 @@ describe("two spellings contend with the real library", () => {
 		expect(fs.statSync(aliasFile).ino).toBe(fs.statSync(file).ino)
 		await expectOneLockAcrossSpellings(aliasFile, file)
 	})
+
+	// The two rows above alias a directory: once the filesystem resolves the two spellings the
+	// artefacts are one directory no matter what the artefact is named by. These two spellings differ
+	// in the final component only, so the spelling the artefact name is built from is what decides
+	// whether the callers contend. A placement that concatenates the caller's own leaf spelling lands
+	// two artefacts here, lets the second caller through, and leaves every mocked suite above green -
+	// which is why this one delegates to the real library and asserts the artefact directory too.
+	it("blocks the other spelling of an 8.3 alias of the leaf while one holds the real lock", async (context) => {
+		if (!generatesShortNames) {
+			return context.skip()
+		}
+		const directory = path.join(root(), "leaf-alias-lock")
+		fs.mkdirSync(directory, { recursive: true })
+		const longLeaf = path.join(directory, "task-history-leaf-for-alias-lock-testing.json")
+		fs.writeFileSync(longLeaf, "{}", "utf8")
+		const aliasLeaf = aliasOf(longLeaf)
+		expect(aliasLeaf).not.toBe(longLeaf)
+		expect(fs.statSync(aliasLeaf).ino).toBe(fs.statSync(longLeaf).ino)
+		const release = await acquireFileLock(aliasLeaf, { immediate: true })
+		try {
+			expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([
+				"task-history-leaf-for-alias-lock-testing.json.lock",
+			])
+			await expect(acquireFileLock(longLeaf, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+		} finally {
+			await release()
+		}
+		const released = await acquireFileLock(longLeaf, { immediate: true })
+		await released()
+		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
+	})
 })
 
 /**
