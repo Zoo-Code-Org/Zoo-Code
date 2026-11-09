@@ -454,6 +454,143 @@ describe("two spellings contend with the real library", () => {
 		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
 		expect(fs.readdirSync(elsewhere).filter((name) => name.endsWith(".lock"))).toEqual([])
 	})
+
+	// The row above proves the artefact lands in the caller's directory. It does not prove what
+	// happens when the caller's own directory already holds a file with the target's name, and that
+	// collision is not hypothetical - it is what the lock does. The sibling is a different inode with
+	// its own content and its own canonical key, and it still contends on the one artefact name the
+	// volume spelling hands both of them.
+	itPosixLeaf("contends an unrelated sibling named like the link target against the link's lock", async () => {
+		const directory = path.join(root(), "sibling-collision")
+		const elsewhere = path.join(root(), "sibling-target")
+		fs.mkdirSync(directory, { recursive: true })
+		fs.mkdirSync(elsewhere, { recursive: true })
+		const target = path.join(elsewhere, "history.json")
+		fs.writeFileSync(target, JSON.stringify({ writer: "target" }), "utf8")
+		const link = path.join(directory, "history-link.json")
+		fs.symlinkSync(target, link)
+		const sibling = path.join(directory, "history.json")
+		fs.writeFileSync(sibling, JSON.stringify({ writer: "sibling" }), "utf8")
+		expect(fs.realpathSync.native(link)).toBe(fs.realpathSync.native(target))
+		expect(fs.statSync(sibling).ino).not.toBe(fs.statSync(link).ino)
+		expect(canonicalLockKey(link)).not.toBe(canonicalLockKey(sibling))
+		const release = await acquireFileLock(link, { immediate: true })
+		try {
+			expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual(["history.json.lock"])
+			await expect(acquireFileLock(sibling, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+		} finally {
+			await release()
+		}
+		const afterRelease = await acquireFileLock(sibling, { immediate: true })
+		await afterRelease()
+		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
+		expect(fs.readdirSync(elsewhere).filter((name) => name.endsWith(".lock"))).toEqual([])
+	})
+
+	// A leaf link replaced while a second writer queues is the case the persistence-integrity check
+	// asked for. The contract it has to assert is the one the filesystem offers: convergence happens
+	// inside one directory, so the artefact directory does not follow the target. Both artefacts are
+	// named here, the queue is observed at the caller-named one, and the merged content is read back
+	// from both coexisting targets - constructed as two live files with two live caller paths, and the
+	// replacement is an atomic rename of a freshly created link over the old one, so no recycled inode
+	// is load-bearing.
+	itPosixLeaf(
+		"keeps a waiting writer at the caller-named artefact across a leaf-link replacement, and merges into the referent that answers when it proceeds",
+		async () => {
+			const readMerged = (target: string): { merge: string; writer?: string } =>
+				JSON.parse(fs.readFileSync(target, "utf8")) as { merge: string; writer?: string }
+			const callerDir = path.join(root(), "retarget-caller")
+			const targetDir = path.join(root(), "retarget-target")
+			fs.mkdirSync(callerDir, { recursive: true })
+			fs.mkdirSync(targetDir, { recursive: true })
+			const firstTarget = path.join(targetDir, "history.json")
+			fs.writeFileSync(firstTarget, JSON.stringify({ merge: "first" }), "utf8")
+			const secondTarget = path.join(callerDir, "history-content.json")
+			fs.writeFileSync(secondTarget, JSON.stringify({ merge: "second" }), "utf8")
+			const callerPath = path.join(callerDir, "history.json")
+			fs.symlinkSync(firstTarget, callerPath)
+			const callerArtefact = path.join(callerDir, "history.json.lock")
+			const targetArtefact = path.join(targetDir, "history.json.lock")
+			let releaseFirst: (() => Promise<void>) | null = null
+			let releaseSecond: (() => Promise<void>) | null = null
+			let waitingSeen = "not started"
+			try {
+				releaseFirst = await acquireFileLock(callerPath, { immediate: true })
+				const firstBase = readMerged(callerPath)
+				fs.writeFileSync(callerPath, JSON.stringify({ ...firstBase, writer: "first" }), "utf8")
+				expect(fs.existsSync(callerArtefact)).toBe(true)
+				const throughTarget = await acquireFileLock(firstTarget, { immediate: true })
+				expect(fs.existsSync(targetArtefact)).toBe(true)
+				await throughTarget()
+				const waitingWriter = acquireFileLock(callerPath)
+				waitingSeen = await Promise.race([
+					waitingWriter.then(() => "settled while the first writer still held"),
+					new Promise<string>((resolve) => {
+						setTimeout(() => resolve("still queued"), 300)
+					}),
+				])
+				const replacement = path.join(callerDir, "history.json.next")
+				fs.symlinkSync(secondTarget, replacement)
+				fs.renameSync(replacement, callerPath)
+				await releaseFirst()
+				releaseFirst = null
+				releaseSecond = await waitingWriter
+				expect(fs.readdirSync(callerDir).filter((name) => name.endsWith(".lock"))).toEqual([
+					"history.json.lock",
+				])
+				const secondBase = readMerged(callerPath)
+				fs.writeFileSync(callerPath, JSON.stringify({ ...secondBase, writer: "second" }), "utf8")
+			} finally {
+				if (releaseFirst !== null) {
+					await releaseFirst()
+				}
+				if (releaseSecond !== null) {
+					await releaseSecond()
+				}
+			}
+			expect(waitingSeen).toBe("still queued")
+			expect(fs.existsSync(callerArtefact)).toBe(false)
+			expect(fs.existsSync(targetArtefact)).toBe(false)
+			expect(readMerged(firstTarget)).toEqual({ merge: "first", writer: "first" })
+			expect(readMerged(secondTarget)).toEqual({ merge: "second", writer: "second" })
+		},
+	)
+
+	// The third pre-merge row asks about overlapping acquisitions and releases, and about one library key
+	// owning two different artefacts at once. Measured before asserting: an acquisition that arrives at an
+	// artefact another key already holds rejects ELOCKED - on this volume the artefact carries the lock, so
+	// a second key cannot fork a second lock onto it - and a release called a second time, after another
+	// writer has taken the artefact, rejects ERELEASED and leaves that writer's artefact where it is. Each
+	// writer then releases through the function it was handed, and neither directory is left holding one.
+	itPosixLeaf("refuses a second key on a held artefact, and a late release from the writer that let go", async () => {
+		const directory = path.join(root(), "release-order")
+		const elsewhere = path.join(root(), "release-target")
+		fs.mkdirSync(directory, { recursive: true })
+		fs.mkdirSync(elsewhere, { recursive: true })
+		const target = path.join(elsewhere, "history.json")
+		fs.writeFileSync(target, JSON.stringify({ writer: "target" }), "utf8")
+		const link = path.join(directory, "history-link.json")
+		fs.symlinkSync(target, link)
+		const sibling = path.join(directory, "history.json")
+		fs.writeFileSync(sibling, JSON.stringify({ writer: "sibling" }), "utf8")
+		expect(canonicalLockKey(link)).not.toBe(canonicalLockKey(sibling))
+		const releaseLink = await acquireFileLock(link, { immediate: true })
+		let releaseSibling: (() => Promise<void>) | null = null
+		try {
+			await expect(acquireFileLock(sibling, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+			const queued = acquireFileLock(sibling)
+			await releaseLink()
+			releaseSibling = await queued
+			await expect(releaseLink()).rejects.toMatchObject({ code: "ERELEASED" })
+			expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual(["history.json.lock"])
+		} finally {
+			if (releaseSibling !== null) {
+				await releaseSibling()
+			}
+		}
+		expect(fs.readdirSync(directory).filter((name) => name.endsWith(".lock"))).toEqual([])
+		expect(fs.readdirSync(elsewhere).filter((name) => name.endsWith(".lock"))).toEqual([])
+	})
 })
 
 /**
@@ -506,5 +643,46 @@ describe("identity keeps inodes above 2^53 distinct", () => {
 	it("asks the filesystem for the identity in bigint form", () => {
 		canonicalLockKey(path.join(directoryLow, "history.json"))
 		expect(statCalls.some((call) => call.bigintRequested)).toBe(true)
+	})
+
+	// The identity and the surviving components are joined with a separator, and a separator is only
+	// decoration until two widths concatenate alike: device 1 inode 23 and device 12 inode 3 build the
+	// same digit run, and device 1 inode 2 followed by a file named 3history.json builds the same run as
+	// device 1 inode 23 followed by history.json. These paths are synthetic - the fake statSync answers
+	// for them - and the doubles return plain numbers for both spellings because the row is about widths,
+	// not about the bigint read the row above already pins, so the only thing that can keep the three
+	// keys apart is the separator the unit composes them with.
+	it("keeps identities whose digits concatenate alike apart", () => {
+		const directoryWide = path.join(precisionRoot, "wide")
+		const directoryWideConcat = path.join(precisionRoot, "wide-concat")
+		const directoryShift = path.join(precisionRoot, "shift")
+		statSyncOverride = (target) => {
+			const fabricated: Record<string, { dev: number; ino: number }> = {
+				[directoryWide]: { dev: 1, ino: 23 },
+				[directoryWideConcat]: { dev: 12, ino: 3 },
+				[directoryShift]: { dev: 1, ino: 2 },
+			}
+			return fabricated[path.resolve(target)] ?? { dev: 1, ino: 99 }
+		}
+		const wide = canonicalLockKey(path.join(directoryWide, "history.json"))
+		const sameConcat = canonicalLockKey(path.join(directoryWideConcat, "history.json"))
+		const shifted = canonicalLockKey(path.join(directoryShift, "3history.json"))
+		expect(wide).not.toBe(sameConcat)
+		expect(wide).not.toBe(shifted)
+		expect(sameConcat).not.toBe(shifted)
+	})
+
+	// Every ancestor missing is the fall-through at the end of nearestExistingDirectory, and that is the
+	// only way to reach the fallback that hands back the caller's own path: with no identity anywhere the
+	// key has to be the resolved path, because nothing on the filesystem has answered with an identity to
+	// build one from. Mutating that fall-through's return to an empty object is equivalent here - an
+	// undefined directory statSyncs to null and lands on the same fallback - so this row covers the line
+	// without killing that mutant, and says so rather than claiming a kill.
+	it("falls back to the caller's own path when no ancestor has an identity", () => {
+		statSyncOverride = () => {
+			throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		}
+		const uncreated = path.resolve(path.join(precisionRoot, "uncreated", "nested", "history.json"))
+		expect(canonicalLockKey(uncreated)).toBe(uncreated)
 	})
 })
