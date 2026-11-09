@@ -75,9 +75,13 @@ describe("ContextProxy", () => {
 	describe("shared test-utils doubles", () => {
 		it("gives each Memento double its own stored values", () => {
 			// Freshness is the helper's contract: a module-scope Memento in a shared test helper leaks
-			// stored values between cases, and nothing else in this run would notice.
+			// stored values between cases, and nothing else in this run would notice. The read-back on the
+			// writing double is what keeps the second double's emptiness from being vacuous: with a no-op
+			// update both second-double assertions pass against a store that never stored anything.
 			const first = makeFreshMemento()
 			void first.update("leakProbe", "stored-in-first")
+			expect(first.get("leakProbe")).toBe("stored-in-first")
+			expect(first.keys()).toEqual(["leakProbe"])
 			const second = makeFreshMemento()
 			expect(second.get("leakProbe")).toBeUndefined()
 			expect(second.keys()).toEqual([])
