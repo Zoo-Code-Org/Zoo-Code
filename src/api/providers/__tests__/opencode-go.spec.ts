@@ -691,9 +691,16 @@ describe("OpencodeGoHandler", () => {
 			const resolutionGate = new Promise<void>((resolve) => {
 				releaseResolution = resolve
 			})
-			vitest.mocked(getModels).mockImplementationOnce(async () => {
-				await resolutionGate
-				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+			// The exact promise the provider awaits, so the test can await the lookup's own
+			// settlement instead of guessing how long a parked lookup takes.
+			let lookupPromise: Promise<Record<string, unknown>> | undefined
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				const parked = (async () => {
+					await resolutionGate
+					return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+				})()
+				lookupPromise = parked
+				return parked
 			})
 
 			const handler = new OpencodeGoHandler(mockOptions)
@@ -707,8 +714,12 @@ describe("OpencodeGoHandler", () => {
 				),
 			)
 
-			// Let the lookup park on the gate, then abort while it is still pending.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// Observable condition: the catalog lookup has been invoked and is parked on the
+			// gate, which is what the 10 ms sleep was standing in for.
+			await vitest.waitFor(() => expect(vitest.mocked(getModels)).toHaveBeenCalledTimes(1), {
+				timeout: 1000,
+				interval: 5,
+			})
 			controller.abort()
 
 			const error = await consumed.then(
@@ -722,9 +733,12 @@ describe("OpencodeGoHandler", () => {
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
 
-			// Releasing the lookup afterwards must not start a late request.
+			// Observable condition: the parked lookup has actually settled. Awaiting the same
+			// promise the provider awaits drains the provider's continuation first, because the
+			// provider subscribed to it before this test did; only then is "no late request" a
+			// statement about drained state rather than about a 10 ms window.
 			releaseResolution()
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await lookupPromise
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -816,16 +830,22 @@ describe("OpencodeGoHandler", () => {
 			// hang if the bridge stops forwarding aborts, and it rejects as
 			// soon as the bridge aborts the controller.
 			let capturedSignal: AbortSignal | undefined
+			let firstChunkDelivered = false
 			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
 				return (async function* () {
 					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
-					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
-						await new Promise((resolve) => setTimeout(resolve, 5))
-					}
-					if (capturedSignal?.aborted) {
-						throw new DOMException("The operation was aborted.", "AbortError")
-					}
+					// Runs only once the consumer has taken the first chunk and asked for the next
+					// one, which is the state the 25 ms sleep was approximating.
+					firstChunkDelivered = true
+					// Observable condition: the bridge aborted the internal controller. Polling it
+					// means a bridge that stops forwarding aborts fails on a printed condition
+					// instead of quietly running the stream to its end.
+					await vitest.waitFor(() => expect(capturedSignal?.aborted).toBe(true), {
+						timeout: 1000,
+						interval: 5,
+					})
+					throw new DOMException("The operation was aborted.", "AbortError")
 				})()
 			})
 
@@ -840,8 +860,9 @@ describe("OpencodeGoHandler", () => {
 				),
 			)
 
-			// Let the request start and the first chunk be yielded before aborting.
-			await new Promise((resolve) => setTimeout(resolve, 25))
+			// Observable condition: the first chunk has been consumed and the stream is asking for
+			// the next one; abort mid-stream from there rather than after a fixed 25 ms.
+			await vitest.waitFor(() => expect(firstChunkDelivered).toBe(true), { timeout: 1000, interval: 5 })
 			controller.abort()
 
 			const error = await consumed.then(
@@ -1049,9 +1070,16 @@ describe("OpencodeGoHandler", () => {
 			const resolutionGate = new Promise<void>((resolve) => {
 				releaseResolution = resolve
 			})
-			vitest.mocked(getModels).mockImplementationOnce(async () => {
-				await resolutionGate
-				return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+			// The exact promise the provider awaits, so the test can await the lookup's own
+			// settlement instead of guessing how long a parked lookup takes.
+			let lookupPromise: Promise<Record<string, unknown>> | undefined
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				const parked = (async () => {
+					await resolutionGate
+					return { "glm-5.1": { ...opencodeGoModels["glm-5.1"] } }
+				})()
+				lookupPromise = parked
+				return parked
 			})
 
 			const handler = new OpencodeGoHandler(mockOptions)
@@ -1059,8 +1087,12 @@ describe("OpencodeGoHandler", () => {
 
 			const completion = handler.completePrompt("ping", { abortSignal: controller.signal })
 
-			// Park the lookup on the gate, then abort while it is still pending.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// Observable condition: the catalog lookup has been invoked and is parked on the
+			// gate, which is what the 10 ms sleep was standing in for.
+			await vitest.waitFor(() => expect(vitest.mocked(getModels)).toHaveBeenCalledTimes(1), {
+				timeout: 1000,
+				interval: 5,
+			})
 			controller.abort()
 
 			await expect(completion).rejects.toMatchObject({
@@ -1071,9 +1103,12 @@ describe("OpencodeGoHandler", () => {
 			expect(vitest.mocked(getModels)).toHaveBeenCalledTimes(1)
 			expect(mockCreate).not.toHaveBeenCalled()
 
-			// Releasing the lookup afterwards must not start a late request.
+			// Observable condition: the parked lookup has actually settled. Awaiting the same
+			// promise the provider awaits drains the provider's continuation first, because the
+			// provider subscribed to it before this test did; only then is "no late request" a
+			// statement about drained state rather than about a 10 ms window.
 			releaseResolution()
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await lookupPromise
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -1447,8 +1482,16 @@ describe("OpencodeGoHandler", () => {
 			// Emulate the Anthropic SDK: when the request timeout fires, the SDK
 			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
 			// are exhausted — verified against @anthropic-ai/sdk against a hung server.
-			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
-				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				const requestSignal = options?.signal
+				if (!requestSignal) {
+					throw new Error("the provider forwarded no request signal")
+				}
+				// Observable condition: the deadline signal the provider shares with this request has
+				// fired. The 50 ms sleep stood in for that same instant — the SDK's own timeout
+				// budget and this deadline are the same number by design, so the signal is the only
+				// witness that either leg of the race actually ran.
+				await vitest.waitFor(() => expect(requestSignal.aborted).toBe(true), { timeout: 1000, interval: 5 })
 				throw new AnthropicTimeoutError()
 			})
 			const handler = new OpencodeGoHandler(anthropicOptions)
@@ -1650,8 +1693,14 @@ describe("OpencodeGoHandler", () => {
 				// Emulate the OpenAI SDK: when the request timeout fires, the SDK
 				// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
 				// are exhausted — verified against openai v5.23.2 against a hung server.
-				mockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
-					await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+				mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+					const requestSignal = options?.signal
+					if (!requestSignal) {
+						throw new Error("the provider forwarded no request signal")
+					}
+					// Observable condition: the deadline signal the provider shares with this request
+					// has fired, the same instant the 50 ms sleep was standing in for.
+					await vitest.waitFor(() => expect(requestSignal.aborted).toBe(true), { timeout: 1000, interval: 5 })
 					throw new APIConnectionTimeoutError()
 				})
 				const handler = new OpencodeGoHandler(openaiOptions)
@@ -1959,6 +2008,7 @@ describe("OpencodeGoHandler", () => {
 			// started must normalize to the standardized AbortError like the
 			// other wire formats, not leak the raw SDK rejection.
 			let capturedSignal: AbortSignal | undefined
+			let firstChunkDelivered = false
 			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
 				return (async function* () {
@@ -1967,12 +2017,15 @@ describe("OpencodeGoHandler", () => {
 						index: 0,
 						delta: { type: "text_delta", text: "partial" },
 					}
-					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
-						await new Promise((resolve) => setTimeout(resolve, 5))
-					}
-					if (capturedSignal?.aborted) {
-						throw new AnthropicAbortError()
-					}
+					// Runs only once the consumer has taken the first chunk and asked for the next
+					// one, which is the state the 25 ms sleep was approximating.
+					firstChunkDelivered = true
+					// Observable condition: the bridge aborted the internal controller.
+					await vitest.waitFor(() => expect(capturedSignal?.aborted).toBe(true), {
+						timeout: 1000,
+						interval: 5,
+					})
+					throw new AnthropicAbortError()
 				})()
 			})
 			const controller = new AbortController()
@@ -1983,8 +2036,9 @@ describe("OpencodeGoHandler", () => {
 				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
 			)
 
-			// Let the request start and the first chunk be yielded before aborting.
-			await new Promise((resolve) => setTimeout(resolve, 25))
+			// Observable condition: the first chunk has been consumed and the stream is asking for
+			// the next one; abort mid-stream from there rather than after a fixed 25 ms.
+			await vitest.waitFor(() => expect(firstChunkDelivered).toBe(true), { timeout: 1000, interval: 5 })
 			controller.abort()
 
 			const error = await consumed.then(
@@ -2084,16 +2138,20 @@ describe("OpencodeGoHandler", () => {
 			// started must normalize to the standardized AbortError like the
 			// other wire formats, not leak the raw SDK rejection.
 			let capturedSignal: AbortSignal | undefined
+			let firstChunkDelivered = false
 			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
 				return (async function* () {
 					yield { type: "response.output_text.delta", delta: "partial" }
-					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
-						await new Promise((resolve) => setTimeout(resolve, 5))
-					}
-					if (capturedSignal?.aborted) {
-						throw new APIUserAbortError()
-					}
+					// Runs only once the consumer has taken the first chunk and asked for the next
+					// one, which is the state the 25 ms sleep was approximating.
+					firstChunkDelivered = true
+					// Observable condition: the bridge aborted the internal controller.
+					await vitest.waitFor(() => expect(capturedSignal?.aborted).toBe(true), {
+						timeout: 1000,
+						interval: 5,
+					})
+					throw new APIUserAbortError()
 				})()
 			})
 			const controller = new AbortController()
@@ -2104,8 +2162,9 @@ describe("OpencodeGoHandler", () => {
 				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
 			)
 
-			// Let the request start and the first chunk be yielded before aborting.
-			await new Promise((resolve) => setTimeout(resolve, 25))
+			// Observable condition: the first chunk has been consumed and the stream is asking for
+			// the next one; abort mid-stream from there rather than after a fixed 25 ms.
+			await vitest.waitFor(() => expect(firstChunkDelivered).toBe(true), { timeout: 1000, interval: 5 })
 			controller.abort()
 
 			const error = await consumed.then(
@@ -2999,10 +3058,23 @@ describe("OpencodeGoHandler", () => {
 	})
 
 	describe("completePrompt shared timeout deadline", () => {
-		const delayResolveModel = (handler: OpencodeGoHandler, delayMs: number) =>
-			vi
-				.spyOn(handler as unknown as { resolveModel: () => Promise<unknown> }, "resolveModel")
-				.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), delayMs)))
+		// Stands in for a slow catalog lookup: it stays pending until the test releases it, so
+		// "the deadline fired first" is an observable state the test can assert, not a race
+		// against a fixed delay the test cannot see.
+		const gateResolveModel = (handler: OpencodeGoHandler) => {
+			let release!: () => void
+			let pending = true
+			const lookup = new Promise<Record<string, unknown>>((resolve) => {
+				release = () => {
+					pending = false
+					resolve({})
+				}
+			})
+			vi.spyOn(handler as unknown as { resolveModel: () => Promise<unknown> }, "resolveModel").mockImplementation(
+				() => lookup,
+			)
+			return { isPending: () => pending, release }
+		}
 
 		it.each([
 			[
@@ -3018,13 +3090,18 @@ describe("OpencodeGoHandler", () => {
 			["OpenAI", () => new OpencodeGoHandler(mockOptions), mockCreate],
 		])("bounds %s model resolution by the request timeout", async (_label, makeHandler, createMock) => {
 			const handler = makeHandler() as OpencodeGoHandler
-			delayResolveModel(handler, 80)
+			const { isPending, release } = gateResolveModel(handler)
 
 			const error = await handler.completePrompt("ping", { timeoutMs: 20 }).catch((caught: unknown) => caught)
 
 			expect(error).toMatchObject({ name: "AbortError" })
-			// Resolution timed out, so no completion request may start.
+			// The lookup was still parked when the deadline fired, which is the condition the old
+			// 80 ms delay was approximating; it must still be pending here, and no completion
+			// request may have started.
+			expect(isPending()).toBe(true)
 			expect(createMock).not.toHaveBeenCalled()
+			// Release the parked lookup so the test leaves no pending promise behind.
+			release()
 		})
 
 		it.each([
