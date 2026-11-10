@@ -28,8 +28,10 @@ describe("API - configuration", () => {
 				]),
 			},
 			localModeConfigIds: new Map<string, string>(),
+			modeConfigWrites: new Map<string, Promise<void>>(),
 			initialModeConfigIds: Promise.resolve({}),
 			setModeConfig: ClineProvider.prototype.setModeConfig,
+			writeModeConfig: ClineProvider.prototype["writeModeConfig"],
 			getModeConfigId: ClineProvider.prototype["getModeConfigId"],
 			postStateToWebview,
 			// Provides the configuration methods and event registration used by API.

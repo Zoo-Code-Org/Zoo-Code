@@ -239,8 +239,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// These tests stub providerSettingsManager; without an opening snapshot, mode lookups read it.
-		provider["initialModeConfigIds"] = Promise.resolve(undefined)
+		// Tests provide explicit opening snapshots when they need saved mode profiles.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
@@ -977,6 +977,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				},
 			})
 			await provider.addClineToStack(mockTask)
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()

@@ -434,6 +434,9 @@ export class ClineProvider
 	 */
 	private initialModeConfigIds: Promise<Record<string, string> | undefined> = Promise.resolve({})
 
+	/** Serialize each mode’s local choice and persisted write, including failure rollback. */
+	private readonly modeConfigWrites = new Map<Mode, Promise<void>>()
+
 	constructor(
 		readonly context: vscode.ExtensionContext,
 		private readonly outputChannel: vscode.OutputChannel,
@@ -2178,15 +2181,12 @@ export class ClineProvider
 	 * shared map as it was when the window opened. Modes absent from both resolve to `undefined`, so
 	 * callers keep this window's current profile instead of one another window saved later. A cached
 	 * id whose profile no longer exists (e.g. after a reset) is dropped in favour of the shared map,
-	 * which is also used when the opening snapshot could not be read.
+	 * while an unreadable opening snapshot keeps this window’s current profile.
 	 */
 	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
 		const localId = this.localModeConfigIds.get(mode)
 		const initialIds = localId === undefined ? await this.initialModeConfigIds : undefined
 		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode)
-		if (localId === undefined && initialIds === undefined) {
-			return this.providerSettingsManager.getModeConfigId(mode)
-		}
 		const cachedId = localId ?? initialIds?.[mode]
 		if (cachedId === undefined) return undefined
 
@@ -2207,6 +2207,21 @@ export class ClineProvider
 	}
 
 	public async setModeConfig(mode: Mode, id: string): Promise<void> {
+		const pending = this.modeConfigWrites.get(mode)
+		const write = (async () => {
+			// A failed predecessor must roll back before this operation captures its previous choice.
+			if (pending) await pending.catch(() => {})
+			await this.writeModeConfig(mode, id)
+		})()
+		this.modeConfigWrites.set(mode, write)
+		try {
+			await write
+		} finally {
+			if (this.modeConfigWrites.get(mode) === write) this.modeConfigWrites.delete(mode)
+		}
+	}
+
+	private async writeModeConfig(mode: Mode, id: string): Promise<void> {
 		const previousId = this.localModeConfigIds.get(mode)
 		this.localModeConfigIds.set(mode, id)
 		try {

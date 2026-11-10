@@ -558,9 +558,8 @@ describe("ClineProvider", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// Most tests stub providerSettingsManager and expect it to be consulted for mode profiles,
-		// so start without the snapshot the real manager would take of the seeded mode map.
-		provider["initialModeConfigIds"] = Promise.resolve(undefined)
+		// Tests provide explicit opening snapshots when they need saved mode profiles.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		defaultTaskOptions = {
 			provider,
@@ -4464,6 +4463,7 @@ describe("ClineProvider", () => {
 			apiProvider: providerIdentifiers.anthropic,
 		}
 
+		provider["initialModeConfigIds"] = Promise.resolve({ architect: "test-id" })
 		;(provider as any).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
@@ -4476,7 +4476,7 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "mode", text: "architect" })
 
 		// Should load the saved config for architect mode
-		expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+		expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "test-config" })
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
@@ -4536,13 +4536,18 @@ describe("ClineProvider", () => {
 			},
 		)
 
-		it("falls back to the shared value when the snapshot cannot be read", async () => {
+		it("keeps the current profile when the snapshot cannot be read", async () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValue(new Error("unreadable"))
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
 
 			provider["captureInitialModeConfigIds"]()
 
-			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("shared-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
+			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
+			existingProfiles("chosen-id")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			await provider.setModeConfig("architect", "chosen-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
 		})
 
 		it("drops a local choice whose profile was removed and falls back to the shared mapping", async () => {
@@ -4627,6 +4632,31 @@ describe("ClineProvider", () => {
 			await expect(provider["setModeConfig"]("architect", "second-id")).rejects.toThrow("write failed")
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
 		})
+
+		it.each(["first-id", "second-id"])(
+			"preserves a successful overlapping write of %s after the preceding write fails",
+			async (nextId) => {
+				existingProfiles("first-id", "second-id")
+				const sharedWrite = vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue()
+				await provider.setModeConfig("code", "first-id")
+				let rejectWrite = (_error: Error) => {}
+				sharedWrite.mockImplementationOnce(
+					() =>
+						new Promise<void>((_resolve, reject) => {
+							rejectWrite = reject
+						}),
+				)
+				const failed = provider.setModeConfig("code", "second-id")
+				const failure = expect(failed).rejects.toThrow("write failed")
+				const succeeded = provider.setModeConfig("code", nextId)
+				expect(sharedWrite).toHaveBeenCalledTimes(2)
+				rejectWrite(new Error("write failed"))
+				await failure
+				await succeeded
+				expect(sharedWrite).toHaveBeenLastCalledWith("code", nextId)
+				await expect(provider["getModeConfigId"]("code")).resolves.toBe(nextId)
+			},
+		)
 
 		it("drops local choices and re-reads the mapping when state is reset", async () => {
 			const { t } = await import("../../../i18n")
@@ -5234,6 +5264,7 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			}
 
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "saved-config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
@@ -5249,7 +5280,7 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
 			// Verify saved config was loaded
-			expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
 			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "saved-config" })
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "saved-config")
 
@@ -5384,6 +5415,7 @@ describe("ClineProvider", () => {
 			})
 
 			// Mock provider settings manager
+			provider["initialModeConfigIds"] = Promise.resolve({ "custom-mode": "config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
@@ -5523,6 +5555,7 @@ describe("ClineProvider", () => {
 			})
 
 			// Mock provider settings manager to throw error
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
