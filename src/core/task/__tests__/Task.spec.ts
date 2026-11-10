@@ -7241,7 +7241,31 @@ describe("Cline", () => {
 			await taskAccess.initiateTaskLoop([])
 
 			expect(saveSpy).toHaveBeenCalledOnce()
-			expect(saveSpy).toHaveBeenCalledWith(true, true)
+			expect(saveSpy).toHaveBeenCalledWith(true, true, true)
+		})
+
+		it("produces the baseline commit while suppressing only its broadcast", async () => {
+			// The suppression is an extra argument to the same save, so the baseline still
+			// commits (allowEmpty) and the once-per-instance flag still flips only on that
+			// commit: a second loop entry gets no second save because the first committed.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "suppressed baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue({ commit: "baseline-commit" })
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(saveSpy).toHaveBeenCalledWith(true, true, true)
 		})
 
 		it("does not record a baseline when the task resumes from history", async () => {
@@ -7293,7 +7317,7 @@ describe("Cline", () => {
 			await taskAccess.initiateTaskLoop([])
 
 			expect(saveSpy).toHaveBeenCalledOnce()
-			expect(saveSpy).toHaveBeenCalledWith(true, true)
+			expect(saveSpy).toHaveBeenCalledWith(true, true, true)
 		})
 
 		it("does not record a baseline checkpoint when perWriteCheckpoints is disabled", async () => {
@@ -7436,7 +7460,7 @@ describe("Cline", () => {
 			await taskAccess.initiateTaskLoop([])
 
 			expect(saveSpy).toHaveBeenCalledOnce()
-			expect(saveSpy).toHaveBeenCalledWith(true, true)
+			expect(saveSpy).toHaveBeenCalledWith(true, true, true)
 			expect(requestSpy).toHaveBeenCalled()
 		})
 	})

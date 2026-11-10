@@ -3956,7 +3956,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				try {
 					// allowEmpty=true so a clean workspace still produces the baseline
 					// commit; awaited so the first per-write checkpoint cannot interleave.
-					const baseline = await this.checkpointSave(true, true)
+					// suppressBroadcast=true for this save only: the baseline is the workspace
+					// state before the task wrote anything, so broadcasting it as the current
+					// checkpoint makes every completed task show a "See New Changes" affordance
+					// pointing at a commit that holds no user change. The commit itself is still
+					// produced and remains the baseline restore point.
+					const baseline = await this.checkpointSave(true, true, true)
 					// The flag is set only once the baseline actually committed: a save
 					// that no-ops behind a failed or timed-out service initialization is
 					// retried on a later loop entry instead of being marked done without
@@ -6259,8 +6264,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Checkpoints
 
-	public async checkpointSave(force: boolean = false, suppressMessage: boolean = false) {
-		return checkpointSave(this, force, suppressMessage)
+	public async checkpointSave(force: boolean = false, suppressMessage: boolean = false, suppressBroadcast = false) {
+		return checkpointSave(this, force, suppressMessage, undefined, suppressBroadcast)
 	}
 
 	private buildCleanConversationHistory(

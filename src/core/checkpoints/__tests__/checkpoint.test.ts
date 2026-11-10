@@ -131,7 +131,7 @@ describe("Checkpoint functionality", () => {
 			// saveCheckpoint should have been called
 			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledWith(
 				expect.stringContaining("Task: test-task-id"),
-				{ allowEmpty: true, suppressMessage: false },
+				{ allowEmpty: true, suppressMessage: false, suppressBroadcast: false },
 			)
 
 			// Result should contain the commit hash
@@ -470,6 +470,116 @@ describe("Checkpoint functionality", () => {
 
 			expect(mockTask.enableCheckpoints).toBe(false)
 			expect(mockProvider.log).toHaveBeenCalledWith("[checkpointDiff] disabling checkpoints for this task")
+		})
+	})
+
+	describe("checkpointSave - task-start baseline broadcast suppression", () => {
+		type CheckpointPayload = {
+			type: "checkpoint"
+			fromHash: string
+			toHash: string
+			duration: number
+			suppressMessage?: boolean
+			suppressBroadcast?: boolean
+		}
+		type PostedWebviewMessage = { type?: string; text?: string; suppressMessage?: boolean }
+
+		const broadcastPosts = (): PostedWebviewMessage[] =>
+			mockProvider.postMessageToWebview.mock.calls
+				.map(([message]: PostedWebviewMessage[]) => message)
+				.filter((message: PostedWebviewMessage) => message?.type === "currentCheckpointUpdated")
+
+		const registerCheckpointHandler = async () => {
+			// The handler is registered when the service is created, so drop the pre-made
+			// double and let getCheckpointService wire it up against the same double.
+			mockTask.checkpointService = undefined
+			mockTask.checkpointServiceInitializing = false
+
+			await getCheckpointService(mockTask)
+
+			const registration = mockCheckpointService.on.mock.calls.find(
+				([event]: [string]) => event === "checkpoint",
+			) as [string, (payload: CheckpointPayload) => void] | undefined
+			if (!registration) {
+				throw new Error("the checkpoint handler was never registered on the service")
+			}
+			return registration[1]
+		}
+
+		const emitOfLastSave = () => {
+			const call = mockCheckpointService.saveCheckpoint.mock.calls.at(-1)
+			if (!call) {
+				throw new Error("no checkpoint save reached the service")
+			}
+			return call[1] as { suppressMessage?: boolean; suppressBroadcast?: boolean }
+		}
+
+		it("threads the suppression flag to the service for the save that asks for it", async () => {
+			await checkpointSave(mockTask, true, true, undefined, true)
+
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledWith(
+				expect.stringContaining("Task: test-task-id"),
+				{ allowEmpty: true, suppressMessage: true, suppressBroadcast: true },
+			)
+		})
+
+		it("keeps allowEmpty in force so a clean workspace still commits the baseline", async () => {
+			await expect(checkpointSave(mockTask, true, true, undefined, true)).resolves.toMatchObject({
+				commit: "test-commit-hash",
+			})
+		})
+
+		it("suppresses only the current-checkpoint broadcast for the baseline save", async () => {
+			const handler = await registerCheckpointHandler()
+			mockCheckpointService.saveCheckpoint.mockResolvedValue({ commit: HASH_2 })
+
+			await checkpointSave(mockTask, true, true, undefined, true)
+			const options = emitOfLastSave()
+			handler({
+				type: "checkpoint",
+				fromHash: HASH_1,
+				toHash: HASH_2,
+				duration: 1,
+				suppressMessage: options.suppressMessage,
+				suppressBroadcast: options.suppressBroadcast,
+			})
+
+			expect(broadcastPosts()).toHaveLength(0)
+			expect(mockTask.say).toHaveBeenCalledWith(
+				"checkpoint_saved",
+				HASH_2,
+				undefined,
+				undefined,
+				{ from: HASH_1, to: HASH_2, suppressMessage: true },
+				undefined,
+				{ isNonInteractive: true },
+			)
+		})
+
+		it("still broadcasts the current checkpoint after a real user checkpoint", async () => {
+			// The user-facing shape at Task.ts:2485 - a save whose chat row is suppressed
+			// but whose checkpoint the user can still roll back to and see changes for.
+			const handler = await registerCheckpointHandler()
+			mockCheckpointService.saveCheckpoint.mockResolvedValue({ commit: HASH_2 })
+
+			await checkpointSave(mockTask, false, true)
+			const options = emitOfLastSave()
+			handler({
+				type: "checkpoint",
+				fromHash: HASH_1,
+				toHash: HASH_2,
+				duration: 1,
+				suppressMessage: options.suppressMessage,
+				suppressBroadcast: options.suppressBroadcast,
+			})
+
+			const broadcasts = broadcastPosts()
+			expect(broadcasts).toHaveLength(1)
+			expect(broadcasts[0]).toEqual({
+				type: "currentCheckpointUpdated",
+				text: HASH_2,
+				suppressMessage: true,
+			})
 		})
 	})
 

@@ -180,15 +180,23 @@ async function checkGitInstallation(
 			task.checkpointServiceInitializing = false
 		})
 
-		service.on("checkpoint", ({ fromHash: from, toHash: to, suppressMessage }) => {
+		service.on("checkpoint", ({ fromHash: from, toHash: to, suppressMessage, suppressBroadcast }) => {
 			try {
 				sendCheckpointInitWarn(task)
-				// Always update the current checkpoint hash in the webview, including the suppress flag
-				provider?.postMessageToWebview({
-					type: "currentCheckpointUpdated",
-					text: to,
-					suppressMessage: !!suppressMessage,
-				})
+				// The current-checkpoint broadcast is what the completion card renders its
+				// "See New Changes" affordance from, so it is sent for every checkpoint a user
+				// could act on. A baseline checkpoint is the workspace state before this task
+				// wrote anything, so broadcasting it would make every completed task offer to
+				// show changes that do not exist. Only the broadcast is suppressed: the commit
+				// is still made and still recorded in history below, so rollback keeps its
+				// baseline restore point.
+				if (!suppressBroadcast) {
+					provider?.postMessageToWebview({
+						type: "currentCheckpointUpdated",
+						text: to,
+						suppressMessage: !!suppressMessage,
+					})
+				}
 
 				// Always create the chat message but include the suppress flag in the payload
 				// so the chatview can choose not to render it while keeping it in history.
@@ -252,6 +260,7 @@ export async function checkpointSave(
 	force = false,
 	suppressMessage = false,
 	write?: CheckpointWriteInfo | CheckpointWriteInfo[],
+	suppressBroadcast = false,
 ) {
 	const service = await getCheckpointService(task)
 
@@ -289,7 +298,11 @@ export async function checkpointSave(
 
 	// Start the checkpoint process in the background.
 	return service
-		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
+		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, {
+			allowEmpty: force,
+			suppressMessage,
+			suppressBroadcast,
+		})
 		.then(async (result) => {
 			// Only a real commit produces entries (an empty or failed save resolves
 			// to undefined / rejects), and non-write checkpoint calls (e.g. the
