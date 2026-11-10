@@ -206,6 +206,23 @@ describe("getCommandDecision — outer word attached to a command substitution",
 			expect(getCommandDecision(command, ["printf", "reboot"])).toBe("auto_approve")
 		},
 	)
+
+	it.each(["$(printf re)boot", "$(printf re)boot 'a\nb'", "`printf re`boot 'a\nb'"])(
+		"asks the user when a substitution is part of the command name: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["printf", "boot"])).toBe("ask_user")
+			expect(getCommandDecision(command, ["printf", "boot"], ["reboot"])).toBe("ask_user")
+		},
+	)
+
+	it.each(["echo*$(reboot)", "echo*$(reboot) 'a\nb'", "ls *$(reboot).ts"])(
+		"checks a substitution inside a glob: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["echo", "ls"])).toBe("ask_user")
+			expect(getCommandDecision(command, ["echo", "ls"], ["reboot"])).toBe("auto_deny")
+			expect(getCommandDecision(command, ["echo", "ls", "reboot"])).toBe("auto_approve")
+		},
+	)
 })
 
 describe("getCommandDecisionDetailed", () => {

@@ -251,8 +251,13 @@ describe("parseCommand", () => {
 		})
 
 		it.each([
-			{ input: "reboot$(printf 'x')", expected: ["printf 'x'", "reboot"] },
-			{ input: "reboot$(printf '\n')", expected: ["printf '\n'", "reboot"] },
+			{ input: "reboot$(printf 'x')", expected: ["printf 'x'", "reboot$(printf 'x')"] },
+			{ input: "reboot$(printf '\n')", expected: ["printf '\n'", "reboot$(printf '\n')"] },
+			{ input: "$(printf re)boot", expected: ["printf re", "$(printf re)boot"] },
+			{ input: "$(printf re)boot 'a\nb'", expected: ["printf re", "$(printf re)boot 'a\nb'"] },
+			{ input: "`printf re`boot", expected: ["printf re", "$(printf re)boot"] },
+			{ input: "echo*$(reboot)", expected: ["reboot", "echo*$(reboot)"] },
+			{ input: "ls *$(reboot).ts 'a\nb'", expected: ["reboot", "ls *$(reboot).ts 'a\nb'"] },
 			{ input: "echo $(a)$(b)", expected: ["echo", "a", "b"] },
 		])("keeps the outer word and every substitution in $input", ({ input, expected }) => {
 			expect(parseCommand(input).commands).toEqual(expected)

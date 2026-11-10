@@ -692,6 +692,26 @@ function parseCommandLine(command: string): string[] {
 	const commands: string[] = []
 	let currentCommand: string[] = []
 
+	const addWord = (word: string) => {
+		const subshellMatches = [...word.matchAll(/__SUBSH_(\d+)__/g)]
+		if (subshellMatches.length === 0) {
+			currentCommand.push(word)
+			return
+		}
+		if (word.replace(/__SUBSH_\d+__/g, "")) {
+			// The substitution output is part of this word, for example
+			// `$(printf re)boot` runs `reboot`. Keep the substitution text in the
+			// word: the allowlist check must not see only the literal part.
+			currentCommand.push(word.replace(/__SUBSH_(\d+)__/g, (_, i) => `$(${subshells[parseInt(i)]})`))
+		} else if (currentCommand.length > 0) {
+			commands.push(currentCommand.join(" "))
+			currentCommand = []
+		}
+		for (const match of subshellMatches) {
+			commands.push(subshells[parseInt(match[1])])
+		}
+	}
+
 	for (const token of tokens) {
 		if (typeof token === "object" && "op" in token) {
 			// Chain operator - split command
@@ -703,31 +723,13 @@ function parseCommandLine(command: string): string[] {
 			} else if ("pattern" in token) {
 				// shell-quote returns a glob as { op: "glob", pattern }. Keep the glob
 				// text (for example `*`) so that deny rules can match it.
-				currentCommand.push(token.pattern)
+				addWord(token.pattern)
 			} else {
 				// Other operators (>) are part of the command
 				currentCommand.push(token.op)
 			}
 		} else if (typeof token === "string") {
-			// Check if the word contains subshell placeholders
-			const subshellMatches = [...token.matchAll(/__SUBSH_(\d+)__/g)]
-			if (subshellMatches.length > 0) {
-				// Text outside the substitution is part of the outer command, for
-				// example `reboot` in `reboot$(printf x)`. It must stay in the
-				// command so that the allowlist check sees it.
-				const outerText = token.replace(/__SUBSH_\d+__/g, "")
-				if (outerText) {
-					currentCommand.push(outerText)
-				} else if (currentCommand.length > 0) {
-					commands.push(currentCommand.join(" "))
-					currentCommand = []
-				}
-				for (const match of subshellMatches) {
-					commands.push(subshells[parseInt(match[1])])
-				}
-			} else {
-				currentCommand.push(token)
-			}
+			addWord(token)
 		}
 	}
 
