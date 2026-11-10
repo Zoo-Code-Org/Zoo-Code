@@ -8,9 +8,14 @@ interface Running {
 	promise: Promise<void>
 }
 
-/** The one change that waits behind the running one. Later values replace its value: only the latest is applied. */
+/**
+ * The one change that waits behind the running one. Later values replace its value: only the latest is applied. It is
+ * kept while a save that is still waiting for it asks for it: when every one of them has given up, it is dropped.
+ */
 interface Pending {
 	value: boolean
+	/** The values that the saves waiting for this change asked for, oldest first; the last one is `value`. */
+	waiters: Array<{ value: boolean }>
 	promise: Promise<void>
 	resolve: () => void
 	reject: (error: unknown) => void
@@ -22,6 +27,14 @@ interface HubChanges {
 	/** The value of the change that was started last. */
 	last?: boolean
 	reconciling: boolean
+	/** The providers that asked for a reconciliation: only what is needed to read the stored setting, and not kept alive. */
+	owners: Array<WeakRef<McpOwner>>
+}
+
+/** What a reconciliation needs of a provider: whether it is gone, and the setting that it stores. */
+export interface McpOwner {
+	readonly isDisposed?: boolean
+	readonly contextProxy: { getValue(key: "mcpEnabled"): unknown }
 }
 
 /** What is in line for each hub. A hub is shared by every provider, so this is across providers too. */
@@ -30,7 +43,7 @@ const hubs = new WeakMap<McpEnabledTarget, HubChanges>()
 const changesOf = (hub: McpEnabledTarget): HubChanges => {
 	let changes = hubs.get(hub)
 	if (!changes) {
-		changes = { reconciling: false }
+		changes = { reconciling: false, owners: [] }
 		hubs.set(hub, changes)
 	}
 	return changes
@@ -76,14 +89,14 @@ function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Prom
  * they were made. What waits is only the latest value: a change that never started is replaced by a newer one (every
  * caller that waited for it is answered by the one that runs), so a stalled change cannot make a queue grow.
  */
-export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean): Promise<void> {
+export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) return Promise.reject(signal.reason)
 	const changes = changesOf(hub)
 	const { running, pending } = changes
 	if (!running) return start(hub, changes, value)
 
 	if (pending) {
-		pending.value = value
-		return pending.promise
+		return joinPending(changes, pending, value, signal)
 	}
 	if (running.value === value) return running.promise
 
@@ -94,8 +107,37 @@ export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean): Promise
 		reject = rej
 	})
 	promise.catch(() => undefined)
-	changes.pending = { value, promise, resolve, reject }
-	return promise
+	const created: Pending = { value, waiters: [], promise, resolve, reject }
+	changes.pending = created
+	return joinPending(changes, created, value, signal)
+}
+
+/**
+ * Adds a save to the saves that wait for the change that has not started. When the save gives up (its `signal` aborts)
+ * and no other save waits for it, the change is dropped: it must not start later, with a value that nothing asks for.
+ */
+function joinPending(changes: HubChanges, pending: Pending, value: boolean, signal?: AbortSignal): Promise<void> {
+	const waiter = { value }
+	pending.waiters.push(waiter)
+	pending.value = value
+	if (!signal) return pending.promise
+
+	const leave = () => {
+		// A change that has started is under way, and cannot be taken back: it is the reconciliation's business then.
+		if (changes.pending !== pending) return
+		pending.waiters.splice(pending.waiters.indexOf(waiter), 1)
+		const latest = pending.waiters.at(-1)
+		if (latest) {
+			pending.value = latest.value
+			return
+		}
+		changes.pending = undefined
+		pending.reject(signal.reason)
+	}
+	signal.addEventListener("abort", leave, { once: true })
+	const settled = () => signal.removeEventListener("abort", leave)
+	pending.promise.then(settled, settled)
+	return pending.promise
 }
 
 /**
@@ -103,9 +145,16 @@ export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean): Promise
  * gave up waiting on a change: that change may still land late, and must not leave the hub other than the setting says.
  * One of these runs per hub, and it looks at what is stored when the changes are done, so several saves that gave up
  * leave one reconciliation behind, not one each. Nothing is applied if the stored value is the one the hub got last.
+ * The providers are only remembered weakly, and one that has been disposed is not asked: a reconciliation that waits for
+ * a change that never settles does not keep a provider that was closed meanwhile.
  */
-export async function reconcileMcpEnabled(hub: McpEnabledTarget, getStored: () => boolean): Promise<void> {
+export async function reconcileMcpEnabled(hub: McpEnabledTarget, owner: McpOwner): Promise<void> {
 	const changes = changesOf(hub)
+	changes.owners = changes.owners.filter((ref) => {
+		const known = ref.deref()
+		return known !== undefined && !known.isDisposed && known !== owner
+	})
+	changes.owners.push(new WeakRef(owner))
 	if (changes.reconciling) return
 	changes.reconciling = true
 	try {
@@ -118,7 +167,13 @@ export async function reconcileMcpEnabled(hub: McpEnabledTarget, getStored: () =
 			}
 			// Nothing is running: the hub has what the last change gave it. If a change that came in while this one was under
 			// way (a save that timed out and joined the reconciliation) moved it from what is stored, bring it back.
-			const stored = getStored()
+			// The setting is the same for every provider: any one that is still there can say what is stored.
+			const live = [...changes.owners]
+				.reverse() // the latest one that was asked for first
+				.map((ref) => ref.deref())
+				.find((known) => known && !known.isDisposed)
+			if (!live) break
+			const stored = (live.contextProxy.getValue("mcpEnabled") ?? true) as boolean
 			if (stored === changes.last) break
 			let failed = false
 			await changeMcpEnabled(hub, stored).catch(() => {
@@ -129,5 +184,9 @@ export async function reconcileMcpEnabled(hub: McpEnabledTarget, getStored: () =
 		}
 	} finally {
 		changes.reconciling = false
+		changes.owners = changes.owners.filter((ref) => {
+			const known = ref.deref()
+			return known !== undefined && !known.isDisposed
+		})
 	}
 }

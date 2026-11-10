@@ -49,6 +49,7 @@ import {
 } from "../config/appearanceSettingWrites"
 import { isInvalidDisplayValue } from "../config/displaySettings"
 import { changeMcpEnabled, reconcileMcpEnabled } from "./mcpEnabledChanges"
+import { storeInOrder } from "./storeInOrder"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -928,20 +929,22 @@ export const webviewMessageHandler = async (
 						if (mcpHub) {
 							// Applied one at a time, and a retried save joins the change that is under way: the hub removes a
 							// connection only after its close has finished, so a second disconnect would close it again.
-							const change = changeMcpEnabled(mcpHub, newValue as boolean)
+							// A save that gives up on the change takes back its place in line (see `changeMcpEnabled`).
+							const giveUp = new AbortController()
+							const change = changeMcpEnabled(mcpHub, newValue as boolean, giveUp.signal)
 							// In a save with appearance values, a change that does not finish must not keep their records for
 							// good: the save fails after the usual time, and the change goes on (it is not repeated).
 							try {
 								await (boundsStores ? withinSettingWriteTime(change, key) : change)
 							} catch (error) {
+								// A change that has not started is dropped, if no other save waits for it: it must not start
+								// later, with a value that this save did not store.
+								giveUp.abort(error)
 								// The save fails, and the setting stays as it was stored, but the change may still land: once the
 								// changes in line have settled (however they end) the hub is brought back to the setting that is
 								// stored, so servers that a late disable closed do not stay disconnected while MCP is stored as
-								// enabled.
-								void reconcileMcpEnabled(
-									mcpHub,
-									() => (provider.contextProxy.getValue("mcpEnabled") ?? true) as boolean,
-								)
+								// enabled. The provider is not kept for that: a closed one is not asked.
+								void reconcileMcpEnabled(mcpHub, provider)
 								throw error
 							}
 						}
@@ -967,7 +970,11 @@ export const webviewMessageHandler = async (
 						continue
 					}
 
-					const store = provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					// One store of a key at a time: a store whose wait was given up may still land, and must not do so after the
+					// store of a newer save of the same key.
+					const store = storeInOrder(key, () =>
+						provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue),
+					)
 					// In a save with appearance values, a store that never settles must not keep their records for good: the
 					// save fails after the usual time, and they are put back below. (The store goes on; it cannot be cancelled.)
 					await (boundsStores ? withinSettingWriteTime(store, key) : store)

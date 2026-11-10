@@ -220,6 +220,17 @@ describe("CodeBlock", () => {
 			expect(collapseButton()).not.toBeNull()
 		})
 
+		it("renders where there is no ResizeObserver, and observes nothing", async () => {
+			// A host without the API: the control is worked out when the content changes only, as before.
+			Reflect.deleteProperty(global, "ResizeObserver")
+
+			const { container } = render(<CodeBlock source="const x = 1;" language="typescript" />)
+			await act(async () => {})
+
+			expect(container.firstElementChild).not.toBeNull()
+			expect(observers).toHaveLength(0)
+		})
+
 		it("stops observing when the block is removed", async () => {
 			const { container, unmount } = render(<CodeBlock source="const x = 1;" language="typescript" />)
 			const observer = lastObserverOf(container.firstElementChild as Element)

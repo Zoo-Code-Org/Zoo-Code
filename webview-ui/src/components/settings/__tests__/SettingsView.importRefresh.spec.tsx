@@ -36,7 +36,11 @@ describe("SettingsView – the form after an import that failed part of the way"
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 		const editedChecked = thinkingCheckbox().checked
 
-		hostPosts({ terminalFontSize: 16, settingsImportRefreshedAt: 1_000 })
+		hostPosts({
+			terminalFontSize: 16,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
 
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
 		expect(thinkingCheckbox().checked).toBe(editedChecked) // the edit was not dropped
@@ -58,7 +62,11 @@ describe("SettingsView – the form after an import that failed part of the way"
 		fireEvent.click(await screen.findByTestId("appearance-terminalFontSize-increment"))
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-		hostPosts({ terminalFontSize: 16, settingsImportRefreshedAt: 1_000 })
+		hostPosts({
+			terminalFontSize: 16,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
 
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
 	})
@@ -69,7 +77,11 @@ describe("SettingsView – the form after an import that failed part of the way"
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 		const edited = input("spacingScale").value
 
-		hostPosts({ terminalFontSize: 16, settingsImportRefreshedAt: 1_000 })
+		hostPosts({
+			terminalFontSize: 16,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
 
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
 		expect(input("spacingScale").value).toBe(edited)
@@ -122,14 +134,58 @@ describe("SettingsView – the form after an import that failed part of the way"
 		expect(input("terminalFontSize").value).toBe("13")
 	})
 
+	it("keeps an unsaved edit of an appearance value that another provider changed, when the import did not store it", async () => {
+		renderUiTab()
+		await screen.findByTestId("appearance-terminalFontSize-input")
+		hostPosts({ terminalFontSize: 14, spacingScale: 100 })
+		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // 13: the user's edit (the stepper starts at 12)
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		// The refresh of an import that stored the spacing; the terminal size changed too, but not through the import.
+		hostPosts({
+			terminalFontSize: 18,
+			spacingScale: 120,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["spacingScale"],
+		})
+
+		await waitFor(() => expect(input("spacingScale").value).toBe("120")) // what the import stored is taken
+		expect(input("terminalFontSize").value).toBe("13") // the edit is not discarded
+		vi.mocked(vscode.postMessage).mockClear()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const save = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0] as { type: string; updatedSettings?: Record<string, unknown> })
+			.find((message) => message.type === "updateSettings")
+		expect(save?.updatedSettings?.terminalFontSize).toBe(13) // and it is still sent with the next save
+	})
+
+	it("takes a changed value that is not an appearance value from a refresh that names no stored keys", async () => {
+		renderUiTab()
+		await screen.findByTestId("collapse-thinking-checkbox")
+		const before = thinkingCheckbox().checked
+
+		hostPosts({ reasoningBlockCollapsed: !before, settingsImportRefreshedAt: 1_000 }) // no `settingsImportStoredKeys`
+
+		await waitFor(() => expect(thinkingCheckbox().checked).toBe(!before))
+	})
+
 	it("acts on each refresh once: the same mark on a later state changes nothing", async () => {
 		renderUiTab()
 		await screen.findByTestId("appearance-terminalFontSize-input")
-		hostPosts({ terminalFontSize: 16, settingsImportRefreshedAt: 1_000 })
+		hostPosts({
+			terminalFontSize: 16,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
 		fireEvent.click(screen.getByTestId("appearance-terminalFontSize-increment")) // the user edits it again: 17
 
-		hostPosts({ terminalFontSize: 20, settingsImportRefreshedAt: 1_000 }) // another state, with the mark still on it
+		hostPosts({
+			terminalFontSize: 20,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		}) // another state, with the mark still on it
 
 		expect(input("terminalFontSize").value).toBe("17")
 	})
@@ -137,10 +193,18 @@ describe("SettingsView – the form after an import that failed part of the way"
 	it("acts on a later refresh again", async () => {
 		renderUiTab()
 		await screen.findByTestId("appearance-terminalFontSize-input")
-		hostPosts({ terminalFontSize: 16, settingsImportRefreshedAt: 1_000 })
+		hostPosts({
+			terminalFontSize: 16,
+			settingsImportRefreshedAt: 1_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("16"))
 
-		hostPosts({ terminalFontSize: 20, settingsImportRefreshedAt: 2_000 })
+		hostPosts({
+			terminalFontSize: 20,
+			settingsImportRefreshedAt: 2_000,
+			settingsImportStoredKeys: ["terminalFontSize"],
+		})
 
 		await waitFor(() => expect(input("terminalFontSize").value).toBe("20"))
 	})

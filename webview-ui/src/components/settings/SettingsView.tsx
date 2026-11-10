@@ -361,8 +361,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		}
 		for (const [key, value] of Object.entries(extensionState)) {
 			// Compared by value: the host builds new arrays and objects for every state it posts.
+			// An appearance value is taken only when the import says it stored it (above): another provider may have changed
+			// it since, and what it changed says nothing about the import, nor about the edit that the user has made here.
 			if (
 				key !== "settingsImportRefreshedAt" &&
+				!(key in APPEARANCE_SETTINGS) &&
 				!editedSince(key) &&
 				JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(value)
 			) {

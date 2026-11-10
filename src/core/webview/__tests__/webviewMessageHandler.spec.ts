@@ -90,6 +90,7 @@ import { flushModels, getModels } from "../../../api/providers/fetchers/modelCac
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
 import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
+import { resetStoreInOrder } from "../storeInOrder"
 import {
 	handleCreateRule,
 	handleDeleteRule,
@@ -1894,6 +1895,59 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 		vi.mocked(mockClineProvider.postStateToWebview).mockResolvedValue(undefined as never)
 	})
 
+	describe("updatePrompt, with a provider that may be disposed while the prompt is stored", () => {
+		const buildState = (state: Record<string, unknown> | undefined) => {
+			Object.assign(mockClineProvider, { buildStateUnlessDisposed: vi.fn().mockResolvedValue(state) })
+			vi.mocked(mockClineProvider.postMessageToWebview).mockClear()
+		}
+		afterEach(() => Reflect.deleteProperty(mockClineProvider, "buildStateUnlessDisposed"))
+		const update = () =>
+			webviewMessageHandler(mockClineProvider, {
+				type: "updatePrompt",
+				promptMode: "code",
+				customPrompt: { roleDefinition: "a new role" },
+			})
+
+		it("posts the state with the stored prompts to a provider that is still open", async () => {
+			buildState({ mode: "code" })
+
+			await update()
+
+			expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("customModePrompts", {
+				code: { roleDefinition: "a new role" },
+			})
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "state",
+				state: {
+					mode: "code",
+					customModePrompts: { code: { roleDefinition: "a new role" } },
+					hasOpenedModeSelector: false,
+				},
+			})
+		})
+
+		it("keeps the flag of the mode selector that the state already has", async () => {
+			buildState({ mode: "code", hasOpenedModeSelector: true })
+
+			await update()
+
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ state: expect.objectContaining({ hasOpenedModeSelector: true }) }),
+			)
+		})
+
+		it("stores the prompt but shows it to no one when the provider was disposed meanwhile", async () => {
+			buildState(undefined)
+
+			await update()
+
+			expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("customModePrompts", expect.anything())
+			expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "state" }),
+			)
+		})
+	})
+
 	describe("when the provider is disposed while the writes are in flight", () => {
 		/** The view is closed while a write is being made: the provider reports it from then on. */
 		const disposeNow = () =>
@@ -2499,6 +2553,7 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 		afterEach(() => {
 			vi.useRealTimers()
 			Reflect.deleteProperty(mockClineProvider, "isDisposed")
+			resetStoreInOrder() // a store that never settled is still in line: the next test starts without it
 		})
 
 		/** The store of `key` never settles, as a hung `globalState.update` would not. */
@@ -2562,6 +2617,44 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			for (const settle of stalled) settle()
 			await vi.advanceTimersByTimeAsync(0)
 			await vi.advanceTimersByTimeAsync(0)
+		})
+
+		it("does not let a store that timed out land after the store of a newer save of the same key", async () => {
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			const lands: Array<() => void> = []
+			const stores: unknown[] = []
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				(k: string, v: unknown): Promise<void> => {
+					if (k !== "openRouterImageApiKey") return real(k as never, v as never) as Promise<void>
+					stores.push(v)
+					// The older store is slow to reach the storage; it writes its value when it lands.
+					return new Promise<void>((resolve) =>
+						lands.push(() => {
+							stored[k] = v
+							resolve()
+						}),
+					)
+				},
+			)
+
+			const older = save({ interfaceFontScale: 120, openRouterImageApiKey: "old-key" }, "save-1")
+			const olderFailed = expect(older).rejects.toThrow("did not finish in 15 seconds")
+			await vi.advanceTimersByTimeAsync(15_000)
+			await olderFailed
+
+			// The webview sends the save again with the key the user has since typed.
+			const newer = save({ interfaceFontScale: 120, openRouterImageApiKey: "new-key" }, "save-2")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(stores).toEqual(["old-key"]) // the newer store waits for the older one: it is not started beside it
+
+			lands[0]() // the older store lands at last ...
+			await vi.advanceTimersByTimeAsync(0)
+			expect(stores).toEqual(["old-key", "new-key"]) // ... and then the newer one is stored
+			lands[1]()
+			await vi.advanceTimersByTimeAsync(0)
+			await expect(newer).resolves.toBeUndefined() // it was stored within its time: the save works
+
+			expect(stored.openRouterImageApiKey).toBe("new-key") // the newer value is what is stored
 		})
 
 		it("keeps nothing for repeated saves that time out", async () => {
@@ -2668,6 +2761,27 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 				expect(vi.getTimerCount()).toBe(0)
 				releases[0]()
+			})
+
+			it("does not start a disable that waited behind a stalled enable once its save has timed out", async () => {
+				const { hub, releases } = stalledHub()
+				const failed = (value: Promise<unknown>) =>
+					expect(value).rejects.toThrow("did not finish in 15 seconds")
+
+				const enable = failed(save({ interfaceFontScale: 120, mcpEnabled: true }, "save-1")) // stalls
+				await vi.advanceTimersByTimeAsync(15_000)
+				await enable
+				const disable = failed(save({ interfaceFontScale: 120, mcpEnabled: false }, "save-2")) // waits behind it
+				await vi.advanceTimersByTimeAsync(15_000)
+				await disable
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
+
+				releases[0]() // the enable lands at last
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(0)
+
+				// The disable of the save that timed out was dropped: the servers are not disconnected, and not reconnected.
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
 			})
 
 			it("brings the hub back to the stored setting when a timed-out disable lands late", async () => {

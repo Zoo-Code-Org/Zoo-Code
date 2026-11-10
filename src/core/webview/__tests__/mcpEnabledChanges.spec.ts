@@ -1,4 +1,4 @@
-import { changeMcpEnabled, reconcileMcpEnabled } from "../mcpEnabledChanges"
+import { changeMcpEnabled, reconcileMcpEnabled, type McpOwner } from "../mcpEnabledChanges"
 
 const createHub = () => {
 	const releases: Array<() => void> = []
@@ -7,6 +7,12 @@ const createHub = () => {
 	}
 	return { hub, releases }
 }
+
+/** A provider, as far as a reconciliation asks of it: the stored setting, and whether it was closed. */
+const ownerOf = (stored: () => boolean, disposed = false): McpOwner => ({
+	isDisposed: disposed,
+	contextProxy: { getValue: () => stored() },
+})
 
 describe("changeMcpEnabled", () => {
 	it("applies a change, and nothing is kept once it is done", async () => {
@@ -151,6 +157,124 @@ describe("changeMcpEnabled", () => {
 		})
 	})
 
+	describe("a save that gives up on the change that waits for its turn", () => {
+		it("drops the change when it is the only save that asked for it, so it does not start later", async () => {
+			const { hub, releases } = createHub()
+			const giveUp = new AbortController()
+
+			void changeMcpEnabled(hub, true) // stalled
+			const waiting = changeMcpEnabled(hub, false, giveUp.signal) // behind it
+			const rejected = expect(waiting).rejects.toThrow("save timed out")
+			giveUp.abort(new Error("save timed out"))
+			await rejected
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]() // the stalled change lands at last
+			await new Promise((resolve) => setTimeout(resolve, 20))
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]]) // the disable never starts
+		})
+
+		it("keeps the change that another save still waits for, with the value of the one that is left", async () => {
+			const { hub, releases } = createHub()
+			const first = new AbortController()
+			const second = new AbortController()
+
+			void changeMcpEnabled(hub, true) // stalled
+			const a = changeMcpEnabled(hub, false, first.signal)
+			const b = changeMcpEnabled(hub, true, second.signal) // the latest value that is asked for ...
+			expect(b).toBe(a)
+			const aLeft = a.catch(() => undefined)
+			second.abort(new Error("gave up")) // ... is given up on: the value of the other save is what waits
+
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await aLeft
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
+		})
+
+		it("drops the change only when every save that asked for it has given up", async () => {
+			const { hub, releases } = createHub()
+			const first = new AbortController()
+			const second = new AbortController()
+
+			void changeMcpEnabled(hub, true)
+			const waiting = changeMcpEnabled(hub, false, first.signal)
+			void changeMcpEnabled(hub, false, second.signal)
+			const rejected = expect(waiting).rejects.toThrow("gave up")
+			first.abort(new Error("gave up"))
+			await Promise.resolve()
+			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1) // one save is still waiting for it
+			second.abort(new Error("gave up"))
+			await rejected
+
+			releases[0]()
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
+		})
+
+		it("cannot take back a change that has started: it goes on, and a save that joined it is not affected", async () => {
+			const { hub, releases } = createHub()
+			const giveUp = new AbortController()
+
+			const running = changeMcpEnabled(hub, false, giveUp.signal) // starts at once
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			giveUp.abort(new Error("gave up"))
+			releases[0]()
+
+			await expect(running).resolves.toBeUndefined()
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false]])
+		})
+
+		it("is not affected when the save gives up after the change has already started", async () => {
+			const { hub, releases } = createHub()
+			const giveUp = new AbortController()
+
+			void changeMcpEnabled(hub, true) // stalled
+			const waiting = changeMcpEnabled(hub, false, giveUp.signal)
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]() // it lands, and the waiting change starts
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			giveUp.abort(new Error("gave up")) // too late: it is under way, and cannot be taken back
+			releases[1]()
+
+			await expect(waiting).resolves.toBeUndefined()
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
+		})
+
+		it("makes no change for a signal that has already been aborted", async () => {
+			const { hub } = createHub()
+			const giveUp = new AbortController()
+			giveUp.abort(new Error("already gone"))
+
+			await expect(changeMcpEnabled(hub, false, giveUp.signal)).rejects.toThrow("already gone")
+
+			expect(hub.handleMcpEnabledChange).not.toHaveBeenCalled()
+		})
+
+		it("removes the listener that it added to the signal once the change is done", async () => {
+			const { hub, releases } = createHub()
+			const controller = new AbortController()
+			const add = vi.spyOn(controller.signal, "addEventListener")
+			const remove = vi.spyOn(controller.signal, "removeEventListener")
+
+			void changeMcpEnabled(hub, true)
+			const waiting = changeMcpEnabled(hub, false, controller.signal)
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await waiting
+
+			const added = add.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+			const removed = remove.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+			expect(added).toHaveLength(1)
+			expect(removed).toEqual(added) // the one that was added is the one that is removed
+		})
+	})
+
 	describe("reconcileMcpEnabled", () => {
 		it("applies the stored value once the changes in line have settled, and only once for several saves that gave up", async () => {
 			const { hub, releases } = createHub()
@@ -158,7 +282,8 @@ describe("changeMcpEnabled", () => {
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 
 			const getStored = vi.fn(() => true)
-			const reconciles = Array.from({ length: 20 }, () => reconcileMcpEnabled(hub, getStored))
+			const owner = ownerOf(getStored)
+			const reconciles = Array.from({ length: 20 }, () => reconcileMcpEnabled(hub, owner))
 			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 			releases[0]()
 			await vi.waitFor(() => expect(releases).toHaveLength(2))
@@ -174,7 +299,10 @@ describe("changeMcpEnabled", () => {
 			let stored = true
 			void changeMcpEnabled(hub, false)
 			const waiting = changeMcpEnabled(hub, true)
-			const reconcile = reconcileMcpEnabled(hub, () => stored)
+			const reconcile = reconcileMcpEnabled(
+				hub,
+				ownerOf(() => stored),
+			)
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 			releases[0]()
 			await vi.waitFor(() => expect(releases).toHaveLength(2))
@@ -190,12 +318,12 @@ describe("changeMcpEnabled", () => {
 
 		it("checks again after its own change, so a change that joined while it ran does not leave the hub other than what is stored", async () => {
 			const { hub, releases } = createHub()
-			const stored = () => true // MCP stays stored as enabled: a later save that asked for false never stored it
+			const owner = ownerOf(() => true) // MCP stays stored as enabled: a later save that asked for false never stored it
 
-			const reconcile = reconcileMcpEnabled(hub, stored) // nothing was applied before: it applies true, which stalls
+			const reconcile = reconcileMcpEnabled(hub, owner) // nothing was applied before: it applies true, which stalls
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 			const timedOut = changeMcpEnabled(hub, false) // a second save: queued behind it
-			const second = reconcileMcpEnabled(hub, stored) // and its reconciliation joins the one that runs
+			const second = reconcileMcpEnabled(hub, owner) // and its reconciliation joins the one that runs
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
 
 			releases[0]() // true settles, and the waiting false starts
@@ -217,9 +345,10 @@ describe("changeMcpEnabled", () => {
 					.mockResolvedValue(undefined),
 			}
 
-			await reconcileMcpEnabled(flaky, () => true) // fails
-			await reconcileMcpEnabled(flaky, () => true) // the same stored value: tried again, and it lands
-			await reconcileMcpEnabled(flaky, () => true) // and now the hub is known to have it
+			const owner = ownerOf(() => true)
+			await reconcileMcpEnabled(flaky, owner) // fails
+			await reconcileMcpEnabled(flaky, owner) // the same stored value: tried again, and it lands
+			await reconcileMcpEnabled(flaky, owner) // and now the hub is known to have it
 
 			expect(flaky.handleMcpEnabledChange.mock.calls).toEqual([[true], [true]])
 		})
@@ -227,7 +356,10 @@ describe("changeMcpEnabled", () => {
 		it("does not repeat a change that failed, so it cannot loop", async () => {
 			const failing = { handleMcpEnabledChange: vi.fn(async () => Promise.reject(new Error("transport stuck"))) }
 
-			await reconcileMcpEnabled(failing, () => true)
+			await reconcileMcpEnabled(
+				failing,
+				ownerOf(() => true),
+			)
 
 			expect(failing.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		})
@@ -237,21 +369,107 @@ describe("changeMcpEnabled", () => {
 			void changeMcpEnabled(hub, false)
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 
-			const reconcile = reconcileMcpEnabled(hub, () => false)
+			const reconcile = reconcileMcpEnabled(
+				hub,
+				ownerOf(() => false),
+			)
 			releases[0]()
 			await reconcile
 
 			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		})
 
+		it("asks no provider that has been closed, and applies nothing for it", async () => {
+			const { hub, releases } = createHub()
+			void changeMcpEnabled(hub, false)
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			const closed = ownerOf(() => true, true)
+
+			const reconcile = reconcileMcpEnabled(hub, closed) // the provider that asked was closed meanwhile
+			releases[0]()
+			await reconcile
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false]]) // nothing that a closed provider stores is applied
+		})
+
+		it("uses a provider that is still open when the one that asked first was closed, with a shared hub", async () => {
+			const { hub, releases } = createHub()
+			void changeMcpEnabled(hub, false)
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			let closedNow = false
+			const first: McpOwner = {
+				get isDisposed() {
+					return closedNow
+				},
+				contextProxy: { getValue: () => true },
+			}
+			const second = ownerOf(() => true)
+
+			const a = reconcileMcpEnabled(hub, first)
+			const b = reconcileMcpEnabled(hub, second) // the call is joined by the one that runs
+			closedNow = true // the first provider is closed while the change is stalled
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await Promise.all([a, b])
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false], [true]]) // the open provider's setting is applied
+		})
+
+		it("does not keep a provider that asked: only a weak reference to it is held", () => {
+			const { hub } = createHub()
+			const owner = ownerOf(() => true)
+			const refs: WeakRef<object>[] = []
+			const original = globalThis.WeakRef
+			globalThis.WeakRef = class<T extends object> extends original<T> {
+				constructor(target: T) {
+					super(target)
+					refs.push(this)
+				}
+			} as unknown as typeof WeakRef
+			try {
+				void reconcileMcpEnabled(hub, owner)
+			} finally {
+				globalThis.WeakRef = original
+			}
+
+			expect(refs).toHaveLength(1)
+			expect(refs[0].deref()).toBe(owner)
+		})
+
+		it("goes on when the change that it waits for fails, and applies what is stored", async () => {
+			const rejects: Array<(error: unknown) => void> = []
+			const hub = {
+				handleMcpEnabledChange: vi
+					.fn<(enabled: boolean) => Promise<void>>()
+					.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => rejects.push(reject)))
+					.mockResolvedValue(undefined),
+			}
+			void changeMcpEnabled(hub, true).catch(() => undefined) // stalls, and then fails
+			await vi.waitFor(() => expect(rejects).toHaveLength(1))
+			const owner = ownerOf(() => false)
+
+			const reconcile = reconcileMcpEnabled(hub, owner)
+			rejects[0](new Error("transport stuck"))
+			await reconcile
+
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
+		})
+
 		it("can be started again after it is done", async () => {
 			const { hub, releases } = createHub()
-			const first = reconcileMcpEnabled(hub, () => true) // nothing was ever applied: the stored value is applied
+			const first = reconcileMcpEnabled(
+				hub,
+				ownerOf(() => true),
+			) // nothing was ever applied: the stored value is applied
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 			releases[0]()
 			await first
 
-			const again = reconcileMcpEnabled(hub, () => false)
+			const again = reconcileMcpEnabled(
+				hub,
+				ownerOf(() => false),
+			)
 			await vi.waitFor(() => expect(releases).toHaveLength(2))
 			releases[1]()
 			await again
