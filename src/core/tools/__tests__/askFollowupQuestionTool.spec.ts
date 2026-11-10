@@ -18,6 +18,7 @@ describe("AskFollowupQuestionTool", () => {
 		tool = new AskFollowupQuestionTool()
 
 		mockTask = {
+			userMessageContent: [],
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			didToolFailInCurrentTurn: false,

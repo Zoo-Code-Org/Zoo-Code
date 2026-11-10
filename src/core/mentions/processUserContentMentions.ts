@@ -8,6 +8,16 @@ import type { SkillLookup } from "../../services/skills/skillInvocation"
 type TextPart = Anthropic.Messages.TextBlockParam
 type ImagePart = Anthropic.Messages.ImageBlockParam
 
+// Authorization stays in memory and cannot be forged by message text or restored history.
+const authorizedInputs = new WeakMap<TextPart, { text: string; input: string }>()
+
+/** Call only at a user-input boundary, before adding lower-trust context. */
+export function userMentionContent(text: string, input: string = text): TextPart {
+	const block: TextPart = { type: "text", text }
+	if (input && text.includes(input)) authorizedInputs.set(block, { text, input })
+	return block
+}
+
 export interface ProcessUserContentMentionsResult {
 	content: Anthropic.Messages.ContentBlockParam[]
 	mode?: string // Mode from the first slash command that has one
@@ -26,7 +36,7 @@ function contentBlocksToTextParts(contentBlocks: MentionContentBlock[]): TextPar
 }
 
 /**
- * Process mentions in user content, specifically within task and feedback tags.
+ * Process mentions only in explicitly authorized user input.
  *
  * File/folder @ mentions are now returned as separate text blocks that
  * look like read_file tool results, making it clear to the model that
@@ -57,16 +67,15 @@ export async function processUserContentMentions({
 	let commandMode: string | undefined
 
 	// Process userContent array, which contains text and image parts.
-	// We need to apply parseMentions() to TextPart's text that contains "<user_message>".
+	// Tool results and unmarked text never authorize resource access.
 	const content = (
 		await Promise.all(
 			userContent.map(async (block) => {
-				const shouldProcessMentions = (text: string) => text.includes("<user_message>")
-
 				if (block.type === "text") {
-					if (shouldProcessMentions(block.text)) {
+					const authorized = authorizedInputs.get(block)
+					if (authorized && authorized.text === block.text) {
 						const result = await parseMentions(
-							block.text,
+							authorized.input,
 							cwd,
 							fileContextTracker,
 							rooIgnoreController,
@@ -88,7 +97,7 @@ export async function processUserContentMentions({
 						const blocks: Array<TextPart | ImagePart> = [
 							{
 								...block,
-								text: result.text,
+								text: block.text.replace(authorized.input, () => result.text),
 							},
 						]
 
@@ -104,110 +113,6 @@ export async function processUserContentMentions({
 							})
 						}
 						return blocks
-					}
-
-					return block
-				} else if (block.type === "tool_result") {
-					if (typeof block.content === "string") {
-						if (shouldProcessMentions(block.content)) {
-							const result = await parseMentions(
-								block.content,
-								cwd,
-								fileContextTracker,
-								rooIgnoreController,
-								showRooIgnoredFiles,
-								includeDiagnosticMessages,
-								maxDiagnosticMessages,
-								skillsManager,
-								currentMode,
-							)
-							// Capture the first mode found
-							if (!commandMode && result.mode) {
-								commandMode = result.mode
-							}
-
-							// Build content array with file blocks included
-							const contentParts: Array<{ type: "text"; text: string }> = [
-								{
-									type: "text" as const,
-									text: result.text,
-								},
-							]
-
-							// Add file/folder content blocks
-							for (const contentBlock of result.contentBlocks) {
-								contentParts.push({
-									type: "text" as const,
-									text: contentBlock.content,
-								})
-							}
-
-							if (result.slashCommandHelp) {
-								contentParts.push({
-									type: "text" as const,
-									text: result.slashCommandHelp,
-								})
-							}
-
-							return {
-								...block,
-								content: contentParts,
-							}
-						}
-
-						return block
-					} else if (Array.isArray(block.content)) {
-						const parsedContent = (
-							await Promise.all(
-								block.content.map(async (contentBlock) => {
-									if (contentBlock.type === "text" && shouldProcessMentions(contentBlock.text)) {
-										const result = await parseMentions(
-											contentBlock.text,
-											cwd,
-											fileContextTracker,
-											rooIgnoreController,
-											showRooIgnoredFiles,
-											includeDiagnosticMessages,
-											maxDiagnosticMessages,
-											skillsManager,
-											currentMode,
-										)
-										// Capture the first mode found
-										if (!commandMode && result.mode) {
-											commandMode = result.mode
-										}
-
-										// Build blocks array with file content
-										const blocks: Array<{ type: "text"; text: string }> = [
-											{
-												...contentBlock,
-												text: result.text,
-											},
-										]
-
-										// Add file/folder content blocks
-										for (const cb of result.contentBlocks) {
-											blocks.push({
-												type: "text" as const,
-												text: cb.content,
-											})
-										}
-
-										if (result.slashCommandHelp) {
-											blocks.push({
-												type: "text" as const,
-												text: result.slashCommandHelp,
-											})
-										}
-										return blocks
-									}
-
-									return contentBlock
-								}),
-							)
-						).flat()
-
-						return { ...block, content: parsedContent }
 					}
 
 					return block
