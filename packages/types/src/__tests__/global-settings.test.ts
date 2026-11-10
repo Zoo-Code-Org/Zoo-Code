@@ -39,36 +39,6 @@ describe("alwaysDenyUnapprovedCommands global setting", () => {
 		expect(() => globalSettingsSchema.parse({ alwaysDenyUnapprovedCommands: "true" })).toThrow()
 	})
 })
-describe("viewStates global setting", () => {
-	it("accepts a persisted per-view record", () => {
-		const parsed = globalSettingsSchema.parse({
-			viewStates: {
-				"view-1": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1_700_000_000_000 },
-			},
-		})
-
-		expect(GLOBAL_SETTINGS_KEYS).toContain("viewStates")
-		expect(parsed.viewStates?.["view-1"]).toEqual({
-			mode: "architect",
-			currentApiConfigName: "profile-a",
-			updatedAt: 1_700_000_000_000,
-		})
-	})
-
-	it("accepts an empty entry because every field is optional", () => {
-		const parsed = globalSettingsSchema.parse({ viewStates: { "view-1": {} } })
-
-		expect(parsed.viewStates?.["view-1"]).toEqual({})
-	})
-
-	it("rejects malformed fields, non-object entries and non-record values", () => {
-		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": { mode: 7 } } })).toThrow()
-		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": { updatedAt: "now" } } })).toThrow()
-		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": "architect" } })).toThrow()
-		expect(() => globalSettingsSchema.parse({ viewStates: "view-1" })).toThrow()
-	})
-})
-
 describe("collapseCommandOutputByDefault global setting", () => {
 	it.each([true, false, undefined])("round-trips %s through the export/import schema", (value) => {
 		const settings = globalSettingsSchema.parse({ collapseCommandOutputByDefault: value })
@@ -96,6 +66,18 @@ describe("viewStates global setting", () => {
 			"session-1": { mode: "code", currentApiConfigName: "default", updatedAt: 1700000000000 },
 			"session-2": { mode: "architect" },
 		})
+
+		// The key list is part of the contract: a setting that never reaches
+		// GLOBAL_SETTINGS_KEYS is not a persisted setting, whatever the schema does.
+		expect(GLOBAL_SETTINGS_KEYS).toContain("viewStates")
+	})
+
+	it("accepts an empty entry because every field is optional", () => {
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": {} } })).not.toThrow()
+		// The control that makes the line above a test: an absent viewStates is omitted
+		// rather than defaulted, so an empty entry is a record and not the same shape
+		// as nothing at all.
+		expect(globalSettingsSchema.parse({}).viewStates).toBeUndefined()
 	})
 
 	it("parses a single view state on its own", () => {
@@ -145,5 +127,9 @@ describe("viewStates global setting", () => {
 
 		expect(result.success).toBe(false)
 		expect(result.error?.issues[0]?.path).toEqual(["viewStates", "a"])
+
+		// A null entry fails for a different reason than a string entry: the record
+		// type tolerates an absent value and rejects a present non-object one.
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": null } })).toThrow()
 	})
 })
