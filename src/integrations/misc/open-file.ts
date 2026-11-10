@@ -8,6 +8,10 @@ interface OpenFileOptions {
 	create?: boolean
 	content?: string
 	line?: number
+	// Validated change-card paths opt out of the decode below: they
+	// are filesystem paths, and decoding a validated path would shift it
+	// after containment (a literal "a%20b.ts" must open as named).
+	skipDecode?: boolean
 }
 
 export async function openFile(filePath: string, options: OpenFileOptions = {}) {
@@ -15,12 +19,16 @@ export async function openFile(filePath: string, options: OpenFileOptions = {}) 
 		// Store the original path for error messages before any modifications
 		const originalFilePathForError = filePath
 
-		// Try to decode the URI component, but if it fails, use the original path
-		try {
-			filePath = decodeURIComponent(filePath)
-		} catch (decodeError) {
-			// If decoding fails (e.g., invalid escape sequences), continue with the original path
-			console.warn(`Failed to decode file path: ${decodeError}. Using original path.`)
+		// Try to decode the URI component, but if it fails, use the original
+		// path. Validated change-card paths opt out (skipDecode): they were
+		// contained as literals and must open exactly as named.
+		if (!options.skipDecode) {
+			try {
+				filePath = decodeURIComponent(filePath)
+			} catch (decodeError) {
+				// If decoding fails (e.g., invalid escape sequences), continue with the original path
+				console.warn(`Failed to decode file path: ${decodeError}. Using original path.`)
+			}
 		}
 
 		const workspaceRoot = getWorkspacePath()
