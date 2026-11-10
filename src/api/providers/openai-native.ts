@@ -500,10 +500,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
-		// Create a request-local AbortController for cancellation. It is exposed via
-		// this.abortController so the stop-button path can observe it, but all bridging
+		// Create a request-local AbortController for cancellation. The field is still
+		// assigned so the finally can tell which request still owns it, but all bridging
 		// below captures the local reference so a late abort from an earlier request can
-		// never reach a later request's controller.
+		// never reach a later request's controller. The field is not a cancellation
+		// entry point and is not how a stop is delivered: the only reads of it in this
+		// file are the two ownership checks in the finallys, and a cancellation arrives
+		// from the caller's signal, bridged by attachExternalAbort below.
 		const requestController = new AbortController()
 		this.abortController = requestController
 
@@ -586,15 +589,24 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					// client sends error.message straight to PostHog, so this path reports a fixed
 					// message plus the numeric status in errorCode, which the client turns into a
 					// structured property. The propagated object still carries the provider text.
-					TelemetryService.instance.captureException(
-						new ApiProviderError(
-							`${this.providerName} createMessage request failed with a status-bearing error after the caller aborted`,
-							this.providerName,
-							failedModel.id,
-							"createMessage",
-							getNumericHttpStatus(sdkErr),
-						),
-					)
+					// Telemetry must not decide what the caller receives: an uninitialized singleton
+					// getter or a throwing client would otherwise replace the SDK error below
+					// and discard the numeric status its retry reads, so the capture is
+					// contained here.
+					try {
+						TelemetryService.instance.captureException(
+							new ApiProviderError(
+								`${this.providerName} createMessage request failed with a status-bearing error after the caller aborted`,
+								this.providerName,
+								failedModel.id,
+								"createMessage",
+								getNumericHttpStatus(sdkErr),
+							),
+						)
+					} catch {
+						// Discarded on purpose: the capture is best-effort and the propagated
+						// sdkErr is the caller's contract.
+					}
 					throw sdkErr
 				}
 				throw createAbortError(this.providerName)
@@ -739,10 +751,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
 		const url = `${baseUrl}/v1/responses`
 
-		// Create a request-local AbortController for cancellation. It is exposed via
-		// this.abortController so the stop-button path can observe it, but the bridging
+		// Create a request-local AbortController for cancellation. The field is still
+		// assigned for the ownership check in the finally below, but the bridging
 		// listener captures the local reference so a late abort from an earlier request
-		// can never reach a later request's controller.
+		// can never reach a later request's controller. Cancellation arrives through
+		// the caller's signal via attachExternalAbort; nothing aborts a request by
+		// reading this field.
 		const requestController = new AbortController()
 		this.abortController = requestController
 
@@ -930,6 +944,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 				const { done, value } = await reader.read()
 				if (done) {
+					// A body that closes in the same turn the caller aborts is still a
+					// cancellation. The check above ran before this read, so recheck here
+					// instead of exiting normally: otherwise a request the caller stopped
+					// resolves with the partial stream the stop was meant to avoid.
+					if (requestController.signal.aborted) {
+						throw createAbortError(this.providerName)
+					}
 					break
 				}
 

@@ -1209,6 +1209,166 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockCaptureException).not.toHaveBeenCalled()
 			})
 
+			it("rejects with the contract AbortError when the fallback body closes in the turn the caller aborts", async () => {
+				// The loop-boundary check runs before reader.read(), so a done that lands while the
+				// cancellation is pending used to end the generator normally: the caller received a
+				// completed partial stream for a request it had already stopped. The pull after the
+				// first chunk stays parked until this test releases it, which is the turn the abort
+				// lands in; releasing it closes the body so read() resolves { done: true }.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				let parkedOnSecondPull = false
+				let releaseParkedPull: (() => void) | undefined
+				const mockFetch = vitest.fn().mockImplementation(() => {
+					const encoder = new TextEncoder()
+					let pulls = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull: (streamController) => {
+							pulls++
+							if (pulls === 1) {
+								streamController.enqueue(
+									encoder.encode('data: {"type":"response.output_text.delta","delta":"partial"}\n\n'),
+								)
+								return
+							}
+							parkedOnSecondPull = true
+							return new Promise<void>((resolve) => {
+								releaseParkedPull = () => {
+									streamController.close()
+									resolve()
+								}
+							})
+						},
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const signalController = new AbortController()
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: signalController.signal }),
+				)
+				const iterator = stream[Symbol.asyncIterator]()
+				const first = await iterator.next()
+				expect(first.done).toBe(false)
+				expect(first.value).toMatchObject({ type: "text", text: "partial" })
+
+				// Start the next pull before cancelling, so the abort lands after the loop-boundary
+				// check has passed and while read() is pending.
+				const pending = iterator.next()
+				await tick()
+				expect(parkedOnSecondPull).toBe(true)
+				signalController.abort()
+				releaseParkedPull!()
+
+				await expect(pending).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
+				// A stop is not a provider failure to report.
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			})
+
+			it("cancels the open fallback body and releases the reader lock when the consumer abandons the stream", async () => {
+				// Regression evidence for the failed pre-merge check: a consumer that stops early (the
+				// stop-button path) must tear the socket down instead of leaving the body open. Nothing
+				// here aborts, so the early exit alone has to do the cancelling.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				let cancelCalls = 0
+				// One SSE chunk, then the body stays open: no close, no abort, no error.
+				const body = new ReadableStream<Uint8Array>({
+					start: (streamController) => {
+						streamController.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_text.delta","delta":"partial"}\n\n',
+							),
+						)
+					},
+					cancel: () => {
+						cancelCalls++
+					},
+				})
+				const mockFetch = vitest.fn().mockResolvedValue({ ok: true, body })
+				global.fetch = mockFetch as typeof fetch
+
+				const stream = handler.createMessage(systemPrompt, messages, makeCreateMessageMetadata())
+				const iterator = stream[Symbol.asyncIterator]()
+				const first = await iterator.next()
+				expect(first.done).toBe(false)
+				expect(first.value).toMatchObject({ type: "text", text: "partial" })
+				// The provider holds the only reader while the stream is live.
+				expect(body.locked).toBe(true)
+
+				// return() on the generator is the abandonment path a stop takes.
+				const completed = await iterator.return(undefined)
+				expect(completed.done).toBe(true)
+				// The body was still open when the consumer stopped, so the finally had to cancel it.
+				expect(cancelCalls).toBe(1)
+				// A second reader is acquirable only once the lock was released: that is the observable
+				// form of "its reader lock is released".
+				expect(body.locked).toBe(false)
+				expect(() => body.getReader()).not.toThrow()
+				// Abandoning a stream is a stop, not a provider failure to report.
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			})
+
+			it("hands out every event delivered by one pull and only then observes the cancellation", async () => {
+				// This row tests the bound the file states in its own comments: cancellation is observed
+				// between pulls, never between chunks. One read carries three SSE events, so an abort
+				// landing between the yields of that batch must not truncate it, and the next pull is
+				// where the cancellation surfaces. Tightening the bound to per-chunk is a maintainer
+				// decision, and changing it has to change this row.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				const mockFetch = vitest.fn().mockImplementation(() => {
+					const encoder = new TextEncoder()
+					let pulls = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull: (streamController) => {
+							pulls++
+							if (pulls === 1) {
+								streamController.enqueue(
+									encoder.encode(
+										'data: {"type":"response.output_text.delta","delta":"one"}\n\n' +
+											'data: {"type":"response.output_text.delta","delta":"two"}\n\n' +
+											'data: {"type":"response.output_text.delta","delta":"three"}\n\n',
+									),
+								)
+								return
+							}
+							// Never settles: the next pull is where the between-pulls check must fire.
+							return new Promise<void>(() => {})
+						},
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const signalController = new AbortController()
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: signalController.signal }),
+				)
+				const iterator = stream[Symbol.asyncIterator]()
+				const one = await iterator.next()
+				expect(one.value).toMatchObject({ type: "text", text: "one" })
+				signalController.abort()
+				// The rest of the batch was already pulled, so the declared bound hands it out.
+				const two = await iterator.next()
+				expect(two.done).toBe(false)
+				expect(two.value).toMatchObject({ type: "text", text: "two" })
+				const three = await iterator.next()
+				expect(three.done).toBe(false)
+				expect(three.value).toMatchObject({ type: "text", text: "three" })
+				// Only the next pull is a cancellation point.
+				await expect(iterator.next()).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			})
+
 			it("should not convert a non-abort stream error into an AbortError and keeps the full wrapper", async () => {
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 				const mockFetch = vitest.fn().mockImplementation(() => {
@@ -1540,6 +1700,45 @@ describe("OpenAiNativeHandler", () => {
 				// The attribution is the reason for capturing it: retry and the error surface read
 				// operation, so an empty or missing one has to fail here rather than pass quietly.
 				expect(mockCaptureException.mock.calls[0]?.[0]).toMatchObject({ operation: "createMessage" })
+			})
+
+			it("propagates the original SDK error when the abort-race telemetry capture itself throws", async () => {
+				// The capture sits between the status branch and the rethrow, so a throwing telemetry
+				// client (or an uninitialized singleton getter) must not become the error the caller
+				// sees: the guard contains it and the exact SDK object still propagates.
+				const mockFetch = vitest.fn()
+				global.fetch = mockFetch as typeof fetch
+				const controller = new AbortController()
+				const rateLimited = Object.assign(new Error("Rate limit exceeded"), { status: 429 })
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						options?.signal?.addEventListener("abort", () => reject(rateLimited), { once: true })
+					})
+				})
+				// Force the guarded path: the capture throws once, on the way to the rethrow.
+				mockCaptureException.mockImplementationOnce(() => {
+					throw new Error("Telemetry client unavailable")
+				})
+
+				const collected = collectStream(
+					handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				)
+				await tick()
+				controller.abort()
+
+				const error = await collected.then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				// Not the telemetry failure and not a wrapper: the SDK object retry needs to read.
+				expect(error).toBe(rateLimited)
+				// Containment is not suppression: the failure still has to be reported.
+				expect(mockCaptureException).toHaveBeenCalledTimes(1)
+				expect(mockFetch).not.toHaveBeenCalled()
 			})
 
 			it("keeps the provider's own error text out of the abort-race telemetry capture", async () => {
