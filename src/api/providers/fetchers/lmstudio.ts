@@ -3,7 +3,7 @@ import { z } from "zod"
 
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
-import { isTimeoutAbort, mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
+import { isTimeoutAbort, mergeAbortSignalAndTimeout, settleOnAbort, throwIfAborted } from "../utils/abort-signal"
 import { getLoggableOrigin } from "../utils/endpoint-origin"
 import { normalizeLMStudioBaseUrl } from "../utils/lmstudio"
 
@@ -43,7 +43,9 @@ type Instance = z.infer<typeof instanceSchema>
 // Loading large model files can take minutes; discovery keeps its shorter deadline.
 export const LM_STUDIO_MODEL_LOAD_TIMEOUT_MS = 10 * 60_000
 const modelsWithLoadedDetails = new Map<string, Set<string>>()
-const pendingLoads = new Map<string, Promise<void>>()
+const serverVersions = new Map<string, "v1" | "v0" | "openai">()
+type PendingLoad = { promise: Promise<void>; controller: AbortController; waiters: number }
+const pendingLoads = new Map<string, PendingLoad>()
 // Runtime aliases support saved selections without adding entries to model dropdowns.
 const instanceAliases = new Map<string, Map<string, ModelInfo>>()
 
@@ -70,6 +72,9 @@ async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
 				const parsed = nativeModelSchema.safeParse(entry)
 				return parsed.success ? [parsed.data] : []
 			})
+			const dropped = parsedList.data.models.length - models.length
+			if (dropped)
+				console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} dropped ${dropped} invalid catalog entries`)
 			return { version: "v1" as const, models }
 		}
 		const serverError = errorBodySchema.safeParse(data)
@@ -81,6 +86,7 @@ async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
 		if (!isUnsupportedEndpoint(error)) throw error
 	}
 
+	console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} falling back to /api/v0/models`)
 	try {
 		const { data } = await axios.get<unknown>(`${baseUrl}/api/v0/models`, { signal })
 		const parsedList = legacyListSchema.safeParse(data)
@@ -94,6 +100,9 @@ async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
 		if (!isUnsupportedEndpoint(error)) throw error
 	}
 
+	console.warn(
+		`LM Studio at ${getLoggableOrigin(baseUrl)} falling back to OpenAI-compatible discovery without vision or context metadata`,
+	)
 	let data: unknown
 	try {
 		;({ data } = await axios.get<unknown>(`${baseUrl}/v1/models`, { signal }))
@@ -130,7 +139,11 @@ function logModelError(action: string, error: unknown, baseUrl: string) {
 	} else {
 		console.error(
 			`Error ${action} LMStudio models at ${getLoggableOrigin(baseUrl)}:`,
-			error instanceof Error ? error.message : String(error),
+			axios.isAxiosError(error)
+				? `${error.message} (status=${error.response?.status ?? "none"}, code=${error.code ?? "none"})`
+				: error instanceof Error
+					? error.message
+					: String(error),
 		)
 	}
 }
@@ -139,17 +152,25 @@ export const forceFullModelDetailsLoad = async (
 	baseUrl: string | undefined,
 	modelId: string,
 	handler: ApiHandler,
+	signal?: AbortSignal,
 ): Promise<void> => {
 	baseUrl = normalizeLMStudioBaseUrl(baseUrl)
 	try {
+		throwIfAborted(signal)
+		const version = serverVersions.get(baseUrl)
+		if (version && version !== "v1") return
 		// Acquire the slot before discovery so a late catalog response cannot start
 		// another load after an earlier caller has finished. An unloaded model can
 		// only resolve by its catalog key; instance aliases already imply a load.
 		const loadKey = JSON.stringify([baseUrl, modelId])
 		let pending = pendingLoads.get(loadKey)
 		if (!pending) {
-			pending = (async () => {
-				const catalog = await discoverModels(baseUrl)
+			const controller = new AbortController()
+			const loadSignal = controller.signal
+			const promise = (async () => {
+				const catalog = await discoverModels(baseUrl, loadSignal)
+				throwIfAborted(loadSignal)
+				serverVersions.set(baseUrl, catalog.version)
 				// Older HTTP APIs leave loading to chat/JIT.
 				if (catalog.version !== "v1") return
 				const llms = catalog.models.filter(({ type }) => type === "llm")
@@ -159,19 +180,34 @@ export const forceFullModelDetailsLoad = async (
 				// Preserve unmatched SDK paths for chat rather than guessing a key.
 				if (!model) return
 				if (!selectInstance(model, modelId)) {
+					console.info(`LM Studio model load started at ${getLoggableOrigin(baseUrl)}`)
 					await axios.post(
 						`${baseUrl}/api/v1/models/load`,
 						{ model: model.key },
 						{
-							signal: mergeAbortSignalAndTimeout(undefined, LM_STUDIO_MODEL_LOAD_TIMEOUT_MS),
+							signal: mergeAbortSignalAndTimeout(loadSignal, LM_STUDIO_MODEL_LOAD_TIMEOUT_MS),
 						},
 					)
+					console.info(`LM Studio model load completed at ${getLoggableOrigin(baseUrl)}`)
 				}
+				throwIfAborted(loadSignal)
 				await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, handler, true)
-			})().finally(() => pendingLoads.delete(loadKey))
+			})().finally(() => {
+				if (pendingLoads.get(loadKey)?.promise === promise) pendingLoads.delete(loadKey)
+			})
+			pending = { promise, controller, waiters: 0 }
 			pendingLoads.set(loadKey, pending)
 		}
-		await pending
+		pending.waiters++
+		try {
+			await settleOnAbort(pending.promise, signal, "LM Studio")
+		} finally {
+			pending.waiters--
+			if (pending.waiters === 0) {
+				pending.controller.abort()
+				if (pendingLoads.get(loadKey) === pending) pendingLoads.delete(loadKey)
+			}
+		}
 	} catch (error) {
 		logModelError("refreshing", error, baseUrl)
 	}
@@ -179,7 +215,7 @@ export const forceFullModelDetailsLoad = async (
 
 export async function getLMStudioModels(
 	baseUrl?: string,
-	opts?: { signal?: AbortSignal },
+	opts?: { signal?: AbortSignal; commit?: boolean },
 ): Promise<Record<string, ModelInfo>> {
 	baseUrl = normalizeLMStudioBaseUrl(baseUrl)
 	const models = Object.create(null) as Record<string, ModelInfo>
@@ -219,12 +255,18 @@ export async function getLMStudioModels(
 			for (const model of catalog.models)
 				models[model.id] = { ...lMStudioDefaultModelInfo, description: model.id, supportsImages: false }
 		}
-		modelsWithLoadedDetails.set(baseUrl, loadedDetails)
-		instanceAliases.set(baseUrl, aliases)
+		if (opts?.commit !== false) {
+			serverVersions.set(baseUrl, catalog.version)
+			modelsWithLoadedDetails.set(baseUrl, loadedDetails)
+			instanceAliases.set(baseUrl, aliases)
+		}
 	} catch (error) {
-		throwIfAborted(opts?.signal)
-		modelsWithLoadedDetails.delete(baseUrl)
-		instanceAliases.delete(baseUrl)
+		if (!isTimeoutAbort(opts?.signal)) throwIfAborted(opts?.signal)
+		if (opts?.commit !== false) {
+			serverVersions.delete(baseUrl)
+			modelsWithLoadedDetails.delete(baseUrl)
+			instanceAliases.delete(baseUrl)
+		}
 		logModelError("fetching", error, baseUrl)
 	}
 	return models

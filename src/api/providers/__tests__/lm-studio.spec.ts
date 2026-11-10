@@ -1,6 +1,7 @@
 // npx vitest run api/providers/__tests__/lm-studio.spec.ts
 
 import { LmStudioHandler } from "../lm-studio"
+import * as modelCache from "../fetchers/modelCache"
 import * as lmStudioFetcher from "../fetchers/lmstudio"
 import { ApiHandlerOptions } from "../../../shared/api"
 
@@ -90,6 +91,15 @@ describe("LmStudioHandler abort wiring", () => {
 		}
 	})
 
+	it.each([
+		["", "http://localhost:1234/v1"],
+		["http://h:1234/", "http://h:1234/v1"],
+		["http://h:1234///", "http://h:1234/v1"],
+	])("normalizes OpenAI baseURL %s", (lmStudioBaseUrl, baseURL) => {
+		new LmStudioHandler({ ...options, lmStudioBaseUrl })
+		expect(mockOpenAIConstructor).toHaveBeenLastCalledWith(expect.objectContaining({ baseURL }))
+	})
+
 	it("resolves saved instance metadata separately from the dropdown catalog", () => {
 		const aliasInfo = { contextWindow: 4096, supportsImages: false, supportsPromptCache: true }
 		const aliasSpy = vitest.spyOn(lmStudioFetcher, "getLMStudioModelAlias").mockReturnValue(aliasInfo)
@@ -102,6 +112,22 @@ describe("LmStudioHandler abort wiring", () => {
 		}
 	})
 
+	it("prefers catalog metadata over instance aliases", () => {
+		const catalogInfo = { contextWindow: 8192, supportsImages: false, supportsPromptCache: true }
+		const aliasSpy = vitest
+			.spyOn(lmStudioFetcher, "getLMStudioModelAlias")
+			.mockReturnValue({ ...catalogInfo, contextWindow: 1024 })
+		const cacheSpy = vitest.spyOn(modelCache, "getModelsFromCache").mockReturnValue({ llama2: catalogInfo })
+		try {
+			const handler = new LmStudioHandler(options)
+			expect(handler.getModel()).toEqual({ id: "llama2", info: catalogInfo })
+			expect(aliasSpy).not.toHaveBeenCalled()
+		} finally {
+			aliasSpy.mockRestore()
+			cacheSpy.mockRestore()
+		}
+	})
+
 	it("preserves a saved path ID when catalog metadata is unavailable", () => {
 		const savedId = "lmstudio-community/SmolLM2/SmolLM2-Q8_0.gguf"
 		const handler = new LmStudioHandler({ ...options, lmStudioModelId: savedId })
@@ -111,18 +137,22 @@ describe("LmStudioHandler abort wiring", () => {
 
 	describe.each(["stream", "complete"] as const)("%s model selection errors", (mode) => {
 		it.each([
-			{ status: 404, message: "Model old/path.gguf not found", code: undefined, targeted: true },
-			{ status: 400, message: "No models found", code: undefined, targeted: true },
-			{ status: 404, message: "Unavailable", code: "model_not_found", targeted: true },
-			{ status: 401, message: "Unauthorized", code: undefined, targeted: false },
-			{ status: 400, message: "Context length exceeded", code: undefined, targeted: false },
-			{ status: 404, message: "Endpoint not found", code: undefined, targeted: false },
+			{ status: 400, message: "Unavailable", code: undefined, type: "model_not_found", targeted: true },
+			{ status: 404, message: "Model old/path.gguf not found", code: undefined, type: undefined, targeted: true },
+			{ status: 400, message: "No models found", code: undefined, type: undefined, targeted: true },
+			{ status: 404, message: "Unavailable", code: "model_not_found", type: undefined, targeted: true },
+			{ status: 404, message: "Model does not exist", code: undefined, type: undefined, targeted: true },
+			{ status: 400, message: "Model not available", code: undefined, type: undefined, targeted: true },
+			{ status: 500, message: "Model not found", code: "model_not_found", type: undefined, targeted: false },
+			{ status: 401, message: "Unauthorized", code: undefined, type: undefined, targeted: false },
+			{ status: 400, message: "Context length exceeded", code: undefined, type: undefined, targeted: false },
+			{ status: 404, message: "Endpoint not found", code: undefined, type: undefined, targeted: false },
 		])(
 			"handles $status $message without rewriting the saved selection",
-			async ({ status, message, code, targeted }) => {
+			async ({ status, message, code, type, targeted }) => {
 				const handler = new LmStudioHandler(options)
 				vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
-				lastCreate().mockRejectedValue(Object.assign(new Error(message), { status, error: { code } }))
+				lastCreate().mockRejectedValue(Object.assign(new Error(message), { status, error: { code, type } }))
 				const request =
 					mode === "stream"
 						? collectStream(handler.createMessage("system", []))

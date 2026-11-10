@@ -935,7 +935,7 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			values: { baseUrl: "http://127.0.0.1:4321" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321")
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321", { commit: false })
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 
@@ -947,7 +947,7 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			values: { baseUrl: "" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("", { commit: false })
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 })
