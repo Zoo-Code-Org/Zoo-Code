@@ -12,6 +12,11 @@ vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: { instance: { captureDiffApplicationError: vi.fn() } },
 }))
 
+// The B3a per-write checkpoint path imports core/checkpoints (whose module graph
+// pulls the real DiffViewProvider); these reporting tests do not exercise it.
+vi.mock("../../checkpoints", () => ({ checkpointSave: vi.fn() }))
+vi.mock("../../auto-approval", () => ({ checkAutoApproval: vi.fn().mockResolvedValue({ decision: "deny" }) }))
+
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
