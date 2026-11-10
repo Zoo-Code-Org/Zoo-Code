@@ -19,7 +19,7 @@ function createProvider(taskId: string) {
 		on: vi.fn<ClineProvider["on"]>(),
 		evictCurrentTask: vi.fn<ClineProvider["evictCurrentTask"]>().mockResolvedValue(undefined),
 		postStateToWebview: vi.fn<ClineProvider["postStateToWebview"]>().mockResolvedValue(undefined),
-		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(true),
+		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined),
 		createTask: vi.fn<ClineProvider["createTask"]>().mockResolvedValue(task),
 	})
 }
