@@ -28,8 +28,16 @@ function icaclsSeam(onDump?: [string, string], calls?: string[]): SafeWriteTextO
 		if (onDump && callsMade++ === 0) {
 			const [swapFrom, swapAside] = onDump
 			void (async (): Promise<void> => {
-				await fs.promises.rename(swapFrom, swapAside)
-				await fs.promises.writeFile(swapFrom, "someone else's")
+				try {
+					await fs.promises.rename(swapFrom, swapAside)
+					await fs.promises.writeFile(swapFrom, "someone else's")
+				} catch (swapFailure) {
+					// A swap that cannot happen has to reach the row. Leaving finish uncalled here made the
+					// row sit out the test timeout and report a hang, which is the failure this file exists
+					// to make visible, so the error is handed to the callback instead.
+					finish(swapFailure instanceof Error ? swapFailure : new Error(String(swapFailure)))
+					return
+				}
 				finish()
 			})()
 			return
