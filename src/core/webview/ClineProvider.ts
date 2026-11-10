@@ -426,6 +426,7 @@ export class ClineProvider
 	 * alone lets another window's profile selection leak into this window's tasks.
 	 */
 	private readonly localModeConfigIds = new Map<string, string>()
+	private readonly modeConfigWriteOwners = new Map<string, symbol>()
 
 	/**
 	 * The shared mode map as it was when this window opened. Modes this window has not changed
@@ -2207,6 +2208,7 @@ export class ClineProvider
 	public adoptModeConfigIds(ids: Record<string, string>): void {
 		for (const [mode, id] of Object.entries(ids)) {
 			this.localModeConfigIds.set(mode, id)
+			this.modeConfigWriteOwners.delete(mode)
 		}
 	}
 
@@ -2227,6 +2229,8 @@ export class ClineProvider
 
 	private async writeModeConfig(mode: Mode, id: string): Promise<void> {
 		const previousId = this.localModeConfigIds.get(mode)
+		const owner = Symbol()
+		this.modeConfigWriteOwners.set(mode, owner)
 		this.localModeConfigIds.set(mode, id)
 		try {
 			await this.providerSettingsManager.setModeConfig(mode, id, () => {
@@ -2234,12 +2238,14 @@ export class ClineProvider
 				this.localModeConfigIds.set(mode, id)
 			})
 		} catch (error) {
-			// Keep this window consistent with the shared map the failed write left unchanged.
-			if (this.localModeConfigIds.get(mode) === id) {
+			// Only roll back our optimistic update; an import may have adopted even the same ID.
+			if (this.modeConfigWriteOwners.get(mode) === owner) {
 				if (previousId === undefined) this.localModeConfigIds.delete(mode)
 				else this.localModeConfigIds.set(mode, previousId)
 			}
 			throw error
+		} finally {
+			if (this.modeConfigWriteOwners.get(mode) === owner) this.modeConfigWriteOwners.delete(mode)
 		}
 	}
 
@@ -3833,6 +3839,7 @@ export class ClineProvider
 		await this.providerSettingsManager.resetAllConfigs()
 		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
 		this.localModeConfigIds.clear()
+		this.modeConfigWriteOwners.clear()
 		this.captureInitialModeConfigIds()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()

@@ -202,6 +202,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 		contextProxy: { getGlobalState: vi.fn() },
 		customModesManager: {},
 		upsertProviderProfile: vi.fn().mockResolvedValue(undefined),
+		adoptModeConfigIds: vi.fn(),
 	}
 	return {
 		ClineProvider: Object.assign(
@@ -243,6 +244,21 @@ describe("extension.ts", () => {
 		} as unknown as vscode.ExtensionContext
 
 		settingsUpdatedHandler = undefined
+	})
+
+	test("adopts mode profile mappings from the activation auto-import callback", async () => {
+		const { activate } = await import("../extension")
+		const { autoImportSettings } = await import("../utils/autoImportSettings")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const ids = { code: "imported-id" }
+		vi.mocked(autoImportSettings).mockImplementationOnce(async (_output, options) => {
+			expect(options.onModeConfigIdsImported).toBeTypeOf("function")
+			options.onModeConfigIdsImported?.(ids)
+		})
+
+		await activate(mockContext)
+
+		expect(ClineProvider.getVisibleInstance()!.adoptModeConfigIds).toHaveBeenCalledExactlyOnceWith(ids)
 	})
 
 	test("shares the extension-owned focus tracker with the sidebar and code actions and disposes its listeners", async () => {

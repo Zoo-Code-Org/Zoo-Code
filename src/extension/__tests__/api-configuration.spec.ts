@@ -28,6 +28,7 @@ describe("API - configuration", () => {
 				]),
 			},
 			localModeConfigIds: new Map<string, string>(),
+			modeConfigWriteOwners: new Map<string, symbol>(),
 			modeConfigWrites: new Map<string, Promise<void>>(),
 			initialModeConfigIds: Promise.resolve({}),
 			setModeConfig: ClineProvider.prototype.setModeConfig,

@@ -4547,53 +4547,62 @@ describe("ClineProvider", () => {
 			expect(provider["localModeConfigIds"].has("code")).toBe(false)
 		})
 
-		it.each(["manual", "automatic"])("adopts imported choices through the %s import entry point", async (entry) => {
-			const filePath = "/settings.json"
-			const fsPromises = (await import("fs/promises")).default
-			const originalReadFile = vi.mocked(fsPromises.readFile).getMockImplementation()!
-			vi.mocked(fsPromises.readFile).mockResolvedValue(
-				JSON.stringify({
-					providerProfiles: {
-						currentApiConfigName: "imported",
-						apiConfigs: { imported: { id: "imported-id", apiProvider: providerIdentifiers.anthropic } },
-						modeApiConfigs: { code: "imported-id" },
-					},
-					globalSettings: {},
-				}),
-			)
-			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			const options = {
-				providerSettingsManager: provider.providerSettingsManager,
-				contextProxy: provider.contextProxy,
-				customModesManager: provider.customModesManager,
-				provider,
-			}
-			if (entry === "manual") {
-				vi.mocked(vscode.window.showOpenDialog).mockResolvedValueOnce([makeUri(filePath)])
-				const { importSettingsWithFeedback } = await import("../../config/importExport")
-				await importSettingsWithFeedback(options)
-			} else {
-				const fsUtils = await import("../../../utils/fs")
-				const exists = vi.spyOn(fsUtils, "fileExistsAtPath").mockResolvedValue(true)
-				const originalGetConfiguration = vi.mocked(vscode.workspace.getConfiguration).getMockImplementation()!
-				vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(
-					makeWorkspaceConfiguration({ autoImportSettingsPath: filePath }),
+		it.each(["manual", "automatic", "explicit-path"])(
+			"adopts imported choices through the %s import entry point",
+			async (entry) => {
+				const filePath = "/settings.json"
+				const fsPromises = (await import("fs/promises")).default
+				const originalReadFile = vi.mocked(fsPromises.readFile).getMockImplementation()!
+				vi.mocked(fsPromises.readFile).mockResolvedValue(
+					JSON.stringify({
+						providerProfiles: {
+							currentApiConfigName: "imported",
+							apiConfigs: { imported: { id: "imported-id", apiProvider: providerIdentifiers.anthropic } },
+							modeApiConfigs: { code: "imported-id" },
+						},
+						globalSettings: {},
+					}),
 				)
-				const { autoImportSettings } = await import("../../../utils/autoImportSettings")
-				await autoImportSettings(mockOutputChannel, {
-					...options,
-					onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
-				})
-				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-					expect.stringContaining("Successfully imported settings"),
-				)
-				exists.mockRestore()
-				vi.mocked(vscode.workspace.getConfiguration).mockImplementation(originalGetConfiguration)
-			}
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
-			await expect(provider.providerSettingsManager.getModeConfigId("code")).resolves.toBe("imported-id")
-			vi.mocked(fsPromises.readFile).mockImplementation(originalReadFile)
-		})
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const options = {
+					providerSettingsManager: provider.providerSettingsManager,
+					contextProxy: provider.contextProxy,
+					customModesManager: provider.customModesManager,
+					provider,
+				}
+				if (entry === "explicit-path") {
+					vi.spyOn(fsPromises, "access").mockResolvedValueOnce(undefined)
+					const { importSettingsWithFeedback } = await import("../../config/importExport")
+					await importSettingsWithFeedback(options, filePath)
+				} else if (entry === "manual") {
+					vi.mocked(vscode.window.showOpenDialog).mockResolvedValueOnce([makeUri(filePath)])
+					const { importSettingsWithFeedback } = await import("../../config/importExport")
+					await importSettingsWithFeedback(options)
+				} else {
+					const fsUtils = await import("../../../utils/fs")
+					const exists = vi.spyOn(fsUtils, "fileExistsAtPath").mockResolvedValue(true)
+					const originalGetConfiguration = vi
+						.mocked(vscode.workspace.getConfiguration)
+						.getMockImplementation()!
+					vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(
+						makeWorkspaceConfiguration({ autoImportSettingsPath: filePath }),
+					)
+					const { autoImportSettings } = await import("../../../utils/autoImportSettings")
+					await autoImportSettings(mockOutputChannel, {
+						...options,
+						onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
+					})
+					expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+						expect.stringContaining("Successfully imported settings"),
+					)
+					exists.mockRestore()
+					vi.mocked(vscode.workspace.getConfiguration).mockImplementation(originalGetConfiguration)
+				}
+				await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
+				await expect(provider.providerSettingsManager.getModeConfigId("code")).resolves.toBe("imported-id")
+				vi.mocked(fsPromises.readFile).mockImplementation(originalReadFile)
+			},
+		)
 
 		it.each(["import-first", "choice-first"])("keeps local choices in persisted order (%s)", async (order) => {
 			const manager = provider.providerSettingsManager
@@ -4621,6 +4630,39 @@ describe("ClineProvider", () => {
 			await expect(manager.getModeConfigId("code")).resolves.toBe(expected)
 			await expect(provider["getModeConfigId"]("code")).resolves.toBe(expected)
 		})
+
+		it.each(["imported-id", "other-id"])(
+			"preserves an imported choice when an overlapping write of %s fails",
+			async (chosenId) => {
+				const manager = provider.providerSettingsManager
+				const profiles = {
+					currentApiConfigName: "imported",
+					apiConfigs: { imported: { id: "imported-id" }, previous: { id: "previous-id" } },
+					modeApiConfigs: { code: "imported-id" },
+				}
+				await provider.setModeConfig("code", "previous-id")
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+				const store = vi.spyOn(mockContext.secrets, "store")
+				store
+					.mockImplementationOnce(async (key, value) => {
+						await pending
+						await originalStore(key, value)
+					})
+					.mockRejectedValueOnce(new Error("write failed"))
+				const imported = manager.import(profiles, () => provider.adoptModeConfigIds(profiles.modeApiConfigs))
+				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
+				const failed = expect(provider.setModeConfig("code", chosenId)).rejects.toThrow("write failed")
+				release()
+				await imported
+				await failed
+				await expect(manager.getModeConfigId("code")).resolves.toBe("imported-id")
+				await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
+			},
+		)
 
 		it("prefers this window's mode profile over one another window saved in shared storage", async () => {
 			const manager = provider.providerSettingsManager

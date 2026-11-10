@@ -747,11 +747,15 @@ describe("ClineProvider - Sticky Mode", () => {
 			const architectConfigId = provider.getProviderProfileEntry("architect-config")?.id
 
 			// Associate configs with modes
-			await provider.providerSettingsManager.setModeConfig("code", codeConfigId!)
-			await provider.providerSettingsManager.setModeConfig("architect", architectConfigId!)
+			await provider.setModeConfig("code", codeConfigId!)
+			await provider.setModeConfig("architect", architectConfigId!)
 
 			// Start in code mode with code config
 			await provider.handleModeSwitch("code")
+
+			const stateBeforeRestore = await provider.getState()
+			expect(stateBeforeRestore.currentApiConfigName).toBe("code-config")
+			expect(stateBeforeRestore.apiConfiguration.apiProvider).toBe("anthropic")
 
 			// Create a history item with architect mode
 			const historyItem: HistoryItem = {
