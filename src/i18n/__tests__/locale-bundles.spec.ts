@@ -48,13 +48,40 @@ const bundles: Record<string, { errors: Record<string, unknown> }> = {
 }
 
 // Keys this unit adds to the common namespace (the openFile workspace
-// containment error posted by webviewMessageHandler).
-const addedKeys = ["path_outside_workspace"]
+// containment error posted by webviewMessageHandler, the checkpoint restore
+// failures, and the usage export size error).
+const addedKeys = [
+	"path_outside_workspace",
+	"checkpoint_rewind_failed",
+	"checkpoint_rewind_restart_failed",
+	"checkpoint_restart_failed",
+	"usage_export_too_large",
+]
+
+// What each message is interpolated with: a translation that drops a placeholder shows the user a message without the
+// reason it is there to give.
+const placeholders: Record<string, string[]> = {
+	checkpoint_rewind_failed: ["{{error}}"],
+	checkpoint_rewind_restart_failed: ["{{error}}", "{{restartError}}"],
+	checkpoint_restart_failed: ["{{error}}"],
+}
 
 describe("common locale bundles", () => {
 	it.each(Object.keys(bundles))("%s defines every key this unit adds", (locale) => {
 		for (const key of addedKeys) {
 			expect(bundles[locale].errors[key]).toEqual(expect.any(String))
 		}
+	})
+
+	it.each(Object.keys(bundles))("%s keeps the placeholders of the checkpoint failure messages", (locale) => {
+		for (const [key, expected] of Object.entries(placeholders)) {
+			for (const placeholder of expected) {
+				expect(bundles[locale].errors[key], `${locale} ${key}`).toContain(placeholder)
+			}
+		}
+	})
+
+	it.each(Object.keys(bundles))("%s does not interpolate the usage export message", (locale) => {
+		expect(bundles[locale].errors.usage_export_too_large).not.toContain("{{")
 	})
 })

@@ -454,6 +454,34 @@ describe("checkpointRestoreHandler", () => {
 				)
 			})
 
+			it("does not put an edit back in the chat box when a newer edit has replaced it while the restore ran", async () => {
+				const operationId = `task-${fixture.task.taskId}`
+				fixture.taskDouble.checkpointRestore.mockImplementationOnce(async () => {
+					// A second edit of the same task, from another restore, takes the pending edit.
+					fixture.provider.setPendingEditOperation(operationId, {
+						messageTs: 5,
+						editedContent: "Newer edit",
+						messageIndex: 2,
+						apiConversationHistoryIndex: 1,
+					})
+					throw notRestarted()
+				})
+
+				await expect(
+					handleCheckpointRestoreOperation({
+						...fixture.config,
+						operation: "edit",
+						editData: { editedContent: "Older edit", apiConversationHistoryIndex: 0 },
+					}),
+				).rejects.toBeInstanceOf(TaskNotRestartedError)
+
+				expect(fixture.providerDouble.postMessageToWebview).not.toHaveBeenCalledWith(
+					expect.objectContaining({ invoke: "setChatBoxMessage" }),
+				)
+				expect(fixture.store.get(operationId)?.editedContent).toBe("Newer edit") // the newer one is still staged
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce() // the failure is still reported
+			})
+
 			it("offers to restart a deleted task", async () => {
 				fixture.taskDouble.abort = true
 				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(notRestarted())

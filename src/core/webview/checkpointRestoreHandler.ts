@@ -79,10 +79,12 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// takes the pending edit, and hands it back to the user if it cannot apply it, and there is nothing to restart.
 		const taskRestarted = error instanceof ConversationRewindError && error.restarted
 		if (operation === "edit" && !checkpointRestored && pendingEditOwner && !taskRestarted) {
-			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
+			const stillOwned = provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
 			// The task could not be started again (after a rewind that failed, or one that worked): nothing will apply the
-			// edit, so it is put back in the chat box, as the provider does when it cannot apply it.
-			if (taskWasNotRestarted(error) && editData) {
+			// edit, so it is put back in the chat box, as the provider does when it cannot apply it. An edit that a newer
+			// one has replaced is not this restore's any more: the newer one is staged, and showing this one would put
+			// stale content in front of the user.
+			if (stillOwned && taskWasNotRestarted(error) && editData) {
 				try {
 					await provider.postMessageToWebview({
 						type: "invoke",
