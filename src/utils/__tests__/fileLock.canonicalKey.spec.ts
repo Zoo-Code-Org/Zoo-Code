@@ -33,7 +33,11 @@ beforeEach(() => {
 	mockedLock.mockReset()
 	// alias.json is a symlink to item.json; everything else resolves to itself.
 	mockedRealpath.mockImplementation(async (target) => (target === alias ? referent : String(target)))
-	mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false }) as unknown as BigIntStats)
+	// fs/promises types lstat as returning BigIntStats and this mock only ever needs
+	// isSymbolicLink(), so the assertion is single-step and names the subset the double
+	// actually fakes. AGENTS.md asks for a reason next to a cast a typed API cannot
+	// express: no test in this file reads a bigint field, so no bigint field is faked.
+	mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false }) as BigIntStats)
 	mockedReadlink.mockRejectedValue(Object.assign(new Error("not a link"), { code: "EINVAL" }))
 })
 
