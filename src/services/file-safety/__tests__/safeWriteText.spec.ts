@@ -18,6 +18,7 @@ import {
 	OrphanedBackupAfterFailedWriteError,
 	OrphanedBackupError,
 	OrphanedPublishedBackupError,
+	PublishedEntryMismatchError,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
@@ -109,6 +110,12 @@ function _dirIdentity(ino: bigint): BigIntStats {
 function _fileIdentity(dev: bigint, ino: bigint): BigIntStats {
 	return { dev, ino, isSymbolicLink: () => false, isFile: () => true } as unknown as BigIntStats
 }
+// BigIntStats stand-in with a controllable device, for pinning the dev half of an identity test.
+// Same last-resort double assertion as _dirIdentity, test-local.
+function _crossIdentity(dev: bigint, ino: bigint): BigIntStats {
+	return { dev, ino } as unknown as BigIntStats
+}
+
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
 	Object.assign(s, { mode })
@@ -977,6 +984,39 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
+		it("win32 DACL: a failed restore is reported on the warning channel and the write still resolves", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			// icacls save succeeds, restore fails
+			let callCount = 0
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				callCount++
+				if (typeof cb === "function") {
+					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+				}
+				return fakeChild
+			})
+			const warnings: { kind: string; path: string; cause: unknown }[] = []
+
+			await expect(
+				safeWriteText(targetPath, "data", {
+					platform: "win32",
+					onPostCommitWarning: (warning) => {
+						warnings.push({ kind: warning.kind, path: warning.path, cause: warning.cause })
+					},
+				}),
+			).resolves.toBeUndefined()
+
+			expect(warnings).toHaveLength(1)
+			expect(warnings[0]?.kind).toBe("dacl-restore-failed")
+			expect(warnings[0]?.path).toBe(path.dirname(targetPath))
+			expect((warnings[0]?.cause as Error | undefined)?.message).toBe("icacls restore error")
+			// still best-effort in every other respect: the dump is unlinked, as the test above pins
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
+		})
+
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -1596,6 +1636,73 @@ describe("safeWriteText", () => {
 		expect(fs.link).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
 	})
 
+	it("names the orphaned staged file on the warning channel when the unlink after the link fails", async () => {
+		// Same Windows antivirus case as the test above, now with the residue named instead of
+		// dropped: the write still resolves, and the caller learns the staged name is still there.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+		const warnings: { kind: string; path: string; cause: unknown }[] = []
+
+		await expect(
+			safeWriteText(targetPath, "new data", {
+				failIfExist: true,
+				platform: "linux",
+				onPostCommitWarning: (warning) => {
+					warnings.push({ kind: warning.kind, path: warning.path, cause: warning.cause })
+				},
+			}),
+		).resolves.toBeUndefined()
+
+		expect(warnings).toHaveLength(1)
+		expect(warnings[0]?.kind).toBe("staging-link-orphan")
+		expect(String(warnings[0]?.path)).toContain("safeWriteText_")
+		expect((warnings[0]?.cause as { code?: string } | undefined)?.code).toBe("EBUSY")
+	})
+
+	it("refuses to report success when the published name is not the staged file", async () => {
+		// A third party replaced the staging file between the staging checks and link(2), so the
+		// name link(2) published holds bytes this write never staged. Comparing both names after the
+		// link is what catches it, and a mismatch is a refusal, not a success.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockImplementation(async (p) =>
+			String(p).includes("safeWriteText_") ? _dirIdentity(11n) : _dirIdentity(12n),
+		)
+
+		const error = await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect(error).toBeInstanceOf(PublishedEntryMismatchError)
+		expect((error as PublishedEntryMismatchError).targetPath).toBe(targetPath)
+		expect((error as PublishedEntryMismatchError).message).toContain("both names were left in place")
+		// Neither name is removed: after a mismatch the staged name may be another process's file
+		// and the published name is content a reader can already see, so an unlink by pathname here
+		// could take away an entry this write does not own.
+		expect(fs.unlink).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("refuses to report success when the published name holds a file from another device", async () => {
+		// The same refusal through the other half of the identity comparison: same inode number,
+		// different device. Pinning both halves is the only way to know that neither arm of the
+		// (dev, ino) test is dead code, which is why this case exists beside the inode case above.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockImplementation(async (p) =>
+			String(p).includes("safeWriteText_") ? _crossIdentity(1n, 11n) : _crossIdentity(2n, 11n),
+		)
+
+		const error = await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect(error).toBeInstanceOf(PublishedEntryMismatchError)
+		expect((error as PublishedEntryMismatchError).message).toContain("both names were left in place")
+		expect(fs.unlink).not.toHaveBeenCalled()
+	})
+
 	it("refuses to publish when the path no longer resolves to the authorized target", async () => {
 		// Isolate the commit-phase counters from any async cleanup a previous test left
 		// in flight.
@@ -1646,8 +1753,39 @@ describe("safeWriteText", () => {
 		expect((error as AncestorReplacedError).message).toContain("no longer the directory that was authorized")
 		expect(fs.rename).not.toHaveBeenCalled()
 		expect(fs.link).not.toHaveBeenCalled()
-		// The staged copy is cleaned up rather than left beside the target.
-		expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText"))).toBe(true)
+		// The pre-commit revalidation is no longer the first check to notice: the ancestor
+		// preflight runs before mkdir, so this write never created the parent, never made a staging
+		// directory beside the target, and has no staged copy to clean up.
+		expect(fs.mkdir).not.toHaveBeenCalled()
+		expect(
+			vi.mocked(fsSync.mkdirSync).mock.calls.some((call) => String(call[0]).includes(".file-safety-staging")),
+		).toBe(false)
+		expect(fs.unlink).not.toHaveBeenCalled()
+	})
+
+	it("refuses before creating anything when an authorized parent was already replaced", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(999n)) // was 100n when authorized
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).directory).toBe(dir)
+		expect((error as AncestorReplacedError).message).toContain("no longer the directory that was authorized")
+		// The point of the preflight is the ORDER: mkdir(recursive:true) follows whatever the name
+		// resolves to at the moment it runs, so a parent that is already unauthorized gets created
+		// through before any identity comparison happens. Nothing was created and nothing was staged.
+		expect(fs.mkdir).not.toHaveBeenCalled()
+		expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+		expect(fs.unlink).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
 	it("refuses to publish when an authorized ancestor name was moved and replaced by a link", async () => {

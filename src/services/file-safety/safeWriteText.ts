@@ -83,6 +83,19 @@ export interface SafeWriteTextOptions {
 	 * when it recorded a plain spelling - not merely to the same inode.
 	 */
 	expectedAncestorIdentities?: DirectoryIdentity[]
+	/**
+	 * A post-commit step failed while the content this call published stayed readable: either the staged name
+	 * could not be removed after a no-replace commit, or the win32 DACL restore failed. The write
+	 * resolves in both cases - failing it would report a failure for bytes the caller can now read
+	 * back - and the residue is reported here instead of dropped. Kinds are spelled inline rather
+	 * than exported: no production caller selects on them today, and an export whose only reader
+	 * is a spec is dead API.
+	 */
+	onPostCommitWarning?: (warning: {
+		kind: "staging-link-orphan" | "dacl-restore-failed"
+		path: string
+		cause: unknown
+	}) => void
 }
 
 /** One directory's on-disk identity, read with bigint stats so NTFS 64-bit values survive. */
@@ -319,7 +332,52 @@ export class AncestorReplacedError extends Error {
 		this.directory = directory
 	}
 }
+/**
+ * The target name does not hold the file this write staged.
+ *
+ * A third party replaced the staging file between the staging checks and link(2), so the name now
+ * published is bytes this write never staged. Nothing is removed: after the link both names may
+ * belong to somebody else, and an unlink by pathname can take away an entry this write does not
+ * own. The two identities travel on the error because the only useful next step is comparing them.
+ */
+export class PublishedEntryMismatchError extends Error {
+	readonly targetPath: string
+	constructor(targetPath: string, publishedIdentity: string, stagedIdentity: string) {
+		super(
+			`The published entry (${targetPath}) is not the staged file (published ${publishedIdentity}, staged ${stagedIdentity}); both names were left in place.`,
+		)
+		this.name = "PublishedEntryMismatchError"
+		this.targetPath = targetPath
+	}
+}
 // -- helpers ---------------------------------------------------------------
+
+/**
+ * Reject an unauthorized parent BEFORE mkdir walks through it.
+ *
+ * mkdir(recursive:true) follows whatever parent chain the name currently resolves to, and the
+ * step 2b revalidation below runs after it, so a parent swapped for a link to outside the
+ * authorized chain gets created through before anything compares identities. Only an ancestor that
+ * is already present is compared: an ENOENT here is a directory this call is about to create, not a
+ * containment violation, and the recorded identity for it cannot be checked against nothing. Step
+ * 2b stays in place: it is what catches a swap in the window between this check and the commit.
+ */
+async function _preflightAncestors(identities: DirectoryIdentity[] | undefined): Promise<void> {
+	if (!identities) {
+		return
+	}
+	for (const expected of identities) {
+		const current = await fs.stat(expected.dir, { bigint: true }).catch((error: unknown) => {
+			if (getErrorCode(error) === "ENOENT") {
+				return null
+			}
+			throw error
+		})
+		if (current !== null && (current.dev !== expected.dev || current.ino !== expected.ino)) {
+			throw new AncestorReplacedError(expected.dir, "is no longer the directory that was authorized")
+		}
+	}
+}
 
 /** fsync one directory so the entry it holds (a rename, or a newly created child) is durable. */
 function _syncDirectory(dir: string): void {
@@ -406,8 +464,15 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 	}
 }
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Best-effort: content is already committed, so failure is non-fatal. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
+ *
+ * Best-effort: the content is already committed, so a failed restore does not fail the write. The
+ * failure is RETURNED rather than swallowed, because the caller is the only party that can do
+ * something about a directory whose ACL did not come back, and a swallowed error never reaches it. */
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<unknown | null> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -415,8 +480,10 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 				err ? reject(err) : resolve(),
 			)
 		})
-	} catch {
-		// best-effort; content already committed
+		return null
+	} catch (error: unknown) {
+		// best-effort: content already committed, so the caller is told rather than the write failed
+		return error
 	}
 }
 
@@ -564,6 +631,7 @@ export async function safeWriteText(
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour). What mkdir reports it
 	// created feeds step 4b's fsync of the ancestors this write introduced; see
 	// _createdAncestorChain.
+	await _preflightAncestors(options?.expectedAncestorIdentities)
 	const createdAncestors = _createdAncestorChain(await fs.mkdir(dirPath, { recursive: true }), dirPath)
 	await fs.access(dirPath)
 
@@ -937,12 +1005,45 @@ export async function safeWriteText(
 			}
 
 			if (options?.failIfExist) {
+				// Both names should now be one inode. They are not when a third party replaced the
+				// staging file before the link, in which case the published name holds bytes this write
+				// never staged. Checked after the link because link(2) is the first point at which the
+				// target name exists; a check of either name before it cannot see what landed at the
+				// other. Neither name is removed on a mismatch and stagingCommitted is set first, so the
+				// cleanup below cannot unlink a name that may belong to another process. The ordinary
+				// rename path cannot be verified this way: rename(2) moves the staged inode itself and
+				// leaves no second name to compare, and a re-stat of the target proves only that the
+				// rename took effect, not that the staging file was still ours when it did. Issue
+				// #2391 is where that gap is carried; what it must prove is how a commit that leaves
+				// no second name detects a staging substitution before publication and how its cleanup
+				// avoids removing an entry it does not own. This unit does not claim that answer.
+				const [stagedNow, publishedNow] = await Promise.all([
+					fs.stat(tempPath, { bigint: true }),
+					fs.stat(targetPath, { bigint: true }),
+				])
+				if (stagedNow.dev !== publishedNow.dev || stagedNow.ino !== publishedNow.ino) {
+					stagingCommitted = true
+					throw new PublishedEntryMismatchError(
+						targetPath,
+						`${publishedNow.dev}:${publishedNow.ino}`,
+						`${stagedNow.dev}:${stagedNow.ino}`,
+					)
+				}
 				// The target name is published at this point; the staged name is only a second
 				// link to the same inode (or a copy of it). Removal is best-effort: on Windows
 				// an antivirus handle can make unlink fail with EBUSY/EPERM after the content
 				// is already visible, and the write must not be reported as failed for content
-				// the caller can now read back.
-				await fs.unlink(tempPath).catch(() => undefined)
+				// the caller can now read back. The residue is named on the warning channel rather
+				// than dropped, because a caller that keeps its own staging name needs to learn the
+				// orphan is still there.
+				const stagingResidue = await fs.unlink(tempPath).catch((error: unknown) => error)
+				if (stagingResidue !== undefined) {
+					options?.onPostCommitWarning?.({
+						kind: "staging-link-orphan",
+						path: tempPath,
+						cause: stagingResidue,
+					})
+				}
 			}
 
 			// Marked once the commit has consumed the staging name: on the rename path the
@@ -983,7 +1084,14 @@ export async function safeWriteText(
 			// and on every failed save.
 			if (daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				const restoreFailure = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (restoreFailure !== null) {
+					options?.onPostCommitWarning?.({
+						kind: "dacl-restore-failed",
+						path: restoredDir,
+						cause: restoreFailure,
+					})
+				}
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------
