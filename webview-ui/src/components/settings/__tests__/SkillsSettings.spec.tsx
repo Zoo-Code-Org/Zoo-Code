@@ -255,12 +255,11 @@ describe("SkillsSettings", () => {
 
 		const warning = screen.getByRole("alert")
 		const rows = Array.from(warning.querySelectorAll("li"))
-		expect(rows[0]?.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/broken-2/SKILL.md")
-		expect(rows[1]?.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/broken-3/SKILL.md:7")
-		expect(rows[2]?.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/broken-4/SKILL.md:12:3")
-		expect(warning).toHaveTextContent("unexpected end of the stream")
-		expect(warning).toHaveTextContent("bad indentation of a mapping entry")
-		expect(warning).toHaveTextContent("found character that cannot start any token")
+		expect(rows.map((row) => row.textContent)).toEqual([
+			"/workspace/.roo/skills/broken-2/SKILL.md: unexpected end of the stream",
+			"/workspace/.roo/skills/broken-3/SKILL.md:7: bad indentation of a mapping entry",
+			"/workspace/.roo/skills/broken-4/SKILL.md:12:3: found character that cannot start any token",
+		])
 	})
 
 	it("shows diagnostics that arrive after the settings view is already mounted", () => {
@@ -318,10 +317,10 @@ describe("SkillsSettings", () => {
 		created.forEach((row, index) => {
 			row.dataset.initialPosition = String(index)
 		})
-		expect(created.map((row) => row.querySelector("span")?.textContent)).toEqual([
-			"/workspace/.roo/skills/broken-2/SKILL.md",
-			"/workspace/.roo/skills/broken-3/SKILL.md:7",
-			"/workspace/.roo/skills/broken-4/SKILL.md:12:3",
+		expect(created.map((row) => row.textContent)).toEqual([
+			"/workspace/.roo/skills/broken-2/SKILL.md: unexpected end of the stream",
+			"/workspace/.roo/skills/broken-3/SKILL.md:7: bad indentation of a mapping entry",
+			"/workspace/.roo/skills/broken-4/SKILL.md:12:3: found character that cannot start any token",
 		])
 
 		mockExtensionState = {
@@ -350,10 +349,10 @@ describe("SkillsSettings", () => {
 		view.rerender(<SkillsSettings />)
 
 		const reordered = Array.from(screen.getByRole("alert").querySelectorAll("li"))
-		expect(reordered.map((row) => row.querySelector("span")?.textContent)).toEqual([
-			"/workspace/.roo/skills/broken-4/SKILL.md:12:3",
-			"/workspace/.roo/skills/broken-3/SKILL.md:7",
-			"/workspace/.roo/skills/broken-2/SKILL.md",
+		expect(reordered.map((row) => row.textContent)).toEqual([
+			"/workspace/.roo/skills/broken-4/SKILL.md:12:3: found character that cannot start any token",
+			"/workspace/.roo/skills/broken-3/SKILL.md:7: bad indentation of a mapping entry",
+			"/workspace/.roo/skills/broken-2/SKILL.md: unexpected end of the stream",
 		])
 		expect(reordered.map((row) => row.dataset.initialPosition)).toEqual(["2", "1", "0"])
 	})
