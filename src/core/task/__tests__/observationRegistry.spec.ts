@@ -1,8 +1,12 @@
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 
 import { ObservationRegistry } from "../observationRegistry"
 
 describe("ObservationRegistry", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
 	it("observe → get returns the recorded version and observedAt", () => {
 		const reg = new ObservationRegistry()
 		reg.observe("/a/b/c.ts", "1:2:300:4000000000:5000000000")
@@ -25,8 +29,6 @@ describe("ObservationRegistry", () => {
 		const second = reg.get("/a/b/c.ts")!
 		expect(second.version).toBe("v2")
 		expect(second.observedAt).toBeGreaterThan(first.observedAt)
-
-		vi.useRealTimers()
 	})
 
 	it("has returns true for observed paths, false otherwise", () => {
