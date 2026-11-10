@@ -618,10 +618,19 @@ describe("ZooGatewayHandler", () => {
 			// Emulate the OpenAI SDK: when the request timeout fires, the SDK
 			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
 			// are exhausted — verified against openai v5.23.2 against a hung server.
-			mockCreate.mockImplementationOnce(async (_params: unknown, options: { timeout?: number }) => {
-				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
-				throw new APIConnectionTimeoutError()
-			})
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options: { timeout?: number; signal?: AbortSignal }) => {
+					// The SDK surfaces its timeout error only once the client's patience runs out: wait on
+					// the per-request signal the handler passed instead of guessing at a duration.
+					const sdkSignal = options?.signal
+					if (sdkSignal && !sdkSignal.aborted) {
+						await new Promise<void>((resolve) => {
+							sdkSignal.addEventListener("abort", () => resolve(), { once: true })
+						})
+					}
+					throw new APIConnectionTimeoutError()
+				},
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
 
@@ -722,7 +731,12 @@ describe("ZooGatewayHandler", () => {
 		const gate = new Promise<void>((resolve) => {
 			releaseGate = resolve
 		})
+		let markLookupParked!: () => void
+		const lookupParked = new Promise<void>((resolve) => {
+			markLookupParked = resolve
+		})
 		vitest.mocked(getModels).mockImplementationOnce(async () => {
+			markLookupParked()
 			await gate
 			return {}
 		})
@@ -731,7 +745,7 @@ describe("ZooGatewayHandler", () => {
 		const controller = new AbortController()
 
 		const completion = handler.completePrompt("test prompt", { abortSignal: controller.signal })
-		await new Promise((resolve) => setTimeout(resolve, 10))
+		await lookupParked
 		controller.abort()
 
 		const error = await completion.then(
@@ -824,7 +838,12 @@ describe("ZooGatewayHandler", () => {
 			const resolutionGate = new Promise<void>((resolve) => {
 				releaseResolution = resolve
 			})
+			let markLookupParked!: () => void
+			const lookupParked = new Promise<void>((resolve) => {
+				markLookupParked = resolve
+			})
 			vitest.mocked(getModels).mockImplementationOnce(async () => {
+				markLookupParked()
 				await resolutionGate
 				return DEFAULT_MODEL_CATALOG
 			})
@@ -841,7 +860,7 @@ describe("ZooGatewayHandler", () => {
 			)
 
 			// Let the lookup park on the gate, then abort while it is still pending.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await lookupParked
 			controller.abort()
 
 			const error = await consumed.then(
@@ -857,7 +876,10 @@ describe("ZooGatewayHandler", () => {
 
 			// Releasing the lookup afterwards must not start a late request.
 			releaseResolution()
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// A late request is an absence, so poll the observable call count for a bounded window
+			// (vitest 4.1.12 here resolves waitFor at the timeout rather than rejecting, measured)
+			// and the assertion below is what fails when the late request appears.
+			await vitest.waitFor(() => mockCreate.mock.calls.length > 0).catch(() => undefined)
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -870,9 +892,9 @@ describe("ZooGatewayHandler", () => {
 				capturedSignal = options?.signal
 				return (async function* () {
 					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
-					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
-						await new Promise((resolve) => setTimeout(resolve, 5))
-					}
+					// Reached only when the consumer asks for the next chunk, i.e. the first chunk is
+					// delivered: fire the caller's abort here so the abort is mid-stream by construction.
+					controller.abort()
 					if (capturedSignal?.aborted) {
 						throw new DOMException("The operation was aborted.", "AbortError")
 					}
@@ -891,8 +913,7 @@ describe("ZooGatewayHandler", () => {
 			)
 
 			// Let the request start and the first chunk be yielded before aborting.
-			await new Promise((resolve) => setTimeout(resolve, 25))
-			controller.abort()
+			// The mock calls controller.abort() the moment the first chunk has been consumed,
 
 			const error = await consumed.then(
 				() => undefined,
