@@ -1,6 +1,7 @@
 import { parse } from "shell-quote"
 
-export type ShellToken = string | { op: string } | { command: string }
+export type ShellToken =
+	string | { op: "glob"; pattern: string } | { op: string } | { command: string } | { comment: string }
 
 /**
  * The style of quoting that opened a region.
@@ -654,6 +655,12 @@ function parseCommandLine(command: string): string[] {
 		return `__QUOTE_${quotes.length - 1}__`
 	})
 
+	// The shell starts a comment only at a `#` that begins a word. shell-quote
+	// starts one at any `#`, so a word such as `safe#x` would hide the rest of
+	// the line, including chained commands, from the allowlist check. Mask a `#`
+	// that follows a word character so shell-quote keeps it as text.
+	processedCommand = processedCommand.replace(/(?<=[^\s;&|()<>])#/g, "__HASH__")
+
 	let tokens: ShellToken[]
 	try {
 		tokens = parse(processedCommand) as ShellToken[]
@@ -693,6 +700,9 @@ function parseCommandLine(command: string): string[] {
 					commands.push(currentCommand.join(" "))
 					currentCommand = []
 				}
+			} else if (token.op === "glob" && "pattern" in token) {
+				// Keep the glob text (for example `*`) so that deny rules can match it.
+				currentCommand.push(token.pattern)
 			} else {
 				// Other operators (>) are part of the command
 				currentCommand.push(token.op)
@@ -759,5 +769,6 @@ function restorePlaceholders(
 	// Restore variable references
 	result = result.replace(/__VAR_(\d+)__/g, (_, i) => variables[parseInt(i)])
 	result = result.replace(/__SUBSH_(\d+)__/g, (_, i) => subshells[parseInt(i)])
+	result = result.replace(/__HASH__/g, "#")
 	return result
 }

@@ -175,13 +175,51 @@ describe("parseCommand", () => {
 				input: 'git commit -m "line 1\nline 2" && git push',
 				expected: ['git commit -m "line 1\nline 2"', "git push"],
 			},
+			{
+				input: `echo $'first\nline' && printf $"second\r\nline"`,
+				expected: [`echo $'first\nline'`, `printf $"second\r\nline"`],
+			},
+			{
+				input: "echo 'first\nline' & echo done",
+				expected: ["echo 'first\nline'", "echo done"],
+			},
+			{
+				input: "echo 'first\nline';ls",
+				expected: ["echo 'first\nline'", "ls"],
+			},
 		])("splits $input into each chained command", ({ input, expected }) => {
 			expect(parseCommand(input).commands).toEqual(expected)
+		})
+
+		it("restores each quote by its full index when a line has more than ten quotes", () => {
+			const singleLineQuotes = Array.from({ length: 10 }, (_, i) => `'q${i}'`).join(" ")
+			const input = `echo ${singleLineQuotes} 'q10\nend' && ls`
+			expect(parseCommand(input).commands).toEqual([`echo ${singleLineQuotes} 'q10\nend'`, "ls"])
 		})
 
 		it("keeps operators inside the multi-line quoted argument", () => {
 			const input = `sh -c "cd a && node x\necho done" && ls`
 			expect(parseCommand(input).commands).toEqual([`sh -c "cd a && node x\necho done"`, "ls"])
+		})
+	})
+
+	describe("# inside a word and glob patterns", () => {
+		it.each([
+			{ input: "echo safe#blocked && node -v", expected: ["echo safe#blocked", "node -v"] },
+			{ input: "echo safe#blocked 'a\nb' && node -v", expected: ["echo safe#blocked 'a\nb'", "node -v"] },
+			{ input: "curl http://x/#frag && node y", expected: ["curl http://x/#frag", "node y"] },
+			{ input: "rm *", expected: ["rm *"] },
+			{ input: "rm * 'a\nb'", expected: ["rm * 'a\nb'"] },
+			{ input: "ls *.ts && echo x", expected: ["ls *.ts", "echo x"] },
+		])("keeps the word text in $input", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
+
+		it.each([
+			{ input: "echo hi # comment && rm x", expected: ["echo hi"] },
+			{ input: "echo hi 'a\nb' # comment && rm x", expected: ["echo hi 'a\nb'"] },
+		])("drops a comment that starts a word in $input", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
 		})
 	})
 

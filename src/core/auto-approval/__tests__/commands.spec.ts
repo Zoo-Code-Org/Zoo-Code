@@ -179,6 +179,24 @@ describe("getCommandDecision — chained command next to a multi-line quoted arg
 	})
 })
 
+describe("getCommandDecision — # inside a word and glob patterns", () => {
+	it.each(["echo safe#blocked && node -v", "echo safe#blocked 'a\nb' && node -v"])(
+		"applies a deny rule that contains # and checks the chained command: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["echo"], ["echo safe#blocked"])).toBe("auto_deny")
+			expect(getCommandDecision(command, ["echo"])).toBe("ask_user")
+		},
+	)
+
+	it.each(["rm *", "rm * 'a\nb'"])("applies a deny rule for a glob: %j", (command) => {
+		expect(getCommandDecision(command, ["rm"], ["rm *"])).toBe("auto_deny")
+	})
+
+	it("auto-approves a glob argument when the command is allowed", () => {
+		expect(getCommandDecision("ls *.ts && echo x", ["ls", "echo"])).toBe("auto_approve")
+	})
+})
+
 describe("getCommandDecisionDetailed", () => {
 	it("names the offending sub-command and matched denied prefix on chained commands", () => {
 		const result = getCommandDecisionDetailed("git status && rm x && npm test", ["git", "npm"], ["rm"])
