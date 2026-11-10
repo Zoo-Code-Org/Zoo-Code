@@ -3039,7 +3039,9 @@ describe("Task persistence", () => {
 		it("really cannot say the closing note: the real say of an aborted task throws", async () => {
 			const task = abortedTaskWithCheckpoint()
 
-			await expect(task.say("api_req_deleted", "{}")).rejects.toThrow(/aborted/)
+			await expect(task.say("api_req_deleted", "{}")).rejects.toThrow(
+				`[RooCode#say] task ${task.taskId}.${task.instanceId} aborted`,
+			)
 		})
 
 		it("rewinds, stores both histories and starts the task again, though the note cannot be said", async () => {
@@ -3056,7 +3058,9 @@ describe("Task persistence", () => {
 
 			// The note was tried, and the abort refused it.
 			expect(say).toHaveBeenCalledWith("api_req_deleted", expect.any(String))
-			await expect(say.mock.results[0].value).rejects.toThrow(/aborted/)
+			await expect(say.mock.results[0].value).rejects.toThrow(
+				`[RooCode#say] task ${task.taskId}.${task.instanceId} aborted`,
+			)
 			// Both histories were cut and stored, as the rewind left them.
 			expect(task.clineMessages.map((m) => m.ts)).toEqual([1, 2])
 			expect(task.apiConversationHistory.map((m) => m.ts)).toEqual([1, 2])
