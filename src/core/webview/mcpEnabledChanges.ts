@@ -3,8 +3,20 @@ interface McpEnabledTarget {
 	handleMcpEnabledChange(enabled: boolean): Promise<void>
 }
 
-interface Running {
+/** A save that waits for a change: its own promise, and the way to answer it. */
+interface Caller {
+	resolve: () => void
+	reject: (error: unknown) => void
+}
+
+/** What the saves that wait for a change are registered with. Each one can be taken off again, and only it. */
+interface Waited {
+	callers: Set<Caller>
+}
+
+interface Running extends Waited {
 	value: boolean
+	/** For the reconciliation, which waits for the changes in line to settle. */
 	promise: Promise<void>
 }
 
@@ -12,13 +24,10 @@ interface Running {
  * The one change that waits behind the running one. Later values replace its value: only the latest is applied. It is
  * kept while a save that is still waiting for it asks for it: when every one of them has given up, it is dropped.
  */
-interface Pending {
+interface Pending extends Waited {
 	value: boolean
 	/** The values that the saves waiting for this change asked for, oldest first; the last one is `value`. */
 	waiters: Array<{ value: boolean }>
-	promise: Promise<void>
-	resolve: () => void
-	reject: (error: unknown) => void
 }
 
 interface HubChanges {
@@ -49,8 +58,47 @@ const changesOf = (hub: McpEnabledTarget): HubChanges => {
 	return changes
 }
 
-function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Promise<void> {
-	const running: Running = { value, promise: Promise.resolve() }
+/** Answers every save that waits for the change, and forgets them. */
+function settle(change: Waited, failure?: { error: unknown }): void {
+	const callers = [...change.callers]
+	change.callers.clear()
+	for (const caller of callers) {
+		if (failure) caller.reject(failure.error)
+		else caller.resolve()
+	}
+}
+
+/**
+ * Registers a save as a waiter of the change, with a promise of its own. If the save gives up (its `signal` aborts) it is
+ * taken off at once: its promise is rejected, and the registration, the callbacks and the signal listener go with it,
+ * whatever the change is doing; the change itself, and the saves that still wait for it, are not touched. So saves that
+ * give up again and again against a change that never settles leave nothing behind.
+ */
+function register(change: Waited, signal?: AbortSignal, onGiveUp?: () => void): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		const caller: Caller = { resolve, reject }
+		if (signal) {
+			const giveUp = () => {
+				change.callers.delete(caller)
+				onGiveUp?.()
+				reject(signal.reason)
+			}
+			signal.addEventListener("abort", giveUp, { once: true })
+			caller.resolve = () => {
+				signal.removeEventListener("abort", giveUp)
+				resolve()
+			}
+			caller.reject = (error) => {
+				signal.removeEventListener("abort", giveUp)
+				reject(error)
+			}
+		}
+		change.callers.add(caller)
+	})
+}
+
+function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Running {
+	const running: Running = { value, promise: Promise.resolve(), callers: new Set() }
 	changes.last = value
 
 	const finish = (succeeded: boolean) => {
@@ -59,25 +107,34 @@ function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Prom
 		changes.pending = undefined
 		if (!next) return
 		// The value that was applied is the one that is wanted now: there is nothing left to do.
-		if (succeeded && next.value === value) next.resolve()
-		else start(hub, changes, next.value).then(next.resolve, next.reject)
+		if (succeeded && next.value === value) settle(next)
+		else {
+			// The callers of the change that starts now are the ones that waited for it.
+			const started = start(hub, changes, next.value)
+			for (const caller of next.callers) started.callers.add(caller)
+			next.callers.clear()
+		}
 	}
 
 	running.promise = Promise.resolve()
 		.then(() => hub.handleMcpEnabledChange(value))
 		.then(
-			() => finish(true),
+			() => {
+				finish(true)
+				settle(running)
+			},
 			(error: unknown) => {
 				// What the hub has is not known any more, so a later look at what is stored does not take it for granted.
 				changes.last = undefined
 				finish(false)
+				settle(running, { error })
 				throw error
 			},
 		)
-	// Whoever waits for it sees its failure; a caller that gave up waiting leaves no rejection unhandled.
+	// The saves see its failure through their own promises; the reconciliation catches it itself.
 	running.promise.catch(() => undefined)
 	changes.running = running
-	return running.promise
+	return running
 }
 
 /**
@@ -88,69 +145,39 @@ function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Prom
  * close has finished). A different value waits for the change that is under way, so the changes are applied in the order
  * they were made. What waits is only the latest value: a change that never started is replaced by a newer one (every
  * caller that waited for it is answered by the one that runs), so a stalled change cannot make a queue grow.
+ *
+ * Each caller gets a promise of its own, and a `signal` to give up with: it is answered at once and taken off, and a
+ * change that has not started is dropped when no other caller waits for it (see `register`).
  */
 export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean, signal?: AbortSignal): Promise<void> {
 	if (signal?.aborted) return Promise.reject(signal.reason)
 	const changes = changesOf(hub)
 	const { running, pending } = changes
-	if (!running) return forCaller(start(hub, changes, value), signal)
+	if (!running) return register(start(hub, changes, value), signal)
+	if (pending) return joinPending(changes, pending, value, signal)
+	if (running.value === value) return register(running, signal)
 
-	if (pending) {
-		return forCaller(joinPending(changes, pending, value, signal), signal)
-	}
-	if (running.value === value) return forCaller(running.promise, signal)
-
-	let resolve!: () => void
-	let reject!: (error: unknown) => void
-	const promise = new Promise<void>((res, rej) => {
-		resolve = res
-		reject = rej
-	})
-	promise.catch(() => undefined)
-	const created: Pending = { value, waiters: [], promise, resolve, reject }
+	const created: Pending = { value, waiters: [], callers: new Set() }
 	changes.pending = created
-	return forCaller(joinPending(changes, created, value, signal), signal)
+	return joinPending(changes, created, value, signal)
 }
 
 /**
- * The promise a caller waits on: its own, so that a caller that gives up (its `signal` aborts) is answered at once and
- * lets go of what it was doing, while the change that other callers still wait for goes on.
- */
-function forCaller(shared: Promise<void>, signal?: AbortSignal): Promise<void> {
-	if (!signal) return shared
-	return new Promise<void>((resolve, reject) => {
-		const abort = () => reject(signal.reason)
-		signal.addEventListener("abort", abort, { once: true })
-		shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
-	})
-}
-
-/**
- * Adds a save to the saves that wait for the change that has not started. When the save gives up (its `signal` aborts)
- * and no other save waits for it, the change is dropped: it must not start later, with a value that nothing asks for.
+ * Adds a save to the saves that wait for the change that has not started. When the save gives up and no other save waits
+ * for it, the change is dropped: it must not start later, with a value that nothing asks for.
  */
 function joinPending(changes: HubChanges, pending: Pending, value: boolean, signal?: AbortSignal): Promise<void> {
 	const waiter = { value }
 	pending.waiters.push(waiter)
 	pending.value = value
-	if (!signal) return pending.promise
-
-	const leave = () => {
+	return register(pending, signal, () => {
 		// A change that has started is under way, and cannot be taken back: it is the reconciliation's business then.
 		if (changes.pending !== pending) return
 		pending.waiters.splice(pending.waiters.indexOf(waiter), 1)
 		const latest = pending.waiters.at(-1)
-		if (latest) {
-			pending.value = latest.value
-			return
-		}
-		changes.pending = undefined
-		pending.reject(signal.reason)
-	}
-	signal.addEventListener("abort", leave, { once: true })
-	const settled = () => signal.removeEventListener("abort", leave)
-	pending.promise.then(settled, settled)
-	return pending.promise
+		if (latest) pending.value = latest.value
+		else changes.pending = undefined
+	})
 }
 
 /**

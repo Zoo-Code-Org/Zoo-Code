@@ -264,6 +264,8 @@ describe("importExport", () => {
 				success: false,
 				error: "current profile write failed",
 				settingsMayHaveChanged: true,
+				// The global settings that the import had stored before this step are told to the form.
+				storedSettings: expect.any(Array),
 			})
 			expect(mockContextProxy.setProviderSettings).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
@@ -331,6 +333,41 @@ describe("importExport", () => {
 					stored.set(key, value)
 				}) as unknown as typeof mockContextProxy.setValue)
 				mockContextProxy.setValues.mockResolvedValue(undefined)
+			})
+
+			it.each([
+				[
+					"the provider settings cannot be set",
+					() =>
+						mockContextProxy.setProviderSettings.mockRejectedValueOnce(new Error("provider write failed")),
+				],
+				[
+					"the list of profiles cannot be read",
+					() => mockProviderSettingsManager.listConfig.mockRejectedValueOnce(new Error("list failed")),
+				],
+			])(
+				"names the settings that it had stored when %s after them, so the form takes what is really there",
+				async (_name, fail) => {
+					fail()
+
+					const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+					expect(result).toMatchObject({ success: false, settingsMayHaveChanged: true })
+					expect(stored.get("interfaceFontScale")).toBe(120) // it was stored, and stays
+					// The stored settings are told, though the failure was not of a write of them.
+					expect((result as { storedSettings?: string[] }).storedSettings).toEqual(
+						expect.arrayContaining(["interfaceFontScale", "mode", "currentApiConfigName"]),
+					)
+				},
+			)
+
+			it("names no settings when it failed before it stored any", async () => {
+				mockProviderSettingsManager.import.mockRejectedValueOnce(new Error("profiles could not be imported"))
+
+				const result = await importWith({ interfaceFontScale: 120, mode: "code" })
+
+				expect(result).toMatchObject({ success: false, settingsMayHaveChanged: true })
+				expect(result).not.toHaveProperty("storedSettings")
 			})
 
 			it("stores an appearance value as a recorded write, and the rest through setValues", async () => {

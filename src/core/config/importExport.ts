@@ -70,6 +70,13 @@ type PartialImportFailure = {
 	storedSettings?: string[]
 }
 
+/** What the form is told that a failed import stored: what the failed write says, and what was stored before it failed. */
+function storedSettingsOf(error: unknown, storedBefore: ReadonlySet<string>): string[] {
+	const reported =
+		error instanceof PartialSettingsWriteError ? [...error.stored, ...error.uncertain] : ([] as string[])
+	return [...new Set([...reported, ...storedBefore])]
+}
+
 const isPartialImportFailure = (result: object): result is PartialImportFailure =>
 	"settingsMayHaveChanged" in result && result.settingsMayHaveChanged === true
 
@@ -204,6 +211,7 @@ export async function importSettingsFromPath(
 
 	// Whether the import has started to change anything: a failure before that leaves every setting as it was.
 	let settingsMayHaveChanged = false
+	let storedKeysOfThisImport: ReadonlySet<string> = new Set()
 
 	try {
 		const previousProviderProfiles = await providerSettingsManager.export()
@@ -277,6 +285,10 @@ export async function importSettingsFromPath(
 		warnings.push(...globalSettingsWarnings)
 
 		settingsMayHaveChanged = true
+		// The global settings that this import has stored, so that a step that fails after them (the provider settings, the
+		// list of profiles) still names them: the form takes what is really stored for them.
+		const storedGlobalKeys = new Set<string>()
+		storedKeysOfThisImport = storedGlobalKeys
 		await Promise.all(
 			(sanitizedGlobalSettings.customModes ?? []).map((mode) =>
 				customModesManager.updateCustomMode(mode.slug, mode),
@@ -292,11 +304,13 @@ export async function importSettingsFromPath(
 			owner,
 		})
 		if (written.failure) throw describeFailedWrite(written)
+		for (const key of written.stored) storedGlobalKeys.add(key)
 
 		// Set the current provider.
 		const currentProviderName = providerProfiles.currentApiConfigName
 		const currentProvider = providerProfiles.apiConfigs[currentProviderName]
 		await contextProxy.setValue("currentApiConfigName", currentProviderName)
+		storedGlobalKeys.add("currentApiConfigName")
 
 		// TODO: It seems like we don't need to have the provider settings in
 		// the proxy; we can just use providerSettingsManager as the source of
@@ -306,6 +320,7 @@ export async function importSettingsFromPath(
 		}
 
 		await contextProxy.setValue("listApiConfigMeta", await providerSettingsManager.listConfig())
+		storedGlobalKeys.add("listApiConfigMeta")
 
 		return {
 			providerProfiles,
@@ -332,8 +347,8 @@ export async function importSettingsFromPath(
 					settingsMayHaveChanged: true,
 					// The settings the import stored, and those it may have stored (a rollback that did not work): the form
 					// takes what is really there for all of them.
-					...(e instanceof PartialSettingsWriteError && e.stored.length + e.uncertain.length > 0
-						? { storedSettings: [...e.stored, ...e.uncertain] }
+					...(storedSettingsOf(e, storedKeysOfThisImport).length > 0
+						? { storedSettings: storedSettingsOf(e, storedKeysOfThisImport) }
 						: {}),
 				} satisfies PartialImportFailure)
 			: { success: false as const, error }
