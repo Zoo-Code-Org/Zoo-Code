@@ -13,6 +13,7 @@ export interface GitRepositoryChange {
 
 export interface GitRepositoryState {
 	readonly workingTreeChanges?: ReadonlyArray<GitRepositoryChange>
+	readonly untrackedChanges?: ReadonlyArray<GitRepositoryChange>
 }
 
 export interface GitRepository {
@@ -150,12 +151,41 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		pattern: /(?<prefix>:\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g,
 		replacement: "$<prefix>[REDACTED]",
 	},
-	// Email addresses
-	{
-		pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/g,
-		replacement: "[REDACTED_EMAIL]",
-	},
 ]
+
+const EMAIL_LOCAL_PART_CHAR = /[A-Za-z0-9._%+-]/
+const EMAIL_DOMAIN = /[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/y
+
+/**
+ * Replaces email addresses with [REDACTED_EMAIL] in linear time.
+ *
+ * An unanchored `local@domain` regex rescans a long run of local-part characters from every start
+ * position when the run has no `@`, which is quadratic on a large diff. This scan starts at each `@`
+ * instead. The local part is read backwards and stops at the end of the previous replacement or at
+ * the previous `@`, so every character is visited a constant number of times. Back-to-back addresses
+ * such as `a@b.co+c@d.co` are both replaced.
+ */
+function redactEmailAddresses(content: string): string {
+	let result = ""
+	let copiedUpTo = 0
+	let at = content.indexOf("@")
+	while (at !== -1) {
+		let start = at
+		while (start > copiedUpTo && EMAIL_LOCAL_PART_CHAR.test(content[start - 1])) {
+			start--
+		}
+		EMAIL_DOMAIN.lastIndex = at + 1
+		const domain = start < at ? EMAIL_DOMAIN.exec(content) : null
+		if (domain) {
+			result += content.slice(copiedUpTo, start) + "[REDACTED_EMAIL]"
+			copiedUpTo = at + 1 + domain[0].length
+			at = content.indexOf("@", copiedUpTo)
+		} else {
+			at = content.indexOf("@", at + 1)
+		}
+	}
+	return result + content.slice(copiedUpTo)
+}
 
 /**
  * Redacts secrets, private keys, credential tokens, and email addresses from content before it is
@@ -166,7 +196,8 @@ export function redactSensitiveInformation(content: string): string {
 	for (const { pattern, replacement } of REDACTION_RULES) {
 		redacted = redacted.replace(pattern, replacement)
 	}
-	return redacted
+	// Runs after the URL credential rule so `user:password@host` is handled there first.
+	return redactEmailAddresses(redacted)
 }
 
 /**
@@ -274,11 +305,19 @@ export async function getRepositoryDiff(repository: GitRepository): Promise<stri
 
 	// `git diff` omits untracked files; surface them as a plain listing so the
 	// LLM can still generate an "initial commit" or "add files" message.
+	// With `git.untrackedChanges: "separate"` they are in `untrackedChanges`, otherwise in
+	// `workingTreeChanges`. Read both and de-duplicate by path.
 	// Paths are relative to the repository root so absolute local paths are not sent.
-	const untracked = repository.state?.workingTreeChanges?.filter((c) => c.status === UNTRACKED_STATUS)
-	if (untracked && untracked.length > 0) {
+	const state = repository.state
+	const untrackedPaths = new Set(
+		[
+			...(state?.workingTreeChanges ?? []).filter((c) => c.status === UNTRACKED_STATUS),
+			...(state?.untrackedChanges ?? []),
+		].map((c) => c.uri.fsPath),
+	)
+	if (untrackedPaths.size > 0) {
 		const rootPath = repository.rootUri.fsPath
-		const fileList = untracked.map((c) => path.relative(rootPath, c.uri.fsPath) || c.uri.fsPath).join("\n")
+		const fileList = [...untrackedPaths].map((p) => path.relative(rootPath, p) || p).join("\n")
 		return `Untracked files:\n${fileList}`
 	}
 
@@ -370,9 +409,16 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 				}
 				const isCancelled = () => token.isCancellationRequested || abortController.signal.aborted
 				const untilCancelled = <T>(work: Promise<T>): Promise<T | undefined> => {
-					// A rejection after cancellation has no reader; keep it from becoming unhandled.
-					void work.catch(() => undefined)
-					return Promise.race([work, cancelled])
+					// A rejection caused by the user's cancel (for example, a provider that rejects
+					// synchronously on abort and wins the race) ends the step quietly. Any other
+					// rejection reaches the outer catch and is reported.
+					const guarded = work.catch((error: unknown) => {
+						if (isCancelled()) {
+							return undefined
+						}
+						throw error
+					})
+					return Promise.race([guarded, cancelled])
 				}
 
 				try {
@@ -438,9 +484,8 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 			},
 		)
 	} catch (error) {
-		if (error instanceof Error && (error.name === "AbortError" || error.message.includes("aborted"))) {
-			return
-		}
+		// The cancel path is handled inside the progress callback, so every error here is a real
+		// failure, including provider timeouts and errors whose text mentions "aborted".
 		const errorMessage = error instanceof Error ? error.message : String(error)
 		outputChannel?.appendLine(`[generateGitCommitMessage] failed: ${errorMessage}`)
 		vscode.window.showErrorMessage(`Failed to generate commit message: ${errorMessage}`)

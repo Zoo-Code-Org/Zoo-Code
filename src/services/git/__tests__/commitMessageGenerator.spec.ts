@@ -237,6 +237,26 @@ describe("commitMessageGenerator", () => {
 			const content = "diff --git a/src/app.ts b/src/app.ts\n+console.log('hello world')"
 			expect(redactSensitiveInformation(content)).toBe(content)
 		})
+
+		it.each([
+			["back-to-back addresses", "a@b.co+c@d.co", "[REDACTED_EMAIL][REDACTED_EMAIL]"],
+			["addresses in a list", "to: x@y.io, z@w.dev", "to: [REDACTED_EMAIL], [REDACTED_EMAIL]"],
+			["an address after a bare @", "@ then bob@example.org", "@ then [REDACTED_EMAIL]"],
+			["an address next to a decorator", "@Input() admin@corp.example", "@Input() [REDACTED_EMAIL]"],
+		])("redacts %s", (_label, content, expected) => {
+			expect(redactSensitiveInformation(content)).toBe(expected)
+		})
+
+		it.each([
+			["a long run without @", "a".repeat(200_000)],
+			["many @ signs with no domain", "a@".repeat(100_000)],
+			["many local-part characters before one @", `${"a.".repeat(100_000)}@`],
+		])("redacts %s in linear time", (_label, content) => {
+			// A quadratic scan of 200k characters takes far longer than this budget.
+			const startedAt = performance.now()
+			expect(redactSensitiveInformation(content)).toBe(content)
+			expect(performance.now() - startedAt).toBeLessThan(1000)
+		})
 	})
 
 	describe("buildCommitMessagePrompt", () => {
@@ -639,6 +659,45 @@ describe("commitMessageGenerator", () => {
 			const diff = await getRepositoryDiff(repo)
 			// path.relative uses the platform separator.
 			expect(diff).toMatch(/^Untracked files:\nsrc[\\/]new-file\.ts$/)
+		})
+
+		it("lists untracked files from the separate untrackedChanges group", async () => {
+			const repo = makeRepo("/workspace/repo", {
+				diff: vi.fn().mockResolvedValue(""),
+				state: {
+					workingTreeChanges: [],
+					untrackedChanges: [{ uri: makeUri("/workspace/repo/brand-new.ts"), status: 7 }],
+				},
+			})
+
+			expect(await getRepositoryDiff(repo)).toBe("Untracked files:\nbrand-new.ts")
+		})
+
+		it("de-duplicates a file listed in both untracked locations", async () => {
+			const repo = makeRepo("/workspace/repo", {
+				diff: vi.fn().mockResolvedValue(""),
+				state: {
+					workingTreeChanges: [
+						{ uri: makeUri("/workspace/repo/a.ts"), status: 7 },
+						{ uri: makeUri("/workspace/repo/modified.ts"), status: 5 },
+					],
+					untrackedChanges: [
+						{ uri: makeUri("/workspace/repo/a.ts"), status: 7 },
+						{ uri: makeUri("/workspace/repo/b.ts"), status: 7 },
+					],
+				},
+			})
+
+			expect(await getRepositoryDiff(repo)).toBe("Untracked files:\na.ts\nb.ts")
+		})
+
+		it("returns undefined when both untracked locations are empty", async () => {
+			const repo = makeRepo("/workspace/repo", {
+				diff: vi.fn().mockResolvedValue(""),
+				state: { workingTreeChanges: [], untrackedChanges: [] },
+			})
+
+			expect(await getRepositoryDiff(repo)).toBeUndefined()
 		})
 
 		it("surfaces untracked files when both diffs are empty", async () => {
@@ -1103,33 +1162,6 @@ describe("commitMessageGenerator", () => {
 			expect(mockRepo.inputBox.value).toBe("")
 		})
 
-		it("aborts when token triggers cancellation callback", async () => {
-			let cancellationHandler: (() => void) | undefined
-			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
-				const progress = { report: vi.fn() }
-				const token = {
-					isCancellationRequested: false,
-					onCancellationRequested: vi.fn((fn: () => void) => {
-						cancellationHandler = fn
-						return { dispose: vi.fn() }
-					}),
-				}
-				return callback(progress, token)
-			})
-			;(singleCompletionHandler as Mock).mockImplementation(async (_config, _prompt, options) => {
-				cancellationHandler?.()
-				expect(options.abortSignal.aborted).toBe(true)
-				return ""
-			})
-
-			await generateCommitMessage({
-				provider: mockProvider,
-				outputChannel: mockOutputChannel,
-			})
-
-			expect(mockRepo.inputBox.value).toBe("")
-		})
-
 		it("aborts the in-flight provider request when cancellation is requested", async () => {
 			// Collect ALL registered cancellation handlers so both abortController.abort()
 			// and the cancelPromise resolver are called when the test triggers cancellation.
@@ -1186,18 +1218,43 @@ describe("commitMessageGenerator", () => {
 			expect(vscode.window.showWarningMessage).toHaveBeenCalledWith("No commit message generated.")
 		})
 
-		it("ignores AbortError without showing an error message", async () => {
-			const abortError = new Error("This operation was aborted")
-			abortError.name = "AbortError"
-			;(vscode.window.withProgress as Mock).mockRejectedValue(abortError)
+		it("stays quiet when the provider rejects synchronously on the user's cancel", async () => {
+			const { cancel } = useCancellableProgress()
+			;(singleCompletionHandler as Mock).mockImplementation(
+				(_config, _prompt, options: { abortSignal: AbortSignal }) =>
+					new Promise((_resolve, reject) => {
+						options.abortSignal.addEventListener("abort", () => {
+							const abortError = new Error("This operation was aborted")
+							abortError.name = "AbortError"
+							reject(abortError)
+						})
+					}),
+			)
 
-			await generateCommitMessage({
-				provider: mockProvider,
-				outputChannel: mockOutputChannel,
-			})
+			const run = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalled())
+			cancel()
+			await run
 
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it.each([
+			["a message that mentions 'aborted'", "request aborted by server", "Error"],
+			["a provider timeout", "The operation was aborted due to timeout", "TimeoutError"],
+			["an AbortError the user did not cause", "This operation was aborted", "AbortError"],
+		])("reports %s when the user did not cancel", async (_label, message, name) => {
+			const error = new Error(message)
+			error.name = name
+			;(singleCompletionHandler as Mock).mockRejectedValue(error)
+
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(`Failed to generate commit message: ${message}`)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(`[generateGitCommitMessage] failed: ${message}`)
+			expect(mockRepo.inputBox.value).toBe("")
 		})
 
 		it("handles non-Error objects gracefully and shows error message", async () => {
