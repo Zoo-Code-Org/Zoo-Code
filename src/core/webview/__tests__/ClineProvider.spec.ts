@@ -7179,6 +7179,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -7214,6 +7215,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
 			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
+			.mockResolvedValueOnce(mockModels) // friendli (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
 
@@ -7237,6 +7239,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -7343,6 +7346,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
