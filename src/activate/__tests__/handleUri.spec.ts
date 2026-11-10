@@ -1,6 +1,18 @@
+const { mockShowWarningMessage } = vi.hoisted(() => ({
+	mockShowWarningMessage:
+		vi.fn<
+			(
+				message: string,
+				options: import("vscode").MessageOptions,
+				...items: string[]
+			) => Promise<string | undefined>
+		>(),
+}))
+
 vi.mock("vscode", () => ({
 	window: {
 		showInformationMessage: vi.fn(),
+		showWarningMessage: mockShowWarningMessage,
 	},
 }))
 
@@ -53,11 +65,13 @@ const makeCallbackProvider = (callback = vi.fn()): ClineProvider =>
 describe("handleUri", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockShowWarningMessage.mockResolvedValue(undefined)
 		mockGetVisibleInstance.mockReturnValue(mockVisibleProvider)
 		mockGetAllInstances.mockReturnValue([mockVisibleProvider])
 	})
 
 	it.each(["/openrouter", "/requesty"])("dispatches %s codes without losing literal plus signs", async (path) => {
+		mockShowWarningMessage.mockImplementation(async () => "Activate Requesty")
 		await handleUri(makeUri({ path, query: "code=a+b%2Bc&baseUrl=https%3A%2F%2Fexample.com" }))
 
 		if (path === "/openrouter") {
@@ -70,7 +84,47 @@ describe("handleUri", () => {
 	})
 
 	it("passes null when Requesty has no base URL", async () => {
+		mockShowWarningMessage.mockImplementation(async () => "Activate Requesty")
 		await handleUri(makeUri({ path: "/requesty", query: "code=test-code" }))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+			"Activate Requesty credentials from an external link?",
+			expect.objectContaining({ modal: true, detail: expect.stringContaining("https://router.requesty.ai/v1") }),
+			"Activate Requesty",
+		)
+		expect(mockVisibleProvider.handleRequestyCallback).toHaveBeenCalledWith("test-code", null)
+	})
+
+	it.each([undefined, "Cancel"])(
+		"does not apply an unsolicited Requesty callback when dismissed with %s",
+		async (choice) => {
+			mockShowWarningMessage.mockImplementation(async () => choice)
+			await handleUri(
+				makeUri({ path: "/requesty", query: "code=attacker-key&baseUrl=https://attacker.example/v1" }),
+			)
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+				"Activate Requesty credentials from an external link?",
+				expect.objectContaining({
+					modal: true,
+					detail: expect.stringContaining("https://attacker.example/v1"),
+				}),
+				"Activate Requesty",
+			)
+			expect(mockVisibleProvider.handleRequestyCallback).not.toHaveBeenCalled()
+		},
+	)
+
+	it("waits for explicit approval before applying callback credentials", async () => {
+		let approve: (choice: string | undefined) => void = () => {}
+		mockShowWarningMessage.mockImplementation(
+			() =>
+				new Promise<string | undefined>((resolve) => {
+					approve = resolve
+				}),
+		)
+		const callback = handleUri(makeUri({ path: "/requesty", query: "code=test-code" }))
+		expect(mockVisibleProvider.handleRequestyCallback).not.toHaveBeenCalled()
+		approve("Activate Requesty")
+		await callback
 		expect(mockVisibleProvider.handleRequestyCallback).toHaveBeenCalledWith("test-code", null)
 	})
 

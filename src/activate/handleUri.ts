@@ -1,5 +1,7 @@
 import * as vscode from "vscode"
 
+import { toRequestyServiceUrl } from "../shared/utils/requesty"
+
 import { getRouterUnavailableSignInMessage } from "../core/config/routerRemoval"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { handleAuthCallback as handleZooCodeAuthCallback, setZooCodeUserInfo } from "../services/zoo-code-auth"
@@ -51,7 +53,21 @@ export const handleUri = async (uri: vscode.Uri) => {
 			const code = query.get("code")
 			const baseUrl = query.get("baseUrl")
 			if (code) {
-				await visibleProvider.handleRequestyCallback(code, baseUrl)
+				// Deep links are untrusted. Require consent before installing credentials
+				// or redirecting an existing task's conversation to this destination.
+				const destination = toRequestyServiceUrl(baseUrl)
+				const approve = "Activate Requesty"
+				const choice = await vscode.window.showWarningMessage(
+					"Activate Requesty credentials from an external link?",
+					{
+						modal: true,
+						detail: `This will replace the active provider. Subsequent requests can send your conversation and workspace content to:\n${JSON.stringify(destination)}\n\nContinue only if you requested these credentials and trust this destination.`,
+					},
+					approve,
+				)
+				if (choice === approve) {
+					await visibleProvider.handleRequestyCallback(code, baseUrl)
+				}
 			}
 			break
 		}
