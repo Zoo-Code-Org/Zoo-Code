@@ -72,6 +72,8 @@
 		"command_template_content": "---\ndescription: \"이 명령이 수행하는 작업에 대한 간단한 설명\"\n---\n\n이것은 새로운 슬래시 명령입니다. 이 파일을 편집하여 명령 동작을 사용자 정의하세요.",
 		"message": {
 			"no_active_task_to_delete": "메시지를 삭제할 활성 작업이 없습니다",
+			"no_active_task_to_roll_back": "되돌릴 활성 작업이 없습니다",
+			"no_active_task_to_restore": "복원할 활성 작업이 없습니다",
 			"invalid_timestamp_for_deletion": "삭제를 위한 메시지 타임스탬프가 유효하지 않습니다",
 			"cannot_delete_missing_timestamp": "메시지를 삭제할 수 없습니다: 타임스탬프가 없습니다",
 			"cannot_delete_invalid_timestamp": "메시지를 삭제할 수 없습니다: 타임스탬프가 유효하지 않습니다",
