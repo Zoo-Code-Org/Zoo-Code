@@ -649,15 +649,14 @@ describe("ApplyDiffTool failure reporting", () => {
 		})
 	})
 
-	// ApplyDiffTool.ts lines 108-110 hold the three comparisons that decide whether a replacement
-	// character already in the file is stepped over or reported as the failure position. Each byte
-	// sequence below was run through the tool in round U35 and the offset it prints is asserted here.
-	// The offsets each case must not print are the offsets the surviving mutants at those lines print
-	// instead; the changed-code mutation report numbers those rows one higher than the head lines
-	// (printed 109, 110, 111 for head 108, 109, 110), the shift I measured and named on the triage
-	// comment, so the bytes and the printed offset are the anchors, not the report line number. The
-	// mutant each case kills is named above it. The 0x41 and 0x3f cases are the shape where the
-	// replacement character is not at the start of the file, so the reported offset is one.
+	// The guard below decides, from the bytes, whether a replacement character already in the file is
+	// stepped over or reported as the failure position: it steps over only when the three bytes at the
+	// current offset really are the encoded form of U+FFFD. Each byte sequence below was run through
+	// the tool and the offset it prints is asserted here. The offsets each case must not print are the
+	// offsets a mutant that stops stepping over, or steps by the wrong width, prints instead, so the
+	// bytes and the printed offset are the anchors and no report line number is relied on. The mutant
+	// each case kills is named above it. The 0x41 and 0x3f cases are the shape where the replacement
+	// character is not at the start of the file, so the reported offset is one.
 	describe("the guard that steps past an encoded replacement character", () => {
 		async function runBytesFor(bytes: Buffer): Promise<string> {
 			mockedReadFile.mockResolvedValue(bytes)
@@ -674,7 +673,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			return String(pushedResult ?? "")
 		}
 
-		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
 		it("reports offset 0 for the bytes 0xef 0xef 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0xef, 0xbd]))
 
@@ -683,7 +682,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 3)")
 		})
 
-		// kills line 108 outer_or_and, line 110 clauseC_false
+		// kills first comparison outer_or_and, third comparison clauseC_false
 		it("reports offset 0 for the bytes 0xef 0xbf 0xef", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0xef]))
 
@@ -692,7 +691,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 3)")
 		})
 
-		// kills line 108 outer_or_and, line 110 clauseC_false
+		// kills first comparison outer_or_and, third comparison clauseC_false
 		it("reports offset 0 for the bytes 0xef 0xbf 0xff", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0xff]))
 
@@ -701,7 +700,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 3)")
 		})
 
-		// kills line 108 outer_or_and, line 110 clauseC_false
+		// kills first comparison outer_or_and, third comparison clauseC_false
 		it("reports offset 0 for the bytes 0xef 0xbf 0x41", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0x41]))
 
@@ -710,7 +709,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 4)")
 		})
 
-		// kills line 108 outer_or_and, line 110 clauseC_false
+		// kills first comparison outer_or_and, third comparison clauseC_false
 		it("reports offset 0 for the bytes 0xef 0xbf 0x3f", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0x3f]))
 
@@ -719,7 +718,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 4)")
 		})
 
-		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
 		it("reports offset 0 for the bytes 0xef 0xff 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0xff, 0xbd]))
 
@@ -728,7 +727,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 3)")
 		})
 
-		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
 		it("reports offset 0 for the bytes 0xef 0x41 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0x41, 0xbd]))
 
@@ -737,7 +736,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 4)")
 		})
 
-		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		// kills first comparison outer_or_and, first comparison inner_or_and, second comparison clauseB_false
 		it("reports offset 0 for the bytes 0xef 0x3f 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xef, 0x3f, 0xbd]))
 
@@ -746,7 +745,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 4)")
 		})
 
-		// kills line 108 outer_or_and, line 110 clauseC_false
+		// kills first comparison outer_or_and, third comparison clauseC_false
 		it("reports offset 1 for the bytes 0x41 0xef 0xbf", async () => {
 			const output = await runBytesFor(Buffer.from([0x41, 0xef, 0xbf]))
 
@@ -755,7 +754,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 4)")
 		})
 
-		// kills line 108 outer_or_and, line 110 clauseC_false
+		// kills first comparison outer_or_and, third comparison clauseC_false
 		it("reports offset 1 for the bytes 0x3f 0xef 0xbf", async () => {
 			const output = await runBytesFor(Buffer.from([0x3f, 0xef, 0xbf]))
 
@@ -764,7 +763,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 4)")
 		})
 
-		// kills line 108 inner_or_and, line 108 clauseA_false
+		// kills first comparison inner_or_and, first comparison clauseA_false
 		it("reports offset 0 for the bytes 0xbf 0xbf 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xbf, 0xbf, 0xbd]))
 
@@ -773,7 +772,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 3)")
 		})
 
-		// kills line 108 inner_or_and, line 108 clauseA_false
+		// kills first comparison inner_or_and, first comparison clauseA_false
 		it("reports offset 0 for the bytes 0xbd 0xbf 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xbd, 0xbf, 0xbd]))
 
@@ -782,7 +781,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("offset 3)")
 		})
 
-		// kills line 108 inner_or_and, line 108 clauseA_false
+		// kills first comparison inner_or_and, first comparison clauseA_false
 		it("reports offset 0 for the bytes 0xff 0xbf 0xbd", async () => {
 			const output = await runBytesFor(Buffer.from([0xff, 0xbf, 0xbd]))
 
