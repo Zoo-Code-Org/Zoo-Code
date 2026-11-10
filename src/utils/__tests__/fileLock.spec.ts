@@ -160,10 +160,16 @@ test("terminates on a three-link cycle instead of recursing forever", async () =
 
 	const releaseLock = await acquireFileLock(a)
 
-	// Terminated with exactly one lock acquisition on a cycle member, and the
-	// total hop budget held across all frames.
+	// Terminated with exactly one lock acquisition, and the hop accounting is pinned to an
+	// exact number instead of an upper bound: eight frames of eight hops spend the 64-hop
+	// budget, 64 mod 3 leaves the cursor on the second cycle member, and realpath reports
+	// ENOENT all the way to the root, so the lock lands on the lexical second member.
+	// An upper bound accepts any walk that stopped early, which is how the per-frame bound
+	// mutant and the budget-carry mutant survived: they also terminate, just after a
+	// different number of hops and on a different member.
 	expect(lockfile.lock).toHaveBeenCalledTimes(1)
-	expect(vi.mocked(fsPromises.readlink).mock.calls.length).toBeLessThanOrEqual(64)
+	expect(lockfile.lock).toHaveBeenCalledWith(b, expect.objectContaining({ realpath: false }))
+	expect(vi.mocked(fsPromises.readlink).mock.calls.length).toBe(64)
 
 	await releaseLock()
 })

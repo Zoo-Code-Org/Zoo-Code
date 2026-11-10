@@ -364,14 +364,24 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 		})
 
-		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind", async () => {
+		it("a post-commit backup cleanup failure is retried: the target stays committed and the retry clears", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// The post-commit backup unlink (SUT step 6) fails — the write must
-			// still succeed; an orphaned backup is the documented acceptable
-			// outcome, so the failure is swallowed instead of rolling back.
-			vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("EPERM"))
+			const backupUnlinks: string[] = []
+			// The post-commit backup unlink (SUT step 6) fails on its first attempt. What makes
+			// the write still succeed is that step 6 retries once, so the retry is asserted here
+			// instead of being described as a swallow - the swallow is the success path at the
+			// failure-path unlink, which the failure-path describe pins separately.
+			vi.mocked(fs.unlink).mockImplementation(async (candidate: unknown) => {
+				const asString = String(candidate)
+				if (asString.includes("safeWriteText.bak_")) {
+					backupUnlinks.push(asString)
+					if (backupUnlinks.length === 1) {
+						throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+					}
+				}
+			})
 
 			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
 
@@ -379,8 +389,10 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 
-			// the failing cleanup was the post-commit backup unlink
+			// the failing cleanup was the post-commit backup unlink, attempted twice: attempt
+			// one hit EPERM and attempt two is the retry that cleared it
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(backupUnlinks).toHaveLength(2)
 
 			// the staging temp was already committed by the rename; nothing
 			// temp-shaped is unlinked afterwards
@@ -1595,6 +1607,47 @@ describe("cleanup before a rollback failure is reported", () => {
 		const rmdirOrder = vi.mocked(fs.rmdir).mock.invocationCallOrder[0]
 		expect(unlinkOrder).toBeGreaterThan(failingRenameOrder)
 		expect(rmdirOrder).toBeGreaterThan(failingRenameOrder)
+	})
+})
+
+describe("backup removal on the failure path", () => {
+	beforeEach(() => mockDefaults())
+	// Thread 4525471043 on the CodeRabbit review of PR 2383. After the commit rename the
+	// failure path removes the backup copy with one unlink whose error is swallowed, while
+	// step 6 on the success path makes two attempts and reports a leftover as
+	// OrphanedPublishedBackupError. This test pins what the failure path does today and
+	// names the gap instead of fixing it: reporting the leftover would change which error
+	// the caller sees, and this round changes no source on this path.
+	it("makes one unlink attempt and reports the durability failure, not the leftover backup path", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const dirPath = path.dirname(targetPath)
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The file fd opens normally; the parent-directory open after the commit rename
+		// fails, which is the post-commit durability failure that routes here.
+		vi.mocked(fsSync.openSync).mockImplementation((target) => {
+			if (String(target) === dirPath) {
+				throw new Error("EBADF")
+			}
+			return 1
+		})
+		const backupUnlinks: string[] = []
+		vi.mocked(fs.unlink).mockImplementation(async (candidate: unknown) => {
+			const asString = String(candidate)
+			if (asString.includes("safeWriteText.bak_")) {
+				backupUnlinks.push(asString)
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+		})
+
+		const error = await safeWriteText(targetPath, "data", { backup: true, platform: "linux" }).catch(
+			(thrown: unknown) => thrown,
+		)
+		expect(error).toBeInstanceOf(PostCommitDurabilityError)
+		// The durability failure is what the caller learns, and nothing in it names the copy
+		// this path failed to remove.
+		expect((error as Error).message).not.toContain("safeWriteText.bak_")
+		expect(backupUnlinks).toHaveLength(1)
+		expect(backupUnlinks[0]).toContain("safeWriteText.bak_")
 	})
 })
 
