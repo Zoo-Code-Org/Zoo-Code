@@ -157,6 +157,34 @@ describe("parseCommand", () => {
 		})
 	})
 
+	describe("chain operators on a line with a multi-line quoted argument", () => {
+		it.each([
+			{
+				input: `cd cmd-test && node -e "\nconsole.log('hello world');\n"`,
+				expected: ["cd cmd-test", `node -e "\nconsole.log('hello world');\n"`],
+			},
+			{
+				input: `node -e "\nconsole.log(1)\n" || echo failed`,
+				expected: [`node -e "\nconsole.log(1)\n"`, "echo failed"],
+			},
+			{
+				input: "cd a; node -e '\nx\n' | tee out.txt",
+				expected: ["cd a", "node -e '\nx\n'", "tee out.txt"],
+			},
+			{
+				input: 'git commit -m "line 1\nline 2" && git push',
+				expected: ['git commit -m "line 1\nline 2"', "git push"],
+			},
+		])("splits $input into each chained command", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
+
+		it("keeps operators inside the multi-line quoted argument", () => {
+			const input = `sh -c "cd a && node x\necho done" && ls`
+			expect(parseCommand(input).commands).toEqual([`sh -c "cd a && node x\necho done"`, "ls"])
+		})
+	})
+
 	describe("real-world wrapped multi-line script (regression)", () => {
 		it("treats a wrapper command with an embedded multi-line script as a single command", () => {
 			const input = [

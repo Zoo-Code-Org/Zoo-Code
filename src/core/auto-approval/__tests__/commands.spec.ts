@@ -160,6 +160,25 @@ describe("getCommandDecision — multi-line script wrapped in a quoted argument"
 	})
 })
 
+describe("getCommandDecision — chained command next to a multi-line quoted argument", () => {
+	// Every command in the chain must match the allowlist on its own, also when
+	// one of them has a quoted argument that spans lines.
+	const chained = `cd cmd-test && node -e "\nconsole.log('hello world');\n"`
+	const reversed = `node -e "\nconsole.log('hello world');\n" && cd cmd-test`
+
+	it.each([chained, reversed])("asks user when only cd is allowed: %j", (command) => {
+		expect(getCommandDecision(command, ["cd"])).toBe("ask_user")
+	})
+
+	it.each([chained, reversed])("auto-approves when every command is allowed: %j", (command) => {
+		expect(getCommandDecision(command, ["cd", "node"])).toBe("auto_approve")
+	})
+
+	it.each([chained, reversed])("auto-denies when the chained command is denied: %j", (command) => {
+		expect(getCommandDecision(command, ["cd"], ["node"])).toBe("auto_deny")
+	})
+})
+
 describe("getCommandDecisionDetailed", () => {
 	it("names the offending sub-command and matched denied prefix on chained commands", () => {
 		const result = getCommandDecisionDetailed("git status && rm x && npm test", ["git", "npm"], ["rm"])

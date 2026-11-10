@@ -516,14 +516,18 @@ export function parseCommand(command: string): ParseResult {
 		// Restore top-level quote placeholders before per-line parsing so that
 		// parseCommandLine sees the original quoted content and can apply its own
 		// masking for operator splitting.
-		const restoredLine = line.replace(/__TOPLEVEL_QUOTE_(\d+)__/g, (_, i) => topLevelQuotes[parseInt(i)])
+		const restoreQuotes = (text: string) =>
+			text.replace(/__TOPLEVEL_QUOTE_(\d+)__/g, (_, i) => topLevelQuotes[parseInt(i)])
+		const restoredLine = restoreQuotes(line)
 
 		// If the restored line contains embedded newlines it means a top-level
-		// quote (e.g. a heredoc) spanned multiple lines. The entire restored
-		// string is a single atomic command -- passing it through parseCommandLine
-		// would let shell-quote split on the embedded newlines and << operators.
+		// quote (e.g. a heredoc) spanned multiple lines. Passing the restored text
+		// to parseCommandLine would let shell-quote split on the embedded newlines
+		// and << operators, so split the masked line instead and restore each
+		// quote inside its own sub-command. Each chained command must reach the
+		// allowlist check on its own.
 		if (restoredLine.includes("\n")) {
-			allCommands.push(restoredLine)
+			allCommands.push(...parseCommandLine(line).map(restoreQuotes))
 			continue
 		}
 
