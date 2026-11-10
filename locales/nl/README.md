@@ -47,11 +47,11 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.92.0
+## Nieuw in v3.96.0
 
-- ✨ **Snellere modelkeuze en betere modelondersteuning:** Wissel van model via het invoerveld van de chat. Gebruik Claude Haiku 5.5 op Amazon Bedrock, krijg nauwkeurigere Kimi K3-mogelijkheden op OpenRouter en gebruik de gecorrigeerde limieten voor Gemini 4 Argon op Vercel AI Gateway.
-- 🧭 **Betrouwbaardere workflows voor terminal, bewerking, chat en externe omgevingen:** Laat opdrachtuitvoer desgewenst standaard inklappen, krijg duidelijkere bewerkingsfouten, houd redeneer- en API-rijen zichtbaar en voorkom opstart- en proxyproblemen in externe workspaces.
-- 🔌 **Uitgebreide MCP-marketplace:** Verbind Zoo Code via de MCP-marketplace met AnySearch, Mailtea en Tradehand.
+- ✨ **Nieuwe chatinstellingen en diagnostiek:** Toon tijdstempels bij berichten met instelbare tijd- en datumformaten, stel de prompt-cache-TTL voor Anthropic-profielen af en genereer privacyvriendelijke diagnostiekrapporten.
+- 💸 **Nauwkeurigere providerkosten en caching:** Houdt Anthropic-toolresultaten intact, neemt cumulatieve outputtokens mee in Anthropic- en MiniMax-kosten, leest DeepSeek-prompt-cache-tellers, richt zich op de xAI Responses-cache en factureert Mistral-cache-leesacties tegen 0,1x.
+- 🧭 **Betrouwbaardere en snellere chats:** Hervat voltooide taken na een herstart, herstel checkpoints wanneer de opgeslagen commit ontbreekt, herlaad een dode webview-renderer automatisch, beperk streamingupdates en laad talen op verzoek.
 
 ## Wat kan Zoo Code voor JOU doen?
 

@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.92.0
+## Neu in v3.96.0
 
-- ✨ **Schnellere Modellauswahl und bessere Modellunterstützung:** Wechsle das Modell direkt im Chat-Eingabefeld. Nutze Claude Haiku 5.5 auf Amazon Bedrock, profitiere von präziseren Kimi K3-Funktionen auf OpenRouter und verwende die korrigierten Limits für Gemini 4 Argon auf Vercel AI Gateway.
-- 🧭 **Zuverlässigere Workflows für Terminal, Bearbeitung, Chat und Remote-Umgebungen:** Lass Befehlsausgaben auf Wunsch standardmäßig einklappen, erhalte klarere Fehlermeldungen bei der Bearbeitung, halte Reasoning- und API-Zeilen sichtbar und vermeide Start- und Proxy-Probleme in Remote-Workspaces.
-- 🔌 **Erweiterter MCP Marketplace:** Verbinde Zoo Code über den MCP Marketplace mit AnySearch, Mailtea und Tradehand.
+- ✨ **Neue Chat-Einstellungen und Diagnose:** Zeige Nachrichten-Zeitstempel mit konfigurierbaren Zeit- und Datumsformaten, stimme die Prompt-Cache-TTL für Anthropic-Profile ab und erstelle datenschutzfreundliche Diagnoseberichte.
+- 💸 **Genauere Anbieterkosten und Caching:** Anthropic-Ergebnisse bleiben intakt, kumulative Output-Tokens fließen in Anthropic- und MiniMax-Kosten ein, DeepSeek-Prompt-Cache-Zähler werden ausgelesen, der xAI-Responses-Cache wird gezielt angesprochen und Mistral-Cache-Lesungen werden mit 0,1x abgerechnet.
+- 🧭 **Zuverlässigere und schnellere Chats:** Setze abgeschlossene Aufgaben nach einem Neustart fort, stelle Checkpoints wieder her, wenn der gespeicherte Commit fehlt, lade einen toten Webview-Renderer automatisch neu, drossle Streaming-Updates und lade Sprachen bei Bedarf.
 
 ## Was kann Zoo Code für DICH tun?
 

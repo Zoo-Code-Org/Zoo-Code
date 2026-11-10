@@ -20,21 +20,21 @@ vi.mock("fs/promises", async () => {
 	fsPromisesActuals.unlink = actual.unlink
 	fsPromisesActuals.writeFile = actual.writeFile
 	// Start with all actual implementations.
-	const mockedFs = { ...actual }
-	// Selectively wrap functions with vi.fn() if they are spied on
-	// or have their implementations changed in tests.
-	// This ensures that other fs.promises functions used by the SUT
-	// (like proper-lockfile's internals) will use their actual implementations.
-	mockedFs.writeFile = vi.fn(actual.writeFile) as any
-	mockedFs.readFile = vi.fn(actual.readFile) as any
-	mockedFs.rename = vi.fn(actual.rename) as any
-	mockedFs.unlink = vi.fn(actual.unlink) as any
-	mockedFs.access = vi.fn(actual.access) as any
-	mockedFs.mkdtemp = vi.fn(actual.mkdtemp) as any
-	mockedFs.rm = vi.fn(actual.rm) as any
-	mockedFs.readdir = vi.fn(actual.readdir) as any
-	mockedFs.mkdir = vi.fn(actual.mkdir) as any
-	// fs.stat and fs.lstat will be available via { ...actual }
+	const mockedFs = {
+		...actual,
+		writeFile: vi.fn(actual.writeFile),
+		readFile: vi.fn(actual.readFile),
+		rename: vi.fn(actual.rename),
+		unlink: vi.fn(actual.unlink),
+		access: vi.fn(actual.access),
+		stat: vi.fn(actual.stat),
+		open: vi.fn(actual.open),
+		mkdtemp: vi.fn(actual.mkdtemp),
+		rm: vi.fn(actual.rm),
+		readdir: vi.fn(actual.readdir),
+		mkdir: vi.fn(actual.mkdir),
+	}
+	// fs.lstat is available via { ...actual }
 
 	return mockedFs
 })
@@ -44,11 +44,25 @@ vi.mock("fs", async () => {
 	const actualFs = await vi.importActual<typeof import("fs")>("fs")
 	return {
 		...actualFs, // Spread actual implementations
-		createWriteStream: vi.fn(actualFs.createWriteStream) as any, // Default to actual, but mockable
+		createWriteStream: vi.fn(actualFs.createWriteStream), // Default to actual, but mockable
 	}
 })
 
 import * as fs from "fs/promises" // This will now be the mocked version
+
+function makeErrorWriteStream(message: string): fsSyncActual.WriteStream {
+	const stream = Object.assign(
+		new Writable({
+			write(_chunk, _encoding, callback) {
+				callback(new Error(message))
+			},
+		}),
+		{ close: () => {}, bytesWritten: 0, path: "", pending: false },
+	)
+
+	// The double provides the Writable behavior and WriteStream properties consumed by the serializer.
+	return stream as unknown as fsSyncActual.WriteStream
+}
 
 describe("safeWriteJson", () => {
 	let originalConsoleError: typeof console.error
@@ -87,7 +101,7 @@ describe("safeWriteJson", () => {
 	})
 
 	// Helper function to read file content
-	async function readFileContent(filePath: string): Promise<any> {
+	async function readFileContent(filePath: string): Promise<unknown> {
 		const readContent = await fs.readFile(filePath, "utf-8")
 		return JSON.parse(readContent)
 	}
@@ -132,20 +146,10 @@ describe("safeWriteJson", () => {
 		// currentTestFilePath exists due to beforeEach, allowing lock acquisition.
 		const data = { message: "test write failure" }
 
-		const mockErrorStream = new Writable() as any
-		mockErrorStream._write = (_chunk: any, _encoding: any, callback: any) => {
-			callback(new Error("Write stream error"))
-		}
-		// Add missing WriteStream properties
-		mockErrorStream.close = vi.fn()
-		mockErrorStream.bytesWritten = 0
-		mockErrorStream.path = ""
-		mockErrorStream.pending = false
+		const mockErrorStream = makeErrorWriteStream("Write stream error")
 
 		// Mock createWriteStream to return a stream that errors on write
-		;(fsSyncActual.createWriteStream as any).mockImplementationOnce((_path: any, _options: any) => {
-			return mockErrorStream
-		})
+		vi.mocked(fsSyncActual.createWriteStream).mockImplementationOnce(() => mockErrorStream)
 
 		await expect(safeWriteJson(currentTestFilePath, data)).rejects.toThrow("Write stream error")
 
@@ -158,26 +162,33 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ initial: "content" })
 	})
 
-	test("should handle failure when renaming filePath to tempBackupFilePath (filePath exists)", async () => {
-		const initialData = { message: "Initial content, should remain" }
-		const newData = { message: "New content, should not be written" }
+	test("should fall back to the two-step replacement when the commit rename fails with EPERM", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "Windows-style EPERM replacement" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		// First call: the single-rename commit fails with the Windows-style EPERM
+		// (a reader holds the target open). The fallback then renames the target
+		// to a backup and the replacement into place, using real renames.
 		vi.mocked(fs.rename).mockImplementationOnce(async () => {
-			throw new Error("Rename to backup failed")
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename to backup failed")
+		await safeWriteJson(currentTestFilePath, newData)
 
-		// Verify the original file still exists with initial content
+		// Verify the new content was committed by the fallback
 		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(initialData)
+		expect(content).toEqual(newData)
+
+		// Verify the fallback backup was cleaned up
+		const leftovers = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(leftovers).toEqual([])
 	})
 
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup succeeded)", async () => {
+	test("should restore the committed file when the EPERM fallback's replacement rename fails", async () => {
 		const initialData = { message: "Initial content, should be restored" }
 		const newData = { message: "New content" }
 
@@ -191,20 +202,21 @@ describe("safeWriteJson", () => {
 		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 1) {
-				// First call: filePath -> tempBackupFilePath (should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
+				// First call: the single-rename commit fails with EPERM, which
+				// triggers the two-step fallback.
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
 			} else if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
-				throw new Error("Rename from temp to final failed")
-			} else if (renameCallCount === 3) {
-				// Third call: tempBackupFilePath -> filePath (rollback, should succeed)
+				// Second call: filePath -> tempBackupFilePath (fallback backup, succeeds)
 				return fsPromisesActuals.rename!(oldPath, newPath)
+			} else if (renameCallCount === 3) {
+				// Third call: tempNewFilePath -> filePath (fallback replacement, fails)
+				throw new Error("Fallback replacement rename failed")
 			}
-			// Default: use original implementation
+			// Fourth call: tempBackupFilePath -> filePath (rollback, succeeds)
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Fallback replacement rename failed")
 
 		// Verify the file was restored to initial content
 		const content = await readFileContent(currentTestFilePath)
@@ -257,8 +269,7 @@ describe("safeWriteJson", () => {
 	test("should handle directory creation permission errors", async () => {
 		// fs.mkdir is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.mkdir).mockImplementationOnce(async () => {
-			const error = new Error("EACCES: permission denied") as any
-			error.code = "EACCES"
+			const error = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			throw error
 		})
 
@@ -292,12 +303,17 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(data)
 	})
 
-	test("should handle failure when deleting tempBackupFilePath (filePath exists, all renames succeed)", async () => {
+	test("should handle failure when deleting tempBackupFilePath (EPERM fallback, all renames succeed)", async () => {
 		const initialData = { message: "Initial content" }
 		const newData = { message: "Successfully written new content" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// Force the two-step fallback so a backup exists, then let its deletion fail
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
 
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.unlink).mockImplementationOnce(async () => {
@@ -320,8 +336,13 @@ describe("safeWriteJson", () => {
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
+		// Force the two-step fallback so a backup exists, then fail its deletion
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
+
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
+		vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
 			if (filePath.toString().includes(".bak_")) {
 				throw new Error("Backup deletion failed")
 			}
@@ -338,7 +359,7 @@ describe("safeWriteJson", () => {
 	})
 
 	// The expected error message might need to change if the mock behaves differently.
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath initially exists)", async () => {
+	test("should keep the committed file when the commit rename fails with a non-EPERM error", async () => {
 		// currentTestFilePath exists due to beforeEach.
 		const initialData = { message: "Initial content" }
 		const newData = { message: "New content" }
@@ -346,20 +367,14 @@ describe("safeWriteJson", () => {
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		let renameCallCount = 0
-		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
-			renameCallCount++
-			if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
-				throw new Error("Rename failed")
-			}
-			// For all other calls, use the original implementation
-			return fsPromisesActuals.rename!(oldPath, newPath)
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename failed")
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename failed")
 
-		// The file should be restored to its initial content
+		// No backup is made on the single-rename path, and the committed file
+		// keeps its previous content
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(initialData)
 	})
@@ -392,18 +407,7 @@ describe("safeWriteJson", () => {
 
 		// Mock createWriteStream to throw an error
 		const createWriteStreamSpy = vi.spyOn(fsSyncActual, "createWriteStream")
-		createWriteStreamSpy.mockImplementationOnce((_path: any, _options: any) => {
-			const errorStream = new Writable() as any
-			errorStream._write = (_chunk: any, _encoding: any, callback: any) => {
-				callback(new Error("Stream write error"))
-			}
-			// Add missing WriteStream properties
-			errorStream.close = vi.fn()
-			errorStream.bytesWritten = 0
-			errorStream.path = _path
-			errorStream.pending = false
-			return errorStream
-		})
+		createWriteStreamSpy.mockImplementationOnce(() => makeErrorWriteStream("Stream write error"))
 
 		// This should throw but still release the lock
 		await expect(safeWriteJson(currentTestFilePath, data)).rejects.toThrow("Stream write error")
@@ -420,8 +424,7 @@ describe("safeWriteJson", () => {
 		const data = { message: "access error test" }
 		// fs.access is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.access).mockImplementationOnce(async () => {
-			const error = new Error("EACCES: permission denied") as any
-			error.code = "EACCES"
+			const error = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			throw error
 		})
 
@@ -436,7 +439,7 @@ describe("safeWriteJson", () => {
 
 	// Test for rollback failure scenario
 	test("should log error and re-throw original if rollback fails", async () => {
-		const initialData = { message: "Initial, should be lost if rollback fails" }
+		const initialData = { message: "Initial, preserved if rollback fails" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -447,18 +450,36 @@ describe("safeWriteJson", () => {
 		let renameCallCount = 0
 		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
-			if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (fail)
-				throw new Error("Primary rename failed")
+			if (renameCallCount === 1) {
+				// First call: the single-rename commit fails with EPERM, which
+				// triggers the two-step fallback.
+				throw Object.assign(new Error("Primary rename failed"), { code: "EPERM" })
+			} else if (renameCallCount === 2) {
+				// Second call: filePath -> tempBackupFilePath (fallback backup, succeeds)
+				return fsPromisesActuals.rename!(oldPath, newPath)
 			} else if (renameCallCount === 3) {
-				// Third call: tempBackupFilePath -> filePath (rollback, also fail)
+				// Third call: tempNewFilePath -> filePath (fallback replacement, fails)
+				throw new Error("Fallback replacement rename failed")
+			} else if (renameCallCount === 4) {
+				// Fourth call: tempBackupFilePath -> filePath (rollback, also fails)
 				throw new Error("Rollback rename failed")
 			}
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		// Should throw the original error, not the rollback error
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
+		// The fallback's replacement error rejects the write; the rollback error
+		// is only logged.
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Fallback replacement rename failed")
+
+		const backups = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(backups).toHaveLength(1)
+		expect(await readFileContent(path.join(tempDir, backups[0]))).toEqual(initialData)
+		await safeWriteJson(currentTestFilePath, newData, {
+			merge: (existing) => {
+				expect(existing).toEqual(initialData)
+				return newData
+			},
+		})
 
 		// Verify console.error was called for the rollback failure
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -541,5 +562,260 @@ describe("safeWriteJson", () => {
 
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual({ c: 3 })
+	})
+
+	// Interrupted-write recovery tests
+	it.each(["EMFILE", "EIO"])(
+		"should preserve committed history when the recovery scan fails with %s",
+		async (code) => {
+			await fs.unlink(currentTestFilePath)
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_saved.tmp`)
+			const committed = { history: ["saved"] }
+			await fs.writeFile(backupPath, JSON.stringify(committed))
+			const error = Object.assign(new Error("Recovery scan failed"), { code })
+			vi.mocked(fs.readdir).mockRejectedValueOnce(error)
+			const merge = vi.fn((existing: unknown) => existing)
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(merge).not.toHaveBeenCalled()
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: `failed:${code}` })
+			expect(await readFileContent(backupPath)).toEqual(committed)
+			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
+			// Once the fault clears, a later merge still sees the committed state.
+			await safeWriteJson(currentTestFilePath, {}, { merge })
+			expect(merge).toHaveBeenCalledExactlyOnceWith(committed, {})
+			expect(await readFileContent(currentTestFilePath)).toEqual(committed)
+		},
+	)
+
+	test("should allow a write when the recovery directory scan reports ENOENT", async () => {
+		vi.mocked(fs.readdir).mockRejectedValueOnce(Object.assign(new Error("Directory missing"), { code: "ENOENT" }))
+		await safeWriteJson(currentTestFilePath, { saved: true })
+		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
+	})
+
+	test("should restore an orphaned backup when the canonical path is missing after an interrupted write", async () => {
+		const committedData = { message: "Committed before the interruption" }
+
+		// Simulate the crash state of the two-step replacement: the target was
+		// renamed to a backup, the replacement never landed, and the
+		// replacement temp file was left behind. The canonical path is absent.
+		await fsPromisesActuals.unlink!(currentTestFilePath)
+		const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_abc.tmp`)
+		const orphanedNewPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.new_1_def.tmp`)
+		await fsPromisesActuals.writeFile!(backupPath, JSON.stringify(committedData))
+		await fsPromisesActuals.writeFile!(orphanedNewPath, "{}")
+
+		// A merge write must observe the restored committed content, not null.
+		const incoming = { message: "New content" }
+		let mergedWith: unknown
+		await safeWriteJson(currentTestFilePath, incoming, {
+			merge: (existing) => {
+				mergedWith = existing
+				return incoming
+			},
+		})
+
+		expect(mergedWith).toEqual(committedData)
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(incoming)
+
+		// The restored backup is consumed and the leftover replacement file is
+		// garbage collected.
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+	})
+
+	it.each(["EACCES", "EIO", "EPERM", undefined])(
+		"should preserve committed content when canonical access fails with %s",
+		async (code) => {
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_stale.tmp`)
+			await fs.writeFile(backupPath, JSON.stringify({ stale: true }))
+			// Directory access succeeds; only the canonical-path check fails.
+			const error = Object.assign(new Error("Canonical access failed"), { code })
+			vi.mocked(fs.access).mockResolvedValueOnce(undefined).mockRejectedValueOnce(error)
+			const merge = vi.fn((existing: unknown) => existing)
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: `failed:${code ?? "unknown"}` })
+			expect(merge).not.toHaveBeenCalled()
+			expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+			expect(await readFileContent(backupPath)).toEqual({ stale: true })
+		},
+	)
+
+	it.each(["ENOENT", "EACCES", "EIO"])(
+		"should preserve backups when another backup stat fails with %s",
+		async (code) => {
+			await fs.unlink(currentTestFilePath)
+			const unreadableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_bad.tmp`)
+			const readableBackup = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_2_good.tmp`)
+			await fs.writeFile(unreadableBackup, JSON.stringify({ stale: true }))
+			await fs.writeFile(readableBackup, JSON.stringify({ committed: true }))
+			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			vi.mocked(fs.stat).mockImplementation(async (backupPath) => {
+				if (backupPath === unreadableBackup) {
+					throw Object.assign(new Error("Backup stat failed"), { code })
+				}
+				return actual.stat(backupPath)
+			})
+			const merge = vi.fn((existing: unknown) => existing)
+
+			if (code === "ENOENT") {
+				await safeWriteJson(currentTestFilePath, {}, { merge })
+				expect(merge).toHaveBeenCalledWith({ committed: true }, {})
+			} else {
+				await expect(safeWriteJson(currentTestFilePath, {}, { merge })).rejects.toMatchObject({ code })
+				expect(merge).not.toHaveBeenCalled()
+				expect(await readFileContent(unreadableBackup)).toEqual({ stale: true })
+				expect(await readFileContent(readableBackup)).toEqual({ committed: true })
+			}
+		},
+	)
+
+	it.each(["rename", "stat"] as const)(
+		"should abort recovery and preserve history when backup %s fails",
+		async (operation) => {
+			await fs.unlink(currentTestFilePath)
+			const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_saved.tmp`)
+			const committed = { history: ["saved"] }
+			await fs.writeFile(backupPath, JSON.stringify(committed))
+			const error = Object.assign(new Error("Recovery failed"), { code: "EACCES" })
+			vi.mocked(fs[operation]).mockRejectedValueOnce(error)
+			const merge = vi.fn()
+			const trace = vi.fn()
+
+			await expect(safeWriteJson(currentTestFilePath, {}, { merge, trace })).rejects.toBe(error)
+
+			expect(trace).toHaveBeenCalledExactlyOnceWith({ stage: "recover", detail: "failed:EACCES" })
+			expect(merge).not.toHaveBeenCalled()
+			expect(await readFileContent(backupPath)).toEqual(committed)
+			await expect(fs.readFile(currentTestFilePath)).rejects.toMatchObject({ code: "ENOENT" })
+			await safeWriteJson(currentTestFilePath, {}, { merge: (existing) => existing })
+			expect(await readFileContent(currentTestFilePath)).toEqual(committed)
+		},
+	)
+
+	test("should restore by mtime and preserve unrelated siblings", async () => {
+		await fs.unlink(currentTestFilePath)
+		const prefix = `.${path.basename(currentTestFilePath)}`
+		const newest = path.join(tempDir, `${prefix}.bak_1_newest.tmp`)
+		const older = path.join(tempDir, `${prefix}.bak_9_older.tmp`)
+		const unrelated = path.join(tempDir, ".other.json.bak_1_saved.tmp")
+		const wrongSuffix = path.join(tempDir, `${prefix}.bak_1_saved.txt`)
+		await fs.writeFile(newest, JSON.stringify({ newest: true }))
+		await fs.writeFile(older, JSON.stringify({ older: true }))
+		await fs.writeFile(unrelated, "keep")
+		await fs.writeFile(wrongSuffix, "keep")
+		await fs.utimes(older, new Date(1000), new Date(1000))
+		await fs.utimes(newest, new Date(2000), new Date(2000))
+
+		await safeWriteJson(currentTestFilePath, {}, { merge: (existing) => existing })
+
+		expect(await readFileContent(currentTestFilePath)).toEqual({ newest: true })
+		expect(await fs.readFile(unrelated, "utf8")).toBe("keep")
+		expect(await fs.readFile(wrongSuffix, "utf8")).toBe("keep")
+	})
+
+	test("should open the replacement with write access for flushing", async () => {
+		const open = vi.mocked(fs.open)
+		open.mockClear()
+
+		await safeWriteJson(currentTestFilePath, { flushed: true })
+
+		expect(open).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(".new_"), "r+")
+		expect(await readFileContent(currentTestFilePath)).toEqual({ flushed: true })
+	})
+
+	it.each([false, true])("should close the flush handle before commit when sync fails: %s", async (failSync) => {
+		const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		const steps: string[] = []
+		vi.mocked(fs.open).mockImplementation(async (filePath, flags) => {
+			const handle = await actual.open(filePath, flags)
+			const sync = handle.sync.bind(handle)
+			const close = handle.close.bind(handle)
+			vi.spyOn(handle, "sync").mockImplementation(async () => {
+				steps.push("sync")
+				if (failSync) throw Object.assign(new Error("Flush failed"), { code: "EIO" })
+				await sync()
+			})
+			vi.spyOn(handle, "close").mockImplementation(async () => {
+				steps.push("close")
+				await close()
+			})
+			return handle
+		})
+		await safeWriteJson(currentTestFilePath, { saved: true }, { trace: ({ stage }) => steps.push(stage) })
+		expect(steps).toEqual(["write-start", "sync", "close", "replacement-rename", "write-complete"])
+		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
+	})
+
+	test("should garbage collect orphaned replacement files when the canonical path exists", async () => {
+		const initialData = { message: "Initial content" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		// Leftovers from an interrupted write whose commit rename never ran.
+		const backupPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.bak_1_abc.tmp`)
+		const orphanedNewPath = path.join(tempDir, `.${path.basename(currentTestFilePath)}.new_1_def.tmp`)
+		await fsPromisesActuals.writeFile!(backupPath, JSON.stringify({ message: "stale backup" }))
+		await fsPromisesActuals.writeFile!(orphanedNewPath, "{}")
+
+		const newData = { message: "New content" }
+		await safeWriteJson(currentTestFilePath, newData)
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
+
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+	})
+
+	test("should report replacement-protocol trace events when a trace callback is provided", async () => {
+		const traceEvents: Array<{ stage: string; detail?: string }> = []
+		const newData = { message: "traced write" }
+
+		await safeWriteJson(currentTestFilePath, newData, {
+			trace: (event) => traceEvents.push(event),
+		})
+
+		expect(traceEvents.map((event) => event.stage)).toEqual(["write-start", "replacement-rename", "write-complete"])
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
+	})
+
+	test("should trace the EPERM fallback backup rename", async () => {
+		const traceEvents: Array<{ stage: string; detail?: string }> = []
+		const initialData = { message: "Initial content" }
+		const newData = { message: "Traced fallback write" }
+
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+		})
+
+		await safeWriteJson(currentTestFilePath, newData, {
+			trace: (event) => traceEvents.push(event),
+		})
+
+		expect(traceEvents.map((event) => event.stage)).toEqual([
+			"write-start",
+			"replacement-rename",
+			"backup-rename",
+			"replacement-rename",
+			"write-complete",
+		])
+		expect(traceEvents.find((event) => event.stage === "backup-rename")?.detail).toBe("eperm-fallback")
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
 	})
 })

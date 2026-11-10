@@ -415,17 +415,67 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"chat-row-timestamps": async () => {
+		const { ChatRowTimestampsStory } = await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
+		return <ChatRowTimestampsStory />
+	},
+	"task-header-timestamp": async () => {
+		const { TaskHeaderTimestampStory } =
+			await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
+		return <TaskHeaderTimestampStory />
+	},
+	"task-item-footer-absolute": async () => {
+		const { TaskItemFooterAbsoluteStory } =
+			await import("@/components/chat/__tests__/MessageTimestamps.visual.fixture")
+		return <TaskItemFooterAbsoluteStory />
+	},
+	"language-settings": async () => {
+		const { LanguageSettingsStory } =
+			await import("@/components/settings/__tests__/LanguageSettings.visual.fixture")
+		return <LanguageSettingsStory />
+	},
+	"anthropic-settings": async () => {
+		const [{ AppProviders }, { Anthropic }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/Anthropic"),
+			import("@roo-code/types"),
+		])
+		function AnthropicSettings() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sk-ant-example-key",
+			})
+			return (
+				<div data-testid="anthropic-settings-story" className="w-[420px] p-4 bg-vscode-editor-background">
+					<div className="flex flex-col gap-3">
+						<Anthropic
+							apiConfiguration={config}
+							setApiConfigurationField={(field, value) =>
+								setConfig((previous) => ({ ...previous, [field]: value }))
+							}
+						/>
+					</div>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<AnthropicSettings />
+			</AppProviders>
+		)
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
 	},
+	"experimental-settings": async () => {
+		const { ExperimentalSettingsStory } =
+			await import("@/components/settings/__tests__/ExperimentalSettings.visual.fixture")
+		return <ExperimentalSettingsStory />
+	},
 	"ui-settings-long-locale": async () => {
-		const [{ UISettingsStory }, { default: i18next }] = await Promise.all([
-			import("@/components/settings/__tests__/UISettings.visual.fixture"),
-			import("@/i18n/setup"),
-		])
-		await i18next.changeLanguage("ru")
-		return <UISettingsStory />
+		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
+		return <UISettingsStory initialState={{ language: "ru" }} />
 	},
 	welcome: async () => {
 		const [{ AppProviders }, { WelcomeLanding }] = await Promise.all([

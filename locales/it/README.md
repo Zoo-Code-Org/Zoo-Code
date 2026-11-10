@@ -47,11 +47,11 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.92.0
+## Novità in v3.96.0
 
-- ✨ **Scelta del modello più rapida e supporto dei modelli più completo:** Cambia modello dal campo di composizione della chat. Usa Claude Haiku 5.5 su Amazon Bedrock, ottieni capacità Kimi K3 più accurate su OpenRouter e usa i limiti corretti di Gemini 4 Argon su Vercel AI Gateway.
-- 🧭 **Workflow di terminale, modifica, chat e da remoto più affidabili:** Scegli di comprimere per impostazione predefinita l'output dei comandi, ottieni errori di modifica più chiari, mantieni visibili le righe del ragionamento e dell'API ed evita problemi di avvio e proxy negli spazi di lavoro remoti.
-- 🔌 **Marketplace MCP ampliato:** Collega Zoo Code ad AnySearch, Mailtea e Tradehand tramite il marketplace MCP.
+- ✨ **Nuove impostazioni della chat e diagnostica:** Mostra i timestamp dei messaggi con formati di data e ora configurabili, regola il TTL della prompt-cache per i profili Anthropic e genera report diagnostici rispettosi della privacy.
+- 💸 **Costi dei provider e caching più precisi:** Mantiene intatti i risultati dei tool Anthropic, adotta i token di output cumulativi nei costi Anthropic e MiniMax, legge i contatori della prompt-cache di DeepSeek, punta alla cache Responses di xAI e fattura le letture della cache di Mistral a 0,1x.
+- 🧭 **Chat più affidabili e veloci:** Riprendi le attività completate dopo un riavvio, ripristina i checkpoint quando manca il commit salvato, ricarica automaticamente un renderer webview morto, limita gli aggiornamenti in streaming e carica le lingue su richiesta.
 
 ## Cosa può fare Zoo Code per TE?
 
