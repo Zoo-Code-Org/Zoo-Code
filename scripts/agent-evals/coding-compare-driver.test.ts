@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { spawn } from "node:child_process"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
@@ -6,6 +7,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, it } from "node:test"
 import {
+	createComparisonScratchDirectory,
 	executeComparisonFlow,
 	publishedComparisonGeneration,
 	readPublishedComparisonReport,
@@ -707,6 +709,67 @@ for (const code of ["EACCES", "EROFS", "EEXIST"]) {
 					return true
 				},
 			)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+for (const location of ["ordinary", "artifacts", "alias"] as const) {
+	it(`validates the ${location} comparison scratch parent before creating a generation`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-scratch-policy-"))
+		try {
+			const protectedParent = path.join(dir, "artifacts")
+			await fs.mkdir(protectedParent)
+			const alias = path.join(dir, "alias")
+			await fs.symlink(protectedParent, alias)
+			const parent = location === "ordinary" ? dir : location === "alias" ? alias : protectedParent
+			if (location === "ordinary") {
+				const scratch = await createComparisonScratchDirectory(parent)
+				assert.equal(path.dirname(scratch), await fs.realpath(parent))
+				assert.deepEqual(await fs.readdir(scratch), [])
+				const release = await acquireSideOutputLock(path.join(scratch, "baseline-out"))
+				release()
+			} else {
+				await assert.rejects(createComparisonScratchDirectory(parent), /set TMPDIR/)
+				assert.deepEqual(await fs.readdir(protectedParent), [])
+			}
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+for (const boundary of ["output", "lock"] as const) {
+	it(`removes empty comparison scratch when ${boundary} preparation fails`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-early-cleanup-"))
+		try {
+			const scratchDir = await createComparisonScratchDirectory(dir)
+			const out = boundary === "output" ? path.join(dir, "artifacts", "out") : path.join(dir, "out")
+			let lock: string | undefined
+			if (boundary === "lock") {
+				await fs.mkdir(out)
+				const key = createHash("sha256")
+					.update(await fs.realpath(out))
+					.digest("hex")
+				lock = path.join(dir, `.coding-comparison-${key}.lock`)
+				await fs.mkdir(lock)
+			}
+			await assert.rejects(
+				executeComparisonFlow(
+					flowWiring({
+						flag: createInterruptFlag(),
+						out,
+						scratchDir,
+						runSide: async () => {
+							assert.fail("side must not start")
+						},
+					}),
+				),
+				boundary === "output" ? /managed artifacts tree/ : /comparison output lock/,
+			)
+			await assert.rejects(fs.access(scratchDir))
+			if (lock) await fs.access(lock)
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true })
 		}

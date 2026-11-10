@@ -372,3 +372,37 @@ describe("compare driver signal exit", () => {
 		},
 	)
 })
+
+for (const alias of [false, true]) {
+	it(`rejects an artifacts TMPDIR before worktree preparation (alias: ${alias})`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-tmpdir-policy-"))
+		try {
+			const protectedParent = path.join(dir, "artifacts")
+			await fs.mkdir(protectedParent)
+			const tmpdir = alias ? path.join(dir, "alias") : protectedParent
+			if (alias) await fs.symlink(protectedParent, tmpdir)
+			const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim()
+			const worktreesBefore = execFileSync("git", ["worktree", "list", "--porcelain"], {
+				cwd: repoRoot,
+				encoding: "utf8",
+			})
+			const trustFile = path.join(dir, "trust-policy.json")
+			await fs.writeFile(trustFile, JSON.stringify({ version: 1, approvedCommits: [head] }))
+			const out = path.join(dir, "out")
+			const outcome = await runCompareScript(
+				["--baseline", head, "--candidate", head, "--out", out, "--trust-file", trustFile],
+				{ ...minimalEnv(), TMPDIR: tmpdir, SOLHEIM_API_KEY: "not-a-real-credential", TSX_DISABLE_CACHE: "1" },
+			)
+			assert.notEqual(outcome.code, 0)
+			assert.match(outcome.stderr, /set TMPDIR/)
+			assert.equal(
+				execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: repoRoot, encoding: "utf8" }),
+				worktreesBefore,
+			)
+			assert.deepEqual(await fs.readdir(protectedParent), [])
+			assert.deepEqual(await fs.readdir(out), [])
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
