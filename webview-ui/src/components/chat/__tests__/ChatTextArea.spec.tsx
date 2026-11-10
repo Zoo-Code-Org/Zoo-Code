@@ -996,6 +996,13 @@ describe("ChatTextArea", () => {
 				// the row under the pointer, not the first entry.
 				const row = container.querySelector('[title="Second prompt"]')
 				expect(row).not.toBeNull()
+
+				// Real pointer order: mousedown on the row, then the textarea
+				// blurs. The menu must survive the blur.
+				fireEvent.mouseDown(row!)
+				fireEvent.blur(textarea)
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
+
 				fireEvent.click(row!)
 
 				expect(textarea.value).toBe("Second prompt")
