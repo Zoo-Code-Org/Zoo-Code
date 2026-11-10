@@ -2,7 +2,7 @@
 
 import type { ExperimentId } from "@roo-code/types"
 
-import { EXPERIMENT_IDS, experimentConfigsMap, experiments as Experiments } from "../experiments"
+import { EXPERIMENT_IDS, experimentConfigsMap, experimentDefault, experiments as Experiments } from "../experiments"
 
 describe("experiments", () => {
 	describe("PREVENT_FOCUS_DISRUPTION", () => {
@@ -22,6 +22,7 @@ describe("experiments", () => {
 				runSlashCommand: false,
 				customTools: false,
 				parallelToolExecution: false,
+				dynamicThinkingEffort: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)
 		})
@@ -33,6 +34,7 @@ describe("experiments", () => {
 				runSlashCommand: false,
 				customTools: false,
 				parallelToolExecution: false,
+				dynamicThinkingEffort: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(true)
 		})
@@ -44,6 +46,7 @@ describe("experiments", () => {
 				runSlashCommand: false,
 				customTools: false,
 				parallelToolExecution: false,
+				dynamicThinkingEffort: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)
 		})
@@ -64,6 +67,30 @@ describe("experiments", () => {
 
 		it("returns true when enabled", () => {
 			expect(Experiments.isEnabled({ parallelToolExecution: true }, "parallelToolExecution")).toBe(true)
+		})
+	})
+
+	describe("DYNAMIC_THINKING_EFFORT", () => {
+		it("is configured correctly", () => {
+			expect(EXPERIMENT_IDS.DYNAMIC_THINKING_EFFORT).toBe("dynamicThinkingEffort")
+			expect(experimentConfigsMap.DYNAMIC_THINKING_EFFORT).toMatchObject({
+				enabled: false,
+			})
+			// Visible in the Settings panel (showInSettings defaults to true).
+			expect(experimentConfigsMap.DYNAMIC_THINKING_EFFORT.showInSettings).toBeUndefined()
+		})
+
+		it("is disabled by default", () => {
+			expect(experimentDefault.dynamicThinkingEffort).toBe(false)
+			expect(Experiments.isEnabled({}, "dynamicThinkingEffort")).toBe(false)
+		})
+
+		it("returns true when enabled", () => {
+			expect(Experiments.isEnabled({ dynamicThinkingEffort: true }, "dynamicThinkingEffort")).toBe(true)
+		})
+
+		it("returns false when explicitly disabled", () => {
+			expect(Experiments.isEnabled({ dynamicThinkingEffort: false }, "dynamicThinkingEffort")).toBe(false)
 		})
 	})
 })
