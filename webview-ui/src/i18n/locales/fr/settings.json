@@ -769,12 +769,12 @@
 		"idleCondensing": {
 			"name": "Condensation en veille",
 			"description": "Un seuil plus bas pour condenser le contexte pendant les moments de veille, afin d’avoir toujours un contexte propre quand tu reviens au clavier.",
-			"thresholdDescription": "Lorsque le contexte atteint ce pourcentage en veille, le minuteur de condensation en veille démarre. Doit être inférieur ou égal au seuil de condensation du contexte.",
+			"thresholdDescription": "Un seuil plus bas pour condenser le contexte, qui s'applique uniquement lorsque le modèle est inactif.",
 			"thresholdProfileDescription": "Seuil de veille personnalisé pour ce profil uniquement (remplace le défaut global, plafonné au seuil de condensation du profil)",
 			"idleTime": {
 				"label": "Temps de veille",
 				"seconds": "secondes",
-				"description": "Durée pendant laquelle le modèle doit rester inactif avant que la condensation soit déclenchée. Mettre 0 pour condenser dès que le modèle passe en veille."
+				"description": "Durée pendant laquelle le modèle doit rester inactif."
 			},
 			"useGlobal": "Utiliser les paramètres globaux"
 		},

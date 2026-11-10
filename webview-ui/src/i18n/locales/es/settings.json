@@ -769,12 +769,12 @@
 		"idleCondensing": {
 			"name": "Condensación en reposo",
 			"description": "Un umbral más bajo para condensar el contexto durante los momentos de reposo, para que siempre tengas un contexto limpio cuando vuelvas al teclado.",
-			"thresholdDescription": "Cuando el contexto alcanza este porcentaje durante el reposo, se activa el temporizador de condensación en reposo. Debe ser igual o inferior al umbral de condensación de contexto.",
+			"thresholdDescription": "Un umbral más bajo para condensar el contexto que se aplica solo cuando el modelo está inactivo.",
 			"thresholdProfileDescription": "Umbral de reposo personalizado solo para este perfil (anula el predeterminado global, limitado al umbral de condensación del perfil)",
 			"idleTime": {
 				"label": "Tiempo de reposo",
 				"seconds": "segundos",
-				"description": "Cuánto tiempo debe estar el modelo inactivo antes de que se active la condensación. Establécelo en 0 para condensar en cuanto el modelo quede inactivo."
+				"description": "Cuánto tiempo debe estar el modelo inactivo."
 			},
 			"useGlobal": "Usar ajustes globales"
 		},

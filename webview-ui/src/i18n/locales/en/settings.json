@@ -842,12 +842,12 @@
 		"idleCondensing": {
 			"name": "Idle condensing",
 			"description": "A lower threshold for condensing the context during idle moments, so you always have a clean context when you return to the keyboard.",
-			"thresholdDescription": "When the context reaches this percentage while idle, the idle condensing timer runs. Must be at or below the Condensing Trigger Threshold.",
+			"thresholdDescription": "A lower threshold to condense the context that applies only when the model is idle.",
 			"thresholdProfileDescription": "Custom idle threshold for this profile only (overrides global default, capped at the profile's condensing threshold)",
 			"idleTime": {
 				"label": "Idle time",
 				"seconds": "seconds",
-				"description": "How long the model must be idle before condensing is triggered. Set to 0 to condense as soon as the model goes idle."
+				"description": "How long the model must be idle."
 			},
 			"useGlobal": "Use global settings"
 		},

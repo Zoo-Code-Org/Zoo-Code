@@ -759,12 +759,12 @@
 		"idleCondensing": {
 			"name": "空闲时压缩",
 			"description": "在空闲时段以更低的阈值压缩上下文，让你回到键盘前时始终拥有干净的上下文。",
-			"thresholdDescription": "当上下文在空闲期间达到此百分比时，启动空闲压缩计时器。必须不高于压缩触发阈值。",
+			"thresholdDescription": "仅在模型空闲时适用的、用于压缩上下文的更低阈值。",
 			"thresholdProfileDescription": "仅此配置文件的自定义空闲阈值（覆盖全局默认值，上限为该配置文件的压缩阈值）",
 			"idleTime": {
 				"label": "空闲时间",
 				"seconds": "秒",
-				"description": "模型必须空闲多久才触发压缩。设为 0 可在模型进入空闲后立即压缩。"
+				"description": "模型必须空闲多久。"
 			},
 			"useGlobal": "使用全局设置"
 		},
