@@ -1537,7 +1537,7 @@ export const webviewMessageHandler = async (
 				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
 				let lmStudioModels: ModelRecord
 				if (hasPreviewBaseUrl) {
-					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
+					lmStudioModels = await getLMStudioModels(requestedBaseUrl, { commit: false })
 				} else {
 					const lmStudioOptions = {
 						provider: providerIdentifiers.lmstudio,

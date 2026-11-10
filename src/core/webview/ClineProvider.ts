@@ -666,11 +666,21 @@ export class ClineProvider
 						cline.apiConfiguration.lmStudioBaseUrl,
 					)
 				) {
-					await forceFullModelDetailsLoad(
-						cline.apiConfiguration.lmStudioBaseUrl,
-						cline.apiConfiguration.lmStudioModelId!,
-						buildApiHandler({ ...cline.apiConfiguration, apiProvider: providerIdentifiers.lmstudio }),
-					)
+					const controller = new AbortController()
+					cline.metadataFetchAbortController = controller
+					try {
+						await forceFullModelDetailsLoad(
+							cline.apiConfiguration.lmStudioBaseUrl,
+							cline.apiConfiguration.lmStudioModelId!,
+							buildApiHandler({ ...cline.apiConfiguration, apiProvider: providerIdentifiers.lmstudio }),
+							controller.signal,
+						)
+					} finally {
+						if (cline.metadataFetchAbortController === controller) {
+							cline.metadataFetchAbortController = undefined
+						}
+						controller.abort()
+					}
 				}
 			} catch (error) {
 				this.log(`Failed to load full model details for LM Studio: ${error}`)
