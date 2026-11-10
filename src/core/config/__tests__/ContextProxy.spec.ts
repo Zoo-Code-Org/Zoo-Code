@@ -1170,4 +1170,31 @@ Output only the summary of the conversation so far, without any additional comme
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
 	})
+
+	describe("export", () => {
+		it("omits viewStates from the exported global settings", async () => {
+			// The sibling setting is the control: if the export returned nothing at all -
+			// a schema failure, an empty value set - the first assertion below fails and the
+			// absent viewStates cannot be read as a passing test for the wrong reason.
+			mockGlobalState.get.mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					return { "view-1": { mode: "code", currentApiConfigName: "profile-a", updatedAt: 1700000000000 } }
+				}
+				if (key === "mode") {
+					return "code"
+				}
+				return undefined
+			})
+
+			const exportProxy = new ContextProxy(mockContext)
+			await exportProxy.initialize()
+
+			const exported = await exportProxy.export()
+
+			expect(exported?.mode).toBe("code")
+			expect(Object.keys(exported ?? {})).toContain("mode")
+			expect(exported?.viewStates).toBeUndefined()
+			expect(Object.keys(exported ?? {})).not.toContain("viewStates")
+		})
+	})
 })

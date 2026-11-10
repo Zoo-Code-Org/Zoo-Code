@@ -4554,8 +4554,7 @@ export class ClineProvider
 	 * both in-memory view-local caches and durable per-view selections so stale view state
 	 * cannot mask imported/reset shared state after reload.
 	 */
-	async broadcastResetToAllInstances(): Promise<void> {
-	}
+	async broadcastResetToAllInstances(): Promise<void> {}
 
 	// dev
 
