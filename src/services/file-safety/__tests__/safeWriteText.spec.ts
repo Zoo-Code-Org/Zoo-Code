@@ -43,6 +43,11 @@ vi.mock("fs", () => ({
 	// Mirrors Node's value; the no-replace fallback passes it to copyFile.
 	constants: { COPYFILE_EXCL: 1 },
 	openSync: vi.fn(),
+	// fstatSync is consulted after openSync on the caller-staged path, to compare the descriptor's
+	// identity with the one lstat authorized. The default below is an empty stand-in: the fields
+	// the comparison reads stay undefined on both sides, so existing cases pass it the same way
+	// they pass the identity comparisons they already perform.
+	fstatSync: vi.fn(() => ({})),
 	writeSync: vi.fn(),
 	closeSync: vi.fn(),
 	mkdirSync: vi.fn(),
@@ -2351,5 +2356,67 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 		})
 
 		await expect(resolveLockKey(target)).rejects.toThrow("EACCES")
+	})
+})
+
+describe("post-commit steps after a published write", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it("does not let a throwing warning callback unlink a published staging name", async () => {
+		// The staged name is removed best-effort after the link, and the residue is reported on
+		// the warning channel. A caller whose listener throws must learn about the throw, but the
+		// write has already published its content: the failure handler may not treat it as an
+		// uncommitted write and unlink the staging name a second time underneath the caller.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+		const callbackError = new Error("warning listener threw")
+
+		await expect(
+			safeWriteText(targetPath, "new data", {
+				failIfExist: true,
+				platform: "linux",
+				onPostCommitWarning: () => {
+					throw callbackError
+				},
+			}),
+		).rejects.toBe(callbackError)
+
+		// Once for the post-commit removal. A second unlink is the failure handler cleaning up a
+		// write it wrongly believes is uncommitted.
+		expect(fs.unlink).toHaveBeenCalledTimes(1)
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+	})
+
+	it("refuses a caller-supplied staging file that changed identity between validation and open", async () => {
+		// The staging path is authorized by lstat and re-opened by name for the chmod and the
+		// fsync. A third party that renames another file onto that name in between would have its
+		// bytes chmod'd, fsync'd and published under this target. The commit must compare the
+		// descriptor's own identity against the one that was authorized.
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+		// The SUT lstats the resolved spelling of the staging path, which carries a drive letter on
+		// Windows, so the fixture branches on the same resolution rather than on the literal.
+		const stagingSpelling = path.resolve(customTempPath)
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.lstat).mockImplementation(async (p) => {
+			// The staging file as validated, and a target with its own identity so the
+			// "staging must not be the target" check is not what fires here.
+			return String(p) === stagingSpelling ? _fileIdentity(7n, 700n) : _fileIdentity(7n, 777n)
+		})
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+		// The entry behind the staging name is now a different file.
+		vi.mocked(fsSync.fstatSync).mockReturnValue(_fileIdentity(7n, 999n))
+
+		await expect(safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })).rejects.toThrow(
+			"Staging file was replaced between validation and open",
+		)
+
+		expect(fsSync.openSync).toHaveBeenCalledWith(customTempPath, "r+")
+		// Refused before acting on the substituted entry or publishing it.
+		expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+		expect(fsSync.fsyncSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
 	})
 })

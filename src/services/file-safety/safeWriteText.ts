@@ -89,7 +89,9 @@ export interface SafeWriteTextOptions {
 	 * resolves in both cases - failing it would report a failure for bytes the caller can now read
 	 * back - and the residue is reported here instead of dropped. Kinds are spelled inline rather
 	 * than exported: no production caller selects on them today, and an export whose only reader
-	 * is a spec is dead API.
+	 * is a spec is dead API. Omitting the callback means this call chose not to hear: the residue is
+	 * still where it was and the write still resolves, so the absence of a report is not evidence
+	 * that there was none.
 	 */
 	onPostCommitWarning?: (warning: {
 		kind: "staging-link-orphan" | "dacl-restore-failed"
@@ -646,6 +648,11 @@ export async function safeWriteText(
 	// whatever is filed under it next, and a caller-supplied staging name is reused by the next
 	// write to the same target.
 	let stagingCommitted = false
+	// The identity of a caller-supplied staging file, taken by lstat when it was validated. The
+	// staging path is re-opened by name further below, so the entry behind the name can be swapped
+	// between that validation and the open; the open's own descriptor identity is compared
+	// against this value before anything touches the file.
+	let stagingIdentity: { dev: bigint; ino: bigint } | null = null
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -695,6 +702,7 @@ export async function safeWriteText(
 		) {
 			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
+		stagingIdentity = { dev: stagingStat.dev, ino: stagingStat.ino }
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
 	} else {
@@ -786,6 +794,16 @@ export async function safeWriteText(
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
+				// The name was authorized by lstat and is re-opened here by string, so the entry behind it may
+				// have been replaced in between. Compare the descriptor's own identity with the one that
+				// was authorized and refuse before fchmodSync or fsyncSync acts on whatever the name
+				// holds now.
+				if (stagingIdentity !== null) {
+					const opened = fsSync.fstatSync(fd, { bigint: true })
+					if (opened.dev !== stagingIdentity.dev || opened.ino !== stagingIdentity.ino) {
+						throw new StagingPathError("Staging file was replaced between validation and open", tempPath)
+					}
+				}
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
@@ -1004,12 +1022,23 @@ export async function safeWriteText(
 				await fs.rename(tempPath, targetPath)
 			}
 
+			// Marked as soon as the commit has consumed the staging name, on both paths: the rename
+			// consumed it, and on the link path the target now holds the inode this write staged.
+			// Everything below is a post-commit step - the identity comparison, the removal of the
+			// staged name, the warnings, the fsyncs and the DACL restore - and none of them, including
+			// a caller callback that throws, may leave the failure handler free to unlink a staging
+			// name whose content is already published.
+			stagingCommitted = true
+
 			if (options?.failIfExist) {
-				// Both names should now be one inode. They are not when a third party replaced the
-				// staging file before the link, in which case the published name holds bytes this write
-				// never staged. Checked after the link because link(2) is the first point at which the
-				// target name exists; a check of either name before it cannot see what landed at the
-				// other. Neither name is removed on a mismatch and stagingCommitted is set first, so the
+				// Both names should now be one inode. They diverge when the entry under either name is
+				// replaced after the commit, and the published name then holds bytes this write never
+				// staged. A substitution completed BEFORE the link is not detectable from here: link(2)
+				// links whatever entry the staging name holds at that moment, so both stats report the
+				// substituted inode and the comparison passes. Checked after the link because link(2) is
+				// the first point at which the target name exists, and a check of either name before it
+				// cannot see what landed at the other. Neither name is removed on a mismatch and the
+				// commit marker above is already set, so the
 				// cleanup below cannot unlink a name that may belong to another process. The ordinary
 				// rename path cannot be verified this way: rename(2) moves the staged inode itself and
 				// leaves no second name to compare, and a re-stat of the target proves only that the
@@ -1022,7 +1051,6 @@ export async function safeWriteText(
 					fs.stat(targetPath, { bigint: true }),
 				])
 				if (stagedNow.dev !== publishedNow.dev || stagedNow.ino !== publishedNow.ino) {
-					stagingCommitted = true
 					throw new PublishedEntryMismatchError(
 						targetPath,
 						`${publishedNow.dev}:${publishedNow.ino}`,
@@ -1046,11 +1074,6 @@ export async function safeWriteText(
 				}
 			}
 
-			// Marked once the commit has consumed the staging name: on the rename path the
-			// rename consumed it, on the link path the removal just did. Every step after
-			// this one is a post-commit step, and none of them may remove the staging path
-			// or the published content.
-			stagingCommitted = true
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
 			if (platform !== "win32") {
