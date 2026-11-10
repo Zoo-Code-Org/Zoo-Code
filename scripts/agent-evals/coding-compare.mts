@@ -24,12 +24,17 @@
 // cleanup runs, the side runs the same escalation for its own children, and
 // an interrupt leaves no orphan host behind.
 import fs from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { executeComparisonFlow, runBoundedPreparation, runCompareSide } from "./coding-compare.ts"
+import {
+	createComparisonScratchDirectory,
+	executeComparisonFlow,
+	runBoundedPreparation,
+	runCompareSide,
+} from "./coding-compare.ts"
 import { assertCommitsApproved, assertCredentialEnvAllowed, loadTrustPolicy, resolveCommit } from "./coding-trust.ts"
 import { createInterruptFlag, createSideProcessGuard, type SideKillOutcome } from "./side-process-guard.ts"
+import { prepareOutputDirectory } from "./output-lock.ts"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
@@ -128,8 +133,8 @@ const baselineCommit = await resolveCommit(inputs.baseline, root)
 const candidateCommit = await resolveCommit(inputs.candidate, root)
 assertCommitsApproved(policy, [baselineCommit, candidateCommit])
 
-const scratchDir = await fs.mkdtemp(path.join(os.tmpdir(), "coding-evals-compare-"))
-await fs.mkdir(inputs.out, { recursive: true })
+await prepareOutputDirectory(inputs.out, "comparison")
+const scratchDir = await createComparisonScratchDirectory()
 // Both sides run inside the flow. The flow cleanup finishes the interrupt
 // escalation, removes the worktrees, and removes the scratch directory
 // before any exit, so no child is still writing while its tree is deleted.

@@ -126,6 +126,21 @@ export const runBoundedPreparation = async (
 	}
 }
 
+// Internal side outputs inherit the temporary parent's path policy. Reject
+// unsuitable TMPDIR values before creating scratch or preparing any worktree.
+export async function createComparisonScratchDirectory(parent: string = os.tmpdir()): Promise<string> {
+	let canonicalParent: string
+	try {
+		canonicalParent = await prepareOutputDirectory(parent, "side")
+	} catch (error) {
+		throw new Error(
+			`cannot prepare comparison scratch in ${parent}; set TMPDIR to a directory outside managed artifacts trees`,
+			{ cause: error },
+		)
+	}
+	return fs.mkdtemp(path.join(canonicalParent, "coding-evals-compare-"))
+}
+
 // The worktree removals in the flow cleanup are best effort and bounded.
 const WORKTREE_REMOVE_TIMEOUT_MS = 30_000
 
@@ -255,6 +270,16 @@ export type ComparisonFlowOutcome =
 // caller exits with the conventional code on the normal and the throwing
 // path alike; any other failure stays a thrown failure.
 export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
+	try {
+		return await executeOwnedComparisonFlow(wiring)
+	} finally {
+		// Preparation or lock acquisition can fail before the locked flow owns
+		// cleanup. Only remove an empty scratch directory on this path.
+		await fs.rmdir(wiring.scratchDir).catch(() => {})
+	}
+}
+
+const executeOwnedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
 	const canonicalOut = await prepareOutputDirectory(wiring.out, "comparison")
 	// A canonical path also excludes aliases through symlinks. Keep the lock
 	// beside the canonical output so all processes share it regardless of TMPDIR.
@@ -273,8 +298,6 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 		return await executeLockedComparisonFlow(wiring)
 	} finally {
 		await fs.rmdir(lock)
-		// Scratch may contain the output lock; retry its empty-directory cleanup after release.
-		await fs.rmdir(wiring.scratchDir).catch(() => {})
 	}
 }
 
