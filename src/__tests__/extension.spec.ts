@@ -709,6 +709,49 @@ describe("extension.ts", () => {
 			}
 		})
 
+		test("logs a rejected telemetry shutdown without masking the seed rejection", async () => {
+			// The seed-failure catch awaits the shutdown inside its own try/catch, so a
+			// rejecting shutdown must be logged and the seed error must still reach the
+			// host as the activation failure. A regression that rethrows the shutdown
+			// error hides why activation aborted; one that swallows it silently loses
+			// the only record of the telemetry teardown failure.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const teardownOrder: string[] = []
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi
+					.fn()
+					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
+			}))
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			// Distinct from the seed error so any masking of the seed rejection is visible.
+			shutdown.mockImplementation(() => {
+				teardownOrder.push("telemetry-shutdown")
+				return Promise.reject(new Error("shutdown drain failed"))
+			})
+			try {
+				const vscode = await import("vscode")
+				const { activate } = await import("../extension")
+
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+				// The shutdown failure surfaces through the appendLine idiom, with its
+				// error text, instead of replacing the seed rejection the host receives.
+				const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+				expect(channel?.appendLine).toHaveBeenCalledWith(
+					"Failed to shut down telemetry service: shutdown drain failed",
+				)
+				// Teardown still runs in order on this path: listener released before the shutdown call.
+				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"])
+			} finally {
+				shutdown.mockReset()
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+			}
+		})
+
 		test("does not shut down telemetry when activation completes", async () => {
 			// Telemetry shutdown is failure-path only: a successfully activated
 			// extension owns the telemetry client until deactivate() runs.

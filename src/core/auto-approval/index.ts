@@ -12,11 +12,20 @@ import type { DcgDecision } from "../../services/destructive-command-guard/runne
 
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
+import { parseCommand } from "../../shared/parse-command"
+
 import { isWriteToolAction, isReadOnlyToolAction } from "./tools"
 import { isMcpToolAlwaysAllowed } from "./mcp"
-import { containsDangerousSubstitution, getCommandDecisionDetailed } from "./commands"
 import {
+	type CommandDecisionDetail,
+	containsDangerousSubstitution,
+	findLongestPrefixMatch,
+	getCommandDecisionDetailed,
+} from "./commands"
+import {
+	type EffectiveCommandLists,
 	commandListFolderForResource,
+	getEffectiveCommandDecision,
 	readCommandListScopes,
 	resolveEffectiveCommandLists,
 	workspaceCommandListsEnabled,
@@ -144,6 +153,66 @@ function isWriteAllowedByPatterns(
 	return areAllNamedFilesMatched(tool, (filePath) =>
 		isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedWriteFiles }),
 	)
+}
+
+/**
+ * Same chain aggregation as `getCommandDecisionDetailed` — split into
+ * sub-commands, any denial denies the whole command, a dangerous substitution
+ * forces the user prompt, and approval needs every sub-command approved — but
+ * each sub-command is decided by `getEffectiveCommandDecision`, so the global
+ * layer decides every command it matches and workspace entries apply only
+ * where no global entry matches. A flat merged pair cannot express that
+ * precedence: a workspace wildcard deny ties a global prefix allow in the
+ * matcher's longest-prefix comparison, so composition would have to drop one
+ * layer's entries to break the tie and lose its verdicts elsewhere.
+ *
+ * The aggregation mirrors `getCommandDecisionDetailed` on purpose: malformed
+ * parsing, redirection sanitization, the substitution veto, and the
+ * offending-command/matched-pattern reporting must not drift between the two
+ * paths — only the per-sub-command leaf decision differs. Where a sub-command
+ * has no global match at all, both paths reach the same outcome, because the
+ * flat pair is the union of exactly the layers the split evaluates.
+ */
+function getLayerScopedCommandDecisionDetailed(
+	command: string,
+	effective: EffectiveCommandLists,
+): CommandDecisionDetail {
+	if (!command?.trim()) {
+		return { decision: "auto_approve" }
+	}
+
+	const { commands: subCommands, parseError } = parseCommand(command)
+	if (parseError !== null) {
+		return { decision: "malformed_command", offendingCommand: command, parseError: parseError.message }
+	}
+
+	const sanitizedCommands = subCommands.map((cmd) => cmd.replace(/\d*>&\d*/, "").trim())
+
+	const decisions = sanitizedCommands.map((cmd) => getEffectiveCommandDecision(cmd, effective))
+
+	const denyIndex = decisions.indexOf("auto_deny")
+	if (denyIndex !== -1) {
+		const offendingCommand = sanitizedCommands[denyIndex]
+		const lowerMatch = findLongestPrefixMatch(offendingCommand, effective.denied)
+		// Prefer the original-cased pattern the user typed, falling back to the
+		// case-insensitive match itself.
+		const matchedPattern =
+			effective.denied.find((pattern) => pattern.toLowerCase() === lowerMatch) ?? lowerMatch ?? undefined
+
+		return { decision: "auto_deny", offendingCommand, matchedPattern }
+	}
+
+	if (containsDangerousSubstitution(command)) {
+		return { decision: "ask_user" }
+	}
+
+	if (decisions.every((decision) => decision === "auto_approve")) {
+		return { decision: "auto_approve" }
+	}
+
+	const askIndex = decisions.indexOf("ask_user")
+
+	return { decision: "ask_user", offendingCommand: askIndex !== -1 ? sanitizedCommands[askIndex] : undefined }
 }
 
 export type CheckAutoApprovalResult =
@@ -349,11 +418,14 @@ export async function checkAutoApproval({
 						)
 					: { allowed: state.allowedCommands || [], denied: state.deniedCommands || [] }
 
-			const { decision, offendingCommand, matchedPattern, parseError } = getCommandDecisionDetailed(
-				text,
-				effectiveLists.allowed,
-				effectiveLists.denied,
-			)
+			// The layered composition carries the per-layer split, so each
+			// sub-command goes through getEffectiveCommandDecision; the
+			// pre-composed fallback pair carries no layers and keeps the flat
+			// matcher.
+			const { decision, offendingCommand, matchedPattern, parseError } =
+				"globalAllow" in effectiveLists
+					? getLayerScopedCommandDecisionDetailed(text, effectiveLists)
+					: getCommandDecisionDetailed(text, effectiveLists.allowed, effectiveLists.denied)
 
 			if (decision === "auto_approve") {
 				return { decision: "approve" }

@@ -5,7 +5,12 @@ import { DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED } from "@roo-code/types"
 import * as vscode from "vscode"
 
 import { Package } from "../../shared/package"
-import { isShadowedByAnyEntry } from "./commands"
+import {
+	type CommandDecision,
+	findLongestPrefixMatch,
+	getSingleCommandDecision,
+	isShadowedByAnyEntry,
+} from "./commands"
 
 export type CommandListConfigKey = "allowedCommands" | "deniedCommands"
 
@@ -95,7 +100,12 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 		let matchedLength = 0
 		for (const candidate of vscode.workspace.workspaceFolders ?? []) {
 			const rootPath = realPathOrRegistered(candidate.uri.fsPath)
-			if ((cwd === rootPath || cwd.startsWith(rootPath + path.sep)) && rootPath.length > matchedLength) {
+			// A filesystem root (`/`, `C:\`) already ends in a separator;
+			// appending a second one (`//`, `C:\\`) would leave no child path
+			// able to match the root, so the separator is added only where the
+			// root lacks one.
+			const childPrefix = rootPath.endsWith(path.sep) ? rootPath : rootPath + path.sep
+			if ((cwd === rootPath || cwd.startsWith(childPrefix)) && rootPath.length > matchedLength) {
 				match = candidate.uri
 				matchedLength = rootPath.length
 			}
@@ -291,6 +301,17 @@ export function workspaceCommandListsEnabled(): boolean {
 export interface EffectiveCommandLists {
 	allowed: string[]
 	denied: string[]
+	/** The global layer's allow entries: they decide every command they match. */
+	globalAllow: string[]
+	/** Deny-side counterpart of {@link globalAllow}. */
+	globalDeny: string[]
+	/**
+	 * Workspace allow entries the gate and shadowing kept; they decide only
+	 * commands no global entry matches (see {@link getEffectiveCommandDecision}).
+	 */
+	keptWorkspaceAllow: string[]
+	/** Deny-side counterpart of {@link keptWorkspaceAllow}. */
+	keptWorkspaceDeny: string[]
 	/**
 	 * Workspace allow entries absent from the effective allowlist — hidden by
 	 * the gate or shadowed by a global entry — which a dialog save must not be
@@ -302,15 +323,23 @@ export interface EffectiveCommandLists {
 }
 
 /**
- * Composes the raw per-key layers into the pair of lists to enforce and
- * display, keeping display byte-equal to enforcement.
+ * Composes the raw per-key layers into the pair of lists the settings dialog
+ * displays, together with the layer split {@link getEffectiveCommandDecision}
+ * matches commands against, so display and enforcement draw on one composition
+ * pass and cannot drift.
  *
  * Gate off: the workspace layers contribute nothing and the global layers are
- * effective verbatim. Gate on: a workspace entry survives only when no entry
- * of either global list shadows it, so a global entry decides every command it
- * matches while workspace entries apply where the global layer is silent.
- * Shadowing is cross-directional because a global allow entry silences a
- * workspace deny entry (and vice versa) just as much as a same-list shadow.
+ * effective verbatim. Gate on: a workspace entry survives in the pair only
+ * when no entry of either global list shadows it — an entry whose every match
+ * a global entry also matches can decide nothing on its own, and keeping it
+ * out of the pair keeps the dialog honest about what the global layer already
+ * covers. A surviving entry may still overlap a global entry without being
+ * shadowed by it (a wildcard deny matches commands no global prefix reaches);
+ * the overlap is harmless because {@link getEffectiveCommandDecision} lets the
+ * global layer decide every command it matches, so a workspace entry never
+ * outranks a global match. Shadowing is cross-directional because a global
+ * allow entry silences a workspace deny entry (and vice versa) just as much as
+ * a same-list shadow.
  *
  * Composing here — not inside {@link readCommandListScopes} — keeps the raw
  * layers intact for the save path, which derives the write split from them and
@@ -319,30 +348,63 @@ export interface EffectiveCommandLists {
  * @param allowScopes - Raw `allowedCommands` layers from readCommandListScopes.
  * @param denyScopes - Raw `deniedCommands` layers from readCommandListScopes.
  * @param enabled - The value of the `workspaceCommandListsEnabled` gate.
- * @returns The effective allow/deny lists and the workspace entries hidden
- * from each.
+ * @returns The effective allow/deny lists, the per-layer split behind them, and
+ * the workspace entries hidden from each.
  */
 export function resolveEffectiveCommandLists(
 	allowScopes: CommandListScopes,
 	denyScopes: CommandListScopes,
 	enabled: boolean,
 ): EffectiveCommandLists {
-	const globalEntries = [...allowScopes.global, ...denyScopes.global]
+	const globalAllow = allowScopes.global
+	const globalDeny = denyScopes.global
+	const globalEntries = [...globalAllow, ...globalDeny]
 
-	const keptAllow = enabled
+	const keptWorkspaceAllow = enabled
 		? allowScopes.workspace.filter((entry) => !isShadowedByAnyEntry(entry, globalEntries))
 		: []
-	const keptDeny = enabled ? denyScopes.workspace.filter((entry) => !isShadowedByAnyEntry(entry, globalEntries)) : []
+	const keptWorkspaceDeny = enabled
+		? denyScopes.workspace.filter((entry) => !isShadowedByAnyEntry(entry, globalEntries))
+		: []
 
-	const allowed = [...new Set([...allowScopes.global, ...keptAllow])]
-	const denied = [...new Set([...denyScopes.global, ...keptDeny])]
+	const allowed = [...new Set([...globalAllow, ...keptWorkspaceAllow])]
+	const denied = [...new Set([...globalDeny, ...keptWorkspaceDeny])]
 
 	return {
 		allowed,
 		denied,
+		globalAllow,
+		globalDeny,
+		keptWorkspaceAllow,
+		keptWorkspaceDeny,
 		hiddenWorkspaceAllow: allowScopes.workspace.filter((entry) => !allowed.includes(entry)),
 		hiddenWorkspaceDeny: denyScopes.workspace.filter((entry) => !denied.includes(entry)),
 	}
+}
+
+/**
+ * Decides a single command under the precedence the command layers are
+ * authored with: wherever a global (user-level) entry — allow or deny —
+ * matches the command, the global layer decides it, so a user's own allow
+ * outranks a project's deny and a user's own deny outranks a project's allow;
+ * workspace entries apply only where no global entry matches. Within either
+ * layer the established matcher semantics stand: the longest matching prefix
+ * wins and an equal-length allow/deny conflict denies.
+ *
+ * The scope is one command: a chained command is decided per sub-command, and
+ * chain splitting lives with the command matcher.
+ *
+ * @param command - The single (unchained) command to decide.
+ * @param effective - A composition from {@link resolveEffectiveCommandLists}.
+ * @returns The decision produced by the matching layer.
+ */
+export function getEffectiveCommandDecision(command: string, effective: EffectiveCommandLists): CommandDecision {
+	// One longest-prefix probe asks the only question the precedence turns on:
+	// does the global layer hold any match for this command at all?
+	if (findLongestPrefixMatch(command, [...effective.globalAllow, ...effective.globalDeny]) !== null) {
+		return getSingleCommandDecision(command, effective.globalAllow, effective.globalDeny)
+	}
+	return getSingleCommandDecision(command, effective.keptWorkspaceAllow, effective.keptWorkspaceDeny)
 }
 
 function sanitizeCommandList(list: unknown): string[] {

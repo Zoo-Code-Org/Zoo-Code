@@ -9,13 +9,14 @@ import { Package } from "../../../shared/package"
 import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import {
 	commandListFolderForResource,
+	getEffectiveCommandDecision,
 	readCommandListScopes,
 	resolveEffectiveCommandLists,
 	resolveWorkspaceWriteTarget,
 	splitCommandListScopes,
 	workspaceCommandListsEnabled,
 } from "../commandScope"
-import { getCommandDecision, getSingleCommandDecision } from "../commands"
+import { getSingleCommandDecision } from "../commands"
 import { checkAutoApproval } from "../index"
 import { baseState, type State } from "./fixtures"
 
@@ -531,11 +532,14 @@ it("resolveEffectiveCommandLists: shadows workspace entries case-insensitively, 
 	expect(effective.hiddenWorkspaceDeny).toEqual([])
 })
 
-// When allow and deny entries both match a command with equal specificity,
-// the deny decides: an ambiguous case fails closed rather than silently
-// widening auto-approval. The direction is a deliberate policy, not an
-// accident of the comparison — letting an allow win a tie would approve
-// commands a deny entry claims, so reversing it requires an explicit policy
+// A user-level (global) entry decides every command it matches: a workspace
+// entry applies only where no global entry matches, so a project file can
+// fill gaps in the user's policy but never outrank it. Within a single layer
+// the conflict rule is specificity — the longest match wins — and when allow
+// and deny entries match with equal specificity, the deny decides: an
+// ambiguous case fails closed rather than silently widening auto-approval.
+// Letting an allow win a within-layer tie would approve commands a deny entry
+// in the same layer claims, so reversing it requires an explicit policy
 // decision, not a refactor that happens to flip the comparison's direction.
 it("getSingleCommandDecision: resolves an equally specific allow/deny match to the deny", () => {
 	// "*" matches every command but counts as length 1, so it ties the
@@ -552,21 +556,55 @@ it("getSingleCommandDecision: lets the strictly more specific entry win on eithe
 	expect(getSingleCommandDecision("git push origin", ["git"], ["git push"])).toBe("auto_deny")
 })
 
-it("resolveEffectiveCommandLists: keeps a workspace wildcard deny alive beside a global allow entry it only overlaps", () => {
+it("resolveEffectiveCommandLists: keeps a workspace wildcard deny alive for the commands no global entry matches", () => {
 	// Composition drops a workspace entry only when a global entry covers
 	// every command it could match. "*" matches commands "g" cannot, so the
-	// deny survives into the effective pair and reaches the matcher beside
-	// the allow entry, where the equal-length tie decides "git status" as a
-	// deny: a global allow overlaps a wildcard deny's coverage without
-	// overriding it.
+	// deny survives into the effective pair. Deciding then follows the layer
+	// precedence: the global entry decides every command it matches, and the
+	// workspace deny applies exactly where the global layer is silent.
 	const effective = resolveEffectiveCommandLists(listScopes(["g"], []), listScopes([], ["*"]), true)
 
 	expect(effective.allowed).toEqual(["g"])
 	expect(effective.denied).toEqual(["*"])
-	// Inside the global allow prefix, yet the equally specific deny decides.
-	expect(getCommandDecision("git status", effective.allowed, effective.denied)).toBe("auto_deny")
-	// Outside the global prefix the deny matches alone, so it still decides.
-	expect(getCommandDecision("docker ps", effective.allowed, effective.denied)).toBe("auto_deny")
+	// Inside the global allow prefix the global layer decides: the user's own
+	// allow outranks a project wildcard deny.
+	expect(getEffectiveCommandDecision("git status", effective)).toBe("auto_approve")
+	// Outside the global prefix the deny matches alone, so the workspace
+	// layer decides.
+	expect(getEffectiveCommandDecision("docker ps", effective)).toBe("auto_deny")
+})
+
+it("getEffectiveCommandDecision: lets a global deny decide a command a workspace wildcard allow also matches", () => {
+	// The precedence is symmetric: a user-level deny outranks a project's
+	// allow exactly as a user-level allow outranks a project's deny, while
+	// the workspace allow still decides the commands the user's layer is
+	// silent about.
+	const effective = resolveEffectiveCommandLists(listScopes([], ["*"]), listScopes(["g"], []), true)
+
+	expect(getEffectiveCommandDecision("git status", effective)).toBe("auto_deny")
+	expect(getEffectiveCommandDecision("docker ps", effective)).toBe("auto_approve")
+})
+
+it("getEffectiveCommandDecision: lets the workspace layer decide when no global entry matches", () => {
+	// The global layers say nothing about "rm": the kept workspace deny
+	// decides alone, while the global allow still decides the commands it
+	// matches. A global entry matching nothing leaves the workspace layer in
+	// full charge of the commands it covers.
+	const effective = resolveEffectiveCommandLists(listScopes(["git"], []), listScopes([], ["rm"]), true)
+
+	expect(getEffectiveCommandDecision("git status", effective)).toBe("auto_approve")
+	expect(getEffectiveCommandDecision("rm -rf tmp", effective)).toBe("auto_deny")
+})
+
+it("getEffectiveCommandDecision: keeps within-layer conflict resolution in each layer", () => {
+	// Within the workspace layer an equal-length allow/deny conflict still
+	// denies: layer precedence orders the layers, not the entries of a layer.
+	const inWorkspace = resolveEffectiveCommandLists(listScopes([], ["g"]), listScopes([], ["*"]), true)
+	expect(getEffectiveCommandDecision("git status", inWorkspace)).toBe("auto_deny")
+	// The same holds within the global layer: the wildcard deny ties the
+	// one-character allow there too.
+	const inGlobal = resolveEffectiveCommandLists(listScopes(["g"], []), listScopes(["*"], []), true)
+	expect(getEffectiveCommandDecision("git status", inGlobal)).toBe("auto_deny")
 })
 
 // Command-branch enforcement composes its allow/deny pair from the raw
@@ -804,6 +842,181 @@ it("checkAutoApproval command: in a single-folder window reads exactly the same 
 	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
 })
 
+it("checkAutoApproval command: enforces the deny entries of a filesystem-root workspace folder", async () => {
+	vi.clearAllMocks()
+	// A window opened directly on the filesystem root ("/" or the Windows
+	// drive root) is a workspace folder whose children must still resolve to
+	// it: failing containment there would drop the root's deny entries
+	// silently — the exact fail-open the folder lookup must not have.
+	const rootPath = path.parse(process.cwd()).root
+	const rootUri = makeUri(rootPath)
+	workspaceState.workspaceFolders = [{ uri: rootUri }]
+	workspaceState.foldersByPath.set(rootPath, rootUri)
+	mockFolderConfigurations({ [rootPath]: { gate: true, deny: ["echo"] } })
+
+	const result = await checkAutoApproval({
+		// Empty raw global layers: only the root folder's layer can decide.
+		state: taskFolderState([]),
+		cwd: path.join(rootPath, "srv"),
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, rootUri)
+})
+
+// Enforcement decides commands through the layer split the composition
+// carries: wherever a global (user-level) entry matches, the global layer
+// decides, and the workspace layer decides only the commands no global entry
+// matches. A single-character global entry ties a workspace wildcard entry in
+// the merged pair's longest-prefix comparison, so a merged-pair matcher alone
+// could not reproduce that precedence; these cases pin it through the public
+// enforcement boundary.
+const layeredState = (globalAllow: string[], globalDeny: string[] = []): State => ({
+	...taskFolderState(["baked"]),
+	globalAllowedCommands: globalAllow,
+	globalDeniedCommands: globalDeny,
+})
+
+it("checkAutoApproval command: lets a global allow entry decide a command a workspace wildcard deny also matches", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["*"] },
+		[folderB.fsPath]: { gate: true, deny: ["*"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: layeredState(["g"]),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "git status",
+	})
+
+	// The project's wildcard deny matches "git status" too, but the user's own
+	// allow entry matches it, so the global layer decides: approve.
+	expect(result).toEqual({ decision: "approve" })
+})
+
+it("checkAutoApproval command: lets the workspace wildcard deny decide the commands no global entry matches", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["*"] },
+		[folderB.fsPath]: { gate: true, deny: ["*"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: layeredState(["g"]),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "docker ps",
+	})
+
+	// "docker ps" matches no global entry, so the kept workspace deny decides
+	// it — the global allow of "g" fills no gap here, and the project fills its
+	// own.
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" } })
+})
+
+it("checkAutoApproval command: lets a global deny entry veto a command a workspace wildcard allow also matches", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, allow: ["*"] },
+		[folderB.fsPath]: { gate: true, allow: ["*"] },
+	})
+
+	const state = layeredState([], ["g"])
+
+	const denied = await checkAutoApproval({ state, cwd: folderB.fsPath, ask: "command", text: "git status" })
+	expect(denied).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "git status", pattern: "g" } })
+
+	// The precedence is symmetric: outside the global deny's prefix the
+	// project's wildcard allow still decides.
+	const allowed = await checkAutoApproval({ state, cwd: folderB.fsPath, ask: "command", text: "docker ps" })
+	expect(allowed).toEqual({ decision: "approve" })
+})
+
+it("checkAutoApproval command: keeps the global-only degradation for a cwd naming no root under the layered composition", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["*"] },
+		[folderB.fsPath]: { gate: true, deny: ["*"] },
+	})
+
+	const state = layeredState(["g"])
+
+	const globalWitness = await checkAutoApproval({
+		state,
+		cwd: "/mock/removed-folder",
+		ask: "command",
+		text: "git status",
+	})
+	expect(globalWitness).toEqual({ decision: "approve" })
+
+	// Dropping the workspace layer for an unmatched cwd must not promote the
+	// command to an approval: with no global match either, the plain prompt
+	// stands, exactly as under the pre-composed pair.
+	const unmatched = await checkAutoApproval({
+		state,
+		cwd: "/mock/removed-folder",
+		ask: "command",
+		text: "docker ps",
+	})
+	expect(unmatched).toEqual({ decision: "ask" })
+})
+
+it("checkAutoApproval command: decides a command in a filesystem-root workspace folder by both layers", async () => {
+	vi.clearAllMocks()
+	// The root folder's deny must still reach enforcement for a child cwd
+	// (containment keeps the layer), and the global layer must still outrank
+	// it where it matches — folder containment and layer precedence together.
+	const rootPath = path.parse(process.cwd()).root
+	const rootUri = makeUri(rootPath)
+	workspaceState.workspaceFolders = [{ uri: rootUri }]
+	workspaceState.foldersByPath.set(rootPath, rootUri)
+	mockFolderConfigurations({ [rootPath]: { gate: true, deny: ["*"] } })
+
+	const state = layeredState(["g"])
+	const cwd = path.join(rootPath, "srv")
+
+	const globalWitness = await checkAutoApproval({ state, cwd, ask: "command", text: "git status" })
+	expect(globalWitness).toEqual({ decision: "approve" })
+
+	const folderWitness = await checkAutoApproval({ state, cwd, ask: "command", text: "docker ps" })
+	expect(folderWitness).toEqual({
+		decision: "deny",
+		autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" },
+	})
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, rootUri)
+})
+
+it("checkAutoApproval command: decides each sub-command of a chain by its own matching layer", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true, deny: ["*"] },
+		[folderB.fsPath]: { gate: true, deny: ["*"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: layeredState(["g"]),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "git status && docker ps",
+	})
+
+	// Chain aggregation holds across layers — any denial denies the whole
+	// command — while each sub-command is decided by its own layer: "git
+	// status" is approved by the global allow while "docker ps" is denied by
+	// the workspace wildcard, and the denial names the denied sub-command, not
+	// the approved one.
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" } })
+})
+
 // Creating a directory symlink on Windows needs developer mode or elevation; a
 // junction needs neither and is resolved by realpath like a POSIX link, so the
 // fixture tries a symlink first and falls back to a junction. Where neither can
@@ -927,6 +1140,33 @@ it("commandListFolderForResource: matches a cwd equal to the root's real path", 
 	)
 
 	expect(commandListFolderForResource(rootPath)).toBe(rootUri)
+})
+
+it("commandListFolderForResource: matches a cwd inside a filesystem-root workspace folder", () => {
+	vi.clearAllMocks()
+	// A filesystem root — "/" on POSIX, "C:\" on Windows — is a legal
+	// workspace folder and already ends in a separator. Appending another
+	// separator would leave no child path able to match the root, dropping
+	// that folder's command-list layer out of enforcement silently.
+	const rootPath = path.parse(process.cwd()).root
+	const rootUri = makeUri(rootPath)
+	workspaceState.workspaceFolders = [{ uri: rootUri }]
+
+	expect(commandListFolderForResource(path.join(rootPath, "srv", "app"))).toBe(rootUri)
+	// The root itself remains a match through the equality branch.
+	expect(commandListFolderForResource(rootPath)).toBe(rootUri)
+})
+
+it("commandListFolderForResource: matches a child of a folder registered with a trailing separator", () => {
+	vi.clearAllMocks()
+	// The real-path fallback passes a registered trailing separator through
+	// unresolved roots, so containment must treat an already-separated root
+	// as its own child prefix instead of doubling the separator.
+	const rootPath = path.join(path.sep + "mock", "root") + path.sep
+	const rootUri = makeUri(rootPath)
+	workspaceState.workspaceFolders = [{ uri: rootUri }]
+
+	expect(commandListFolderForResource(path.join(rootPath, "sub"))).toBe(rootUri)
 })
 
 it("commandListFolderForResource: returns undefined when no workspace folder is open", () => {
