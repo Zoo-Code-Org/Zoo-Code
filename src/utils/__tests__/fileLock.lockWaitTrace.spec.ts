@@ -1,4 +1,3 @@
-// @ts-nocheck
 // npx vitest run utils/__tests__/fileLock.lockWaitTrace.spec.ts
 
 import * as path from "path"
