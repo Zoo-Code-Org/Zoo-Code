@@ -1,4 +1,5 @@
 import * as fs from "fs"
+import * as os from "os"
 import * as path from "path"
 
 import { DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED, globalSettingsSchema } from "@roo-code/types"
@@ -7,6 +8,7 @@ import * as vscode from "vscode"
 import { Package } from "../../../shared/package"
 import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import {
+	commandListFolderForResource,
 	readCommandListScopes,
 	resolveEffectiveCommandLists,
 	resolveWorkspaceWriteTarget,
@@ -25,6 +27,42 @@ const workspaceState = vi.hoisted(() => ({
 	workspaceFolders: undefined as { uri: unknown }[] | undefined,
 	foldersByPath: new Map<string, unknown>(),
 }))
+
+// Scriptable stand-in for `fs.realpathSync`, which the root-side containment
+// fallback consults. Every other fs binding stays real — the manifest reads
+// and the real-filesystem tests run through `importOriginal` — and the double
+// resolves paths to themselves by default: the mock roots are fake paths that
+// exist on no filesystem, and an unresolvable root is compared by its
+// registered path, so identity reproduces exactly what the real call does to
+// them. Tests that need other behavior script it explicitly.
+const fsState = vi.hoisted(() => ({
+	// The unmocked implementation, captured by the module mock so a test can
+	// delegate through the double to real filesystem behavior.
+	realRealpathSync: null as null | ((target: string) => string),
+}))
+
+vi.mock("fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("fs")>()
+	fsState.realRealpathSync = (target: string) => String(actual.realpathSync(target))
+	const realpathSync = vi.fn((target: string): string => String(target))
+	// Interop shape: production code reaches `realpathSync` through the
+	// default export and this spec through the named one; both must see the
+	// same double.
+	const actualDefault = (actual as { default?: typeof import("fs") }).default ?? actual
+	return {
+		...actual,
+		default: { ...actualDefault, realpathSync },
+		realpathSync,
+	}
+})
+
+/** The unmocked `fs.realpathSync`, for tests that pin real-filesystem behavior. */
+function realPath(target: string): string {
+	if (!fsState.realRealpathSync) {
+		throw new Error("the fs module mock did not capture the unmocked realpathSync")
+	}
+	return fsState.realRealpathSync(target)
+}
 
 vi.mock("vscode", () => ({
 	ConfigurationTarget: {
@@ -586,6 +624,28 @@ it("checkAutoApproval command: does not apply the first folder's allow list to a
 	expect(result).toEqual({ decision: "ask" })
 })
 
+it("checkAutoApproval command: composes a command without a cwd from the global layers when both raw layers are present", async () => {
+	vi.clearAllMocks()
+	// With both raw layers set, the command branch re-composes instead of
+	// consuming the baked pair; an absent cwd keeps the first-folder
+	// configuration, which here contributes nothing, so only the raw global
+	// allow entry can decide. A check that consumed the baked pair instead
+	// would find no match and fall to the plain prompt.
+	const { folderA, folderB } = openMultiRootWindow()
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true },
+		[folderB.fsPath]: { gate: true, deny: ["rm"] },
+	})
+
+	const result = await checkAutoApproval({
+		state: { ...taskFolderState(["baked"]), globalAllowedCommands: ["echo"], globalDeniedCommands: ["rm"] },
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "approve" })
+})
+
 it("checkAutoApproval command: still lets a global deny entry veto a command whose cwd names no workspace root", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
@@ -670,4 +730,166 @@ it("checkAutoApproval command: in a single-folder window reads exactly the same 
 
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
 	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
+})
+
+// Creating a directory symlink on Windows needs developer mode or elevation; a
+// junction needs neither and is resolved by realpath like a POSIX link, so the
+// fixture tries a symlink first and falls back to a junction. Where neither can
+// be created the real-filesystem test is skipped; the scripted tests below pin
+// the same resolution logic on every platform.
+function createDirectoryLink(target: string, linkPath: string): void {
+	try {
+		fs.symlinkSync(target, linkPath, "dir")
+	} catch {
+		fs.symlinkSync(target, linkPath, "junction")
+	}
+}
+
+function canCreateDirectoryLink(): boolean {
+	const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "command-scope-link-probe-"))
+	try {
+		const target = path.join(probeDir, "target")
+		fs.mkdirSync(target)
+		createDirectoryLink(target, path.join(probeDir, "link"))
+		return true
+	} catch {
+		return false
+	} finally {
+		fs.rmSync(probeDir, { recursive: true, force: true })
+	}
+}
+const directoryLinksAvailable = canCreateDirectoryLink()
+
+// The root-side fallback runs after the registered paths matched nothing, so
+// these tests control resolution through the double (the mock header explains
+// the identity default) and keep the registry lists they expect to be read
+// independent of resolution. Resetting here also keeps the double's scripted
+// behavior from leaking into the manifest reads above and the file's other
+// lookup tests.
+afterEach(() => {
+	workspaceState.workspaceFolders = undefined
+	workspaceState.foldersByPath.clear()
+	vi.mocked(fs.realpathSync).mockImplementation((target) => String(target))
+})
+
+it.skipIf(!directoryLinksAvailable)(
+	"checkAutoApproval command: applies a symlinked workspace root's folder layer to a cwd in the root's real path",
+	async () => {
+		vi.clearAllMocks()
+		const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "command-scope-link-root-"))
+		try {
+			const realRoot = path.join(baseDir, "real-root")
+			const taskDir = path.join(realRoot, "sub")
+			fs.mkdirSync(realRoot)
+			fs.mkdirSync(taskDir)
+			const link = path.join(baseDir, "link-to-root")
+			createDirectoryLink(realRoot, link)
+			const linkUri = makeUri(link)
+			// The registry holds the link: the folder was opened through it, so
+			// the registered paths match nothing for a cwd the filesystem has
+			// already resolved, and only the root's real path connects the two.
+			workspaceState.workspaceFolders = [{ uri: linkUri }]
+			workspaceState.foldersByPath.set(link, linkUri)
+			// One delegate covers every call the lookup makes against this link.
+			vi.mocked(fs.realpathSync).mockImplementation((target) => realPath(String(target)))
+			// The configuration is scripted for the registry entry, not the
+			// real path: folder-scoped settings resolve against what VS Code
+			// opened.
+			mockFolderConfigurations({ [link]: { gate: true, allow: ["echo"] } })
+
+			const result = await checkAutoApproval({
+				// Empty raw global layers: only the link folder's layer can
+				// decide.
+				state: taskFolderState([]),
+				cwd: realPath(taskDir),
+				ask: "command",
+				text: "echo hi",
+			})
+
+			expect(result).toEqual({ decision: "approve" })
+			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, linkUri)
+		} finally {
+			fs.rmSync(baseDir, { recursive: true, force: true })
+		}
+	},
+)
+
+it("commandListFolderForResource: falls back to the registered path for a root whose real path cannot be resolved", () => {
+	vi.clearAllMocks()
+	const rootPath = path.join(path.sep + "mock", "broken-root")
+	const rootUri = makeUri(rootPath)
+	// A relocated or deleted root has no real path; comparing it by the path the
+	// registry holds keeps that folder's layer applied instead of silently
+	// dropping it.
+	workspaceState.workspaceFolders = [{ uri: rootUri }]
+	vi.mocked(fs.realpathSync).mockImplementation((target) => {
+		if (String(target) === rootPath) {
+			throw new Error("ENOENT: no such file or directory")
+		}
+		return String(target)
+	})
+
+	expect(commandListFolderForResource(path.join(rootPath, "sub"))).toBe(rootUri)
+})
+
+it("commandListFolderForResource: a path inside no root stays unmatched after the real-path retry", () => {
+	vi.clearAllMocks()
+	const rootPath = path.join(path.sep + "mock", "root")
+	workspaceState.workspaceFolders = [{ uri: makeUri(rootPath) }]
+
+	// The sibling "root-two" shares "root" as a string prefix; only the
+	// separator guard between root and remainder keeps it outside the root.
+	expect(commandListFolderForResource(path.join(path.sep + "mock", "root-two", "x"))).toBeUndefined()
+	expect(commandListFolderForResource(path.join(path.sep + "mock", "elsewhere"))).toBeUndefined()
+})
+
+it("commandListFolderForResource: compares the cwd to the root's real path case-sensitively", () => {
+	vi.clearAllMocks()
+	workspaceState.workspaceFolders = [{ uri: makeUri(path.join(path.sep + "mock", "Root")) }]
+	// Both sides arrive canonical, so their case agrees wherever the
+	// comparison applies; folding case here could match a root the filesystem
+	// treats as distinct.
+	expect(commandListFolderForResource(path.join(path.sep + "mock", "root", "sub"))).toBeUndefined()
+})
+
+it("commandListFolderForResource: returns the registry Uri of the deepest matching root", () => {
+	vi.clearAllMocks()
+	const outerRoot = path.sep + "mock"
+	const innerRegistered = path.join(outerRoot, "inner-real")
+	const innerReal = path.join(outerRoot, "inner")
+	const outerUri = makeUri(outerRoot)
+	const innerUri = makeUri(innerRegistered)
+	// Order matters: the outer root is seen first, so a lookup that returned
+	// the first match instead of the deepest one decides differently here.
+	workspaceState.workspaceFolders = [{ uri: outerUri }, { uri: innerUri }]
+	vi.mocked(fs.realpathSync).mockImplementation((target) =>
+		String(target) === innerRegistered ? innerReal : String(target),
+	)
+
+	const result = commandListFolderForResource(path.join(innerReal, "sub"))
+
+	// Object identity against the registry entry pins both halves: the deepest
+	// root won, and the value returned is the registered Uri (folder-scoped
+	// configuration resolves against the registry, not the real path).
+	expect(result).toBe(innerUri)
+	expect(result?.fsPath).toBe(innerRegistered)
+})
+
+it("realpathSync preserves the on-disk case of an existing directory", () => {
+	vi.clearAllMocks()
+	const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "command-scope-case-"))
+	try {
+		const dirName = "MixedCase-Dir"
+		const dir = path.join(baseDir, dirName)
+		fs.mkdirSync(dir)
+		// The comparison trusts realpath output case, so it is pinned against
+		// the real filesystem rather than assumed: the final component keeps
+		// the case it was created with, and a differently-cased spelling of the
+		// same directory does not sit inside it.
+		const realBase = realPath(baseDir)
+		expect(realPath(dir)).toBe(path.join(realBase, dirName))
+		expect(path.join(realBase, dirName.toLowerCase()).startsWith(`${realPath(dir)}${path.sep}`)).toBe(false)
+	} finally {
+		fs.rmSync(baseDir, { recursive: true, force: true })
+	}
 })

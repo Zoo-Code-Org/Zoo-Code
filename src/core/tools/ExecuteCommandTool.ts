@@ -160,11 +160,39 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// decision: the command-list policy, the DCG run, and the terminal
 			// spawn must all see the same directory, so a custom `cwd` can never
 			// be approved against one folder and executed in another.
-			const workingDirectory = customCwd
+			const lexicalWorkingDirectory = customCwd
 				? path.isAbsolute(customCwd)
 					? customCwd
 					: path.resolve(task.cwd, customCwd)
 				: task.cwd
+			// A folder's command lists apply to a command by containment: the
+			// working directory is matched against the open roots, and against
+			// each root's real path when the registered paths match nothing, so
+			// a root that is itself a link still claims its own directory.
+			// Canonicalizing here keeps both sides of that match physical, so
+			// the judged folder is the one containing the directory the process
+			// actually starts in — a symlinked directory would otherwise be
+			// judged by the folder its path sits in while the process starts in
+			// the link's target, the same drift in filesystem form (precedent:
+			// `RooIgnoreController.validateAccess` also resolves symlinks with
+			// realpath before a policy check). Unlike that file-access posture,
+			// an unresolvable link here names no directory any policy could
+			// judge, so the command fails closed through the working-directory
+			// error channel rather than falling back to the lexical path. A link
+			// re-pointed between this call and the spawn cannot be closed from
+			// here; it rides the same accepted race class as a settings flip
+			// during a pending prompt.
+			let workingDirectory: string
+			try {
+				workingDirectory = await fs.realpath(lexicalWorkingDirectory)
+			} catch (error) {
+				const resolutionError =
+					(await commandWorkingDirectoryError(lexicalWorkingDirectory)) ??
+					`Unable to resolve working directory '${lexicalWorkingDirectory}': ${error instanceof Error ? error.message : String(error)}`
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formatResponse.toolError(resolutionError))
+				return
+			}
 			let dcgDecision: DcgDecision | undefined
 			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
 				const workingDirectoryError = await commandWorkingDirectoryError(workingDirectory)

@@ -1,3 +1,6 @@
+import fs from "fs"
+import path from "path"
+
 import { DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED } from "@roo-code/types"
 import * as vscode from "vscode"
 
@@ -50,12 +53,26 @@ export function commandListConfiguration(folderResource?: vscode.Uri): vscode.Wo
  * directory of the task it came from, so it resolves to the same folder
  * without separate plumbing.
  *
+ * The command path hands this lookup a cwd the filesystem has already
+ * resolved to its real path, while the workspace registry holds each root as
+ * it was opened. Containment against the registered paths is tried first;
+ * when it matches no root, the search is retried against each root's real
+ * path so a root that is itself a symlink (or a Windows junction) keeps
+ * matching its own real directory. Among several matches the deepest root
+ * wins, mirroring how VS Code's own containment picks the innermost folder.
+ * A root whose real path cannot be resolved is compared by its registered
+ * path: the cwd is already canonical, so an unresolvable root can only
+ * narrow which folder layer applies, never widen what a folder's allow list
+ * may approve — and dropping the layer outright would silently change
+ * enforcement for a folder the user has open.
+ *
  * @param cwd - The task's working directory. A blank cwd, or one that names
  * no workspace root (a removed or relocated folder), yields `undefined`,
  * which leaves every read on its first-folder default — the behavior such a
  * cwd had before per-task scoping existed, never a guess at a different one.
- * @returns The containing folder's URI, or `undefined` when cwd resolves to
- * no root.
+ * @returns The containing folder's registry URI — never a canonicalized one,
+ * because folder-scoped configuration resolves against the registry — or
+ * `undefined` when cwd resolves to no root.
  */
 export function commandListFolderForResource(cwd?: string): vscode.Uri | undefined {
 	if (!cwd) {
@@ -66,9 +83,43 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 	// run stands in for a cwd naming no root, so enforcement degrades to the
 	// first-folder default instead of failing the approval decision.
 	try {
-		return vscode.workspace.getWorkspaceFolder(vscode.Uri.file(cwd))?.uri
+		const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(cwd))
+		if (folder) {
+			return folder.uri
+		}
+
+		// A miss above is expected when a root is a link and the cwd names the
+		// link's target, so containment is retried root by root against the
+		// filesystem's real paths. The separator guard keeps a sibling like
+		// `/root/other` from matching a root `/root`.
+		let match: vscode.Uri | undefined
+		let matchedLength = 0
+		for (const candidate of vscode.workspace.workspaceFolders ?? []) {
+			const rootPath = realPathOrRegistered(candidate.uri.fsPath)
+			if ((cwd === rootPath || cwd.startsWith(rootPath + path.sep)) && rootPath.length > matchedLength) {
+				match = candidate.uri
+				matchedLength = rootPath.length
+			}
+		}
+		return match
 	} catch {
 		return undefined
+	}
+}
+
+/**
+ * The path a workspace root is compared by: its real filesystem path, or —
+ * when that cannot be resolved (a relocated or deleted root) — the path the
+ * registry holds. Root-side lookups stay best-effort because the cwd being
+ * matched is already canonical; failing the comparison for one unresolvable
+ * root would drop that folder's command-list layer without widening any
+ * approval.
+ */
+function realPathOrRegistered(fsPath: string): string {
+	try {
+		return fs.realpathSync(fsPath)
+	} catch {
+		return fsPath
 	}
 }
 

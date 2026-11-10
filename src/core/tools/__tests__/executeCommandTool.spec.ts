@@ -2,7 +2,8 @@
 
 import type { ToolUsage } from "@roo-code/types"
 import fs from "fs/promises"
-import { constants as fsConstants, type Stats } from "fs"
+import { constants as fsConstants, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, type Stats } from "fs"
+import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
@@ -24,6 +25,10 @@ vitest.mock("fs/promises", () => ({
 	default: {
 		access: vitest.fn().mockResolvedValue(undefined),
 		stat: vitest.fn().mockResolvedValue({ isDirectory: () => true }),
+		// The tool canonicalizes the resolved working directory before any
+		// approval decision; the default double resolves every path to itself,
+		// so a test only sees symlink behavior when it scripts this mock.
+		realpath: vitest.fn().mockImplementation((p: string) => Promise.resolve(p)),
 	},
 }))
 
@@ -78,6 +83,34 @@ const { executeCommandTool } = executeCommandModule
 // so a delegating spy must call the real policy captured at import time:
 // capturing inside a test can capture another test's leaked spy and recurse.
 const realCheckAutoApproval = autoApprovalModule.checkAutoApproval
+
+// Creating a directory symlink on Windows needs developer mode or elevation; a
+// junction needs neither and is resolved by `realpath` like a POSIX link, so the
+// fixture tries a symlink first and falls back to a junction. Where neither can
+// be created the fixture is skipped: the real-filesystem behavior it pins cannot
+// be produced by the file-mock module this suite otherwise runs on.
+function createDirectoryLink(target: string, linkPath: string): void {
+	try {
+		symlinkSync(target, linkPath, "dir")
+	} catch {
+		symlinkSync(target, linkPath, "junction")
+	}
+}
+
+function canCreateDirectoryLink(): boolean {
+	const probeDir = mkdtempSync(path.join(os.tmpdir(), "execute-command-symlink-probe-"))
+	try {
+		const target = path.join(probeDir, "target")
+		mkdirSync(target)
+		createDirectoryLink(target, path.join(probeDir, "link"))
+		return true
+	} catch {
+		return false
+	} finally {
+		rmSync(probeDir, { recursive: true, force: true })
+	}
+}
+const directoryLinksAvailable = canCreateDirectoryLink()
 
 describe("executeCommandTool", () => {
 	// Setup common test variables
@@ -268,6 +301,148 @@ describe("executeCommandTool", () => {
 				}),
 			)
 		})
+	})
+
+	// The folder-scoped command policy resolves a directory by string
+	// containment, so a link would be judged by the folder it sits in while the
+	// process starts in the link's target. The tool canonicalizes the resolved
+	// working directory once, before any approval decision, so every consumer
+	// (ask, DCG, re-checks, spawn) sees the physical directory.
+	describe("Working directory canonicalization", () => {
+		it("forwards the physical directory behind a symlinked custom cwd to the approval ask", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "/mock/link"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/link" }
+			vi.mocked(fs.realpath).mockResolvedValueOnce("/physical/target")
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(fs.realpath).toHaveBeenCalledWith("/mock/link")
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/physical/target",
+			})
+		})
+
+		it("runs the destructive-command guard in the physical directory behind a symlinked custom cwd", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/mock/link"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/link" }
+			vi.mocked(fs.realpath).mockResolvedValueOnce("/physical/target")
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockRunDcg).toHaveBeenCalledWith("/test/storage/dcg", "echo test", "/physical/target")
+		})
+
+		it("fails closed on a broken symlink without reaching approval", async () => {
+			mockToolUse.params.cwd = "/mock/broken-link"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/broken-link" }
+			vi.mocked(fs.realpath).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(fs.stat).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted broken-link error")
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The realpath failure is reported through the working-directory
+			// error channel, which names the directory by its validated state.
+			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+				"Working directory '/mock/broken-link' does not exist.",
+			)
+			expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted broken-link error")
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it.each([
+			{ thrown: Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" }) },
+			{ thrown: "ELOOP: too many symbolic links" },
+		])(
+			"fails closed when canonicalization fails although the lexical directory validates (%s)",
+			async ({ thrown }) => {
+				mockToolUse.params.cwd = "/mock/loop"
+				mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/loop" }
+				vi.mocked(fs.realpath).mockRejectedValueOnce(thrown)
+
+				await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "test-tool-call-id",
+				})
+
+				// A link that cannot be resolved names no directory any policy
+				// could judge, even when the lexical `stat` check would pass: the
+				// fallback message is the witness that the error came from
+				// canonicalization, and it carries the failure reason whatever
+				// shape the rejection has.
+				expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+					expect.stringContaining("Unable to resolve working directory '/mock/loop': ELOOP"),
+				)
+				expect(mockAskApproval).not.toHaveBeenCalled()
+				expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+			},
+		)
+
+		// The scripted-realpath tests above pin the tool's contract; this one
+		// pins it against a real link: the folder policy resolves a path by
+		// string containment (already covered against the canonical value), so
+		// the physical path reaching `commandCwd` is what makes a link inside one
+		// folder judged by the folder of its target.
+		it.skipIf(!directoryLinksAvailable)(
+			"forwards the real target of a directory link created on disk",
+			async () => {
+				const baseDir = mkdtempSync(path.join(os.tmpdir(), "execute-command-canonicalize-"))
+				try {
+					const folderA = path.join(baseDir, "folder-a")
+					const folderB = path.join(baseDir, "folder-b")
+					mkdirSync(folderA)
+					mkdirSync(folderB)
+					const link = path.join(folderA, "link")
+					createDirectoryLink(folderB, link)
+					// The module mock resolves paths through this delegate, so the
+					// tool sees the same physical path the filesystem reports.
+					// Once-only: the tool canonicalizes exactly one path per call,
+					// and a leaked delegate would resolve later tests' fake paths
+					// against the real filesystem.
+					vi.mocked(fs.realpath).mockImplementationOnce(async (target) => realpathSync(String(target)))
+
+					mockToolUse.params.cwd = link
+					mockToolUse.nativeArgs = { command: "echo test", cwd: link }
+					await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+						askApproval: mockAskApproval,
+						handleError: mockHandleError,
+						pushToolResult: mockPushToolResult,
+						toolCallId: "test-tool-call-id",
+					})
+
+					// Compared against the independently resolved target rather
+					// than a literal: temporary-directory paths themselves contain
+					// links on some platforms.
+					expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+						commandCwd: realpathSync(folderB),
+					})
+				} finally {
+					rmSync(baseDir, { recursive: true, force: true })
+				}
+			},
+		)
 	})
 
 	describe("Error handling", () => {
