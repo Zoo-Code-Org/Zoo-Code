@@ -700,22 +700,31 @@ function parseCommandLine(command: string): string[] {
 					commands.push(currentCommand.join(" "))
 					currentCommand = []
 				}
-			} else if (token.op === "glob" && "pattern" in token) {
-				// Keep the glob text (for example `*`) so that deny rules can match it.
+			} else if ("pattern" in token) {
+				// shell-quote returns a glob as { op: "glob", pattern }. Keep the glob
+				// text (for example `*`) so that deny rules can match it.
 				currentCommand.push(token.pattern)
 			} else {
 				// Other operators (>) are part of the command
 				currentCommand.push(token.op)
 			}
 		} else if (typeof token === "string") {
-			// Check if it's a subshell placeholder
-			const subshellMatch = token.match(/__SUBSH_(\d+)__/)
-			if (subshellMatch) {
-				if (currentCommand.length > 0) {
+			// Check if the word contains subshell placeholders
+			const subshellMatches = [...token.matchAll(/__SUBSH_(\d+)__/g)]
+			if (subshellMatches.length > 0) {
+				// Text outside the substitution is part of the outer command, for
+				// example `reboot` in `reboot$(printf x)`. It must stay in the
+				// command so that the allowlist check sees it.
+				const outerText = token.replace(/__SUBSH_\d+__/g, "")
+				if (outerText) {
+					currentCommand.push(outerText)
+				} else if (currentCommand.length > 0) {
 					commands.push(currentCommand.join(" "))
 					currentCommand = []
 				}
-				commands.push(subshells[parseInt(subshellMatch[1])])
+				for (const match of subshellMatches) {
+					commands.push(subshells[parseInt(match[1])])
+				}
 			} else {
 				currentCommand.push(token)
 			}

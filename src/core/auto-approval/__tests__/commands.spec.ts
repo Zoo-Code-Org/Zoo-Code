@@ -197,6 +197,17 @@ describe("getCommandDecision — # inside a word and glob patterns", () => {
 	})
 })
 
+describe("getCommandDecision — outer word attached to a command substitution", () => {
+	it.each(["reboot$(printf 'x')", "reboot$(printf '\n')"])(
+		"checks the outer command when only the inner command is allowed: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["printf"])).toBe("ask_user")
+			expect(getCommandDecision(command, ["printf"], ["reboot"])).toBe("auto_deny")
+			expect(getCommandDecision(command, ["printf", "reboot"])).toBe("auto_approve")
+		},
+	)
+})
+
 describe("getCommandDecisionDetailed", () => {
 	it("names the offending sub-command and matched denied prefix on chained commands", () => {
 		const result = getCommandDecisionDetailed("git status && rm x && npm test", ["git", "npm"], ["rm"])

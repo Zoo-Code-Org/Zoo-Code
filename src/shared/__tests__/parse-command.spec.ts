@@ -249,6 +249,14 @@ describe("parseCommand", () => {
 			const { commands: result } = parseCommand("echo $(whoami)")
 			expect(result).toContain("whoami")
 		})
+
+		it.each([
+			{ input: "reboot$(printf 'x')", expected: ["printf 'x'", "reboot"] },
+			{ input: "reboot$(printf '\n')", expected: ["printf '\n'", "reboot"] },
+			{ input: "echo $(a)$(b)", expected: ["echo", "a", "b"] },
+		])("keeps the outer word and every substitution in $input", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
 	})
 
 	describe("shell-quote parse-failure fallback", () => {
@@ -266,6 +274,13 @@ describe("parseCommand", () => {
 			expect(result).toEqual(["sh -c $'echo hi'", "echo done"])
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
+		})
+
+		it("splits outer operators and keeps operators inside a multi-line quote in the fallback path", () => {
+			forceShellQuoteFailure = true
+
+			const { commands: result } = parseCommand(`cd a && node -e "x && y\nz | w" ; ls`)
+			expect(result).toEqual(["cd a", `node -e "x && y\nz | w"`, "ls"])
 		})
 	})
 
