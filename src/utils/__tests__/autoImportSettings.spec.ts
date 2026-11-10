@@ -261,10 +261,13 @@ describe("autoImportSettings", () => {
 			),
 		)
 		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("info.auto_import_success")
-		expect(mockContextProxy.setValues).toHaveBeenCalledWith({
-			imageGenerationProvider: undefined,
-			customInstructions: "Test instructions",
-		})
+		expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+			{
+				imageGenerationProvider: undefined,
+				customInstructions: "Test instructions",
+			},
+			expect.any(Function),
+		)
 	})
 
 	it("should handle invalid JSON gracefully", async () => {
