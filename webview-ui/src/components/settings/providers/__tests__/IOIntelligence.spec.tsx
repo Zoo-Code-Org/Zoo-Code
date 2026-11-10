@@ -76,6 +76,7 @@ describe("IOIntelligence", () => {
 		poe: {},
 		deepseek: {},
 		moonshot: {},
+		fireworks: {},
 		"opencode-go": {},
 		kenari: {},
 		nanogpt: {},

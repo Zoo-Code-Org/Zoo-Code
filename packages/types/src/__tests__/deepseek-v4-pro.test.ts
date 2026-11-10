@@ -1,4 +1,4 @@
-import { basetenModels, deepSeekModels, fireworksModels, opencodeGoModels } from "../providers/index.js"
+import { basetenModels, deepSeekModels, opencodeGoModels } from "../providers/index.js"
 
 describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 	it.each([
@@ -55,23 +55,19 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 	})
 
 	// Self-hosted providers retain separate IDs for the preview weights and 0813 checkpoint.
-	it.each([
-		["Fireworks AI", fireworksModels["accounts/fireworks/models/deepseek-v4-pro"]],
-		["Baseten", basetenModels["deepseek-ai/DeepSeek-V4-Pro"]],
-	])("does not apply the API checkpoint label to %s", (_provider, model) => {
-		expect(model).toBeDefined()
-		expect("displayName" in model && typeof model.displayName === "string" ? model.displayName : "").not.toContain(
-			"0813",
-		)
-		expect(model?.contextWindow).toBeGreaterThanOrEqual(1_000_000)
-	})
+	// (Fireworks models, including pricing, are fetched dynamically from the Fireworks API.)
+	it.each([["Baseten", basetenModels["deepseek-ai/DeepSeek-V4-Pro"]]])(
+		"does not apply the API checkpoint label to %s",
+		(_provider, model) => {
+			expect(model).toBeDefined()
+			expect(
+				"displayName" in model && typeof model.displayName === "string" ? model.displayName : "",
+			).not.toContain("0813")
+			expect(model?.contextWindow).toBeGreaterThanOrEqual(1_000_000)
+		},
+	)
 
 	it.each([
-		[
-			"Fireworks AI",
-			fireworksModels["accounts/fireworks/models/deepseek-v4-pro-0813"],
-			{ inputPrice: 1.32, outputPrice: 3.96, cacheReadsPrice: 0.044 },
-		],
 		[
 			"Baseten",
 			basetenModels["deepseek-ai/DeepSeek-V4-Pro-0813"],
@@ -85,11 +81,6 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 	})
 
 	it("keeps preview pricing separate and omits unverified cache-write prices", () => {
-		expect(fireworksModels["accounts/fireworks/models/deepseek-v4-pro"]).toMatchObject({
-			inputPrice: 1.74,
-			outputPrice: 3.48,
-			cacheReadsPrice: 0.145,
-		})
 		expect(basetenModels["deepseek-ai/DeepSeek-V4-Pro"]).toMatchObject({
 			inputPrice: 1.74,
 			outputPrice: 3.48,
