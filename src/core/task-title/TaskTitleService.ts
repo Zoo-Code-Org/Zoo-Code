@@ -178,24 +178,25 @@ export class TaskTitleService {
 		}
 		const { prompt, settings } = prepared
 		const taskProfile = job.task.apiConfiguration
-		const titleProfile = settings.apiConfigId ? await this.deps.resolveProfile(settings.apiConfigId) : undefined
-
-		const profile = titleProfile ?? taskProfile
 
 		let title: string | undefined
-		const rateLimited = (taskProfile.rateLimitSeconds ?? 0) > 0 || (titleProfile?.rateLimitSeconds ?? 0) > 0
-		// Checked per request: the organization policy may have changed since the task started.
-		if (!rateLimited && !job.cancelReason && (await this.deps.isProfileAllowed(profile))) {
-			try {
+		// A failed profile lookup or policy check falls through to the fallback title, like a failed request.
+		try {
+			const titleProfile = settings.apiConfigId ? await this.deps.resolveProfile(settings.apiConfigId) : undefined
+			const profile = titleProfile ?? taskProfile
+			const rateLimited = (taskProfile.rateLimitSeconds ?? 0) > 0 || (titleProfile?.rateLimitSeconds ?? 0) > 0
+			// Checked per request: the organization policy may have changed since the task started.
+			// Cancellation is re-checked after the await so a cancel during the check sends no request.
+			if (!rateLimited && (await this.deps.isProfileAllowed(profile)) && !job.cancelReason) {
 				title = await (this.deps.generate ?? generateTaskTitle)({
 					profile,
 					prompt,
 					customSupportPrompts: settings.customSupportPrompts,
 					signal: job.controller.signal,
 				})
-			} catch (error) {
-				this.log(`[TaskTitleService] ${job.taskId}: title request failed: ${errorMessage(error)}`)
 			}
+		} catch (error) {
+			this.log(`[TaskTitleService] ${job.taskId}: title request failed: ${errorMessage(error)}`)
 		}
 
 		if (isDropped(job)) {

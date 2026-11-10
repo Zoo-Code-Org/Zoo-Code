@@ -4,6 +4,7 @@ import { generateTaskTitle, type GenerateTaskTitleOptions } from "../generateTas
 import {
 	TASK_TITLE_MAX_CONCURRENT,
 	TaskTitleService,
+	type TaskTitleServiceDeps,
 	type TaskTitleSettings,
 	type TaskTitleTask,
 } from "../TaskTitleService"
@@ -24,7 +25,13 @@ function historyItem(id: string, overrides: Partial<HistoryItem> = {}): HistoryI
 	return { id, number: 1, ts: 1, task: LONG_PROMPT, tokensIn: 0, tokensOut: 0, totalCost: 0, ...overrides }
 }
 
-function createHarness(options: { settings?: Partial<TaskTitleSettings>; items?: HistoryItem[] } = {}) {
+function createHarness(
+	options: {
+		settings?: Partial<TaskTitleSettings>
+		items?: HistoryItem[]
+		deps?: Partial<Pick<TaskTitleServiceDeps, "resolveProfile" | "isProfileAllowed">>
+	} = {},
+) {
 	const items = new Map((options.items ?? []).map((item) => [item.id, item]))
 	const settings: TaskTitleSettings = { enabled: true, ...options.settings }
 	const written: Array<{ taskId: string; title: string }> = []
@@ -45,6 +52,7 @@ function createHarness(options: { settings?: Partial<TaskTitleSettings>; items?:
 				requests.push({ options: generateOptions, resolve, reject })
 				generateOptions.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
 			}),
+		...options.deps,
 	})
 
 	const task = (taskId: string, overrides: Partial<TaskTitleTask> = {}): TaskTitleTask => ({
@@ -285,6 +293,21 @@ describe("TaskTitleService", () => {
 
 			expect(h.requests).toHaveLength(1)
 		})
+
+		it.each([
+			{ name: "profile lookup", deps: { resolveProfile: () => Promise.reject(new Error("profile removed")) } },
+			{ name: "policy check", deps: { isProfileAllowed: () => Promise.reject(new Error("state unavailable")) } },
+		])("records only the fallback when the $name rejects", async ({ deps }) => {
+			const h = createHarness({ settings: { apiConfigId: "light" }, deps })
+			h.profiles.set("light", { apiProvider: providerIdentifiers.openai })
+			h.startTask("t1")
+
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			expect(h.requests).toHaveLength(0)
+			expect(h.written).toEqual([{ taskId: "t1", title: FALLBACK }])
+		})
 	})
 
 	describe("results", () => {
@@ -377,6 +400,26 @@ describe("TaskTitleService", () => {
 
 			expect(h.requests[0]!.options.signal?.aborted).toBe(true)
 			expect(h.written).toEqual([])
+		})
+
+		it.each([
+			{ reason: "user" as const, written: [{ taskId: "t1", title: FALLBACK }] },
+			{ reason: "deleted" as const, written: [] },
+		])("sends no request when cancelled ($reason) during the policy check", async ({ reason, written }) => {
+			let allow: (allowed: boolean) => void = () => {}
+			const h = createHarness({
+				deps: { isProfileAllowed: () => new Promise<boolean>((resolve) => (allow = resolve)) },
+			})
+			h.startTask("t1")
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			h.service.cancel("t1", reason)
+			allow(true)
+			await flush()
+
+			expect(h.requests).toHaveLength(0)
+			expect(h.written).toEqual(written)
 		})
 
 		it("records the fallback for a queued task cancelled by the user without a request", async () => {
