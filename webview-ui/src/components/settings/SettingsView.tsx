@@ -601,16 +601,20 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
-			// Saving commits the buffered lists, so they no longer hold off external updates.
-			commandListsTouched.current = false
 			lastDisplayedCommandSnapshot.current = commandListSnapshot({
 				allowedCommands,
 				deniedCommands,
 				workspaceCommandListsEnabled: cachedState.workspaceCommandListsEnabled,
 			})
-			// With a time or date edit the flag is cleared when the host reports the save (see below). A failed save
-			// leaves the user's edits in place to retry.
-			if (!saveId) setChangeDetected(false)
+			// The stamp records what is on screen, so it moves at submit regardless of the outcome; the lists'
+			// ownership of the buffer does not. A save the host answers commits the buffered lists only once the
+			// host says the write landed (see the settle below) - committing at submit would let the state refresh
+			// that follows a rejected save overwrite the edit the user is still looking at. A save the host never
+			// answers has no result to wait for, so it clears the hold at submit.
+			if (!saveId) {
+				commandListsTouched.current = false
+				setChangeDetected(false)
+			}
 		}
 	}
 
@@ -619,8 +623,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		const settle = (success: boolean) => {
 			setPendingSaveId(undefined)
-			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
-			if (success && latestCachedState.current === sentState.current) setChangeDetected(false)
+			// An edit made while the save was in flight is not in what was sent: it stays unsaved. A failed save
+			// keeps the buffered lists holding off external updates too, so the host's refresh after a rejected
+			// write cannot replace the edit the user is looking at.
+			if (success && latestCachedState.current === sentState.current) {
+				commandListsTouched.current = false
+				setChangeDetected(false)
+			}
 		}
 
 		const onResult = (event: MessageEvent) => {

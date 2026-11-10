@@ -162,9 +162,6 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize i18n for internationalization support.
 	initializeI18n(context.globalState.get("language") ?? formatLanguage(vscode.env.language))
 
-	// Initialize terminal shell execution handlers.
-	TerminalRegistry.initialize()
-
 	// Initialize OpenAI Codex OAuth manager for ChatGPT subscription-based access.
 	openAiCodexOAuthManager.initialize(context, (message) => outputChannel.appendLine(message))
 	// Kimi Code OAuth tokens live only in VS Code SecretStorage, outside provider profile JSON/cloud sync.
@@ -173,11 +170,18 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)
 
+	// Seed before the terminal registry is initialized: a rejected seed must
+	// abort activation while the registry holds no resources, because its
+	// listeners are released only by `deactivate()`, which the host does not
+	// guarantee after a failed activation.
 	// Each list key carries its own first-run guard, so a profile whose
 	// allowlist was seeded by an earlier version still gets the deny-list
 	// migration on the next activation.
 	await seedCommandList(context.globalState, "allowedCommands")
 	await seedCommandList(context.globalState, "deniedCommands")
+
+	// Initialize terminal shell execution handlers.
+	TerminalRegistry.initialize()
 
 	const contextProxy = await ContextProxy.getInstance(context)
 	const updateTelemetryState = () => {

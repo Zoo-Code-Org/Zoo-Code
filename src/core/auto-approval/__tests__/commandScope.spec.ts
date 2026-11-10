@@ -22,10 +22,13 @@ import { baseState, type State } from "./fixtures"
 // mock's getter reads through this object, so a test can change the open
 // folders without re-mocking the module. `foldersByPath` backs
 // `getWorkspaceFolder`: keys are folder paths, values the folder objects, so
-// a test controls which cwds resolve to a root.
+// a test controls which cwds resolve to a root. `throwsOnFoldersRead` makes
+// the getter itself fail once, standing in for a workspace that cannot answer
+// the lookup at all.
 const workspaceState = vi.hoisted(() => ({
 	workspaceFolders: undefined as { uri: unknown }[] | undefined,
 	foldersByPath: new Map<string, unknown>(),
+	throwsOnFoldersRead: false,
 }))
 
 // Scriptable stand-in for `fs.realpathSync`, which the root-side containment
@@ -77,13 +80,27 @@ vi.mock("vscode", () => ({
 	},
 	workspace: {
 		get workspaceFolders() {
+			if (workspaceState.throwsOnFoldersRead) {
+				// One-shot, like the throwing-lookup test it serves: a leaked
+				// throw would fail every later read, including the
+				// first-folder default reads the composition still performs.
+				workspaceState.throwsOnFoldersRead = false
+				throw new Error("workspace unavailable")
+			}
 			return workspaceState.workspaceFolders
 		},
 		getConfiguration: vi.fn(),
+		// Mirrors VS Code's lexical containment: a prefix test against the
+		// registered paths, with the platform separator as the guard between
+		// root and remainder. The folder lookup does not consult this double —
+		// it compares roots by their real paths — but the double stays
+		// faithful so a test can register an outer root that lexically
+		// contains a symlinked root's target, the containment that must not
+		// decide the folder match.
 		getWorkspaceFolder: vi.fn((resource?: { fsPath?: string }) => {
 			const fsPath = resource?.fsPath ?? ""
 			for (const [folderPath, uri] of workspaceState.foldersByPath) {
-				if (fsPath === folderPath || fsPath.startsWith(`${folderPath}/`)) {
+				if (fsPath === folderPath || fsPath.startsWith(folderPath + path.sep)) {
 					return { uri }
 				}
 			}
@@ -624,26 +641,44 @@ it("checkAutoApproval command: does not apply the first folder's allow list to a
 	expect(result).toEqual({ decision: "ask" })
 })
 
-it("checkAutoApproval command: composes a command without a cwd from the global layers when both raw layers are present", async () => {
+it("checkAutoApproval command: composes a command without a cwd from the global entries and the first folder's list when both raw layers are present", async () => {
 	vi.clearAllMocks()
 	// With both raw layers set, the command branch re-composes instead of
-	// consuming the baked pair; an absent cwd keeps the first-folder
-	// configuration, which here contributes nothing, so only the raw global
-	// allow entry can decide. A check that consumed the baked pair instead
-	// would find no match and fall to the plain prompt.
+	// consuming the baked pair. An absent cwd keeps the first-folder
+	// configuration, so two independent witnesses apply: the raw global allow
+	// entry decides "echo hi" (a check that consumed the baked pair instead
+	// would find no match and fall to the plain prompt), and folder A's deny
+	// entry — about a command the global layers say nothing of — decides
+	// "date -u" (a composition that ignored the folder's configuration would
+	// have only the raw global layers to enforce and would fall to the plain
+	// prompt). The scope assertions pin which folder's configuration the
+	// composition read.
 	const { folderA, folderB } = openMultiRootWindow()
 	mockFolderConfigurations({
-		[folderA.fsPath]: { gate: true },
+		[folderA.fsPath]: { gate: true, deny: ["date"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
 	})
 
-	const result = await checkAutoApproval({
-		state: { ...taskFolderState(["baked"]), globalAllowedCommands: ["echo"], globalDeniedCommands: ["rm"] },
-		ask: "command",
-		text: "echo hi",
-	})
+	const state = {
+		...taskFolderState(["baked"]),
+		globalAllowedCommands: ["echo"],
+		globalDeniedCommands: ["rm"],
+	}
 
-	expect(result).toEqual({ decision: "approve" })
+	const globalWitness = await checkAutoApproval({ state, ask: "command", text: "echo hi" })
+	expect(globalWitness).toEqual({ decision: "approve" })
+
+	// "date" is shadowed by neither global layer, so only folder A's list can
+	// deny it: the outcome names the folder whose configuration decided.
+	const folderWitness = await checkAutoApproval({ state, ask: "command", text: "date -u" })
+	expect(folderWitness).toEqual({
+		decision: "deny",
+		autoDeny: { kind: "denylist", command: "date -u", pattern: "date" },
+	})
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
+	// Reading folder B instead would have judged the command against a folder
+	// the window never defaults to.
+	expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, folderB)
 })
 
 it("checkAutoApproval command: still lets a global deny entry veto a command whose cwd names no workspace root", async () => {
@@ -692,11 +727,9 @@ it("checkAutoApproval command: treats a throwing workspace-folder lookup as a cw
 	// The lookup guard exists so a broken lookup cannot fail the decision; the
 	// degradation it produces must be the global-only composition, not a
 	// first-folder guess — the same fail-closed direction as an unmatched cwd.
-	// Once-only: spies survive between tests in this file, and a leaked throwing
-	// lookup would change every later test's folder resolution.
-	vi.mocked(vscode.workspace.getWorkspaceFolder).mockImplementationOnce(() => {
-		throw new Error("workspace unavailable")
-	})
+	// The stand-in throws exactly once, so a leak cannot change later tests'
+	// folder resolution.
+	workspaceState.throwsOnFoldersRead = true
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: [], allow: ["echo"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
@@ -843,6 +876,28 @@ it("commandListFolderForResource: a path inside no root stays unmatched after th
 	expect(commandListFolderForResource(path.join(path.sep + "mock", "elsewhere"))).toBeUndefined()
 })
 
+it("commandListFolderForResource: matches a cwd equal to the root's real path", () => {
+	vi.clearAllMocks()
+	workspaceState.foldersByPath.clear()
+	const rootPath = path.join(path.sep + "mock", "root")
+	const registeredPath = path.join(path.sep + "mock", "root-link")
+	const rootUri = makeUri(registeredPath)
+	workspaceState.workspaceFolders = [{ uri: rootUri }]
+	vi.mocked(fs.realpathSync).mockImplementation((target) =>
+		String(target) === registeredPath ? rootPath : String(target),
+	)
+
+	expect(commandListFolderForResource(rootPath)).toBe(rootUri)
+})
+
+it("commandListFolderForResource: returns undefined when no workspace folder is open", () => {
+	vi.clearAllMocks()
+	workspaceState.foldersByPath.clear()
+	workspaceState.workspaceFolders = undefined
+
+	expect(commandListFolderForResource(path.join(path.sep + "mock", "root"))).toBeUndefined()
+})
+
 it("commandListFolderForResource: compares the cwd to the root's real path case-sensitively", () => {
 	vi.clearAllMocks()
 	workspaceState.workspaceFolders = [{ uri: makeUri(path.join(path.sep + "mock", "Root")) }]
@@ -873,6 +928,46 @@ it("commandListFolderForResource: returns the registry Uri of the deepest matchi
 	// configuration resolves against the registry, not the real path).
 	expect(result).toBe(innerUri)
 	expect(result?.fsPath).toBe(innerRegistered)
+})
+
+it("checkAutoApproval command: judges a cwd inside a symlinked root by that root's layer when an outer root also contains it lexically", async () => {
+	vi.clearAllMocks()
+	const outerRoot = path.sep + "mock"
+	const outerUri = makeUri(outerRoot)
+	const linkPath = path.join(outerRoot, "link")
+	const innerReal = path.join(outerRoot, "inner")
+	const linkUri = makeUri(linkPath)
+	// The outer root is registered first, and the registry holds the inner
+	// folder as the link: the command's canonical cwd sits inside the link's
+	// target. The outer root is also a lexical prefix of the cwd, so
+	// VS Code-style lexical containment resolves it there — a lookup that
+	// trusted that first lexical hit would enforce the outer folder's list
+	// and never consult the folder the command physically runs in.
+	workspaceState.workspaceFolders = [{ uri: outerUri }, { uri: linkUri }]
+	workspaceState.foldersByPath.set(outerRoot, outerUri)
+	vi.mocked(fs.realpathSync).mockImplementation((target) =>
+		String(target) === linkPath ? innerReal : String(target),
+	)
+	// The two folders' lists are deliberately opposite on "echo": the outer
+	// root allows what the inner root denies, so the decision names the
+	// folder whose configuration enforcement read.
+	mockFolderConfigurations({
+		[outerRoot]: { gate: true, allow: ["echo"] },
+		[linkPath]: { gate: true, deny: ["echo"] },
+	})
+
+	const result = await checkAutoApproval({
+		// Empty raw global layers: only the winning folder's layer can decide.
+		state: taskFolderState([]),
+		cwd: path.join(innerReal, "sub"),
+		ask: "command",
+		text: "echo hi",
+	})
+
+	// The deepest canonical match wins over the shallower lexical containment,
+	// so the symlinked root's deny entry decides the command running inside it.
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, linkUri)
 })
 
 it("realpathSync preserves the on-disk case of an existing directory", () => {

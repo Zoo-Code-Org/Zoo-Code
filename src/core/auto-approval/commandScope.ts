@@ -55,10 +55,13 @@ export function commandListConfiguration(folderResource?: vscode.Uri): vscode.Wo
  *
  * The command path hands this lookup a cwd the filesystem has already
  * resolved to its real path, while the workspace registry holds each root as
- * it was opened. Containment against the registered paths is tried first;
- * when it matches no root, the search is retried against each root's real
- * path so a root that is itself a symlink (or a Windows junction) keeps
- * matching its own real directory. Among several matches the deepest root
+ * it was opened. Containment is therefore tested against every root's real
+ * path, so a root that is itself a symlink (or a Windows junction) keeps
+ * matching its own real directory. Comparing against the registered paths
+ * alone could not decide the folder: that comparison is lexical, so an outer
+ * root lexically contains a directory that physically belongs to a deeper
+ * root, and enforcing the outer root's lists there would let the deeper
+ * folder's deny entries be skipped. Among several matches the deepest root
  * wins, mirroring how VS Code's own containment picks the innermost folder.
  * A root whose real path cannot be resolved is compared by its registered
  * path: the cwd is already canonical, so an unresolvable root can only
@@ -66,32 +69,28 @@ export function commandListConfiguration(folderResource?: vscode.Uri): vscode.Wo
  * may approve — and dropping the layer outright would silently change
  * enforcement for a folder the user has open.
  *
- * @param cwd - The task's working directory. A blank cwd, or one that names
- * no workspace root (a removed or relocated folder), yields `undefined`,
- * which leaves every read on its first-folder default — the behavior such a
- * cwd had before per-task scoping existed, never a guess at a different one.
+ * @param cwd - The task's working directory. An empty or absent cwd yields
+ * `undefined` and keeps the first-folder configuration. A nonempty cwd with
+ * no matching root also yields `undefined`. When both raw global lists are
+ * available, enforcement then excludes the workspace layer; otherwise, it
+ * uses the pre-composed state lists.
  * @returns The containing folder's registry URI — never a canonicalized one,
  * because folder-scoped configuration resolves against the registry — or
- * `undefined` when cwd resolves to no root.
+ * `undefined` when cwd is empty, resolves to no root, or lookup fails.
  */
 export function commandListFolderForResource(cwd?: string): vscode.Uri | undefined {
 	if (!cwd) {
 		return undefined
 	}
 
-	// Guarded like the configuration reads this feeds: a lookup that cannot
-	// run stands in for a cwd naming no root, so enforcement degrades to the
-	// first-folder default instead of failing the approval decision.
+	// A failed lookup returns undefined, like a cwd naming no root.
+	// With both raw global lists available, enforcement excludes the workspace
+	// layer; otherwise, it uses the pre-composed state lists.
 	try {
-		const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(cwd))
-		if (folder) {
-			return folder.uri
-		}
-
-		// A miss above is expected when a root is a link and the cwd names the
-		// link's target, so containment is retried root by root against the
-		// filesystem's real paths. The separator guard keeps a sibling like
-		// `/root/other` from matching a root `/root`.
+		// Comparing by root-path length makes the deepest match win: a root
+		// registered lexically above a symlinked root must not claim a command
+		// running in the deeper root's real directory. The separator guard
+		// keeps a sibling like `/root/other` from matching a root `/root`.
 		let match: vscode.Uri | undefined
 		let matchedLength = 0
 		for (const candidate of vscode.workspace.workspaceFolders ?? []) {

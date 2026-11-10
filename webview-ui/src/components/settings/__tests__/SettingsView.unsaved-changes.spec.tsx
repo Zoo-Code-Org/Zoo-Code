@@ -9,6 +9,8 @@ import React from "react"
 import SettingsView from "../SettingsView"
 import { vscode } from "@src/utils/vscode"
 
+import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
+
 const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
 // Mock the extension state context
@@ -940,6 +942,105 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 				commandListBaseline: { allowedCommands: [], deniedCommands: ["rm -rf"] },
 				updatedSettings: expect.objectContaining({ deniedCommands: [] }),
 			}),
+		)
+	})
+
+	it("keeps a buffered list edit and its hold on external updates when the save is reported failed", async () => {
+		// A failed save must leave the dialog exactly as the user left it: still dirty, and with the
+		// in-flight list still holding back external refreshes. Clearing the hold at submit - before
+		// the host's answer - would let the post-failure state refresh overwrite the edit on screen.
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<span data-testid="current-deny-list">{JSON.stringify(deniedCommands)}</span>
+					<button
+						data-testid="buffer-deny-edit"
+						onClick={() => setCachedStateField("deniedCommands", ["git status"])}>
+						Buffer deny edit
+					</button>
+				</div>
+			),
+		)
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			queryClient,
+		})
+
+		fireEvent.click(await screen.findByTestId("buffer-deny-edit"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		// A display-setting difference between the buffer and the live state puts this save on the
+		// path that waits for the host's answer, without touching the buffered command lists.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		const saveId = lastSaveRequestId(postMessage)
+		expect(saveId).toBeDefined()
+		expect(screen.getByTestId("save-button")).toBeDisabled() // waiting for the host's answer
+		answerSave(saveId, { success: false, error: "storage unavailable" })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled()) // the failure keeps it dirty
+
+		// The host refreshes state after the rejected write; the edit the user is looking at wins.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			deniedCommands: ["rm -rf"],
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["git status"]))
+
+		// Retrying submits the buffered edit, not the refresh that tried to replace it.
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ deniedCommands: ["git status"] }),
+			}),
+		)
+	})
+
+	it("releases the buffered list to external updates once the host confirms the save", async () => {
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<span data-testid="current-deny-list">{JSON.stringify(deniedCommands)}</span>
+					<button
+						data-testid="buffer-deny-edit"
+						onClick={() => setCachedStateField("deniedCommands", ["git status"])}>
+						Buffer deny edit
+					</button>
+				</div>
+			),
+		)
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			queryClient,
+		})
+
+		fireEvent.click(await screen.findByTestId("buffer-deny-edit"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastSaveRequestId(postMessage)).toBeDefined() // this save waits for the host's answer
+		answerSave(lastSaveRequestId(postMessage), { success: true })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		// The lists committed, so a later host update is no longer an in-flight edit being stomped.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			deniedCommands: ["rm -rf"],
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		await waitFor(() =>
+			expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["rm -rf"])),
 		)
 	})
 

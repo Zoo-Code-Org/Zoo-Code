@@ -588,6 +588,50 @@ describe("extension.ts", () => {
 			} as unknown as vscode.WorkspaceConfiguration)
 		})
 
+		test("seeds both command lists before initializing the terminal registry", async () => {
+			// Invariant: a seed rejection must fail activation before the terminal
+			// registry is initialized, so no initialized-but-half-activated state is
+			// reachable (the registry's listeners are released only via deactivate,
+			// which the host does not guarantee after a failed activation).
+			const order: string[] = []
+			const seedCommandList = vi.fn(async (_globalState: vscode.Memento, configKey: string): Promise<void> => {
+				order.push(`seed:${configKey}`)
+			})
+			vi.doMock("../utils/seedAllowedCommands", () => ({ seedCommandList }))
+			try {
+				const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+				vi.mocked(TerminalRegistry.initialize).mockImplementation(() => void order.push("initialize"))
+
+				const { activate } = await import("../extension")
+				await activate(mockContext)
+
+				expect(order).toEqual(["seed:allowedCommands", "seed:deniedCommands", "initialize"])
+				expect(TerminalRegistry.initialize).toHaveBeenCalledTimes(1)
+			} finally {
+				vi.doUnmock("../utils/seedAllowedCommands")
+			}
+		})
+
+		test("aborts activation before the terminal registry is initialized when seeding rejects", async () => {
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			try {
+				const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+				const { ClineProvider } = await import("../core/webview/ClineProvider")
+
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+				// The seed rejection must reach the host unchanged, with the registry
+				// never initialized and no downstream activation (sidebar provider) reached.
+				expect(TerminalRegistry.initialize).not.toHaveBeenCalled()
+				expect(ClineProvider).not.toHaveBeenCalled()
+			} finally {
+				vi.doUnmock("../utils/seedAllowedCommands")
+			}
+		})
+
 		test("does not seed global state from an enforced workspace-scoped override", async () => {
 			const vscode = await import("vscode")
 			// The gate is on: an enforced workspace list replaces the default across
