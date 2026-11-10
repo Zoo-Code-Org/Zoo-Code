@@ -1075,10 +1075,96 @@ describe("appearanceSettingWrites", () => {
 			} as unknown as ContextProxy
 		})
 
+		describe("the other settings are stored one at a time for each key", () => {
+			// The setValues of the double stores each key through the line it is given, as the real one does.
+			const lineOf = (log: string[], stalls: Array<() => void>) => {
+				let first = true
+				return {
+					getValue: (key: string) => stored.get(key),
+					setValue: (key: string, value: unknown) => {
+						log.push(`start ${key}=${String(value)}`)
+						const done = () => {
+							stored.set(key, value)
+							log.push(`end ${key}=${String(value)}`)
+						}
+						if (first) {
+							first = false
+							return new Promise<void>((resolve) => stalls.push(() => resolve(done())))
+						}
+						done()
+						return Promise.resolve()
+					},
+					setValues: async (
+						values: Record<string, unknown>,
+						storeKey?: (key: string, write: () => Promise<void>) => Promise<void>,
+					) => {
+						await Promise.all(
+							Object.entries(values).map(([key, value]) =>
+								(storeKey ?? ((_key, write) => write()))(key, () => lineProxy.setValue(key, value)),
+							),
+						)
+					},
+				}
+			}
+			let lineProxy: ReturnType<typeof lineOf>
+
+			it("waits for a store that has not settled, so the older write cannot land after the newer one", async () => {
+				const log: string[] = []
+				const stalls: Array<() => void> = []
+				lineProxy = lineOf(log, stalls)
+				const owner = {}
+				const key = `plain-${Math.random()}` // a key of its own: the line is shared by the whole process
+
+				const older = writeValuesThroughWriteChain(
+					lineProxy as unknown as ContextProxy,
+					{ [key]: 1 } as never,
+					{ owner },
+				)
+				const newer = writeValuesThroughWriteChain(
+					lineProxy as unknown as ContextProxy,
+					{ [key]: 2 } as never,
+					{ owner },
+				)
+				await Promise.resolve()
+				expect(log).toEqual([`start ${key}=1`]) // the newer one waits for the older one
+
+				stalls[0]()
+				await Promise.all([older, newer])
+
+				expect(log).toEqual([`start ${key}=1`, `end ${key}=1`, `start ${key}=2`, `end ${key}=2`])
+				expect(stored.get(key)).toBe(2)
+			})
+
+			it("takes back the write that has not started when its owner is disposed, and reports it as not stored", async () => {
+				const { giveUpAllOf } = await import("../giveUp")
+				const log: string[] = []
+				const stalls: Array<() => void> = []
+				lineProxy = lineOf(log, stalls)
+				const owner = {}
+				const key = `plain-${Math.random()}`
+
+				void writeValuesThroughWriteChain(lineProxy as unknown as ContextProxy, { [key]: 1 } as never, {})
+				const dropped = writeValuesThroughWriteChain(
+					lineProxy as unknown as ContextProxy,
+					{ [key]: 2 } as never,
+					{ owner },
+				)
+				await Promise.resolve()
+				giveUpAllOf(owner)
+				const report = await dropped
+
+				expect(report.failure).toBeDefined()
+				expect(report.stored).toEqual([])
+				stalls[0]()
+				await Promise.resolve()
+				expect(log).toEqual([`start ${key}=1`, `end ${key}=1`]) // the second was never started
+			})
+		})
+
 		it("hands settings with no appearance value to setValues as they are", async () => {
 			await setValuesThroughWriteChain(proxy, { mode: "code" })
 
-			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" }, expect.any(Function))
 		})
 
 		it("stores several appearance values through the chain and the rest through setValues", async () => {
@@ -1086,7 +1172,7 @@ describe("appearanceSettingWrites", () => {
 
 			expect(stored.get("interfaceFontScale")).toBe(120)
 			expect(stored.get("terminalFontSize")).toBe(14)
-			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" }, expect.any(Function))
 			expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 		})
 
@@ -1156,7 +1242,7 @@ describe("appearanceSettingWrites", () => {
 			await setValuesThroughWriteChain(proxy, inherited)
 
 			expect(stored.get("interfaceFontScale")).toBe(100)
-			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+			expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" }, expect.any(Function))
 		})
 
 		it("does not let a failing save that wrote the same value undo it", async () => {

@@ -346,6 +346,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		// A late refresh (a rollback that finished after the import was answered) corrects the value the form took then,
 		// unless the user has edited that setting since the answer: that edit stays. An import that is answered starts
 		// the count again.
+		const editedBefore = new Set(editedSinceImportAnswer.current)
 		if (settingsImportRefreshIsLate !== true) editedSinceImportAnswer.current.clear()
 		const editedSince = (key: string) =>
 			settingsImportRefreshIsLate === true && editedSinceImportAnswer.current.has(key)
@@ -363,9 +364,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// Compared by value: the host builds new arrays and objects for every state it posts.
 			// An appearance value is taken only when the import says it stored it (above): another provider may have changed
 			// it since, and what it changed says nothing about the import, nor about the edit that the user has made here.
+			// The same goes for any setting that the user has edited here and that the import did not store: the change did
+			// not come from the import, and the edit is not discarded for it.
 			if (
 				key !== "settingsImportRefreshedAt" &&
 				!(key in APPEARANCE_SETTINGS) &&
+				!editedBefore.has(key) &&
 				!editedSince(key) &&
 				JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(value)
 			) {

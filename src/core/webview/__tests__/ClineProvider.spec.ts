@@ -3538,6 +3538,17 @@ describe("ClineProvider", () => {
 		spy.mockRestore()
 	})
 
+	test("disposing the provider takes back the stores and MCP changes that it has queued and that have not started", async () => {
+		const { giveUpControllerFor } = await import("../../config/giveUp")
+		const queued = giveUpControllerFor(provider)
+		const unrelated = giveUpControllerFor({})
+
+		await provider.dispose()
+
+		expect(queued.controller.signal.aborted).toBe(true)
+		expect(unrelated.controller.signal.aborted).toBe(false) // another provider's are not
+	})
+
 	test("setValues, which a new task's configuration goes through, writes an appearance value through the write chain", async () => {
 		const setValue = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
 		const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
@@ -3545,7 +3556,7 @@ describe("ClineProvider", () => {
 		await provider.setValues({ terminalFontSize: 14, mode: "code" })
 
 		expect(setValue).toHaveBeenCalledWith("terminalFontSize", 14)
-		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" }, expect.any(Function))
 	})
 
 	test("numbers a push by when its settings were read, not by when it finishes", async () => {
@@ -4572,7 +4583,10 @@ describe("ClineProvider", () => {
 
 			await provider.setValues({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
 
-			expect(setValues).toHaveBeenCalledWith({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })
+			expect(setValues).toHaveBeenCalledWith(
+				{ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false },
+				expect.any(Function),
+			)
 		})
 
 		it("ignores an invalid value, keeps the others, and logs which", async () => {
@@ -4581,7 +4595,7 @@ describe("ClineProvider", () => {
 
 			await provider.setValues(hand({ timeFormat: "13h", dateFormat: "dmy", mode: "code" }))
 
-			expect(setValues).toHaveBeenCalledWith({ dateFormat: "dmy", mode: "code" })
+			expect(setValues).toHaveBeenCalledWith({ dateFormat: "dmy", mode: "code" }, expect.any(Function))
 			expect(log).toHaveBeenCalledWith("[setValues] Ignored an invalid value for timeFormat")
 		})
 
@@ -4593,7 +4607,7 @@ describe("ClineProvider", () => {
 				.createTask("hello", undefined, undefined, {}, hand({ showRelativeTimes: "yes", mode: "code" }))
 				.catch(() => undefined) // what happens after the configuration is written is not under test
 
-			expect(setValues).toHaveBeenCalledWith({ mode: "code" })
+			expect(setValues).toHaveBeenCalledWith({ mode: "code" }, expect.any(Function))
 		})
 	})
 

@@ -49,7 +49,8 @@ import {
 } from "../config/appearanceSettingWrites"
 import { isInvalidDisplayValue } from "../config/displaySettings"
 import { changeMcpEnabled, reconcileMcpEnabled } from "./mcpEnabledChanges"
-import { storeInOrder } from "./storeInOrder"
+import { storeInOrder } from "../config/storeInOrder"
+import { giveUpControllerFor } from "../config/giveUp"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -154,8 +155,6 @@ const APPEARANCE_VALUE_SCHEMAS = {
 	terminalFontSize: globalSettingsSchema.shape.terminalFontSize,
 	editorFontSize: globalSettingsSchema.shape.editorFontSize,
 	spacingScale: globalSettingsSchema.shape.spacingScale,
-	// Shown by the appearance preview next to these, so it is checked in the same pass.
-	chatFontSize: globalSettingsSchema.shape.chatFontSize,
 }
 
 export const webviewMessageHandler = async (
@@ -780,6 +779,8 @@ export const webviewMessageHandler = async (
 			// value of theirs that the webview's own controls cannot send is ignored and logged. Either way the webview
 			// is refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`).
 			const written: SettingWrite[] = []
+			// What this save has queued and that has not started is taken back when it fails or its provider is disposed.
+			const giveUp = giveUpControllerFor(provider)
 			let failure: string | undefined
 			let failedKey: string | undefined
 			let unhandledFailure: unknown
@@ -789,9 +790,9 @@ export const webviewMessageHandler = async (
 
 				// Checked before anything else happens, so an invalid value changes nothing: no side effect runs and
 				// no setting is stored, not even the valid ones sent with it.
-				// A value that is already stored is not a change, so it is not checked: the webview sends the chat font
-				// size with every save, and a stored value that is out of bounds (from an older version, or a hand-edited
-				// file) must not make every other save fail until the user edits it.
+				// A value that is already stored is not a change, so it is not checked: a stored value that is out of
+				// bounds (from an older version, or a hand-edited file) must not make every other save fail until the
+				// user edits it.
 				for (const [key, schema] of Object.entries(APPEARANCE_VALUE_SCHEMAS)) {
 					if (!(key in message.updatedSettings)) continue
 					const incoming = Reflect.get(message.updatedSettings, key)
@@ -930,16 +931,12 @@ export const webviewMessageHandler = async (
 							// Applied one at a time, and a retried save joins the change that is under way: the hub removes a
 							// connection only after its close has finished, so a second disconnect would close it again.
 							// A save that gives up on the change takes back its place in line (see `changeMcpEnabled`).
-							const giveUp = new AbortController()
-							const change = changeMcpEnabled(mcpHub, newValue as boolean, giveUp.signal)
+							const change = changeMcpEnabled(mcpHub, newValue as boolean, giveUp.controller.signal)
 							// In a save with appearance values, a change that does not finish must not keep their records for
 							// good: the save fails after the usual time, and the change goes on (it is not repeated).
 							try {
 								await (boundsStores ? withinSettingWriteTime(change, key) : change)
 							} catch (error) {
-								// A change that has not started is dropped, if no other save waits for it: it must not start
-								// later, with a value that this save did not store.
-								giveUp.abort(error)
 								// The save fails, and the setting stays as it was stored, but the change may still land: once the
 								// changes in line have settled (however they end) the hub is brought back to the setting that is
 								// stored, so servers that a late disable closed do not stay disconnected while MCP is stored as
@@ -972,8 +969,10 @@ export const webviewMessageHandler = async (
 
 					// One store of a key at a time: a store whose wait was given up may still land, and must not do so after the
 					// store of a newer save of the same key.
-					const store = storeInOrder(key, () =>
-						provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue),
+					const store = storeInOrder(
+						key,
+						() => provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue),
+						{ signal: giveUp.controller.signal },
 					)
 					// In a save with appearance values, a store that never settles must not keep their records for good: the
 					// save fails after the usual time, and they are put back below. (The store goes on; it cannot be cancelled.)
@@ -983,6 +982,9 @@ export const webviewMessageHandler = async (
 				finishSettingWrites(written)
 			} catch (error) {
 				failure = error instanceof Error ? error.message : String(error)
+				// What this save queued and that has not started is taken back: a store, or a change of the MCP switch,
+				// must not start later with a value that this save did not store.
+				giveUp.controller.abort(error)
 
 				// The restores are of different keys, so none waits for another: started together (in reverse order, each
 				// queues its store at once), a stalled one costs the save one write time, not one per key.
@@ -1020,6 +1022,8 @@ export const webviewMessageHandler = async (
 					// Not an appearance value: handled as it always was, once the webview has been told.
 					unhandledFailure = error
 				}
+			} finally {
+				giveUp.done()
 			}
 
 			// The outcome is decided above. A failed refresh must neither undo a stored save nor keep the webview

@@ -40,6 +40,7 @@ describe("API - configuration", () => {
 				currentApiConfigName: "default",
 				modeApiConfigs: expect.anything(),
 			}),
+			expect.any(Function),
 		)
 		expect(setModeConfig).toHaveBeenCalledTimes(2)
 		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
@@ -88,7 +89,7 @@ describe("API - configuration", () => {
 		await api.setConfiguration({ terminalFontSize: 14, mode: "code" })
 
 		expect(setValue).toHaveBeenCalledExactlyOnceWith("terminalFontSize", 14)
-		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" })
+		expect(setValues).toHaveBeenCalledExactlyOnceWith({ mode: "code" }, expect.any(Function))
 	})
 
 	it.each([[999], [7], [12.5], ["12"]])(
@@ -274,7 +275,7 @@ describe("API - configuration", () => {
 
 			await api.setConfiguration({ [key]: value })
 
-			expect(setValues).toHaveBeenCalledWith({ [key]: value })
+			expect(setValues).toHaveBeenCalledWith({ [key]: value }, expect.any(Function))
 			expect(log).not.toHaveBeenCalled()
 		})
 
@@ -302,7 +303,7 @@ describe("API - configuration", () => {
 			// A hand-written value that the typed signature does not allow.
 			await api.setConfiguration({ [key]: value, soundEnabled: true } as unknown as RooCodeSettings)
 
-			expect(setValues).toHaveBeenCalledWith({ soundEnabled: true })
+			expect(setValues).toHaveBeenCalledWith({ soundEnabled: true }, expect.any(Function))
 			expect(log).toHaveBeenCalledWith(`[setConfiguration] Ignored an invalid value for ${key}`)
 		})
 	})

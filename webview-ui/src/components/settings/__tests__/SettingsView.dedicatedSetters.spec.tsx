@@ -202,4 +202,24 @@ describe("SettingsView – a late import refresh and the settings that have a se
 
 		await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.lateText))
 	})
+
+	it.each(cases)(
+		"keeps an unsaved edit of $name that the import did not store, though the value changed",
+		async (c) => {
+			render(c.section, c.initial)
+			await screen.findByTestId(c.read)
+
+			fireEvent.click(screen.getByTestId(c.edit))
+			await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.edited))
+			// Another provider changed it, and an import that stored something else is refreshed together with that change.
+			hostPosts({
+				[c.key]: c.answered,
+				settingsImportRefreshedAt: 1_000,
+				settingsImportStoredKeys: ["somethingElse"],
+			})
+
+			expect(screen.getByTestId(c.read).textContent).toBe(c.edited) // the edit is not discarded for it
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+		},
+	)
 })

@@ -138,6 +138,7 @@ import {
 	writeValuesThroughWriteChain,
 } from "../config/appearanceSettingWrites"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
+import { giveUpAllOf } from "../config/giveUp"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import type { SettingsImportRefresh } from "../config/importExport"
 import { CustomModesManager } from "../config/CustomModesManager"
@@ -980,6 +981,8 @@ export class ClineProvider
 		this._postStateToWebviewThrottled.cancel()
 		// Appearance writes that have not started are dropped; one whose store has started cannot be cancelled.
 		disposeSettingWrites(this)
+		// Stores and MCP changes that this provider queued and that have not started are taken back too.
+		giveUpAllOf(this)
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
 		this.log("Disposing ClineProvider...")

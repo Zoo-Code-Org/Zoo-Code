@@ -665,9 +665,15 @@ export class ContextProxy {
 	 * `storeSecret`; best effort for global state, whose Memento may keep the attempted value). Callers that need more than this, such as a
 	 * rollback, must provide it themselves.
 	 */
-	public async setValues(values: RooCodeSettings) {
+	public async setValues(
+		values: RooCodeSettings,
+		/** How each store is made: a caller that must keep the writes of a key in order gives it the line to join. */
+		storeKey: (key: string, store: () => Promise<void>) => Promise<void> = (_key, store) => store(),
+	) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
-		const results = await Promise.allSettled(entries.map(([key, value]) => this.setValue(key, value)))
+		const results = await Promise.allSettled(
+			entries.map(([key, value]) => storeKey(key, () => this.setValue(key, value))),
+		)
 
 		const committed: string[] = []
 		const failed: string[] = []

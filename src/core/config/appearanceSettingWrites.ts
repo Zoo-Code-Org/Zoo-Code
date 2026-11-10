@@ -1,6 +1,8 @@
 import { globalSettingsSchema, type RooCodeSettings } from "@roo-code/types"
 
 import { SettingsWriteError, type ContextProxy } from "./ContextProxy"
+import { giveUpControllerFor } from "./giveUp"
+import { storeInOrder } from "./storeInOrder"
 
 /** The appearance settings, whose writes are tracked so a failed save can be put back without undoing another one. */
 export const APPEARANCE_SETTING_KEYS = [
@@ -578,11 +580,30 @@ export async function writeValuesThroughWriteChain(
 	settings: RooCodeSettings,
 	options: SettingWriteOptions = {},
 ): Promise<WriteValuesReport> {
+	// The other settings are stored one at a time for each key, in the order the writes were made, like those of a save:
+	// a store of a save that gave up may land late, and must not do so after the write of an import or of the API.
+	// What has not started when the owner is disposed is taken back.
+	const giveUp = giveUpControllerFor(options.owner ?? contextProxy)
+	const inOrder = (key: string, store: () => Promise<void>) =>
+		storeInOrder(key, store, { signal: giveUp.controller.signal })
+	try {
+		return await writeInOrder(contextProxy, settings, options, inOrder)
+	} finally {
+		giveUp.done()
+	}
+}
+
+async function writeInOrder(
+	contextProxy: ContextProxy,
+	settings: RooCodeSettings,
+	options: SettingWriteOptions,
+	inOrder: (key: string, store: () => Promise<void>) => Promise<void>,
+): Promise<WriteValuesReport> {
 	// Own properties only: an inherited value is not something the caller wrote.
 	const keys = APPEARANCE_SETTING_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(settings, key))
 	if (keys.length === 0) {
 		try {
-			await contextProxy.setValues(settings)
+			await contextProxy.setValues(settings, inOrder)
 			return { stored: Object.keys(settings), notStored: [], uncertain: [] }
 		} catch (reason) {
 			return { failure: { reason }, ...reportOthers(reason), uncertain: [] }
@@ -624,7 +645,7 @@ export async function writeValuesThroughWriteChain(
 		return { key: write.key }
 	})
 	const [othersResult, ...results] = await Promise.all([
-		contextProxy.setValues(others).then(
+		contextProxy.setValues(others, inOrder).then(
 			() => ({ ok: true as const }),
 			(reason: unknown) => ({ ok: false as const, reason }),
 		),

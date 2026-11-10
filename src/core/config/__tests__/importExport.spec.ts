@@ -338,7 +338,7 @@ describe("importExport", () => {
 
 				expect(result).toMatchObject({ success: true })
 				expect(stored.get("interfaceFontScale")).toBe(120)
-				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" }, expect.any(Function))
 				expect(settingWriteBookkeepingSize()).toEqual({ latestWrites: 0, queuedKeys: 0 })
 			})
 
@@ -1018,7 +1018,7 @@ describe("importExport", () => {
 			it("writes everything through setValues when the file has no appearance value", async () => {
 				await importWith({ mode: "code" })
 
-				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" }, expect.any(Function))
 				expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("interfaceFontScale", expect.anything())
 			})
 		})
@@ -1071,7 +1071,10 @@ describe("importExport", () => {
 				modeApiConfigs: {},
 			})
 
-			expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code", autoApprovalEnabled: true })
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+				{ mode: "code", autoApprovalEnabled: true },
+				expect.any(Function),
+			)
 			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "test")
 
 			expect(mockContextProxy.setValue).toHaveBeenCalledWith("listApiConfigMeta", [
@@ -1212,7 +1215,7 @@ describe("importExport", () => {
 			})
 
 			// Should call setValues with an empty object since globalSettings is missing.
-			expect(mockContextProxy.setValues).toHaveBeenCalledWith({})
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith({}, expect.any(Function))
 			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "test")
 			expect(mockContextProxy.setValue).toHaveBeenCalledWith("listApiConfigMeta", [
 				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
@@ -1375,7 +1378,10 @@ describe("importExport", () => {
 				},
 				modeApiConfigs: {},
 			})
-			expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code", autoApprovalEnabled: true })
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+				{ mode: "code", autoApprovalEnabled: true },
+				expect.any(Function),
+			)
 		})
 
 		it("should return error when provided file path does not exist", async () => {
@@ -1472,7 +1478,10 @@ describe("importExport", () => {
 				modeApiConfigs: {},
 			})
 
-			expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code", autoApprovalEnabled: true })
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+				{ mode: "code", autoApprovalEnabled: true },
+				expect.any(Function),
+			)
 			expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "openai-provider")
 		})
 
@@ -2098,6 +2107,7 @@ describe("importExport", () => {
 							imageGenerationProvider: expectedWarnings ? undefined : providerIdentifiers.openrouter,
 							customInstructions: "roo",
 						}),
+						expect.any(Function),
 					)
 				},
 			)
@@ -2251,9 +2261,12 @@ describe("importExport", () => {
 					expect.arrayContaining([expect.stringContaining("globalSettings.customModes")]),
 				)
 				expect(mockCustomModesManager.updateCustomMode).not.toHaveBeenCalled()
-				expect(mockContextProxy.setValues).toHaveBeenCalledWith({
-					customInstructions: "Keep this setting",
-				})
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith(
+					{
+						customInstructions: "Keep this setting",
+					},
+					expect.any(Function),
+				)
 			})
 
 			it("should use generic warning wording when only global settings have issues", async () => {
@@ -2833,6 +2846,7 @@ describe("importExport", () => {
 							codebaseIndexEmbedderModelDimension: 1536,
 						}),
 					}),
+					expect.any(Function),
 				)
 
 				// Provider profiles are imported as-is

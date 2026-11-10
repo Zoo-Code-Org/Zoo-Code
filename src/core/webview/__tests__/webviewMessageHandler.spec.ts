@@ -2660,6 +2660,71 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			expect(stored.openRouterImageApiKey).toBe("new-key") // the newer value is what is stored
 		})
 
+		it("does not let a timed-out enable of an approval setting come after the import that turned it off", async () => {
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			const order: string[] = []
+			const stalls: Array<() => void> = []
+			let first = true
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				(k: string, v: unknown): Promise<void> => {
+					if (k !== "alwaysAllowExecute") return real(k as never, v as never) as Promise<void>
+					order.push(`start ${String(v)}`)
+					if (first) {
+						first = false
+						return new Promise<void>((resolve) => stalls.push(resolve)).then(() => {
+							stored[k] = v
+							order.push(`end ${String(v)}`)
+						})
+					}
+					stored[k] = v
+					order.push(`end ${String(v)}`)
+					return Promise.resolve()
+				},
+			)
+			const timedOut = (value: Promise<unknown>) => expect(value).rejects.toThrow("did not finish in 15 seconds")
+
+			// A save whose store of the approval setting stalls, and a retry that asks for it again: that one waits.
+			const stalled = timedOut(save({ interfaceFontScale: 120, alwaysAllowExecute: false }, "save-1"))
+			await vi.advanceTimersByTimeAsync(15_000)
+			await stalled
+			const retry = timedOut(save({ interfaceFontScale: 120, alwaysAllowExecute: true }, "save-2"))
+			await vi.advanceTimersByTimeAsync(15_000)
+			await retry
+			expect(order).toEqual(["start false"]) // the enable has not started: it waits behind the stalled store
+
+			// An import turns the setting off, behind them.
+			const { writeValuesThroughWriteChain } = await import("../../config/appearanceSettingWrites")
+			// The setValues of the double stores each key through the given line, as the real one does.
+			Object.assign(mockClineProvider.contextProxy, {
+				setValues: async (
+					values: Record<string, unknown>,
+					storeKey?: (k: string, w: () => Promise<void>) => Promise<void>,
+				) => {
+					await Promise.all(
+						Object.entries(values).map(([k, v]) =>
+							(storeKey ?? ((_key, write) => write()))(k, () =>
+								mockClineProvider.contextProxy.setValue(k as never, v as never),
+							),
+						),
+					)
+				},
+			})
+			const imported = writeValuesThroughWriteChain(
+				mockClineProvider.contextProxy,
+				{ alwaysAllowExecute: false },
+				{},
+			)
+			await vi.advanceTimersByTimeAsync(0)
+
+			stalls[0]() // the stalled store lands at last
+			await imported
+
+			// The enable of the save that timed out was taken back: it never started, and the import is the last word.
+			expect(order).toEqual(["start false", "end false", "start false", "end false"])
+			expect(stored.alwaysAllowExecute).toBe(false)
+			Reflect.deleteProperty(mockClineProvider.contextProxy, "setValues")
+		})
+
 		it("keeps nothing for repeated saves that time out", async () => {
 			hangOn("timeFormat")
 
@@ -2787,6 +2852,49 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
 			})
 
+			it("takes back the stores and MCP changes that a save has queued when its provider is disposed", async () => {
+				const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+				const started: unknown[] = []
+				const stalls: Array<() => void> = []
+				vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+					(k: string, v: unknown): Promise<void> => {
+						if (k !== "alwaysAllowWrite") return real(k as never, v as never) as Promise<void>
+						started.push(v)
+						return new Promise<void>((resolve) => stalls.push(resolve))
+					},
+				)
+				const { hub, releases } = stalledHub()
+				const failing = (value: Promise<unknown>) => value.catch(() => undefined)
+
+				// Two saves whose store stalls and waits, and two whose MCP change stalls and waits.
+				void failing(save({ interfaceFontScale: 120, alwaysAllowWrite: false }, "store-1"))
+				await vi.advanceTimersByTimeAsync(0)
+				const waitingStore = expect(
+					save({ interfaceFontScale: 120, alwaysAllowWrite: true }, "store-2"),
+				).rejects.toThrow()
+				void failing(save({ interfaceFontScale: 130, mcpEnabled: true }, "mcp-1"))
+				await vi.advanceTimersByTimeAsync(0)
+				const waitingMcp = expect(
+					save({ interfaceFontScale: 130, mcpEnabled: false }, "mcp-2"),
+				).rejects.toThrow()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(started).toEqual([false])
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
+
+				const { giveUpAllOf } = await import("../../config/giveUp")
+				giveUpAllOf(mockClineProvider) // the provider is disposed: what waits is taken back
+				await vi.advanceTimersByTimeAsync(0)
+				await waitingStore
+				await waitingMcp
+				stalls[0]()
+				releases[0]() // what had started lands at last
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(15_000)
+
+				expect(started).toEqual([false]) // the queued store was never started
+				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]]) // and neither was the queued MCP change
+			})
+
 			it("brings the hub back to the stored setting when a timed-out disable lands late", async () => {
 				const { hub, releases } = stalledHub()
 				const first = expect(save({ mcpEnabled: false, interfaceFontScale: 120 }, "save-1")).rejects.toThrow(
@@ -2904,8 +3012,6 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			terminalFontSize: { min: 8, max: 32 },
 			editorFontSize: { min: 8, max: 32 },
 			spacingScale: { min: 50, max: 200 },
-			// Not an appearance value of the transaction, but shown by the same preview and checked in the same pass.
-			chatFontSize: { min: 8, max: 32 },
 		} as const
 		const keys = Object.keys(bounds) as Array<keyof typeof bounds>
 
@@ -2945,7 +3051,6 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 				terminalFontSize: 99,
 				editorFontSize: 1,
 				spacingScale: 10,
-				chatFontSize: 99,
 			}
 
 			it.each(keys)(
@@ -2964,24 +3069,35 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			)
 
 			it("does not excuse another invalid value: the stored one is let through, the changed one is refused", async () => {
-				stored.chatFontSize = 99
+				stored.terminalFontSize = 99
 
-				await save({ chatFontSize: 99, terminalFontSize: 500, soundEnabled: true })
+				await save({ terminalFontSize: 99, interfaceFontScale: 500, soundEnabled: true })
+
+				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+				expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({ success: false, error: "Invalid value for interfaceFontScale" }),
+				)
+			})
+
+			it("is still checked when it is changed to another invalid value", async () => {
+				stored.terminalFontSize = 99
+
+				await save({ terminalFontSize: 100 })
 
 				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
 				expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
 					expect.objectContaining({ success: false, error: "Invalid value for terminalFontSize" }),
 				)
 			})
+		})
 
-			it("is still checked when it is changed to another invalid value", async () => {
-				stored.chatFontSize = 99
+		describe("the chat font size, which is not one of the new values", () => {
+			it.each([99, 0, -5, "big"])("is stored as it was before, not checked here: %s", async (value) => {
+				await save({ chatFontSize: value })
 
-				await save({ chatFontSize: 100 })
-
-				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+				expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("chatFontSize", value)
 				expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
-					expect.objectContaining({ success: false, error: "Invalid value for chatFontSize" }),
+					expect.objectContaining({ requestId: "save-1", success: true }),
 				)
 			})
 		})
