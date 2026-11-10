@@ -29,7 +29,7 @@ describe("lockArtefactSpelling against a real filesystem", () => {
 		fsSync.symlinkSync(realDir, linkDir, process.platform === "win32" ? "junction" : "dir")
 
 		const target = path.join(linkDir, "missing-component", "history_item.json")
-		const canonicalRealDir = fsSync.realpathSync(realDir)
+		const canonicalRealDir = fsSync.realpathSync.native(realDir)
 
 		expect(lockArtefactSpelling(target)).toBe(
 			path.join(canonicalRealDir, "missing-component", "history_item.json") + ".lock",
