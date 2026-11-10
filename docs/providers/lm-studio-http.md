@@ -8,7 +8,10 @@ Zoo Code discovers models without `@lmstudio/sdk`. It tries these endpoints in o
 | `GET /api/v0/models` (LM Studio 0.3.6+) | LLM/VLM IDs, vision inferred from `vlm`, maximum context                                   |
 | `GET /v1/models`                        | IDs with Zoo Code's existing default metadata                                              |
 
-Only HTTP 404 or 405 triggers the next discovery endpoint. Authentication errors, rate limits, network failures, cancellation, and invalid response bodies do not trigger fallback. Older APIs do not expose the native model-load operation; chat/JIT remains responsible for loading on those servers.
+HTTP 404 or 405 starts the next discovery endpoint. HTTP 200 with a body of `{"error": "<message>"}` also starts it. Authentication errors, network failures, timeouts, cancellation and other invalid bodies do not.
+
+All three discovery requests share a 15-second deadline. Explicit model loading has a separate 10-minute timeout. A failed refresh clears cached loaded-detail flags and instance aliases for that server; caller cancellation preserves them.
+Older APIs do not expose the native model-load operation; chat/JIT remains responsible for loading on those servers.
 
 Sources: [native API changelog](https://lmstudio.ai/docs/developer/api-changelog), [legacy API reference](https://lmstudio.ai/docs/developer/rest/endpoints).
 

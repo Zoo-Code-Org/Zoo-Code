@@ -9,12 +9,16 @@ import {
 	hasLoadedFullDetails,
 	LM_STUDIO_MODEL_LOAD_TIMEOUT_MS,
 } from "../lmstudio"
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../modelCache"
 import type { ApiHandler } from "../../../index"
 
 import nativeFixture from "./fixtures/lmstudio-model-details.json"
 
 const mockFlushModels = vi.hoisted(() => vi.fn())
-vi.mock("../modelCache", () => ({ flushModels: mockFlushModels, MODEL_CATALOG_FETCH_TIMEOUT_MS: 15_000 }))
+vi.mock("../modelCache", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../modelCache")>()),
+	flushModels: mockFlushModels,
+}))
 
 const get = vi.spyOn(axios, "get")
 const post = vi.spyOn(axios, "post")
@@ -74,6 +78,66 @@ describe("LM Studio HTTP discovery", () => {
 			expect(get).toHaveBeenCalledOnce()
 		},
 	)
+
+	it.each([{ error: 42 }, { unexpected: true }])("rejects an invalid v0 body %j", async (data) => {
+		get.mockRejectedValueOnce(httpError(404)).mockResolvedValueOnce({ data })
+		expect(await getLMStudioModels(baseUrl)).toEqual({})
+		expect(get).toHaveBeenCalledTimes(2)
+	})
+
+	it("reports an OpenAI error body after HTTP fallback failures", async () => {
+		get.mockRejectedValueOnce(httpError(404))
+			.mockRejectedValueOnce(httpError(405))
+			.mockResolvedValueOnce({ data: { error: "OpenAI endpoint unavailable" } })
+		expect(await getLMStudioModels(baseUrl)).toEqual({})
+		expect(console.error).toHaveBeenCalledWith(expect.any(String), "OpenAI endpoint unavailable")
+	})
+
+	it("reports discovery deadline expiration as a timeout", async () => {
+		const deadline = new AbortController()
+		const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal)
+		try {
+			get.mockImplementationOnce(async () => {
+				deadline.abort(new DOMException("deadline", "TimeoutError"))
+				throw new AxiosError("cancelled", "ERR_CANCELED")
+			})
+			expect(await getLMStudioModels(baseUrl)).toEqual({})
+			expect(console.error).toHaveBeenCalledWith(expect.any(String), "LM Studio model discovery timed out")
+		} finally {
+			timeout.mockRestore()
+		}
+	})
+
+	it("retains the first server error when every endpoint fails", async () => {
+		get.mockResolvedValueOnce({ data: { error: "Invalid API key" } })
+			.mockResolvedValueOnce({ data: { error: "second error" } })
+			.mockResolvedValueOnce({ data: { error: "last error" } })
+		expect(await getLMStudioModels(baseUrl)).toEqual({})
+		expect(get).toHaveBeenCalledTimes(3)
+		expect(console.error).toHaveBeenCalledWith(expect.any(String), "Invalid API key")
+	})
+
+	it("preserves a healthy refresh when an older flight is cancelled", async () => {
+		const controller = new AbortController()
+		let rejectFlight: (error: Error) => void = () => {
+			throw new Error("flight not started")
+		}
+		get.mockImplementationOnce(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectFlight = reject
+				}),
+		)
+		const cancelled = getLMStudioModels(baseUrl, { signal: controller.signal })
+		const assertion = expect(cancelled).rejects.toMatchObject({ name: "AbortError" })
+		get.mockResolvedValueOnce(nativeResponse())
+		await getLMStudioModels(baseUrl)
+		controller.abort()
+		rejectFlight(new Error("cancelled"))
+		await assertion
+		expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(true)
+		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toBeDefined()
+	})
 
 	it("prefers a valid native catalog over an accompanying error string", async () => {
 		get.mockResolvedValueOnce({ data: { ...nativeResponse().data, error: "ignored" } })
@@ -333,7 +397,7 @@ describe("LM Studio explicit loading", () => {
 				const pending = forceFullModelDetailsLoad(baseUrl, modelKey, handler)
 				await vi.waitFor(() => expect(requestSignal).toBe(deadline.signal))
 				expect(timeout).toHaveBeenLastCalledWith(
-					phase === "discovery" ? 15_000 : LM_STUDIO_MODEL_LOAD_TIMEOUT_MS,
+					phase === "discovery" ? MODEL_CATALOG_FETCH_TIMEOUT_MS : LM_STUDIO_MODEL_LOAD_TIMEOUT_MS,
 				)
 				deadline.abort()
 				await pending

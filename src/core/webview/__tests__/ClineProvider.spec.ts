@@ -1057,19 +1057,23 @@ describe("ClineProvider", () => {
 		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model", expect.anything())
 	})
 
-	test("does not reload full model details when the LM Studio model is already loaded", async () => {
-		vi.mocked(hasLoadedFullDetails).mockReturnValue(true)
+	test.each([undefined, "http://localhost:1234"])(
+		"does not reload full model details already loaded at %s",
+		async (lmStudioBaseUrl) => {
+			vi.mocked(hasLoadedFullDetails).mockReturnValue(true)
 
-		await provider.performPreparationTasks({
-			apiConfiguration: {
-				apiProvider: providerIdentifiers.lmstudio,
-				lmStudioBaseUrl: "http://localhost:1234",
-				lmStudioModelId: "test-model",
-			},
-		} as Task)
+			await provider.performPreparationTasks({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.lmstudio,
+					lmStudioBaseUrl,
+					lmStudioModelId: "test-model",
+				},
+			} as Task)
 
-		expect(forceFullModelDetailsLoad).not.toHaveBeenCalled()
-	})
+			expect(hasLoadedFullDetails).toHaveBeenCalledWith("test-model", lmStudioBaseUrl)
+			expect(forceFullModelDetailsLoad).not.toHaveBeenCalled()
+		},
+	)
 
 	test("resolveWebviewView hydrates the saved terminalProfile into the process-wide Terminal state", async () => {
 		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
