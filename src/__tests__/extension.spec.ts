@@ -632,6 +632,33 @@ describe("extension.ts", () => {
 			}
 		})
 
+		test("disposes the auth secret-storage listener when seeding rejects activation", async () => {
+			// A rejected seed aborts activation after the auth initializer has
+			// registered its secret-storage listener, and the host does not guarantee
+			// `deactivate()` after a failed activation, so the failure path must
+			// release the retained listener disposable itself.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const dispose = vi.fn()
+			const authListener = { dispose }
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi.fn().mockResolvedValue(authListener),
+			}))
+			try {
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+				// Retained for the success path (deactivate disposes subscriptions) and
+				// disposed on the failure path, exactly once, with the error propagated.
+				expect(mockContext.subscriptions).toContain(authListener)
+				expect(dispose).toHaveBeenCalledExactlyOnceWith()
+			} finally {
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+			}
+		})
+
 		test("does not seed global state from an enforced workspace-scoped override", async () => {
 			const vscode = await import("vscode")
 			// The gate is on: an enforced workspace list replaces the default across

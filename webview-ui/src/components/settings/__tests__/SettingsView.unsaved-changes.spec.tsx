@@ -13,6 +13,9 @@ import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
 
 const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
+const updateSettingsPosts = () =>
+	postMessage.mock.calls.map(([message]) => message).filter((message) => message.type === "updateSettings")
+
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	ExtensionStateContextProvider: ({ children }: any) => children,
@@ -992,12 +995,88 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
 		expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["git status"]))
 
-		// Retrying submits the buffered edit, not the refresh that tried to replace it.
+		// Retrying submits the buffered edit, not the refresh that tried to replace it. The first save posted the
+		// same list, so only the call count plus the last message's list and baseline prove the retry did it.
 		fireEvent.click(screen.getByTestId("save-button"))
-		expect(postMessage).toHaveBeenCalledWith(
+		const saves = updateSettingsPosts()
+		expect(saves).toHaveLength(2)
+		expect(saves.at(-1)).toEqual(
 			expect.objectContaining({
 				type: "updateSettings",
 				updatedSettings: expect.objectContaining({ deniedCommands: ["git status"] }),
+				commandListBaseline: expect.objectContaining({ deniedCommands: expect.any(Array) }),
+			}),
+		)
+	})
+
+	it("reconciles each list's retry baseline with that list's own write outcome after a failed save", async () => {
+		// A failed save reports one outcome for the whole payload, yet its writes ran setting by setting: the
+		// refresh the host posts before the answer carries each list's configuration result. A list whose own
+		// write landed keeps its advanced baseline - its pre-submit baseline no longer describes the file; one
+		// that was not written rolls back to the pre-submit baseline, so the user's deletion stays a deletion on
+		// retry instead of looking like an external addition the save must re-admit.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo"],
+			deniedCommands: ["rm -rf"],
+		})
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo", "ls"])}>
+						Edit allow list
+					</button>
+					<button data-testid="clear-deny-list" onClick={() => setCachedStateField("deniedCommands", [])}>
+						Clear deny list
+					</button>
+				</div>
+			),
+		)
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			queryClient,
+		})
+
+		fireEvent.click(await screen.findByTestId("edit-allow-list"))
+		fireEvent.click(screen.getByTestId("clear-deny-list"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		// A display-setting difference between the buffer and the live state puts this save on the path that
+		// waits for the host's answer, without touching the buffered command lists.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo"],
+			deniedCommands: ["rm -rf"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastSaveRequestId(postMessage)
+		expect(saveId).toBeDefined()
+
+		// The host wrote the allow list before the save failed, and never wrote the deny list: the refresh
+		// carries the allow list's new entry but the deny list's unchanged deletion target, then the answer
+		// reports the failure.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			deniedCommands: ["rm -rf"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		answerSave(saveId, { success: false, error: "storage unavailable" })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saves = updateSettingsPosts()
+		expect(saves).toHaveLength(2)
+		expect(saves.at(-1)).toEqual(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: { allowedCommands: ["echo", "ls"], deniedCommands: ["rm -rf"] },
+				updatedSettings: expect.objectContaining({ allowedCommands: ["echo", "ls"], deniedCommands: [] }),
 			}),
 		)
 	})

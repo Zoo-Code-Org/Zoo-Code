@@ -168,7 +168,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	kimiCodeOAuthManager.initialize(context)
 
 	// Initialize Zoo Code auth service for extension session token management.
-	await initZooCodeAuth(context)
+	// The returned disposable unregisters the secret-storage listener the
+	// initializer acquires; keep it for both the normal deactivate path and the
+	// failed-activation path below.
+	const authSecretsListener = await initZooCodeAuth(context)
+	context.subscriptions.push(authSecretsListener)
 
 	// Seed before the terminal registry is initialized: a rejected seed must
 	// abort activation while the registry holds no resources, because its
@@ -177,8 +181,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Each list key carries its own first-run guard, so a profile whose
 	// allowlist was seeded by an earlier version still gets the deny-list
 	// migration on the next activation.
-	await seedCommandList(context.globalState, "allowedCommands")
-	await seedCommandList(context.globalState, "deniedCommands")
+	try {
+		await seedCommandList(context.globalState, "allowedCommands")
+		await seedCommandList(context.globalState, "deniedCommands")
+	} catch (error) {
+		// Activation aborts here, so `deactivate()` may never run: release the
+		// secret-storage listener acquired above before propagating.
+		authSecretsListener.dispose()
+		throw error
+	}
 
 	// Initialize terminal shell execution handlers.
 	TerminalRegistry.initialize()

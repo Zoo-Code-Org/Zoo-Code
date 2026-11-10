@@ -7,6 +7,9 @@ const ZOO_CODE_USER_NAME_KEY = "zoo-code-user-name"
 const ZOO_CODE_USER_EMAIL_KEY = "zoo-code-user-email"
 const ZOO_CODE_USER_IMAGE_KEY = "zoo-code-user-image"
 
+// Returned when no listener was acquired, so callers can dispose unconditionally.
+const NOOP_DISPOSABLE: vscode.Disposable = { dispose: () => {} }
+
 let secretStorage: vscode.SecretStorage | undefined
 
 // In-memory cache for synchronous access in ZooCodeHandler hot path
@@ -16,11 +19,11 @@ let _cachedUserName: string | undefined = undefined
 let _cachedUserEmail: string | undefined = undefined
 let _cachedUserImage: string | undefined = undefined
 
-export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise<void> {
+export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise<vscode.Disposable> {
 	if (!context.secrets) {
 		// Secret storage unavailable (e.g. test environment without secrets mock).
 		// Treat as unauthenticated startup — all cached values remain undefined.
-		return
+		return NOOP_DISPOSABLE
 	}
 	secretStorage = context.secrets
 
@@ -42,8 +45,11 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 		}
 	}
 
-	// Watch for secret changes and update cache
-	context.secrets.onDidChange((e) => {
+	// Watch for secret changes and update cache. The returned disposable unregisters
+	// the listener: an activation that fails after this point must release it itself,
+	// because the host does not guarantee `deactivate()` (and with it
+	// context.subscriptions cleanup) after activation throws.
+	return context.secrets.onDidChange((e) => {
 		if (e.key === ZOO_CODE_TOKEN_KEY) {
 			secretStorage?.get(ZOO_CODE_TOKEN_KEY).then((token) => {
 				_cachedToken = token
