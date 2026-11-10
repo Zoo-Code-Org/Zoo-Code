@@ -94,11 +94,22 @@ const CREDENTIAL_KEYWORDS = [
 	"credentials?",
 ].join("|")
 
+// `\x60` is a backtick. An assignment operator not followed by `=` or `>` skips comparisons
+// (`password === x`) and arrow functions.
+const ASSIGNMENT = String.raw`["'\x60]?\s*[:=](?![=>])\s*`
+// A quoted value runs to its closing quote, so `;` or `,` inside the quotes is redacted too.
+// Backslash escapes are honored. Empty quotes are left alone.
+const QUOTED_VALUE = String.raw`(?<open>["'\x60])(?:\\.|(?!\k<open>)[^\\\n])+\k<open>`
+// An unquoted (or unterminated) value runs to the next whitespace or quote.
+const UNQUOTED_VALUE = String.raw`["'\x60]?[^\s"'\x60]+`
+const AUTH_SCHEME = String.raw`(?:Bearer|Basic|Digest|Token)\s+`
+
 /**
  * Each entry replaces one class of sensitive value. Patterns with a `prefix` capture group keep the
- * prefix (key name, header scheme) and replace only the value, so the model still sees which setting
- * changed. The order matters: header schemes run before the generic key/value pattern, and URL
- * credentials run before the email pattern.
+ * prefix (key name, header scheme, quotes) and replace only the value, so the model still sees which
+ * setting changed. The order matters: header schemes run before the generic key/value pattern, and
+ * URL credentials run before the email pattern. A named group that did not take part in the match is
+ * replaced with an empty string.
  */
 const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> = [
 	// PEM private key blocks
@@ -108,9 +119,11 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 	},
 	// Authorization header values, with or without a scheme ("Authorization: Basic dXNlcjpwYXNz")
 	{
-		pattern:
-			/(?<prefix>\bauthorization["']?\s*[:=](?![=>])\s*["']?(?:(?:Bearer|Basic|Digest|Token)\s+)?)[^\s"',;]+/gi,
-		replacement: "$<prefix>[REDACTED]",
+		pattern: new RegExp(
+			String.raw`(?<prefix>\bauthorization${ASSIGNMENT})(?:(?<open>["'\x60])(?<scheme>${AUTH_SCHEME})?(?:\\.|(?!\k<open>)[^\\\n])+\k<open>|(?<bareScheme>${AUTH_SCHEME})?${UNQUOTED_VALUE})`,
+			"gi",
+		),
+		replacement: "$<prefix>$<open>$<scheme>$<bareScheme>[REDACTED]$<open>",
 	},
 	// Bearer tokens outside an Authorization header. The token must contain a digit so prose such as
 	// "Bearer authentication" is not redacted.
@@ -118,11 +131,13 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		pattern: /(?<prefix>\b[Bb]earer\s+)(?=[A-Za-z_\-.~+/]*\d)[A-Za-z0-9_\-.~+/]{8,}=*/g,
 		replacement: "$<prefix>[REDACTED]",
 	},
-	// key = value, key: value, "key": "value" (env files, YAML, JSON, code).
-	// `(?![=>])` skips comparisons (`password === x`) and arrow functions.
+	// key = value, key: value, "key": "value" (env files, YAML, JSON, code)
 	{
-		pattern: new RegExp(`(?<prefix>(?:${CREDENTIAL_KEYWORDS})["']?\\s*[:=](?![=>])\\s*["']?)[^\\s"',;]+`, "gi"),
-		replacement: "$<prefix>[REDACTED]",
+		pattern: new RegExp(
+			String.raw`(?<prefix>(?:${CREDENTIAL_KEYWORDS})${ASSIGNMENT})(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
+			"gi",
+		),
+		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
 	// Well-known token formats that can appear without a key name
 	{

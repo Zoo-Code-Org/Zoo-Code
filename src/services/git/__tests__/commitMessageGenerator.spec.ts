@@ -183,6 +183,28 @@ describe("commitMessageGenerator", () => {
 				"s3cr3t",
 			],
 			["email address", '+  "author": "alice@example.com",', '+  "author": "[REDACTED_EMAIL]",', "alice@"],
+			[
+				"a double-quoted value with a semicolon",
+				'+password: "pass;word123"',
+				'+password: "[REDACTED]"',
+				"word123",
+			],
+			[
+				"a JSON value with commas and semicolons",
+				'+  "api_key": "a,b;c-123",',
+				'+  "api_key": "[REDACTED]",',
+				"b;c-123",
+			],
+			["a single-quoted value with spaces", "+secret = 'two words;x'", "+secret = '[REDACTED]'", "words"],
+			["a backtick value", "+const pwd = `p;w`", "+const pwd = `[REDACTED]`", "p;w"],
+			["a quoted value with an escaped quote", String.raw`+password: "a\";b"`, '+password: "[REDACTED]"', ";b"],
+			["an unterminated quoted value", '+password: "abc;def', "+password: [REDACTED]", "abc"],
+			[
+				"a quoted Authorization value with a semicolon",
+				'+"Authorization": "Basic ab;cd=="',
+				'+"Authorization": "Basic [REDACTED]"',
+				";cd",
+			],
 		])("redacts %s", (_label, content, expected, secret) => {
 			const redacted = redactSensitiveInformation(content)
 			expect(redacted).toBe(expected)
@@ -206,6 +228,7 @@ describe("commitMessageGenerator", () => {
 			["prose mentioning auth schemes", "+// Adds basic functionality for Bearer authentication"],
 			["scoped package names", '+import { x } from "@roo-code/types"'],
 			["versioned package specs", "+npx react@18.3.1"],
+			["empty quoted credentials", '+  password: "",'],
 		])("leaves %s unchanged", (_label, content) => {
 			expect(redactSensitiveInformation(content)).toBe(content)
 		})
