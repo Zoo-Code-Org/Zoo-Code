@@ -3187,7 +3187,9 @@ describe("ClineProvider", () => {
 			soundEnabled: false,
 			ttsEnabled: false,
 			enableCheckpoints: false,
-			perWriteCheckpoints: false,
+			// The branch makes perWriteCheckpoints required in ExtensionState, and this
+			// fixture is a fully specified state, so it has to carry the field.
+			perWriteCheckpoints: true,
 			writeDelayMs: 1000,
 			mcpEnabled: true,
 			mode: defaultModeSlug,
