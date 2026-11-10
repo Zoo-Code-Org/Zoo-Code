@@ -282,6 +282,37 @@ describe("changeMcpEnabled", () => {
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
 		})
 
+		it("lets go of the saves that give up after the change they waited for has started, and stays stalled", async () => {
+			const { hub, releases } = createHub()
+			void changeMcpEnabled(hub, true) // stalled
+			const controllers = [new AbortController(), new AbortController()]
+			const spies = controllers.map((controller) => ({
+				add: vi.spyOn(controller.signal, "addEventListener"),
+				remove: vi.spyOn(controller.signal, "removeEventListener"),
+			}))
+			const waiting = controllers.map((controller) => changeMcpEnabled(hub, false, controller.signal))
+			const staying = changeMcpEnabled(hub, false) // and a save that stays
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]() // the first change lands: the waiting one starts, and stalls too
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+
+			const rejected = waiting.map((promise) => expect(promise).rejects.toThrow("gave up"))
+			controllers.forEach((controller) => controller.abort(new Error("gave up")))
+			await Promise.all(rejected) // answered at once, though the change they waited for is stalled
+			releases[1]() // it lands at last
+			await expect(staying).resolves.toBeUndefined()
+
+			// They were taken off the change that is running now: it did not try to answer them (which would take their
+			// listener off the signal a second time), and each put one listener on its signal and took off that one.
+			spies.forEach(({ add, remove }) => {
+				const added = add.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+				const removed = remove.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+				expect(added).toHaveLength(1)
+				expect(removed).toEqual(added)
+			})
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
+		})
+
 		it("answers a save that gives up at once, while another save still waits for the same change, which goes on", async () => {
 			const { hub, releases } = createHub()
 			const first = new AbortController()

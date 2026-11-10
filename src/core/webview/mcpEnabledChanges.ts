@@ -7,6 +7,8 @@ interface McpEnabledTarget {
 interface Caller {
 	resolve: () => void
 	reject: (error: unknown) => void
+	/** The change that this save is registered with now: it moves with the save when a waiting change starts. */
+	holder: Waited
 }
 
 /** What the saves that wait for a change are registered with. Each one can be taken off again, and only it. */
@@ -76,11 +78,11 @@ function settle(change: Waited, failure?: { error: unknown }): void {
  */
 function register(change: Waited, signal?: AbortSignal, onGiveUp?: () => void): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
-		const caller: Caller = { resolve, reject }
+		const caller: Caller = { resolve, reject, holder: change }
 		if (signal) {
 			const giveUp = () => {
 				signal.removeEventListener("abort", giveUp) // the signal keeps no reference to this save any more
-				change.callers.delete(caller)
+				caller.holder.callers.delete(caller) // from the change it is registered with now
 				onGiveUp?.()
 				reject(signal.reason)
 			}
@@ -112,7 +114,10 @@ function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Runn
 		else {
 			// The callers of the change that starts now are the ones that waited for it.
 			const started = start(hub, changes, next.value)
-			for (const caller of next.callers) started.callers.add(caller)
+			for (const caller of next.callers) {
+				caller.holder = started
+				started.callers.add(caller)
+			}
 			next.callers.clear()
 		}
 	}

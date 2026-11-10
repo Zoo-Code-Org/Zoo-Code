@@ -170,6 +170,44 @@ describe("SettingsView – the form after an import that failed part of the way"
 		await waitFor(() => expect(thinkingCheckbox().checked).toBe(!before))
 	})
 
+	describe("when the import that failed part of the way changed the profile or the mode", () => {
+		const editTerminalSize = async () => {
+			renderUiTab()
+			fireEvent.click(await screen.findByTestId("appearance-terminalFontSize-increment")) // 13: an unsaved edit
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		}
+
+		it("keeps an unrelated appearance edit, and its unsaved status, and still sends it with the next save", async () => {
+			await editTerminalSize()
+
+			hostPosts({
+				mode: "architect",
+				currentApiConfigName: "imported-profile",
+				settingsImportRefreshedAt: 1_000,
+				settingsImportStoredKeys: ["mode", "currentApiConfigName"],
+			})
+
+			expect(input("terminalFontSize").value).toBe("13") // the edit is not dropped with the profile switch
+			expect(screen.getByTestId("save-button")).toBeEnabled() // and is still unsaved
+			vi.mocked(vscode.postMessage).mockClear()
+			fireEvent.click(screen.getByTestId("save-button"))
+			const save = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.map((call) => call[0] as { type: string; updatedSettings?: Record<string, unknown> })
+				.find((message) => message.type === "updateSettings")
+			expect(save?.updatedSettings?.terminalFontSize).toBe(13)
+		})
+
+		it("still resets the form for a change of the profile or the mode that is not part of such an import", async () => {
+			await editTerminalSize()
+
+			hostPosts({ mode: "architect", currentApiConfigName: "another-profile" }) // a switch made elsewhere
+
+			await waitFor(() => expect(input("terminalFontSize").value).toBe("12")) // the form is the live state again
+			expect(screen.getByTestId("save-button")).toBeDisabled()
+		})
+	})
+
 	it("acts on each refresh once: the same mark on a later state changes nothing", async () => {
 		renderUiTab()
 		await screen.findByTestId("appearance-terminalFontSize-input")

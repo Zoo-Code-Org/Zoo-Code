@@ -218,6 +218,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const prevApiConfigName = useRef(currentApiConfigName)
 	const prevMode = useRef(mode)
+	// The stamp of the last refresh after a failed import that the form has acted on (see the effect that takes it).
+	const handledImportRefreshAt = useRef<number | undefined>(undefined)
 	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
 
@@ -312,13 +314,19 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			return
 		}
 
-		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
+		// A failed import that changed the profile or the mode comes with its own refresh (below): that takes what the
+		// import stored and keeps every other edit, with its unsaved status. Replacing the form here would drop them.
+		if (settingsImportRefreshedAt && handledImportRefreshAt.current !== settingsImportRefreshedAt) {
+			return
+		}
+
+		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		editedAppearance.current.clear()
 		editedSinceImportAnswer.current.clear()
 		setChangeDetected(false)
-	}, [currentApiConfigName, mode, extensionState])
+	}, [currentApiConfigName, mode, extensionState, settingsImportRefreshedAt])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -336,7 +344,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// An import that failed part of the way stored some of its settings: the form takes the values that changed with the
 	// state that follows it, and keeps every other value as it is, with the edits made to them (unlike after an import
 	// that succeeded, which replaces the form).
-	const handledImportRefreshAt = useRef<number | undefined>(undefined)
 	const liveStateBefore = useRef(extensionState)
 	useEffect(() => {
 		const before = liveStateBefore.current
