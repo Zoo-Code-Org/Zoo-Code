@@ -45,11 +45,11 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.92.0
+## Nowości w v3.96.0
 
-- ✨ **Szybszy wybór modeli i lepsza obsługa modeli:** Przełączaj modele w polu tworzenia wiadomości na czacie. Korzystaj z Claude Haiku 5.5 w Amazon Bedrock, uzyskaj dokładniejsze możliwości Kimi K3 w OpenRouter i używaj poprawionych limitów Gemini 4 Argon w Vercel AI Gateway.
-- 🧭 **Bardziej niezawodne przepływy pracy w terminalu, edycji, czacie i środowiskach zdalnych:** Jeśli chcesz, domyślnie zwijaj dane wyjściowe poleceń, otrzymuj wyraźniejsze informacje o błędach edycji, zachowaj widoczne wiersze rozumowania i API oraz unikaj problemów z uruchamianiem i proxy w zdalnych obszarach roboczych.
-- 🔌 **Rozszerzony marketplace MCP:** Połącz Zoo Code z AnySearch, Mailtea i Tradehand przez marketplace MCP.
+- ✨ **Nowe ustawienia czatu i diagnostyka:** Pokaż znaczniki czasu wiadomości z konfigurowalnymi formatami godziny i daty, dostosuj TTL prompt-cache dla profili Anthropic i generuj raporty diagnostyczne chroniące prywatność.
+- 💸 **Dokładniejsze koszty dostawców i cache:** Zachowuje wyniki narzędzi Anthropic w nienaruszonym stanie, uwzględnia skumulowane tokeny wyjściowe w kosztach Anthropic i MiniMax, odczytuje liczniki prompt-cache DeepSeek, celuje w cache Responses xAI i rozlicza odczyty cache Mistral po 0,1x.
+- 🧭 **Bardziej niezawodne i szybsze czaty:** Wznów ukończone zadania po restarcie, przywróć checkpointy, gdy zapisany commit brakuje, automatycznie załaduj ponownie martwy renderer webview, ogranicz aktualizacje strumieniowania i ładuj języki na żądanie.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 
