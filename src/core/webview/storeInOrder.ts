@@ -61,13 +61,3 @@ export function storeInOrder(key: string, write: () => Promise<void>): Promise<v
 	slot.waiting = { write, promise, resolve, reject }
 	return promise
 }
-
-/** What is in line, for tests: the keys that have a write running or waiting. */
-export function storeInOrderKeys(): string[] {
-	return [...slots.keys()]
-}
-
-/** For tests: forgets what is in line, as a process that was started again would. */
-export function resetStoreInOrder(): void {
-	slots.clear()
-}

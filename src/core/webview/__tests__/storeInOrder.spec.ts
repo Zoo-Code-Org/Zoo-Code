@@ -1,4 +1,4 @@
-import { resetStoreInOrder, storeInOrder, storeInOrderKeys } from "../storeInOrder"
+import { storeInOrder } from "../storeInOrder"
 
 const controllable = () => {
 	const finish: Array<{ resolve: () => void; reject: (error: unknown) => void }> = []
@@ -6,26 +6,37 @@ const controllable = () => {
 	return { write, finish }
 }
 
+let counter = 0
+// Each test has a key of its own: what one leaves in line cannot reach another.
+let current = "key"
+const keyOf = () => current
+
 describe("storeInOrder", () => {
-	afterEach(() => resetStoreInOrder())
+	beforeEach(() => {
+		current = `key-${++counter}`
+	})
 
 	it("runs a write at once when nothing of that key is in line, and keeps nothing once it is done", async () => {
 		const { write, finish } = controllable()
 
-		const stored = storeInOrder("key", write)
+		const stored = storeInOrder(keyOf(), write)
 		await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
 		finish[0].resolve()
 		await stored
 
-		expect(storeInOrderKeys()).toEqual([])
+		// Nothing is left in line: the next write of the key starts at once.
+		const next = controllable()
+		void storeInOrder(keyOf(), next.write)
+		await vi.waitFor(() => expect(next.write).toHaveBeenCalledTimes(1))
+		next.finish[0].resolve()
 	})
 
 	it("starts a write of the same key only when the one before it has settled", async () => {
 		const first = controllable()
 		const second = controllable()
 
-		const a = storeInOrder("key", first.write)
-		const b = storeInOrder("key", second.write)
+		const a = storeInOrder(keyOf(), first.write)
+		const b = storeInOrder(keyOf(), second.write)
 		await vi.waitFor(() => expect(first.write).toHaveBeenCalledTimes(1))
 		expect(second.write).not.toHaveBeenCalled()
 
@@ -34,7 +45,6 @@ describe("storeInOrder", () => {
 		await vi.waitFor(() => expect(second.write).toHaveBeenCalledTimes(1))
 		second.finish[0].resolve()
 		await b
-		expect(storeInOrderKeys()).toEqual([])
 	})
 
 	it("keeps one write waiting at most: a newer one replaces it, and every caller is answered by the one that runs", async () => {
@@ -42,9 +52,9 @@ describe("storeInOrder", () => {
 		const replaced = controllable()
 		const latest = controllable()
 
-		const a = storeInOrder("key", running.write)
-		const b = storeInOrder("key", replaced.write)
-		const c = storeInOrder("key", latest.write)
+		const a = storeInOrder(keyOf(), running.write)
+		const b = storeInOrder(keyOf(), replaced.write)
+		const c = storeInOrder(keyOf(), latest.write)
 		expect(c).toBe(b)
 		await vi.waitFor(() => expect(running.write).toHaveBeenCalledTimes(1))
 		running.finish[0].resolve()
@@ -60,8 +70,8 @@ describe("storeInOrder", () => {
 		const stalled = controllable()
 		const other = controllable()
 
-		void storeInOrder("a", stalled.write)
-		const b = storeInOrder("b", other.write)
+		void storeInOrder(`${keyOf()}-a`, stalled.write)
+		const b = storeInOrder(`${keyOf()}-b`, other.write)
 		await vi.waitFor(() => expect(other.write).toHaveBeenCalledTimes(1))
 		other.finish[0].resolve()
 		await b
@@ -71,9 +81,9 @@ describe("storeInOrder", () => {
 		const first = controllable()
 		const second = controllable()
 
-		const a = storeInOrder("key", first.write)
+		const a = storeInOrder(keyOf(), first.write)
 		const aFailed = expect(a).rejects.toThrow("storage unavailable")
-		const b = storeInOrder("key", second.write)
+		const b = storeInOrder(keyOf(), second.write)
 		await vi.waitFor(() => expect(first.write).toHaveBeenCalledTimes(1))
 		first.finish[0].reject(new Error("storage unavailable"))
 		await aFailed
@@ -86,11 +96,11 @@ describe("storeInOrder", () => {
 	it("reports a write that throws before it returns a promise, and goes on", async () => {
 		const next = controllable()
 
-		const a = storeInOrder("key", () => {
+		const a = storeInOrder(keyOf(), () => {
 			throw new Error("sync failure")
 		})
 		await expect(a).rejects.toThrow("sync failure")
-		const b = storeInOrder("key", next.write)
+		const b = storeInOrder(keyOf(), next.write)
 		await vi.waitFor(() => expect(next.write).toHaveBeenCalledTimes(1))
 		next.finish[0].resolve()
 		await b
@@ -100,7 +110,7 @@ describe("storeInOrder", () => {
 		const unhandled = vi.fn()
 		process.on("unhandledRejection", unhandled)
 		try {
-			void storeInOrder("key", async () => Promise.reject(new Error("nobody waits")))
+			void storeInOrder(keyOf(), async () => Promise.reject(new Error("nobody waits")))
 			await new Promise((resolve) => setTimeout(resolve, 20))
 			expect(unhandled).not.toHaveBeenCalled()
 		} finally {

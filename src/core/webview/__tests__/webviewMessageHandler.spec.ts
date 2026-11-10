@@ -90,7 +90,6 @@ import { flushModels, getModels } from "../../../api/providers/fetchers/modelCac
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
 import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
-import { resetStoreInOrder } from "../storeInOrder"
 import {
 	handleCreateRule,
 	handleDeleteRule,
@@ -2549,19 +2548,23 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 	})
 
 	describe("when a later setting of the save never finishes being stored", () => {
+		const hung: Array<() => void> = []
 		beforeEach(() => vi.useFakeTimers())
 		afterEach(() => {
 			vi.useRealTimers()
 			Reflect.deleteProperty(mockClineProvider, "isDisposed")
-			resetStoreInOrder() // a store that never settled is still in line: the next test starts without it
+			// A store that never settled is still in line for its key: it settles now, so that the next test finds the key free.
+			for (const settle of hung.splice(0)) settle()
 		})
 
-		/** The store of `key` never settles, as a hung `globalState.update` would not. */
+		/** The store of `key` never settles (until the test is over), as a hung `globalState.update` would not. */
 		const hangOn = (key: string) => {
 			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
 			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
 				(k: string, v: unknown): Promise<void> =>
-					k === key ? new Promise<void>(() => {}) : (real(k as never, v as never) as Promise<void>),
+					k === key
+						? new Promise<void>((resolve) => hung.push(resolve))
+						: (real(k as never, v as never) as Promise<void>),
 			)
 		}
 		const resultsOf = () =>

@@ -32,7 +32,7 @@ interface HubChanges {
 }
 
 /** What a reconciliation needs of a provider: whether it is gone, and the setting that it stores. */
-export interface McpOwner {
+interface McpOwner {
 	readonly isDisposed?: boolean
 	readonly contextProxy: { getValue(key: "mcpEnabled"): unknown }
 }

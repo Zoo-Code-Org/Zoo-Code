@@ -1,4 +1,6 @@
-import { changeMcpEnabled, reconcileMcpEnabled, type McpOwner } from "../mcpEnabledChanges"
+import { changeMcpEnabled, reconcileMcpEnabled } from "../mcpEnabledChanges"
+
+type McpOwner = Parameters<typeof reconcileMcpEnabled>[1]
 
 const createHub = () => {
 	const releases: Array<() => void> = []

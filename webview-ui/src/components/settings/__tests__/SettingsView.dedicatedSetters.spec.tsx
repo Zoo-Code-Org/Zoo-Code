@@ -2,6 +2,8 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it, vi } from "vitest"
 
+import { providerIdentifiers } from "@roo-code/types"
+
 import { renderWithExtensionState } from "@/utils/test-utils"
 
 import SettingsView from "../SettingsView"
@@ -129,13 +131,13 @@ const cases: Case[] = [
 		name: "the image generation provider",
 		section: "experimental",
 		key: "imageGenerationProvider",
-		initial: { imageGenerationProvider: "openrouter" },
+		initial: { imageGenerationProvider: providerIdentifiers.openrouter },
 		answered: "failed",
-		late: "openrouter",
+		late: providerIdentifiers.openrouter,
 		edit: "edit-image-provider",
 		read: "image-provider-value",
 		edited: "mine",
-		lateText: "openrouter",
+		lateText: providerIdentifiers.openrouter,
 		answeredText: "failed",
 	},
 	{
