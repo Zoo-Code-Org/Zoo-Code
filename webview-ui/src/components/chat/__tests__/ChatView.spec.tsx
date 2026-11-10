@@ -1754,6 +1754,33 @@ describe("ChatView - Follow-up Suggestions", () => {
 		await waitFor(() => expect(input.value).toBe("Padded"))
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
 	})
+
+	it("posts idleCondenseReset when a setChatBoxMessage invoke rewrites the input", async () => {
+		const { getByTestId } = renderChatView()
+
+		mockPostMessage({ mode: "ask", customModes: [] })
+
+		const input = getByTestId("chat-textarea").querySelector("input")
+		if (!input) {
+			throw new Error("expected the chat input to be rendered")
+		}
+		// Pre-fill a draft so the invoke appends to it, then clear the calls
+		// made while setting up so only the invoke path is asserted on.
+		fireEvent.change(input, { target: { value: "Draft" } })
+		vscodePostMessageMock.cleanup()
+
+		await dispatchExtensionMessage({
+			type: "invoke",
+			invoke: "setChatBoxMessage",
+			text: "from invoke",
+			images: [],
+		})
+
+		await waitFor(() => expect(input.value).toBe("Draft from invoke"))
+		// The invoke path changes the prompt programmatically without a
+		// textarea onChange, so the armed idle countdown must restart.
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "idleCondenseReset" })
+	})
 })
 
 describe("ChatView - Context Condensing Indicator Tests", () => {
