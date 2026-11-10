@@ -951,7 +951,8 @@
 		"useAzure": "Azure gebruiken",
 		"azureApiVersion": "Azure API-versie instellen",
 		"gemini": {
-			"freeRequests": "* Gratis tot {{count}} verzoeken per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
+			"freeRequests_one": "* Gratis tot {{count}} verzoek per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
+			"freeRequests_other": "* Gratis tot {{count}} verzoeken per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
 			"pricingDetails": "Zie prijsdetails voor meer info.",
 			"billingEstimate": "* Facturering is een schatting - de exacte kosten hangen af van de promptgrootte."
 		}

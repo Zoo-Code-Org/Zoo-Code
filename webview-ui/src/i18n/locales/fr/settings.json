@@ -77,6 +77,7 @@
 			"summaryCopied": "{{copied}} sur {{total}} fichiers copiés",
 			"detailFailed": "Démarre une nouvelle tentative d'importation pour réessayer.",
 			"detailTasksImported_one": "{{count}} sur {{total}} historique de tâche importé.",
+			"detailTasksImported_many": "{{count}} sur {{total}} historiques de tâches importés.",
 			"detailTasksImported_other": "{{count}} sur {{total}} historiques de tâches importés.",
 			"detailPreparing": "Préparation de l'importation de l'historique Roo Code.",
 			"progressAriaLabel": "Progression de l'importation de l'historique Roo Code"
@@ -951,7 +952,9 @@
 		"useAzure": "Utiliser Azure",
 		"azureApiVersion": "Définir la version de l'API Azure",
 		"gemini": {
-			"freeRequests": "* Gratuit jusqu'à {{count}} requêtes par minute. Après cela, la facturation dépend de la taille du prompt.",
+			"freeRequests_one": "* Gratuit jusqu'à {{count}} requête par minute. Après cela, la facturation dépend de la taille du prompt.",
+			"freeRequests_many": "* Gratuit jusqu'à {{count}} requêtes par minute. Après cela, la facturation dépend de la taille du prompt.",
+			"freeRequests_other": "* Gratuit jusqu'à {{count}} requêtes par minute. Après cela, la facturation dépend de la taille du prompt.",
 			"pricingDetails": "Pour plus d'informations, voir les détails de tarification.",
 			"billingEstimate": "* La facturation est une estimation - le coût exact dépend de la taille du prompt."
 		}

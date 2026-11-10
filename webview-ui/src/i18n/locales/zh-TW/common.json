@@ -57,19 +57,19 @@
 	},
 	"time_ago": {
 		"just_now": "剛剛",
-		"seconds_ago": "{{count}} 秒前",
+		"seconds_ago_other": "{{count}} 秒前",
 		"minute_ago": "1 分鐘前",
-		"minutes_ago": "{{count}} 分鐘前",
+		"minutes_ago_other": "{{count}} 分鐘前",
 		"hour_ago": "1 小時前",
-		"hours_ago": "{{count}} 小時前",
+		"hours_ago_other": "{{count}} 小時前",
 		"day_ago": "1 天前",
-		"days_ago": "{{count}} 天前",
+		"days_ago_other": "{{count}} 天前",
 		"week_ago": "1 週前",
-		"weeks_ago": "{{count}} 週前",
+		"weeks_ago_other": "{{count}} 週前",
 		"month_ago": "1 個月前",
-		"months_ago": "{{count}} 個月前",
+		"months_ago_other": "{{count}} 個月前",
 		"year_ago": "1 年前",
-		"years_ago": "{{count}} 年前"
+		"years_ago_other": "{{count}} 年前"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "初始化檢查點已等待 {{timeout}} 秒。若不需要檢查點功能，請在 <settingsLink>[檢查點設定]</settingsLink> 中關閉。",

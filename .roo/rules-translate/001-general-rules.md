@@ -54,14 +54,65 @@
 # 5. TECHNICAL IMPLEMENTATION
 
 - Use namespaces to organize translations logically
-- Handle pluralization using i18next's built-in capabilities
+- Handle pluralization with i18next plural keys that follow CLDR rules (see section 6)
 - Implement proper interpolation for variables using {{variable}} syntax
 - Don't include defaultValue. The `en` translations are the fallback
 - Always use apply_diff instead of write_to_file when editing existing translation files (much faster and more reliable)
 - When using apply_diff, carefully identify the exact JSON structure to edit to avoid syntax errors
 - Placeholders (like {{variable}}) must remain exactly identical to the English source to maintain code integration and prevent syntax errors
 
-# 6. WORKFLOW AND APPROACH
+# 6. PLURALIZATION (CLDR)
+
+i18next v25 picks a plural form with `Intl.PluralRules`, which implements the [CLDR plural rules](https://www.unicode.org/cldr/charts/latest/supplemental/language_plural_rules.html). Any string that counts something must use plural keys.
+
+- Never fake plurals with "(s)", "файл(ов)", "richiesta/e" or similar. Split the string into plural forms instead.
+- Pass the number as `count`: `t("ns:key", { count: n })`. With `<Trans>`, pass `count={n}` or `values={{ count: n }}`.
+- Name the keys `key_one`, `key_few`, `key_many`, `key_other` (plus an optional `key_zero`). Do not keep a bare `key` next to them: i18next uses it in place of any missing form, which hides the gap.
+- Each locale must have exactly its CLDR forms. When a form is missing, i18next falls back to the bare key and then to English. Extra forms are never shown:
+
+| Locales                      | Forms                         | What the forms cover                                                                                          |
+| ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| en, de, nl, tr               | `one`, `other`                | `one` = 1                                                                                                     |
+| hi                           | `one`, `other`                | `one` = 0, 1                                                                                                  |
+| fr, pt-BR                    | `one`, `many`, `other`        | `one` = 0, 1; `many` = exact millions (1000000)                                                               |
+| ca, es, it                   | `one`, `many`, `other`        | `one` = 1; `many` = exact millions (1000000)                                                                  |
+| ru                           | `one`, `few`, `many`, `other` | `one` = 1, 21, 31, 101 (not 11); `few` = 2–4, 22–24 (not 12–14); `many` = 0, 5–20, 25–30; `other` = fractions |
+| pl                           | `one`, `few`, `many`, `other` | `one` = 1 only; `few` = 2–4, 22–24 (not 12–14); `many` = 0, 5–21, 25–31; `other` = fractions                  |
+| id, ja, ko, vi, zh-CN, zh-TW | `other`                       | No `_one`: these languages do not inflect for number                                                          |
+
+- Every form, including `_one`, must contain `{{count}}`. Do not hardcode "1": `_one` also covers 21 in ru and 0 in fr, pt-BR and hi.
+- `_many` in ca, es, fr, it and pt-BR only applies to exact millions printed as digits. Copy the `_other` text.
+- `_other` in ru and pl only applies to fractions (1.5). Use the genitive singular: ru "1,5 минуты" (same as `_few`), pl "1,5 minuty", "1,5 wyniku".
+- The form depends on the whole phrase, not just the noun. Check the case the preposition or verb requires:
+    - ru "удалить {{count}} задачу / задачи / задач"
+    - ru "до {{count}} запроса / запросов / запросов"
+    - pl negation "nie udało się odłączyć {{count}} serwera / serwerów / serwerów"
+- If another number governs the noun (e.g. "{{count}} of {{total}}"), rephrase so the noun no longer depends on a number: "Импортировано историй задач: {{count}} из {{total}}".
+- `_zero` is an i18next override for count 0 in every language. Add it in every locale when the English key has it. In ru and pl, 0 otherwise uses `_many`.
+- Do not pluralize money amounts, unit abbreviations ("{{count}}s"), numbers that JavaScript updates live in the DOM, or phrases with no counted noun ("and {{count}} more").
+
+Example:
+
+```jsonc
+// en
+"subtasks_one": "{{count}} subtask",
+"subtasks_other": "{{count}} subtasks",
+
+// ru
+"subtasks_one": "{{count}} подзадача",
+"subtasks_few": "{{count}} подзадачи",
+"subtasks_many": "{{count}} подзадач",
+"subtasks_other": "{{count}} подзадачи",
+
+// ja
+"subtasks_other": "{{count}} サブタスク",
+```
+
+To list the plural forms of any locale, run: `node -p 'new Intl.PluralRules("<locale>").resolvedOptions().pluralCategories'`
+
+`node scripts/find-missing-translations.js` reports a plural key only when a locale has no key with its base name (`key` or `key_*`). `node scripts/validate-plural-forms.js` reports missing forms, extra forms, bare keys next to plural forms and plural mistakes in English.
+
+# 7. WORKFLOW AND APPROACH
 
 - First add or modify English strings, then ask for confirmation before translating to all other languages
 - Use this process for each localization task:
@@ -78,7 +129,7 @@
     - Tooltip text: Can be slightly more descriptive
 - Preserve the original perspective: If text is a user command directed at the software, ensure the translation maintains this direction, avoiding language that makes it sound like an instruction from the system to the user
 
-# 7. COMMON PITFALLS TO AVOID
+# 8. COMMON PITFALLS TO AVOID
 
 - Switching between formal and informal addressing styles - always stay informal ("du" not "Sie")
 - Translating or altering technical terms and brand names that should remain in English
@@ -86,8 +137,9 @@
 - Translating domain-specific terms that are commonly used in English in the target language
 - Changing the meaning or nuance of instructions or error messages
 - Forgetting to maintain consistent terminology throughout the translation
+- Copying the English `_one`/`_other` pair into a locale with different plural forms, or writing "(s)"-style plurals
 
-# 8. QUALITY ASSURANCE
+# 9. QUALITY ASSURANCE
 
 - Maintain consistent terminology across all translations
 - Respect the JSON structure of translation files
@@ -99,11 +151,16 @@
     node scripts/find-missing-translations.js
     ```
 - Address any missing translations identified by the script to ensure complete coverage across all locales
+- When you add or change plural keys, also run the plural forms script and fix every problem it reports:
+    ```
+    node scripts/validate-plural-forms.js
+    ```
 
-# 9. TRANSLATOR'S CHECKLIST
+# 10. TRANSLATOR'S CHECKLIST
 
 - ✓ Used informal tone consistently ("du" not "Sie")
 - ✓ Preserved all placeholders exactly as in the English source
+- ✓ Gave each plural key exactly the locale's CLDR forms, each containing `{{count}}`
 - ✓ Maintained consistent terminology with existing translations
 - ✓ Kept technical terms and brand names unchanged where appropriate
 - ✓ Preserved the original perspective (user→system vs system→user)

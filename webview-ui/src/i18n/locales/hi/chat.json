@@ -20,7 +20,8 @@
 	"unpin": "पिन करें",
 	"pin": "अवपिन करें",
 	"fileChangesInConversation": {
-		"header": "इस वार्तालाप में {{count}} फ़ाइल(ें) बदली गईं"
+		"header_one": "इस वार्तालाप में {{count}} फ़ाइल बदली गई",
+		"header_other": "इस वार्तालाप में {{count}} फ़ाइलें बदली गईं"
 	},
 	"tokenProgress": {
 		"availableSpace": "उपलब्ध स्थान: {{amount}} tokens",
@@ -287,7 +288,7 @@
 		"triggerLabelOff": "स्वतः-अनुमोदन बंद",
 		"triggerLabelOffShort": "बंद",
 		"triggerLabel_zero": "0 स्वतः-अनुमोदन",
-		"triggerLabel_one": "1 स्वतः-अनुमोदित",
+		"triggerLabel_one": "{{count}} स्वतः-अनुमोदित",
 		"triggerLabel_other": "{{count}} स्वतः-अनुमोदित",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +306,7 @@
 		"truncation": {
 			"title": "संदर्भ छोटा किया गया",
 			"inProgress": "संदर्भ छोटा कर रहा है...",
-			"messagesRemoved": "{{count}} संदेश हटाया गया",
+			"messagesRemoved_one": "{{count}} संदेश हटाया गया",
 			"messagesRemoved_other": "{{count}} संदेश हटाए गए",
 			"description": "संदर्भ विंडो सीमा के भीतर रहने के लिए बातचीत से पुराने संदेश हटा दिए गए। संघनन की तुलना में यह एक तेज़ लेकिन कम संदर्भ-संरक्षित दृष्टिकोण है।"
 		}
@@ -349,7 +350,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "स्वत:-स्वीकृत अनुरोध सीमा पहुंची",
-			"description": "Zoo {{count}} API अनुरोध(धों) की स्वत:-स्वीकृत सीमा तक पहुंच गया है। क्या आप गणना को रीसेट करके कार्य जारी रखना चाहते हैं?",
+			"description_one": "Zoo {{count}} API अनुरोध की स्वत:-स्वीकृत सीमा तक पहुंच गया है। क्या आप गणना को रीसेट करके कार्य जारी रखना चाहते हैं?",
+			"description_other": "Zoo {{count}} API अनुरोधों की स्वत:-स्वीकृत सीमा तक पहुंच गया है। क्या आप गणना को रीसेट करके कार्य जारी रखना चाहते हैं?",
 			"button": "रीसेट करें और जारी रखें"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +363,7 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo कोडबेस में <code>{{query}}</code> खोजना चाहता है",
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> में कोडबेस में <code>{{query}}</code> खोजना चाहता है",
-		"didSearch_one": "1 परिणाम मिला",
+		"didSearch_one": "{{count}} परिणाम मिला",
 		"didSearch_other": "{{count}} परिणाम मिले",
 		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)"
 	},

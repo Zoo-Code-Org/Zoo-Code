@@ -76,6 +76,8 @@ jobs:
                   install-args: "--frozen-lockfile"
             - name: Verify all translations are complete
               run: node scripts/find-missing-translations.js
+            - name: Verify plural forms follow CLDR
+              run: node scripts/validate-plural-forms.js
             - name: Verify t() calls pass every interpolation variable
               run: node scripts/check-i18n-interpolation.js
 
