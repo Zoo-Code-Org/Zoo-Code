@@ -263,6 +263,101 @@ describe("SkillsSettings", () => {
 		expect(warning).toHaveTextContent("found character that cannot start any token")
 	})
 
+	it("shows diagnostics that arrive after the settings view is already mounted", () => {
+		const view = renderSkillsSettings(mockSkills, undefined, [])
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+
+		// The extension pushes a fresh diagnostics list through the extension state while the view stays
+		// mounted. The memoized list has to follow that value, or the warning freezes at first render.
+		mockExtensionState = {
+			...mockExtensionState,
+			skillDiagnostics: [
+				{
+					path: "/workspace/.roo/skills/late/SKILL.md",
+					source: "project",
+					message: "bad indentation of a mapping entry",
+					line: 4,
+					column: 9,
+				},
+			],
+		}
+		view.rerender(<SkillsSettings />)
+
+		const warning = screen.getByRole("alert")
+		expect(warning.querySelector("span")?.textContent).toBe("/workspace/.roo/skills/late/SKILL.md:4:9")
+		expect(warning).toHaveTextContent("bad indentation of a mapping entry")
+	})
+
+	it("keeps each diagnostic row in its own element when the diagnostics list is reordered", () => {
+		const view = renderSkillsSettings(mockSkills, undefined, [
+			{
+				path: "/workspace/.roo/skills/broken-2/SKILL.md",
+				source: "project",
+				message: "unexpected end of the stream",
+			},
+			{
+				path: "/workspace/.roo/skills/broken-3/SKILL.md",
+				source: "project",
+				message: "bad indentation of a mapping entry",
+				line: 7,
+			},
+			{
+				path: "/workspace/.roo/skills/broken-4/SKILL.md",
+				source: "project",
+				message: "found character that cannot start any token",
+				line: 12,
+				column: 3,
+			},
+		])
+
+		const created = Array.from(screen.getByRole("alert").querySelectorAll("li"))
+		// Every row is keyed by the diagnostic it reports, so a reordered list must reuse the element the
+		// row was created in. Position-matched rows move row-local state and selection away from the
+		// diagnostic the reader is looking at.
+		created.forEach((row, index) => {
+			row.dataset.initialPosition = String(index)
+		})
+		expect(created.map((row) => row.querySelector("span")?.textContent)).toEqual([
+			"/workspace/.roo/skills/broken-2/SKILL.md",
+			"/workspace/.roo/skills/broken-3/SKILL.md:7",
+			"/workspace/.roo/skills/broken-4/SKILL.md:12:3",
+		])
+
+		mockExtensionState = {
+			...mockExtensionState,
+			skillDiagnostics: [
+				{
+					path: "/workspace/.roo/skills/broken-4/SKILL.md",
+					source: "project",
+					message: "found character that cannot start any token",
+					line: 12,
+					column: 3,
+				},
+				{
+					path: "/workspace/.roo/skills/broken-3/SKILL.md",
+					source: "project",
+					message: "bad indentation of a mapping entry",
+					line: 7,
+				},
+				{
+					path: "/workspace/.roo/skills/broken-2/SKILL.md",
+					source: "project",
+					message: "unexpected end of the stream",
+				},
+			],
+		}
+		view.rerender(<SkillsSettings />)
+
+		const reordered = Array.from(screen.getByRole("alert").querySelectorAll("li"))
+		expect(reordered.map((row) => row.querySelector("span")?.textContent)).toEqual([
+			"/workspace/.roo/skills/broken-4/SKILL.md:12:3",
+			"/workspace/.roo/skills/broken-3/SKILL.md:7",
+			"/workspace/.roo/skills/broken-2/SKILL.md",
+		])
+		expect(reordered.map((row) => row.dataset.initialPosition)).toEqual(["2", "1", "0"])
+	})
+
 	it("displays project skills section when in a workspace", () => {
 		renderSkillsSettings()
 
