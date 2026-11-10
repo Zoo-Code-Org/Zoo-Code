@@ -12,6 +12,19 @@ vi.mock("@roo-code/ipc", () => ({
 }))
 
 describe("API - configuration", () => {
+	// API needs an OutputChannel it can log to. The shared helper in test-utils/provider.ts types one the
+	// same way, so this double carries every vscode.OutputChannel member and stays type-checked instead
+	// of cast (AGENTS.md: new code avoids any-style assertions).
+	const makeOutputChannel = (): vscode.OutputChannel => ({
+		name: "test-output",
+		append: vi.fn(),
+		appendLine: vi.fn(),
+		replace: vi.fn(),
+		clear: vi.fn(),
+		show: vi.fn(),
+		hide: vi.fn(),
+		dispose: vi.fn(),
+	})
 	it("persists every supplied mode API config mapping", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("default-id")
@@ -26,7 +39,7 @@ describe("API - configuration", () => {
 			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
-		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const outputChannel = makeOutputChannel()
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		await api.setConfiguration({
@@ -61,7 +74,7 @@ describe("API - configuration", () => {
 			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
-		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const outputChannel = makeOutputChannel()
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		await api.setConfiguration({ currentApiConfigName: "default" })
@@ -85,7 +98,7 @@ describe("API - configuration", () => {
 				},
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 			} as unknown as ClineProvider
-			const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+			const outputChannel = makeOutputChannel()
 			return { api: new API(outputChannel, provider, makeClineProviderFactory()), setValues, log }
 		}
 
@@ -128,5 +141,35 @@ describe("API - configuration", () => {
 			expect(setValues).toHaveBeenCalledWith({ soundEnabled: true })
 			expect(log).toHaveBeenCalledWith(`[setConfiguration] Ignored an invalid value for ${key}`)
 		})
+	})
+
+	it("omits host-owned viewStates from the settings the API returns", () => {
+		// API reads only getValues() in this test; the double provides that plus the members the
+		// constructor touches (context, on, log) and leaves the rest of ClineProvider unbuilt.
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getValues: () => ({
+				currentApiConfigName: "default",
+				// Minted by the host: per-view selections plus the claim token that binds them.
+				// A secret, so the filter has to drop it for the same reason it drops viewStates.
+				apiKey: "secret-api-key",
+				viewStates: { "view-1": { claimToken: "claim-token-1", mode: "code" } },
+			}),
+		} as unknown as ClineProvider
+		const outputChannel = makeOutputChannel()
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		// Exact output: the portable setting survives and both host-owned keys are gone.
+		expect(configuration).toEqual({ currentApiConfigName: "default" })
+		expect(Object.keys(configuration)).not.toContain("viewStates")
+		expect("viewStates" in configuration).toBe(false)
+		// The value must not escape either: the claim token is host-owned state.
+		// Neither value may escape either: the claim token and the API key are host-owned state.
+		expect(JSON.stringify(configuration)).not.toContain("claim-token-1")
+		expect(JSON.stringify(configuration)).not.toContain("secret-api-key")
 	})
 })
