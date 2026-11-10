@@ -17,6 +17,7 @@ for (const active of [false, true]) {
 			const rejectNested = async () => {
 				await assert.rejects(acquireSideOutputLock(nested), /managed artifacts tree/)
 				await assert.rejects(acquireSideOutputLock(path.join(alias, "b")), /managed artifacts tree/)
+				await assert.rejects(fs.access(nested))
 				assert.equal(await fs.readFile(path.join(dir, "side-results.json"), "utf8"), "complete")
 			}
 			await executeSideGeneration({
@@ -76,6 +77,10 @@ setInterval(() => {}, 1000)
 				reject(new Error("lock owner exited"))
 			}, reject)
 		})
+		await assert.rejects(acquireSideOutputLock(dir), /cannot acquire side output lock/)
+		// Keep the separate owner alive beyond the stale interval. Without
+		// heartbeat renewal a contender could take over this live generation.
+		await new Promise((resolve) => setTimeout(resolve, 31_000))
 		await assert.rejects(acquireSideOutputLock(dir), /cannot acquire side output lock/)
 		child.kill("SIGKILL")
 		await closed
