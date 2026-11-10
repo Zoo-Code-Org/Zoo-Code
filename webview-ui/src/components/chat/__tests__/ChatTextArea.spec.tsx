@@ -1787,5 +1787,42 @@ describe("ChatTextArea", () => {
 			expect(defaultProps.setInputValue).toHaveBeenCalled()
 			expect(idleSignals()).toHaveLength(2)
 		})
+
+		it("posts idleCondenseReset when a slash command inserts text into the input", () => {
+			// The insertTextIntoTextarea message rewrites the input
+			// programmatically (no onChange), so the handler itself must
+			// restart the armed idle countdown.
+			render(<ChatTextArea {...defaultProps} inputValue="hello " />)
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "insertTextIntoTextarea", text: "/command" } }),
+				)
+			})
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("/command hello ")
+			expect(idleSignals()).toHaveLength(1)
+		})
+
+		it("posts idleCondenseReset when Backspace programmatically removes a mention", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			// Position the cursor after the trailing space and tell the component about it.
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+
+			// First Backspace: drops the space after the mention and arms the
+			// pending flag without rewriting the input, so no signal yet.
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+			expect(idleSignals()).toHaveLength(0)
+
+			// Second Backspace: removes the mention itself via setInputValue,
+			// a programmatic rewrite that never fires the textarea onChange.
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("hello ")
+			expect(idleSignals()).toHaveLength(1)
+		})
 	})
 })
