@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 
-import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import { type ClineSayTool, DEFAULT_PER_WRITE_CHECKPOINTS, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
@@ -11,6 +11,7 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { checkpointSave } from "../../core/checkpoints"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -392,6 +393,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			const state = await provider?.getState()
 			const diagnosticsEnabled = state?.diagnosticsEnabled ?? true
 			const writeDelayMs = state?.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS
+			const perWriteCheckpoints = state?.perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS
 			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -462,6 +464,21 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
 
 			pushToolResult(message + replacementInfo)
+
+			if (perWriteCheckpoints) {
+				// B2: the change-journal entry for this edit is appended inside
+				// checkpointSave (the hook stays a single call site), keyed by the
+				// checkpoint commit that call produces.
+				// Await so the checkpoint (staging + commit + journal) completes
+				// before the diff state resets and queued work proceeds; fire-and-forget
+				// lets a queued write's own checkpoint interleave and lets shutdown
+				// lose the commit entirely.
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: isNewFile ? "create" : "update",
+					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,
+				}).catch(() => {})
+			}
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
