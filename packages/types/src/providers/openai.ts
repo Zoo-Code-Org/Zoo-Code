@@ -24,6 +24,51 @@ export const OPENAI_API_PROTOCOL = "openai"
 export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.6-sol"
 
 export const openAiNativeModels = {
+	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+	"gpt-6.1-terra": {
+		maxTokens: 128000,
+		contextWindow: 1_050_000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 1,
+		outputPrice: 5,
+		cacheWritesPrice: 1.25,
+		cacheWritesPrice12h: 2.5,
+		cacheReadsPrice: 0.05,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+			appliesToServiceTiers: ["default", "flex", "priority"],
+		},
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		tiers: [
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 0.5,
+				outputPrice: 2.5,
+				cacheWritesPrice: 0.625,
+				cacheReadsPrice: 0.025,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 2,
+				outputPrice: 10,
+				cacheWritesPrice: 2.5,
+				cacheReadsPrice: 0.1,
+			},
+		],
+		description: "GPT-6.1 Terra: Fast, efficient visual reasoning, precise computer use, and natural writing",
+	},
 	// https://developers.openai.com/api/docs/models/gpt-6.1-sol
 	"gpt-6.1-sol": {
 		maxTokens: 128000,
@@ -38,6 +83,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 10.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.1,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -82,6 +128,7 @@ export const openAiNativeModels = {
 		inputPrice: 10.0,
 		outputPrice: 50.0,
 		cacheWritesPrice: 12.5,
+		cacheWritesPrice12h: 25, // $25.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 1.0,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -124,6 +171,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 10.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.2,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -167,6 +215,7 @@ export const openAiNativeModels = {
 		inputPrice: 0.1,
 		outputPrice: 0.5,
 		cacheWritesPrice: 0.125,
+		cacheWritesPrice12h: 0.25, // $0.25 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.01,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -210,6 +259,7 @@ export const openAiNativeModels = {
 		inputPrice: 4.0,
 		outputPrice: 20.0,
 		cacheWritesPrice: 5.0,
+		cacheWritesPrice12h: 10, // $10.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.4,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -253,6 +303,7 @@ export const openAiNativeModels = {
 		inputPrice: 2.0,
 		outputPrice: 12.0,
 		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5, // $5.00 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.2,
 		longContextPricing: {
 			thresholdTokens: 272_000,
@@ -296,6 +347,7 @@ export const openAiNativeModels = {
 		inputPrice: 0.2,
 		outputPrice: 1.2,
 		cacheWritesPrice: 0.25,
+		cacheWritesPrice12h: 0.5, // $0.50 per million tokens (2.5x input price, 12h cache writes)
 		cacheReadsPrice: 0.02,
 		longContextPricing: {
 			thresholdTokens: 272_000,
