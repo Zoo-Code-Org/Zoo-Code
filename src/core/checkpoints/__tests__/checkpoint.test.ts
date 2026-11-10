@@ -99,6 +99,7 @@ describe("Checkpoint functionality", () => {
 			apiConversationHistory: [],
 			pendingUserMessageCheckpoint: undefined,
 			say: vi.fn().mockResolvedValue(undefined),
+			abortTask: vi.fn().mockResolvedValue(undefined),
 			ensureApiConversationHistoryStored: vi.fn().mockResolvedValue(true),
 			overwriteClineMessages: vi.fn(),
 			overwriteApiConversationHistory: vi.fn(),
@@ -619,6 +620,47 @@ describe("Checkpoint functionality", () => {
 				)
 				// Not started again from two sides that are not the same conversation.
 				expect(mockProvider.cancelTask).not.toHaveBeenCalled()
+				expect(mockTask.abortTask).toHaveBeenCalledTimes(1) // and the task that is there does not go on
+			})
+
+			it.each(["delete", "edit"] as const)(
+				"stops the task that is still running after a partly rewound conversation, for %s, and says so when it cannot",
+				async (operation) => {
+					keepWhatIsWritten()
+					mockTask.ensureApiConversationHistoryStored.mockResolvedValueOnce(false)
+					mockTask.overwriteClineMessages
+						.mockImplementationOnce(async (messages: unknown[]) => {
+							mockTask.clineMessages = messages
+						})
+						.mockRejectedValueOnce(new Error("disk full"))
+					mockTask.abortTask.mockRejectedValueOnce(new Error("cannot stop"))
+
+					await expect(
+						checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "restore", operation }),
+					).rejects.toMatchObject({ name: "ConversationRewindError", restarted: false })
+
+					expect(mockTask.abortTask).toHaveBeenCalledTimes(1)
+					expect(mockProvider.log).toHaveBeenCalledWith(
+						expect.stringContaining("the task could not be stopped: cannot stop"),
+					)
+					expect(mockProvider.cancelTask).not.toHaveBeenCalled()
+				},
+			)
+
+			it("does not stop the task when the messages were put back, since it is restarted from a consistent conversation", async () => {
+				keepWhatIsWritten()
+				mockTask.ensureApiConversationHistoryStored.mockResolvedValueOnce(false)
+
+				await expect(
+					checkpointRestore(mockTask, {
+						ts: 2,
+						commitHash: RESTORE_HASH,
+						mode: "restore",
+						operation: "edit",
+					}),
+				).rejects.toMatchObject({ restarted: true })
+
+				expect(mockTask.abortTask).not.toHaveBeenCalled()
 			})
 
 			it("tells a failure that is not an Error as text, in the message about a conversation that is only partly rewound", async () => {

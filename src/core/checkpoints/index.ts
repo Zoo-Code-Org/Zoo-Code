@@ -278,6 +278,17 @@ export async function checkpointRestore(
 				// A conversation whose two sides are not the same is not started again: the model would be given turns that
 				// the user cannot see. It is reported as a restart that did not happen, so the edit is handed back.
 				if (error instanceof ConversationPartlyRewoundError) {
+					// The task must not go on either: an edit is not aborted by its caller (a delete is), and a task that
+					// keeps running would give the model turns that the user cannot see.
+					try {
+						await task.abortTask()
+					} catch (abortError) {
+						provider?.log(
+							`[checkpointRestore] the task could not be stopped: ${
+								abortError instanceof Error ? abortError.message : String(abortError)
+							}`,
+						)
+					}
 					throw new ConversationRewindError(error, {
 						error: new Error(
 							"the task was not started again, because its conversation is only partly rewound",
