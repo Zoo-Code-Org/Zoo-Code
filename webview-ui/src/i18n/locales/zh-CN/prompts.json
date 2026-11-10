@@ -89,6 +89,13 @@
 			"includeTaskHistory": "包含任务历史作为上下文",
 			"includeTaskHistoryDescription": "启用后，当前对话的最后 10 条消息将作为上下文包含在增强提示词时，有助于生成更相关和上下文感知的建议。"
 		},
+		"taskTitle": {
+			"enabled": "自动生成任务标题",
+			"enabledDescription": "在后台将每个新任务的第一条提示总结为简短标题。标题请求不计入任务费用。GitHub Copilot 和 VS Code LM 配置会消耗您的配额。",
+			"apiConfiguration": "API 配置",
+			"useTaskConfig": "使用任务的 API 配置",
+			"apiConfigDescription": "建议使用轻量级的非推理配置。如果选择其他配置，提示的开头部分将发送给该提供商。"
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "增强提示词",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "新任务",
 				"description": "控制开始新任务时的用户提示词。可在首页对话框中使用。"
+			},
+			"TASK_TITLE": {
+				"label": "任务标题",
+				"description": "在后台为新任务生成简短标题，显示在历史记录和任务标题栏中。可在下方配置。"
 			}
 		}
 	},

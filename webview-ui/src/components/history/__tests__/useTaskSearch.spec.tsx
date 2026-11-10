@@ -172,6 +172,26 @@ describe("useTaskSearch", () => {
 		])
 	})
 
+	it("searches the generated title and the original prompt of an auto-titled task", () => {
+		mockUseExtensionState.mockReturnValue({
+			taskHistory: [{ ...mockTaskHistory[1], autoTitle: "Coverage sprint" }],
+			cwd: "/workspace/project1",
+		})
+		const { result } = renderHook(() => useTaskSearch())
+
+		act(() => {
+			result.current.setSearchQuery("Coverage")
+		})
+		expect(result.current.tasks).toEqual([
+			expect.objectContaining({ id: "task-2", highlight: "<mark>Coverage sprint</mark>" }),
+		])
+
+		act(() => {
+			result.current.setSearchQuery("unit tests")
+		})
+		expect(result.current.tasks).toEqual([expect.objectContaining({ id: "task-2" })])
+	})
+
 	it("keeps match positions from a custom title that is longer than the task", () => {
 		// "Write unit tests" (16 chars) vs "Coverage sprint with deep tests" (31 chars):
 		// with the old task.length bound, every position of "deep" (21-24) would be filtered out.

@@ -11,6 +11,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
+import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -593,6 +594,79 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			expect(Array.isArray(result)).toBe(true)
 			expect(result.some((item) => item.id === "task-return")).toBe(true)
+		})
+	})
+
+	describe("autoTitle", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		beforeEach(() => {
+			// fs is mocked in this suite, so serve the persisted record from the store cache.
+			vi.mocked(safeWriteJson).mockImplementation(async (_path, data, options) => {
+				// Apply the merge callback against the cached record, as the real writer does against disk.
+				const existing = provider.taskHistoryStore.get((data as HistoryItem).id) ?? null
+				options?.merge?.(existing, data)
+			})
+			Reflect.set(provider.taskHistoryStore, "readTaskFile", async (id: string) => {
+				const cached = provider.taskHistoryStore.get(id)
+				return cached ? structuredClone(cached) : null
+			})
+		})
+
+		afterEach(() => {
+			vi.mocked(safeWriteJson).mockResolvedValue(undefined)
+		})
+
+		it("does not let a stale snapshot overwrite or clear a stored autoTitle", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto", task: "Long prompt" }), {
+				broadcast: false,
+			})
+			await provider.setAutoTitle("task-auto", "Generated title")
+
+			await provider.updateTaskHistory(
+				{ ...createHistoryItem({ id: "task-auto", task: "Long prompt" }), autoTitle: "Stale", tokensIn: 5 },
+				{ broadcast: false },
+			)
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto", task: "Long prompt" }), {
+				broadcast: false,
+			})
+
+			expect(getStored("task-auto")).toMatchObject({ autoTitle: "Generated title" })
+		})
+
+		it("does not let updateTaskHistory write an autoTitle", async () => {
+			await provider.updateTaskHistory(
+				{ ...createHistoryItem({ id: "task-new", task: "New task" }), autoTitle: "Sneaky" },
+				{
+					broadcast: false,
+				},
+			)
+
+			expect(getStored("task-new")?.autoTitle).toBeUndefined()
+		})
+
+		it("setAutoTitle broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-bc", task: "Long prompt" }))
+			mockPostMessage.mockClear()
+
+			await provider.setAutoTitle("task-bc", "Generated")
+
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-bc", autoTitle: "Generated" })
+		})
+
+		it("setAutoTitle keeps the first title and ignores unknown tasks", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-once", task: "Long prompt" }), {
+				broadcast: false,
+			})
+			await provider.setAutoTitle("task-once", "First")
+			await provider.setAutoTitle("task-once", "Second")
+			await provider.setAutoTitle("missing-task", "Nope")
+
+			expect(getStored("task-once")?.autoTitle).toBe("First")
+			expect(getStored("missing-task")).toBeUndefined()
 		})
 	})
 

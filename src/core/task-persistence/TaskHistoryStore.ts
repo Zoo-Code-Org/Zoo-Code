@@ -1025,6 +1025,66 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Record a generated title unless the task already has one. The persisted record is re-checked
+	 * under the per-file lock, so a task deleted by another host is never resurrected and a title
+	 * written by another host is never overwritten.
+	 */
+	public setAutoTitleIfAbsent(taskId: string, autoTitle: string): Promise<{ applied: boolean; item?: HistoryItem }> {
+		return this.withLock(async () => {
+			const title = autoTitle.trim()
+			const disk = await this.readTaskFile(taskId)
+			if (!disk || disk.id !== taskId) {
+				this.cache.delete(taskId)
+				return { applied: false }
+			}
+			if (disk.autoTitle || !title) {
+				this.cache.set(taskId, disk)
+				return { applied: false, item: disk }
+			}
+
+			const skipped = Symbol("auto-title-skipped")
+			let persisted: HistoryItem | undefined
+			try {
+				const filePath = await this.getTaskFilePath(taskId)
+				await safeWriteJson(
+					filePath,
+					{ ...disk, autoTitle: title },
+					{
+						merge: (existing) => {
+							const current = existing as Partial<HistoryItem> | null
+							if (!current || current.id !== taskId || current.autoTitle) {
+								throw Object.assign(new Error("auto title skipped"), { [skipped]: true })
+							}
+							persisted = { ...(current as HistoryItem), autoTitle: title }
+							return persisted
+						},
+					},
+				)
+			} catch (error) {
+				if (!(error instanceof Error) || !(skipped in error)) {
+					throw error
+				}
+				const latest = await this.readTaskFile(taskId)
+				if (latest) {
+					this.cache.set(taskId, latest)
+				} else {
+					this.cache.delete(taskId)
+				}
+				return { applied: false, item: latest ?? undefined }
+			}
+
+			if (!persisted) {
+				return { applied: false }
+			}
+			this.cache.set(taskId, persisted)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return { applied: true, item: persisted }
+		})
+	}
+
+	/**
 	 * Update two related HistoryItems within a single in-process lock acquisition.
 	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes
 	 * complete before the lock releases, so no in-process reader can observe an
