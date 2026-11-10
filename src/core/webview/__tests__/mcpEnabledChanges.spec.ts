@@ -187,7 +187,9 @@ describe("changeMcpEnabled", () => {
 			// Each caller has its own promise: one that gives up is answered at once, the other goes on waiting.
 			expect(b).not.toBe(a)
 			const aLeft = a.catch(() => undefined)
+			const bGaveUp = expect(b).rejects.toThrow("gave up") // answered at once, and not left unhandled
 			second.abort(new Error("gave up")) // ... is given up on: the value of the other save is what waits
+			await bGaveUp
 
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 			releases[0]()
@@ -205,13 +207,15 @@ describe("changeMcpEnabled", () => {
 
 			void changeMcpEnabled(hub, true)
 			const waiting = changeMcpEnabled(hub, false, first.signal)
-			void changeMcpEnabled(hub, false, second.signal)
+			const other = changeMcpEnabled(hub, false, second.signal)
+			const otherGaveUp = expect(other).rejects.toThrow("gave up")
 			const rejected = expect(waiting).rejects.toThrow("gave up")
 			first.abort(new Error("gave up"))
 			await Promise.resolve()
 			expect(hub.handleMcpEnabledChange).toHaveBeenCalledTimes(1) // one save is still waiting for it
 			second.abort(new Error("gave up"))
 			await rejected
+			await otherGaveUp
 
 			releases[0]()
 			await new Promise((resolve) => setTimeout(resolve, 20))
