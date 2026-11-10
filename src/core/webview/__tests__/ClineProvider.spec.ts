@@ -4308,6 +4308,47 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
 	})
 
+	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when enabled", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("experiments", {
+			...experimentDefault,
+			dynamicThinkingEffort: true,
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: true })
+	})
+
+	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when explicitly disabled", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		// A second experiment is enabled on purpose: a projection that fell back to
+		// experimentDefault whenever the flag was false would still satisfy a
+		// fixture-equals-default assertion, and it would discard this enabled
+		// experiment on the way.
+		await provider.contextProxy.setValue("experiments", {
+			...experimentDefault,
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: false,
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({
+			...experimentDefault,
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: false,
+		})
+	})
+
+	test("getStateToPostToWebview defaults dynamicThinkingEffort to false when experiments are unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: false })
+	})
+
 	test("getStateToPostToWebview returns the saved blanket auto-deny setting", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("alwaysDenyUnapprovedCommands", true)
