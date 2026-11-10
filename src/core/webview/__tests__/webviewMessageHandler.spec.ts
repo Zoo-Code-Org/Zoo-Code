@@ -2550,6 +2550,8 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			const saving = save({ interfaceFontScale: 120, terminalFontSize: 14, timeFormat: "24h" })
 			const failed = expect(saving).rejects.toThrow("did not finish in 15 seconds")
 			await vi.advanceTimersByTimeAsync(15_000) // the later setting gives up; the two restores start together
+			// The later setting, and both restores, are in flight now: not one restore, with the other waiting for it.
+			expect(stalled).toHaveLength(3)
 			await vi.advanceTimersByTimeAsync(15_000) // and both give up after one write time, not one after the other
 
 			await failed

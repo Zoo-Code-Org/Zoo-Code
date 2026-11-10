@@ -209,6 +209,21 @@ describe("changeMcpEnabled", () => {
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false], [true]])
 		})
 
+		it("applies the same stored value again after a change that failed: the hub is not known to have it", async () => {
+			const flaky = {
+				handleMcpEnabledChange: vi
+					.fn<(enabled: boolean) => Promise<void>>()
+					.mockRejectedValueOnce(new Error("transport stuck"))
+					.mockResolvedValue(undefined),
+			}
+
+			await reconcileMcpEnabled(flaky, () => true) // fails
+			await reconcileMcpEnabled(flaky, () => true) // the same stored value: tried again, and it lands
+			await reconcileMcpEnabled(flaky, () => true) // and now the hub is known to have it
+
+			expect(flaky.handleMcpEnabledChange.mock.calls).toEqual([[true], [true]])
+		})
+
 		it("does not repeat a change that failed, so it cannot loop", async () => {
 			const failing = { handleMcpEnabledChange: vi.fn(async () => Promise.reject(new Error("transport stuck"))) }
 

@@ -55,6 +55,8 @@ function start(hub: McpEnabledTarget, changes: HubChanges, value: boolean): Prom
 		.then(
 			() => finish(true),
 			(error: unknown) => {
+				// What the hub has is not known any more, so a later look at what is stored does not take it for granted.
+				changes.last = undefined
 				finish(false)
 				throw error
 			},
