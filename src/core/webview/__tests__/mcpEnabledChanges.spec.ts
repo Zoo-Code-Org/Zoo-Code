@@ -253,45 +253,33 @@ describe("changeMcpEnabled", () => {
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
 		})
 
-		it("takes every save that gives up off the change again, while the shared change stays stalled", async () => {
+		it("lets go of the signal of every save that gives up, while the shared change stays stalled", async () => {
 			const { hub, releases } = createHub()
-			// The registrations of the saves are kept in sets: what is added to them, and taken out, is watched.
-			const isCaller = (value: unknown) =>
-				typeof value === "object" &&
-				value !== null &&
-				"resolve" in value &&
-				"reject" in value &&
-				typeof value.resolve === "function"
-			const added = vi.spyOn(Set.prototype, "add")
-			const deleted = vi.spyOn(Set.prototype, "delete")
-			try {
-				void changeMcpEnabled(hub, true) // stalled
-				const staying = changeMcpEnabled(hub, false) // a save that stays: it waits for the change behind it
+			void changeMcpEnabled(hub, true) // stalled
+			const staying = changeMcpEnabled(hub, false) // a save that stays: it waits for the change behind it
 
-				for (let i = 0; i < 200; i++) {
-					const giveUp = new AbortController()
-					const waiting = changeMcpEnabled(hub, i % 2 === 0, giveUp.signal) // joins the running or the waiting one
-					const rejected = expect(waiting).rejects.toThrow("gave up")
-					giveUp.abort(new Error("gave up"))
-					await rejected
-				}
+			for (let i = 0; i < 200; i++) {
+				const giveUp = new AbortController()
+				const add = vi.spyOn(giveUp.signal, "addEventListener")
+				const remove = vi.spyOn(giveUp.signal, "removeEventListener")
+				const waiting = changeMcpEnabled(hub, i % 2 === 0, giveUp.signal) // joins the running or the waiting one
+				const rejected = expect(waiting).rejects.toThrow("gave up")
+				giveUp.abort(new Error("gave up"))
+				await rejected
 
-				const registered = added.mock.calls.map(([value]) => value).filter(isCaller)
-				const taken = new Set(deleted.mock.calls.map(([value]) => value).filter(isCaller))
-				// The 200 that gave up are all taken off; only the save that stayed (and the first call) are still registered.
-				expect(registered.length).toBeGreaterThanOrEqual(200)
-				expect(registered.filter((caller) => !taken.has(caller)).length).toBeLessThanOrEqual(2)
-
-				// And the change they gave up on goes on for the save that stayed.
-				releases[0]()
-				await vi.waitFor(() => expect(releases).toHaveLength(2))
-				releases[1]()
-				await expect(staying).resolves.toBeUndefined()
-				expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
-			} finally {
-				added.mockRestore()
-				deleted.mockRestore()
+				// The listener that the save put on its signal is the one that was taken off again.
+				const added = add.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+				const removed = remove.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+				expect(added).toHaveLength(1)
+				expect(removed).toEqual(added)
 			}
+
+			// And the change they gave up on goes on for the save that stayed.
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await expect(staying).resolves.toBeUndefined()
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
 		})
 
 		it("answers a save that gives up at once, while another save still waits for the same change, which goes on", async () => {

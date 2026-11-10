@@ -79,6 +79,7 @@ function register(change: Waited, signal?: AbortSignal, onGiveUp?: () => void): 
 		const caller: Caller = { resolve, reject }
 		if (signal) {
 			const giveUp = () => {
+				signal.removeEventListener("abort", giveUp) // the signal keeps no reference to this save any more
 				change.callers.delete(caller)
 				onGiveUp?.()
 				reject(signal.reason)
