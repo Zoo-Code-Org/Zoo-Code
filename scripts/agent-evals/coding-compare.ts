@@ -10,7 +10,7 @@ import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
 import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
 import { createSideProcessGuard, type SideProcessGuard } from "./side-process-guard.ts"
-import { acquireSideOutputLock } from "./output-lock.ts"
+import { acquireSideOutputLock, prepareOutputDirectory } from "./output-lock.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
 
 export { buildComparisonReport, renderMarkdownReport }
@@ -255,8 +255,7 @@ export type ComparisonFlowOutcome =
 // caller exits with the conventional code on the normal and the throwing
 // path alike; any other failure stays a thrown failure.
 export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
-	await fs.mkdir(wiring.out, { recursive: true })
-	const canonicalOut = await fs.realpath(wiring.out)
+	const canonicalOut = await prepareOutputDirectory(wiring.out, "comparison")
 	// A canonical path also excludes aliases through symlinks. Keep the lock
 	// beside the canonical output so all processes share it regardless of TMPDIR.
 	const key = createHash("sha256").update(canonicalOut).digest("hex")
@@ -264,8 +263,9 @@ export const executeComparisonFlow = async (wiring: ComparisonFlowWiring): Promi
 	try {
 		await fs.mkdir(lock, { mode: 0o700 })
 	} catch (error) {
+		if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error
 		throw new Error(
-			`cannot acquire comparison output lock for ${canonicalOut}; another comparison may be running`,
+			`cannot acquire comparison output lock for ${canonicalOut}; another comparison may be running. If none is running, remove the stale lock directory ${lock}`,
 			{ cause: error },
 		)
 	}

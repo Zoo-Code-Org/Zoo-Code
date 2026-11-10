@@ -14,6 +14,7 @@ import {
 	type ComparisonFlowWiring,
 	type SideResultFile,
 } from "./coding-compare.ts"
+import { executeSideGeneration } from "./coding-side-flow.ts"
 import { acquireSideOutputLock } from "./output-lock.ts"
 import { buildRunMetrics } from "./coding-metrics.ts"
 import type { SidePins } from "./coding-pins.ts"
@@ -625,3 +626,89 @@ try {
 		await fs.rm(dir, { recursive: true, force: true })
 	}
 })
+
+for (const alias of [false, true]) {
+	it(`rejects comparison output inside a side generation before rollback (alias: ${alias})`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-side-rollback-"))
+		const sideOut = path.join(dir, "side")
+		const artifacts = path.join(sideOut, "artifacts")
+		let interrupted = false
+		let started = false
+		try {
+			await executeSideGeneration({
+				out: sideOut,
+				isInterrupted: () => interrupted,
+				run: async () => {
+					await fs.mkdir(artifacts)
+					await fs.writeFile(path.join(artifacts, "owned"), "side data")
+					const parent = alias ? path.join(dir, "alias") : artifacts
+					if (alias) await fs.symlink(artifacts, parent)
+					const out = path.join(parent, "nested", "report")
+					await assert.rejects(
+						executeComparisonFlow(
+							flowWiring({
+								flag: createInterruptFlag(),
+								out,
+								scratchDir: path.join(dir, "scratch"),
+								runSide: async (side) => {
+									started = true
+									return record(side, COMMIT)
+								},
+							}),
+						),
+						/comparison output cannot be inside a managed artifacts tree/,
+					)
+					assert.equal(started, false)
+					assert.deepEqual(await fs.readdir(artifacts), ["owned"])
+					await assert.rejects(fs.access(out))
+					await assert.rejects(fs.access(path.join(dir, "scratch")))
+				},
+				cleanup: async () => {
+					interrupted = true
+				},
+			})
+			await assert.rejects(fs.access(artifacts))
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+for (const code of ["EACCES", "EROFS", "EEXIST"]) {
+	it(`preserves comparison lock acquisition diagnostics for ${code}`, async (t) => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-lock-error-"))
+		const mkdir = fs.mkdir
+		const failure = Object.assign(new Error("lock creation failed"), { code })
+		let lockPath = ""
+		t.mock.method(fs, "mkdir", async (...args: Parameters<typeof fs.mkdir>) => {
+			if (path.basename(String(args[0])).startsWith(".coding-comparison-")) {
+				lockPath = String(args[0])
+				throw failure
+			}
+			return mkdir(...args)
+		})
+		try {
+			await assert.rejects(
+				executeComparisonFlow(
+					flowWiring({
+						flag: createInterruptFlag(),
+						out: path.join(dir, "out"),
+						scratchDir: path.join(dir, "scratch"),
+						runSide: async () => {
+							throw new Error("must not run")
+						},
+					}),
+				),
+				(error: unknown) => {
+					if (code !== "EEXIST") return error === failure
+					assert.ok(error instanceof Error)
+					assert.ok(error.message.includes(lockPath))
+					assert.match(error.message, /another comparison may be running/)
+					return true
+				},
+			)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
