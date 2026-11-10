@@ -12,7 +12,7 @@ import {
 } from "@/utils/test-utils"
 
 import { vscode } from "@src/utils/vscode"
-import type { SuggestionItem } from "@roo-code/types"
+import { retiredProviderIdentifiers, type SuggestionItem } from "@roo-code/types"
 
 import ChatView, { ChatViewProps } from "../ChatView"
 
@@ -1820,6 +1820,32 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 				expect(condensingRow).toBeTruthy()
 			},
 			{ timeout: 2000 },
+		)
+	})
+})
+
+describe("ChatView - Retired provider warning", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it("warns instead of sending when the resolved configuration keeps a retired provider", async () => {
+		// The host resolves `apiProvider` but deliberately passes retired names through,
+		// so this warning path must keep working on a resolved configuration.
+		const { getByTestId, getByText } = renderChatView()
+
+		mockPostMessage({
+			apiConfiguration: { apiProvider: retiredProviderIdentifiers.roo },
+			clineMessages: [{ type: "say", say: "task", ts: Date.now() - 1000, text: "Initial task" }],
+		})
+
+		await waitFor(() => expect(getByTestId("chat-textarea")).toBeInTheDocument())
+
+		const input = getByTestId("chat-textarea").querySelector("input")!
+		fireEvent.change(input, { target: { value: "hello" } })
+		fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+
+		await waitFor(() => expect(getByText("chat:retiredProvider.title")).toBeInTheDocument())
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: "askResponse", askResponse: "messageResponse" }),
 		)
 	})
 })

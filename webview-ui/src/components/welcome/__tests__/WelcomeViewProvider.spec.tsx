@@ -1,4 +1,4 @@
-import { providerIdentifiers } from "@roo-code/types"
+import { DEFAULT_API_PROVIDER, providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/welcome/__tests__/WelcomeViewProvider.spec.tsx
 
 import React from "react"
@@ -158,6 +158,23 @@ describe("WelcomeViewProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 				apiModelId: "claude-sonnet-4-5",
 			},
+		})
+
+		fireEvent.click(screen.getByTestId("button-primary"))
+
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openrouter")
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-model", openRouterDefaultModelId)
+		expect(setApiConfiguration).toHaveBeenCalledWith({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: openRouterDefaultModelId,
+		})
+	})
+
+	it("still suggests OpenRouter for a resolved but keyless configuration", () => {
+		// The host now always resolves `apiProvider`, so "no provider" is no longer the
+		// signal for an unconfigured profile. A keyless default must still onboard.
+		const { setApiConfiguration } = renderWelcomeViewProvider({
+			apiConfiguration: { apiProvider: DEFAULT_API_PROVIDER },
 		})
 
 		fireEvent.click(screen.getByTestId("button-primary"))
