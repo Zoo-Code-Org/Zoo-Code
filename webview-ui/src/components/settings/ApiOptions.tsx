@@ -777,6 +777,7 @@ const ApiOptions = ({
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
 									apiConfiguration,
+									routerModels,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
