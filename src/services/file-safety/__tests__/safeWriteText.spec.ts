@@ -1833,13 +1833,15 @@ describe("residue a publish must not lose", () => {
 // bodies unchanged; the helpers they need are the sweep helpers, kept here so each assertion stays
 // in the shape that killed its mutant. 44 of these killed a mutant the shipped 75 tests let live,
 // and K313b, K353c, K413b and K637b are the four modified forms that killed theirs.
-// Mutants with no test here fall into three named classes: equivalence at lines 475, 476, 490, 714
-// and 758 (the strict comparison already forces the value the replacement produces, or the state the
-// replacement reaches is unreachable), the win32 DACL optional-chain rows at 572 and 692 (killed on
-// this Windows host by the shipped no-options test above, which never overrides `platform`, so they
-// need a leg that runs the real win32 step), line 402, which nothing in this package kills on this
-// host either, and the line 474 second-`&&` mutant, which does not reproduce here at all. Each is
-// named with its mechanism in that comment rather than papered over with a weaker assertion.
+// Mutants with no test here are the equivalence rows: lines 475, 476, 490, 714 and 758, where the
+// strict comparison already forces the value the replacement produces or the state the replacement
+// reaches is unreachable. The win32 optional-chain rows at 402, 572 and 692 are covered by the three
+// tests at the end of this block: the guard being mutated dereferences the whole options object, so
+// passing the documented `platform` override makes it non-null and cannot trip the chain - those two
+// tests supply no options object and pin process.platform for the call, which reads the same on a
+// Linux runner as on this host. The line 474 whole-condition mutant does not reproduce here at all;
+// CI killed it in the run of these specs (322 killed printed against head 6010a57a0b53), so the
+// mechanism is named rather than papered over with a weaker assertion.
 
 describe("assertions ported from the changed-code mutation sweep", () => {
 	beforeEach(() => {
@@ -2311,5 +2313,84 @@ describe("assertions ported from the changed-code mutation sweep", () => {
 		expect(
 			spy.mock.calls.some((c: unknown[]) => String(c[0]).includes("onWarning callback failed: sinkblew")),
 		).toBe(true)
+	})
+	// The three remaining optional chains guard the whole options object, not the field named in the
+	// replacement: line 402 reads options?.onWarning, lines 572 and 692 read options?.execFileRunner. A
+	// mutation to `options.field` therefore only differs from the clean program when options is absent,
+	// which is why these two tests pass no options object at all, and why the documented platform
+	// override cannot kill them: supplying `{ platform: "win32" }` is what makes options non-null, and
+	// non-null options is exactly the case the chain already handles. To reach the win32 steps with no
+	// options object the tests pin process.platform for the duration of the call and restore its own
+	// descriptor after it, so the assertion runs identically on Linux and on Windows instead of being
+	// gated on the host. The third test keeps the override form and asserts only the reachability the
+	// OS-gated test at line 752 could not assert off a Windows host; it kills none of the three mutants,
+	// and that gap is the finding, not an oversight.
+	const withPlatformPinned = async <T>(value: string, run: () => Promise<T>): Promise<T> => {
+		const own = Object.getOwnPropertyDescriptor(process, "platform")
+		Object.defineProperty(process, "platform", { value, configurable: true, writable: true })
+		try {
+			return await run()
+		} finally {
+			if (own) {
+				Object.defineProperty(process, "platform", own)
+			}
+		}
+	}
+	const win32IcaclsOk = () =>
+		vi.mocked(execFile).mockImplementation(((
+			_cmd: string,
+			_args: unknown[],
+			_opts: unknown,
+			cb: (e: unknown, stdout?: string) => void,
+		) => {
+			cb(null, "")
+			return { kill: () => true } as never
+		}) as never)
+	it("K402 K572 K692 the default sink gets the warning when no options object exists", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The DACL save succeeds and the restore fails, so the post-commit warning at line 703 is the
+		// only warning this call can produce, and with no options object its sink is the default
+		// console.warn fallback that line 402 selects through the mutated chain.
+		restoreFailExecFile2()
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const failure = await withPlatformPinned("win32", () => safeWriteText(targetPath, "x")).catch((e: unknown) => e)
+		expect(failure).toBeInstanceOf(DaclRestoreError)
+		const printed = spy.mock.calls.map((c: unknown[]) => String(c[0]))
+		expect(printed.some((m: string) => m.includes("could not restore its saved access rights"))).toBe(true)
+		// Under the line 402 mutant the fallback lookup throws before any sink exists and the warning
+		// arrives only as a report about the callback, so the message text is the discriminating fact.
+		expect(printed.some((m: string) => m.includes("onWarning callback"))).toBe(false)
+		expect(execFile).toHaveBeenCalledTimes(2)
+		spy.mockRestore()
+	})
+	it("K572 K692 the DACL save and restore both run when no options object exists", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		win32IcaclsOk()
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const result = await withPlatformPinned("win32", () => safeWriteText(targetPath, "x"))
+		expect(result).toEqual({ leftoverPaths: [] })
+		expect(execFile).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(execFile).mock.calls.map((c: unknown[]) => String((c[1] as unknown[])[1]))).toEqual([
+			"/save",
+			"/restore",
+		])
+		expect(vi.mocked(fs.unlink).mock.calls.some((c: unknown[]) => String(c[0]).includes("safeWriteText.acl"))).toBe(
+			true,
+		)
+		expect(spy.mock.calls.length).toBe(0)
+		spy.mockRestore()
+	})
+	it("K572 K692 the documented override reaches the win32 DACL steps on any host", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		win32IcaclsOk()
+		await expect(safeWriteText(targetPath, "x", { platform: "win32" })).resolves.toEqual({ leftoverPaths: [] })
+		expect(execFile).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(execFile).mock.calls.map((c: unknown[]) => String((c[1] as unknown[])[1]))).toEqual([
+			"/save",
+			"/restore",
+		])
 	})
 })
