@@ -727,7 +727,7 @@ export class ClineProvider
 					)
 				) {
 					await forceFullModelDetailsLoad(
-						cline.apiConfiguration.lmStudioBaseUrl ?? "http://localhost:1234",
+						cline.apiConfiguration.lmStudioBaseUrl,
 						cline.apiConfiguration.lmStudioModelId!,
 						buildApiHandler({ ...cline.apiConfiguration, apiProvider: providerIdentifiers.lmstudio }),
 					)

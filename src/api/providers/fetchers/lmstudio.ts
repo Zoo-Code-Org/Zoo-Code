@@ -3,7 +3,7 @@ import { z } from "zod"
 
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
-import { mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
+import { isTimeoutAbort, mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
 import { getLoggableOrigin } from "../utils/endpoint-origin"
 import { normalizeLMStudioBaseUrl } from "../utils/lmstudio"
 
@@ -61,6 +61,7 @@ const errorBodySchema = z.object({ error: z.string() })
 
 async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
 	const signal = mergeAbortSignalAndTimeout(externalSignal, MODEL_CATALOG_FETCH_TIMEOUT_MS)
+	let firstServerError: Error | undefined
 	try {
 		const { data } = await axios.get<unknown>(`${baseUrl}/api/v1/models`, { signal })
 		const parsedList = nativeListSchema.safeParse(data)
@@ -71,8 +72,11 @@ async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
 			})
 			return { version: "v1" as const, models }
 		}
-		if (!errorBodySchema.safeParse(data).success) throw parsedList.error
+		const serverError = errorBodySchema.safeParse(data)
+		if (!serverError.success) throw parsedList.error
+		firstServerError ??= new Error(serverError.data.error)
 	} catch (error) {
+		if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
 		throwIfAborted(signal)
 		if (!isUnsupportedEndpoint(error)) throw error
 	}
@@ -81,14 +85,28 @@ async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
 		const { data } = await axios.get<unknown>(`${baseUrl}/api/v0/models`, { signal })
 		const parsedList = legacyListSchema.safeParse(data)
 		if (parsedList.success) return { version: "v0" as const, models: parsedList.data.data }
-		if (!errorBodySchema.safeParse(data).success) throw parsedList.error
+		const serverError = errorBodySchema.safeParse(data)
+		if (!serverError.success) throw parsedList.error
+		firstServerError ??= new Error(serverError.data.error)
 	} catch (error) {
+		if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
 		throwIfAborted(signal)
 		if (!isUnsupportedEndpoint(error)) throw error
 	}
 
-	const { data } = await axios.get<unknown>(`${baseUrl}/v1/models`, { signal })
-	return { version: "openai" as const, models: openAIListSchema.parse(data).data }
+	let data: unknown
+	try {
+		;({ data } = await axios.get<unknown>(`${baseUrl}/v1/models`, { signal }))
+	} catch (error) {
+		if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
+		throwIfAborted(signal)
+		// Keep the earlier server message only when this endpoint is also unsupported.
+		throw isUnsupportedEndpoint(error) ? (firstServerError ?? error) : error
+	}
+	const parsed = openAIListSchema.safeParse(data)
+	if (parsed.success) return { version: "openai" as const, models: parsed.data.data }
+	const serverError = errorBodySchema.safeParse(data)
+	throw firstServerError ?? (serverError.success ? new Error(serverError.data.error) : parsed.error)
 }
 
 // Prefer the instance explicitly selected by the user; otherwise use server order.
@@ -118,7 +136,7 @@ function logModelError(action: string, error: unknown, baseUrl: string) {
 }
 
 export const forceFullModelDetailsLoad = async (
-	baseUrl: string,
+	baseUrl: string | undefined,
 	modelId: string,
 	handler: ApiHandler,
 ): Promise<void> => {
@@ -204,9 +222,9 @@ export async function getLMStudioModels(
 		modelsWithLoadedDetails.set(baseUrl, loadedDetails)
 		instanceAliases.set(baseUrl, aliases)
 	} catch (error) {
+		throwIfAborted(opts?.signal)
 		modelsWithLoadedDetails.delete(baseUrl)
 		instanceAliases.delete(baseUrl)
-		throwIfAborted(opts?.signal)
 		logModelError("fetching", error, baseUrl)
 	}
 	return models
