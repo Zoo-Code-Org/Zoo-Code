@@ -17,7 +17,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
-import { ContextProxy } from "./ContextProxy"
+import { ContextProxy, isNonPortableSettingsKey } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -102,6 +102,11 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 		if (!schema) {
 			warnings.push(`Setting "${path}" was skipped: Unknown setting.`)
+			continue
+		}
+
+		if (isNonPortableSettingsKey(key)) {
+			warnings.push(`Setting "${path}" was skipped: host-owned view state is not portable.`)
 			continue
 		}
 

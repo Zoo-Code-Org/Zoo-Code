@@ -3229,8 +3229,9 @@ describe("ClineProvider", () => {
 
 		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
 
-		// Should not throw
-		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+		// Should not throw, and must report the failed delivery rather than resolving as if the
+		// webview had taken the message.
+		await expect(provider.postMessageToWebview(message)).resolves.toBe(false)
 	})
 
 	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
@@ -3315,7 +3316,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("posts a request and resolves the matching response", async () => {
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture()
 			await Promise.resolve()
 			const requestId = postMessageSpy.mock.calls[0]?.[0].requestId
@@ -3331,7 +3332,7 @@ describe("ClineProvider", () => {
 
 		test("rejects a request after its timeout", async () => {
 			vi.useFakeTimers()
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture(100)
 			const rejection = expect(request).rejects.toThrow("Theme fixture probe timed out after 100ms")
 
@@ -3340,7 +3341,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("rejects pending requests when webview resources are cleared", async () => {
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture()
 			const rejection = expect(request).rejects.toThrow(
 				"Webview was disposed before the theme fixture probe completed",
@@ -3366,7 +3367,7 @@ describe("ClineProvider", () => {
 			mdmService,
 		)
 
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => true)
 		vi.spyOn(provider as any, "getStateToPostToWebview").mockResolvedValue({ version: "1.0.0" })
 
 		await provider.postStateToWebview()
@@ -3376,8 +3377,8 @@ describe("ClineProvider", () => {
 	})
 
 	test("postStateToWebviewWithoutTaskHistory waits for the webview post boundary", async () => {
-		let releasePost!: () => void
-		const pendingPost = new Promise<void>((resolve) => {
+		let releasePost!: (delivered: boolean) => void
+		const pendingPost = new Promise<boolean>((resolve) => {
 			releasePost = resolve
 		})
 		let statePostSettled = false
@@ -3396,7 +3397,7 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy).toHaveBeenCalledOnce()
 		expect(statePostSettled).toBe(false)
 
-		releasePost()
+		releasePost(true)
 		await statePost
 		expect(statePostSettled).toBe(true)
 	})
@@ -3423,7 +3424,7 @@ describe("ClineProvider", () => {
 		vi.spyOn(provider, "getStateToPostToWebview")
 			.mockReturnValueOnce(olderSnapshot)
 			.mockResolvedValueOnce(readyState)
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 		const olderPost = postState(provider)
 		await Promise.resolve()
@@ -3450,7 +3451,7 @@ describe("ClineProvider", () => {
 		],
 	])("%s skips task history computation", async (_methodName, postState) => {
 		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll")
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 		await postState(provider)
 
@@ -5307,7 +5308,6 @@ describe("ClineProvider", () => {
 
 			// Spy on log method to verify warning was logged
 			const logSpy = vi.spyOn(provider, "log")
-
 			// Create history item with non-existent mode
 			const historyItem = {
 				id: "test-id",
@@ -8164,7 +8164,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				} as any)
 				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
@@ -8268,7 +8268,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
 				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi
