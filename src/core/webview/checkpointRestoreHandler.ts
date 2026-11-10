@@ -1,6 +1,7 @@
 import { Task } from "../task/Task"
 import {
 	checkpointRestoreFailureMessage,
+	ConversationPartlyRewoundError,
 	ConversationRewindError,
 	taskWasNotRestarted,
 } from "../checkpoints/ConversationRewindError"
@@ -99,7 +100,10 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		}
 		console.error(`Error in checkpoint restore (${operation}):`, error)
 		void vscode.window.showErrorMessage(checkpointRestoreFailureMessage(error))
-		if (operation === "delete" && !checkpointRestored && !taskRestarted && currentCline.abort) {
+		// A conversation that is only partly rewound is not offered a restart: it would load turns that the user cannot see.
+		const partlyRewound =
+			error instanceof ConversationRewindError && error.cause instanceof ConversationPartlyRewoundError
+		if (operation === "delete" && !checkpointRestored && !taskRestarted && !partlyRewound && currentCline.abort) {
 			try {
 				const restart = t("common:checkpoints.restart")
 				const response = await vscode.window.showWarningMessage(

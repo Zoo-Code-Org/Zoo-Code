@@ -3,7 +3,11 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { Task } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
-import { ConversationRewindError, TaskNotRestartedError } from "../../checkpoints/ConversationRewindError"
+import {
+	ConversationPartlyRewoundError,
+	ConversationRewindError,
+	TaskNotRestartedError,
+} from "../../checkpoints/ConversationRewindError"
 import { handleCheckpointRestoreOperation, type CheckpointRestoreConfig } from "../checkpointRestoreHandler"
 import { PendingEditOperationStore } from "../PendingEditOperationStore"
 import { saveTaskMessages } from "../../task-persistence"
@@ -406,6 +410,43 @@ describe("checkpointRestoreHandler", () => {
 				).rejects.toMatchObject({ restarted: false })
 
 				expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce()
+			})
+
+			it("does not offer to restart a deleted task whose conversation is only partly rewound, and hands an edit back", async () => {
+				fixture.taskDouble.abort = true
+				const partly = new ConversationRewindError(new ConversationPartlyRewoundError("only partly rewound"), {
+					error: new Error("the task was not started again"),
+				})
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(partly)
+
+				await expect(handleCheckpointRestoreOperation(fixture.config)).rejects.toBe(partly)
+
+				// The failure is reported, and no restart is offered: it would load turns that the user cannot see.
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce()
+				expect(showWarningMessage).not.toHaveBeenCalled()
+				expect(fixture.providerDouble.restartTaskIfCurrent).not.toHaveBeenCalled()
+			})
+
+			it("hands an edit back, and offers no restart, after a partly rewound conversation of an edit", async () => {
+				fixture.taskDouble.abort = true
+				fixture.taskDouble.checkpointRestore.mockRejectedValueOnce(
+					new ConversationRewindError(new ConversationPartlyRewoundError("only partly rewound"), {
+						error: new Error("the task was not started again"),
+					}),
+				)
+
+				await expect(
+					handleCheckpointRestoreOperation({
+						...fixture.config,
+						operation: "edit",
+						editData: { editedContent: "Edited prompt", apiConversationHistoryIndex: 0 },
+					}),
+				).rejects.toMatchObject({ restarted: false })
+
+				expect(fixture.providerDouble.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({ invoke: "setChatBoxMessage", text: "Edited prompt" }),
+				)
+				expect(showWarningMessage).not.toHaveBeenCalled()
 			})
 
 			it("offers to restart a deleted task, since nothing started it", async () => {
