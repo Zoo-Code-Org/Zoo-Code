@@ -187,11 +187,11 @@
 			}
 		],
 		"menus": {
-			"scm/inputBox": [
+			"scm/title": [
 				{
 					"command": "zoo-code.generateGitCommitMessage",
-					"group": "inline",
-					"when": "scmRepository && scmProvider == git"
+					"group": "navigation",
+					"when": "scmProvider == git"
 				}
 			],
 			"editor/context": [

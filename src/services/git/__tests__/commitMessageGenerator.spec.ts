@@ -5,9 +5,15 @@ import { providerIdentifiers } from "@roo-code/types"
 import {
 	buildCommitMessagePrompt,
 	cleanCommitMessage,
+	COMMIT_MESSAGE_SYSTEM_PROMPT,
+	DIFF_CHARACTER_LIMIT,
+	DIFF_LINE_LIMIT,
+	DIFF_TRUNCATED_MESSAGE,
+	DRAFT_CHANGED_MESSAGE,
 	generateCommitMessage,
 	getGitApi,
 	getRepositoryDiff,
+	NO_CHANGES_MESSAGE,
 	redactSensitiveInformation,
 	resolveGitRepository,
 	type GitAPI,
@@ -40,6 +46,52 @@ vi.mock("vscode", () => ({
 vi.mock("../../../utils/single-completion-handler", () => ({
 	singleCompletionHandler: vi.fn(),
 }))
+
+function makeRepo(root: string, overrides: Partial<GitRepository> = {}): GitRepository {
+	return {
+		rootUri: makeUri(root),
+		inputBox: { value: "" },
+		diff: vi.fn().mockResolvedValue("diff content"),
+		...overrides,
+	}
+}
+
+function deferred<T>() {
+	let resolve: (value: T) => void = () => {}
+	const promise = new Promise<T>((r) => {
+		resolve = r
+	})
+	return { promise, resolve }
+}
+
+/**
+ * Installs a withProgress mock whose token can be cancelled from the test. Every registered
+ * cancellation listener runs on cancel(), like a real vscode.CancellationTokenSource.
+ */
+function useCancellableProgress() {
+	let cancelled = false
+	const listeners: Array<() => void> = []
+	const disposable = { dispose: vi.fn() }
+	;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+		const token = {
+			get isCancellationRequested() {
+				return cancelled
+			},
+			onCancellationRequested: vi.fn((fn: () => void) => {
+				listeners.push(fn)
+				return disposable
+			}),
+		}
+		return callback({ report: vi.fn() }, token)
+	})
+	return {
+		disposable,
+		cancel: () => {
+			cancelled = true
+			listeners.forEach((fn) => fn())
+		},
+	}
+}
 
 describe("commitMessageGenerator", () => {
 	beforeEach(() => {
@@ -87,6 +139,77 @@ describe("commitMessageGenerator", () => {
 			expect(redacted).toContain("+other: value")
 		})
 
+		it("redacts secret_key values", () => {
+			const content = "secret_key=supersecret12345\nother=unchanged"
+			const redacted = redactSensitiveInformation(content)
+			expect(redacted).not.toContain("supersecret12345")
+			expect(redacted).toContain("[REDACTED]")
+			expect(redacted).toContain("other=unchanged")
+		})
+
+		it("redacts passwords containing special characters like @", () => {
+			const content = "password=pass@word123\nother=unchanged"
+			const redacted = redactSensitiveInformation(content)
+			expect(redacted).not.toContain("pass@word123")
+			expect(redacted).toContain("[REDACTED]")
+			expect(redacted).toContain("other=unchanged")
+		})
+
+		it.each([
+			["JSON key", '+  "apiKey": "sk-live-123456789",', '+  "apiKey": "[REDACTED]",', "sk-live-123456789"],
+			["YAML key", "+  client_secret: hunter2", "+  client_secret: [REDACTED]", "hunter2"],
+			["env var with prefix", "+OPENAI_API_KEY=abc", "+OPENAI_API_KEY=[REDACTED]", "abc"],
+			["short password", "+DB_PASSWORD=a", "+DB_PASSWORD=[REDACTED]", "=a"],
+			["camelCase key", '+  openAiApiKey: "abc123",', '+  openAiApiKey: "[REDACTED]",', "abc123"],
+			["bare bearer token", "+curl -H x Bearer abc123def456", "+curl -H x Bearer [REDACTED]", "abc123def456"],
+			["access token", "+access_token: 'tok_1'", "+access_token: '[REDACTED]'", "tok_1"],
+			[
+				"Basic authorization header",
+				"+Authorization: Basic dXNlcjpwYXNzd29yZA==",
+				"+Authorization: Basic [REDACTED]",
+				"dXNlcjpwYXNzd29yZA",
+			],
+			[
+				"JSON authorization header",
+				'+"Authorization": "Bearer abc.def.ghi"',
+				'+"Authorization": "Bearer [REDACTED]"',
+				"abc.def.ghi",
+			],
+			["raw authorization header", "+authorization: rawtoken", "+authorization: [REDACTED]", "rawtoken"],
+			[
+				"URL credentials",
+				"+url = postgres://admin:s3cr3t@db.internal:5432/app",
+				"+url = postgres://admin:[REDACTED]@db.internal:5432/app",
+				"s3cr3t",
+			],
+			["email address", '+  "author": "alice@example.com",', '+  "author": "[REDACTED_EMAIL]",', "alice@"],
+		])("redacts %s", (_label, content, expected, secret) => {
+			const redacted = redactSensitiveInformation(content)
+			expect(redacted).toBe(expected)
+			expect(redacted).not.toContain(secret)
+		})
+
+		it.each([
+			["OpenAI key", "sk-proj-abcdefghijklmnopqrstuvwx"],
+			["GitHub token", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+			["AWS access key id", "AKIAABCDEFGHIJKLMNOP"],
+			["Slack token", "xoxb-1234567890-abcdef"],
+			["JWT", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"],
+		])("redacts a bare %s", (_label, token) => {
+			const redacted = redactSensitiveInformation(`+const value = callWith(${token})`)
+			expect(redacted).toBe("+const value = callWith([REDACTED_SECRET])")
+		})
+
+		it.each([
+			["comparisons", "+if (password === confirmation) {"],
+			["arrow functions", "+const check = (password) => verify(password)"],
+			["prose mentioning auth schemes", "+// Adds basic functionality for Bearer authentication"],
+			["scoped package names", '+import { x } from "@roo-code/types"'],
+			["versioned package specs", "+npx react@18.3.1"],
+		])("leaves %s unchanged", (_label, content) => {
+			expect(redactSensitiveInformation(content)).toBe(content)
+		})
+
 		it("leaves normal diff content unchanged", () => {
 			const content = "diff --git a/src/app.ts b/src/app.ts\n+console.log('hello world')"
 			expect(redactSensitiveInformation(content)).toBe(content)
@@ -95,15 +218,31 @@ describe("commitMessageGenerator", () => {
 
 	describe("buildCommitMessagePrompt", () => {
 		it("includes diff and instructions", () => {
-			const prompt = buildCommitMessagePrompt("diff --git a/file b/file\n+test")
+			const { prompt, truncated } = buildCommitMessagePrompt("diff --git a/file b/file\n+test")
 			expect(prompt).toContain("diff --git a/file b/file\n+test")
 			expect(prompt).toContain("Conventional Commits")
+			expect(truncated).toBe(false)
 		})
 
 		it("redacts sensitive information in the prompt", () => {
-			const prompt = buildCommitMessagePrompt("apiKey: 'secret_token_12345678'")
+			const { prompt } = buildCommitMessagePrompt("apiKey: 'secret_token_12345678'")
 			expect(prompt).not.toContain("secret_token_12345678")
 			expect(prompt).toContain("[REDACTED]")
+		})
+
+		it.each([
+			["character", "x".repeat(DIFF_CHARACTER_LIMIT + 1)],
+			["line", Array.from({ length: DIFF_LINE_LIMIT + 1 }, (_, i) => `+line ${i}`).join("\n")],
+		])("reports truncation when the diff exceeds the %s limit", (_label, diff) => {
+			const { prompt, truncated } = buildCommitMessagePrompt(diff)
+			expect(truncated).toBe(true)
+			expect(prompt).toContain(COMMIT_MESSAGE_SYSTEM_PROMPT)
+			expect(prompt).toMatch(/\[\.\.\.\d+ (?:characters|lines) omitted\.\.\.\]/)
+		})
+
+		it("does not report truncation at exactly the character limit", () => {
+			const { truncated } = buildCommitMessagePrompt("x".repeat(DIFF_CHARACTER_LIMIT))
+			expect(truncated).toBe(false)
 		})
 	})
 
@@ -147,6 +286,43 @@ describe("commitMessageGenerator", () => {
 			const git: GitAPI = { repositories: [repo] }
 
 			expect(resolveGitRepository(git, repo)).toBe(repo)
+		})
+
+		it("resolves a SourceControl context from the scm/title menu by rootUri", () => {
+			const repo1 = makeRepo("/workspace/repo1")
+			const repo2 = makeRepo("/workspace/repo2")
+			const git: GitAPI = { repositories: [repo1, repo2] }
+			const sourceControl = { id: "git", rootUri: makeUri("/workspace/repo2"), inputBox: { value: "" } }
+
+			expect(resolveGitRepository(git, sourceControl)).toBe(repo2)
+		})
+
+		it("rejects a repository-shaped context that is not a known repository", () => {
+			const known = makeRepo("/workspace/repo1")
+			const other = makeRepo("/workspace/repo2")
+			const git: GitAPI = { repositories: [known, other] }
+			const fake = makeRepo("/workspace/attacker")
+
+			expect(resolveGitRepository(git, fake)).toBeUndefined()
+			expect(fake.diff).not.toHaveBeenCalled()
+		})
+
+		it("returns the known repository, not the context object, when a fake context reuses its rootUri", () => {
+			const known = makeRepo("/workspace/repo")
+			const git: GitAPI = { repositories: [known, makeRepo("/workspace/other")] }
+			const fake = makeRepo("/workspace/repo")
+
+			const resolved = resolveGitRepository(git, fake)
+			expect(resolved).toBe(known)
+			expect(resolved).not.toBe(fake)
+		})
+
+		it("rejects a fake context with a matching-looking inputBox", () => {
+			const git: GitAPI = { repositories: [makeRepo("/workspace/repo1"), makeRepo("/workspace/repo2")] }
+			const fake = { inputBox: { value: "" }, diff: vi.fn() }
+
+			expect(resolveGitRepository(git, fake)).toBeUndefined()
+			expect(fake.diff).not.toHaveBeenCalled()
 		})
 
 		it("resolves from bare vscode.Uri context", () => {
@@ -383,20 +559,28 @@ describe("commitMessageGenerator", () => {
 			expect(repo.diff).toHaveBeenCalledWith(false)
 		})
 
-		it("falls back to working tree diff if staged diff throws", async () => {
-			const repo: GitRepository = {
-				rootUri: makeUri("/workspace/repo"),
-				inputBox: { value: "" },
+		it("rejects without reading the working tree when the staged diff fails", async () => {
+			const repo = makeRepo("/workspace/repo", {
 				diff: vi.fn().mockImplementation((cached?: boolean) => {
 					if (cached) return Promise.reject(new Error("Git diff staged failed"))
 					return Promise.resolve("working diff fallback")
 				}),
-			}
+			})
 
-			const diff = await getRepositoryDiff(repo)
-			expect(diff).toBe("working diff fallback")
-			expect(repo.diff).toHaveBeenCalledWith(true)
-			expect(repo.diff).toHaveBeenCalledWith(false)
+			await expect(getRepositoryDiff(repo)).rejects.toThrow("Git diff staged failed")
+			expect(repo.diff).not.toHaveBeenCalledWith(false)
+		})
+
+		it("rejects with the staged error when both staged and working tree diffs fail", async () => {
+			const repo = makeRepo("/workspace/repo", {
+				diff: vi
+					.fn()
+					.mockImplementation((cached?: boolean) =>
+						Promise.reject(new Error(cached ? "staged failed" : "working failed")),
+					),
+			})
+
+			await expect(getRepositoryDiff(repo)).rejects.toThrow("staged failed")
 		})
 
 		it("returns undefined if both staged and working diffs are empty", async () => {
@@ -410,18 +594,28 @@ describe("commitMessageGenerator", () => {
 			expect(diff).toBeUndefined()
 		})
 
-		it("returns undefined if working diff throws after empty staged diff", async () => {
-			const repo: GitRepository = {
-				rootUri: makeUri("/workspace/repo"),
-				inputBox: { value: "" },
+		it("rejects if working diff fails after empty staged diff", async () => {
+			const repo = makeRepo("/workspace/repo", {
 				diff: vi.fn().mockImplementation((cached?: boolean) => {
 					if (cached) return Promise.resolve("")
 					return Promise.reject(new Error("Git working tree diff failed"))
 				}),
-			}
+			})
+
+			await expect(getRepositoryDiff(repo)).rejects.toThrow("Git working tree diff failed")
+		})
+
+		it("lists untracked files relative to the repository root", async () => {
+			const repo = makeRepo("/home/alice/workspace/repo", {
+				diff: vi.fn().mockResolvedValue(""),
+				state: {
+					workingTreeChanges: [{ uri: makeUri("/home/alice/workspace/repo/src/new-file.ts"), status: 7 }],
+				},
+			})
 
 			const diff = await getRepositoryDiff(repo)
-			expect(diff).toBeUndefined()
+			// path.relative uses the platform separator.
+			expect(diff).toMatch(/^Untracked files:\nsrc[\\/]new-file\.ts$/)
 		})
 
 		it("surfaces untracked files when both diffs are empty", async () => {
@@ -571,9 +765,195 @@ describe("commitMessageGenerator", () => {
 				outputChannel: mockOutputChannel,
 			})
 
-			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-				"No staged or working directory changes found to generate commit message.",
+			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(NO_CHANGES_MESSAGE)
+		})
+
+		it("reports a Git diff failure as an error instead of 'no changes'", async () => {
+			mockRepo.diff = vi.fn().mockRejectedValue(new Error("fatal: bad index file"))
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(NO_CHANGES_MESSAGE)
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"Failed to generate commit message: fatal: bad index file",
 			)
+			expect(singleCompletionHandler).not.toHaveBeenCalled()
+		})
+
+		it("never reads from or writes to a command context that is not a known repository", async () => {
+			const fake = makeRepo("/workspace/attacker")
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+				context: fake,
+			})
+
+			expect(fake.diff).not.toHaveBeenCalled()
+			expect(singleCompletionHandler).not.toHaveBeenCalled()
+			expect(fake.inputBox.value).toBe("")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("No Git repository found.")
+		})
+
+		it("generates for the repository named by an scm/title SourceControl context", async () => {
+			;(singleCompletionHandler as Mock).mockResolvedValue("fix: second repo")
+			const second = makeRepo("/workspace/second")
+			;(vscode.extensions.getExtension as Mock).mockReturnValue({
+				isActive: true,
+				exports: { getAPI: () => ({ repositories: [mockRepo, second] }) },
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+				context: { rootUri: makeUri("/workspace/second"), inputBox: { value: "" } },
+			})
+
+			expect(second.inputBox.value).toBe("fix: second repo")
+			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it("warns after writing when the diff was truncated", async () => {
+			mockRepo.diff = vi.fn().mockResolvedValue("x".repeat(DIFF_CHARACTER_LIMIT + 1))
+			;(singleCompletionHandler as Mock).mockResolvedValue("feat: large change")
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockRepo.inputBox.value).toBe("feat: large change")
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(DIFF_TRUNCATED_MESSAGE)
+		})
+
+		it("does not warn about truncation for a diff within the limits", async () => {
+			;(singleCompletionHandler as Mock).mockResolvedValue("feat: small change")
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockRepo.inputBox.value).toBe("feat: small change")
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		})
+
+		it("keeps text the user typed while the request was pending", async () => {
+			mockRepo.inputBox.value = "draft"
+			;(singleCompletionHandler as Mock).mockImplementation(async () => {
+				mockRepo.inputBox.value = "typed by user"
+				return "feat: generated"
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockRepo.inputBox.value).toBe("typed by user")
+			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
+		})
+
+		it("replaces an unchanged draft with the generated message", async () => {
+			mockRepo.inputBox.value = "draft"
+			;(singleCompletionHandler as Mock).mockResolvedValue("feat: generated")
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockRepo.inputBox.value).toBe("feat: generated")
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
+		})
+
+		it("discards an older result that finishes after a newer request for the same repository", async () => {
+			const first = deferred<string>()
+			const second = deferred<string>()
+			;(singleCompletionHandler as Mock)
+				.mockImplementationOnce(() => first.promise)
+				.mockImplementationOnce(() => second.promise)
+
+			const older = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			const newer = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(2))
+
+			second.resolve("feat: newer")
+			await newer
+			first.resolve("feat: older")
+			await older
+
+			expect(mockRepo.inputBox.value).toBe("feat: newer")
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
+		})
+
+		it("keeps the latest request of each repository independent", async () => {
+			const otherRepo = makeRepo("/workspace/other")
+			;(vscode.extensions.getExtension as Mock).mockReturnValue({
+				isActive: true,
+				exports: { getAPI: () => ({ repositories: [mockRepo, otherRepo] }) },
+			})
+			const first = deferred<string>()
+			const second = deferred<string>()
+			;(singleCompletionHandler as Mock)
+				.mockImplementationOnce(() => first.promise)
+				.mockImplementationOnce(() => second.promise)
+
+			const forMockRepo = generateCommitMessage({ provider: mockProvider, context: mockRepo })
+			const forOtherRepo = generateCommitMessage({ provider: mockProvider, context: otherRepo })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(2))
+
+			second.resolve("feat: other")
+			await forOtherRepo
+			first.resolve("feat: mock")
+			await forMockRepo
+
+			expect(mockRepo.inputBox.value).toBe("feat: mock")
+			expect(otherRepo.inputBox.value).toBe("feat: other")
+		})
+
+		it("closes the progress immediately when cancelled while the LLM call is pending", async () => {
+			const { cancel, disposable } = useCancellableProgress()
+			let capturedSignal: AbortSignal | undefined
+			// The provider ignores the abort signal and never settles.
+			;(singleCompletionHandler as Mock).mockImplementation((_config, _prompt, options) => {
+				capturedSignal = options.abortSignal as AbortSignal
+				return new Promise(() => {})
+			})
+
+			const run = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalled())
+			cancel()
+			await run
+
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(disposable.dispose).toHaveBeenCalled()
+			expect(mockRepo.inputBox.value).toBe("")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("does not report a provider rejection that arrives after cancellation", async () => {
+			const { cancel } = useCancellableProgress()
+			let rejectCompletion: (error: Error) => void = () => {}
+			;(singleCompletionHandler as Mock).mockImplementation(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectCompletion = reject
+					}),
+			)
+
+			const run = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalled())
+			cancel()
+			await run
+			rejectCompletion(new Error("late provider failure"))
+			await Promise.resolve()
+
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(mockRepo.inputBox.value).toBe("")
 		})
 
 		it("shows error if no valid API provider is configured", async () => {
@@ -639,7 +1019,41 @@ describe("commitMessageGenerator", () => {
 			expect(mockRepo.inputBox.value).toBe("")
 		})
 
-		it("skips LLM call when cancelled between diff fetch and provider state read", async () => {
+		it("skips provider and LLM call when cancelled while diff is pending", async () => {
+			let isCancelled = false
+			const cancellationHandlers: Array<() => void> = []
+			// diff never resolves on its own — simulates a slow/stuck git process
+			mockRepo.diff = vi.fn().mockImplementation(() => new Promise(() => {}))
+			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+				const progress = { report: vi.fn() }
+				const token = {
+					get isCancellationRequested() {
+						return isCancelled
+					},
+					onCancellationRequested: vi.fn((fn: () => void) => {
+						cancellationHandlers.push(fn)
+						return { dispose: vi.fn() }
+					}),
+				}
+				// Trigger cancellation after the race has started (next microtask)
+				void Promise.resolve().then(() => {
+					isCancelled = true
+					cancellationHandlers.forEach((fn) => fn())
+				})
+				return callback(progress, token)
+			})
+
+			await generateCommitMessage({
+				provider: mockProvider,
+				outputChannel: mockOutputChannel,
+			})
+
+			expect(mockProvider.getState).not.toHaveBeenCalled()
+			expect(singleCompletionHandler).not.toHaveBeenCalled()
+			expect(mockRepo.inputBox.value).toBe("")
+		})
+
+		it("skips LLM call when cancelled after provider state resolves", async () => {
 			let isCancelled = false
 			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
 				const progress = { report: vi.fn() }
@@ -694,11 +1108,14 @@ describe("commitMessageGenerator", () => {
 		})
 
 		it("aborts the in-flight provider request when cancellation is requested", async () => {
-			let cancelHandler: () => void = () => {}
+			// Collect ALL registered cancellation handlers so both abortController.abort()
+			// and the cancelPromise resolver are called when the test triggers cancellation.
+			const registeredHandlers: Array<() => void> = []
+			let triggerCancellation: () => void = () => {}
 			let capturedSignal: AbortSignal | undefined
 			;(singleCompletionHandler as Mock).mockImplementation((_config, _prompt, options) => {
 				capturedSignal = options.abortSignal as AbortSignal
-				cancelHandler()
+				triggerCancellation()
 				return Promise.resolve("feat: should be cancelled")
 			})
 			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
@@ -706,7 +1123,8 @@ describe("commitMessageGenerator", () => {
 				const token = {
 					isCancellationRequested: false,
 					onCancellationRequested: vi.fn((fn: () => void) => {
-						cancelHandler = fn
+						registeredHandlers.push(fn)
+						triggerCancellation = () => registeredHandlers.forEach((h) => h())
 						return { dispose: vi.fn() }
 					}),
 				}

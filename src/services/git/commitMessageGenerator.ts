@@ -1,3 +1,4 @@
+import * as path from "path"
 import * as vscode from "vscode"
 import type { ProviderSettings } from "@roo-code/types"
 
@@ -38,6 +39,11 @@ export interface GenerateCommitMessageOptions {
 	context?: unknown
 }
 
+export interface CommitMessagePrompt {
+	prompt: string
+	truncated: boolean
+}
+
 export const COMMIT_MESSAGE_SYSTEM_PROMPT = `You are an expert developer specializing in Git commit messages.
 Generate a concise, meaningful Git commit message for the provided diff following the Conventional Commits specification (v1.0.0).
 
@@ -62,24 +68,88 @@ Guidelines:
 6. Return ONLY the commit message. Do NOT include markdown code blocks, quotes, or any introductory or concluding text.
 7. Never output secrets, passwords, or personal identifiable information in commit messages.`
 
-const SENSITIVE_PATTERNS = [
-	/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-	/(?:api[_-]?key|auth[_-]?token|bearer|secret|password)[\s]*[=:]\s*['"]?([a-zA-Z0-9_\-.]{8,})['"]?/gi,
-	/\bBearer\s+([a-zA-Z0-9_\-.~+/]{8,}=*)/gi,
+export const DIFF_LINE_LIMIT = 1000
+export const DIFF_CHARACTER_LIMIT = 50_000
+
+export const NO_CHANGES_MESSAGE = "No staged or working directory changes found to generate commit message."
+export const DRAFT_CHANGED_MESSAGE =
+	"The commit message box changed while Zoo Code generated a message. Your text was kept. Run the command again to replace it."
+export const DIFF_TRUNCATED_MESSAGE =
+	"The diff was too large and Zoo Code shortened it before generation. Make sure the commit message covers all changes."
+
+// vscode.git Status.UNTRACKED
+const UNTRACKED_STATUS = 7
+
+const CREDENTIAL_KEYWORDS = [
+	"api[_-]?key",
+	"access[_-]?key(?:[_-]?id)?",
+	"access[_-]?token",
+	"refresh[_-]?token",
+	"auth[_-]?token",
+	"client[_-]?secret",
+	"private[_-]?key",
+	"secret(?:[_-]?(?:access[_-]?)?key)?",
+	"passw(?:or)?d",
+	"pwd",
+	"credentials?",
+].join("|")
+
+/**
+ * Each entry replaces one class of sensitive value. Patterns with a `prefix` capture group keep the
+ * prefix (key name, header scheme) and replace only the value, so the model still sees which setting
+ * changed. The order matters: header schemes run before the generic key/value pattern, and URL
+ * credentials run before the email pattern.
+ */
+const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> = [
+	// PEM private key blocks
+	{
+		pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+		replacement: "[REDACTED_SECRET]",
+	},
+	// Authorization header values, with or without a scheme ("Authorization: Basic dXNlcjpwYXNz")
+	{
+		pattern:
+			/(?<prefix>\bauthorization["']?\s*[:=](?![=>])\s*["']?(?:(?:Bearer|Basic|Digest|Token)\s+)?)[^\s"',;]+/gi,
+		replacement: "$<prefix>[REDACTED]",
+	},
+	// Bearer tokens outside an Authorization header. The token must contain a digit so prose such as
+	// "Bearer authentication" is not redacted.
+	{
+		pattern: /(?<prefix>\b[Bb]earer\s+)(?=[A-Za-z_\-.~+/]*\d)[A-Za-z0-9_\-.~+/]{8,}=*/g,
+		replacement: "$<prefix>[REDACTED]",
+	},
+	// key = value, key: value, "key": "value" (env files, YAML, JSON, code).
+	// `(?![=>])` skips comparisons (`password === x`) and arrow functions.
+	{
+		pattern: new RegExp(`(?<prefix>(?:${CREDENTIAL_KEYWORDS})["']?\\s*[:=](?![=>])\\s*["']?)[^\\s"',;]+`, "gi"),
+		replacement: "$<prefix>[REDACTED]",
+	},
+	// Well-known token formats that can appear without a key name
+	{
+		pattern:
+			/\b(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
+		replacement: "[REDACTED_SECRET]",
+	},
+	// Credentials embedded in URLs: scheme://user:password@host
+	{
+		pattern: /(?<prefix>:\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g,
+		replacement: "$<prefix>[REDACTED]",
+	},
+	// Email addresses
+	{
+		pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/g,
+		replacement: "[REDACTED_EMAIL]",
+	},
 ]
 
 /**
- * Redacts secrets, private keys, and credential tokens from content before sending to an LLM.
+ * Redacts secrets, private keys, credential tokens, and email addresses from content before it is
+ * sent to an LLM.
  */
 export function redactSensitiveInformation(content: string): string {
 	let redacted = content
-	for (const pattern of SENSITIVE_PATTERNS) {
-		redacted = redacted.replace(pattern, (match, captured) => {
-			if (captured) {
-				return match.replace(captured, "[REDACTED]")
-			}
-			return "[REDACTED_SECRET]"
-		})
+	for (const { pattern, replacement } of REDACTION_RULES) {
+		redacted = redacted.replace(pattern, replacement)
 	}
 	return redacted
 }
@@ -98,8 +168,25 @@ export async function getGitApi(): Promise<GitAPI | undefined> {
 	return gitExtension.exports?.getAPI(1)
 }
 
+function isUriLike(value: unknown): value is vscode.Uri {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as { scheme?: unknown }).scheme === "string" &&
+		typeof (value as { fsPath?: unknown }).fsPath === "string"
+	)
+}
+
+function findRepositoryByRoot(git: GitAPI, uri: vscode.Uri): GitRepository | undefined {
+	const uriString = uri.toString()
+	return git.repositories.find((r) => r.rootUri.toString() === uriString || r.rootUri.fsPath === uri.fsPath)
+}
+
 /**
- * Resolves the appropriate Git repository given an optional SCM invocation context.
+ * Resolves the Git repository for an optional SCM command context.
+ *
+ * The command is public, so the context is untrusted. The result is always an entry of
+ * `git.repositories`. The function never returns the context object and never calls its methods.
  */
 export function resolveGitRepository(git: GitAPI, context?: unknown): GitRepository | undefined {
 	if (!git.repositories || git.repositories.length === 0) {
@@ -107,27 +194,21 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 	}
 
 	if (context && typeof context === "object") {
-		// Bare vscode.Uri or URI-like object passed from scm/inputBox menu.
-		// Return undefined (not first repo) when it doesn't match any repository.
-		if ("scheme" in context && "fsPath" in context) {
-			const uri = context as vscode.Uri
-			return git.repositories.find(
-				(r) => r.rootUri.toString() === uri.toString() || r.rootUri.fsPath === uri.fsPath,
-			)
+		const known = git.repositories.find((r) => r === context)
+		if (known) {
+			return known
 		}
 
-		const candidate = context as Partial<GitRepository>
-		if (typeof candidate.diff === "function" && candidate.inputBox && typeof candidate.inputBox === "object") {
-			return candidate as GitRepository
+		// A bare Uri, or a SourceControl from the scm/title menu (rootUri + inputBox).
+		// When an explicit context matches no repository, return undefined instead of
+		// silently picking a different repository.
+		if (isUriLike(context)) {
+			return findRepositoryByRoot(git, context)
 		}
 
-		const sc = context as { rootUri?: vscode.Uri; inputBox?: unknown }
-		// When an explicit SCM rootUri or inputBox is provided but matches no repository,
-		// return undefined rather than silently falling through to a different repository.
-		if (sc.rootUri) {
-			return git.repositories.find(
-				(r) => r.rootUri.toString() === sc.rootUri?.toString() || r.rootUri.fsPath === sc.rootUri?.fsPath,
-			)
+		const sc = context as { rootUri?: unknown; inputBox?: unknown }
+		if (isUriLike(sc.rootUri)) {
+			return findRepositoryByRoot(git, sc.rootUri)
 		}
 
 		if (sc.inputBox) {
@@ -159,35 +240,30 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 }
 
 /**
- * Retrieves diff from the repository, prioritizing staged changes and falling back to working tree changes.
+ * Retrieves the diff from the repository. Staged changes come first. Working tree changes are used
+ * only when nothing is staged, and untracked files only when both diffs are empty.
+ *
+ * A failed `git diff` rejects. It is not reported as "no changes", because a failed staged read
+ * would otherwise make the message describe unstaged changes that the next commit does not include.
  */
 export async function getRepositoryDiff(repository: GitRepository): Promise<string | undefined> {
-	let diff = ""
-	try {
-		diff = await repository.diff(true)
-	} catch {
-		// Staged diff failed, continue to working tree diff
+	const staged = (await repository.diff(true))?.trim()
+	if (staged) {
+		return staged
 	}
 
-	if (!diff || !diff.trim()) {
-		try {
-			diff = await repository.diff(false)
-		} catch {
-			// Working tree diff failed
-		}
-	}
-
-	const trimmed = diff ? diff.trim() : ""
-	if (trimmed.length > 0) {
-		return trimmed
+	const workingTree = (await repository.diff(false))?.trim()
+	if (workingTree) {
+		return workingTree
 	}
 
 	// `git diff` omits untracked files; surface them as a plain listing so the
 	// LLM can still generate an "initial commit" or "add files" message.
-	const UNTRACKED_STATUS = 7 // vscode.git Status.UNTRACKED
+	// Paths are relative to the repository root so absolute local paths are not sent.
 	const untracked = repository.state?.workingTreeChanges?.filter((c) => c.status === UNTRACKED_STATUS)
 	if (untracked && untracked.length > 0) {
-		const fileList = untracked.map((c) => c.uri.fsPath).join("\n")
+		const rootPath = repository.rootUri.fsPath
+		const fileList = untracked.map((c) => path.relative(rootPath, c.uri.fsPath) || c.uri.fsPath).join("\n")
 		return `Untracked files:\n${fileList}`
 	}
 
@@ -212,18 +288,29 @@ export function cleanCommitMessage(message: string): string {
 
 /**
  * Builds the full prompt to generate a commit message from a git diff.
+ * `truncated` is true when the diff exceeded the line or character limit and was shortened.
  */
-export function buildCommitMessagePrompt(diff: string): string {
+export function buildCommitMessagePrompt(diff: string): CommitMessagePrompt {
 	const sanitizedDiff = redactSensitiveInformation(diff)
-	const truncatedDiff = truncateOutput(sanitizedDiff, 1000, 50000)
-	return `${COMMIT_MESSAGE_SYSTEM_PROMPT}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\`\n\nCommit Message:`
+	const truncatedDiff = truncateOutput(sanitizedDiff, DIFF_LINE_LIMIT, DIFF_CHARACTER_LIMIT)
+	return {
+		prompt: `${COMMIT_MESSAGE_SYSTEM_PROMPT}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\`\n\nCommit Message:`,
+		truncated: truncatedDiff !== sanitizedDiff,
+	}
 }
+
+// Invocation order for the stale-write check. Numbers are assigned before the first await, so they
+// follow call order. The latest number is tracked per repository so that a request for one
+// repository never discards the result for another.
+let invocationCounter = 0
+const latestInvocationByRepository = new WeakMap<GitRepository, number>()
 
 /**
  * Generates a commit message using the active LLM provider and populates the SCM input box.
  */
 export async function generateCommitMessage(options: GenerateCommitMessageOptions): Promise<void> {
 	const { provider, outputChannel, context } = options
+	const invocationId = ++invocationCounter
 
 	try {
 		const git = await getGitApi()
@@ -238,6 +325,11 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 			return
 		}
 
+		if (invocationId > (latestInvocationByRepository.get(repository) ?? 0)) {
+			latestInvocationByRepository.set(repository, invocationId)
+		}
+		const draft = repository.inputBox.value
+
 		await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
@@ -245,25 +337,48 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 				cancellable: true,
 			},
 			async (_progress, token) => {
+				// One listener aborts the provider request and ends every pending wait below, so the
+				// notification closes as soon as the user cancels, even when Git or the provider
+				// ignores the abort signal.
 				const abortController = new AbortController()
-				const cancellationListener = token.onCancellationRequested(() => {
-					abortController.abort()
+				let resolveCancelled: () => void = () => {}
+				const cancelled = new Promise<undefined>((resolve) => {
+					resolveCancelled = () => resolve(undefined)
 				})
+				const cancel = () => {
+					abortController.abort()
+					resolveCancelled()
+				}
+				const cancellationListener = token.onCancellationRequested(cancel)
+				if (token.isCancellationRequested) {
+					cancel()
+				}
+				const isCancelled = () => token.isCancellationRequested || abortController.signal.aborted
+				const untilCancelled = <T>(work: Promise<T>): Promise<T | undefined> => {
+					// A rejection after cancellation has no reader; keep it from becoming unhandled.
+					void work.catch(() => undefined)
+					return Promise.race([work, cancelled])
+				}
 
 				try {
-					const diff = await getRepositoryDiff(repository)
+					if (isCancelled()) {
+						return
+					}
+
+					const diff = await untilCancelled(getRepositoryDiff(repository))
+					if (isCancelled()) {
+						return
+					}
 					if (!diff) {
-						vscode.window.showInformationMessage(
-							"No staged or working directory changes found to generate commit message.",
-						)
+						vscode.window.showInformationMessage(NO_CHANGES_MESSAGE)
 						return
 					}
 
-					if (token.isCancellationRequested) {
+					const state = await untilCancelled(provider.getState())
+					if (isCancelled()) {
 						return
 					}
-
-					const { apiConfiguration } = await provider.getState()
+					const apiConfiguration = state?.apiConfiguration
 					if (!apiConfiguration || !apiConfiguration.apiProvider) {
 						vscode.window.showErrorMessage(
 							"No valid API provider configured. Please configure an API provider in Zoo Code settings.",
@@ -271,27 +386,39 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 						return
 					}
 
-					if (token.isCancellationRequested) {
+					const { prompt, truncated } = buildCommitMessagePrompt(diff)
+					const rawMessage = await untilCancelled(
+						singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
+							abortSignal: abortController.signal,
+						}),
+					)
+					if (isCancelled() || rawMessage === undefined) {
 						return
 					}
 
-					const prompt = buildCommitMessagePrompt(diff)
-					const rawMessage = await singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
-						abortSignal: abortController.signal,
-					})
-
-					if (token.isCancellationRequested || abortController.signal.aborted) {
+					// A newer request for this repository owns the input box now.
+					if (latestInvocationByRepository.get(repository) !== invocationId) {
 						return
 					}
 
 					const commitMessage = cleanCommitMessage(rawMessage)
-					if (commitMessage) {
-						repository.inputBox.value = commitMessage
-					} else {
+					if (!commitMessage) {
 						vscode.window.showWarningMessage("No commit message generated.")
+						return
+					}
+
+					// Do not overwrite text the user typed while the request was pending.
+					if (repository.inputBox.value !== draft) {
+						vscode.window.showInformationMessage(DRAFT_CHANGED_MESSAGE)
+						return
+					}
+
+					repository.inputBox.value = commitMessage
+					if (truncated) {
+						vscode.window.showWarningMessage(DIFF_TRUNCATED_MESSAGE)
 					}
 				} finally {
-					cancellationListener?.dispose()
+					cancellationListener.dispose()
 				}
 			},
 		)
