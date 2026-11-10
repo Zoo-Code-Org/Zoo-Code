@@ -2835,6 +2835,98 @@ describe("ClineProvider", () => {
 				void queued
 			})
 
+			test("leaves the shared queue untouched when dispose finds the entry already drained", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const drained: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider,
+					generation: provider["viewStateGeneration"],
+					run: async () => {},
+				}
+				const queuedDrained = ClineProvider["enqueuePersistedViewStateWrite"](drained)
+				// The queue step drops the entry from the shared list at its own turn before it asks
+				// whether the owner's generation is still live, so a write whose owner went stale
+				// stays on this provider's schedule while it is already gone from the shared list.
+				// That is the state below, built the way the queue step builds it.
+				const drainedIndex = ClineProvider["pendingViewStateWrites"].indexOf(drained)
+				ClineProvider["pendingViewStateWrites"].splice(drainedIndex, 1)
+				// A write belonging to somebody else, left on the shared queue so that a splice
+				// run without a match would remove it.
+				const neighbour: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider: null,
+					generation: 0,
+					run: async () => {},
+				}
+				ClineProvider["pendingViewStateWrites"].push(neighbour)
+				const sharedBefore = ClineProvider["pendingViewStateWrites"].slice()
+
+				await provider.dispose()
+
+				expect(ClineProvider["pendingViewStateWrites"]).toEqual(sharedBefore)
+				expect(ClineProvider["pendingViewStateWrites"]).toContain(neighbour)
+				expect(provider["scheduledViewStateWrites"]).toEqual([])
+				expect(drained.provider).toBeNull()
+				expect(ClineProvider["pendingViewStateWrites"]).toHaveLength(sharedBefore.length)
+
+				// The neighbour belongs to no provider, so this dispose leaves it on the shared
+				// queue; take it back out rather than hand it to the next test.
+				const neighbourIndex = ClineProvider["pendingViewStateWrites"].indexOf(neighbour)
+				if (neighbourIndex !== -1) {
+					ClineProvider["pendingViewStateWrites"].splice(neighbourIndex, 1)
+				}
+
+				void queuedDrained
+			})
+
+			test("splices the provider entry out of the shared queue without touching the entry behind it", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const entry: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider,
+					generation: provider["viewStateGeneration"],
+					run: async () => {},
+				}
+				const queued = ClineProvider["enqueuePersistedViewStateWrite"](entry)
+				// A write from another provider that is already waiting behind this one.
+				const behind: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider: null,
+					generation: 0,
+					run: async () => {},
+				}
+				ClineProvider["pendingViewStateWrites"].push(behind)
+
+				const entryIndex = ClineProvider["pendingViewStateWrites"].indexOf(entry)
+				expect(ClineProvider["pendingViewStateWrites"].indexOf(behind)).toBe(entryIndex + 1)
+
+				await provider.dispose()
+
+				expect(ClineProvider["pendingViewStateWrites"]).not.toContain(entry)
+				expect(ClineProvider["pendingViewStateWrites"]).toContain(behind)
+				expect(provider["scheduledViewStateWrites"]).toEqual([])
+				expect(entry.provider).toBeNull()
+
+				const behindIndex = ClineProvider["pendingViewStateWrites"].indexOf(behind)
+				if (behindIndex !== -1) {
+					ClineProvider["pendingViewStateWrites"].splice(behindIndex, 1)
+				}
+
+				void queued
+			})
+
 			test("numbers this provider's view id from the shared counter", () => {
 				const suffix = Number(String(provider["viewId"]).split("-").pop())
 
