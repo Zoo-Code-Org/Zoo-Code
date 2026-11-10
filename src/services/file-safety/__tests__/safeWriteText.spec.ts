@@ -1826,3 +1826,490 @@ describe("residue a publish must not lose", () => {
 		expect(failure).toBe("boom")
 	})
 })
+
+// The describe below is the sweep result from round U33: every `it` name starting with a K-number
+// is a control test I published in the triage comment on PR 1910 (comment 6755201987), and the
+// K-number is the source line of the mutant it was written against. The bodies are the control
+// bodies unchanged; the helpers they need are the sweep helpers, kept here so each assertion stays
+// in the shape that killed its mutant. 44 of these killed a mutant the shipped 75 tests let live,
+// and K313b, K353c, K413b and K637b are the four modified forms that killed theirs.
+// Mutants with no test here fall into three named classes: equivalence at lines 475, 476, 490, 714
+// and 758 (the strict comparison already forces the value the replacement produces, or the state the
+// replacement reaches is unreachable), the win32 DACL optional-chain rows at 572 and 692 (killed on
+// this Windows host by the shipped no-options test above, which never overrides `platform`, so they
+// need a leg that runs the real win32 step), line 402, which nothing in this package kills on this
+// host either, and the line 474 second-`&&` mutant, which does not reproduce here at all. Each is
+// named with its mechanism in that comment rather than papered over with a weaker assertion.
+
+describe("assertions ported from the changed-code mutation sweep", () => {
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
+		vi.mocked(fsSync.openSync).mockImplementation(
+			(p: unknown) =>
+				(String(p).includes("safeWriteText.bak") ? 33 : String(p).endsWith("test-dir") ? 22 : 11) as never,
+		)
+	})
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+	const staged2 = () =>
+		String(
+			vi
+				.mocked(fsSync.openSync)
+				.mock.calls.map((c: unknown[]) => String(c[0]))
+				.filter((p: string) => p.includes("safeWriteText_") && !p.includes(".bak"))[0] ?? "",
+		)
+	const w32runner = () => {
+		const calls: unknown[][] = []
+		const runner = (cmd: string, args: unknown[], opts: unknown, cb: (e: unknown) => void) => {
+			calls.push([cmd, args, opts])
+			cb(null)
+			return { kill: () => true } as never
+		}
+		return { calls, runner }
+	}
+	const restoreFailExecFile2 = () =>
+		vi.mocked(execFile).mockImplementation(((
+			cmd: string,
+			args: unknown[],
+			opts: unknown,
+			cb: (e: unknown, o?: string) => void,
+		) => {
+			if (String(args[1]) === "/restore") {
+				cb(Object.assign(new Error("restore failed"), { code: "EPERM" }))
+				return { kill: () => true } as never
+			}
+			cb(null, "")
+			return { kill: () => true } as never
+		}) as never)
+	const dur2 = () => {
+		const boom = Object.assign(new Error("fsyncdir failed"), { code: "EIO" })
+		vi.mocked(fsSync.fsyncSync).mockImplementation((fd: unknown) => {
+			if (Number(fd) === 22) {
+				throw boom
+			}
+		})
+		return boom
+	}
+	const orph2 = () => {
+		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+	}
+
+	it("K60 name of StagingPathError", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			tempPath: "/tmp/other-dir/x.tmp",
+		}).catch((e: unknown) => e)
+		expect((err as Error).name).toBe("StagingPathError")
+	})
+	it("K76 post-commit durability message", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		dur2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect(String((err as Error).message)).toContain(
+			"The rename committed but the parent directory could not be fsynced",
+		)
+	})
+	it("K77 cause attached to durability error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const boom = dur2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect((err as Error & { cause?: unknown }).cause).toBe(boom)
+	})
+	it("K79 name of PostCommitDurabilityError", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		dur2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect((err as Error).name).toBe("PostCommitDurabilityError")
+	})
+	it("K115 name of DaclRestoreError", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		restoreFailExecFile2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "win32" }).catch((e: unknown) => e)
+		expect((err as Error).name).toBe("DaclRestoreError")
+	})
+	it("K154 name of OrphanedBackupError", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		orph2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", backup: true }).catch(
+			(e: unknown) => e,
+		)
+		expect((err as Error).name).toBe("OrphanedBackupError")
+	})
+	it("K164 orphan message first half", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		orph2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", backup: true }).catch(
+			(e: unknown) => e,
+		)
+		expect(String((err as Error).message)).toContain("could not create the backup of")
+	})
+	it("K166 orphan message second half", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		orph2()
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", backup: true }).catch(
+			(e: unknown) => e,
+		)
+		expect(String((err as Error).message)).toContain("must be deleted")
+	})
+	it("K173_dot staged name is hidden", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" })
+		expect(path.basename(staged2()).startsWith(".safeWriteText_")).toBe(true)
+	})
+	it("K173_us2 staged name shape", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" })
+		expect(path.basename(staged2())).toMatch(/^\.safeWriteText_\d+_[a-z0-9]+\.tmp$/)
+	})
+	it("K173_tmp staged name ends in .tmp", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" })
+		expect(path.basename(staged2()).endsWith(".tmp")).toBe(true)
+	})
+	it("K173_sub staged name carries no extra dot", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" })
+		expect((path.basename(staged2()).match(/\./g) || []).length).toBe(2)
+	})
+	it("K211_obj icacls save options object", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const { calls, runner } = w32runner()
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "win32", execFileRunner: runner as never })
+		expect(calls.length).toBeGreaterThan(0)
+		expect(calls[0][2]).toEqual({ windowsHide: true })
+	})
+	it("K211_bool icacls save windowsHide true", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const { calls, runner } = w32runner()
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "win32", execFileRunner: runner as never })
+		expect((calls[0][2] as Record<string, unknown>).windowsHide).toBe(true)
+	})
+	it("K231_obj icacls restore options object", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const { calls, runner } = w32runner()
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "win32", execFileRunner: runner as never })
+		expect(calls.length).toBeGreaterThan(1)
+		expect(calls[1][2]).toEqual({ windowsHide: true })
+	})
+	it("K231_bool icacls restore windowsHide true", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const { calls, runner } = w32runner()
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "win32", execFileRunner: runner as never })
+		expect((calls[1][2] as Record<string, unknown>).windowsHide).toBe(true)
+	})
+	it("K275_c1 string error is not turned into a type error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.statSync).mockImplementation(() => {
+			throw "boom"
+		})
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect(err).toBe("boom")
+	})
+	it("K275_c2 null error is not turned into a type error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.statSync).mockImplementation(() => {
+			throw null
+		})
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect(err).toBe(null)
+	})
+	it("K275_c3 code-less cleanup error prints unknown error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("no code here"))
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			backup: true,
+			onWarning: (m: string) => warnings.push(m),
+		})
+		expect(warnings.join(" | ")).toContain("unknown error")
+	})
+	it("K275_c4 whole guard true keeps null safe", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.statSync).mockImplementation(() => {
+			throw null
+		})
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect(err).toBe(null)
+	})
+	it("K275_L1 swapped or keeps string errors working", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.statSync).mockImplementation(() => {
+			throw "boom"
+		})
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect(err).toBe("boom")
+	})
+	it("K275_L2 swapped and keeps unknown error text", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("no code here"))
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			backup: true,
+			onWarning: (m: string) => warnings.push(m),
+		})
+		expect(warnings.join(" | ")).toContain("unknown error")
+	})
+	it("K402 default sink gets the notice", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { backup: true, platform: "linux" })
+		const seen = spy.mock.calls.map((c: unknown[]) => String(c[0]))
+		expect(seen.some((m: string) => m.includes("could not remove its backup copy"))).toBe(true)
+		expect(seen.some((m: string) => m.includes("onWarning callback"))).toBe(false)
+	})
+	it("K410 non promise sink is not treated as a promise", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			backup: true,
+			platform: "linux",
+			onWarning: (() => 7) as never,
+		})
+		expect(spy.mock.calls.some((c: unknown[]) => String(c[0]).includes("onWarning callback"))).toBe(false)
+	})
+	it("K414 failure label names the failure", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			backup: true,
+			platform: "linux",
+			onWarning: (() => {
+				throw new Error("sinkblew")
+			}) as never,
+		})
+		expect(spy.mock.calls.some((c: unknown[]) => String(c[0]).includes("onWarning callback failed"))).toBe(true)
+	})
+	it("K445 staging location message", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			tempPath: "/tmp/other-dir/x.tmp",
+		}).catch((e: unknown) => e)
+		expect(String((err as Error).message)).toContain("Staging file must sit in the target")
+	})
+	it("K455 symlink staging message names a symlink", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			tempPath: "/tmp/test-dir/x.tmp",
+		}).catch((e: unknown) => e)
+		expect(String((err as Error).message)).toContain("a symlink")
+	})
+	it("K468_comp missing target is comparable", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.lstat)
+			.mockResolvedValueOnce(_fileStatsWithIdentity(7n, 1n))
+			.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		await expect(
+			safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", tempPath: "/tmp/test-dir/x.tmp" }),
+		).resolves.toBeDefined()
+	})
+	it("K468_str missing target still comparable", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.lstat)
+			.mockResolvedValueOnce(_fileStatsWithIdentity(7n, 1n))
+			.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		await expect(
+			safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", tempPath: "/tmp/test-dir/x.tmp" }),
+		).resolves.toBeDefined()
+	})
+	it("K477 different inode is not the target", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.lstat)
+			.mockResolvedValueOnce(_fileStatsWithIdentity(7n, 1n))
+			.mockResolvedValueOnce(_fileStatsWithIdentity(8n, 1n))
+		await expect(
+			safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", tempPath: "/tmp/test-dir/x.tmp" }),
+		).resolves.toBeDefined()
+	})
+	it("K478 different device is not the target", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.lstat)
+			.mockResolvedValueOnce(_fileStatsWithIdentity(7n, 1n))
+			.mockResolvedValueOnce(_fileStatsWithIdentity(7n, 2n))
+		await expect(
+			safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", tempPath: "/tmp/test-dir/x.tmp" }),
+		).resolves.toBeDefined()
+	})
+	it("K480 alias rejection names the hazard", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStatsWithIdentity(7n, 1n))
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			tempPath: "/tmp/test-dir/x.tmp",
+		}).catch((e: unknown) => e)
+		expect(String((err as Error).message)).toContain("must not be the target itself")
+	})
+	it("K555 caller staged temp is fsynced", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", tempPath: "/tmp/test-dir/x.tmp" })
+		expect(vi.mocked(fsSync.fsyncSync).mock.calls.some((c: unknown[]) => Number(c[0]) === 11)).toBe(true)
+	})
+	it("K557 caller staged fd is closed", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", tempPath: "/tmp/test-dir/x.tmp" })
+		expect(vi.mocked(fsSync.closeSync).mock.calls.some((c: unknown[]) => Number(c[0]) === 11)).toBe(true)
+	})
+	it("K650 removable partial backup throws the original error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", backup: true }).catch(
+			(e: unknown) => e,
+		)
+		expect(String((err as Error).message)).toContain("ENOSPC")
+		expect((err as Error).name).toBe("Error")
+	})
+	it("K663 committed write keeps the target file after a durability failure", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		dur2()
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch(() => undefined)
+		expect(
+			vi
+				.mocked(fs.unlink)
+				.mock.calls.some(
+					(c: unknown[]) => String(c[0]).includes("safeWriteText_") && !String(c[0]).includes(".bak"),
+				),
+		).toBe(false)
+	})
+	it("K667_comp win32 publish does not open the parent directory", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.access).mockImplementation(async (p: unknown) => {
+			if (typeof p === "string" && p.endsWith("target.txt")) {
+				throw { code: "ENOENT" }
+			}
+			return undefined
+		})
+		await safeWriteText(targetPath, "x", { platform: "win32" })
+		expect(vi.mocked(fsSync.openSync).mock.calls.some((c: unknown[]) => String(c[1]) === "r")).toBe(false)
+	})
+	it("K667_str win32 label keeps the parent open off", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.access).mockImplementation(async (p: unknown) => {
+			if (typeof p === "string" && p.endsWith("target.txt")) {
+				throw { code: "ENOENT" }
+			}
+			return undefined
+		})
+		await safeWriteText(targetPath, "x", { platform: "win32" })
+		expect(vi.mocked(fsSync.openSync).mock.calls.some((c: unknown[]) => String(c[1]) === "r")).toBe(false)
+	})
+	it("K704 restore failure warning text", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		restoreFailExecFile2()
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "win32",
+			onWarning: (m: string) => warnings.push(m),
+		}).catch(() => undefined)
+		expect(warnings.join(" | ")).toContain("could not restore its saved access rights")
+	})
+	it("K725 stuck backup names an unknown error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("no code here"))
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			backup: true,
+			onWarning: (m: string) => warnings.push(m),
+		})
+		expect(warnings.join(" | ")).toContain("unknown error")
+	})
+	it("K764 removable backup produces no leftover warning", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			backup: true,
+			onWarning: (m: string) => warnings.push(m),
+		}).catch(() => undefined)
+		expect(warnings.join(" | ")).not.toContain("could not be removed")
+	})
+	it("K771_str stuck backup failure names an unknown error", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("no code here"))
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			backup: true,
+			onWarning: (m: string) => warnings.push(m),
+		}).catch(() => undefined)
+		expect(warnings.join(" | ")).toContain("unknown error")
+	})
+	it("K771_L stuck backup failure names the code", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		const warnings: string[] = []
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			platform: "linux",
+			backup: true,
+			onWarning: (m: string) => warnings.push(m),
+		}).catch(() => undefined)
+		expect(warnings.join(" | ")).toContain("EPERM")
+	})
+	it("K784 committed target survives a durability failure", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		dur2()
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch(() => undefined)
+		expect(
+			vi
+				.mocked(fs.unlink)
+				.mock.calls.some(
+					(c: unknown[]) => String(c[0]).includes("safeWriteText_") && !String(c[0]).includes(".bak"),
+				),
+		).toBe(false)
+	})
+	// K313b needed one typing change on the way in: the sweep control annotated the realpath callback as
+	// `(p: string)`, which the package tsconfig rejects because fs/promises declares its path argument as
+	// PathLike. The annotation is widened; the mocked behaviour and every assertion are unchanged.
+	it("K313b lock key walk when referent is gone", async () => {
+		vi.mocked(fs.realpath).mockRejectedValueOnce(Object.assign(new Error("ELOOP"), { code: "ELOOP" }))
+		vi.mocked(fs.realpath).mockImplementation(async (p: Parameters<typeof fs.realpath>[0]) => String(p))
+		vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		const key = await resolveLockKey(path.resolve("/tmp/test-dir/target.txt"))
+		expect(typeof key).toBe("string")
+	})
+	it("K353c null error with residue passes through", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.rename).mockRejectedValue(null)
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
+		expect(err).toBe(null)
+	})
+	it("K637b every opened descriptor is closed", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux", backup: true })
+		expect(vi.mocked(fsSync.closeSync).mock.calls.length).toBe(vi.mocked(fsSync.openSync).mock.calls.length)
+	})
+	it("K413b throwing sink failure is reported verbatim", async () => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		await safeWriteText("/tmp/test-dir/target.txt", "x", {
+			backup: true,
+			platform: "linux",
+			onWarning: (() => {
+				throw new Error("sinkblew")
+			}) as never,
+		})
+		expect(
+			spy.mock.calls.some((c: unknown[]) => String(c[0]).includes("onWarning callback failed: sinkblew")),
+		).toBe(true)
+	})
+})

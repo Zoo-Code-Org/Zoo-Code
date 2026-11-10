@@ -648,4 +648,147 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("--- Diff block")
 		})
 	})
+
+	// ApplyDiffTool.ts lines 108-110 hold the three comparisons that decide whether a replacement
+	// character already in the file is stepped over or reported as the failure position. Each byte
+	// sequence below was run through the tool in round U35 and the offset it prints is asserted here.
+	// The offsets each case must not print are the offsets the surviving mutants at those lines print
+	// instead; the changed-code mutation report numbers those rows one higher than the head lines
+	// (printed 109, 110, 111 for head 108, 109, 110), the shift I measured and named on the triage
+	// comment, so the bytes and the printed offset are the anchors, not the report line number. The
+	// mutant each case kills is named above it. The 0x41 and 0x3f cases are the shape where the
+	// replacement character is not at the start of the file, so the reported offset is one.
+	describe("the guard that steps past an encoded replacement character", () => {
+		async function runBytesFor(bytes: Buffer): Promise<string> {
+			mockedReadFile.mockResolvedValue(bytes)
+			const applyDiff = vi.fn().mockResolvedValue({ success: true, content: "unused" })
+			mockTask.diffStrategy = { getName: () => "test", applyDiff }
+			await applyDiffTool.execute({ path: testFilePath, diff: buildDiffContent(1) }, mockTask, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				toolCallId: "tool-call-1",
+				pushToolResult: vi.fn((result: ToolResponse) => {
+					pushedResult = result
+				}),
+			})
+			return String(pushedResult ?? "")
+		}
+
+		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		it("reports offset 0 for the bytes 0xef 0xef 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xef, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills line 108 outer_or_and, line 110 clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0xef", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0xef]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills line 108 outer_or_and, line 110 clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0xff", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0xff]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills line 108 outer_or_and, line 110 clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0x41", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0x41]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills line 108 outer_or_and, line 110 clauseC_false
+		it("reports offset 0 for the bytes 0xef 0xbf 0x3f", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xbf, 0x3f]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		it("reports offset 0 for the bytes 0xef 0xff 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0xff, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		it("reports offset 0 for the bytes 0xef 0x41 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0x41, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills line 108 outer_or_and, line 108 inner_or_and, line 109 clauseB_false
+		it("reports offset 0 for the bytes 0xef 0x3f 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xef, 0x3f, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills line 108 outer_or_and, line 110 clauseC_false
+		it("reports offset 1 for the bytes 0x41 0xef 0xbf", async () => {
+			const output = await runBytesFor(Buffer.from([0x41, 0xef, 0xbf]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 1).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills line 108 outer_or_and, line 110 clauseC_false
+		it("reports offset 1 for the bytes 0x3f 0xef 0xbf", async () => {
+			const output = await runBytesFor(Buffer.from([0x3f, 0xef, 0xbf]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 1).")
+			expect(output).not.toContain("offset 4)")
+		})
+
+		// kills line 108 inner_or_and, line 108 clauseA_false
+		it("reports offset 0 for the bytes 0xbf 0xbf 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xbf, 0xbf, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills line 108 inner_or_and, line 108 clauseA_false
+		it("reports offset 0 for the bytes 0xbd 0xbf 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xbd, 0xbf, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+
+		// kills line 108 inner_or_and, line 108 clauseA_false
+		it("reports offset 0 for the bytes 0xff 0xbf 0xbd", async () => {
+			const output = await runBytesFor(Buffer.from([0xff, 0xbf, 0xbd]))
+
+			expect(output).toContain("is not valid UTF-8")
+			expect(output).toContain("first undecodable byte at offset 0).")
+			expect(output).not.toContain("offset 3)")
+		})
+	})
 })
