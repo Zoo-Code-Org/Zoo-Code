@@ -35,6 +35,13 @@ vi.mock("../../../utils/pathUtils", () => ({
 	isPathOutsideWorkspace: vi.fn(),
 }))
 
+// The B3a per-write checkpoint path in ApplyDiffTool imports core/checkpoints, whose
+// module graph pulls the real DiffViewProvider and DecorationController, and
+// DecorationController calls vscode.window.createTextEditorDecorationType at import
+// time. These outside-workspace tests do not exercise the checkpoint save; the same
+// mock is already applied in applyDiffTool.failureReporting.spec.ts.
+vi.mock("../../checkpoints", () => ({ checkpointSave: vi.fn() }))
+
 vi.mock("../../prompts/responses", () => ({
 	formatResponse: {
 		toolError: vi.fn((message: string) => `Error: ${message}`),
