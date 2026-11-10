@@ -83,6 +83,7 @@ import * as copilotProvider from "../../../api/providers/github-copilot"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { settingWriteBookkeepingSize } from "../../config/appearanceSettingWrites"
+import { ContextProxy } from "../../config/ContextProxy"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
 import { experimentDefault } from "../../../shared/experiments"
@@ -2549,9 +2550,17 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 
 	describe("when a later setting of the save never finishes being stored", () => {
 		const hung: Array<() => void> = []
+		/**
+		 * The real `ContextProxy.setValues` (its fan-out and its `storeKey` contract), bound to the double: only the
+		 * storage underneath, `setValue`, is the double's. It is taken off again after each test.
+		 */
+		const useRealSetValues = () => {
+			Object.assign(mockClineProvider.contextProxy, { setValues: ContextProxy.prototype.setValues })
+		}
 		beforeEach(() => vi.useFakeTimers())
 		afterEach(() => {
 			vi.useRealTimers()
+			Reflect.deleteProperty(mockClineProvider.contextProxy, "setValues")
 			Reflect.deleteProperty(mockClineProvider, "isDisposed")
 			// A store that never settled is still in line for its key: it settles now, so that the next test finds the key free.
 			for (const settle of hung.splice(0)) settle()
@@ -2643,20 +2652,7 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 					return Promise.resolve()
 				},
 			)
-			Object.assign(mockClineProvider.contextProxy, {
-				setValues: async (
-					values: Record<string, unknown>,
-					storeKey?: (k: string, w: () => Promise<void>) => Promise<void>,
-				) => {
-					await Promise.all(
-						Object.entries(values).map(([k, v]) =>
-							(storeKey ?? ((_key, write) => write()))(k, () =>
-								mockClineProvider.contextProxy.setValue(k as never, v as never),
-							),
-						),
-					)
-				},
-			})
+			useRealSetValues()
 			const { writeValuesThroughWriteChain } = await import("../../config/appearanceSettingWrites")
 
 			// An earlier write of the key is slow; an import that enables auto-approval waits behind it.
@@ -2680,7 +2676,6 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			// In the order they were made: the import, then the user's switch-off, which is the last word.
 			expect(order).toEqual(["start false", "end false", "start true", "end true", "start false", "end false"])
 			expect(stored.autoApprovalEnabled).toBe(false)
-			Reflect.deleteProperty(mockClineProvider.contextProxy, "setValues")
 		})
 
 		it("does not let a store that timed out land after the store of a newer save of the same key", async () => {
@@ -2755,21 +2750,7 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 
 			// An import turns the setting off, behind them.
 			const { writeValuesThroughWriteChain } = await import("../../config/appearanceSettingWrites")
-			// The setValues of the double stores each key through the given line, as the real one does.
-			Object.assign(mockClineProvider.contextProxy, {
-				setValues: async (
-					values: Record<string, unknown>,
-					storeKey?: (k: string, w: () => Promise<void>) => Promise<void>,
-				) => {
-					await Promise.all(
-						Object.entries(values).map(([k, v]) =>
-							(storeKey ?? ((_key, write) => write()))(k, () =>
-								mockClineProvider.contextProxy.setValue(k as never, v as never),
-							),
-						),
-					)
-				},
-			})
+			useRealSetValues()
 			const imported = writeValuesThroughWriteChain(
 				mockClineProvider.contextProxy,
 				{ alwaysAllowExecute: false },
@@ -2783,7 +2764,6 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			// The enable of the save that timed out was taken back: it never started, and the import is the last word.
 			expect(order).toEqual(["start false", "end false", "start false", "end false"])
 			expect(stored.alwaysAllowExecute).toBe(false)
-			Reflect.deleteProperty(mockClineProvider.contextProxy, "setValues")
 		})
 
 		it("keeps nothing for repeated saves that time out", async () => {

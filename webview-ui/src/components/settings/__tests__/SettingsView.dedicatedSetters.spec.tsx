@@ -75,6 +75,11 @@ interface Case {
 	section: string
 	key: string
 	initial: Record<string, unknown>
+	/**
+	 * A value that another provider could give the setting, other than the edit and than what the rollback stored: a form
+	 * that took it would lose the edit. Absent when there is none (a switch has only two values).
+	 */
+	other?: unknown
 	/** What the import answered with (the value that failed to be stored), and what the rollback stored later. */
 	answered: unknown
 	late: unknown
@@ -93,6 +98,7 @@ const cases: Case[] = [
 		section: "about",
 		key: "telemetrySetting",
 		initial: { telemetrySetting: "enabled" },
+		other: "unset",
 		answered: "unset",
 		late: "enabled",
 		edit: "edit-telemetry",
@@ -119,6 +125,7 @@ const cases: Case[] = [
 		section: "experimental",
 		key: "experiments",
 		initial: { experiments: { runSlashCommand: false } },
+		other: { runSlashCommand: false, imageGeneration: true }, // another experiment, changed by another provider
 		answered: { runSlashCommand: false },
 		late: { runSlashCommand: false },
 		edit: "edit-experiment",
@@ -132,6 +139,7 @@ const cases: Case[] = [
 		section: "experimental",
 		key: "imageGenerationProvider",
 		initial: { imageGenerationProvider: providerIdentifiers.openrouter },
+		other: "someone-elses",
 		answered: "failed",
 		late: providerIdentifiers.openrouter,
 		edit: "edit-image-provider",
@@ -145,6 +153,7 @@ const cases: Case[] = [
 		section: "experimental",
 		key: "openRouterImageGenerationSelectedModel",
 		initial: { openRouterImageGenerationSelectedModel: "stored-model" },
+		other: "someone-elses-model",
 		answered: "failed-model",
 		late: "stored-model",
 		edit: "edit-image-model",
@@ -158,6 +167,7 @@ const cases: Case[] = [
 		section: "prompts",
 		key: "customSupportPrompts",
 		initial: { customSupportPrompts: { ENHANCE: "stored" } },
+		other: { ENHANCE: "someone-elses" },
 		answered: { ENHANCE: "failed" },
 		late: { ENHANCE: "stored" },
 		edit: "edit-prompts",
@@ -203,8 +213,12 @@ describe("SettingsView – a late import refresh and the settings that have a se
 		await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.lateText))
 	})
 
-	it.each(cases)(
-		"keeps an unsaved edit of $name that the import did not store, though the value changed",
+	// A switch has two values, so another provider's change to it is the edit or the value before it: the tracking cannot
+	// make a difference there, and these tests would pass without it. Only the settings with a third value can fail.
+	const withAThirdValue = cases.filter((c) => c.other !== undefined)
+
+	it.each(withAThirdValue)(
+		"keeps an unsaved edit of $name that the import did not store, though another provider changed the value",
 		async (c) => {
 			render(c.section, c.initial)
 			await screen.findByTestId(c.read)
@@ -213,7 +227,7 @@ describe("SettingsView – a late import refresh and the settings that have a se
 			await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.edited))
 			// Another provider changed it, and an import that stored something else is refreshed together with that change.
 			hostPosts({
-				[c.key]: c.answered,
+				[c.key]: c.other,
 				settingsImportRefreshedAt: 1_000,
 				settingsImportStoredKeys: ["somethingElse"],
 			})
@@ -223,7 +237,7 @@ describe("SettingsView – a late import refresh and the settings that have a se
 		},
 	)
 
-	it.each(cases)(
+	it.each(withAThirdValue)(
 		"keeps an unsaved edit of $name through two partial refreshes and a change by another provider",
 		async (c) => {
 			render(c.section, c.initial)
@@ -231,13 +245,31 @@ describe("SettingsView – a late import refresh and the settings that have a se
 			fireEvent.click(screen.getByTestId(c.edit))
 			await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.edited))
 
-			// A first import stored something else; then another provider changes the value; a second import stored something else.
+			// A first import stored something else ...
 			hostPosts({ settingsImportRefreshedAt: 1_000, settingsImportStoredKeys: ["somethingElse"] })
-			hostPosts({ [c.key]: c.answered })
-			hostPosts({ [c.key]: c.late, settingsImportRefreshedAt: 2_000, settingsImportStoredKeys: ["another"] })
+			expect(screen.getByTestId(c.read).textContent).toBe(c.edited)
+			// ... then another provider changes the value, which reaches the form with the refresh of a second import that
+			// stored something else.
+			hostPosts({ [c.key]: c.other, settingsImportRefreshedAt: 2_000, settingsImportStoredKeys: ["another"] })
 
 			expect(screen.getByTestId(c.read).textContent).toBe(c.edited) // the edit is tracked across both
 			expect(screen.getByTestId("save-button")).toBeEnabled()
 		},
 	)
+
+	it.each(cases)("takes the stored value of $name from a late refresh after the edit was discarded", async (c) => {
+		render(c.section, c.initial)
+		const late = answerThenLate(c)
+		await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.answeredText))
+		fireEvent.click(screen.getByTestId(c.edit))
+		await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.edited))
+
+		// The user leaves the settings and discards the edit: the form is back to what is stored.
+		fireEvent.click(screen.getByRole("button", { name: "settings:common.done" }))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+		late() // and the rollback of the import then finishes
+
+		// An edit that is gone does not stop the late refresh from correcting the value.
+		await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.lateText))
+	})
 })

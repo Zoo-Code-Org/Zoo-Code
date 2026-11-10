@@ -193,6 +193,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// changed (another webview, a reset from the host) is not an edit and is never sent. A ref, not state: it is read
 	// when saving and needs no render of its own.
 	const editedAppearance = useRef(new Set<AppearanceKey>())
+	// The settings the user has edited since the import was answered. Kept here, by setting, and not worked out from
+	// how the live state moved: an unmarked state push (the host cached the value that failed to be stored, and the
+	// rollback has not finished) can put the live value anywhere before the late refresh, and says nothing of edits.
+	// It is cleared wherever the form drops its edits (a discard, a switch of profile or mode, an import that replaces
+	// the form): an edit that is gone must not stop a late refresh from correcting the value.
+	const editedSinceImportAnswer = useRef(new Set<string>())
 	// What the pending save sent for each appearance value, to tell which edits it has saved when it succeeds.
 	const pendingAppearanceSent = useRef<Record<string, number | null>>({})
 	// A request to leave the form (a tab switch, a command from the host) that came in while a save was pending. It is
@@ -310,6 +316,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
 		editedAppearance.current.clear()
+		editedSinceImportAnswer.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -322,6 +329,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		handledSettingsImportedAt.current = settingsImportedAt
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		editedAppearance.current.clear()
+		editedSinceImportAnswer.current.clear()
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
@@ -330,10 +338,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// that succeeded, which replaces the form).
 	const handledImportRefreshAt = useRef<number | undefined>(undefined)
 	const liveStateBefore = useRef(extensionState)
-	// The settings the user has edited since the import was answered. Kept here, by setting, and not worked out from
-	// how the live state moved: an unmarked state push (the host cached the value that failed to be stored, and the
-	// rollback has not finished) can put the live value anywhere before the late refresh, and says nothing of edits.
-	const editedSinceImportAnswer = useRef(new Set<string>())
 	useEffect(() => {
 		const before = liveStateBefore.current
 		liveStateBefore.current = extensionState
@@ -818,6 +822,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				for (const [key, value] of Object.entries(appearanceSaved.current)) stored[key] = value ?? undefined
 				setCachedState({ ...extensionState, ...stored })
 				editedAppearance.current.clear()
+				editedSinceImportAnswer.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
