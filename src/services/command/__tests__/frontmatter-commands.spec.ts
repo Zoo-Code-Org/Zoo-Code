@@ -22,6 +22,49 @@ describe("Command loading with frontmatter", () => {
 		vi.clearAllMocks()
 	})
 
+	describe.each(["lookup", "discovery"] as const)("%s engine restrictions", (entryPoint) => {
+		async function load(content: string) {
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readFile = vi.fn().mockResolvedValue(content)
+			mockFs.readdir = vi.fn().mockResolvedValue([{ name: "test.md", isFile: () => true }])
+			return entryPoint === "lookup"
+				? getCommand("/test/cwd", "test")
+				: (await getCommands("/test/cwd")).find((command) => command.name === "test")
+		}
+
+		it.each(["js", "javascript", "JavaScript", " js", "javascript\r", "python"])(
+			"treats %s frontmatter as text without executing it",
+			async (language) => {
+				const executed = vi.fn()
+				vi.stubGlobal("__commandFrontmatterExecuted", executed)
+				try {
+					// Include a BOM to exercise gray-matter's input normalization.
+					const content = `\uFEFF---${language}\n(globalThis.__commandFrontmatterExecuted(), {description: "unsafe"})\n---\nBody`
+					const command = await load(content)
+					expect(executed).not.toHaveBeenCalled()
+					expect(command).toMatchObject({ content: content.trim() })
+					expect(command?.description).toBeUndefined()
+				} finally {
+					vi.unstubAllGlobals()
+				}
+			},
+		)
+
+		it.each(["", "yaml", "yml", "json"])("accepts data-only %s frontmatter", async (language) => {
+			const metadata =
+				language === "json"
+					? '{"description":"Safe", "argument-hint":"input", "mode":"code"}'
+					: "description: Safe\nargument-hint: input\nmode: code"
+			const command = await load(`---${language}\n${metadata}\n---\nBody`)
+			expect(command).toMatchObject({
+				content: "Body",
+				description: "Safe",
+				argumentHint: "input",
+				mode: "code",
+			})
+		})
+	})
+
 	describe("getCommand with frontmatter", () => {
 		it("should load command with description from frontmatter", async () => {
 			const commandContent = `---
