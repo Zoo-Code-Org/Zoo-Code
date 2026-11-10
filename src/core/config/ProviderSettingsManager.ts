@@ -55,6 +55,17 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+interface ReadBatch {
+	/** Whether its turn has come: a batch that has started takes no more callers. */
+	started: boolean
+	/** The callers that wait for it. */
+	members: number
+	/** Gives up its place in line. */
+	release: () => void
+	/** The profiles, as loaded once for the whole batch. */
+	result: Promise<ProviderProfiles>
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -99,41 +110,83 @@ export class ProviderSettingsManager {
 		return next
 	}
 
+	/** The reads that wait for their turn together: they load the profiles once, and each maps what was loaded. */
+	private readBatch?: ReadBatch
+
+	/** Incremented whenever the profiles are written, so that a read that began before a write is not shared after it. */
+	private writeEpoch = 0
+	private sharedRead?: { epoch: number; promise: Promise<string | undefined> }
+
 	/**
 	 * A read that only reads and maps what it loaded (it writes nothing), taking its turn in the same line as every other
 	 * operation. With a `signal` the caller is answered as soon as it aborts, and the read gives up its place then, wherever
-	 * it is: a read that has not started never starts, and one whose `secrets.get` never settles does not hold the lock for
-	 * good. The operations behind it still wait for the ones in front of it. What a read that was given up on loads later is
-	 * thrown away, and it writes nothing, so nothing runs beside a write or a migration.
+	 * it is. The operations behind it still wait for the ones in front of it, so writes and migrations keep their order.
+	 *
+	 * Nothing piles up behind an operation that never settles: the reads that wait for the same turn are one batch (one
+	 * place in line, one load, a result for each caller), and a batch that every caller has left is used again by the next
+	 * read instead of adding another one; a batch that nobody waits for when its turn comes does not read. And a read of
+	 * the storage that was given up on is joined by the reads that follow, until a write has been made, so repeated
+	 * refreshes do not start one hanging read after another. What an abandoned read loads later is thrown away, and it
+	 * writes nothing.
 	 */
-	private lockRead<T>(cb: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-		if (!signal) return this.lock(cb)
+	private readProfiles<T>(map: (profiles: ProviderProfiles) => T, signal?: AbortSignal): Promise<T> {
+		if (!signal) return this.lock(async () => map(await this.load()))
+		if (signal.aborted) return Promise.reject(signal.reason)
+
+		let batch = this.readBatch
+		if (!batch || batch.started) {
+			batch = this.newReadBatch()
+			this.readBatch = batch
+		}
+		const joined = batch
+		joined.members++
 
 		let leave!: () => void
-		const left = new Promise<void>((resolve) => (leave = resolve))
-		signal.addEventListener("abort", leave, { once: true })
-		if (signal.aborted) leave()
-
-		const previous = this._lock
-		const run = previous.then(() => {
-			signal.throwIfAborted()
-			return cb()
+		const left = new Promise<never>((_resolve, reject) => {
+			leave = () => {
+				joined.members--
+				// A read that has started cannot be stopped, and is not waited for any more.
+				if (joined.members === 0 && joined.started) joined.release()
+				reject(signal.reason)
+			}
 		})
-		const settled = run.then(
+		left.catch(() => undefined)
+		signal.addEventListener("abort", leave, { once: true })
+
+		return Promise.race([joined.result.then((profiles) => map(structuredClone(profiles))), left]).finally(() =>
+			signal.removeEventListener("abort", leave),
+		)
+	}
+
+	private newReadBatch(): ReadBatch {
+		const previous = this._lock
+		let release!: () => void
+		const released = new Promise<void>((resolve) => (release = resolve))
+		const batch: ReadBatch = {
+			started: false,
+			members: 0,
+			release,
+			result: Promise.resolve(undefined as unknown as ProviderProfiles),
+		}
+		batch.result = previous.then(() => {
+			batch.started = true
+			// Nobody waits for it any more: nothing is read, and its place in line is given up at once.
+			if (batch.members === 0) {
+				release()
+				throw new Error("The read was cancelled before it started")
+			}
+			return this.load(true)
+		})
+		// A batch that nobody waits for leaves no rejection unhandled; the callers that do wait see it.
+		const settled = batch.result.then(
 			() => undefined,
 			() => undefined,
 		)
-		// The place in line is given up when the read is done, or when its caller has left, but not before the
-		// operations in front of it are done.
-		this._lock = previous.then(() => Promise.race([settled, left]))
-		void settled.then(() => signal.removeEventListener("abort", leave))
-
-		return Promise.race([
-			run,
-			left.then(() => {
-				throw signal.reason
-			}),
-		])
+		void settled.then(release)
+		// The place in line is given up when the batch is done, or when every caller has left after it started, but not
+		// before the operations in front of it are done.
+		this._lock = previous.then(() => released)
+		return batch
 	}
 
 	/**
@@ -437,16 +490,16 @@ export class ProviderSettingsManager {
 	 */
 	public async listConfig(options?: { signal?: AbortSignal }): Promise<ProviderSettingsEntry[]> {
 		try {
-			return await this.lockRead(async () => {
-				const providerProfiles = await this.load()
-
-				return Object.entries(providerProfiles.apiConfigs).map(([name, apiConfig]) => ({
-					name,
-					id: apiConfig.id || "",
-					apiProvider: apiConfig.apiProvider,
-					modelId: this.cleanModelId(getModelId(apiConfig)),
-				}))
-			}, options?.signal)
+			return await this.readProfiles(
+				(providerProfiles) =>
+					Object.entries(providerProfiles.apiConfigs).map(([name, apiConfig]) => ({
+						name,
+						id: apiConfig.id || "",
+						apiProvider: apiConfig.apiProvider,
+						modelId: this.cleanModelId(getModelId(apiConfig)),
+					})),
+				options?.signal,
+			)
 		} catch (error) {
 			throw new Error(`Failed to list configs: ${error}`)
 		}
@@ -461,12 +514,13 @@ export class ProviderSettingsManager {
 		signal?: AbortSignal
 	}): Promise<Array<ProviderSettingsWithId & { id: string; name: string }>> {
 		try {
-			return await this.lockRead(async () => {
-				const providerProfiles = await this.load()
-				return Object.entries(providerProfiles.apiConfigs).flatMap(([name, apiConfig]) =>
-					apiConfig.id ? [{ ...apiConfig, id: apiConfig.id, name }] : [],
-				)
-			}, options?.signal)
+			return await this.readProfiles(
+				(providerProfiles) =>
+					Object.entries(providerProfiles.apiConfigs).flatMap(([name, apiConfig]) =>
+						apiConfig.id ? [{ ...apiConfig, id: apiConfig.id, name }] : [],
+					),
+				options?.signal,
+			)
 		} catch (error) {
 			throw new Error(`Failed to get profiles: ${error instanceof Error ? error.message : error}`)
 		}
@@ -510,8 +564,7 @@ export class ProviderSettingsManager {
 		options?: { signal?: AbortSignal },
 	): Promise<ProviderSettingsWithId & { name: string }> {
 		try {
-			return await this.lockRead(async () => {
-				const providerProfiles = await this.load()
+			return await this.readProfiles((providerProfiles) => {
 				let name: string
 				let providerSettings: ProviderSettingsWithId
 
@@ -712,7 +765,12 @@ export class ProviderSettingsManager {
 	 */
 	public async resetAllConfigs() {
 		return await this.lock(async () => {
-			await this.context.secrets.delete(this.secretsKey)
+			this.writeEpoch++
+			try {
+				await this.context.secrets.delete(this.secretsKey)
+			} finally {
+				this.writeEpoch++
+			}
 		})
 	}
 
@@ -720,9 +778,24 @@ export class ProviderSettingsManager {
 		return `${ProviderSettingsManager.SCOPE_PREFIX}api_config`
 	}
 
-	private async load(): Promise<ProviderProfiles> {
+	/** The stored text, as one read of the storage that the reads which follow join until a write has been made. */
+	private readSecretShared(): Promise<string | undefined> {
+		const current = this.sharedRead
+		if (current && current.epoch === this.writeEpoch) return current.promise
+
+		const promise = Promise.resolve(this.context.secrets.get(this.secretsKey))
+		const entry = { epoch: this.writeEpoch, promise }
+		this.sharedRead = entry
+		const done = () => {
+			if (this.sharedRead === entry) this.sharedRead = undefined
+		}
+		promise.then(done, done)
+		return promise
+	}
+
+	private async load(shared = false): Promise<ProviderProfiles> {
 		try {
-			const content = await this.context.secrets.get(this.secretsKey)
+			const content = await (shared ? this.readSecretShared() : this.context.secrets.get(this.secretsKey))
 
 			if (!content) {
 				return structuredClone(this.defaultProviderProfiles)
@@ -810,10 +883,13 @@ export class ProviderSettingsManager {
 	}
 
 	private async store(providerProfiles: ProviderProfiles) {
+		this.writeEpoch++
 		try {
 			await this.context.secrets.store(this.secretsKey, JSON.stringify(providerProfiles, null, 2))
 		} catch (error) {
 			throw new Error(`Failed to write provider profiles to secrets: ${error}`)
+		} finally {
+			this.writeEpoch++
 		}
 	}
 

@@ -1678,9 +1678,9 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				providerQuotasFailed = true
 				if (!controller.signal.aborted) {
-					provider.log(
-						`[requestProviderQuotas] ${error instanceof Error ? error.message : "Failed to load provider limits"}`,
-					)
+					// A fixed text: what failed may be the saved profiles, and a message about them (a parse error of the stored
+					// JSON, say) can carry what is in them, an API key included. Nothing of the error is logged.
+					provider.log("[requestProviderQuotas] Failed to load provider limits")
 				}
 			} finally {
 				// Only remove our own entry: a newer request with the same id from this webview owns the slot now.

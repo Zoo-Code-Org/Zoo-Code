@@ -614,6 +614,27 @@ describe("Checkpoint functionality", () => {
 				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
 			})
 
+			it("tells a failure that is not an Error as text, in the message about a conversation that is only partly rewound", async () => {
+				keepWhatIsWritten()
+				mockTask.ensureApiConversationHistoryStored.mockRejectedValueOnce("disk gone")
+				mockTask.overwriteClineMessages
+					.mockImplementationOnce(async (messages: unknown[]) => {
+						mockTask.clineMessages = messages
+					})
+					.mockRejectedValueOnce("no space")
+
+				await expect(
+					checkpointRestore(mockTask, {
+						ts: 2,
+						commitHash: RESTORE_HASH,
+						mode: "restore",
+						operation: "delete",
+					}),
+				).rejects.toThrow(
+					"disk gone, and the messages could not be put back (no space): the conversation is only partly rewound",
+				)
+			})
+
 			it("puts nothing back when the messages were not cut", async () => {
 				keepWhatIsWritten()
 				mockTask.overwriteClineMessages.mockReset()

@@ -3044,6 +3044,49 @@ describe("Task persistence", () => {
 			)
 		})
 
+		it("starts the task again from a disk that holds both cut histories, though the note cannot be said", async () => {
+			const task = abortedTaskWithCheckpoint()
+			// A disk that the persistence writes to and the rehydration reads from.
+			const disk: { messages: ClineMessage[]; api: ApiMessage[] } = { messages: [], api: [] }
+			mockSaveTaskMessages.mockImplementation(async ({ messages }: { messages: ClineMessage[] }) => {
+				disk.messages = structuredClone(messages)
+			})
+			mockSaveApiMessages.mockImplementation(async ({ messages }: { messages: ApiMessage[] }) => {
+				disk.api = structuredClone(messages)
+				return messages
+			})
+			mockReadTaskMessages.mockImplementation(async () => structuredClone(disk.messages))
+			mockReadApiMessages.mockImplementation(async () => structuredClone(disk.api))
+			let restarted: { messages: ClineMessage[]; api: ApiMessage[] } | undefined
+			// What the provider does when it starts the task again: it loads both histories from the disk.
+			mockProvider.cancelTask = vi.fn(async () => {
+				restarted = {
+					messages: await mockReadTaskMessages({ taskId: task.taskId, globalStoragePath: "/storage" }),
+					api: await mockReadApiMessages({ taskId: task.taskId, globalStoragePath: "/storage" }),
+				}
+			})
+			mockProvider.getCurrentTask = vi.fn(() => ({ taskId: task.taskId, instanceId: "rehydrated" }) as Task)
+			// The task's histories had been stored before the delete.
+			disk.messages = structuredClone(task.clineMessages)
+			disk.api = structuredClone(task.apiConversationHistory)
+			const { checkpointRestore } = await import("../../checkpoints")
+
+			try {
+				await expect(
+					checkpointRestore(task, { ts: 3, commitHash: HASH, mode: "restore", operation: "delete" }),
+				).resolves.toBeUndefined()
+
+				// What the restarted task loads: both histories cut at the checkpoint, and the same conversation on both sides.
+				expect(restarted?.messages.map((m) => m.ts)).toEqual([1, 2])
+				expect(restarted?.api.map((m) => m.ts)).toEqual([1, 2])
+			} finally {
+				mockSaveTaskMessages.mockReset().mockResolvedValue(undefined)
+				mockSaveApiMessages.mockReset().mockResolvedValue(undefined)
+				mockReadTaskMessages.mockReset().mockResolvedValue([])
+				mockReadApiMessages.mockReset().mockResolvedValue([])
+			}
+		})
+
 		it("rewinds, stores both histories and starts the task again, though the note cannot be said", async () => {
 			const task = abortedTaskWithCheckpoint()
 			const cancelTask = vi.fn().mockResolvedValue(undefined)

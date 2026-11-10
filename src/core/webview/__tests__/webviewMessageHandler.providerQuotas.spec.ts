@@ -165,6 +165,36 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 			expect(quotas.getProviderQuotas.mock.calls[0][1].activeProfileId).toBe("b")
 		})
 
+		it.each([
+			[
+				"the saved profiles are malformed JSON that holds an API key",
+				`{"apiConfigs": {"x": {"openRouterApiKey": "${SECRET}"`,
+			],
+			["the storage fails with a message that holds an API key", new Error(`secret store broke near ${SECRET}`)],
+		])("logs a fixed text, and nothing about the error, when %s", async (_name, stored) => {
+			const { ProviderSettingsManager } = await import("../../config/ProviderSettingsManager")
+			const secrets = {
+				get: vi.fn(async () => {
+					if (stored instanceof Error) throw stored
+					return stored
+				}),
+				store: vi.fn(),
+				delete: vi.fn(),
+			}
+			const manager = new ProviderSettingsManager({ secrets } as unknown as ConstructorParameters<
+				typeof ProviderSettingsManager
+			>[0])
+			const provider = makeProvider({ providerSettingsManager: manager })
+
+			await webviewMessageHandler(provider, { type: "requestProviderQuotas" })
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ providerQuotasFailed: true }),
+			)
+			expect(provider.log).toHaveBeenCalledWith("[requestProviderQuotas] Failed to load provider limits")
+			expect(JSON.stringify(vi.mocked(provider.log).mock.calls)).not.toContain(SECRET) // nothing else was logged either
+		})
+
 		it("reports a failure, and queries nothing, when the allow list cannot be read", async () => {
 			const provider = makeProvider({
 				getState: vi.fn(async () => {
@@ -254,7 +284,7 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 				providerQuotasFailed: true,
 				requestId: "bulk-1",
 			})
-			expect(provider.log).toHaveBeenCalledWith(expect.stringContaining("secret storage unavailable"))
+			expect(provider.log).toHaveBeenCalledWith("[requestProviderQuotas] Failed to load provider limits") // the reason is not logged
 		})
 
 		it("answers with an empty list when there are no profiles", async () => {
@@ -451,7 +481,7 @@ describe("webviewMessageHandler – requestProviderQuotas", () => {
 			providerQuotasFailed: true,
 			requestId: undefined,
 		})
-		expect(log).toHaveBeenCalledWith(expect.stringContaining("secret storage unavailable"))
+		expect(log).toHaveBeenCalledWith("[requestProviderQuotas] Failed to load provider limits") // the reason is not logged
 	})
 
 	it("still answers when the quota service throws something that is not an Error", async () => {

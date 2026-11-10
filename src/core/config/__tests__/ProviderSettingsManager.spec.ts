@@ -729,6 +729,84 @@ describe("ProviderSettingsManager", () => {
 				loadSpy.mockRestore()
 			})
 
+			it("starts no new read of the storage for each refresh while an abandoned one still hangs, and reads again after a write", async () => {
+				mockSecrets.get.mockClear()
+				mockSecrets.get.mockImplementationOnce(never).mockResolvedValue(text())
+				const abandonedRead = async () => {
+					const controller = new AbortController()
+					const read = providerSettingsManager.getAllProfiles({ signal: controller.signal })
+					const failed = expect(read).rejects.toThrow(/^Failed to get profiles/)
+					await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalled())
+					controller.abort()
+					await failed
+				}
+
+				for (let refresh = 0; refresh < 10; refresh++) await abandonedRead()
+
+				expect(mockSecrets.get).toHaveBeenCalledTimes(1) // the hanging read is joined, not repeated
+
+				// A write is made (it reads for itself, and the lock is free), and what was joined is not shared after it.
+				await providerSettingsManager.saveConfig("other", {
+					id: "other-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				const afterWrite = mockSecrets.get.mock.calls.length
+				await expect(
+					providerSettingsManager.getAllProfiles({ signal: new AbortController().signal }),
+				).resolves.toHaveLength(2)
+				expect(mockSecrets.get.mock.calls.length).toBe(afterWrite + 1)
+			})
+
+			it("keeps one place in line for the reads that are cancelled behind an operation that never settles", async () => {
+				mockSecrets.get.mockClear()
+				let finishFirst: (value: string) => void = () => undefined
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+					.mockResolvedValue(text())
+				const loadSpy = load()
+
+				const first = providerSettingsManager.listConfig() // cannot be cancelled, and does not settle
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				const batches = new Set<unknown>()
+				for (let refresh = 0; refresh < 50; refresh++) {
+					const controller = new AbortController()
+					const read = providerSettingsManager.getAllProfiles({ signal: controller.signal })
+					batches.add(providerSettingsManager["readBatch"])
+					controller.abort()
+					await expect(read).rejects.toThrow(/^Failed to get profiles/)
+				}
+
+				expect(batches.size).toBe(1) // the same place in line is used again, and no other one is added
+
+				finishFirst(text())
+				await first
+				await expect(
+					providerSettingsManager.getAllProfiles({ signal: new AbortController().signal }),
+				).resolves.toHaveLength(2)
+				// The first read, and the read that was not cancelled: the 50 cancelled ones never loaded.
+				expect(loadSpy).toHaveBeenCalledTimes(2)
+				loadSpy.mockRestore()
+			})
+
+			it("answers every caller of one batch with one load of the storage", async () => {
+				mockSecrets.get.mockClear()
+				mockSecrets.get.mockResolvedValue(text())
+				let finishFirst: (value: string) => void = () => undefined
+				mockSecrets.get.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+
+				const first = providerSettingsManager.listConfig()
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				const signal = new AbortController().signal
+				const a = providerSettingsManager.getAllProfiles({ signal })
+				const b = providerSettingsManager.getAllProfiles({ signal })
+				finishFirst(text())
+				await first
+
+				const [listA, listB] = await Promise.all([a, b])
+				expect(listA).toEqual(listB)
+				expect(mockSecrets.get).toHaveBeenCalledTimes(2) // the first read, and one for both callers
+			})
+
 			it("leaves no listener on a signal that is never aborted", async () => {
 				mockSecrets.get.mockResolvedValue(text())
 				const controller = new AbortController()
