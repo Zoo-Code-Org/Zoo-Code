@@ -230,7 +230,10 @@ describe("reader recovery", () => {
 		expect(tie.message).toContain("history_item.json")
 		expect(tie.message).toContain("share mtime 1700000000000")
 		expect(tie.targetPath).toBe(target)
-		expect(tie.firstBackupPath).toContain(dir)
-		expect(tie.secondBackupPath).toContain(dir)
+		// The two tied files, whatever order readdir handed them in: the guard reports both,
+		// and which one lands on which property is not something the caller can rely on.
+		expect([tie.firstBackupPath, tie.secondBackupPath].sort()).toEqual([backup, otherBackup].sort())
+		expect(tie.message).toContain(path.basename(backup))
+		expect(tie.message).toContain(path.basename(otherBackup))
 	})
 })
