@@ -39,21 +39,10 @@ const {
 	mockUnlink: vi.fn(),
 }))
 
-// Platform-agnostic test paths
-// Use forward slashes for consistency, then normalize with path.normalize
-const HOME_DIR = process.platform === "win32" ? "C:\\Users\\testuser" : "/home/user"
-const PROJECT_DIR = process.platform === "win32" ? "C:\\test\\project" : "/test/project"
-const SHARED_DIR = process.platform === "win32" ? "C:\\shared\\skills" : "/shared/skills"
-
-// Helper to create platform-appropriate paths
-const p = (...segments: string[]) => path.join(...segments)
-
+import { enoent, GLOBAL_AGENTS_DIR, GLOBAL_ROO_DIR, HOME_DIR, p, PROJECT_DIR, SHARED_DIR } from "./skillsTestHarness"
 // Make fs.lstat report the given paths as symlinks
 const mockSymlinks = (...paths: string[]) =>
 	mockLstat.mockImplementation(async (pathArg: string) => ({ isSymbolicLink: () => paths.includes(pathArg) }))
-
-// A real not-found error, as fs throws for a missing path or broken symlink
-const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
 // Mock fs/promises module
 vi.mock("fs/promises", () => ({
@@ -106,10 +95,6 @@ vi.mock("vscode", () => ({
 	},
 	RelativePattern: vi.fn(),
 }))
-
-// Global roo directory - computed once
-const GLOBAL_ROO_DIR = p(HOME_DIR, ".roo")
-const GLOBAL_AGENTS_DIR = p(HOME_DIR, ".agents")
 
 // Mock roo-config
 vi.mock("../../roo-config", () => ({
