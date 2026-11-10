@@ -2,6 +2,7 @@ import * as path from "path"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
 import * as lockfile from "proper-lockfile"
 import * as fs from "fs/promises"
+import { getErrorCode } from "./errorCode"
 
 /**
  * Shared staleness window for per-file advisory locks. This module owns the
@@ -79,10 +80,7 @@ async function canonicalLockPath(filePath: string, remainingLinkHops = MAX_TOTAL
 			const realPath = await fs.realpath(cursor)
 			return missing.length > 0 ? path.join(realPath, ...missing.reverse()) : realPath
 		} catch (error) {
-			const code =
-				typeof error === "object" && error !== null && "code" in error
-					? (error as { code?: string }).code
-					: undefined
+			const code = getErrorCode(error)
 			if (code !== "ENOENT" && code !== "ENOTDIR") return absoluteFilePath
 			const parent = path.dirname(cursor)
 			if (parent === cursor) return absoluteFilePath
