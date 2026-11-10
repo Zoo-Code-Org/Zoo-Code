@@ -1,5 +1,7 @@
 import {
+	type RouterModels,
 	anthropicDefaultModelId,
+	friendliModels,
 	ioIntelligenceDefaultModelId,
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
@@ -210,6 +212,21 @@ describe("providerModelConfig", () => {
 			const models = getStaticModelsForProvider(providerIdentifiers.bedrock, "Use Custom ARN")
 			expect(models["custom-arn"]).toBeDefined()
 			expect(models["custom-arn"].description).toBe("Use Custom ARN")
+		})
+
+		it("prefers fetched Friendli models over the static fallback", () => {
+			const fetched = { "vendor/new-model": { contextWindow: 100_000, supportsPromptCache: false } }
+			const routerModels = { friendli: fetched } as unknown as RouterModels
+
+			expect(getStaticModelsForProvider(providerIdentifiers.friendli, undefined, undefined, routerModels)).toBe(
+				fetched,
+			)
+			expect(getStaticModelsForProvider(providerIdentifiers.friendli)).toBe(friendliModels)
+			expect(
+				getStaticModelsForProvider(providerIdentifiers.friendli, undefined, undefined, {
+					friendli: {},
+				} as unknown as RouterModels),
+			).toBe(friendliModels)
 		})
 
 		it("returns empty object for providers without static models", () => {

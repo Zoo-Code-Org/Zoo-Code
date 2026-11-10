@@ -1215,6 +1215,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1350,6 +1351,30 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.anything(),
 		)
 		expect(mockFlushModels).not.toHaveBeenCalled()
+	})
+
+	it("fetches only Friendli when the provider filter is friendli", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: {} })
+		mockGetModels.mockResolvedValue({
+			"zai-org/GLM-5.2": { maxTokens: 131072, contextWindow: 1000000, supportsPromptCache: true },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.friendli },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.friendli }, expect.anything())
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {
+				friendli: {
+					"zai-org/GLM-5.2": expect.objectContaining({ contextWindow: 1000000 }),
+				},
+			},
+			values: { provider: providerIdentifiers.friendli },
+		})
 	})
 
 	it("prefers an unsaved NanoGPT key and refreshes the matching key-scoped cache", async () => {
@@ -1490,6 +1515,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1557,6 +1583,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})

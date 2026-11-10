@@ -1337,6 +1337,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
+						[providerIdentifiers.friendli]: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
@@ -1549,6 +1550,9 @@ export const webviewMessageHandler = async (
 				key: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
 			})
+
+			// Friendli's /models catalog is public.
+			candidates.push({ key: providerIdentifiers.friendli, options: { provider: providerIdentifiers.friendli } })
 
 			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
 				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
