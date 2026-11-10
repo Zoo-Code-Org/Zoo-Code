@@ -607,9 +607,9 @@ describe("ClineProvider Task History Synchronization", () => {
 				const existing = provider.taskHistoryStore.get((data as HistoryItem).id) ?? null
 				options?.merge?.(existing, data)
 			})
-			Reflect.set(provider.taskHistoryStore, "readTaskFile", async (id: string) => {
+			Reflect.set(provider.taskHistoryStore, "readTaskFileForAutoTitle", async (id: string) => {
 				const cached = provider.taskHistoryStore.get(id)
-				return cached ? structuredClone(cached) : null
+				return cached ? { kind: "found", item: structuredClone(cached) } : { kind: "missing" }
 			})
 		})
 
@@ -1187,6 +1187,98 @@ describe("ClineProvider Task History Synchronization", () => {
 
 			expect(listener).toHaveBeenCalledTimes(1)
 			expect(listener).toHaveBeenCalledWith("child-task", {}, {})
+		})
+	})
+
+	describe("taskCreationCallback — task title wiring", () => {
+		function makeTitleTask(taskId: string, abortReason?: string) {
+			const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>()
+			return {
+				taskId,
+				abortReason,
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				on: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners.set(event, [...(listeners.get(event) ?? []), fn])
+				},
+				off: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners.set(
+						event,
+						(listeners.get(event) ?? []).filter((listener) => listener !== fn),
+					)
+				},
+				emit: async (event: string, ...args: unknown[]) => {
+					await Promise.all((listeners.get(event) ?? []).map((fn) => Promise.resolve(fn(...args))))
+				},
+			}
+		}
+
+		function register(fakeTask: ReturnType<typeof makeTitleTask>) {
+			// Double cast: taskCreationCallback reads only on/off/taskId/abortReason/apiConfiguration from the fake.
+			const task = fakeTask as unknown as Task
+			provider["taskCreationCallback"](task)
+			return task
+		}
+
+		it("registers a new task as a title candidate", () => {
+			const onTaskCreated = vi.spyOn(provider["taskTitleService"], "onTaskCreated")
+			const fakeTask = makeTitleTask("title-created")
+
+			register(fakeTask)
+
+			expect(onTaskCreated).toHaveBeenCalledExactlyOnceWith(fakeTask)
+		})
+
+		it.each([
+			{ totalTokensIn: 0, scheduled: false },
+			{ totalTokensIn: 12, scheduled: true },
+		])(
+			"schedules a title only after real input usage ($totalTokensIn tokens in)",
+			async ({ totalTokensIn, scheduled }) => {
+				const schedule = vi.spyOn(provider["taskTitleService"], "schedule").mockImplementation(() => {})
+				const fakeTask = makeTitleTask("title-usage")
+				register(fakeTask)
+
+				await fakeTask.emit(RooCodeEventName.TaskTokenUsageUpdated, "title-usage", { totalTokensIn }, {})
+
+				if (scheduled) {
+					expect(schedule).toHaveBeenCalledExactlyOnceWith("title-usage")
+				} else {
+					expect(schedule).not.toHaveBeenCalled()
+				}
+			},
+		)
+
+		it.each([
+			{ abortReason: "user_cancelled", cancelled: true },
+			{ abortReason: "streaming_failed", cancelled: false },
+			{ abortReason: undefined, cancelled: false },
+		])(
+			"cancels the title request on abort only for a user cancel ($abortReason)",
+			async ({ abortReason, cancelled }) => {
+				const cancel = vi.spyOn(provider["taskTitleService"], "cancel")
+				const forget = vi.spyOn(provider["taskTitleService"], "forget")
+				const fakeTask = makeTitleTask("title-abort", abortReason)
+				register(fakeTask)
+
+				await fakeTask.emit(RooCodeEventName.TaskAborted)
+
+				if (cancelled) {
+					expect(cancel).toHaveBeenCalledExactlyOnceWith("title-abort", "user")
+				} else {
+					expect(cancel).not.toHaveBeenCalled()
+				}
+				expect(forget).not.toHaveBeenCalled()
+			},
+		)
+
+		it("forgets an unscheduled candidate when the task's listeners are removed", () => {
+			const forget = vi.spyOn(provider["taskTitleService"], "forget")
+			const task = register(makeTitleTask("title-evicted"))
+
+			for (const cleanup of provider["taskEventListeners"].get(task) ?? []) cleanup()
+
+			expect(forget).toHaveBeenCalledExactlyOnceWith("title-evicted")
+			expect(provider["taskTitleService"]["candidates"].has("title-evicted")).toBe(false)
 		})
 	})
 })

@@ -496,14 +496,59 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			})
 		})
 
-		it("rejects a record whose on-disk id does not match", async () => {
+		const ioError = () => Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" })
+		// Each case corrupts the read and returns the file content that must remain on disk.
+		const unreadableCases: Array<{ name: string; corrupt(storagePath: string, before: string): Promise<string> }> =
+			[
+				{
+					name: "a read error",
+					corrupt: async (_storagePath, before) => {
+						vi.mocked(fs.readFile).mockRejectedValueOnce(ioError())
+						return before
+					},
+				},
+				{
+					name: "unparsable JSON",
+					corrupt: async (storagePath) => {
+						await fs.writeFile(taskFile(storagePath), "{ torn")
+						return "{ torn"
+					},
+				},
+				{
+					name: "a record with a different id",
+					corrupt: async (storagePath) => {
+						const other = JSON.stringify(item("other-task"))
+						await fs.writeFile(taskFile(storagePath), other)
+						return other
+					},
+				},
+			]
+
+		it.each(unreadableCases)("keeps the cache and writes nothing on $name", async ({ corrupt }) => {
 			await withTwoStores(async (storeA, _storeB, storagePath) => {
-				await fs.writeFile(taskFile(storagePath), JSON.stringify(item("other-task")))
+				const cached = storeA.get("shared-task")
+				const expectedOnDisk = await corrupt(storagePath, await fs.readFile(taskFile(storagePath), "utf8"))
 
 				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Title")
-				expect(result).toEqual({ applied: false })
-				expect(storeA.get("shared-task")).toBeUndefined()
-				expect(JSON.parse(await fs.readFile(taskFile(storagePath), "utf8")).autoTitle).toBeUndefined()
+				expect(result.applied).toBe(false)
+				expect(storeA.get("shared-task")).toEqual(cached)
+				expect(await fs.readFile(taskFile(storagePath), "utf8")).toBe(expectedOnDisk)
+			})
+		})
+
+		it("does not let a stale save overwrite a peer update after a read error", async () => {
+			await withTwoStores(async (storeA, storeB) => {
+				await storeA.upsert({ ...item("shared-task"), mode: "code" })
+				const stale = storeA.get("shared-task")!
+				await storeB.invalidate("shared-task")
+				await storeB.upsert({ ...storeB.get("shared-task")!, mode: "architect" })
+
+				vi.mocked(fs.readFile).mockRejectedValueOnce(ioError())
+				await storeA.setAutoTitleIfAbsent("shared-task", "Title")
+				await storeA.upsert({ ...stale, tokensOut: 5 })
+
+				await storeB.invalidate("shared-task")
+				expect(storeB.get("shared-task")).toMatchObject({ mode: "architect", tokensOut: 5 })
 			})
 		})
 

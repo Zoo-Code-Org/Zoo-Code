@@ -8,10 +8,9 @@ import type { CompletePromptOptions } from "../../api"
 export const TASK_TITLE_TIMEOUT_MS = 15_000
 export const TASK_TITLE_MAX_INPUT_CHARS = 1_000
 export const TASK_TITLE_MAX_CHARS = 50
-export const TASK_TITLE_SHORT_PROMPT_CHARS = 42
+export const TASK_TITLE_FALLBACK_CHARS = 42
 
 const CODE_BLOCK_MAX_LINES = 8
-const FALLBACK_MAX_CHARS = TASK_TITLE_SHORT_PROMPT_CHARS
 
 export function normalizeWhitespace(text: string): string {
 	return text.replace(/\s+/g, " ").trim()
@@ -57,6 +56,17 @@ function stripSurroundingQuotes(text: string): string {
 }
 
 /**
+ * Remove markdown emphasis markers that wrap text, leaving markers inside identifiers such as
+ * `snake_case` or `a*b` untouched.
+ */
+function stripEmphasis(text: string): string {
+	return text.replace(
+		/(^|[^\p{L}\p{N}*_])(\*{1,3}|_{1,3})(?=\S)(.+?)(?<=\S)\2(?![\p{L}\p{N}*_]|\.[\p{L}\p{N}])/gu,
+		"$1$3",
+	)
+}
+
+/**
  * Turn raw model output into a display title. Returns `undefined` when nothing usable remains or
  * the result merely repeats the prompt, so callers fall back to {@link fallbackTitle}.
  */
@@ -73,10 +83,9 @@ export function cleanTitle(raw: string, originalPrompt: string): string | undefi
 		return undefined
 	}
 
-	let title = firstLine
-		.replace(/^(?:[#>*_\-\s]+)/, "")
+	let title = stripEmphasis(firstLine)
+		.replace(/^(?:[#>*\-\s]+)/, "")
 		.replace(/^(?:title|subject|제목)\s*[:：]\s*/i, "")
-		.replace(/[*_]{1,3}/g, "")
 		.trim()
 	title = stripSurroundingQuotes(title)
 	title = title.replace(/[\s.。!?…,;:，；：]+$/u, "").trim()
@@ -89,34 +98,9 @@ export function cleanTitle(raw: string, originalPrompt: string): string | undefi
 	return Array.from(title).slice(0, TASK_TITLE_MAX_CHARS).join("").trim()
 }
 
-function simplifyReferences(line: string): string {
-	return line
-		.replace(/https?:\/\/[^\s)]+/gi, (url) => {
-			try {
-				return new URL(url).hostname
-			} catch {
-				return url
-			}
-		})
-		.replace(/@(\/?[^\s]+)/g, (_match, ref: string) => {
-			const trimmed = ref.replace(/[\\/]+$/, "")
-			return trimmed.split(/[\\/]/).pop() || trimmed
-		})
-}
-
-/** Free, deterministic title: first line of the prompt, shortened to at most 42 characters. */
+/** First 42 characters of the whitespace-normalized prompt: the free title used when generation is skipped or fails. */
 export function fallbackTitle(prompt: string): string {
-	const firstLine = prompt.split("\n").find((line) => line.trim().length > 0) ?? ""
-	const normalized = normalizeWhitespace(simplifyReferences(firstLine))
-	const chars = Array.from(normalized)
-	if (chars.length <= FALLBACK_MAX_CHARS) {
-		return normalized
-	}
-
-	const head = chars.slice(0, FALLBACK_MAX_CHARS - 1).join("")
-	const boundary = head.lastIndexOf(" ")
-	const cut = boundary > 0 ? head.slice(0, boundary) : head
-	return `${cut.trimEnd()}…`
+	return Array.from(normalizeWhitespace(prompt)).slice(0, TASK_TITLE_FALLBACK_CHARS).join("").trim()
 }
 
 export type CompleteFn = (

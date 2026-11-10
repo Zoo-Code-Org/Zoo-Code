@@ -71,6 +71,8 @@ interface DelegationRepairIntent {
 /**
  * Options for TaskHistoryStore constructor.
  */
+type AutoTitleDiskRead = { kind: "found"; item: HistoryItem } | { kind: "missing" } | { kind: "unreadable" }
+
 export interface TaskHistoryStoreOptions {
 	/**
 	 * Optional callback invoked inside the write lock after each mutation
@@ -1027,19 +1029,18 @@ export class TaskHistoryStore {
 	/**
 	 * Record a generated title unless the task already has one. The persisted record is re-checked
 	 * under the per-file lock, so a task deleted by another host is never resurrected and a title
-	 * written by another host is never overwritten.
+	 * written by another host is never overwritten. Only a confirmed missing file evicts the cache:
+	 * a read or parse failure leaves it intact so a later save still merges against a known record.
 	 */
 	public setAutoTitleIfAbsent(taskId: string, autoTitle: string): Promise<{ applied: boolean; item?: HistoryItem }> {
 		return this.withLock(async () => {
 			const title = autoTitle.trim()
-			const disk = await this.readTaskFile(taskId)
-			if (!disk || disk.id !== taskId) {
-				this.cache.delete(taskId)
-				return { applied: false }
+			const disk = await this.readTaskFileForAutoTitle(taskId)
+			if (disk.kind !== "found") {
+				return this.settleSkippedAutoTitle(taskId, disk)
 			}
-			if (disk.autoTitle || !title) {
-				this.cache.set(taskId, disk)
-				return { applied: false, item: disk }
+			if (disk.item.autoTitle || !title) {
+				return this.settleSkippedAutoTitle(taskId, disk)
 			}
 
 			const skipped = Symbol("auto-title-skipped")
@@ -1048,7 +1049,7 @@ export class TaskHistoryStore {
 				const filePath = await this.getTaskFilePath(taskId)
 				await safeWriteJson(
 					filePath,
-					{ ...disk, autoTitle: title },
+					{ ...disk.item, autoTitle: title },
 					{
 						merge: (existing) => {
 							const current = existing as Partial<HistoryItem> | null
@@ -1064,13 +1065,8 @@ export class TaskHistoryStore {
 				if (!(error instanceof Error) || !(skipped in error)) {
 					throw error
 				}
-				const latest = await this.readTaskFile(taskId)
-				if (latest) {
-					this.cache.set(taskId, latest)
-				} else {
-					this.cache.delete(taskId)
-				}
-				return { applied: false, item: latest ?? undefined }
+				// safeWriteJson reports both a missing and an unparsable file as `null`, so re-read to tell them apart.
+				return this.settleSkippedAutoTitle(taskId, await this.readTaskFileForAutoTitle(taskId))
 			}
 
 			if (!persisted) {
@@ -1082,6 +1078,35 @@ export class TaskHistoryStore {
 			}
 			return { applied: true, item: persisted }
 		})
+	}
+
+	private settleSkippedAutoTitle(taskId: string, disk: AutoTitleDiskRead): { applied: false; item?: HistoryItem } {
+		switch (disk.kind) {
+			case "found":
+				this.cache.set(taskId, disk.item)
+				return { applied: false, item: disk.item }
+			case "missing":
+				this.cache.delete(taskId)
+				return { applied: false }
+			case "unreadable":
+				return { applied: false, item: this.cache.get(taskId) }
+		}
+	}
+
+	private async readTaskFileForAutoTitle(taskId: string): Promise<AutoTitleDiskRead> {
+		let raw: string
+		try {
+			raw = await readFileWithMissingRetry(await this.getTaskFilePath(taskId))
+		} catch (error) {
+			return getErrorCode(error) === "ENOENT" ? { kind: "missing" } : { kind: "unreadable" }
+		}
+		try {
+			const item: unknown = JSON.parse(raw)
+			const id = typeof item === "object" && item !== null ? (item as { id?: unknown }).id : undefined
+			return id === taskId ? { kind: "found", item: item as HistoryItem } : { kind: "unreadable" }
+		} catch {
+			return { kind: "unreadable" }
+		}
 	}
 
 	/**

@@ -5,6 +5,7 @@ import {
 	cleanTitle,
 	fallbackTitle,
 	generateTaskTitle,
+	TASK_TITLE_FALLBACK_CHARS,
 	TASK_TITLE_MAX_CHARS,
 	TASK_TITLE_MAX_INPUT_CHARS,
 	type CompleteFn,
@@ -37,6 +38,13 @@ describe("cleanTitle", () => {
 		["closed think block", "<think>hmm\nmore</think>\nRefactor auth module", "Refactor auth module"],
 		["closed thinking block", "<thinking>x</thinking>Refactor auth module", "Refactor auth module"],
 		["Korean title", "인증 모듈 리팩터링.", "인증 모듈 리팩터링"],
+		["inline bold", "Fix **auth** bug", "Fix auth bug"],
+		["underscore emphasis", "_Refactor_ auth module", "Refactor auth module"],
+		["snake_case identifier", "Rename user_id to account_id", "Rename user_id to account_id"],
+		["dunder identifier", "Fix __init__.py import", "Fix __init__.py import"],
+		["bold before a sentence period", "Fix **auth** bug.", "Fix auth bug"],
+		["bold wrapping the whole title then a period", "**Refactor auth module**.", "Refactor auth module"],
+		["multiplication", "Compute a*b*c totals", "Compute a*b*c totals"],
 	])("cleans %s", (_label, raw, expected) => {
 		expect(cleanTitle(raw, PROMPT)).toBe(expected)
 	})
@@ -69,31 +77,21 @@ describe("cleanTitle", () => {
 describe("fallbackTitle", () => {
 	it.each([
 		["short prompt unchanged", "Fix the login bug", "Fix the login bug"],
-		["first line only", "Fix the login bug\nand also more things", "Fix the login bug"],
-		["leading blank lines skipped", "\n\n  Fix   the\tlogin bug", "Fix the login bug"],
-		["@mention reduced to file name", "Explain @/src/core/task/Task.ts please", "Explain Task.ts please"],
-		["URL reduced to domain", "Read https://docs.example.com/guide/start?x=1 now", "Read docs.example.com now"],
+		["whitespace and newlines normalized", "\n\n  Fix   the\tlogin\nbug  ", "Fix the login bug"],
+		["exactly 42 characters unchanged", "a".repeat(42), "a".repeat(42)],
+		["long prompt cut to its first 42 characters", PROMPT, "Please refactor the authentication module"],
+		[
+			"mentions and URLs kept verbatim",
+			"Explain @/src/core/task/Task.ts and https://x.io",
+			"Explain @/src/core/task/Task.ts and https:",
+		],
 		["empty", "", ""],
 	])("%s", (_label, prompt, expected) => {
 		expect(fallbackTitle(prompt)).toBe(expected)
 	})
 
-	it("cuts long text at a word boundary and appends an ellipsis within 42 characters", () => {
-		const result = fallbackTitle("Please refactor the authentication module so that it supports refresh tokens")
-
-		expect(result).toBe("Please refactor the authentication…")
-		expect(Array.from(result).length).toBeLessThanOrEqual(42)
-	})
-
-	it("hard-cuts text without spaces without splitting surrogate pairs", () => {
-		const result = fallbackTitle("😀".repeat(80))
-
-		expect(result).toBe("😀".repeat(41) + "…")
-	})
-
-	it("keeps exactly 42 characters unchanged", () => {
-		const exact = "a".repeat(42)
-		expect(fallbackTitle(exact)).toBe(exact)
+	it("cuts at 42 code points without splitting surrogate pairs", () => {
+		expect(fallbackTitle("😀".repeat(80))).toBe("😀".repeat(TASK_TITLE_FALLBACK_CHARS))
 	})
 })
 

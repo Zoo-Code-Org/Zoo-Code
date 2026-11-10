@@ -9,7 +9,7 @@ import {
 } from "../TaskTitleService"
 
 const LONG_PROMPT = "Please refactor the authentication module so that it supports refresh tokens"
-const FALLBACK = "Please refactor the authentication…"
+const FALLBACK = "Please refactor the authentication module"
 const USED = { totalTokensIn: 10 }
 
 const taskProfile: ProviderSettings = { apiProvider: providerIdentifiers.anthropic }
@@ -30,6 +30,7 @@ function createHarness(options: { settings?: Partial<TaskTitleSettings>; items?:
 	const written: Array<{ taskId: string; title: string }> = []
 	const requests: Deferred[] = []
 	const profiles = new Map<string, ProviderSettings>()
+	const prohibited = new Set<ProviderSettings>()
 
 	const service = new TaskTitleService({
 		getHistoryItem: (taskId) => items.get(taskId),
@@ -38,6 +39,7 @@ function createHarness(options: { settings?: Partial<TaskTitleSettings>; items?:
 		},
 		getSettings: async () => settings,
 		resolveProfile: async (id) => profiles.get(id),
+		isProfileAllowed: async (profile) => !prohibited.has(profile),
 		generate: (generateOptions) =>
 			new Promise<string | undefined>((resolve, reject) => {
 				requests.push({ options: generateOptions, resolve, reject })
@@ -57,7 +59,7 @@ function createHarness(options: { settings?: Partial<TaskTitleSettings>; items?:
 		items.set(taskId, historyItem(taskId, item))
 	}
 
-	return { service, items, settings, written, requests, profiles, task, startTask }
+	return { service, items, settings, written, requests, profiles, prohibited, task, startTask }
 }
 
 /** Node's native AbortSignal.timeout ignores fake timers; route it through setTimeout instead. */
@@ -141,6 +143,19 @@ describe("TaskTitleService", () => {
 			expect(h.requests[0]!.options.profile).toBe(taskProfile)
 		})
 
+		it("generates a title for a prompt of 42 characters or fewer", async () => {
+			const h = createHarness()
+			h.startTask("t1", {}, { task: "Fix the login bug" })
+
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+			h.requests[0]!.resolve("Login bug fix")
+			await flush()
+
+			expect(h.requests[0]!.options.prompt).toBe("Fix the login bug")
+			expect(h.written).toEqual([{ taskId: "t1", title: "Login bug fix" }])
+		})
+
 		it("passes custom support prompts to the generator", async () => {
 			const h = createHarness({ settings: { customSupportPrompts: { TASK_TITLE: "x ${userInput}" } } })
 			h.startTask("t1")
@@ -169,11 +184,6 @@ describe("TaskTitleService", () => {
 					h.items.set("t1", historyItem("t1"))
 					h.service.onTaskCreated(h.task("t1"))
 				},
-				expectFallback: false,
-			},
-			{
-				name: "a short prompt",
-				setup: (h) => h.startTask("t1", {}, { task: "Fix the login bug" }),
 				expectFallback: false,
 			},
 			{
@@ -222,6 +232,58 @@ describe("TaskTitleService", () => {
 
 			expect(h.requests).toHaveLength(0)
 			expect(h.written).toEqual([{ taskId: "t1", title: FALLBACK }])
+		})
+	})
+
+	describe("organization allow-list", () => {
+		it("records only the fallback when the title profile is prohibited", async () => {
+			const h = createHarness({ settings: { apiConfigId: "blocked" } })
+			const blocked: ProviderSettings = { apiProvider: providerIdentifiers.openai }
+			h.profiles.set("blocked", blocked)
+			h.prohibited.add(blocked)
+			h.startTask("t1")
+
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			expect(h.requests).toHaveLength(0)
+			expect(h.written).toEqual([{ taskId: "t1", title: FALLBACK }])
+		})
+
+		it("does not switch to the task profile when the title profile is prohibited", async () => {
+			const h = createHarness({ settings: { apiConfigId: "blocked" } })
+			const blocked: ProviderSettings = { apiProvider: providerIdentifiers.openai }
+			h.profiles.set("blocked", blocked)
+			h.prohibited.add(blocked)
+			h.startTask("t1")
+
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			expect(h.requests.some((r) => r.options.profile === taskProfile)).toBe(false)
+		})
+
+		it("checks the policy at request time, after the task was created", async () => {
+			const h = createHarness()
+			h.startTask("t1")
+			// The task profile became prohibited after the task started.
+			h.prohibited.add(taskProfile)
+
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			expect(h.requests).toHaveLength(0)
+			expect(h.written).toEqual([{ taskId: "t1", title: FALLBACK }])
+		})
+
+		it("still requests when the effective profile is allowed", async () => {
+			const h = createHarness()
+			h.startTask("t1")
+
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			expect(h.requests).toHaveLength(1)
 		})
 	})
 
@@ -379,6 +441,42 @@ describe("TaskTitleService", () => {
 			expect(h.written).toEqual([{ taskId: "t1", title: "Still generated" }])
 		})
 
+		it("drops an unscheduled task that leaves the stack before its first API usage", async () => {
+			const h = createHarness()
+			h.startTask("t1")
+
+			h.service.forget("t1")
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			expect(h.requests).toHaveLength(0)
+			expect(h.written).toEqual([])
+		})
+
+		it("keeps a scheduled request running when the task leaves the stack", async () => {
+			const h = createHarness()
+			h.startTask("t1")
+			h.service.onTokenUsageUpdated("t1", USED)
+			await flush()
+
+			h.service.forget("t1")
+			h.requests[0]!.resolve("Still generated")
+			await flush()
+
+			expect(h.requests[0]!.options.signal?.aborted).toBe(false)
+			expect(h.written).toEqual([{ taskId: "t1", title: "Still generated" }])
+		})
+
+		it("does not retain the live task object for an unscheduled candidate", () => {
+			const h = createHarness()
+			const live = { ...h.task("t1"), extra: "live task state" }
+			h.service.onTaskCreated(live)
+
+			const stored = h.service["candidates"].get("t1")
+			expect(stored).not.toBe(live)
+			expect(stored).toEqual({ taskId: "t1", parentTaskId: undefined, apiConfiguration: taskProfile })
+		})
+
 		it("aborts everything and writes nothing after dispose", async () => {
 			const h = createHarness()
 			for (const id of ["a", "b", "c"]) {
@@ -417,6 +515,7 @@ describe("TaskTitleService", () => {
 				},
 				getSettings: async () => ({ enabled: true }),
 				resolveProfile: async () => undefined,
+				isProfileAllowed: async () => true,
 				generate: (options) => generateTaskTitle({ ...options, complete: () => new Promise<string>(() => {}) }),
 			})
 			service.onTaskCreated({ taskId: "t1", apiConfiguration: taskProfile })

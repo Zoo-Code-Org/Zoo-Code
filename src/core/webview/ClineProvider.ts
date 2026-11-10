@@ -472,6 +472,10 @@ export class ClineProvider
 				const { name: _name, ...profile } = await this.providerSettingsManager.getProfile({ id: apiConfigId })
 				return profile.apiProvider ? profile : undefined
 			},
+			isProfileAllowed: async (profile) => {
+				const { organizationAllowList } = await this.getState({ includeTaskHistory: false })
+				return ProfileValidator.isProfileAllowed(profile, organizationAllowList)
+			},
 			log: (message) => this.log(message),
 		})
 
@@ -587,6 +591,7 @@ export class ClineProvider
 				() => instance.off(RooCodeEventName.TaskUnpaused, onTaskUnpaused),
 				() => instance.off(RooCodeEventName.TaskSpawned, onTaskSpawned),
 				() => instance.off(RooCodeEventName.TaskTokenUsageUpdated, onTaskTokenUsageUpdated),
+				() => this.taskTitleService.forget(instance.taskId),
 			])
 		}
 	}

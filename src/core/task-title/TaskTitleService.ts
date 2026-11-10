@@ -1,12 +1,6 @@
 import type { HistoryItem, ProviderSettings, TokenUsage } from "@roo-code/types"
 
-import {
-	fallbackTitle,
-	generateTaskTitle,
-	normalizeWhitespace,
-	TASK_TITLE_SHORT_PROMPT_CHARS,
-	type GenerateTaskTitleOptions,
-} from "./generateTaskTitle"
+import { fallbackTitle, generateTaskTitle, type GenerateTaskTitleOptions } from "./generateTaskTitle"
 
 export const TASK_TITLE_MAX_CONCURRENT = 2
 
@@ -30,6 +24,8 @@ export interface TaskTitleServiceDeps {
 	getSettings(): Promise<TaskTitleSettings>
 	/** Resolve a saved provider profile by id; `undefined` when it no longer exists. */
 	resolveProfile(apiConfigId: string): Promise<ProviderSettings | undefined>
+	/** Whether the current organization policy allows sending the prompt to this profile. */
+	isProfileAllowed(profile: ProviderSettings): Promise<boolean>
 	generate?(options: GenerateTaskTitleOptions): Promise<string | undefined>
 	log?(message: string): void
 }
@@ -63,7 +59,17 @@ export class TaskTitleService {
 		if (this.disposed || task.parentTaskId || this.deps.getHistoryItem(task.taskId)) {
 			return
 		}
-		this.candidates.set(task.taskId, task)
+		// Copy the fields so an unscheduled candidate does not keep the live task alive.
+		const { taskId, parentTaskId, apiConfiguration } = task
+		this.candidates.set(taskId, { taskId, parentTaskId, apiConfiguration })
+	}
+
+	/**
+	 * Drop a task that left the stack before its first API usage. A title request that is already
+	 * scheduled keeps running, so switching tasks does not lose it.
+	 */
+	forget(taskId: string): void {
+		this.candidates.delete(taskId)
 	}
 
 	/** Called on every token-usage update; schedules once, after the first real API usage. */
@@ -162,9 +168,6 @@ export class TaskTitleService {
 		if (!item || item.title || item.autoTitle) {
 			return undefined
 		}
-		if (Array.from(normalizeWhitespace(item.task)).length <= TASK_TITLE_SHORT_PROMPT_CHARS) {
-			return undefined
-		}
 		return { prompt: item.task, settings }
 	}
 
@@ -177,12 +180,15 @@ export class TaskTitleService {
 		const taskProfile = job.task.apiConfiguration
 		const titleProfile = settings.apiConfigId ? await this.deps.resolveProfile(settings.apiConfigId) : undefined
 
+		const profile = titleProfile ?? taskProfile
+
 		let title: string | undefined
 		const rateLimited = (taskProfile.rateLimitSeconds ?? 0) > 0 || (titleProfile?.rateLimitSeconds ?? 0) > 0
-		if (!rateLimited && !job.cancelReason) {
+		// Checked per request: the organization policy may have changed since the task started.
+		if (!rateLimited && !job.cancelReason && (await this.deps.isProfileAllowed(profile))) {
 			try {
 				title = await (this.deps.generate ?? generateTaskTitle)({
-					profile: titleProfile ?? taskProfile,
+					profile,
 					prompt,
 					customSupportPrompts: settings.customSupportPrompts,
 					signal: job.controller.signal,
