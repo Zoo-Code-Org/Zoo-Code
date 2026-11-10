@@ -135,7 +135,7 @@ import {
 	checkpointRestore,
 	checkpointDiff,
 } from "../checkpoints"
-import { processUserContentMentions } from "../mentions/processUserContentMentions"
+import { processUserContentMentions, userMentionContent } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
@@ -255,6 +255,8 @@ export interface TaskOptions extends CreateTaskOptions {
 	checkpointTimeout?: number
 	consecutiveMistakeLimit?: number
 	task?: string
+	/** User-authored portion of a generated support prompt; empty disables expansion. */
+	authorizedMentionText?: string
 	images?: string[]
 	historyItem?: HistoryItem
 	experiments?: Record<string, boolean>
@@ -703,7 +705,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
 
+	private readonly authorizedMentionText?: string
+
 	constructor({
+		authorizedMentionText,
 		provider,
 		apiConfiguration,
 		enableCheckpoints = true,
@@ -728,6 +733,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		handoffExecutionContext,
 	}: TaskOptions) {
 		super()
+		this.authorizedMentionText = authorizedMentionText
+
 		this.resetAssistantMessagePersistence()
 
 		if (startTask && !task && !images && !historyItem) {
@@ -3168,10 +3175,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Task starting
 			await this.initiateTaskLoop([
-				{
-					type: "text",
-					text: `<user_message>\n${task}\n</user_message>`,
-				},
+				userMentionContent(`<user_message>\n${task}\n</user_message>`, this.authorizedMentionText ?? task),
 				...imageBlocks,
 			]).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
@@ -3433,10 +3437,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
 
 			if (responseText) {
-				newUserContent.push({
-					type: "text",
-					text: `<user_message>\n${responseText}\n</user_message>`,
-				})
+				newUserContent.push(
+					userMentionContent(`<user_message>\n${responseText}\n</user_message>`, responseText),
+				)
 			}
 
 			if (responseImages && responseImages.length > 0) {
