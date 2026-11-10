@@ -1,0 +1,412 @@
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
+
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
+
+import type { Task } from "../../task/Task"
+import { RepoPerTaskCheckpointService } from "../../../services/checkpoints"
+import { checkGitInstalled } from "../../../utils/git"
+import { journalPath } from "../changeJournal"
+import { checkpointSave } from "../index"
+
+// The recovery test that must re-initialize reaches RepoPerTaskCheckpointService
+// .create; every other test presets a service double or has no storage dir,
+// so the factory is only ever called through these mocks.
+vi.mock("../../../services/checkpoints", () => ({
+	RepoPerTaskCheckpointService: { create: vi.fn() },
+}))
+
+vi.mock("../../../utils/git", () => ({
+	checkGitInstalled: vi.fn(),
+}))
+
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureCheckpointCreated: vi.fn(),
+			captureCheckpointRestored: vi.fn(),
+			captureCheckpointDiffed: vi.fn(),
+		},
+	},
+}))
+
+/**
+ * Minimal Task double for the checkpointSave wiring tests. Only the members
+ * touched by getCheckpointService + checkpointSave are provided: a pre-set
+ * checkpointService (so no git installation happens), the provider context
+ * (journal dir + setting state), and say. Structural cast at the boundary,
+ * matching the documented test-double style of the tool specs.
+ */
+function makeTask(options: {
+	saveCheckpoint?: unknown
+	state?: Record<string, unknown>
+	enableCheckpoints?: boolean
+	storageDir?: string | null
+}) {
+	const say = vi.fn().mockResolvedValue(undefined)
+	// An explicit `saveCheckpoint: undefined` (a checkpoint that produced no
+	// commit) must be preserved as-is; only an omitted option falls back to
+	// the default commit result.
+	const saveCheckpoint = vi
+		.fn()
+		.mockResolvedValue("saveCheckpoint" in options ? options.saveCheckpoint : { commit: "sha-card-1" })
+	// `storageDir: null` simulates a checkpoint-service init failure: the
+	// service lookup dereferences globalStorageUri, throws, and resolves to
+	// no service while the task still expects checkpoints (enableCheckpoints
+	// stays true until the failed lookup flips it).
+	const providerDeref = {
+		context: { globalStorageUri: options.storageDir === null ? undefined : { fsPath: globalStorageDir } },
+		getState: vi.fn().mockResolvedValue(options.state ?? {}),
+		// A re-initialized service sends an init warning through the provider;
+		// the recovery test that re-initializes reaches it.
+		postMessageToWebview: vi.fn(),
+	}
+
+	const task = {
+		taskId: "task-card",
+		cwd: "/workspace",
+		enableCheckpoints: options.enableCheckpoints ?? true,
+		// With `storageDir: null` there is no preset service either, so the
+		// lookup runs for real and fails on the missing storage dir.
+		checkpointService:
+			options.storageDir === null
+				? undefined
+				: { saveCheckpoint, isInitialized: true, isPathIgnored: vi.fn().mockResolvedValue(false) },
+		providerRef: { deref: vi.fn().mockReturnValue(providerDeref) },
+		say,
+	} as unknown as Task
+
+	return { task, say, saveCheckpoint }
+}
+
+let globalStorageDir: string
+
+beforeEach(async () => {
+	globalStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b3a-save-"))
+})
+
+afterEach(async () => {
+	await fs.rm(globalStorageDir, { recursive: true, force: true })
+})
+
+describe("checkpointSave change-card emission (B3a)", () => {
+	it("emits a full-detail change card after a successful per-write checkpoint and still appends the journal", async () => {
+		const { task, say, saveCheckpoint } = makeTask({ state: { changeCardDetail: "full" } })
+
+		await checkpointSave(task, false, true, {
+			path: "src/a.ts",
+			operation: "create",
+			diffStats: { additions: 2, deletions: 1 },
+			diff: "+line-a\n+line-b\n-old",
+		})
+
+		expect(saveCheckpoint).toHaveBeenCalledWith(expect.stringContaining("task-card"), expect.any(Object))
+
+		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
+		expect(cardCalls).toHaveLength(1)
+		const [type, text, images, _partial, _sayOptions, _progress, options] = cardCalls[0] as unknown as [
+			string,
+			string,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			{ isNonInteractive?: boolean },
+		]
+		expect(type).toBe("change_card")
+		expect(images).toBeUndefined()
+		expect(options).toEqual({ isNonInteractive: true })
+		const card = JSON.parse(text as string) as {
+			checkpointIds: string[]
+			files: Array<{ path: string; additions: number; deletions: number; diff?: string }>
+			totalFiles: number
+			detail: string
+		}
+		expect(card.checkpointIds).toEqual(["sha-card-1"])
+		expect(card.totalFiles).toBe(1)
+		expect(card.detail).toBe("full")
+		expect(card.files).toEqual([{ path: "src/a.ts", additions: 2, deletions: 1, diff: "+line-a\n+line-b\n-old" }])
+
+		// B2 regression: the journal entry is still appended with the commit id.
+		const journalRaw = await fs.readFile(journalPath(globalStorageDir, "task-card"), "utf8")
+		const entries = journalRaw
+			.split("\n")
+			.filter((line) => line !== "")
+			.map((line) => JSON.parse(line))
+		expect(entries).toHaveLength(1)
+		expect(entries[0]).toMatchObject({ path: "src/a.ts", operation: "create", checkpointId: "sha-card-1" })
+	})
+
+	it("emits a summary card without diffs for the default (summary) setting", async () => {
+		const { task, say } = makeTask({})
+
+		await checkpointSave(task, false, true, {
+			path: "src/a.ts",
+			operation: "update",
+			diffStats: { additions: 1, deletions: 0 },
+			diff: "+x",
+		})
+
+		const cardCall = say.mock.calls.find(([type]) => type === "change_card")
+		expect(cardCall).toBeDefined()
+		const card = JSON.parse((cardCall as unknown as [string, string])[1]) as {
+			files: Array<Record<string, unknown>>
+			detail: string
+		}
+		expect(card.detail).toBe("summary")
+		expect(card.files[0]).not.toHaveProperty("diff")
+	})
+
+	it("emits a compact card for auto-approved steps even when the setting is full", async () => {
+		const { task, say } = makeTask({ state: { changeCardDetail: "full" } })
+
+		await checkpointSave(task, false, true, {
+			path: "src/a.ts",
+			operation: "create",
+			diffStats: { additions: 1, deletions: 0 },
+			diff: "+x",
+			autoApproved: true,
+		})
+
+		const cardCall = say.mock.calls.find(([type]) => type === "change_card")
+		expect(cardCall).toBeDefined()
+		const card = JSON.parse((cardCall as unknown as [string, string])[1]) as {
+			files: Array<Record<string, unknown>>
+			detail: string
+		}
+		expect(card.detail).toBe("summary")
+		expect(card.files[0]).not.toHaveProperty("diff")
+	})
+
+	it("emits one card with all writes for a multi-file step", async () => {
+		const { task, say } = makeTask({ state: { changeCardDetail: "full" } })
+
+		await checkpointSave(task, false, true, [
+			{ path: "src/a.ts", operation: "create", diffStats: { additions: 2, deletions: 0 }, diff: "+a1\n+a2" },
+			{ path: "src/b.ts", operation: "delete", diffStats: { additions: 0, deletions: 3 } },
+		])
+
+		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
+		expect(cardCalls).toHaveLength(1)
+		const card = JSON.parse((cardCalls[0] as unknown as [string, string])[1]) as {
+			files: Array<{ path: string; diff?: string }>
+			totalFiles: number
+		}
+		expect(card.totalFiles).toBe(2)
+		expect(card.files.map((file) => file.path)).toEqual(["src/a.ts", "src/b.ts"])
+		expect(card.files[0].diff).toBe("+a1\n+a2")
+		expect(card.files[1]).not.toHaveProperty("diff")
+	})
+
+	it("emits no change card for baseline checkpoints without write info", async () => {
+		const { task, say } = makeTask({})
+
+		await checkpointSave(task)
+
+		// `say` is invoked with seven arguments, so a three-argument
+		// `toHaveBeenCalledWith` negative assertion can never fail; filter the
+		// recorded calls by type instead.
+		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
+		expect(cardCalls).toHaveLength(0)
+	})
+
+	it("fails a write-metadata save when the checkpoint produced no commit and emits no card", async () => {
+		const { task, say } = makeTask({ saveCheckpoint: undefined })
+
+		await expect(checkpointSave(task, false, true, { path: "src/a.ts", operation: "create" })).rejects.toThrow(
+			/did not produce a commit/,
+		)
+
+		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
+		expect(cardCalls).toHaveLength(0)
+	})
+
+	it("emits no change card for a no-op checkpoint with an empty writes array but still saves", async () => {
+		const { task, say, saveCheckpoint } = makeTask({})
+
+		// A no-op patch still reaches checkpointSave with [] write metadata; the
+		// commit may cover unrelated workspace changes, but a zero-file card must
+		// not be emitted.
+		await checkpointSave(task, false, true, [])
+
+		expect(saveCheckpoint).toHaveBeenCalled()
+		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
+		expect(cardCalls).toHaveLength(0)
+	})
+
+	it("resolves a write-metadata save when checkpoints are disabled for the task and emits no card", async () => {
+		// Documented contract: user-disabled checkpoints means the absence of
+		// rollback metadata is the user's choice, so the save must not fail the
+		// write tool.
+		const { task, say, saveCheckpoint } = makeTask({
+			enableCheckpoints: false,
+			// The persisted setting agrees the user disabled checkpoints; an unset or
+			// true setting would mean an earlier failure flipped the task flag.
+			state: { enableCheckpoints: false },
+		})
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).resolves.toBeUndefined()
+
+		expect(saveCheckpoint).not.toHaveBeenCalled()
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("fails a write-metadata save when the checkpoint-service lookup fails and emits no card", async () => {
+		// Documented contract: with checkpoints requested (enableCheckpoints
+		// true) a failed service lookup is a genuine init-failure - the write
+		// would be orphaned, so the save must surface it.
+		const { task, say } = makeTask({ storageDir: null })
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/could not initialize the checkpoint service/)
+
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("recovers the next write-metadata save after a transient save failure", async () => {
+		// A failed save flips the task flag (checkpointsDisabledByFailure).
+		// The next write-metadata save must attempt recovery - reusing the
+		// live service handle - instead of failing every later write in the
+		// task with a misleading init-failure error.
+		const { task } = makeTask({})
+		const svc = task.checkpointService as unknown as { saveCheckpoint: Mock }
+		svc.saveCheckpoint = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("index.lock contention"))
+			.mockResolvedValue({ commit: "sha-recovered-1" })
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/Checkpoint save failed after a file write/)
+		expect(task.checkpointsDisabledByFailure).toBe(true)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/b.ts", operation: "create", diff: "+y" }),
+		).resolves.toMatchObject({ commit: "sha-recovered-1" })
+		expect(task.enableCheckpoints).toBe(true)
+		const journalRaw = await fs.readFile(journalPath(globalStorageDir, "task-card"), "utf8")
+		const entries = journalRaw
+			.split("\n")
+			.filter((line) => line !== "")
+			.map((line) => JSON.parse(line))
+		expect(entries).toEqual([
+			expect.objectContaining({ path: "src/b.ts", operation: "create", checkpointId: "sha-recovered-1" }),
+		])
+	})
+
+	it("waits on an in-flight initialization during failure-driven recovery instead of creating a second service", async () => {
+		// A failure disabled checkpoints while an earlier initialization is still
+		// running. Recovery must not create a competing service: it waits on the same
+		// initialization (bounded by checkpointTimeout) and leaves the flag set.
+		const { task } = makeTask({})
+		task.checkpointService = undefined
+		task.checkpointsDisabledByFailure = true
+		task.enableCheckpoints = false
+		task.checkpointServiceInitializing = true
+		task.checkpointTimeout = 0.01
+		vi.mocked(RepoPerTaskCheckpointService.create).mockClear()
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/could not initialize the checkpoint service/)
+
+		expect(RepoPerTaskCheckpointService.create).not.toHaveBeenCalled()
+		expect(task.checkpointServiceInitializing).toBe(true)
+	})
+
+	it("does not reuse an uninitialized stored service during recovery", async () => {
+		// A stored service whose shadow-git init never completed must not be
+		// handed to saveCheckpoint by the recovery path: recovery must clear
+		// it and re-initialize instead.
+		vi.mocked(checkGitInstalled).mockResolvedValue(true)
+		const { task } = makeTask({})
+		const svc = task.checkpointService as unknown as { saveCheckpoint: Mock; isInitialized: boolean }
+		svc.saveCheckpoint = vi.fn().mockRejectedValueOnce(new Error("not initialized"))
+		svc.isInitialized = false
+
+		const freshListeners = new Map<string, (...args: unknown[]) => void>()
+		let freshInit = false
+		const fresh = {
+			on: vi.fn((event: string, cb: (...args: unknown[]) => void) => freshListeners.set(event, cb)),
+			initShadowGit: vi.fn(async () => {
+				freshInit = true
+				freshListeners.get("initialize")?.()
+			}),
+			get isInitialized() {
+				return freshInit
+			},
+			saveCheckpoint: vi.fn().mockResolvedValue({ commit: "sha-recovered-2" }),
+			isPathIgnored: vi.fn().mockResolvedValue(false),
+		}
+		vi.mocked(RepoPerTaskCheckpointService.create).mockReturnValue(fresh as unknown as RepoPerTaskCheckpointService)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/Checkpoint save failed after a file write/)
+		expect(task.checkpointsDisabledByFailure).toBe(true)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/b.ts", operation: "create", diff: "+y" }),
+		).resolves.toMatchObject({ commit: "sha-recovered-2" })
+		// Recovery replaced the dead handle instead of reusing it: the failed
+		// save ran exactly once and the live handle is the fresh service.
+		expect(svc.saveCheckpoint).toHaveBeenCalledOnce()
+		expect(task.checkpointService).toBe(fresh)
+	})
+
+	it("fails a write-metadata save when recovery after an earlier failure cannot re-initialize", async () => {
+		// No live handle to reuse and initialization fails again: the write
+		// has no rollback metadata and must surface the failure.
+		const { task, say } = makeTask({ storageDir: null })
+		task.enableCheckpoints = false
+		task.checkpointsDisabledByFailure = true
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/could not initialize the checkpoint service/)
+
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("resolves silently when checkpoints were off for the task and no failure occurred", async () => {
+		// Enabling checkpoints in settings mid-task does not retroactively
+		// fail writes: the task was constructed without checkpoints and no
+		// failure flipped the flag, so the absence of rollback metadata is
+		// the construction-time user choice.
+		const { task, say, saveCheckpoint } = makeTask({
+			enableCheckpoints: false,
+			state: { enableCheckpoints: true },
+		})
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).resolves.toBeUndefined()
+
+		expect(saveCheckpoint).not.toHaveBeenCalled()
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("keeps the journal append when a card emission failure occurs", async () => {
+		const { task, say } = makeTask({})
+		say.mockImplementation(async (type: string) => {
+			if (type === "change_card") {
+				throw new Error("task aborted")
+			}
+		})
+
+		await checkpointSave(task, false, true, {
+			path: "src/a.ts",
+			operation: "create",
+			diffStats: { additions: 1, deletions: 0 },
+			diff: "+x",
+		})
+
+		// The say failure is contained: the journal is still written.
+		const journalRaw = await fs.readFile(journalPath(globalStorageDir, "task-card"), "utf8")
+		expect(journalRaw).toContain("src/a.ts")
+	})
+})

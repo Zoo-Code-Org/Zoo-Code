@@ -1,6 +1,9 @@
 // pnpm --filter @roo-code/types test src/__tests__/message.test.ts
 
 import {
+	changeCardDetailSchema,
+	changeCardFileSchema,
+	changeCardSchema,
 	clineAsks,
 	clineMessageSchema,
 	getCompletionCheckpoint,
@@ -76,5 +79,54 @@ describe("getCompletionCheckpoint", () => {
 		]
 
 		expect(getCompletionCheckpoint(messages)).toBeUndefined()
+	})
+})
+
+describe("change-card schemas", () => {
+	it("accepts a valid full-detail change card", () => {
+		const card = {
+			stepId: "step-1",
+			checkpointIds: ["abc123"],
+			files: [{ path: "src/a.ts", additions: 3, deletions: 1, diff: "@@ -1 +1 @@" }],
+			totalFiles: 1,
+			detail: "full",
+		}
+		expect(changeCardSchema.parse(card)).toEqual(card)
+	})
+
+	it("accepts a summary card without stepId and without per-file diffs", () => {
+		const card = {
+			checkpointIds: [],
+			files: [{ path: "src/b.ts", additions: 0, deletions: 2 }],
+			totalFiles: 1,
+			detail: "summary",
+		}
+		expect(changeCardSchema.parse(card)).toEqual(card)
+	})
+
+	it("rejects invalid detail values", () => {
+		expect(() => changeCardDetailSchema.parse("detailed")).toThrow()
+		expect(() => changeCardDetailSchema.parse(undefined)).toThrow()
+		expect(() => changeCardSchema.parse({ checkpointIds: [], files: [], totalFiles: 0, detail: "diff" })).toThrow()
+	})
+
+	it("rejects incomplete file entries", () => {
+		// Missing additions/deletions.
+		expect(() => changeCardFileSchema.parse({ path: "src/a.ts" })).toThrow()
+		// Missing path.
+		expect(() => changeCardFileSchema.parse({ additions: 1, deletions: 0 })).toThrow()
+		// Wrong stat type.
+		expect(() => changeCardFileSchema.parse({ path: "src/a.ts", additions: "1", deletions: 0 })).toThrow()
+	})
+
+	it("rejects incomplete payloads", () => {
+		// Missing checkpointIds.
+		expect(() => changeCardSchema.parse({ files: [], totalFiles: 1, detail: "full" })).toThrow()
+		// Missing files.
+		expect(() => changeCardSchema.parse({ checkpointIds: [], totalFiles: 1, detail: "full" })).toThrow()
+		// Missing totalFiles.
+		expect(() => changeCardSchema.parse({ checkpointIds: [], files: [], detail: "full" })).toThrow()
+		// Missing detail.
+		expect(() => changeCardSchema.parse({ checkpointIds: [], files: [], totalFiles: 1 })).toThrow()
 	})
 })
