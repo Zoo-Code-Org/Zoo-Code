@@ -2799,6 +2799,64 @@ describe("ClineProvider", () => {
 				expect(mockWebviewPanel.webview.html).toBe(html)
 			})
 
+			test("retires the view-state generation when the provider disposes", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const generation = provider["viewStateGeneration"]
+
+				await provider.dispose()
+
+				expect(provider["viewStateGeneration"]).toBe(generation + 1)
+				expect(provider["isViewStateGenerationLive"](generation)).toBe(false)
+			})
+
+			test("detaches this provider's queued view-state writes when it disposes", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const entry: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider,
+					generation: provider["viewStateGeneration"],
+					run: async () => {},
+				}
+				// The pump advances on the fake clock, so the entry is read while it still waits on the queue.
+				const queued = ClineProvider["enqueuePersistedViewStateWrite"](entry)
+
+				expect(ClineProvider["pendingViewStateWrites"]).toContain(entry)
+				expect(provider["scheduledViewStateWrites"]).toContain(entry)
+
+				await provider.dispose()
+
+				expect(ClineProvider["pendingViewStateWrites"]).not.toContain(entry)
+				expect(provider["scheduledViewStateWrites"]).toEqual([])
+				expect(entry.provider).toBeNull()
+
+				void queued
+			})
+
+			test("numbers this provider's view id from the shared counter", () => {
+				const suffix = Number(String(provider["viewId"]).split("-").pop())
+
+				expect(Number.isNaN(suffix)).toBe(false)
+				expect(ClineProvider["nextViewId"]).toBeGreaterThan(suffix)
+			})
+
+			test("keeps the per-field view-state write versions the record gates on", () => {
+				expect(provider["viewLocalStateWriteVersions"]).toEqual({
+					mode: 0,
+					currentApiConfigName: 0,
+					apiConfiguration: 0,
+				})
+			})
+
+			test("reports a message as undelivered once the provider is disposed", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				await provider.dispose()
+
+				expect(await provider.postMessageToWebview({ type: "mcpServers", mcpServers: [] })).toBe(false)
+			})
+
 			test.each([false, true])(
 				"replaces the tab host without disposing its provider or task (interrupted: %s)",
 				async (interrupted) => {

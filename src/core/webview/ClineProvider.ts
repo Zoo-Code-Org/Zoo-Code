@@ -160,18 +160,12 @@ import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
 
-type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
-
 /**
  * Values that can be held in a view-local state buffer (in-memory) and, for the
  * non-secret subset, persisted durably per stable view id.
  */
 
-/**
- * The subset of view-local values that has a durable per-view record. `saveViewState`
- * and the mutation path handle exactly these keys, so the generic stays narrow enough
- * for the compiler to reject e.g. `writeDelayMs`.
- */
+type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
 
 /**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -279,8 +273,6 @@ type ViewStateWriteEntry = {
 	readonly generation: number
 	readonly run: (provider: ClineProvider) => Promise<void>
 }
-
-/** The fields a view owns in its buffer and in its durable record. */
 
 /** Writes one field of a partial record, or deletes it when the update is nullish. */
 function assignOrClearField<T, K extends keyof T>(target: Partial<T>, key: K, value: T[K] | null | undefined): void {
@@ -1489,6 +1481,22 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		// Detach this provider from the shared view-state write queue and retire its generation,
+		// so a closure that starts after this point drops its effects instead of applying them
+		// to a disposed provider and holding it retained behind another view's write.
+		this.viewStateGeneration++
+
+		for (const entry of this.scheduledViewStateWrites) {
+			const index = ClineProvider.pendingViewStateWrites.indexOf(entry)
+
+			if (index !== -1) {
+				ClineProvider.pendingViewStateWrites.splice(index, 1)
+			}
+
+			entry.provider = null
+		}
+
+		this.scheduledViewStateWrites = []
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })

@@ -2841,15 +2841,34 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 	// the gate exists to close.
 	it("flushes the provider's pending view-state claims on webviewDidLaunch, after isViewLaunched is set", async () => {
 		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
-		let launchedWhenFlushed: boolean | undefined
+		// Establish the false value inside this row: every beforeEach in this file runs
+		// clearAllMocks, which resets call records and not properties, so a value an earlier row
+		// left set could make the ordering pass on its own.
+		mockClineProvider.isViewLaunched = false
+		const launchedWhenFlushed: boolean[] = []
 		vi.mocked(mockClineProvider.deliverPendingViewStateClaims).mockImplementationOnce(async () => {
-			launchedWhenFlushed = mockClineProvider.isViewLaunched
+			launchedWhenFlushed.push(mockClineProvider.isViewLaunched)
 		})
 
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
 
 		expect(mockClineProvider.deliverPendingViewStateClaims).toHaveBeenCalledTimes(1)
-		expect(launchedWhenFlushed).toBe(true)
+		expect(launchedWhenFlushed).toEqual([true])
+	})
+
+	it("contains a rejected claim flush so webviewDidLaunch still completes", async () => {
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		vi.mocked(mockClineProvider.deliverPendingViewStateClaims).mockImplementationOnce(() => {
+			throw new Error("Claim flush failed")
+		})
+
+		await expect(webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })).resolves.toBeUndefined()
+
+		expect(mockClineProvider.deliverPendingViewStateClaims).toHaveBeenCalledTimes(1)
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Flushing pending claims on launch failed"),
+		)
 	})
 
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
