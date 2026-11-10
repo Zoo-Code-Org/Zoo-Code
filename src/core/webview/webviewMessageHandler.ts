@@ -43,7 +43,6 @@ import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
-import { isNonPortableSettingsKey } from "../config/ContextProxy"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
@@ -710,17 +709,6 @@ export const webviewMessageHandler = async (
 			)
 
 			provider.isViewLaunched = true
-			// Claims minted before this launch were held by the provider, because posting one earlier
-			// could be lost while postMessage still resolved true. The listener exists now, so this is
-			// the point where the queued posts can actually be received. A failed flush must not fail
-			// the launch, so it is contained here.
-			try {
-				await provider.deliverPendingViewStateClaims()
-			} catch (error) {
-				provider.log(
-					`[viewStateClaim] Flushing pending claims on launch failed: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
 			break
 		case "webviewHeartbeat":
 			// Confirm renderer liveness and advance the watchdog recovery health window.
