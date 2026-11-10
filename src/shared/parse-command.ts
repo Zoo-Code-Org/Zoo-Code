@@ -1643,8 +1643,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 					// brings to a `(` followed by another `(` takes the
 					// command-substitution push below instead, where the loop
 					// re-reads the second `(` as a group paren.
-					// Stryker disable next-line ConditionalExpression: the second operand can only hold when no pair was consumed, because every pair at i + 1 leaves its CR or newline at i + 2 — the first operand is implied, so the replacement emits the same bytes.
-					if (arm === i + 1 && text[i + 2] === "(") {
+					if (text[i + 2] === "(") {
 						const arith = skipArithmetic(i)
 						if (arith.commandSubstitution) {
 							// bash reads this opener as `$(` plus a group, not
@@ -2142,8 +2141,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 					// brings to a `(` followed by another `(` takes the
 					// command-substitution push below instead, where the loop
 					// re-reads the second `(` as a group paren.
-					// Stryker disable next-line ConditionalExpression: the second operand can only hold when no pair was consumed, because every pair at i + 1 leaves its CR or newline at i + 2 — the first operand is implied, so the replacement emits the same bytes.
-					if (arm === i + 1 && text[i + 2] === "(") {
+					if (text[i + 2] === "(") {
 						const arith = skipArithmetic(i)
 						if (arith.commandSubstitution) {
 							// bash reads this opener as `$(` plus a group, not
@@ -2447,8 +2445,7 @@ function scanShellSyntax(text: string): ScanOutcome {
 				// to a `(` followed by another `(` takes the
 				// command-substitution push below instead, where the loop
 				// re-reads the second `(` as a group paren.
-				// Stryker disable next-line ConditionalExpression: the second operand can only hold when no pair was consumed, because every pair at i + 1 leaves its CR or newline at i + 2 — the first operand is implied, so the replacement emits the same bytes.
-				if (arm === i + 1 && text[i + 2] === "(") {
+				if (text[i + 2] === "(") {
 					const arith = skipArithmetic(i)
 					if (arith.commandSubstitution) {
 						// bash reads this opener as `$(` plus a group, not
@@ -2880,7 +2877,7 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 	let tokens: ShellToken[]
 	try {
 		tokens = parse(line) as ShellToken[]
-	} catch (error) {
+	} catch {
 		// The masked host text carries no active shell syntax, so a tokenizer
 		// rejection means the decomposition cannot account for this line.
 		// Splitting on operators here would not recurse into payloads — a
@@ -2888,15 +2885,16 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 		// command ride the host's allowlist match to an approval. Fail closed
 		// on the shared error channel: the caller re-checks `outcome` after
 		// every line and returns the raw input as one opaque token.
-		const message = error instanceof Error ? error.message : String(error)
 		// Both the line and the tokenizer's error text may echo payload
-		// content (shell-quote embeds slices of the offending input), so
-		// neither is logged; the console gets only non-content metadata.
+		// content (shell-quote embeds slices of the offending input). The
+		// returned message reaches the model and the command-status UI, so
+		// like the console warning it carries no content — only the fixed
+		// classification, never an echo of the rejected command.
 		console.warn(`shell-quote parse error: tokenizer rejected a ${line.length}-character command line`)
 		outcome.error = {
 			quoteType: "tokenize-failure",
 			openIndex: 0,
-			message: `Malformed command: shell tokenizer rejected the command -- ${message}.`,
+			message: "Malformed command: shell tokenizer rejected the command.",
 		}
 		return []
 	}
@@ -2932,7 +2930,11 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 				outcome.error = {
 					quoteType: "payload-glob",
 					openIndex: 0,
-					message: unterminatedQuoteMessage("payload-glob", 0, line),
+					// The excerpt quotes the command back to the user, so expand
+					// the placeholders first: the raw masked text would expose
+					// the placeholder sentinel and internal names in a message
+					// the model also reads.
+					message: unterminatedQuoteMessage("payload-glob", 0, expandPlaceholders(line, outcome)),
 				}
 				return []
 			} else {

@@ -249,6 +249,32 @@ describe("parseCommand", () => {
 				const logged = warnSpy.mock.calls.map((call) => call.map(String).join(" ")).join("\n")
 				expect(logged).not.toContain(secret)
 				expect(logged).not.toContain(input)
+				// The returned message reaches the model and the command-status
+				// UI, so it stays content-free too.
+				expect(parseError?.message).not.toContain(secret)
+				expect(parseError?.message).not.toContain(input)
+			} finally {
+				warnSpy.mockRestore()
+			}
+		})
+
+		// The tokenizer's thrown error embeds slices of the rejected line, and
+		// the nested substitution keeps the secret-bearing host text on the
+		// masked line the tokenizer sees, so the returned message must stay a
+		// fixed classification: no echo of the error, no echo of the line.
+		it("returns a content-free message when a nested substitution trips the tokenizer", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			forceShellQuoteFailure = true
+			try {
+				const secret = "NESTED_SECRET_7x2q"
+				const input = `echo $(cat $(ls)) ${secret} --flag && echo done`
+				const { commands, parseError } = parseCommand(input)
+				expect(commands).toEqual([input])
+				expect(parseError?.quoteType).toBe("tokenize-failure")
+				expect(parseError?.message).toBe("Malformed command: shell tokenizer rejected the command.")
+				const logged = warnSpy.mock.calls.map((call) => call.map(String).join(" ")).join("\n")
+				expect(logged).not.toContain(secret)
+				expect(parseError?.message).not.toContain(secret)
 			} finally {
 				warnSpy.mockRestore()
 			}
@@ -2383,6 +2409,18 @@ describe("parseCommand", () => {
 			// glob word stays host text exactly as before, so an ordinary
 			// globbed host line still parses.
 			expect(parseCommand("ls *.ts").parseError).toBeNull()
+		})
+
+		it("expands placeholders in the payload-glob message excerpt", () => {
+			// The excerpt quotes the rejected line back to the user and the
+			// model, so it must render the expanded text rather than the raw
+			// masked line with its placeholder sentinel and internal names.
+			const { parseError } = parseCommand("echo $(rm* 'a $b')")
+			expect(parseError?.quoteType).toBe("payload-glob")
+			expect(parseError?.message).not.toContain("\x00")
+			expect(parseError?.message).not.toMatch(/\0[A-Z]\d+\0/)
+			expect(parseError?.message).toContain("glob pattern inside a substitution payload")
+			expect(parseError?.message).toContain("rm* 'a $b'")
 		})
 
 		it("keeps a carriage return inside a delimiter word from joining a dollar to a quote byte", () => {
