@@ -1176,7 +1176,7 @@
 				"hours": "{{n}} 小時",
 				"days": "{{n}} 天",
 				"credits": "點數",
-				"tokens": "權杖"
+				"tokens": "Token"
 			},
 			"value": {
 				"usedOf": "已使用 {{used}} / {{limit}}",

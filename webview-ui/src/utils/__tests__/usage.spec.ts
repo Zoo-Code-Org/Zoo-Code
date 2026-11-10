@@ -358,6 +358,43 @@ describe("a history with corrupted token counts in its per-model usage", () => {
 	})
 })
 
+describe("a history with corrupted counters on the task itself", () => {
+	const corrupted = item({
+		tokensIn: "900" as unknown as number,
+		tokensOut: Number.NaN,
+		cacheReads: Number.POSITIVE_INFINITY,
+		cacheWrites: -40,
+		totalCost: Number.NaN,
+	})
+	const sound = item({ tokensIn: 100, tokensOut: 50, cacheReads: 30, cacheWrites: 10, totalCost: 0.5 })
+
+	it("adds up only what is a count, so no total and no rate is NaN, a string or infinite", () => {
+		const s = summarizeUsage([corrupted, sound], { range: "all", now: NOW })
+
+		expect(s.tokensIn).toBe(100)
+		expect(s.tokensOut).toBe(50)
+		expect(s.totalTokens).toBe(150)
+		expect(s.totalCost).toBe(0.5)
+		expect(s.cacheHitRate).toBeCloseTo(0.3, 9)
+		expect(Number.isFinite(s.cacheHitRate)).toBe(true)
+		expect(s.cacheWrites).toBe(10)
+	})
+
+	it("ranks the tasks by cost and then by real tokens, whatever the corrupted counters hold", () => {
+		const cheapBig = item({ id: "cheap-big", totalCost: 1, tokensIn: 5000, tokensOut: 0 })
+		const cheapSmall = item({
+			id: "cheap-small",
+			totalCost: 1,
+			tokensIn: "9999" as unknown as number,
+			tokensOut: 1,
+		})
+
+		const s = summarizeUsage([cheapSmall, cheapBig, corrupted], { range: "all", now: NOW })
+
+		expect(s.topTasks.map((t) => t.id)).toEqual(["cheap-big", "cheap-small", corrupted.id])
+	})
+})
+
 describe("primaryUsage", () => {
 	it("returns the provider+model that used the most tokens", () => {
 		const task = item({

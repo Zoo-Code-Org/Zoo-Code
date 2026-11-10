@@ -1176,7 +1176,7 @@
 				"hours": "{{n}} 小时",
 				"days": "{{n}} 天",
 				"credits": "积分",
-				"tokens": "令牌"
+				"tokens": "Token"
 			},
 			"value": {
 				"usedOf": "已使用 {{used}} / {{limit}}",

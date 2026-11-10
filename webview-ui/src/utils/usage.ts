@@ -115,14 +115,17 @@ export interface UsageOptions {
 	topTaskLimit?: number
 }
 
-/**
- * The provider+model that did most of a task's work (by tokens), for labelling
- * a task row. Undefined when nothing was recorded.
- */
 /** A token count of a recorded request: a history file that was corrupted or edited by hand may hold anything else. */
 const tokenCount = (value: unknown): number =>
 	typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
 
+/** A cost, with what is not a finite number counted as nothing (the totals do the same). */
+const finiteCost = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0)
+
+/**
+ * The provider+model that did most of a task's work (by tokens), for labelling
+ * a task row. Undefined when nothing was recorded.
+ */
 export function primaryUsage(item: HistoryItem): { apiProvider?: string; modelId?: string } | undefined {
 	const entries = item.usageByModel?.filter((e) => e.apiProvider || e.modelId)
 	if (!entries?.length) return undefined
@@ -238,15 +241,16 @@ export function summarizeUsage(history: HistoryItem[], options: UsageOptions): U
 
 	for (const item of items) {
 		const cost = Number.isFinite(item.totalCost) ? item.totalCost : 0
-		const tIn = item.tokensIn || 0
-		const tOut = item.tokensOut || 0
+		// A history file that was corrupted or edited by hand may hold anything in a counter: only a count is added.
+		const tIn = tokenCount(item.tokensIn)
+		const tOut = tokenCount(item.tokensOut)
 		const tokens = tIn + tOut
 
 		totalCost += cost
 		tokensIn += tIn
 		tokensOut += tOut
-		cacheReads += item.cacheReads || 0
-		cacheWrites += item.cacheWrites || 0
+		cacheReads += tokenCount(item.cacheReads)
+		cacheWrites += tokenCount(item.cacheWrites)
 
 		// Provider/model from what was recorded per request. A task with no record
 		// (created before this was tracked) goes to a single "unrecorded" bucket.
@@ -333,8 +337,10 @@ export function summarizeUsage(history: HistoryItem[], options: UsageOptions): U
 		topTasks: [...items]
 			.sort(
 				(a, b) =>
-					(b.totalCost || 0) - (a.totalCost || 0) ||
-					(b.tokensIn || 0) + (b.tokensOut || 0) - ((a.tokensIn || 0) + (a.tokensOut || 0)),
+					finiteCost(b.totalCost) - finiteCost(a.totalCost) ||
+					tokenCount(b.tokensIn) +
+						tokenCount(b.tokensOut) -
+						(tokenCount(a.tokensIn) + tokenCount(a.tokensOut)),
 			)
 			.slice(0, topTaskLimit),
 	}
