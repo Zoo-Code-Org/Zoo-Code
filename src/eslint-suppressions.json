@@ -81,7 +81,7 @@
 	},
 	"api/providers/__tests__/lite-llm.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 36
+			"count": 31
 		}
 	},
 	"api/providers/__tests__/mimo.spec.ts": {
@@ -276,7 +276,7 @@
 	},
 	"api/providers/lite-llm.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 6
 		}
 	},
 	"api/providers/mimo.ts": {

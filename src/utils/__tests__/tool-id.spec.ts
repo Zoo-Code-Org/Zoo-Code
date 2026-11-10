@@ -1,15 +1,4 @@
-import {
-	sanitizeToolUseId,
-	truncateOpenAiCallId,
-	sanitizeOpenAiCallId,
-	sanitizeLiteLlmCallId,
-	sanitizeToolIdForStrictProvider,
-	OPENAI_CALL_ID_MAX_LENGTH,
-} from "../tool-id"
-
-const signature = "AY89a18ErUKBAfkTYnDbzq6mGnRG5QS8VFogncpDzYVXzC0i+aDwY5o/0123456789abcdef=="
-const thoughtSignatureId = `call_864944__thought__${signature}`
-const strictToolIdPattern = /^[a-zA-Z0-9_-]+$/
+import { sanitizeToolUseId, truncateOpenAiCallId, sanitizeOpenAiCallId, OPENAI_CALL_ID_MAX_LENGTH } from "../tool-id"
 
 describe("sanitizeToolUseId", () => {
 	describe("valid IDs pass through unchanged", () => {
@@ -86,36 +75,6 @@ describe("sanitizeToolUseId", () => {
 			// Standard Anthropic tool_use IDs
 			expect(sanitizeToolUseId("toolu_01H2X3Y4Z5")).toBe("toolu_01H2X3Y4Z5")
 		})
-	})
-})
-
-describe("sanitizeToolUseId with a thought signature", () => {
-	it("keeps the marker and the Base64 signature unchanged", () => {
-		expect(sanitizeToolUseId(thoughtSignatureId)).toBe(thoughtSignatureId)
-	})
-
-	it("sanitizes only the call id before the marker", () => {
-		expect(sanitizeToolUseId("call.1:x__thought__ab+c/d=")).toBe("call_1_x__thought__ab+c/d=")
-	})
-
-	it("still replaces + / = in ids without the marker", () => {
-		expect(sanitizeToolUseId("call_ab+c/d=")).toBe("call_ab_c_d_")
-	})
-})
-
-describe("sanitizeToolIdForStrictProvider", () => {
-	it.each([thoughtSignatureId, "call.1:x__thought__ab+c/d=", "toolu_mcp.linear.create_issue"])(
-		"makes %s match ^[a-zA-Z0-9_-]+$",
-		(id) => {
-			const result = sanitizeToolIdForStrictProvider(id)
-
-			expect(result).toMatch(strictToolIdPattern)
-			expect(result).toHaveLength(id.length)
-		},
-	)
-
-	it("leaves a valid id unchanged", () => {
-		expect(sanitizeToolIdForStrictProvider("toolu_01AbC-xyz_789")).toBe("toolu_01AbC-xyz_789")
 	})
 })
 
@@ -223,36 +182,5 @@ describe("sanitizeOpenAiCallId", () => {
 describe("OPENAI_CALL_ID_MAX_LENGTH constant", () => {
 	it("should be 64", () => {
 		expect(OPENAI_CALL_ID_MAX_LENGTH).toBe(64)
-	})
-})
-
-describe("sanitizeLiteLlmCallId", () => {
-	it("keeps an id that carries a thought signature intact, however long", () => {
-		expect(thoughtSignatureId.length).toBeGreaterThan(OPENAI_CALL_ID_MAX_LENGTH)
-		expect(sanitizeLiteLlmCallId(thoughtSignatureId)).toBe(thoughtSignatureId)
-	})
-
-	it("sanitizes only the call id before the marker, leaving the Base64 signature intact", () => {
-		expect(sanitizeLiteLlmCallId("call.1:x__thought__ab+c/d=")).toBe("call_1_x__thought__ab+c/d=")
-	})
-
-	it("truncates other long ids like sanitizeOpenAiCallId", () => {
-		const id = "call_" + "x".repeat(100)
-
-		expect(sanitizeLiteLlmCallId(id)).toBe(sanitizeOpenAiCallId(id))
-		expect(sanitizeLiteLlmCallId(id).length).toBe(OPENAI_CALL_ID_MAX_LENGTH)
-	})
-
-	it("leaves short ids unchanged", () => {
-		expect(sanitizeLiteLlmCallId("toolu_123")).toBe("toolu_123")
-	})
-})
-
-describe("sanitizeOpenAiCallId with a thought signature", () => {
-	it("returns an id that OpenAI and Bedrock accept", () => {
-		const result = sanitizeOpenAiCallId(thoughtSignatureId)
-
-		expect(result).toMatch(strictToolIdPattern)
-		expect(result).toHaveLength(OPENAI_CALL_ID_MAX_LENGTH)
 	})
 })

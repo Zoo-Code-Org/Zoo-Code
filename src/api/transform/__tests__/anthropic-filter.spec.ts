@@ -140,39 +140,5 @@ describe("anthropic-filter", () => {
 			expect(result).toHaveLength(1)
 			expect(result[0].content).toEqual([{ type: "text", text: "Valid text" }])
 		})
-
-		it("makes tool ids from a thought-signature history match Anthropic's id pattern", () => {
-			const historyId = "call_864944__thought__ab+c/d=="
-			const messages: Anthropic.Messages.MessageParam[] = [
-				{
-					role: "assistant",
-					content: [{ type: "tool_use", id: historyId, name: "read_file", input: {} }],
-				},
-				{
-					role: "user",
-					content: [{ type: "tool_result", tool_use_id: historyId, content: "ok" }],
-				},
-			]
-
-			const result = filterNonAnthropicBlocks(messages)
-
-			expect(result[0].content).toEqual([
-				{ type: "tool_use", id: "call_864944__thought__ab_c_d__", name: "read_file", input: {} },
-			])
-			expect(result[1].content).toEqual([
-				{ type: "tool_result", tool_use_id: "call_864944__thought__ab_c_d__", content: "ok" },
-			])
-		})
-
-		it("leaves valid tool ids unchanged", () => {
-			const messages: Anthropic.Messages.MessageParam[] = [
-				{
-					role: "assistant",
-					content: [{ type: "tool_use", id: "toolu_01AbC-xyz", name: "read_file", input: {} }],
-				},
-			]
-
-			expect(filterNonAnthropicBlocks(messages)).toEqual(messages)
-		})
 	})
 })

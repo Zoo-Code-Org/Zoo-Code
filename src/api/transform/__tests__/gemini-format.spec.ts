@@ -2,7 +2,8 @@
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import { convertAnthropicMessageToGemini } from "../gemini-format"
+import { signedAssistantMessage } from "../../../test-utils/thought-signature"
+import { GEMINI_THOUGHT_SIGNATURE_BYPASS, convertAnthropicMessageToGemini } from "../gemini-format"
 
 describe("convertAnthropicMessageToGemini", () => {
 	it("should convert a simple text message", () => {
@@ -164,6 +165,22 @@ describe("convertAnthropicMessageToGemini", () => {
 
 		expect(functionCallParts[0].thoughtSignature).toBe("sig-123")
 		expect(functionCallParts[1].thoughtSignature).toBeUndefined()
+	})
+
+	it("should send the bypass instead of a signature that another backend minted", () => {
+		const result = convertAnthropicMessageToGemini(
+			signedAssistantMessage(["call-1"], {
+				signature: "sig-123",
+				origin: "litellm|http://localhost:4000|gemini-3-pro",
+			}),
+		)
+
+		expect(result[0]?.parts).toEqual([
+			expect.objectContaining({
+				functionCall: expect.anything(),
+				thoughtSignature: GEMINI_THOUGHT_SIGNATURE_BYPASS,
+			}),
+		])
 	})
 
 	it("should convert a message with tool result as string", () => {

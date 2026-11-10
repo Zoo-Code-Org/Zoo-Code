@@ -12,6 +12,7 @@ type ApiHistoryHandler = ApiHandler & {
 	getResponseId?: () => string | undefined
 	getEncryptedContent?: () => { encrypted_content: string; id?: string } | undefined
 	getThoughtSignature?: () => string | undefined
+	getThoughtSignatureOrigin?: () => string | undefined
 	getReasoningDetails?: () => any[] | undefined
 }
 
@@ -46,6 +47,7 @@ function prepareAssistantMessage(
 	const responseId = handler.getResponseId?.()
 	const reasoningData = handler.getEncryptedContent?.()
 	const thoughtSignature = handler.getThoughtSignature?.()
+	const thoughtSignatureOrigin = handler.getThoughtSignatureOrigin?.()
 	const reasoningDetails = handler.getReasoningDetails?.()
 
 	const modelId = getModelId(apiConfiguration)
@@ -107,6 +109,7 @@ function prepareAssistantMessage(
 		const thoughtSignatureBlock = {
 			type: "thoughtSignature",
 			thoughtSignature,
+			...(thoughtSignatureOrigin ? { origin: thoughtSignatureOrigin } : {}),
 		}
 
 		appendContentBlock(messageWithTs, thoughtSignatureBlock)
