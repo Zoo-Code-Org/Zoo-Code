@@ -15,6 +15,7 @@ import {
 	splitCommandListScopes,
 	workspaceCommandListsEnabled,
 } from "../commandScope"
+import { getCommandDecision, getSingleCommandDecision } from "../commands"
 import { checkAutoApproval } from "../index"
 import { baseState, type State } from "./fixtures"
 
@@ -528,6 +529,44 @@ it("resolveEffectiveCommandLists: shadows workspace entries case-insensitively, 
 	expect(effective.denied).toEqual(["DOCKER"])
 	expect(effective.hiddenWorkspaceAllow).toEqual(["git status"])
 	expect(effective.hiddenWorkspaceDeny).toEqual([])
+})
+
+// When allow and deny entries both match a command with equal specificity,
+// the deny decides: an ambiguous case fails closed rather than silently
+// widening auto-approval. The direction is a deliberate policy, not an
+// accident of the comparison — letting an allow win a tie would approve
+// commands a deny entry claims, so reversing it requires an explicit policy
+// decision, not a refactor that happens to flip the comparison's direction.
+it("getSingleCommandDecision: resolves an equally specific allow/deny match to the deny", () => {
+	// "*" matches every command but counts as length 1, so it ties the
+	// one-character allow entry on "git status".
+	expect(getSingleCommandDecision("git status", ["g"], ["*"])).toBe("auto_deny")
+	// The same entry present in both lists ties trivially, and still denies.
+	expect(getSingleCommandDecision("git push", ["git push"], ["git push"])).toBe("auto_deny")
+})
+
+// Control for the tie: conflicts are decided by specificity, not by a
+// blanket deny preference — the longer entry wins whichever side it sits on.
+it("getSingleCommandDecision: lets the strictly more specific entry win on either side", () => {
+	expect(getSingleCommandDecision("git push origin", ["git push"], ["git"])).toBe("auto_approve")
+	expect(getSingleCommandDecision("git push origin", ["git"], ["git push"])).toBe("auto_deny")
+})
+
+it("resolveEffectiveCommandLists: keeps a workspace wildcard deny alive beside a global allow entry it only overlaps", () => {
+	// Composition drops a workspace entry only when a global entry covers
+	// every command it could match. "*" matches commands "g" cannot, so the
+	// deny survives into the effective pair and reaches the matcher beside
+	// the allow entry, where the equal-length tie decides "git status" as a
+	// deny: a global allow overlaps a wildcard deny's coverage without
+	// overriding it.
+	const effective = resolveEffectiveCommandLists(listScopes(["g"], []), listScopes([], ["*"]), true)
+
+	expect(effective.allowed).toEqual(["g"])
+	expect(effective.denied).toEqual(["*"])
+	// Inside the global allow prefix, yet the equally specific deny decides.
+	expect(getCommandDecision("git status", effective.allowed, effective.denied)).toBe("auto_deny")
+	// Outside the global prefix the deny matches alone, so it still decides.
+	expect(getCommandDecision("docker ps", effective.allowed, effective.denied)).toBe("auto_deny")
 })
 
 // Command-branch enforcement composes its allow/deny pair from the raw

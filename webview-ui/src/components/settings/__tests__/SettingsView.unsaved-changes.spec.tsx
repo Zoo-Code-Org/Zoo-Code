@@ -1109,6 +1109,14 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(lastSaveRequestId(postMessage)).toBeDefined() // this save waits for the host's answer
+		// The host writes the list before it answers, so the refresh carries the submitted entry; that
+		// observation, not the answer alone, is what releases the hold.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			deniedCommands: ["git status"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
 		answerSave(lastSaveRequestId(postMessage), { success: true })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
 
@@ -1121,6 +1129,157 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		await waitFor(() =>
 			expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["rm -rf"])),
 		)
+	})
+
+	it("keeps a silently rejected list write dirty and rolls back only its baseline when the host reports success", async () => {
+		// The answer reports one outcome for the whole payload, so a rejected command-list write can arrive
+		// with success: true. Each edited list's own write result comes from the refresh the host posts before
+		// its answer: the allow list carries the submitted entry, so its baseline stays advanced; the deny
+		// list comes back unchanged, so its deletion rolls back to the pre-submit baseline and the flag keeps
+		// reporting the edit as unsaved instead of silently dropping it.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo"],
+			deniedCommands: ["rm -rf"],
+		})
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<span data-testid="current-deny-list">{JSON.stringify(deniedCommands)}</span>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo", "ls"])}>
+						Edit allow list
+					</button>
+					<button data-testid="clear-deny-list" onClick={() => setCachedStateField("deniedCommands", [])}>
+						Clear deny list
+					</button>
+				</div>
+			),
+		)
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			queryClient,
+		})
+
+		fireEvent.click(await screen.findByTestId("edit-allow-list"))
+		fireEvent.click(screen.getByTestId("clear-deny-list"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		// A display-setting difference between the buffer and the live state puts this save on the path that
+		// waits for the host's answer, without touching the buffered command lists.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo"],
+			deniedCommands: ["rm -rf"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastSaveRequestId(postMessage)
+		expect(saveId).toBeDefined()
+
+		// The host wrote the allow list but silently rejected the deny-list write, and still answers success:
+		// the refresh carries the allow list's new entry and the deny list's old entry back.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			deniedCommands: ["rm -rf"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		answerSave(saveId, { success: true })
+
+		// The unlanded write keeps the flag on, and the buffered deletion keeps holding external updates back.
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			deniedCommands: ["docker"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify([]))
+
+		// Retrying classifies each list by its own write result: the landed allow list keeps its advanced
+		// baseline, and the rolled-back deny baseline keeps the deletion a user deletion to re-apply.
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saves = updateSettingsPosts()
+		expect(saves).toHaveLength(2)
+		expect(saves.at(-1)).toEqual(
+			expect.objectContaining({
+				type: "updateSettings",
+				commandListBaseline: { allowedCommands: ["echo", "ls"], deniedCommands: ["rm -rf"] },
+				updatedSettings: expect.objectContaining({ allowedCommands: ["echo", "ls"], deniedCommands: [] }),
+			}),
+		)
+	})
+
+	it("clears the unsaved flag and releases every list when the refresh shows all writes landed", async () => {
+		// A save whose every edited list appears landed in the host's refresh clears the flag and
+		// releases the buffered lists to external updates.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo"],
+			deniedCommands: ["rm -rf"],
+		})
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<span data-testid="current-deny-list">{JSON.stringify(deniedCommands)}</span>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo", "ls"])}>
+						Edit allow list
+					</button>
+					<button data-testid="clear-deny-list" onClick={() => setCachedStateField("deniedCommands", [])}>
+						Clear deny list
+					</button>
+				</div>
+			),
+		)
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			queryClient,
+		})
+
+		fireEvent.click(await screen.findByTestId("edit-allow-list"))
+		fireEvent.click(screen.getByTestId("clear-deny-list"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo"],
+			deniedCommands: ["rm -rf"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastSaveRequestId(postMessage)
+		expect(saveId).toBeDefined()
+
+		// The host wrote both lists before answering: the refresh carries both submitted lists.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			deniedCommands: [],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		answerSave(saveId, { success: true })
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+		// The lists committed, so a later host update is no longer an in-flight edit being stomped.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			deniedCommands: ["curl"],
+			showRelativeTimes: false,
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		await waitFor(() => expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["curl"])))
+		expect(screen.getByTestId("save-button")).toBeDisabled() // a folded external update is not a user edit
 	})
 
 	it("discards IO Intelligence cached edits and restores the extension values", async () => {

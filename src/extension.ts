@@ -185,9 +185,21 @@ export async function activate(context: vscode.ExtensionContext) {
 		await seedCommandList(context.globalState, "allowedCommands")
 		await seedCommandList(context.globalState, "deniedCommands")
 	} catch (error) {
-		// Activation aborts here, so `deactivate()` may never run: release the
-		// secret-storage listener acquired above before propagating.
+		// Activation aborts here, and `deactivate()` is not guaranteed to run
+		// afterward, so this catch is the only teardown for everything
+		// initialized before the seed point: release the secret-storage
+		// listener and shut down the telemetry client registered above.
+		// Shutdown failures are logged rather than rethrown so they cannot mask
+		// the seed rejection; the service bounds its own drain and client-flush
+		// phases, so a stuck client cannot hang the host here.
 		authSecretsListener.dispose()
+		try {
+			await telemetryService.shutdown()
+		} catch (shutdownError) {
+			outputChannel.appendLine(
+				`Failed to shut down telemetry service: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+			)
+		}
 		throw error
 	}
 

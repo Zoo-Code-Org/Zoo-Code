@@ -659,6 +659,67 @@ describe("extension.ts", () => {
 			}
 		})
 
+		test("shuts down the telemetry service before propagating a seed rejection", async () => {
+			// The telemetry client is created and registered before the seed point,
+			// so a rejected seed must shut it down on the failure path: without
+			// `deactivate()` after a failed activation, an unshut-down client keeps
+			// sending events against an extension the host treats as inactive.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const teardownOrder: string[] = []
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi
+					.fn()
+					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
+			}))
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			// A never-settling shutdown: activation may only reject once the awaited
+			// teardown settles, pinning that the seed rejection never reaches the
+			// host ahead of it.
+			let settleShutdown: () => void = () => {}
+			shutdown.mockImplementation(() => {
+				teardownOrder.push("telemetry-shutdown")
+				return new Promise<void>((resolve) => {
+					settleShutdown = resolve
+				})
+			})
+			try {
+				const { activate } = await import("../extension")
+				const activation = activate(mockContext)
+				let rejected = false
+				void activation.catch(() => {
+					rejected = true
+				})
+
+				// Both teardown steps run on the failure path, in order, exactly once.
+				await vi.waitFor(() => expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"]))
+
+				// Still unrejected while the awaited shutdown is unsettled: the catch
+				// must not propagate the seed rejection before teardown completes.
+				expect(rejected).toBe(false)
+
+				settleShutdown()
+				await expect(activation).rejects.toThrow("seed state write failed")
+			} finally {
+				shutdown.mockReset()
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+			}
+		})
+
+		test("does not shut down telemetry when activation completes", async () => {
+			// Telemetry shutdown is failure-path only: a successfully activated
+			// extension owns the telemetry client until deactivate() runs.
+			const { TelemetryService } = await import("@roo-code/telemetry")
+
+			const { activate } = await import("../extension")
+			await expect(activate(mockContext)).resolves.toBeDefined()
+
+			expect(TelemetryService.instance.shutdown).not.toHaveBeenCalled()
+		})
+
 		test("does not seed global state from an enforced workspace-scoped override", async () => {
 			const vscode = await import("vscode")
 			// The gate is on: an enforced workspace list replaces the default across

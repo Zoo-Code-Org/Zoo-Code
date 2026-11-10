@@ -188,9 +188,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	// The live host state, read when a save settles without re-subscribing the result handler on every post.
 	const latestExtensionState = useRef(extensionState)
 	latestExtensionState.current = extensionState
-	// The save the host must answer records the baseline it stamped and the lists it submitted, so a save the
-	// host reports failed can reconcile each list's baseline against that list's own write outcome (see the
-	// save-result effect below).
+	// The save the host must answer records the baseline it stamped and the lists it submitted, so the
+	// save-result effect can reconcile each list's baseline against that list's own write outcome.
 	const submittedListSave = useRef<{ baselined: [string[], string[]]; sent: [string[], string[]] } | undefined>(
 		undefined,
 	)
@@ -619,11 +618,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				deniedCommands,
 				workspaceCommandListsEnabled: cachedState.workspaceCommandListsEnabled,
 			})
-			// The stamp records what is on screen, so it moves at submit; a save the host reports failed then
-			// re-derives each list's entry from whether that list's own write landed (see the settle below). The
-			// lists' ownership of the buffer does not move at submit. A save the host answers commits the buffered
-			// lists only once the host says the write landed - committing at submit would let the state refresh
-			// that follows a rejected save overwrite the edit the user is still looking at. A save the host never
+			// The stamp records what is on screen, so it moves at submit; the settle below then re-derives each
+			// edited list's entry from whether that list's own write landed. The lists' ownership of the buffer
+			// does not move at submit. A save releases that hold - and with it the unsaved flag - only once the
+			// refresh shows every submitted write landed: releasing earlier would let the state refresh that
+			// follows a rejected list write overwrite the edit the user is still looking at. A save the host never
 			// answers has no result to wait for, so it clears the hold at submit.
 			if (!saveId) {
 				commandListsTouched.current = false
@@ -637,64 +636,65 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		const settle = (success: boolean) => {
 			setPendingSaveId(undefined)
-			if (success) {
-				// Every list's write landed, so the baseline the submit advanced is kept for all of them.
-				submittedListSave.current = undefined
-				// An edit made while the save was in flight is not in what was sent: it stays unsaved. A failed save
-				// keeps the buffered lists holding off external updates too, so the host's refresh after a rejected
-				// write cannot replace the edit the user is looking at.
-				if (latestCachedState.current === sentState.current) {
-					commandListsTouched.current = false
-					setChangeDetected(false)
-				}
-				return
-			}
-			// A rejected or timed-out save reports one outcome for the whole payload, yet each command list may
-			// have reached a different write result before it failed: the save writes setting by setting, so an
-			// earlier failure (or a timeout) can land after one list was written and before another. The refresh
-			// the host posts before its answer carries each list's configuration result, so a list equal to what
-			// was submitted records that its own write landed: for that list the baseline stays advanced, since
-			// restoring the pre-submit baseline of a written list claims an entry the file no longer holds was
-			// displayed. Every other edited list's baseline rolls back to what was displayed before the submit,
-			// so a deletion whose write never ran is still classified as a user deletion on retry instead of an
-			// external addition to re-admit. Lists the save did not edit keep the stamp's baseline, which the
-			// external-update merge already maintains.
+			// The answer's flag reports one outcome for the whole payload, but the payload's lists are written
+			// separately, and a report of success says only that the other settings stored: a rejected
+			// command-list write is absent from the flag. Each edited list's own write result comes from the
+			// refresh the host posts before its answer, so every save reconciles each list against what was
+			// submitted: a list equal to what was submitted records that its own write landed, and its baseline
+			// stays advanced, since restoring the pre-submit baseline of a written list claims an entry the file
+			// no longer holds was displayed. Every other edited list's baseline rolls back to what was displayed
+			// before the submit, so a deletion whose write never ran is still classified as a user deletion on
+			// retry instead of an external addition to re-admit. Lists the save did not edit keep the stamp's
+			// baseline, which the external-update merge already maintains.
 			const save = submittedListSave.current
 			submittedListSave.current = undefined
-			if (!save) {
-				return
+			let everyEditedWriteLanded = true
+			if (save) {
+				const [stampAllowed, stampDenied, stampGate] = JSON.parse(lastDisplayedCommandSnapshot.current) as [
+					string[],
+					string[],
+					boolean,
+				]
+				const reconcileList = (
+					baselined: string[],
+					sent: string[],
+					refreshed: string[] | undefined,
+					stamped: string[],
+				) =>
+					commandListsEquivalent(baselined, sent)
+						? stamped
+						: commandListsEquivalent(refreshed, sent)
+							? sent
+							: baselined
+				const writeLanded = (baselined: string[], sent: string[], refreshed: string[] | undefined) =>
+					commandListsEquivalent(baselined, sent) || commandListsEquivalent(refreshed, sent)
+				everyEditedWriteLanded =
+					writeLanded(save.baselined[0], save.sent[0], latestExtensionState.current.allowedCommands) &&
+					writeLanded(save.baselined[1], save.sent[1], latestExtensionState.current.deniedCommands)
+				lastDisplayedCommandSnapshot.current = commandListSnapshot({
+					allowedCommands: reconcileList(
+						save.baselined[0],
+						save.sent[0],
+						latestExtensionState.current.allowedCommands,
+						stampAllowed,
+					),
+					deniedCommands: reconcileList(
+						save.baselined[1],
+						save.sent[1],
+						latestExtensionState.current.deniedCommands,
+						stampDenied,
+					),
+					workspaceCommandListsEnabled: stampGate,
+				})
 			}
-			const [stampAllowed, stampDenied, stampGate] = JSON.parse(lastDisplayedCommandSnapshot.current) as [
-				string[],
-				string[],
-				boolean,
-			]
-			const reconcileList = (
-				baselined: string[],
-				sent: string[],
-				refreshed: string[] | undefined,
-				stamped: string[],
-			) =>
-				commandListsEquivalent(baselined, sent)
-					? stamped
-					: commandListsEquivalent(refreshed, sent)
-						? sent
-						: baselined
-			lastDisplayedCommandSnapshot.current = commandListSnapshot({
-				allowedCommands: reconcileList(
-					save.baselined[0],
-					save.sent[0],
-					latestExtensionState.current.allowedCommands,
-					stampAllowed,
-				),
-				deniedCommands: reconcileList(
-					save.baselined[1],
-					save.sent[1],
-					latestExtensionState.current.deniedCommands,
-					stampDenied,
-				),
-				workspaceCommandListsEnabled: stampGate,
-			})
+			// The unsaved flag goes off only when nothing is left unsaved: an edit made while the save was in
+			// flight is not in what was sent, and an edited list whose write never landed still holds its edit.
+			// In both cases the buffered lists keep holding off external updates, so a host refresh cannot
+			// replace the edit the user is looking at.
+			if (success && everyEditedWriteLanded && latestCachedState.current === sentState.current) {
+				commandListsTouched.current = false
+				setChangeDetected(false)
+			}
 		}
 
 		const onResult = (event: MessageEvent) => {
