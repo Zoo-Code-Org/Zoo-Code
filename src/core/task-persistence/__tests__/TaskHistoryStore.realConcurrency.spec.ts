@@ -552,6 +552,31 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			})
 		})
 
+		it.each([
+			{ name: "writes the title", peerTitle: undefined, expectedTitle: "Title" },
+			{ name: "skips a peer's title", peerTitle: "Peer title", expectedTitle: "Peer title" },
+		])("does not let a stale save overwrite a peer update after it $name", async ({ peerTitle, expectedTitle }) => {
+			await withTwoStores(async (storeA, storeB) => {
+				await storeA.upsert({ ...item("shared-task"), mode: "code" })
+				const stale = storeA.get("shared-task")!
+				await storeB.invalidate("shared-task")
+				await storeB.upsert({ ...storeB.get("shared-task")!, mode: "architect" })
+				if (peerTitle) await storeB.setAutoTitleIfAbsent("shared-task", peerTitle)
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Title")
+				expect(result.applied).toBe(!peerTitle)
+				expect(storeA.get("shared-task")).toMatchObject({ mode: "code", autoTitle: expectedTitle })
+				await storeA.upsert({ ...stale, tokensOut: 5 })
+
+				await storeB.invalidate("shared-task")
+				expect(storeB.get("shared-task")).toMatchObject({
+					mode: "architect",
+					tokensOut: 5,
+					autoTitle: expectedTitle,
+				})
+			})
+		})
+
 		it.each(["", "   \n\t"])("rejects a blank title %j", async (blank) => {
 			await withTwoStores(async (storeA, _storeB, storagePath) => {
 				const result = await storeA.setAutoTitleIfAbsent("shared-task", blank)

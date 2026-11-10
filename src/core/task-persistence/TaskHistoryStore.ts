@@ -1072,7 +1072,7 @@ export class TaskHistoryStore {
 			if (!persisted) {
 				return { applied: false }
 			}
-			this.cache.set(taskId, persisted)
+			this.cacheAutoTitle(persisted)
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
 			}
@@ -1080,10 +1080,21 @@ export class TaskHistoryStore {
 		})
 	}
 
+	/**
+	 * Copy only `autoTitle` from the disk record onto the cached one. The cache is the baseline that
+	 * later saves diff against, so taking the peer's other fields here would let a stale snapshot
+	 * from this host write its old values back over them. Callers still return the full disk record
+	 * for display.
+	 */
+	private cacheAutoTitle(disk: HistoryItem): void {
+		const cached = this.cache.get(disk.id)
+		this.cache.set(disk.id, cached ? { ...cached, autoTitle: disk.autoTitle } : disk)
+	}
+
 	private settleSkippedAutoTitle(taskId: string, disk: AutoTitleDiskRead): { applied: false; item?: HistoryItem } {
 		switch (disk.kind) {
 			case "found":
-				this.cache.set(taskId, disk.item)
+				this.cacheAutoTitle(disk.item)
 				return { applied: false, item: disk.item }
 			case "missing":
 				this.cache.delete(taskId)

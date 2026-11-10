@@ -70,7 +70,8 @@ interface OperationSpec {
 	publishCacheAtEnd?: boolean
 	/**
 	 * "auto-title" mirrors TaskHistoryStore.setAutoTitleIfAbsent: under the file lock the write is
-	 * skipped when the persisted record is gone or already carries an autoTitle.
+	 * skipped when the persisted record is gone or already carries an autoTitle, and a commit copies
+	 * only autoTitle into the host cache.
 	 * "delete" removes the persisted record.
 	 */
 	kind?: "auto-title" | "delete"
@@ -396,7 +397,16 @@ function nextSteps(state: ModelState, scenario: Scenario): TraceStep[] {
 						delete next.caches[spec.host][targetWrite.taskId]
 					} else {
 						next.disk[targetWrite.taskId] = target.candidate
-						if (!spec.publishCacheAtEnd) next.caches[spec.host][targetWrite.taskId] = target.candidate
+						const cached = next.caches[spec.host][targetWrite.taskId]
+						if (spec.kind === "auto-title" && cached) {
+							// setAutoTitleIfAbsent copies only autoTitle so the cache stays this host's save baseline.
+							next.caches[spec.host][targetWrite.taskId] = {
+								...cached,
+								autoTitle: target.candidate.autoTitle,
+							}
+						} else if (!spec.publishCacheAtEnd) {
+							next.caches[spec.host][targetWrite.taskId] = target.candidate
+						}
 						next.commits.push({
 							operationId: spec.id,
 							taskId: targetWrite.taskId,
