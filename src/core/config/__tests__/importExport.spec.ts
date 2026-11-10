@@ -187,7 +187,9 @@ describe("importExport", () => {
 		beforeEach(() => {
 			;(fs.readFile as Mock).mockResolvedValue(validFileContent)
 			mockProviderSettingsManager.export.mockResolvedValue(previousProviderProfiles)
-			mockProviderSettingsManager.import.mockResolvedValue(undefined)
+			mockProviderSettingsManager.import.mockImplementation(async (_profiles, onPersisted) => {
+				onPersisted?.()
+			})
 			mockProviderSettingsManager.listConfig.mockResolvedValue(profileMetadata)
 			mockContextProxy.setValues.mockResolvedValue(undefined)
 			mockContextProxy.setValue.mockResolvedValue(undefined)

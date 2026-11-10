@@ -28,6 +28,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
+import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
@@ -38,7 +39,12 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
-import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
+import {
+	makeCompositeDisposable,
+	makeEventEmitter,
+	makeUri,
+	makeWorkspaceConfiguration,
+} from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
@@ -4487,6 +4493,135 @@ describe("ClineProvider", () => {
 				.spyOn(provider.providerSettingsManager, "listConfig")
 				.mockResolvedValue(ids.map((id) => ({ name: `${id}-name`, id })))
 
+		it.each([false, true])("captures opening choices in the constructor (read failure: %s)", async (fails) => {
+			const snapshot = vi.spyOn(ProviderSettingsManager.prototype, "getModeConfigIds")
+			if (fails) snapshot.mockRejectedValueOnce(new Error("unreadable"))
+			else snapshot.mockResolvedValueOnce({ code: "opened-id" })
+			const opened = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				expect(snapshot).toHaveBeenCalledOnce()
+				vi.spyOn(opened.providerSettingsManager, "listConfig").mockResolvedValue([
+					{ name: "opened", id: "opened-id" },
+				])
+				const sharedLookup = vi
+					.spyOn(opened.providerSettingsManager, "getModeConfigId")
+					.mockResolvedValue("other-window-id")
+				snapshot.mockResolvedValue({ code: "other-window-id" })
+				await expect(opened["getModeConfigId"]("code")).resolves.toBe(fails ? undefined : "opened-id")
+				expect(sharedLookup).not.toHaveBeenCalled()
+			} finally {
+				await opened.dispose()
+				snapshot.mockRestore()
+			}
+		})
+
+		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			provider["initialModeConfigIds"] =
+				stage === "snapshot"
+					? pending.then(() => ({ code: "opened-id" }))
+					: Promise.resolve({ code: "opened-id" })
+			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(async () => {
+				if (stage === "profiles") await pending
+				return [{ name: "opened", id: "opened-id" }]
+			})
+			const lookup = vi.fn(provider["getModeConfigId"].bind(provider))
+			provider["getModeConfigId"] = lookup
+			const controller = new AbortController()
+			const switched = provider["handleModeSwitchUnlocked"]("code", null, controller.signal)
+			await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce())
+			if (stage === "profiles") await vi.waitFor(() => expect(list).toHaveBeenCalledOnce())
+			controller.abort()
+			release()
+			await switched
+			expect(list).toHaveBeenCalledTimes(stage === "snapshot" ? 0 : 1)
+			expect(provider["localModeConfigIds"].has("code")).toBe(false)
+		})
+
+		it.each(["manual", "automatic"])("adopts imported choices through the %s import entry point", async (entry) => {
+			const filePath = "/settings.json"
+			const fsPromises = (await import("fs/promises")).default
+			const originalReadFile = vi.mocked(fsPromises.readFile).getMockImplementation()!
+			vi.mocked(fsPromises.readFile).mockResolvedValue(
+				JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "imported",
+						apiConfigs: { imported: { id: "imported-id", apiProvider: providerIdentifiers.anthropic } },
+						modeApiConfigs: { code: "imported-id" },
+					},
+					globalSettings: {},
+				}),
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const options = {
+				providerSettingsManager: provider.providerSettingsManager,
+				contextProxy: provider.contextProxy,
+				customModesManager: provider.customModesManager,
+				provider,
+			}
+			if (entry === "manual") {
+				vi.mocked(vscode.window.showOpenDialog).mockResolvedValueOnce([makeUri(filePath)])
+				const { importSettingsWithFeedback } = await import("../../config/importExport")
+				await importSettingsWithFeedback(options)
+			} else {
+				const fsUtils = await import("../../../utils/fs")
+				const exists = vi.spyOn(fsUtils, "fileExistsAtPath").mockResolvedValue(true)
+				const originalGetConfiguration = vi.mocked(vscode.workspace.getConfiguration).getMockImplementation()!
+				vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(
+					makeWorkspaceConfiguration({ autoImportSettingsPath: filePath }),
+				)
+				const { autoImportSettings } = await import("../../../utils/autoImportSettings")
+				await autoImportSettings(mockOutputChannel, {
+					...options,
+					onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
+				})
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("Successfully imported settings"),
+				)
+				exists.mockRestore()
+				vi.mocked(vscode.workspace.getConfiguration).mockImplementation(originalGetConfiguration)
+			}
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
+			await expect(provider.providerSettingsManager.getModeConfigId("code")).resolves.toBe("imported-id")
+			vi.mocked(fsPromises.readFile).mockImplementation(originalReadFile)
+		})
+
+		it.each(["import-first", "choice-first"])("keeps local choices in persisted order (%s)", async (order) => {
+			const manager = provider.providerSettingsManager
+			const profiles = {
+				currentApiConfigName: "imported",
+				apiConfigs: { imported: { id: "imported-id" }, chosen: { id: "chosen-id" } },
+				modeApiConfigs: { code: "imported-id" },
+			}
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+			vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
+				await pending
+				await originalStore(key, value)
+			})
+			const imported = () => manager.import(profiles, () => provider.adoptModeConfigIds(profiles.modeApiConfigs))
+			const chosen = () => provider.setModeConfig("code", "chosen-id")
+			const first = order === "import-first" ? imported() : chosen()
+			const second = order === "import-first" ? chosen() : imported()
+			release()
+			await Promise.all([first, second])
+			const expected = order === "import-first" ? "chosen-id" : "imported-id"
+			await expect(manager.getModeConfigId("code")).resolves.toBe(expected)
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe(expected)
+		})
+
 		it("prefers this window's mode profile over one another window saved in shared storage", async () => {
 			const manager = provider.providerSettingsManager
 			existingProfiles("this-window-id", "other-window-id")
@@ -4495,7 +4630,7 @@ describe("ClineProvider", () => {
 
 			await provider["setModeConfig"]("code", "this-window-id")
 
-			expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
+			expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id", expect.any(Function))
 			await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
 		})
 
@@ -4653,7 +4788,7 @@ describe("ClineProvider", () => {
 				rejectWrite(new Error("write failed"))
 				await failure
 				await succeeded
-				expect(sharedWrite).toHaveBeenLastCalledWith("code", nextId)
+				expect(sharedWrite).toHaveBeenLastCalledWith("code", nextId, expect.any(Function))
 				await expect(provider["getModeConfigId"]("code")).resolves.toBe(nextId)
 			},
 		)
@@ -4698,7 +4833,11 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "mode", text: "architect" })
 
 		// Should save current config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+			"architect",
+			"current-id",
+			expect.any(Function),
+		)
 	})
 
 	it("saves config as default for current mode when loading config", async () => {
@@ -4725,7 +4864,11 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "loadApiConfiguration", text: "new-config" })
 
 		// Should save new config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "new-id")
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+			"architect",
+			"new-id",
+			expect.any(Function),
+		)
 	})
 
 	it("load API configuration by ID works and updates mode config", async () => {
@@ -4752,7 +4895,11 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "loadApiConfigurationById", text: "config-id-123" })
 
 		// Should save new config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "config-id-123")
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+			"architect",
+			"config-id-123",
+			expect.any(Function),
+		)
 
 		// Ensure the `activateProfile` method was called with the correct ID
 		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ id: "config-id-123" })
@@ -4932,7 +5079,11 @@ describe("ClineProvider", () => {
 		})
 
 		// Should save config as default for current mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "test-id")
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+			"code",
+			"test-id",
+			expect.any(Function),
+		)
 	})
 
 	test("file content includes line numbers", async () => {
@@ -5314,7 +5465,11 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
 			// Verify current config was saved as default for new mode
-			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+				"architect",
+				"current-id",
+				expect.any(Function),
+			)
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))

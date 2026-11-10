@@ -2115,7 +2115,8 @@ export class ClineProvider
 		if (signal?.aborted) return
 
 		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.getModeConfigId(newMode)
+		const savedConfigId = await this.getModeConfigId(newMode, signal)
+		if (signal?.aborted) return
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
 		if (signal?.aborted) return
@@ -2183,23 +2184,26 @@ export class ClineProvider
 	 * id whose profile no longer exists (e.g. after a reset) is dropped in favour of the shared map,
 	 * while an unreadable opening snapshot keeps this window’s current profile.
 	 */
-	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
+	private async getModeConfigId(mode: Mode, signal?: AbortSignal): Promise<string | undefined> {
+		if (signal?.aborted) return undefined
 		const localId = this.localModeConfigIds.get(mode)
 		const initialIds = localId === undefined ? await this.initialModeConfigIds : undefined
-		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode)
+		if (signal?.aborted) return undefined
+		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode, signal)
 		const cachedId = localId ?? initialIds?.[mode]
 		if (cachedId === undefined) return undefined
 
 		const profiles = await this.providerSettingsManager.listConfig()
+		if (signal?.aborted) return undefined
 		// A profile selection may have changed while either asynchronous read was pending.
-		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode)
+		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode, signal)
 		if (profiles.some(({ id }) => id === cachedId)) return cachedId
 
 		if (localId !== undefined) this.localModeConfigIds.delete(mode)
 		return this.providerSettingsManager.getModeConfigId(mode)
 	}
 
-	/** Adopt only mappings explicitly written by an import in this window. */
+	/** Adopt imported mappings from the manager's persistence callback, while its storage lock is held. */
 	public adoptModeConfigIds(ids: Record<string, string>): void {
 		for (const [mode, id] of Object.entries(ids)) {
 			this.localModeConfigIds.set(mode, id)
@@ -2225,7 +2229,10 @@ export class ClineProvider
 		const previousId = this.localModeConfigIds.get(mode)
 		this.localModeConfigIds.set(mode, id)
 		try {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+			await this.providerSettingsManager.setModeConfig(mode, id, () => {
+				// An import may have adopted another choice while this write waited for the storage lock.
+				this.localModeConfigIds.set(mode, id)
+			})
 		} catch (error) {
 			// Keep this window consistent with the shared map the failed write left unchanged.
 			if (this.localModeConfigIds.get(mode) === id) {

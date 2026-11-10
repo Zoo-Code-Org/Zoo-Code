@@ -229,8 +229,13 @@ export async function importSettingsFromPath(
 		// OpenAI Compatible settings are now correctly stored in codebaseIndexConfig
 		// They will be imported automatically with the config - no special handling needed
 
-		await providerSettingsManager.import(providerProfiles)
-		onModeConfigIdsImported?.(rawProviderProfiles.modeApiConfigs ?? {})
+		if (onModeConfigIdsImported) {
+			await providerSettingsManager.import(providerProfiles, () =>
+				onModeConfigIdsImported(rawProviderProfiles.modeApiConfigs ?? {}),
+			)
+		} else {
+			await providerSettingsManager.import(providerProfiles)
+		}
 		await contextProxy.setValues(sanitizedGlobalSettings)
 
 		// Set the current provider.

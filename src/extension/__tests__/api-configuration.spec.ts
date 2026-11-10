@@ -52,8 +52,8 @@ describe("API - configuration", () => {
 			}),
 		)
 		expect(setModeConfig).toHaveBeenCalledTimes(2)
-		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
-		expect(setModeConfig).toHaveBeenCalledWith("new-custom-mode", "architect-config")
+		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config", expect.any(Function))
+		expect(setModeConfig).toHaveBeenCalledWith("new-custom-mode", "architect-config", expect.any(Function))
 		await expect(provider["getModeConfigId"]("code")).resolves.toBe("code-config")
 		await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBe("architect-config")
 		expect(postStateToWebview).toHaveBeenCalledOnce()

@@ -543,7 +543,7 @@ export class ProviderSettingsManager {
 	/**
 	 * Set the API config for a specific mode.
 	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId: string, onPersisted?: () => void) {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -554,6 +554,7 @@ export class ProviderSettingsManager {
 				// Assign the chosen config ID to this mode
 				providerProfiles.modeApiConfigs[mode] = configId
 				await this.store(providerProfiles)
+				onPersisted?.()
 			})
 		} catch (error) {
 			throw new Error(`Failed to set mode config: ${error}`)
@@ -651,9 +652,13 @@ export class ProviderSettingsManager {
 		}
 	}
 
-	public async import(providerProfiles: ProviderProfiles) {
+	public async import(providerProfiles: ProviderProfiles, onPersisted?: () => void) {
 		try {
-			return await this.lock(() => this.store(providerProfiles))
+			return await this.lock(async () => {
+				await this.store(providerProfiles)
+				// Publish local choices before a later writer can acquire the storage lock.
+				onPersisted?.()
+			})
 		} catch (error) {
 			throw new Error(`Failed to import provider profiles: ${error}`)
 		}

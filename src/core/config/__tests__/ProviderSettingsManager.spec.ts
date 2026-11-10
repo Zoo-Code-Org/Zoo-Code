@@ -89,6 +89,36 @@ describe("ProviderSettingsManager", () => {
 		providerSettingsManager = new ProviderSettingsManager(mockContext)
 	})
 
+	it.each([
+		{ operation: "import", fails: false },
+		{ operation: "import", fails: true },
+		{ operation: "mode write", fails: false },
+		{ operation: "mode write", fails: true },
+	])("publishes $operation choices only after persistence (failure: $fails)", async ({ operation, fails }) => {
+		let release = () => {}
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		mockSecrets.store.mockImplementationOnce(async () => {
+			await pending
+			if (fails) throw new Error("write failed")
+		})
+		const published = vi.fn()
+		const write =
+			operation === "import"
+				? providerSettingsManager.import(
+						{ currentApiConfigName: "default", apiConfigs: {}, modeApiConfigs: { code: "imported-id" } },
+						published,
+					)
+				: providerSettingsManager.setModeConfig("code", "chosen-id", published)
+		await vi.waitFor(() => expect(mockSecrets.store).toHaveBeenCalledOnce())
+		expect(published).not.toHaveBeenCalled()
+		const result = fails ? expect(write).rejects.toThrow("write failed") : expect(write).resolves.toBeUndefined()
+		release()
+		await result
+		expect(published).toHaveBeenCalledTimes(fails ? 0 : 1)
+	})
+
 	describe("initialize", () => {
 		it("should not write to storage when secrets.get returns null", async () => {
 			// Mock readConfig to return null

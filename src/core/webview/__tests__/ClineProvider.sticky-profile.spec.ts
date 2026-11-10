@@ -456,7 +456,11 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				)
 
 				if (persistModeConfig) {
-					expect(setModeConfigSpy).toHaveBeenCalledExactlyOnceWith("architect", "new-profile-id")
+					expect(setModeConfigSpy).toHaveBeenCalledExactlyOnceWith(
+						"architect",
+						"new-profile-id",
+						expect.any(Function),
+					)
 				} else {
 					expect(setModeConfigSpy).not.toHaveBeenCalled()
 				}
