@@ -2422,7 +2422,11 @@ export const webviewMessageHandler = async (
 			break
 
 		case "autoApprovalEnabled":
-			await updateGlobalState("autoApprovalEnabled", message.bool ?? false)
+			// In the line of the writes of this key: an import that was delayed behind an earlier write must not land
+			// after, and re-enable, what the user has switched off since.
+			await storeInOrder("autoApprovalEnabled", () =>
+				updateGlobalState("autoApprovalEnabled", message.bool ?? false),
+			)
 			await provider.postStateToWebview()
 			break
 		case "enhancePrompt":

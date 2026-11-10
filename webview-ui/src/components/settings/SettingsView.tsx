@@ -347,7 +347,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		// unless the user has edited that setting since the answer: that edit stays. An import that is answered starts
 		// the count again.
 		const editedBefore = new Set(editedSinceImportAnswer.current)
-		if (settingsImportRefreshIsLate !== true) editedSinceImportAnswer.current.clear()
+		// An import that is answered ends the tracking of what it stored (the form takes that from it), and of nothing
+		// else: an unsaved edit of another setting is still an edit for the next refresh, which another provider's change
+		// may come with.
+		if (settingsImportRefreshIsLate !== true) {
+			for (const key of settingsImportStoredKeys ?? []) editedSinceImportAnswer.current.delete(key)
+		}
 		const editedSince = (key: string) =>
 			settingsImportRefreshIsLate === true && editedSinceImportAnswer.current.has(key)
 		// The settings the import says it stored are taken whatever they were before: the live state may have been stale

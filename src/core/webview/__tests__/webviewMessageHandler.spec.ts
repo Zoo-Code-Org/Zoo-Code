@@ -2622,6 +2622,67 @@ describe("webviewMessageHandler - the appearance settings are saved all-or-nothi
 			await vi.advanceTimersByTimeAsync(0)
 		})
 
+		it("does not let an import that was delayed re-enable auto-approval after the user switched it off", async () => {
+			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
+			const order: string[] = []
+			const stalls: Array<() => void> = []
+			let first = true
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(
+				(k: string, v: unknown): Promise<void> => {
+					if (k !== "autoApprovalEnabled") return real(k as never, v as never) as Promise<void>
+					order.push(`start ${String(v)}`)
+					const land = () => {
+						stored[k] = v
+						order.push(`end ${String(v)}`)
+					}
+					if (first) {
+						first = false
+						return new Promise<void>((resolve) => stalls.push(() => (land(), resolve())))
+					}
+					land()
+					return Promise.resolve()
+				},
+			)
+			Object.assign(mockClineProvider.contextProxy, {
+				setValues: async (
+					values: Record<string, unknown>,
+					storeKey?: (k: string, w: () => Promise<void>) => Promise<void>,
+				) => {
+					await Promise.all(
+						Object.entries(values).map(([k, v]) =>
+							(storeKey ?? ((_key, write) => write()))(k, () =>
+								mockClineProvider.contextProxy.setValue(k as never, v as never),
+							),
+						),
+					)
+				},
+			})
+			const { writeValuesThroughWriteChain } = await import("../../config/appearanceSettingWrites")
+
+			// An earlier write of the key is slow; an import that enables auto-approval waits behind it.
+			void webviewMessageHandler(mockClineProvider, { type: "autoApprovalEnabled", bool: false })
+			await vi.advanceTimersByTimeAsync(0)
+			const imported = writeValuesThroughWriteChain(
+				mockClineProvider.contextProxy,
+				{ autoApprovalEnabled: true },
+				{},
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			// The user switches it off, while the import is still waiting.
+			const disabled = webviewMessageHandler(mockClineProvider, { type: "autoApprovalEnabled", bool: false })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(order).toEqual(["start false"])
+
+			stalls[0]() // the slow write lands at last
+			await vi.advanceTimersByTimeAsync(0)
+			await Promise.all([imported, disabled])
+
+			// In the order they were made: the import, then the user's switch-off, which is the last word.
+			expect(order).toEqual(["start false", "end false", "start true", "end true", "start false", "end false"])
+			expect(stored.autoApprovalEnabled).toBe(false)
+			Reflect.deleteProperty(mockClineProvider.contextProxy, "setValues")
+		})
+
 		it("does not let a store that timed out land after the store of a newer save of the same key", async () => {
 			const real = vi.mocked(mockClineProvider.contextProxy.setValue).getMockImplementation()!
 			const lands: Array<() => void> = []

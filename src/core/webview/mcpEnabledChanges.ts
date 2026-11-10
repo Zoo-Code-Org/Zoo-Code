@@ -93,12 +93,12 @@ export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean, signal?:
 	if (signal?.aborted) return Promise.reject(signal.reason)
 	const changes = changesOf(hub)
 	const { running, pending } = changes
-	if (!running) return start(hub, changes, value)
+	if (!running) return forCaller(start(hub, changes, value), signal)
 
 	if (pending) {
-		return joinPending(changes, pending, value, signal)
+		return forCaller(joinPending(changes, pending, value, signal), signal)
 	}
-	if (running.value === value) return running.promise
+	if (running.value === value) return forCaller(running.promise, signal)
 
 	let resolve!: () => void
 	let reject!: (error: unknown) => void
@@ -109,7 +109,20 @@ export function changeMcpEnabled(hub: McpEnabledTarget, value: boolean, signal?:
 	promise.catch(() => undefined)
 	const created: Pending = { value, waiters: [], promise, resolve, reject }
 	changes.pending = created
-	return joinPending(changes, created, value, signal)
+	return forCaller(joinPending(changes, created, value, signal), signal)
+}
+
+/**
+ * The promise a caller waits on: its own, so that a caller that gives up (its `signal` aborts) is answered at once and
+ * lets go of what it was doing, while the change that other callers still wait for goes on.
+ */
+function forCaller(shared: Promise<void>, signal?: AbortSignal): Promise<void> {
+	if (!signal) return shared
+	return new Promise<void>((resolve, reject) => {
+		const abort = () => reject(signal.reason)
+		signal.addEventListener("abort", abort, { once: true })
+		shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
+	})
 }
 
 /**

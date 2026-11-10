@@ -222,4 +222,22 @@ describe("SettingsView – a late import refresh and the settings that have a se
 			expect(screen.getByTestId("save-button")).toBeEnabled()
 		},
 	)
+
+	it.each(cases)(
+		"keeps an unsaved edit of $name through two partial refreshes and a change by another provider",
+		async (c) => {
+			render(c.section, c.initial)
+			await screen.findByTestId(c.read)
+			fireEvent.click(screen.getByTestId(c.edit))
+			await waitFor(() => expect(screen.getByTestId(c.read).textContent).toBe(c.edited))
+
+			// A first import stored something else; then another provider changes the value; a second import stored something else.
+			hostPosts({ settingsImportRefreshedAt: 1_000, settingsImportStoredKeys: ["somethingElse"] })
+			hostPosts({ [c.key]: c.answered })
+			hostPosts({ [c.key]: c.late, settingsImportRefreshedAt: 2_000, settingsImportStoredKeys: ["another"] })
+
+			expect(screen.getByTestId(c.read).textContent).toBe(c.edited) // the edit is tracked across both
+			expect(screen.getByTestId("save-button")).toBeEnabled()
+		},
+	)
 })

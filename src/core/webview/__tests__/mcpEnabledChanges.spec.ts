@@ -184,7 +184,8 @@ describe("changeMcpEnabled", () => {
 			void changeMcpEnabled(hub, true) // stalled
 			const a = changeMcpEnabled(hub, false, first.signal)
 			const b = changeMcpEnabled(hub, true, second.signal) // the latest value that is asked for ...
-			expect(b).toBe(a)
+			// Each caller has its own promise: one that gives up is answered at once, the other goes on waiting.
+			expect(b).not.toBe(a)
 			const aLeft = a.catch(() => undefined)
 			second.abort(new Error("gave up")) // ... is given up on: the value of the other save is what waits
 
@@ -217,20 +218,22 @@ describe("changeMcpEnabled", () => {
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true]])
 		})
 
-		it("cannot take back a change that has started: it goes on, and a save that joined it is not affected", async () => {
+		it("cannot take back a change that has started: the caller that gave up is answered, and the change goes on", async () => {
 			const { hub, releases } = createHub()
 			const giveUp = new AbortController()
 
 			const running = changeMcpEnabled(hub, false, giveUp.signal) // starts at once
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			const rejected = expect(running).rejects.toThrow("gave up")
 			giveUp.abort(new Error("gave up"))
-			releases[0]()
+			await rejected // the caller is not held by it
+			releases[0]() // the change itself lands
 
-			await expect(running).resolves.toBeUndefined()
+			await new Promise((resolve) => setTimeout(resolve, 10))
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[false]])
 		})
 
-		it("is not affected when the save gives up after the change has already started", async () => {
+		it("does not take back a change that has started when its save gives up: the save is answered, the change lands", async () => {
 			const { hub, releases } = createHub()
 			const giveUp = new AbortController()
 
@@ -239,10 +242,32 @@ describe("changeMcpEnabled", () => {
 			await vi.waitFor(() => expect(releases).toHaveLength(1))
 			releases[0]() // it lands, and the waiting change starts
 			await vi.waitFor(() => expect(releases).toHaveLength(2))
-			giveUp.abort(new Error("gave up")) // too late: it is under way, and cannot be taken back
+			const rejected = expect(waiting).rejects.toThrow("gave up")
+			giveUp.abort(new Error("gave up")) // too late to take it back: it is under way
+			await rejected
 			releases[1]()
+			await new Promise((resolve) => setTimeout(resolve, 10))
 
-			await expect(waiting).resolves.toBeUndefined()
+			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
+		})
+
+		it("answers a save that gives up at once, while another save still waits for the same change, which goes on", async () => {
+			const { hub, releases } = createHub()
+			const first = new AbortController()
+			const second = new AbortController()
+
+			void changeMcpEnabled(hub, true) // stalled: the providers of both saves wait behind it
+			const a = changeMcpEnabled(hub, false, first.signal)
+			const b = changeMcpEnabled(hub, false, second.signal)
+			const aLeft = expect(a).rejects.toThrow("provider of the first save was disposed")
+			first.abort(new Error("provider of the first save was disposed"))
+			await aLeft // answered at once, though the change is stalled and the second save still waits for it
+
+			await vi.waitFor(() => expect(releases).toHaveLength(1))
+			releases[0]()
+			await vi.waitFor(() => expect(releases).toHaveLength(2))
+			releases[1]()
+			await expect(b).resolves.toBeUndefined() // the change that the other save needs was not cancelled
 			expect(hub.handleMcpEnabledChange.mock.calls).toEqual([[true], [false]])
 		})
 
@@ -270,10 +295,12 @@ describe("changeMcpEnabled", () => {
 			releases[1]()
 			await waiting
 
-			const added = add.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
-			const removed = remove.mock.calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
-			expect(added).toHaveLength(1)
-			expect(removed).toEqual(added) // the one that was added is the one that is removed
+			const listeners = (calls: typeof add.mock.calls) =>
+				calls.filter(([type]) => type === "abort").map(([, listener]) => listener)
+			await vi.waitFor(() => expect(listeners(remove.mock.calls)).toHaveLength(listeners(add.mock.calls).length))
+			expect(listeners(add.mock.calls).length).toBeGreaterThan(0)
+			// Every listener that was added is the one that is removed.
+			expect(new Set(listeners(remove.mock.calls))).toEqual(new Set(listeners(add.mock.calls)))
 		})
 	})
 
