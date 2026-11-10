@@ -136,25 +136,30 @@ describe.each([
 		expect(last - first).toBe(day.hours * 3_600_000 - 1)
 	})
 
-	it.each(["today", "7d", "30d"] as const)(
-		"includes its first and its last millisecond, and excludes the millisecond before and the one after, in the export for %s",
-		(range) => {
-			const rows = written(range)
-
-			expect(rows).toContain("first-ms")
-			expect(rows).toContain("last-ms")
-			expect(rows).not.toContain("next-first-ms") // the first millisecond of tomorrow is after today
-			if (range === "today") expect(rows).not.toContain("previous-last-ms")
+	it.each([
+		["today", ["first-ms", "last-ms"]],
+		["7d", ["previous-last-ms", "first-ms", "last-ms"]],
+		["30d", ["previous-last-ms", "first-ms", "last-ms"]],
+	] as const)(
+		"writes exactly the tasks of %s, oldest first: both ends of the day, and neither the millisecond after it nor, for today, the one before",
+		(range, expected) => {
+			// The first millisecond of tomorrow is after today, and the last of yesterday is before it.
+			expect(written(range)).toEqual(expected)
 		},
 	)
 
-	it("counts the same tasks in the totals as in the export, for today", () => {
-		const summary = summarizeUsage(tasks(), { range: "today", now })
+	it.each(["today", "7d", "30d"] as const)(
+		"counts the same tasks in the totals as rows in the export, for %s",
+		(range) => {
+			const summary = summarizeUsage(tasks(), { range, now })
 
-		expect(summary.taskCount).toBe(2)
-		expect(summary.daily).toHaveLength(1)
-		expect(summary.daily[0]).toMatchObject({ day: first })
-	})
+			expect(summary.taskCount).toBe(written(range).length)
+			if (range === "today") {
+				expect(summary.daily).toHaveLength(1)
+				expect(summary.daily[0]).toMatchObject({ day: first })
+			}
+		},
+	)
 
 	it("for a window that begins on this day, includes the first millisecond and excludes the one before", () => {
 		const windowNow = new Date(day.y, day.m, day.d + 6, 12, 0).getTime() // this day is the first of its 7 days

@@ -4106,10 +4106,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			)
 			// The placeholder that the say above added, kept from here: it is this request's, whatever is deleted, rewound
 			// or added during the waits below, and no lookup later can select an older request's instead.
-			const requestMessage =
-				this.clineMessages.slice(messageCountBefore).find((message) => message.say === "api_req_started") ??
-				// A task whose `say` added nothing (a test double): the last request message, taken in the same step.
-				findLast(this.clineMessages, (message) => message.say === "api_req_started")
+			// Only what the say above added: if that was deleted while it waited, there is none, and an older request's is
+			// not taken in its place (its usage would be erased, and the deleted turn would still be sent).
+			const requestMessage = this.clineMessages
+				.slice(messageCountBefore)
+				.find((message) => message.say === "api_req_started")
 
 			const provider = this.providerRef.deref()
 			const state = provider ? await provider.getState() : undefined

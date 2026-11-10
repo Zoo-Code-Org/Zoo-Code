@@ -318,6 +318,46 @@ describe("metricTotal", () => {
 	})
 })
 
+describe("a history with corrupted token counts in its per-model usage", () => {
+	const corrupt = [
+		{
+			apiProvider: "a",
+			modelId: "broken",
+			requests: 1,
+			tokensIn: Number.NaN,
+			tokensOut: "12" as unknown as number,
+			cost: 0,
+		},
+		{ apiProvider: "b", modelId: "real", requests: 1, tokensIn: 50, tokensOut: 25, cost: 0 },
+		{
+			apiProvider: "c",
+			modelId: "negative",
+			requests: 1,
+			tokensIn: -500,
+			tokensOut: Number.POSITIVE_INFINITY,
+			cost: 0,
+		},
+	]
+
+	it("adds up only what is a count: no total is NaN, a string or infinite", () => {
+		const s = summarizeUsage([item({ usageByModel: corrupt })], { range: "all", now: NOW })
+
+		for (const bucket of [...s.byProvider, ...s.byModel]) expect(Number.isFinite(bucket.tokens)).toBe(true)
+		expect(s.byModel.find((b) => b.key.includes("real"))?.tokens).toBe(75)
+		expect(s.byModel.find((b) => b.key.includes("broken"))?.tokens).toBe(0)
+		expect(s.byModel.find((b) => b.key.includes("negative"))?.tokens).toBe(0)
+	})
+
+	it("labels the task with the entry that has real tokens, not the corrupted one", () => {
+		expect(primaryUsage(item({ usageByModel: corrupt }))).toEqual({ apiProvider: "b", modelId: "real" })
+		// With NaN on the first entry, a comparison against it would never be true: the first one would be kept.
+		expect(primaryUsage(item({ usageByModel: [corrupt[0], corrupt[1]] }))).toEqual({
+			apiProvider: "b",
+			modelId: "real",
+		})
+	})
+})
+
 describe("primaryUsage", () => {
 	it("returns the provider+model that used the most tokens", () => {
 		const task = item({

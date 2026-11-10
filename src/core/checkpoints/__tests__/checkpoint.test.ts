@@ -607,11 +607,18 @@ describe("Checkpoint functionality", () => {
 					operation: "delete",
 				})
 
-				await expect(restoring).rejects.toMatchObject({ name: "ConversationRewindError" })
+				await expect(restoring).rejects.toMatchObject({
+					name: "ConversationRewindError",
+					restarted: false, // the edit is handed back, and the user decides
+					restartFailure: {
+						error: expect.objectContaining({ message: expect.stringContaining("partly rewound") }),
+					},
+				})
 				await expect(restoring).rejects.toThrow(
 					/could not be saved, and the messages could not be put back \(disk full\).*only partly rewound/,
 				)
-				expect(mockProvider.cancelTask).toHaveBeenCalledTimes(1)
+				// Not started again from two sides that are not the same conversation.
+				expect(mockProvider.cancelTask).not.toHaveBeenCalled()
 			})
 
 			it("tells a failure that is not an Error as text, in the message about a conversation that is only partly rewound", async () => {
@@ -633,6 +640,7 @@ describe("Checkpoint functionality", () => {
 				).rejects.toThrow(
 					"disk gone, and the messages could not be put back (no space): the conversation is only partly rewound",
 				)
+				expect(mockProvider.cancelTask).not.toHaveBeenCalled()
 			})
 
 			it("puts nothing back when the messages were not cut", async () => {

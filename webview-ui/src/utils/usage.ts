@@ -119,10 +119,15 @@ export interface UsageOptions {
  * The provider+model that did most of a task's work (by tokens), for labelling
  * a task row. Undefined when nothing was recorded.
  */
+/** A token count of a recorded request: a history file that was corrupted or edited by hand may hold anything else. */
+const tokenCount = (value: unknown): number =>
+	typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
+
 export function primaryUsage(item: HistoryItem): { apiProvider?: string; modelId?: string } | undefined {
 	const entries = item.usageByModel?.filter((e) => e.apiProvider || e.modelId)
 	if (!entries?.length) return undefined
-	const top = entries.reduce((a, b) => (b.tokensIn + b.tokensOut > a.tokensIn + a.tokensOut ? b : a))
+	const total = (e: { tokensIn: number; tokensOut: number }) => tokenCount(e.tokensIn) + tokenCount(e.tokensOut)
+	const top = entries.reduce((a, b) => (total(b) > total(a) ? b : a))
 	return { apiProvider: top.apiProvider, modelId: top.modelId }
 }
 
@@ -264,7 +269,7 @@ export function summarizeUsage(history: HistoryItem[], options: UsageOptions): U
 		}
 
 		for (const e of entries) {
-			const entryTokens = e.tokensIn + e.tokensOut
+			const entryTokens = tokenCount(e.tokensIn) + tokenCount(e.tokensOut)
 			const entryCost = Number.isFinite(e.cost) ? e.cost : 0
 			const providerKey = e.apiProvider || UNRECORDED
 			const modelKey = e.modelId ? `${e.apiProvider ?? ""}\u0000${e.modelId}` : UNRECORDED

@@ -17,7 +17,11 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 import { assertRecordedCheckpoint } from "./recordedCheckpoint"
-import { ConversationRewindError, TaskNotRestartedError } from "./ConversationRewindError"
+import {
+	ConversationPartlyRewoundError,
+	ConversationRewindError,
+	TaskNotRestartedError,
+} from "./ConversationRewindError"
 
 const WARNING_THRESHOLD_MS = 5000
 
@@ -271,6 +275,15 @@ export async function checkpointRestore(
 			try {
 				deletedRequests = await rewindConversation(task, ts, index, operation)
 			} catch (error) {
+				// A conversation whose two sides are not the same is not started again: the model would be given turns that
+				// the user cannot see. It is reported as a restart that did not happen, so the edit is handed back.
+				if (error instanceof ConversationPartlyRewoundError) {
+					throw new ConversationRewindError(error, {
+						error: new Error(
+							"the task was not started again, because its conversation is only partly rewound",
+						),
+					})
+				}
 				// The workspace is already restored: the task still has to be started again, as after a rewind that worked.
 				// A restart that fails is not hidden by the rewind failure, nor does it hide it: both are told.
 				throw new ConversationRewindError(error, await startTaskAgain(provider, task))
@@ -381,7 +394,7 @@ async function rewindConversation(
 			} catch (restoreError) {
 				const reason = failure instanceof Error ? failure.message : String(failure)
 				const restoreReason = restoreError instanceof Error ? restoreError.message : String(restoreError)
-				throw new Error(
+				throw new ConversationPartlyRewoundError(
 					`${reason}, and the messages could not be put back (${restoreReason}): the conversation is only partly rewound`,
 				)
 			}

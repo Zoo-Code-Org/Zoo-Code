@@ -3905,11 +3905,18 @@ describe("Cline", () => {
 				})
 
 				const payloads: string[] = []
+				// As the real say does, the message is added to the conversation: the request keeps hold of that one.
 				vi.spyOn(task, "say").mockImplementation(async (type, text) => {
 					if (type === "api_req_started") payloads.push(String(text))
+					task.clineMessages.push({
+						ts: Date.now(),
+						type: "say",
+						say: type as "api_req_started",
+						text: String(text),
+					})
 					return undefined as never
 				})
-				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+				task.clineMessages = [{ ts: Date.now() - 1, type: "say", say: "api_req_started", text: "{}" }]
 
 				// Only the stop that the test asks for is expected: any other failure is a failure of the test.
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }]).catch((error: unknown) => {
@@ -3989,6 +3996,47 @@ describe("Cline", () => {
 				)
 
 				expect(getEnvironmentDetails).toHaveBeenCalled() // the placeholder was removed during the waits
+				expect(older.text).toBe('{"apiProvider":"older"}') // not relabelled in its place
+				expect(attempt).not.toHaveBeenCalled() // and nothing was sent
+			})
+
+			it("stops, and takes no older request in its place, when the placeholder is deleted while it is being written", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "k",
+						apiModelId: "claude-sonnet-5",
+					},
+					task: "test task",
+					startTask: false,
+				})
+				Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+					content: [{ type: "text", text: "hello" }],
+					mode: undefined,
+				})
+				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+				const attempt = vi.spyOn(task, "attemptApiRequest")
+				// An older request, and the placeholder that this request adds.
+				const older = {
+					ts: 1,
+					type: "say" as const,
+					say: "api_req_started" as const,
+					text: '{"apiProvider":"older"}',
+				}
+				task.clineMessages = [older]
+				// A delete that is confirmed while the say waits: the placeholder is gone when it returns.
+				vi.spyOn(task, "say").mockImplementation(async () => undefined as never)
+				// A deletion that is confirmed while the request is being prepared removes its placeholder.
+				vi.mocked(getEnvironmentDetails).mockClear()
+
+				// The loop ends the request there, as it does for an abort.
+				await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])).rejects.toThrow(
+					"request was removed from the conversation",
+				)
+
 				expect(older.text).toBe('{"apiProvider":"older"}') // not relabelled in its place
 				expect(attempt).not.toHaveBeenCalled() // and nothing was sent
 			})

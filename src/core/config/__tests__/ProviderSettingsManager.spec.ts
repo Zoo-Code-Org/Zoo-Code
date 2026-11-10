@@ -788,6 +788,33 @@ describe("ProviderSettingsManager", () => {
 				loadSpy.mockRestore()
 			})
 
+			it("does not let a read that comes after a write join the batch that is queued ahead of that write", async () => {
+				mockSecrets.get.mockClear()
+				let finishFirst: (value: string) => void = () => undefined
+				let current = text()
+				mockSecrets.get
+					.mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirst = resolve)))
+					.mockImplementation(async () => current)
+				mockSecrets.store.mockImplementation(async (_key: string, value: string) => {
+					current = value
+				})
+
+				const first = providerSettingsManager.listConfig() // holds the line, so everything after it waits
+				await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledTimes(1))
+				const before = providerSettingsManager.getAllProfiles({ signal: new AbortController().signal }) // a batch
+				const write = providerSettingsManager.saveConfig("added", {
+					id: "added-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				const after = providerSettingsManager.getAllProfiles({ signal: new AbortController().signal }) // behind the write
+				finishFirst(text())
+
+				await first
+				await write
+				expect((await before).map((p) => p.name)).toEqual(["default", "other"]) // as before the write
+				expect((await after).map((p) => p.name)).toContain("added") // and this one sees what the write stored
+			})
+
 			it("answers every caller of one batch with one load of the storage", async () => {
 				mockSecrets.get.mockClear()
 				mockSecrets.get.mockResolvedValue(text())

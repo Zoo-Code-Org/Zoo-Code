@@ -21,6 +21,18 @@ export class ConversationRewindError extends Error {
 }
 
 /**
+ * The messages were cut and could not be put back after the API history failed to follow: the two sides of the
+ * conversation are not the same, and a task that is started from them would give the model turns that the user cannot
+ * see. The task is not started again; the caller hands the edit back, and the user decides.
+ */
+export class ConversationPartlyRewoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ConversationPartlyRewoundError"
+	}
+}
+
+/**
  * The files were restored and the conversation was rewound, but the task could not be started again (or was not
  * rehydrated). Nothing will take a pending edit, so the caller clears it and hands it back to the user.
  */

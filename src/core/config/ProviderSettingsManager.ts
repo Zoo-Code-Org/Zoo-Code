@@ -105,6 +105,8 @@ export class ProviderSettingsManager {
 	// Synchronize readConfig/writeConfig operations to avoid data loss.
 	private _lock = Promise.resolve()
 	private lock<T>(cb: () => Promise<T>) {
+		// Reads that come after this operation are behind it: they cannot join a batch that is queued ahead of it.
+		this.readBatch = undefined
 		const next = this._lock.then(cb)
 		this._lock = next.catch(() => {}) as Promise<void>
 		return next

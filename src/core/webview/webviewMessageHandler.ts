@@ -1675,7 +1675,7 @@ export const webviewMessageHandler = async (
 					signal: controller.signal,
 					activeProfileId,
 				})
-			} catch (error) {
+			} catch {
 				providerQuotasFailed = true
 				if (!controller.signal.aborted) {
 					// A fixed text: what failed may be the saved profiles, and a message about them (a parse error of the stored
