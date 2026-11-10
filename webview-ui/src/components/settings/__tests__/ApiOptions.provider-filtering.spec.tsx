@@ -232,7 +232,10 @@ describe("ApiOptions Provider Filtering", () => {
 
 		renderWithProviders()
 
-		expect(getProviderOptions().map(({ value }) => value)).not.toContain(providerIdentifiers.zooGateway)
+		expect(getProviderOptions().map(({ value }) => value)).toEqual([
+			providerIdentifiers.anthropic,
+			providerIdentifiers.openrouter,
+		])
 	})
 
 	it("keeps Zoo Gateway first when an organization allow list includes it", () => {
@@ -249,7 +252,10 @@ describe("ApiOptions Provider Filtering", () => {
 
 		renderWithProviders()
 
-		expect(getProviderOptions()[0]?.value).toBe(providerIdentifiers.zooGateway)
+		expect(getProviderOptions().map(({ value }) => value)).toEqual([
+			providerIdentifiers.zooGateway,
+			providerIdentifiers.anthropic,
+		])
 	})
 
 	it("should hide static providers with empty models", () => {
