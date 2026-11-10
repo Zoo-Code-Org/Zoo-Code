@@ -253,34 +253,6 @@ function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, t
 	}
 }
 
-/**
- * Whether the shared provider-settings store still carries this profile's stored record.
- * The store normalizes every provider's keys on write, so a key the record does not
- * mention and a key whose stored value is `undefined` are the same value here.
- */
-function sharedStoreCarriesProfileRecord(store: ProviderSettings, record: Record<string, unknown>): boolean {
-	const storeValues = new Map<string, unknown>(Object.entries(store))
-	const recordValues = new Map<string, unknown>(Object.entries(record))
-	for (const key of new Set([...storeValues.keys(), ...recordValues.keys()])) {
-		if (storeValues.get(key) !== recordValues.get(key)) {
-			return false
-		}
-	}
-	return true
-}
-
-/**
- * Raised when a profile activation or upsert failed after durable writes landed and at least one
- * compensating write failed too. The persisted profile stores may now disagree, which is not the
- * ordinary "the save failed and nothing changed" outcome the caller's `undefined` would suggest.
- */
-class ProfileActivationInconsistentError extends Error {
-	constructor(message: string) {
-		super(message)
-		this.name = "ProfileActivationInconsistentError"
-	}
-}
-
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
