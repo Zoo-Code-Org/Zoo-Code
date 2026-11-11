@@ -140,12 +140,23 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
-	// Upper-case environment variable names that end in TOKEN or SECRET (NPM_TOKEN, SLACK_BOT_TOKEN).
-	// The match is case-sensitive, so code such as `token: string` or `maxTokens = 5` is not redacted.
+	// Upper-case environment variable names that are or end in TOKEN or SECRET (TOKEN, NPM_TOKEN,
+	// SLACK_BOT_TOKEN). The match is case-sensitive, so code such as `maxTokens = 5` is not redacted.
 	{
 		pattern: new RegExp(
-			String.raw`(?<prefix>\b[A-Z][A-Z0-9_]*_(?:TOKEN|SECRET)${ASSIGNMENT})(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
+			String.raw`(?<prefix>\b(?:[A-Z][A-Z0-9_]*_)?(?:TOKEN|SECRET)${ASSIGNMENT})(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
 			"g",
+		),
+		replacement: "$<prefix>$<open>[REDACTED]$<open>",
+	},
+	// Any-case `token` keys (token, "token", npm_token). A quoted value is always redacted. An unquoted
+	// value is redacted only when it contains a digit, so type declarations and expressions such as
+	// `token: string` or `token = getToken()` stay readable. The digit lookahead is bounded to keep
+	// the scan linear.
+	{
+		pattern: new RegExp(
+			String.raw`(?<prefix>\b(?:[A-Za-z0-9]+_)*token${ASSIGNMENT})(?:${QUOTED_VALUE}|(?=["'\x60]?[^\s"'\x60\d]{0,256}\d)${UNQUOTED_VALUE})`,
+			"gi",
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},

@@ -208,6 +208,12 @@ describe("commitMessageGenerator", () => {
 			["a quoted value with an escaped quote", String.raw`+password: "a\";b"`, '+password: "[REDACTED]"', ";b"],
 			["an unterminated quoted value", '+password: "abc;def', "+password: [REDACTED]", "abc"],
 			["an npm token variable", `+NPM_TOKEN=${FAKE_NPM_TOKEN}`, "+NPM_TOKEN=[REDACTED]", "npm_"],
+			["a standalone TOKEN variable", "+TOKEN=abcdef", "+TOKEN=[REDACTED]", "abcdef"],
+			["a standalone SECRET variable", "+SECRET=hunter", "+SECRET=[REDACTED]", "hunter"],
+			["a JSON token key", '+  "token": "abcdef1234567890",', '+  "token": "[REDACTED]",', "abcdef1234567890"],
+			["a quoted token in code", "+const token = 'opaque'", "+const token = '[REDACTED]'", "opaque"],
+			["an unquoted YAML token", "+  token: abc123def456", "+  token: [REDACTED]", "abc123def456"],
+			["a snake_case token key", "+npm_token: s3cr3tvalue", "+npm_token: [REDACTED]", "s3cr3tvalue"],
 			["a quoted token variable", '+SLACK_BOT_TOKEN="xyz;123"', '+SLACK_BOT_TOKEN="[REDACTED]"', "xyz"],
 			["a YAML secret variable", "+  CI_DEPLOY_SECRET: hunter2", "+  CI_DEPLOY_SECRET: [REDACTED]", "hunter2"],
 			[
@@ -249,6 +255,10 @@ describe("commitMessageGenerator", () => {
 			["versioned package specs", "+npx react@18.3.1"],
 			["empty quoted credentials", '+  password: "",'],
 			["lower-case token fields", "+  token: string"],
+			["optional token fields", "+  token?: string"],
+			["token expressions", "+const token = getToken()"],
+			["plural token keys", "+  tokens: 5"],
+			["token reads without an assignment", "+const value = env.TOKEN"],
 			["upper-case names that only contain TOKEN", "+const MAX_TOKENS = 4096"],
 			["upper-case token names without an assignment", "+if (env.NPM_TOKEN) {"],
 		])("leaves %s unchanged", (_label, content) => {
@@ -274,6 +284,8 @@ describe("commitMessageGenerator", () => {
 			["many @ signs with no domain", "a@".repeat(100_000)],
 			["many local-part characters before one @", `${"a.".repeat(100_000)}@`],
 			["a long upper-case name without a TOKEN suffix", "A_".repeat(100_000)],
+			["many token assignments without a digit", "token=".repeat(33_334)],
+			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
 		])("redacts %s in linear time", (_label, content) => {
 			// A quadratic scan of 200k characters takes far longer than this budget.
 			const startedAt = performance.now()
@@ -1094,8 +1106,14 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["a staged diff", true],
 			["a working-tree diff", false],
-		])("keeps an npm token in %s out of the prompt", async (_label, staged) => {
-			const tokenDiff = `+NPM_TOKEN=${FAKE_NPM_TOKEN}\n+//registry.npmjs.org/:_authToken=${FAKE_NPM_TOKEN}`
+		])("keeps tokens in %s out of the prompt", async (_label, staged) => {
+			const tokenDiff = [
+				`+NPM_TOKEN=${FAKE_NPM_TOKEN}`,
+				`+//registry.npmjs.org/:_authToken=${FAKE_NPM_TOKEN}`,
+				"+TOKEN=abcdef1234567890",
+				'+  "token": "abcdef1234567890",',
+				"+  token: string",
+			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
 			;(singleCompletionHandler as Mock).mockResolvedValue("chore: configure npm publishing")
 
@@ -1104,7 +1122,11 @@ describe("commitMessageGenerator", () => {
 			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
 			expect(prompt).toContain("+NPM_TOKEN=[REDACTED]")
 			expect(prompt).toContain("_authToken=[REDACTED]")
+			expect(prompt).toContain("+TOKEN=[REDACTED]")
+			expect(prompt).toContain('+  "token": "[REDACTED]",')
+			expect(prompt).toContain("+  token: string")
 			expect(prompt).not.toContain("npm_")
+			expect(prompt).not.toContain("abcdef1234567890")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 
