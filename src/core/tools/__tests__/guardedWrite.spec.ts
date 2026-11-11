@@ -741,6 +741,48 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 		})
 
+		// Ported from 1918 guardedWrite.spec.ts:943 (row 4507855167). This row answers root 4509003168 here.
+		it("the second publication does not start while the first is still running", async () => {
+			// Row 4507855167. Call order and non-overlap are different claims: NthCalledWith says which
+			// publish ran first, and a second publish that began while the first was still inside the publish
+			// primitive satisfies it. The first publish is held open on a promise this row controls, the
+			// invocation list is read while that hold is open, and only then is the hold released.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("overlap.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			const started: string[] = []
+			let releaseFirst: () => void = () => {}
+			const firstHold = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			mockedSafeWriteText
+				.mockImplementationOnce(async () => {
+					started.push("first")
+					await firstHold
+				})
+				.mockImplementationOnce(async () => {
+					started.push("second")
+				})
+
+			const p1 = guardedWrite(task, "overlap.txt", "first", "update")
+			const p2 = guardedWrite(task, "overlap.txt", "second", "update")
+
+			// One macrotask tick is enough for every microtask-only step ahead of a publish to run for both
+			// writes, so a second link that was not waiting on the first would already have published here.
+			await new Promise((resolve) => {
+				setTimeout(resolve, 0)
+			})
+			expect(started).toEqual(["first"])
+
+			releaseFirst()
+			const [r1, r2] = await Promise.allSettled([p1, p2])
+			expect(r1.status).toBe("fulfilled")
+			expect(r2.status).toBe("fulfilled")
+			expect(started).toEqual(["first", "second"])
+		})
+
 		it("the chain settles after a rejection - a later matching write still runs", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("settle.txt"), "v1")
@@ -799,6 +841,44 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const p2 = guardedWrite(task, "b.txt", "b", "update")
 			await Promise.all([p1, p2])
 
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+		})
+		// Ported from 1918 guardedWrite.spec.ts:1043. This row answers root 4509003174 on this branch.
+		it("lets a write on another path publish while the first path's publish is blocked", async () => {
+			// The row is about progress during the blocked window, which a settled call
+			// count cannot show: with one chain shared by every path the second write would
+			// queue behind the first and this assertion would never see a publish at all.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("gate-a.txt"), "v1")
+			reg.observe(abs("gate-b.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			let releaseGateA: () => void = () => {}
+			const gateA = new Promise<void>((resolve) => {
+				releaseGateA = resolve
+			})
+			const publishOrder: string[] = []
+			mockedSafeWriteText.mockImplementation(async (target: string) => {
+				if (target === abs("gate-a.txt")) {
+					await gateA
+				}
+				publishOrder.push(target)
+			})
+
+			const writeA = guardedWrite(task, "gate-a.txt", "a", "update")
+			const writeB = guardedWrite(task, "gate-b.txt", "b", "update")
+
+			// Settle until b has published; a is still inside its own publish here.
+			for (let tick = 0; tick < 200 && publishOrder.length === 0; tick++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			expect(publishOrder).toEqual([abs("gate-b.txt")])
+
+			releaseGateA()
+			await Promise.all([writeA, writeB])
+
+			expect(publishOrder).toEqual([abs("gate-b.txt"), abs("gate-a.txt")])
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 		})
 	})
@@ -966,6 +1046,53 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "x.txt", "b", "update")
 
 			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b", { backup: true })
+		})
+		// Ported from 1918 guardedWrite.spec.ts:1246. This row answers root 4509003182 on this branch.
+		// The last assertion carries this branch's publish shape: guardedWrite.ts:383 and :480 call
+		// safeWriteText(target, content, { backup: true }), where 1918 calls it without options
+		// (guardedWrite.ts:207 and :290). The in-flight assertions above it are verbatim from 1918.
+		it("detaches a link that is still publishing so the next write starts immediately", async () => {
+			// The settled result of the row above cannot tell a detached chain from an
+			// emptied one, because nothing was in flight there. Here the first publish is
+			// still awaiting its gate when resetChain runs: if resetChain left the pending
+			// link as the path's tail, the second write would queue behind a publish that
+			// cannot finish until the second one is already waited on - the wedge the hook
+			// exists to undo.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("chain.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			let releaseGate: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			const entered: string[] = []
+			mockedSafeWriteText.mockImplementation(async (_target: string, content: string | Uint8Array) => {
+				entered.push(String(content))
+				if (content === "a") {
+					await gate
+				}
+			})
+
+			const firstWrite = guardedWrite(task, "chain.txt", "a", "update")
+			for (let tick = 0; tick < 200 && entered.length === 0; tick++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			// The first publish is in flight and unfinished.
+			expect(entered).toEqual(["a"])
+
+			resetChain()
+			const secondWrite = guardedWrite(task, "chain.txt", "b", "update")
+			for (let tick = 0; tick < 200 && entered.length < 2; tick++) {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			expect(entered).toEqual(["a", "b"])
+
+			releaseGate()
+			await Promise.all([firstWrite, secondWrite])
+			expect(entered).toEqual(["a", "b"])
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("chain.txt"), "b", { backup: true })
 		})
 	})
 
