@@ -2168,7 +2168,7 @@ export class ClineProvider
 				if (hasActualSettings) {
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
-						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+						{ persistModeConfig: false, skipCurrentTaskRebuild: targetTask === null },
 						signal,
 					)
 				} else {
@@ -2177,24 +2177,9 @@ export class ClineProvider
 			} else {
 				// The task will continue with the current/default configuration.
 			}
-		} else if ((await this.initialModeConfigIds) !== undefined) {
-			if (signal?.aborted) return
-			// Only seed a default when the opening snapshot was readable.
-			// An unreadable snapshot must not let the current profile overwrite a saved default.
-			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
-
-			if (currentApiConfigNameAfter) {
-				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
-
-				if (config?.id) {
-					const sharedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
-					if (signal?.aborted) return
-					// Keep this window's current profile without replacing another window's saved default.
-					if (sharedConfigId === undefined) await this.setModeConfig(newMode, config.id)
-				}
-			}
 		}
 
+		if (signal?.aborted) return
 		if (targetTask !== null) {
 			await this.postStateToWebview()
 		}
@@ -2243,15 +2228,15 @@ export class ClineProvider
 		}
 	}
 
-	public async setModeConfig(mode: Mode, id: string): Promise<void> {
-		if (this.modeProfileState.reset) return
+	public async setModeConfig(mode: Mode, id: string, signal?: AbortSignal): Promise<void> {
+		if (this.modeProfileState.reset || signal?.aborted) return
 		const pending = this.modeConfigWrites.get(mode)
 		const write = (async () => {
 			// A failed predecessor must roll back before this operation captures its previous choice.
 			if (pending) await pending.catch(() => {})
 			// Reset invalidates queued selections before their profiles are deleted.
-			if (this.modeProfileState.reset) return
-			await this.writeModeConfig(mode, id)
+			if (this.modeProfileState.reset || signal?.aborted) return
+			await this.writeModeConfig(mode, id, signal)
 		})()
 		this.modeConfigWrites.set(mode, write)
 		try {
@@ -2261,24 +2246,31 @@ export class ClineProvider
 		}
 	}
 
-	private async writeModeConfig(mode: Mode, id: string): Promise<void> {
+	private async writeModeConfig(mode: Mode, id: string, signal?: AbortSignal): Promise<void> {
 		const previousId = this.localModeConfigIds.get(mode)
 		const owner = Symbol()
 		this.modeConfigWriteOwners.set(mode, owner)
 		this.localModeConfigIds.set(mode, id)
+		let persisted = false
+		const rollback = () => {
+			if (this.modeConfigWriteOwners.get(mode) !== owner) return
+			if (previousId === undefined) this.localModeConfigIds.delete(mode)
+			else this.localModeConfigIds.set(mode, previousId)
+		}
+		const onPersisted = () => {
+			persisted = true
+			// An import may have adopted another choice while this write waited for the storage lock.
+			this.localModeConfigIds.set(mode, id)
+		}
 		try {
-			await this.providerSettingsManager.setModeConfig(mode, id, () => {
-				// An import may have adopted another choice while this write waited for the storage lock.
-				this.localModeConfigIds.set(mode, id)
-			})
+			if (signal) await this.providerSettingsManager.setModeConfig(mode, id, onPersisted, signal)
+			else await this.providerSettingsManager.setModeConfig(mode, id, onPersisted)
 		} catch (error) {
 			// Only roll back our optimistic update; an import may have adopted even the same ID.
-			if (this.modeConfigWriteOwners.get(mode) === owner) {
-				if (previousId === undefined) this.localModeConfigIds.delete(mode)
-				else this.localModeConfigIds.set(mode, previousId)
-			}
+			rollback()
 			throw error
 		} finally {
+			if (signal?.aborted && !persisted) rollback()
 			if (this.modeConfigWriteOwners.get(mode) === owner) this.modeConfigWriteOwners.delete(mode)
 		}
 	}
@@ -2488,7 +2480,7 @@ export class ClineProvider
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.updateGlobalState("currentApiConfigName", name),
-				this.setModeConfig(mode, id),
+				this.setModeConfig(mode, id, signal),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 			const failedActivation = activationResults.find(
@@ -2593,6 +2585,7 @@ export class ClineProvider
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
+		if (signal?.aborted) return
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
 		if (signal?.aborted) return
@@ -2610,11 +2603,13 @@ export class ClineProvider
 			])
 		}
 
+		if (signal?.aborted) return
 		const { mode } = await this.getState()
 
 		if (id && persistModeConfig) {
-			await this.setModeConfig(mode, id)
+			await this.setModeConfig(mode, id, signal)
 		}
+		if (signal?.aborted) return
 
 		// Change the provider for the current task.
 		const expectedCurrentTaskId = options?.expectedCurrentTaskId
@@ -2633,10 +2628,12 @@ export class ClineProvider
 			})
 		}
 
+		if (signal?.aborted) return
 		if (!skipCurrentTaskRebuild) {
 			await this.postStateToWebview()
 		}
 
+		if (signal?.aborted) return
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
 		}

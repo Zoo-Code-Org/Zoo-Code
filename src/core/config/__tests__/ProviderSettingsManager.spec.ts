@@ -119,6 +119,52 @@ describe("ProviderSettingsManager", () => {
 		expect(published).toHaveBeenCalledTimes(fails ? 0 : 1)
 	})
 
+	it.each([false, true])("checks cancellation after waiting for the storage lock (cancelled: %s)", async (cancel) => {
+		let release = () => {}
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		mockSecrets.store.mockImplementationOnce(async () => {
+			await pending
+		})
+		const imported = providerSettingsManager.import({
+			currentApiConfigName: "default",
+			apiConfigs: {},
+			modeApiConfigs: {},
+		})
+		await vi.waitFor(() => expect(mockSecrets.store).toHaveBeenCalledOnce())
+		const controller = new AbortController()
+		const published = vi.fn()
+		const selected = providerSettingsManager.setModeConfig("code", "selected-id", published, controller.signal)
+		if (cancel) controller.abort()
+		release()
+		await Promise.all([imported, selected])
+
+		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 1 : 2)
+		expect(published).toHaveBeenCalledTimes(cancel ? 0 : 1)
+	})
+
+	it.each([false, true])("checks cancellation after loading profiles (cancelled: %s)", async (cancel) => {
+		let release = () => {}
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		mockSecrets.get.mockImplementationOnce(async () => {
+			await pending
+			return null
+		})
+		const controller = new AbortController()
+		const published = vi.fn()
+		const selected = providerSettingsManager.setModeConfig("code", "selected-id", published, controller.signal)
+		await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledOnce())
+		if (cancel) controller.abort()
+		release()
+		await selected
+
+		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 0 : 1)
+		expect(published).toHaveBeenCalledTimes(cancel ? 0 : 1)
+	})
+
 	describe("initialize", () => {
 		it("should not write to storage when secrets.get returns null", async () => {
 			// Mock readConfig to return null

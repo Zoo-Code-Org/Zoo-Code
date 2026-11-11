@@ -4522,7 +4522,7 @@ describe("ClineProvider", () => {
 		})
 
 		it.each([false, true])(
-			"only seeds an absent mode default after a readable opening snapshot (read failure: %s)",
+			"keeps the current profile without seeding a shared default (read failure: %s)",
 			async (fails) => {
 				const manager = provider.providerSettingsManager
 				await manager.import({
@@ -4540,8 +4540,8 @@ describe("ClineProvider", () => {
 				const write = vi.spyOn(manager, "setModeConfig")
 				await provider["handleModeSwitchUnlocked"]("code", null)
 
-				expect(write).toHaveBeenCalledTimes(fails ? 0 : 1)
-				await expect(manager.getModeConfigId("code")).resolves.toBe(fails ? "saved-id" : "current-id")
+				expect(write).not.toHaveBeenCalled()
+				await expect(manager.getModeConfigId("code")).resolves.toBe(fails ? "saved-id" : undefined)
 				expect(provider["getGlobalState"]("currentApiConfigName")).toBe("current")
 			},
 		)
@@ -4562,11 +4562,9 @@ describe("ClineProvider", () => {
 
 				await provider["handleModeSwitchUnlocked"]("code", null)
 
-				expect(write).toHaveBeenCalledTimes(hasSharedMapping ? 0 : 1)
+				expect(write).not.toHaveBeenCalled()
 				expect(activate).not.toHaveBeenCalled()
-				await expect(manager.getModeConfigId("code")).resolves.toBe(
-					hasSharedMapping ? "other-id" : "current-id",
-				)
+				await expect(manager.getModeConfigId("code")).resolves.toBe(hasSharedMapping ? "other-id" : undefined)
 				expect(provider["getGlobalState"]("currentApiConfigName")).toBe("current")
 			},
 		)
@@ -4603,7 +4601,7 @@ describe("ClineProvider", () => {
 
 				expect(activate).toHaveBeenCalledWith(
 					{ name: expectedName },
-					{ skipCurrentTaskRebuild: true },
+					{ persistModeConfig: false, skipCurrentTaskRebuild: true },
 					undefined,
 				)
 				await expect(tab["getModeConfigId"]("code")).resolves.toBe(`${expectedName}-id`)
@@ -4651,6 +4649,137 @@ describe("ClineProvider", () => {
 				snapshot.mockRestore()
 			}
 		})
+
+		it("restores a cached mode profile without overwriting another window's shared choice", async () => {
+			const manager = provider.providerSettingsManager
+			await manager.import({
+				currentApiConfigName: "other",
+				apiConfigs: {
+					local: { id: "local-id", apiProvider: providerIdentifiers.anthropic },
+					other: { id: "other-id", apiProvider: providerIdentifiers.openai },
+				},
+				modeApiConfigs: { code: "other-id" },
+			})
+			provider.adoptModeConfigIds({ code: "local-id" })
+			const write = vi.spyOn(manager, "setModeConfig")
+			const activate = vi.spyOn(manager, "activateProfile")
+
+			await provider["handleModeSwitchUnlocked"]("code", null)
+
+			expect(activate).toHaveBeenCalledWith({ name: "local" })
+			expect(write).not.toHaveBeenCalled()
+			await expect(manager.getModeConfigId("code")).resolves.toBe("other-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("local-id")
+		})
+
+		it.each([false, true])(
+			"does not seed an unmapped mode across a delayed read (cancelled: %s)",
+			async (cancel) => {
+				const manager = provider.providerSettingsManager
+				provider["initialModeConfigIds"] = Promise.resolve({})
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const list = vi.spyOn(manager, "listConfig").mockImplementationOnce(async () => {
+					await pending
+					return [{ name: "current-config", id: "current-id" }]
+				})
+				// Seeding no longer reads shared mappings, so there is no check/write gap to race.
+				const lookup = vi.spyOn(manager, "getModeConfigId")
+				const write = vi.spyOn(manager, "setModeConfig")
+				const controller = new AbortController()
+				const switched = provider["handleModeSwitchUnlocked"]("code", null, controller.signal)
+				await vi.waitFor(() => expect(list).toHaveBeenCalledOnce())
+				if (cancel) controller.abort()
+				await manager.import({
+					currentApiConfigName: "other",
+					apiConfigs: { other: { id: "other-id" } },
+					modeApiConfigs: { code: "other-id" },
+				})
+				release()
+				await switched
+
+				expect(lookup).not.toHaveBeenCalled()
+				expect(write).not.toHaveBeenCalled()
+				expect(provider["localModeConfigIds"].has("code")).toBe(false)
+				await expect(manager.getModeConfigId("code")).resolves.toBe("other-id")
+			},
+		)
+
+		it.each([false, true])("handles a mode write waiting for the storage lock (cancelled: %s)", async (cancel) => {
+			const manager = provider.providerSettingsManager
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+			const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
+				await pending
+				await originalStore(key, value)
+			})
+			const imported = manager.import({
+				currentApiConfigName: "imported",
+				apiConfigs: { imported: { id: "imported-id" }, selected: { id: "selected-id" } },
+				modeApiConfigs: { code: "imported-id" },
+			})
+			await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
+			const controller = new AbortController()
+			const write = provider.setModeConfig("code", "selected-id", controller.signal)
+			expect(provider["localModeConfigIds"].get("code")).toBe("selected-id")
+			if (cancel) controller.abort()
+			release()
+			await Promise.all([imported, write])
+
+			await expect(manager.getModeConfigId("code")).resolves.toBe(cancel ? "imported-id" : "selected-id")
+			expect(provider["localModeConfigIds"].get("code")).toBe(cancel ? undefined : "selected-id")
+		})
+
+		it.each(["queued", "persisting"])(
+			"stops cancelled activation work when its mode write is %s",
+			async (stage) => {
+				await provider.setValue("mode", "code")
+				const manager = provider.providerSettingsManager
+				vi.spyOn(manager, "activateProfile").mockResolvedValue({
+					name: "selected",
+					id: "selected-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const write = vi
+					.spyOn(manager, "setModeConfig")
+					.mockImplementationOnce(async (_mode, _id, onPersisted) => {
+						await pending
+						onPersisted?.()
+					})
+				const select = vi.spyOn(provider, "setModeConfig")
+				const preceding = stage === "queued" ? provider.setModeConfig("code", "previous-id") : Promise.resolve()
+				const rebuild = vi.fn(provider["updateTaskApiHandlerIfNeeded"].bind(provider))
+				provider["updateTaskApiHandlerIfNeeded"] = rebuild
+				const sticky = vi.fn(provider["persistStickyProviderProfileToCurrentTask"].bind(provider))
+				provider["persistStickyProviderProfileToCurrentTask"] = sticky
+				const controller = new AbortController()
+				const activation = provider["activateProviderProfileUnlocked"](
+					{ name: "selected" },
+					{ skipCurrentTaskRebuild: true },
+					controller.signal,
+				)
+				await vi.waitFor(() => expect(select).toHaveBeenCalledTimes(stage === "queued" ? 2 : 1))
+				controller.abort()
+				release()
+				await Promise.all([preceding, activation])
+
+				expect(write).toHaveBeenCalledOnce()
+				expect(provider["localModeConfigIds"].get("code")).toBe(
+					stage === "queued" ? "previous-id" : "selected-id",
+				)
+				expect(rebuild).not.toHaveBeenCalled()
+				expect(sticky).not.toHaveBeenCalled()
+			},
+		)
 
 		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
 			let release = () => {}
@@ -5036,7 +5165,7 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	it("saves current config when switching to mode without config", async () => {
+	it("keeps current config without saving a shared default for an unmapped mode", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -5055,12 +5184,8 @@ describe("ClineProvider", () => {
 		// Switch to architect mode
 		await messageHandler({ type: "mode", text: "architect" })
 
-		// Should save current config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
-			"architect",
-			"current-id",
-			expect.any(Function),
-		)
+		// An implicit mode switch must not seed shared storage.
+		expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 	})
 
 	it("saves config as default for current mode when loading config", async () => {
@@ -5091,6 +5216,7 @@ describe("ClineProvider", () => {
 			"architect",
 			"new-id",
 			expect.any(Function),
+			expect.any(AbortSignal),
 		)
 	})
 
@@ -5122,6 +5248,7 @@ describe("ClineProvider", () => {
 			"architect",
 			"config-id-123",
 			expect.any(Function),
+			expect.any(AbortSignal),
 		)
 
 		// Ensure the `activateProfile` method was called with the correct ID
@@ -5306,6 +5433,7 @@ describe("ClineProvider", () => {
 			"code",
 			"test-id",
 			expect.any(Function),
+			expect.any(AbortSignal),
 		)
 	})
 
@@ -5662,7 +5790,7 @@ describe("ClineProvider", () => {
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
 
-		test("saves current config when switching to mode without config", async () => {
+		test("keeps current config without saving a shared default for an unmapped mode", async () => {
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -5687,12 +5815,8 @@ describe("ClineProvider", () => {
 			// Verify mode was updated
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
-			// Verify current config was saved as default for new mode
-			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
-				"architect",
-				"current-id",
-				expect.any(Function),
-			)
+			// An implicit mode switch must not seed shared storage.
+			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))

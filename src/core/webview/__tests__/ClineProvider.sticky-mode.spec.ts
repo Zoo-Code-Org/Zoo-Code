@@ -771,8 +771,14 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Task was created in architect mode
 			}
 
+			// Another window changes the shared architect default after this window chose its profile.
+			await provider.providerSettingsManager.setModeConfig("architect", codeConfigId!)
+			const activate = vi.spyOn(provider.providerSettingsManager, "activateProfile")
+
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
+			expect(activate).toHaveBeenCalledWith({ name: "architect-config" })
+			await expect(provider.providerSettingsManager.getModeConfigId("architect")).resolves.toBe(codeConfigId)
 
 			// Verify that the mode was restored
 			const state = await provider.getState()

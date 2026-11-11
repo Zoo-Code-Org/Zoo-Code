@@ -460,6 +460,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 						"architect",
 						"new-profile-id",
 						expect.any(Function),
+						expect.any(AbortSignal),
 					)
 				} else {
 					expect(setModeConfigSpy).not.toHaveBeenCalled()

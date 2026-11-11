@@ -543,10 +543,12 @@ export class ProviderSettingsManager {
 	/**
 	 * Set the API config for a specific mode.
 	 */
-	public async setModeConfig(mode: Mode, configId: string, onPersisted?: () => void) {
+	public async setModeConfig(mode: Mode, configId: string, onPersisted?: () => void, signal?: AbortSignal) {
 		try {
 			return await this.lock(async () => {
+				if (signal?.aborted) return
 				const providerProfiles = await this.load()
+				if (signal?.aborted) return
 				// Ensure the per-mode config map exists
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
