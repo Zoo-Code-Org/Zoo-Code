@@ -4757,7 +4757,7 @@ describe("ClineProvider", () => {
 
 				expect(activate).toHaveBeenCalledWith(
 					{ name: expectedName },
-					{ persistModeConfig: false, skipCurrentTaskRebuild: true },
+					{ persistModeConfig: false, persistTaskHistory: false, skipCurrentTaskRebuild: true },
 					undefined,
 				)
 				await expect(tab["getModeConfigId"]("code")).resolves.toBe(`${expectedName}-id`)
@@ -4993,6 +4993,176 @@ describe("ClineProvider", () => {
 			},
 		)
 
+		it("rejects a delegation profile lookup failure before changing the parent or creating a child", async () => {
+			const parent = new Task(defaultTaskOptions)
+			parent.getTaskMode = vi.fn().mockResolvedValue("code")
+			parent.getTaskApiConfigName = vi.fn().mockResolvedValue("parent-profile")
+			parent.apiConfiguration = { apiProvider: providerIdentifiers.anthropic }
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(parent)
+			vi.spyOn(provider.taskHistoryStore, "invalidate").mockResolvedValue(undefined)
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(undefined)
+			const persist = vi.spyOn(provider.taskHistoryStore, "atomicReadAndUpdate")
+			const create = vi.spyOn(provider, "createTask")
+			const remove = vi.spyOn(provider, "removeClineFromStack")
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "selected-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockRejectedValue(
+				new Error("profiles unavailable"),
+			)
+
+			await expect(
+				provider.delegateParentAndOpenChild({
+					parentTaskId: parent.taskId,
+					message: "Child",
+					initialTodos: [],
+					mode: "architect",
+				}),
+			).rejects.toThrow("profiles unavailable")
+			expect(provider.getCurrentTask()).toBe(parent)
+			expect(parent.apiConfiguration).toEqual({ apiProvider: providerIdentifiers.anthropic })
+			expect(persist).not.toHaveBeenCalled()
+			expect(remove).not.toHaveBeenCalled()
+			expect(create).not.toHaveBeenCalled()
+		})
+
+		it.each(["mode switch", "profile activation"] as const)(
+			"restores matching mode and profile after disposal during a committed %s",
+			async (operation) => {
+				const manager = provider.providerSettingsManager
+				await manager.import({
+					currentApiConfigName: "old",
+					apiConfigs: {
+						old: { id: "old-id", apiProvider: providerIdentifiers.anthropic },
+						selected: { id: "selected-id", apiProvider: providerIdentifiers.openai },
+					},
+					modeApiConfigs: {},
+				})
+				await provider.setValue("mode", "code")
+				await provider.setValue("currentApiConfigName", "old")
+				provider.adoptModeConfigIds({ architect: "selected-id" })
+				const tab = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"editor",
+					provider.contextProxy,
+					provider.webviewFocusTracker,
+				)
+				const task = new Task(defaultTaskOptions)
+				task.setTaskApiConfigName = vi.fn()
+				let history: HistoryItem = {
+					id: task.taskId,
+					number: 1,
+					ts: 1,
+					task: "Restore",
+					mode: "code",
+					apiConfigName: "old",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				}
+				const current = vi.spyOn(tab, "getCurrentTask").mockReturnValue(task)
+				tab["getTaskHistoryItem"] = vi.fn(() => history)
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const entered = vi.fn()
+				vi.spyOn(tab, "updateTaskHistory").mockImplementation(async (item) => {
+					if (operation === "mode switch") {
+						entered()
+						await pending
+					}
+					history = item
+					return [history]
+				})
+				if (operation === "profile activation") {
+					const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+					vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
+						entered()
+						await pending
+						await originalStore(key, value)
+					})
+				}
+				try {
+					const changing =
+						operation === "mode switch"
+							? tab.handleModeSwitch("architect", task)
+							: tab.activateProviderProfile({ name: "selected" })
+					await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+					await tab.dispose()
+					current.mockReturnValue(undefined)
+					release()
+					await changing
+					const expectedMode = operation === "mode switch" ? "architect" : "code"
+					expect(history).toMatchObject({ mode: expectedMode, apiConfigName: "selected" })
+					vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+					await provider.createTaskWithHistoryItem(history)
+					expect(provider.getValue("mode")).toBe(expectedMode)
+					expect(provider.getValue("currentApiConfigName")).toBe("selected")
+					expect(Task).toHaveBeenLastCalledWith(
+						expect.objectContaining({
+							historyItem: expect.objectContaining({ mode: expectedMode, apiConfigName: "selected" }),
+							apiConfiguration: expect.objectContaining({ apiProvider: providerIdentifiers.openai }),
+						}),
+					)
+				} finally {
+					release()
+					await tab.dispose()
+				}
+			},
+		)
+
+		it.each(["lock", "load"] as const)(
+			"settles a disposed tab's save before a pending %s finishes",
+			async (stage) => {
+				await provider["initialModeConfigIds"]
+				const tab = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"editor",
+					provider.contextProxy,
+					provider.webviewFocusTracker,
+				)
+				const manager = tab.providerSettingsManager
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const entered = vi.fn()
+				let locked = Promise.resolve()
+				if (stage === "lock") {
+					locked = manager["lock"](async () => {
+						entered()
+						await pending
+					})
+				} else {
+					vi.spyOn(mockContext.secrets, "get").mockImplementationOnce(async () => {
+						entered()
+						await pending
+						return undefined
+					})
+				}
+				const store = vi.spyOn(mockContext.secrets, "store")
+				const save = vi.spyOn(manager, "saveConfig")
+				try {
+					const saving = tab.upsertProviderProfile("cancelled", {}, false)
+					await vi.waitFor(() => {
+						expect(entered).toHaveBeenCalledOnce()
+						expect(save).toHaveBeenCalledOnce()
+					})
+					await tab.dispose()
+					await expect(saving).resolves.toBeUndefined()
+					expect(store).not.toHaveBeenCalled()
+					release()
+					await locked
+					await vi.waitFor(() => expect(tab["modeProfileState"].mutations.size).toBe(0))
+					expect(store).not.toHaveBeenCalled()
+				} finally {
+					release()
+					await tab.dispose()
+				}
+			},
+		)
+
 		it("finishes an inactive profile save after tab disposal and prevents a duplicate API retry", async () => {
 			const { API } = await import("../../../extension/api")
 			const { makeClineProviderFactory } = await import("../../../test-utils/provider")
@@ -5004,14 +5174,16 @@ describe("ClineProvider", () => {
 				provider.webviewFocusTracker,
 			)
 			const manager = provider.providerSettingsManager
-			const originalSave = manager.saveConfig.bind(manager)
+			await provider["initialModeConfigIds"]
+			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
 			let release = () => {}
 			const pending = new Promise<void>((resolve) => {
 				release = resolve
 			})
-			const save = vi.spyOn(manager, "saveConfig").mockImplementationOnce(async (...args) => {
+			const save = vi.spyOn(manager, "saveConfig")
+			const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
 				await pending
-				return originalSave(...args)
+				await originalStore(key, value)
 			})
 			const post = vi.spyOn(tab, "postStateToWebview").mockResolvedValue(undefined)
 			try {
@@ -5021,7 +5193,7 @@ describe("ClineProvider", () => {
 					.finally(() => {
 						settled = true
 					})
-				await vi.waitFor(() => expect(save).toHaveBeenCalledOnce())
+				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
 				await tab.dispose()
 				await new Promise<void>((resolve) => setImmediate(resolve))
 				expect(settled).toBe(false)
@@ -5346,7 +5518,7 @@ describe("ClineProvider", () => {
 
 					expect(await outcome).toBeUndefined()
 					expect(tab.getValue("mode")).toBe("architect")
-					expect(task["_taskMode"]).toBe(dispose ? "code" : "ask")
+					expect(task["_taskMode"]).toBe("ask")
 				} finally {
 					release()
 					await tab.dispose()
@@ -6883,7 +7055,12 @@ describe("ClineProvider", () => {
 			})
 
 			// Verify config was saved
-			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("test-config", testApiConfig)
+			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				testApiConfig,
+				expect.any(AbortSignal),
+				expect.any(Function),
+			)
 
 			// Verify state updates
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [

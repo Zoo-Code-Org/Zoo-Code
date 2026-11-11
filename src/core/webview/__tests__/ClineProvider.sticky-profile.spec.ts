@@ -1040,8 +1040,10 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// Mock log to verify error is logged
 			const logSpy = vi.spyOn(provider, "log")
 
-			// Switch provider profile - should not throw
-			await expect(provider.activateProviderProfile({ name: "new-profile" })).resolves.not.toThrow()
+			// A committed profile whose sticky history failed must report partial persistence.
+			await expect(provider.activateProviderProfile({ name: "new-profile" })).rejects.toThrow(
+				"Profile activation may be partially persisted: Save failed",
+			)
 
 			// Verify error was logged
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to persist provider profile switch"))

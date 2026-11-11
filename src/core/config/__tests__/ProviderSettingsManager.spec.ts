@@ -119,6 +119,47 @@ describe("ProviderSettingsManager", () => {
 		expect(published).toHaveBeenCalledTimes(fails ? 0 : 1)
 	})
 
+	it.each(["lock", "load"] as const)(
+		"checks save cancellation during %s before announcing a commit",
+		async (stage) => {
+			await providerSettingsManager.getModeConfigIds()
+			mockSecrets.get.mockClear()
+			mockSecrets.store.mockClear()
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const entered = vi.fn()
+			let locked = Promise.resolve()
+			if (stage === "lock") {
+				locked = providerSettingsManager["lock"](async () => {
+					entered()
+					await pending
+				})
+			} else {
+				mockSecrets.get.mockImplementationOnce(async () => {
+					entered()
+					await pending
+					return null
+				})
+			}
+			const controller = new AbortController()
+			const committing = vi.fn()
+			const saved = providerSettingsManager.saveConfig("selected", {}, controller.signal, committing)
+			const result = expect(saved).rejects.toMatchObject({
+				name: "Error",
+				message: "Failed to save config: AbortError: This operation was aborted",
+			})
+			await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+			controller.abort()
+			release()
+			await Promise.all([locked, result])
+			expect(mockSecrets.get).toHaveBeenCalledTimes(stage === "lock" ? 0 : 1)
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+			expect(committing).not.toHaveBeenCalled()
+		},
+	)
+
 	it.each([false, true])("checks cancellation after waiting for the storage lock (cancelled: %s)", async (cancel) => {
 		let release = () => {}
 		const pending = new Promise<void>((resolve) => {

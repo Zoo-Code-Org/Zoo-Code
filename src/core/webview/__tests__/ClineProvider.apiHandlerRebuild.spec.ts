@@ -696,6 +696,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					return realGetState()
 				})
 
+				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(
+					async (_name, _config, _signal, onPersisting) => {
+						onPersisting?.()
+						return "test-id"
+					},
+				)
+
 				const upsert = provider.upsertProviderProfile(
 					"test-config",
 					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "anthropic/claude" },

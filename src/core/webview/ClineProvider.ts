@@ -2161,100 +2161,65 @@ export class ClineProvider
 		signal?: AbortSignal,
 	): Promise<void> {
 		if (signal?.aborted) return
-		const task = targetTask
-		const startWrite = () => {
-			if (signal) this.modeProfileState.committingMutationSignals.add(signal)
-		}
-
-		if (task) {
-			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
-			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
-
-			try {
-				// Update the task history with the new mode first.
-				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
-
-				if (taskHistoryItem) {
-					startWrite()
-					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
-				}
-				if (signal?.aborted) return
-
-				// Only update the task's mode after successful persistence.
-				task["_taskMode"] = newMode
-			} catch (error) {
-				// If persistence fails, log the error but don't update the in-memory state.
-				this.log(
-					`Failed to persist mode switch for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-
-				// Optionally, we could emit an event to notify about the failure.
-				// This ensures the in-memory state remains consistent with persisted state.
-				throw error
-			}
-		}
-
-		if (signal?.aborted) return
-		startWrite()
-		await this.updateGlobalState("mode", newMode)
-		if (signal?.aborted) return
-
-		this.emit(RooCodeEventName.ModeChanged, newMode)
-
-		// If workspace lock is on, keep the current API config — don't load mode-specific config
 		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
-		if (lockApiConfigAcrossModes) {
-			if (targetTask !== null) {
-				await this.postStateToWebview()
+		let profiles: ProviderSettingsEntry[] | undefined
+		let profileName: string | undefined
+		// Resolve the choice before any writes so cancellation during a read leaves no partial switch.
+		if (!lockApiConfigAcrossModes) {
+			const id = await this.getModeConfigId(newMode, signal)
+			if (signal?.aborted) return
+			profiles = await this.providerSettingsManager.listConfig()
+			if (signal?.aborted) return
+			const profile = profiles.find((entry) => entry.id === id)
+			if (profile) {
+				const settings = await this.providerSettingsManager.getProfile({ name: profile.name })
+				if (signal?.aborted) return
+				// Empty CLI profiles must not replace working runtime settings.
+				if (settings.apiProvider) profileName = profile.name
 			}
-			return
 		}
 
 		if (signal?.aborted) return
-
-		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.getModeConfigId(newMode, signal)
-		if (signal?.aborted) return
-		const listApiConfig = await this.providerSettingsManager.listConfig()
-
-		if (signal?.aborted) return
-
-		// Update listApiConfigMeta first to ensure UI has latest data.
-		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
-		if (signal?.aborted) return
-
-		// If this mode has a saved config, use it.
-		if (savedConfigId) {
-			const profile = listApiConfig.find(({ id }) => id === savedConfigId)
-
-			if (profile?.name) {
-				// Check if the profile has actual API configuration (not just an id).
-				// In CLI mode, the ProviderSettingsManager may return empty default profiles
-				// that only contain 'id' and 'name' fields. Activating such a profile would
-				// overwrite the CLI's working API configuration with empty settings.
-				// Skip activation if the profile has no apiProvider set - this indicates
-				// an unconfigured/empty profile.
-				const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
-				const hasActualSettings = !!fullProfile.apiProvider
-
-				if (hasActualSettings) {
-					await this.activateProviderProfileUnlocked(
-						{ name: profile.name },
-						{ persistModeConfig: false, skipCurrentTaskRebuild: targetTask === null },
-						signal,
-					)
-				} else {
-					// The task will continue with the current/default configuration.
+		if (signal) this.modeProfileState.committingMutationSignals.add(signal)
+		try {
+			if (targetTask) {
+				TelemetryService.instance.captureModeSwitch(targetTask.taskId, newMode)
+				targetTask.emit(RooCodeEventName.TaskModeSwitched, targetTask.taskId, newMode)
+				const history = this.getTaskHistoryItem(targetTask.taskId)
+				if (history) {
+					// Persist the mode and sticky profile together for consistent restoration after disposal.
+					await this.updateTaskHistory({
+						...history,
+						mode: newMode,
+						...(profileName ? { apiConfigName: profileName } : {}),
+					})
 				}
-			} else {
-				// The task will continue with the current/default configuration.
+				targetTask["_taskMode"] = newMode
+				if (profileName) targetTask.setTaskApiConfigName(profileName)
 			}
+			// Once a write starts, drain the whole persistence sequence before another tab can write.
+			await this.updateGlobalState("mode", newMode)
+			if (profiles) await this.updateGlobalState("listApiConfigMeta", profiles)
+			if (profileName) {
+				await this.activateProviderProfileUnlocked(
+					{ name: profileName },
+					{
+						persistModeConfig: false,
+						persistTaskHistory: false,
+						skipCurrentTaskRebuild: targetTask === null,
+					},
+					signal,
+				)
+			}
+		} catch (error) {
+			throw new Error(
+				`Mode switch may be partially persisted: ${error instanceof Error ? error.message : String(error)}`,
+				{ cause: error },
+			)
 		}
-
 		if (signal?.aborted) return
-		if (targetTask !== null) {
-			await this.postStateToWebview()
-		}
+		this.emit(RooCodeEventName.ModeChanged, newMode)
+		if (targetTask !== null) await this.postStateToWebview()
 	}
 
 	// Provider Profile Management
@@ -2538,13 +2503,15 @@ export class ClineProvider
 		signal: AbortSignal,
 	): Promise<string | undefined> {
 		signal.throwIfAborted()
+		const task = this.getCurrentTask()
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
 		// we rely on the `ContextProxy`'s data store and in other cases
 		// we rely on the `ProviderSettingsManager`'s data store. It might
 		// be simpler to unify these two.
-		this.modeProfileState.committingMutationSignals.add(signal)
-		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+		const id = await this.providerSettingsManager.saveConfig(name, providerSettings, signal, () => {
+			this.modeProfileState.committingMutationSignals.add(signal)
+		})
 
 		if (activate) {
 			const { mode } = await this.getState()
@@ -2572,15 +2539,13 @@ export class ClineProvider
 			)
 
 			if (failedActivation) throw failedActivation.reason
+			if (task) await this.persistStickyProviderProfileToCurrentTask(name, { task, throwOnFailure: true })
 
 			if (signal.aborted) return id
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-			await this.persistStickyProviderProfileToCurrentTask(name)
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 		}
@@ -2616,10 +2581,15 @@ export class ClineProvider
 
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
+		options: {
+			skipCurrentTaskRebuild?: boolean
+			expectedCurrentTaskId?: string
+			task?: Task
+			throwOnFailure?: boolean
+		} = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
-		const task = this.getCurrentTask()
+		const task = options.task ?? this.getCurrentTask()
 		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) {
 			return
 		}
@@ -2635,12 +2605,13 @@ export class ClineProvider
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
 			}
 		} catch (error) {
-			// If persistence fails, log the error but don't fail the profile switch.
+			// Log failures; committed activations also propagate them as partial persistence.
 			this.log(
 				`Failed to persist provider profile switch for task ${task.taskId}: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			)
+			if (options.throwOnFailure) throw error
 		}
 	}
 
@@ -2669,7 +2640,15 @@ export class ClineProvider
 		},
 		signal: AbortSignal = this.profileMutationAbortController.signal,
 	): Promise<void> {
-		signal.throwIfAborted()
+		const completingSwitch = this.modeProfileState.committingMutationSignals.has(signal)
+		if (!completingSwitch) signal.throwIfAborted()
+		const persistenceSignal = completingSwitch ? new AbortController().signal : signal
+		const task = this.getCurrentTask()
+		const stickyTask =
+			!options?.skipCurrentTaskRebuild &&
+			(!options?.expectedCurrentTaskId || task?.taskId === options.expectedCurrentTaskId)
+				? task
+				: undefined
 		const tracked = this.modeProfileState.activeMutationSignals.has(signal)
 		let persistenceStarted = false
 		let persistenceFinished = false
@@ -2680,7 +2659,7 @@ export class ClineProvider
 		try {
 			const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(
 				args,
-				signal,
+				persistenceSignal,
 				startPersistence,
 			)
 			// Returning from activateProfile confirms that its active-profile write committed.
@@ -2704,6 +2683,9 @@ export class ClineProvider
 
 			const { mode } = await this.getState()
 			if (id && persistModeConfig) await this.setModeConfig(mode, id, signal)
+			if (persistTaskHistory && stickyTask) {
+				await this.persistStickyProviderProfileToCurrentTask(name, { task: stickyTask, throwOnFailure: true })
+			}
 			persistenceFinished = true
 			if (signal.aborted) return
 
@@ -2713,12 +2695,6 @@ export class ClineProvider
 				skipCurrentTaskRebuild,
 				expectedCurrentTaskId,
 			})
-			if (persistTaskHistory) {
-				await this.persistStickyProviderProfileToCurrentTask(name, {
-					skipCurrentTaskRebuild,
-					expectedCurrentTaskId,
-				})
-			}
 			if (signal.aborted) return
 			if (!skipCurrentTaskRebuild) await this.postStateToWebview()
 			if (signal.aborted) return

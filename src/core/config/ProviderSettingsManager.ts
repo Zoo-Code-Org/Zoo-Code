@@ -416,10 +416,18 @@ export class ProviderSettingsManager {
 	 * Preserves the ID from the input 'config' object if it exists,
 	 * otherwise generates a new one (for creation scenarios).
 	 */
-	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
+	public async saveConfig(
+		name: string,
+		config: ProviderSettingsWithId,
+		signal?: AbortSignal,
+		onPersisting?: () => void,
+	): Promise<string> {
+		signal?.throwIfAborted()
 		try {
 			return await this.lock(async () => {
+				signal?.throwIfAborted()
 				const providerProfiles = await this.load()
+				signal?.throwIfAborted()
 				// Preserve the existing ID if this is an update to an existing config.
 				const existingId = providerProfiles.apiConfigs[name]?.id
 				const id = config.id || existingId || this.generateId()
@@ -435,6 +443,7 @@ export class ProviderSettingsManager {
 						? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
 						: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
 				providerProfiles.apiConfigs[name] = { ...filteredConfig, id }
+				onPersisting?.()
 				await this.store(providerProfiles)
 				return id
 			})
