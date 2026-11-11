@@ -431,33 +431,33 @@ describe("safeWriteText", () => {
 					? { isFile: () => true, size: 256 }
 					: _stats(0o644)) as never)
 		})
-		it.skipIf(process.platform !== "win32")(
-			"copies target DACL onto staging file via icacls before rename on Windows",
-			async () => {
-				const targetPath = "/tmp/test-dir/target.txt"
-				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-				vi.mocked(fsSync.openSync).mockReturnValue(1)
-				await safeWriteText(targetPath, "data", { platform: "win32" })
+		// No platform skip: the step is driven by the platform option, not by the host, and every
+		// neighbouring case in this describe mocks platform explicitly so it runs in CI on ubuntu.
+		// A skipIf here meant the two icacls command shapes were never asserted by any CI runner.
+		it("sends two icacls calls, /save of the target path then /restore of its directory", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-				// The neighbouring argument test passes a tempPath, so this generated-path case is
-				// kept - but it has to check the commands, not just their count.
-				expect(execFile).toHaveBeenCalledTimes(2)
+			// The neighbouring argument test passes a tempPath, so this generated-path case is
+			// kept - but it has to check the commands, not just their count.
+			expect(execFile).toHaveBeenCalledTimes(2)
 
-				const saveCall = vi.mocked(execFile).mock.calls[0]
-				expect(saveCall[0]).toBe("icacls")
-				// No /T: with a file path it makes icacls walk the whole tree and save every file of
-				// that name, and the restore then rewrites all of their DACLs.
-				expect(saveCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp")])
+			const saveCall = vi.mocked(execFile).mock.calls[0]
+			expect(saveCall[0]).toBe("icacls")
+			// No /T: with a file path it makes icacls walk the whole tree and save every file of
+			// that name, and the restore then rewrites all of their DACLs.
+			expect(saveCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp")])
 
-				const restoreCall = vi.mocked(execFile).mock.calls[1]
-				expect(restoreCall[0]).toBe("icacls")
-				expect(restoreCall[1]).toEqual([
-					expect.stringContaining("/tmp/test-dir"),
-					"/restore",
-					expect.stringContaining(".acl.tmp"),
-				])
-			},
-		)
+			const restoreCall = vi.mocked(execFile).mock.calls[1]
+			expect(restoreCall[0]).toBe("icacls")
+			expect(restoreCall[1]).toEqual([
+				expect.stringContaining("/tmp/test-dir"),
+				"/restore",
+				expect.stringContaining(".acl.tmp"),
+			])
+		})
 
 		it("non-win32: DACL path is unreachable when platform is not win32", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -1922,6 +1922,26 @@ describe("safeWriteText", () => {
 			// The content is committed, so the staged file (now the target) is never unlinked.
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(fsSync.closeSync).toHaveBeenCalledWith(2)
+		})
+
+		it("names which barrier went unconfirmed when the directory fsync fails after the commit rename", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValueOnce(1).mockReturnValue(2)
+			const dirError = new Error("EIO: directory fsync callback failed")
+			vi.mocked(fsSync.fsync).mockImplementation((fd: number, callback: (error: Error | null) => void) => {
+				callback(fd === 2 ? dirError : null)
+			})
+
+			// The class name on its own does not tell a caller which barrier went unconfirmed. The
+			// sentence is what separates an unconfirmed directory entry from any other post-commit
+			// problem, and it has to carry the reason the fsync reported: a report that says only
+			// "undefined" would send a caller off to look in the wrong place.
+			const report = await _rejectionReport(safeWriteText(targetPath, "data", { platform: "linux" }))
+			expect(report.name).toBe("PublishNotDurableError")
+			expect(report.message).toContain("could not confirm it is durable")
+			expect(report.message).toContain("EIO: directory fsync callback failed")
+			expect(report.message).toContain(targetPath)
 		})
 
 		it("removes the DACL dump and aborts when the save fails after creating it", async () => {
