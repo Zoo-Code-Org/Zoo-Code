@@ -153,6 +153,8 @@ function validateArea(area) {
 
 	if (args.file) {
 		if (!englishFiles.includes(args.file)) {
+			// With --area=all the file is in one of the areas; the caller fails if it is in none
+			if (args.area === "all") return null
 			console.error(`Error: File '${args.file}' not found in ${englishDir}`)
 			process.exit(1)
 		}
@@ -214,7 +216,16 @@ function printStatistics(report) {
 }
 
 const areas = args.area === "all" ? ["core", "webview"] : [args.area]
-const report = areas.flatMap(validateArea)
+const reports = areas.map(validateArea).filter((areaReport) => areaReport !== null)
+
+if (reports.length === 0) {
+	console.error(
+		`Error: File '${args.file}' not found in ${areas.map((area) => LOCALES_DIRS[area] + "/en").join(" or ")}`,
+	)
+	process.exit(1)
+}
+
+const report = reports.flat()
 
 if (report.length > 0) {
 	printStatistics(report)

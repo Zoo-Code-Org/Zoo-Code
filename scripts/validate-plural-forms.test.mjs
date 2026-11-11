@@ -181,6 +181,28 @@ describe("validate-plural-forms options", () => {
 		assert.equal(status, 0, output)
 	})
 
+	const webviewOnlyFile = (jaChat) => ({
+		...commonFiles({ en, ja }),
+		...locales("webview", { en: { "chat.json": en }, ja: { "chat.json": jaChat } }),
+	})
+
+	it("--file without --area checks the area that has the file", () => {
+		const accepted = run(webviewOnlyFile(ja), ["--file=chat.json"])
+		assert.equal(accepted.status, 0, accepted.output)
+		assert.match(accepted.output, /FRONTEND - Checking plural forms/)
+		assert.doesNotMatch(accepted.output, /BACKEND/)
+
+		const rejected = run(webviewOnlyFile({ ...ja, files_one: "1" }), ["--file=chat.json"])
+		assert.equal(rejected.status, 1, rejected.output)
+		assert.match(rejected.output, /files_one: "one" is not a CLDR plural form for ja/)
+	})
+
+	it("--file without --area fails when no area has the file", () => {
+		const { status, output } = run(webviewOnlyFile(ja), ["--file=missing.json"])
+		assert.equal(status, 1, output)
+		assert.match(output, /File 'missing\.json' not found/)
+	})
+
 	for (const [name, args, expected] of [
 		["an unknown locale", ["--area=core", "--locale=xx"], /Locale 'xx' not found/],
 		["an unknown file", ["--area=core", "--file=missing.json"], /File 'missing\.json' not found/],
