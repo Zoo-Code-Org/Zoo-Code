@@ -914,6 +914,26 @@ describe("DiffViewProvider", () => {
 			warn.mockRestore()
 		})
 
+		it("rethrows an ordinary publish failure instead of reporting a committed write", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(vscode.window.showTextDocument).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// Only the committed-publish classes are tolerated here. An ordinary failure means the
+			// bytes never landed, so the tool layer must reject rather than record the save, and
+			// must not open a document for content that was never published.
+			const ordinary = new Error("EACCES: ordinary publish failure")
+			vi.mocked(safeWriteText).mockRejectedValueOnce(ordinary)
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)).rejects.toBe(
+				ordinary,
+			)
+
+			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+
 		beforeEach(() => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
