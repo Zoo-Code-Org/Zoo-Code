@@ -28,6 +28,15 @@ function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOU
 	})
 }
 
+/** In-flight shadow-git initializations per task. Creating the service and running
+ * initShadowGit is the one checkpoint operation the per-task work queue below does not cover,
+ * so it carries its own handle: a caller whose own bounded wait expires must not release an
+ * initialization it did not start, because a released lookup creates a second
+ * RepoPerTaskCheckpointService over the same task directory while the first is still
+ * committing. The entry leaves the map only when the operation settles, so a late caller
+ * either joins it or finds it gone, never both. */
+const checkpointInits = new Map<string, Promise<RepoPerTaskCheckpointService | undefined>>()
+
 export async function getCheckpointService(task: Task, { interval = 250 }: { interval?: number } = {}) {
 	if (!task.enableCheckpoints) {
 		return undefined
@@ -78,27 +87,45 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			log,
 		}
 
-		if (task.checkpointServiceInitializing) {
+		const inFlight = checkpointInits.get(task.taskId)
+
+		if (inFlight || task.checkpointServiceInitializing) {
 			const checkpointInitStartTime = Date.now()
 			let warningShown = false
 
-			await pWaitFor(
-				() => {
-					const elapsed = Date.now() - checkpointInitStartTime
+			try {
+				await pWaitFor(
+					() => {
+						const elapsed = Date.now() - checkpointInitStartTime
 
-					// Show warning if we're past the threshold and haven't shown it yet
-					if (!warningShown && elapsed >= WARNING_THRESHOLD_MS) {
-						warningShown = true
-						sendCheckpointInitWarn(task, "WAIT_TIMEOUT", WARNING_THRESHOLD_MS / 1000)
-					}
+						// Show warning if we're past the threshold and haven't shown it yet
+						if (!warningShown && elapsed >= WARNING_THRESHOLD_MS) {
+							warningShown = true
+							sendCheckpointInitWarn(task, "WAIT_TIMEOUT", WARNING_THRESHOLD_MS / 1000)
+						}
 
-					console.log(
-						`[Task#getCheckpointService] waiting for service to initialize (${Math.round(elapsed / 1000)}s)`,
-					)
-					return !!task.checkpointService && !!task?.checkpointService?.isInitialized
-				},
-				{ interval, timeout: checkpointTimeoutMs },
-			)
+						console.log(
+							`[Task#getCheckpointService] waiting for service to initialize (${Math.round(elapsed / 1000)}s)`,
+						)
+						return !!task.checkpointService && !!task?.checkpointService?.isInitialized
+					},
+					{ interval, timeout: checkpointTimeoutMs },
+				)
+			} catch (error) {
+				// A handle still in the map means the initialization this caller joined is still
+				// running: this caller's window closing is that caller's timeout, not the outcome of
+				// the operation it waited on. Report no service and change nothing else - the caller
+				// that started the initialization still owns the task's checkpoint state, and a later
+				// lookup joins the same operation instead of creating a second shadow git for the
+				// same task.
+				if (error.name === "TimeoutError" && inFlight) {
+					sendCheckpointInitWarn(task, "WAIT_TIMEOUT", checkpointTimeoutMs / 1000)
+					return undefined
+				}
+
+				throw error
+			}
+
 			if (!task?.checkpointService) {
 				sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
 				task.enableCheckpoints = false
@@ -113,23 +140,39 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			return undefined
 		}
 
-		const service = RepoPerTaskCheckpointService.create(options)
-		task.checkpointServiceInitializing = true
-		await checkGitInstallation(task, service, log, provider)
-		if (!service.isInitialized) {
-			// checkGitInstallation disables checkpoints when Git is unavailable and
-			// logs initShadowGit failures without throwing: storing such a service
-			// would hand later saves (and the fast path above) an uninitialized
-			// handle whose isInitialized can never flip, so a failed
-			// initialization must resolve to no service at all.
-			task.checkpointServiceInitializing = false
-			return undefined
+		const starting = (async () => {
+			const service = RepoPerTaskCheckpointService.create(options)
+			task.checkpointServiceInitializing = true
+			await checkGitInstallation(task, service, log, provider)
+			if (!service.isInitialized) {
+				// checkGitInstallation disables checkpoints when Git is unavailable and
+				// logs initShadowGit failures without throwing: storing such a service
+				// would hand later saves (and the fast path above) an uninitialized
+				// handle whose isInitialized can never flip, so a failed
+				// initialization must resolve to no service at all.
+				task.checkpointServiceInitializing = false
+				return undefined
+			}
+			task.checkpointService = service
+			if (task.enableCheckpoints) {
+				sendCheckpointInitWarn(task)
+			}
+			return service
+		})()
+
+		// Registered before this side awaits anything, so a lookup arriving on the next tick joins
+		// this initialization instead of racing it into a second service.
+		checkpointInits.set(task.taskId, starting)
+
+		try {
+			return await starting
+		} finally {
+			// Settled is the only moment the operation stops being shared: success or failure, the
+			// handle leaves the map when the work it names is over, not when a caller loses patience.
+			if (checkpointInits.get(task.taskId) === starting) {
+				checkpointInits.delete(task.taskId)
+			}
 		}
-		task.checkpointService = service
-		if (task.enableCheckpoints) {
-			sendCheckpointInitWarn(task)
-		}
-		return service
 	} catch (err) {
 		if (err.name === "TimeoutError" && task.enableCheckpoints) {
 			sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
