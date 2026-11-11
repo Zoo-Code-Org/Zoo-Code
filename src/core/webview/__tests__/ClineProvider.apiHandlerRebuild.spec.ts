@@ -1011,7 +1011,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
 			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
 			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
-			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
+			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith(
+				{ name: "ask-profile" },
+				expect.any(AbortSignal),
+			)
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {

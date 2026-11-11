@@ -328,6 +328,7 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
+	private readonly profileMutationAbortController = new AbortController()
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
 
@@ -345,20 +346,26 @@ export class ClineProvider
 		options: { runToCompletion?: boolean } = {},
 	): Promise<T> {
 		const controller = new AbortController()
+		const signal = AbortSignal.any([controller.signal, this.profileMutationAbortController.signal])
+		const invoke = () => {
+			signal.throwIfAborted()
+			return fn(signal)
+		}
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
-		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
-			if (options.runToCompletion) {
-				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
-				return
-			}
+		const run = this.providerProfileMutationQueue.then(invoke, invoke)
+		const callerResult = this.withProviderProfileMutationTimeout(
+			run,
+			() => {
+				if (options.runToCompletion) {
+					this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
+					return
+				}
 
-			controller.abort()
-			this.log("Provider profile mutation timed out; aborting in-flight mutation")
-		})
+				controller.abort()
+				this.log("Provider profile mutation timed out; aborting in-flight mutation")
+			},
+			this.profileMutationAbortController.signal,
+		)
 
 		void run.then(
 			() => {
@@ -386,7 +393,11 @@ export class ClineProvider
 		return callerResult
 	}
 
-	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
+	private withProviderProfileMutationTimeout<T>(
+		operation: Promise<T>,
+		onTimeout: () => void,
+		signal: AbortSignal,
+	): Promise<T> {
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeout = new Promise<never>((_, reject) => {
 			timeoutId = setTimeout(() => {
@@ -394,11 +405,16 @@ export class ClineProvider
 				reject(new Error("Provider profile mutation timed out"))
 			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 		})
+		let onAbort = () => {}
+		const cancelled = new Promise<never>((_, reject) => {
+			onAbort = () => reject(signal.reason)
+			if (signal.aborted) onAbort()
+			else signal.addEventListener("abort", onAbort, { once: true })
+		})
 
-		return Promise.race([operation, timeout]).finally(() => {
-			if (timeoutId) {
-				clearTimeout(timeoutId)
-			}
+		return Promise.race([operation, timeout, cancelled]).finally(() => {
+			if (timeoutId) clearTimeout(timeoutId)
+			signal.removeEventListener("abort", onAbort)
 		})
 	}
 
@@ -995,6 +1011,7 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		this.profileMutationAbortController.abort(new Error("Provider disposed"))
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
@@ -2229,14 +2246,19 @@ export class ClineProvider
 	}
 
 	public async setModeConfig(mode: Mode, id: string, signal?: AbortSignal): Promise<void> {
-		if (this.modeProfileState.reset || signal?.aborted) return
+		const writeSignal = signal
+			? AbortSignal.any([signal, this.profileMutationAbortController.signal])
+			: this.profileMutationAbortController.signal
+		writeSignal.throwIfAborted()
+		if (this.modeProfileState.reset) throw new Error("Mode profile write cancelled by settings reset")
 		const pending = this.modeConfigWrites.get(mode)
 		const write = (async () => {
 			// A failed predecessor must roll back before this operation captures its previous choice.
 			if (pending) await pending.catch(() => {})
 			// Reset invalidates queued selections before their profiles are deleted.
-			if (this.modeProfileState.reset || signal?.aborted) return
-			await this.writeModeConfig(mode, id, signal)
+			writeSignal.throwIfAborted()
+			if (this.modeProfileState.reset) throw new Error("Mode profile write cancelled by settings reset")
+			await this.writeModeConfig(mode, id, writeSignal)
 		})()
 		this.modeConfigWrites.set(mode, write)
 		try {
@@ -2452,6 +2474,7 @@ export class ClineProvider
 		activate: boolean,
 		signal: AbortSignal,
 	): Promise<string | undefined> {
+		signal.throwIfAborted()
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
 		// we rely on the `ContextProxy`'s data store and in other cases
@@ -2477,8 +2500,10 @@ export class ClineProvider
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
+			const profiles = await this.providerSettingsManager.listConfig()
+			signal.throwIfAborted()
 			const activationResults = await Promise.allSettled([
-				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("listApiConfigMeta", profiles),
 				this.updateGlobalState("currentApiConfigName", name),
 				this.setModeConfig(mode, id, signal),
 				this.contextProxy.setProviderSettings(providerSettings),
@@ -2586,7 +2611,9 @@ export class ClineProvider
 		signal?: AbortSignal,
 	): Promise<void> {
 		if (signal?.aborted) return
-		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
+		const { name, id, ...providerSettings } = signal
+			? await this.providerSettingsManager.activateProfile(args, signal)
+			: await this.providerSettingsManager.activateProfile(args)
 
 		if (signal?.aborted) return
 
@@ -2596,8 +2623,10 @@ export class ClineProvider
 
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
+			const profiles = await this.providerSettingsManager.listConfig()
+			signal?.throwIfAborted()
 			await Promise.all([
-				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.contextProxy.setValue("listApiConfigMeta", profiles),
 				this.contextProxy.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])

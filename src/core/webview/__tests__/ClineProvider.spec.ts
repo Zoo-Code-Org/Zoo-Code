@@ -4483,7 +4483,10 @@ describe("ClineProvider", () => {
 
 		// Should load the saved config for architect mode
 		expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
-		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "test-config" })
+		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith(
+			{ name: "test-config" },
+			expect.any(AbortSignal),
+		)
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
 
@@ -4729,7 +4732,8 @@ describe("ClineProvider", () => {
 			expect(provider["localModeConfigIds"].get("code")).toBe("selected-id")
 			if (cancel) controller.abort()
 			release()
-			await Promise.all([imported, write])
+			const result = cancel ? expect(write).rejects.toThrow("aborted") : expect(write).resolves.toBeUndefined()
+			await Promise.all([imported, result])
 
 			await expect(manager.getModeConfigId("code")).resolves.toBe(cancel ? "imported-id" : "selected-id")
 			expect(provider["localModeConfigIds"].get("code")).toBe(cancel ? undefined : "selected-id")
@@ -4770,7 +4774,11 @@ describe("ClineProvider", () => {
 				await vi.waitFor(() => expect(select).toHaveBeenCalledTimes(stage === "queued" ? 2 : 1))
 				controller.abort()
 				release()
-				await Promise.all([preceding, activation])
+				const result =
+					stage === "queued"
+						? expect(activation).rejects.toThrow("aborted")
+						: expect(activation).resolves.toBeUndefined()
+				await Promise.all([preceding, result])
 
 				expect(write).toHaveBeenCalledOnce()
 				expect(provider["localModeConfigIds"].get("code")).toBe(
@@ -4780,6 +4788,114 @@ describe("ClineProvider", () => {
 				expect(sticky).not.toHaveBeenCalled()
 			},
 		)
+
+		it("skips context writes when disposed during an activation's profile read", async () => {
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "closed",
+				id: "closed-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementationOnce(async () => {
+				await pending
+				return []
+			})
+			const unlocked = vi.fn(provider["activateProviderProfileUnlocked"].bind(provider))
+			provider["activateProviderProfileUnlocked"] = unlocked
+			const activation = expect(provider.activateProviderProfile({ name: "closed" })).rejects.toThrow(
+				"Provider disposed",
+			)
+			await vi.waitFor(() => expect(list).toHaveBeenCalledOnce())
+			const contextWrite = vi.spyOn(provider.contextProxy, "setValue")
+			const settingsWrite = vi.spyOn(provider.contextProxy, "setProviderSettings")
+			const run = expect(unlocked.mock.results[0].value).rejects.toThrow("Provider disposed")
+			await provider.dispose()
+			release()
+			await Promise.all([activation, run])
+
+			expect(contextWrite).not.toHaveBeenCalled()
+			expect(settingsWrite).not.toHaveBeenCalled()
+		})
+
+		it("invalidates a closed tab's queued activations while a reopened tab can finish its choice", async () => {
+			await provider.setValue("mode", "code")
+			const manager = provider.providerSettingsManager
+			await manager.import({
+				currentApiConfigName: "opened",
+				apiConfigs: {
+					opened: { id: "opened-id" },
+					closed: { id: "closed-id" },
+					reopened: { id: "reopened-id" },
+				},
+				modeApiConfigs: {},
+			})
+			const makeTab = () =>
+				new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"editor",
+					provider.contextProxy,
+					provider.webviewFocusTracker,
+				)
+			const tab = makeTab()
+			let reopened: ClineProvider | undefined
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			try {
+				const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+				const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
+					await pending
+					await originalStore(key, value)
+				})
+				const first = provider.setModeConfig("code", "opened-id")
+				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
+				const activate = vi.spyOn(tab.providerSettingsManager, "activateProfile").mockResolvedValue({
+					name: "closed",
+					id: "closed-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				const write = vi.spyOn(tab.providerSettingsManager, "setModeConfig")
+				const select = vi.spyOn(tab, "setModeConfig")
+				const rebuild = vi.fn(tab["updateTaskApiHandlerIfNeeded"].bind(tab))
+				tab["updateTaskApiHandlerIfNeeded"] = rebuild
+				const sticky = vi.fn(tab["persistStickyProviderProfileToCurrentTask"].bind(tab))
+				tab["persistStickyProviderProfileToCurrentTask"] = sticky
+				const active = expect(
+					tab.activateProviderProfile({ name: "closed" }, { skipCurrentTaskRebuild: true }),
+				).rejects.toThrow("Provider disposed")
+				await vi.waitFor(() => expect(select).toHaveBeenCalledOnce())
+				const queued = expect(
+					tab.activateProviderProfile({ name: "closed" }, { skipCurrentTaskRebuild: true }),
+				).rejects.toThrow("Provider disposed")
+				await tab.dispose()
+				await Promise.all([active, queued])
+				reopened = makeTab()
+				vi.spyOn(reopened.providerSettingsManager, "activateProfile").mockResolvedValue({
+					name: "reopened",
+					id: "reopened-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				const fresh = reopened.activateProviderProfile({ name: "reopened" }, { skipCurrentTaskRebuild: true })
+				release()
+				await Promise.all([first, fresh])
+
+				expect(activate).toHaveBeenCalledOnce()
+				expect(write).not.toHaveBeenCalled()
+				expect(rebuild).not.toHaveBeenCalled()
+				expect(sticky).not.toHaveBeenCalled()
+				await expect(manager.getModeConfigId("code")).resolves.toBe("reopened-id")
+				await expect(reopened["getModeConfigId"]("code")).resolves.toBe("reopened-id")
+			} finally {
+				release()
+				await tab.dispose()
+				await reopened?.dispose()
+			}
+		})
 
 		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
 			let release = () => {}
@@ -4932,7 +5048,12 @@ describe("ClineProvider", () => {
 
 			await provider["setModeConfig"]("code", "this-window-id")
 
-			expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id", expect.any(Function))
+			expect(manager.setModeConfig).toHaveBeenCalledWith(
+				"code",
+				"this-window-id",
+				expect.any(Function),
+				expect.any(AbortSignal),
+			)
 			await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
 		})
 
@@ -5090,7 +5211,12 @@ describe("ClineProvider", () => {
 				rejectWrite(new Error("write failed"))
 				await failure
 				await succeeded
-				expect(sharedWrite).toHaveBeenLastCalledWith("code", nextId, expect.any(Function))
+				expect(sharedWrite).toHaveBeenLastCalledWith(
+					"code",
+					nextId,
+					expect.any(Function),
+					expect.any(AbortSignal),
+				)
 				await expect(provider["getModeConfigId"]("code")).resolves.toBe(nextId)
 			},
 		)
@@ -5118,13 +5244,13 @@ describe("ClineProvider", () => {
 			})
 			const first = provider.setModeConfig("code", "first-id")
 			await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-			const second = provider.setModeConfig("code", "second-id")
+			const second = expect(provider.setModeConfig("code", "second-id")).rejects.toThrow("settings reset")
 			const resetConfigs = vi.spyOn(manager, "resetAllConfigs")
 			const resetting = provider.resetState()
 			await vi.waitFor(() => expect(provider["modeProfileState"].reset).toBeDefined())
 			// Deletion waits for the active write; another selection during reset must also be ignored.
 			expect(resetConfigs).not.toHaveBeenCalled()
-			await provider.setModeConfig("code", "second-id")
+			await expect(provider.setModeConfig("code", "second-id")).rejects.toThrow("settings reset")
 			release()
 			await Promise.all([first, second, resetting])
 
@@ -5252,7 +5378,10 @@ describe("ClineProvider", () => {
 		)
 
 		// Ensure the `activateProfile` method was called with the correct ID
-		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ id: "config-id-123" })
+		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith(
+			{ id: "config-id-123" },
+			expect.any(AbortSignal),
+		)
 	})
 
 	test("handles showRooIgnoredFiles setting", async () => {
@@ -5783,7 +5912,10 @@ describe("ClineProvider", () => {
 
 			// Verify saved config was loaded
 			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
-			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "saved-config" })
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith(
+				{ name: "saved-config" },
+				expect.any(AbortSignal),
+			)
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "saved-config")
 
 			// Verify state was posted to webview

@@ -632,11 +632,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await this.sidebarProvider.contextProxy.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
-			await Promise.all(
+			const results = await Promise.allSettled(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
 					this.sidebarProvider.setModeConfig(mode as Mode, configId),
 				),
 			)
+			const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+			if (failed) {
+				throw new Error(
+					"Configuration update may be partially persisted: mode profile mappings were not fully saved",
+					{
+						cause: failed.reason,
+					},
+				)
+			}
 		}
 		await this.sidebarProvider.postStateToWebview()
 	}

@@ -487,12 +487,17 @@ export class ProviderSettingsManager {
 	 */
 	public async activateProfile(
 		params: { name: string } | { id: string },
+		signal?: AbortSignal,
 	): Promise<ProviderSettingsWithId & { name: string }> {
+		signal?.throwIfAborted()
 		const { name, ...providerSettings } = await this.getProfile(params)
+		signal?.throwIfAborted()
 
 		try {
 			return await this.lock(async () => {
+				signal?.throwIfAborted()
 				const providerProfiles = await this.load()
+				signal?.throwIfAborted()
 				providerProfiles.currentApiConfigName = name
 				await this.store(providerProfiles)
 				return { name, ...providerSettings }
@@ -546,9 +551,9 @@ export class ProviderSettingsManager {
 	public async setModeConfig(mode: Mode, configId: string, onPersisted?: () => void, signal?: AbortSignal) {
 		try {
 			return await this.lock(async () => {
-				if (signal?.aborted) return
+				signal?.throwIfAborted()
 				const providerProfiles = await this.load()
-				if (signal?.aborted) return
+				signal?.throwIfAborted()
 				// Ensure the per-mode config map exists
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}

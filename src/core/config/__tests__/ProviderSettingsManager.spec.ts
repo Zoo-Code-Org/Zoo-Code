@@ -133,13 +133,17 @@ describe("ProviderSettingsManager", () => {
 			modeApiConfigs: {},
 		})
 		await vi.waitFor(() => expect(mockSecrets.store).toHaveBeenCalledOnce())
+		// Exclude the constructor's initialization read from the selected write's read count.
+		mockSecrets.get.mockClear()
 		const controller = new AbortController()
 		const published = vi.fn()
 		const selected = providerSettingsManager.setModeConfig("code", "selected-id", published, controller.signal)
 		if (cancel) controller.abort()
 		release()
-		await Promise.all([imported, selected])
+		const result = cancel ? expect(selected).rejects.toThrow("aborted") : expect(selected).resolves.toBeUndefined()
+		await Promise.all([imported, result])
 
+		expect(mockSecrets.get).toHaveBeenCalledTimes(cancel ? 0 : 1)
 		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 1 : 2)
 		expect(published).toHaveBeenCalledTimes(cancel ? 0 : 1)
 	})
@@ -158,11 +162,39 @@ describe("ProviderSettingsManager", () => {
 		const selected = providerSettingsManager.setModeConfig("code", "selected-id", published, controller.signal)
 		await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledOnce())
 		if (cancel) controller.abort()
+		const result = cancel ? expect(selected).rejects.toThrow("aborted") : expect(selected).resolves.toBeUndefined()
 		release()
-		await selected
+		await result
 
 		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 0 : 1)
 		expect(published).toHaveBeenCalledTimes(cancel ? 0 : 1)
+	})
+
+	it.each([false, true])("cancels profile activation waiting for storage (cancelled: %s)", async (cancel) => {
+		let release = () => {}
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		mockSecrets.store.mockImplementationOnce(async () => {
+			await pending
+		})
+		const imported = providerSettingsManager.import({
+			currentApiConfigName: "default",
+			apiConfigs: {},
+			modeApiConfigs: {},
+		})
+		await vi.waitFor(() => expect(mockSecrets.store).toHaveBeenCalledOnce())
+		vi.spyOn(providerSettingsManager, "getProfile").mockResolvedValue({ name: "selected", id: "selected-id" })
+		const controller = new AbortController()
+		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal)
+		if (cancel) controller.abort()
+		const result = cancel
+			? expect(selected).rejects.toThrow("aborted")
+			: expect(selected).resolves.toMatchObject({ name: "selected", id: "selected-id" })
+		release()
+		await Promise.all([imported, result])
+
+		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 1 : 2)
 	})
 
 	describe("initialize", () => {
