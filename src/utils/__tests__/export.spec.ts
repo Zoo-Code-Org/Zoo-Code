@@ -73,6 +73,18 @@ describe("resolveDefaultSaveUri", () => {
 		expect(mocks.access).toHaveBeenCalledWith(REMEMBERED_DIR, constants.W_OK | constants.X_OK)
 	})
 
+	it("prefers the remembered directory over the workspace folder while it is still usable", async () => {
+		// The documented priority is remembered path before workspace folder, and the
+		// remembered branch does not consult useWorkspace, so the order has to be proven
+		// with a live remembered directory and the default options.
+		mocks.workspaceFolders = [{ uri: { fsPath: "/workspace" } }]
+
+		const resolved = await resolveWith(REMEMBERED, {})
+
+		expect(resolved).toBe(REMEMBERED)
+		expect(resolved).not.toBe(path.join("/workspace", "zoo-code-settings.json"))
+	})
+
 	it("checks write permission instead of existence alone", async () => {
 		await resolveWith(REMEMBERED, { useWorkspace: false })
 

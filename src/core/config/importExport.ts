@@ -86,12 +86,14 @@ function formatZodIssues(error: ZodError): string {
  * this machine. They are dropped on import and re-established by the next dialog
  * choice.
  */
-const hostLocalPathKeys = new Set([
+const hostLocalPathKeyNames = [
 	"lastSettingsExportPath",
 	"lastTaskExportPath",
 	"lastModeExportPath",
 	"lastImageSavePath",
-])
+] as const satisfies readonly (keyof GlobalSettings)[]
+
+const hostLocalPathKeys: ReadonlySet<string> = new Set(hostLocalPathKeyNames)
 
 function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 	sanitizedGlobalSettings: GlobalSettings

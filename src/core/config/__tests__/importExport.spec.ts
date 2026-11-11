@@ -1987,12 +1987,12 @@ describe("importExport", () => {
 			expect(mockContextProxy.setValue.mock.invocationCallOrder[0]).toBeLessThan(
 				(vscode.window.showInformationMessage as Mock).mock.invocationCallOrder[0],
 			)
-			// The toast must name the file that actually received the export.
+			// The toast must name the file that actually received the export, and name it
+			// under the parameter the catalogue interpolates: the mocked t echoes the params
+			// as JSON, so matching the whole rendered message catches a renamed `path` param
+			// that a substring match on the path would let through.
 			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-				expect.stringContaining("info.settings_exported"),
-			)
-			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-				expect.stringContaining("/usb/zoo-code-settings.json"),
+				`common:info.settings_exported:{"path":"/usb/zoo-code-settings.json"}`,
 			)
 		})
 
