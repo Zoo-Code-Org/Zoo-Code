@@ -555,15 +555,67 @@ describe("ZooGatewayHandler", () => {
 			expect(mockCreate.mock.calls[0][1]).toEqual({})
 		})
 
-		it("rejects with an AbortError and sends no request when the signal is pre-aborted", async () => {
+		it.each([
+			["with a session", mockOptions],
+			["without a session", { zooGatewayModelId: "anthropic/claude-sonnet-4" }],
+		])(
+			"rejects a pre-aborted signal with an AbortError, %s, before model lookup",
+			async (_label, options: ApiHandlerOptions) => {
+				const { getModels } = await import("../fetchers/modelCache")
+				const handler = new ZooGatewayHandler(options)
+				const caller = new AbortController()
+				caller.abort()
+
+				await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
+					name: "AbortError",
+				})
+				expect(getModels).not.toHaveBeenCalled()
+				expect(mockCreate).not.toHaveBeenCalled()
+			},
+		)
+
+		it("keeps an ordinary model lookup failure while the caller signal is live", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			const lookupFailure = new Error("model catalog unavailable")
+			vitest.mocked(getModels).mockRejectedValue(lookupFailure)
+			vitest.mocked(refreshModels).mockRejectedValue(lookupFailure)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test", { abortSignal: new AbortController().signal })).rejects.toBe(
+				lookupFailure,
+			)
+		})
+
+		it("rejects with an AbortError when the timeout alone expires during the SDK call", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			let sdkSignal: AbortSignal | undefined
+			mockCreate.mockImplementation((_params: unknown, requestOptions: { signal?: AbortSignal }) => {
+				sdkSignal = requestOptions.signal
+				return new Promise(() => {})
+			})
+
+			await expect(handler.completePrompt("Test", { timeoutMs: 20 })).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Zoo Gateway request was aborted",
+			})
+			expect(sdkSignal?.aborted).toBe(true)
+			expect(showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("settles on abort while a gateway error notification waits for the user", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const caller = new AbortController()
+			mockCreate.mockRejectedValue(makeApiError(402))
+			showErrorMessage.mockImplementation(() => new Promise(() => {}))
+
+			const pending = handler.completePrompt("Test", { abortSignal: caller.signal })
+			await vitest.waitFor(() => expect(showErrorMessage).toHaveBeenCalled())
 			caller.abort()
 
-			await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
+			await expect(pending).rejects.toMatchObject({
 				name: "AbortError",
+				message: "The Zoo Gateway request was aborted",
 			})
-			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("rejects with an AbortError when the timeout alone expires during model lookup", async () => {
@@ -649,13 +701,21 @@ describe("ZooGatewayHandler", () => {
 			await expect(pending).rejects.toMatchObject({ name: "AbortError" })
 		})
 
-		it("removes the same abort listener from the caller's signal that it added", async () => {
+		it.each([
+			["a completed request", () => {}],
+			["a failed request", () => mockCreate.mockRejectedValue(new Error("upstream failure"))],
+			["a request aborted mid-flight", () => mockCreate.mockImplementation(() => new Promise(() => {}))],
+		])("removes the same abort listener from the caller's signal after %s", async (_label, setup) => {
+			setup()
 			const handler = new ZooGatewayHandler(mockOptions)
 			const caller = new AbortController()
 			const addListener = vitest.spyOn(caller.signal, "addEventListener")
 			const removeListener = vitest.spyOn(caller.signal, "removeEventListener")
 
-			await handler.completePrompt("Test", { abortSignal: caller.signal })
+			const pending = handler.completePrompt("Test", { abortSignal: caller.signal }).catch(() => undefined)
+			await vitest.waitFor(() => expect(mockCreate).toHaveBeenCalled())
+			caller.abort()
+			await pending
 
 			const abortListeners = addListener.mock.calls.filter(([type]) => type === "abort")
 			expect(abortListeners).toHaveLength(1)

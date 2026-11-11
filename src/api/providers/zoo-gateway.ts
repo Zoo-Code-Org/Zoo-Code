@@ -307,8 +307,6 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		this.ensureAuthenticated()
-
 		// Same abort-signal contract as the other providers (see requesty.ts): the SDK gets a
 		// per-request signal bridged from the caller's signal, so its abort listener does not stay on
 		// the caller's long-lived signal. The `finally` below detaches the bridge on every exit path.
@@ -318,7 +316,9 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		const requestAbortSignal = mergeAbortSignalAndTimeout(bridgedCallerSignal, options?.timeoutMs)
 
 		try {
+			// A cancel that came first wins over every other failure, also a missing session.
 			throwIfAborted(requestAbortSignal)
+			this.ensureAuthenticated()
 
 			let model: Awaited<ReturnType<ZooGatewayHandler["fetchModel"]>>
 			try {
@@ -364,12 +364,21 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
 				}
 				try {
-					await surfaceGatewayApiError(error)
+					// The notification can wait for the user. A cancel or timeout must still settle at once.
+					const surfacing = surfaceGatewayApiError(error)
+					await (requestAbortSignal
+						? rejectOnAbort(surfacing, requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
+						: surfacing)
 				} catch (surfaceError) {
-					console.error(
-						"Failed to surface Zoo Gateway error:",
-						surfaceError instanceof Error ? surfaceError.message : surfaceError,
-					)
+					if (!requestAbortSignal?.aborted) {
+						console.error(
+							"Failed to surface Zoo Gateway error:",
+							surfaceError instanceof Error ? surfaceError.message : surfaceError,
+						)
+					}
+				}
+				if (requestAbortSignal?.aborted) {
+					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
 				}
 				if (error instanceof Error) {
 					throw new Error(`Zoo Gateway completion error: ${error.message}`)
