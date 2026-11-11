@@ -321,6 +321,26 @@ describe("commitMessageGenerator", () => {
 				"+<apiKey>[REDACTED]\n+[REDACTED]</apiKey>",
 			],
 			[
+				"an XML credential element with attributes",
+				'+<password encoding="plain">hunter2</password>',
+				'+<password encoding="plain">[REDACTED]</password>',
+			],
+			[
+				"an XML credential value with CDATA markup",
+				"+<password><![CDATA[hunter2]]></password>",
+				"+<password>[REDACTED]</password>",
+			],
+			[
+				"removed and added XML values that close on their own side",
+				" <password>\n-  oldpass</password>\n+  hunter2</password>\n <user>admin</user>",
+				" <password>\n-  [REDACTED]</password>\n+  [REDACTED]</password>\n <user>admin</user>",
+			],
+			[
+				"a YAML block that an added line ends only on the new side",
+				" password: |\n+newkey: value\n   still-old-secret",
+				" password: [REDACTED]\n+newkey: value\n   [REDACTED]",
+			],
+			[
 				"an unclosed XML credential element up to the next hunk",
 				" <secret>\n s3cr3t\n@@ -1 +1 @@\n+next",
 				" <secret>\n [REDACTED]\n@@ -1 +1 @@\n+next",
@@ -401,6 +421,7 @@ describe("commitMessageGenerator", () => {
 			["camelCase token fields", "+  nextPageToken: string"],
 			["cookie type annotations", "+  cookie: string;"],
 			["YAML mappings under a credential key", "+credentials:\n+  username: admin"],
+			["self-closing XML credential tags", "+<password/>\n+<token />\n+<name>app</name>"],
 			["primitive credential types", "+  apiKey: string | undefined"],
 			["primitive array types", "+  passwords: string[]"],
 			["typed password fields", "+  password: string[]"],
@@ -443,7 +464,8 @@ describe("commitMessageGenerator", () => {
 			["a long upper-case name without a TOKEN suffix", "A_".repeat(100_000)],
 			["many token type declarations", "token: string\n".repeat(14_286)],
 			["long lines of credential words without a value", `${"token ".repeat(50)}\n`.repeat(600)],
-			["many unclosed XML credential tags", "<password>".repeat(20_000)],
+			["many empty XML credential elements", "<password></password>".repeat(10_000)],
+			["many self-closing XML credential tags", "<password />".repeat(18_000)],
 			["many lines with a closed XML element", "<a>x</a>\n".repeat(20_000)],
 			["many URL schemes without a password", "://:".repeat(50_000)],
 			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
@@ -1348,6 +1370,11 @@ describe("commitMessageGenerator", () => {
 				"+<password>",
 				"+  multilinesecret",
 				"+</password>",
+				'+<apiKey env="prod">attrsecret</apiKey>',
+				"+<secret><![CDATA[cdatasecret]]></secret>",
+				" <password>",
+				"-  removedsecret</password>",
+				"+  addedsecret</password>",
 				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
 				"+  token: string",
 			].join("\n")
@@ -1374,6 +1401,9 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwx")
 			expect(prompt).not.toContain("hunter2")
 			expect(prompt).not.toContain("multilinesecret")
+			for (const secret of ["attrsecret", "cdatasecret", "removedsecret", "addedsecret"]) {
+				expect(prompt).not.toContain(secret)
+			}
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 

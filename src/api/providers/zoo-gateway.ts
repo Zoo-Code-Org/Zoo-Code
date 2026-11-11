@@ -30,18 +30,6 @@ import type {
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
 import { getZooGatewayModels } from "./fetchers/zoo-gateway"
-import {
-	bridgeExternalAbortSignal,
-	createAbortError,
-	hasUsableTimeout,
-	isRequestAborted,
-	mergeAbortSignalAndTimeout,
-	rejectOnAbort,
-	throwIfAborted,
-	toSdkTimeoutMs,
-} from "./utils/abort-signal"
-
-const ZOO_GATEWAY_PROVIDER_NAME = "Zoo Gateway"
 
 function getApiErrorStatus(error: unknown): number | undefined {
 	if (typeof error === "object" && error !== null && "status" in error) {
@@ -306,33 +294,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		this.ensureAuthenticated()
 
-		// Same abort-signal contract as the other providers (see requesty.ts): the SDK gets a
-		// per-request signal bridged from the caller's signal, so its abort listener does not stay on
-		// the caller's long-lived signal. The `finally` below detaches the bridge on every exit path.
-		const { signal: bridgedCallerSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
-			options?.abortSignal,
-		)
-		const requestAbortSignal = mergeAbortSignalAndTimeout(bridgedCallerSignal, options?.timeoutMs)
+		const { id: modelId, info } = await this.fetchModel()
 
 		try {
-			throwIfAborted(requestAbortSignal)
-
-			let model: Awaited<ReturnType<ZooGatewayHandler["fetchModel"]>>
-			try {
-				model = requestAbortSignal
-					? await rejectOnAbort(this.fetchModel(), requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
-					: await this.fetchModel()
-			} catch (error) {
-				if (isRequestAborted(error, requestAbortSignal)) {
-					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
-				}
-				throw error
-			}
-			const { id: modelId, info } = model
-
 			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
@@ -345,45 +312,21 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 
 			requestOptions.max_completion_tokens = info.maxTokens
 
-			const createOptions: OpenAI.RequestOptions = {
-				...(requestAbortSignal && { signal: requestAbortSignal }),
-				...(hasUsableTimeout(options?.timeoutMs) && { timeout: toSdkTimeoutMs(options.timeoutMs) }),
-			}
-
-			let response: OpenAI.Chat.ChatCompletion
-			try {
-				const pendingCompletion = this.client.chat.completions.create(requestOptions, createOptions)
-				// Race the completion against the signal: the SDK does not observe the signal while it
-				// sleeps between retries, so awaiting the SDK call alone can outlive the cancel.
-				response = requestAbortSignal
-					? await rejectOnAbort(pendingCompletion, requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
-					: await pendingCompletion
-			} catch (error) {
-				// A cancel or timeout is not a gateway failure: do not show a gateway error for it.
-				if (requestAbortSignal?.aborted) {
-					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
-				}
-				try {
-					await surfaceGatewayApiError(error)
-				} catch (surfaceError) {
-					console.error(
-						"Failed to surface Zoo Gateway error:",
-						surfaceError instanceof Error ? surfaceError.message : surfaceError,
-					)
-				}
-				if (error instanceof Error) {
-					throw new Error(`Zoo Gateway completion error: ${error.message}`)
-				}
-				throw error
-			}
-
-			if (requestAbortSignal?.aborted) {
-				// The response resolved after the request was aborted: do not return the late result.
-				throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
-			}
+			const response = await this.client.chat.completions.create(requestOptions)
 			return response.choices[0]?.message.content || ""
-		} finally {
-			removeExternalAbortListener()
+		} catch (error) {
+			try {
+				await surfaceGatewayApiError(error)
+			} catch (surfaceError) {
+				console.error(
+					"Failed to surface Zoo Gateway error:",
+					surfaceError instanceof Error ? surfaceError.message : surfaceError,
+				)
+			}
+			if (error instanceof Error) {
+				throw new Error(`Zoo Gateway completion error: ${error.message}`)
+			}
+			throw error
 		}
 	}
 }

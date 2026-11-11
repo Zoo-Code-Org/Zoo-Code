@@ -151,14 +151,6 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
-	// XML elements named after a credential key: <password>secret</password>, <apiKey>…</apiKey>
-	{
-		pattern: new RegExp(
-			String.raw`<(?<tag>[\w.:-]{0,64}?(?:${CREDENTIAL_KEYWORDS})[\w.:-]{0,64})>[^<\n]+</\k<tag>>`,
-			"gi",
-		),
-		replacement: "<$<tag>>[REDACTED]</$<tag>>",
-	},
 	// key = value, key: value, "key": "value" (env files, YAML, JSON, code). The key has no leading
 	// boundary, so prefixed and camelCase names match too (NPM_TOKEN, npmToken, DB_PASSWORD).
 	{
@@ -227,100 +219,85 @@ function redactEmailAddresses(content: string): string {
  * Redacts secrets, private keys, credential tokens, and email addresses from content before it is
  * sent to an LLM.
  */
-// A YAML block value under a credential key (`password: |` or `secret: >-`). Groups: diff prefix, indent.
+// A YAML block value under a credential key (`password: |`, `secret: >-`). Group 1: indent of the key.
 const YAML_BLOCK_KEY = new RegExp(
-	String.raw`^([+\- ]?)([ \t]*)[^\n]*?(?:${CREDENTIAL_KEYWORDS})["']?[ \t]*:[ \t]*[|>][-+0-9]*[ \t\r]*$`,
+	String.raw`^([ \t]*)[^\n]*?(?:${CREDENTIAL_KEYWORDS})["']?[ \t]*:[ \t]*[|>][-+0-9]*[ \t\r]*$`,
 	"i",
+)
+// An opening XML tag named after a credential key, with optional attributes. Self-closing tags do not match.
+const XML_CREDENTIAL_OPEN_TAG = new RegExp(
+	String.raw`<([\w.:-]{0,64}?(?:${CREDENTIAL_KEYWORDS})[\w.:-]{0,64})(?:\s[^<>]{0,512}?)?(?<!/)>`,
+	"gi",
 )
 
 /**
- * Redacts the lines of a YAML block value under a credential key. The block is every following line
- * that is indented deeper than the key, ignoring the one-character diff prefix (`+`, `-`, or space).
+ * Redacts values that a single-line pattern cannot see: XML credential elements (with attributes, with
+ * markup such as CDATA in the value, or spread over lines) and YAML block values under credential keys.
+ * A diff mixes the old and new file, so the scan runs once over the old side (context and `-` lines) and
+ * once over the new side (context and `+` lines): a line of one side cannot end a value of the other side.
+ * A diff file or hunk header ends any value. Redacted lines keep their diff prefix and indentation.
  */
-function redactYamlBlockValues(content: string): string {
+function redactStructuredValues(content: string): string {
 	const lines = content.split("\n")
-	for (let i = 0; i < lines.length; i++) {
-		const match = YAML_BLOCK_KEY.exec(lines[i])
-		if (!match) {
-			continue
-		}
-		const keyIndent = match[2].length
-		let j = i + 1
-		for (; j < lines.length; j++) {
-			const body = lines[j].replace(/^[+\- ]/, "")
-			if (body.trim() === "") {
+	for (const side of ["-", "+"]) {
+		let xmlClose: string | undefined
+		let yamlIndent: number | undefined
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]
+			if (/^(?:diff --git |@@ )/.test(line)) {
+				xmlClose = yamlIndent = undefined
 				continue
 			}
+			const prefix = /^[+\- ]/.test(line) ? line[0] : ""
+			if (prefix === (side === "-" ? "+" : "-")) {
+				continue
+			}
+			const body = line.slice(prefix.length)
 			const indent = body.length - body.trimStart().length
-			if (indent <= keyIndent) {
-				break
+			const start = prefix.length + indent
+			if (yamlIndent !== undefined && body.trim() !== "" && indent <= yamlIndent) {
+				yamlIndent = undefined
 			}
-			lines[j] = `${lines[j].slice(0, lines[j].length - body.length + indent)}[REDACTED]`
-		}
-		i = j - 1
-	}
-	return lines.join("\n")
-}
+			if (yamlIndent !== undefined) {
+				lines[i] = body.trim() === "" ? line : `${line.slice(0, start)}[REDACTED]`
+				continue
+			}
+			yamlIndent = YAML_BLOCK_KEY.exec(body)?.[1].length
 
-// An XML element named after a credential key. The single-line form is a REDACTION_RULES entry.
-const XML_CREDENTIAL_OPEN_TAG = new RegExp(String.raw`<([\w.:-]{0,64}?(?:${CREDENTIAL_KEYWORDS})[\w.:-]{0,64})>`, "gi")
-
-/**
- * Redacts the value of an XML credential element that spans lines (`<password>` on one line, the value
- * on the next lines, `</password>` after them). Each line keeps its diff prefix and indentation. The
- * value ends at the closing tag, or at the next diff file or hunk header when the tag never closes.
- */
-function redactMultilineXmlValues(content: string): string {
-	const lines = content.split("\n")
-	for (let i = 0; i < lines.length; i++) {
-		// Only the last credential tag on the line can start a value that continues on the next line.
-		let open: RegExpExecArray | undefined
-		XML_CREDENTIAL_OPEN_TAG.lastIndex = 0
-		for (
-			let match = XML_CREDENTIAL_OPEN_TAG.exec(lines[i]);
-			match;
-			match = XML_CREDENTIAL_OPEN_TAG.exec(lines[i])
-		) {
-			open = match
-		}
-		if (!open) {
-			continue
-		}
-		const closingTag = `</${open[1].toLowerCase()}>`
-		const valueStart = open.index + open[0].length
-		if (lines[i].toLowerCase().includes(closingTag, valueStart)) {
-			continue
-		}
-		if (lines[i].slice(valueStart).trim() !== "") {
-			lines[i] = `${lines[i].slice(0, valueStart)}[REDACTED]`
-		}
-		let j = i + 1
-		for (; j < lines.length; j++) {
-			if (/^(?:diff --git |@@ )/.test(lines[j])) {
-				break
+			const lower = line.toLowerCase()
+			let out = ""
+			let cursor = 0
+			const redactUntil = (from: number, to: number) => {
+				const value = line.slice(from, to)
+				out += line.slice(cursor, from) + (value.trim() === "" ? value : "[REDACTED]")
+				cursor = to
 			}
-			const prefixLength = /^[+\- ]/.test(lines[j]) ? 1 : 0
-			const body = lines[j].slice(prefixLength)
-			const indent = body.length - body.trimStart().length
-			const keep = lines[j].slice(0, prefixLength + indent)
-			const closeAt = lines[j].toLowerCase().indexOf(closingTag)
-			if (closeAt !== -1) {
-				const before = lines[j].slice(prefixLength + indent, closeAt)
-				lines[j] = before.trim() === "" ? lines[j] : `${keep}[REDACTED]${lines[j].slice(closeAt)}`
-				break
+			if (xmlClose) {
+				const at = lower.indexOf(xmlClose, start)
+				redactUntil(start, at === -1 ? line.length : at)
+				xmlClose = at === -1 ? xmlClose : undefined
 			}
-			if (body.trim() !== "") {
-				lines[j] = `${keep}[REDACTED]`
+			XML_CREDENTIAL_OPEN_TAG.lastIndex = cursor
+			for (
+				let open = XML_CREDENTIAL_OPEN_TAG.exec(line);
+				open && !xmlClose;
+				open = XML_CREDENTIAL_OPEN_TAG.exec(line)
+			) {
+				const close = `</${open[1].toLowerCase()}>`
+				const at = lower.indexOf(close, open.index + open[0].length)
+				redactUntil(open.index + open[0].length, at === -1 ? line.length : at)
+				xmlClose = at === -1 ? close : undefined
+				XML_CREDENTIAL_OPEN_TAG.lastIndex = cursor
 			}
+			lines[i] = out + line.slice(cursor)
 		}
-		i = j
 	}
 	return lines.join("\n")
 }
 
 export function redactSensitiveInformation(content: string): string {
-	// Run first, while the block indicator (`|` or `>`) and the open tag are still on their lines.
-	let redacted = redactMultilineXmlValues(redactYamlBlockValues(content))
+	// Runs first, while the YAML block indicator (`|` or `>`) is still on the key line.
+	let redacted = redactStructuredValues(content)
 	for (const { pattern, replacement } of REDACTION_RULES) {
 		redacted = redacted.replace(pattern, replacement)
 	}
