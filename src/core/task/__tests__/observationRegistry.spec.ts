@@ -69,4 +69,64 @@ describe("ObservationRegistry", () => {
 		expect(regA.get("/shared.ts")!.version).toBe("v1")
 		expect(regB.get("/shared.ts")!.version).toBe("v2")
 	})
+
+	describe("completeness scope (S4b follow-up #46)", () => {
+		it("defaults to a complete observation when the read scope is not given", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+
+			expect(reg.get("/a/b/c.ts")!.complete).toBe(true)
+		})
+
+		it("records a partial observation when the read only returned a view of the file", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1", false)
+
+			expect(reg.get("/a/b/c.ts")!.complete).toBe(false)
+		})
+
+		it("re-observing replaces the entry's completeness with the new read's scope", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1", false)
+			reg.observe("/a/b/c.ts", "v2")
+
+			const obs = reg.get("/a/b/c.ts")!
+			expect(obs.version).toBe("v2")
+			expect(obs.complete).toBe(true)
+		})
+
+		it("re-observing with a partial scope downgrades a previously complete entry", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			reg.observe("/a/b/c.ts", "v2", false)
+
+			const obs = reg.get("/a/b/c.ts")!
+			expect(obs.version).toBe("v2")
+			expect(obs.complete).toBe(false)
+		})
+	})
+
+	describe("closure on task disposal", () => {
+		it("close drops every entry and reports the registry closed", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			expect(reg.closed).toBe(false)
+
+			reg.close()
+
+			expect(reg.size).toBe(0)
+			expect(reg.get("/a/b/c.ts")).toBeUndefined()
+			expect(reg.closed).toBe(true)
+		})
+
+		it("observe is a no-op after close, so a read resuming after disposal records nothing", () => {
+			const reg = new ObservationRegistry()
+			reg.close()
+
+			reg.observe("/late.ts", "v1")
+
+			expect(reg.size).toBe(0)
+			expect(reg.has("/late.ts")).toBe(false)
+		})
+	})
 })

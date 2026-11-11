@@ -23,6 +23,11 @@ vi.mock("fs/promises", () => ({
 		// ApplyDiffTool stats around its read so the guarded publish is authorised against the
 		// version the diff was computed from; one shared stats object means the file did not change
 		// underneath the read. Same fixture shape as applyDiffTool.failureReporting.spec.ts.
+		// Merging main changed this row rather than dropping it: main's fixture rejected ENOENT to
+		// describe a tree where ApplyDiffTool made no stat call at all, and the merged tree's code -
+		// this unit's, at ApplyDiffTool.ts:88 and :90 - does stat around the read, so the double has
+		// to resolve for the read-time version token to exist. No main-side assertion in this file
+		// depended on the rejection: its rows assert only isPathOutsideWorkspace.
 		stat: vi.fn().mockResolvedValue({ dev: 1n, ino: 2n, size: 4n, mtimeNs: 100n, ctimeNs: 100n }),
 	},
 }))
@@ -125,6 +130,12 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 			},
 			diffViewProvider: diffViewProviderStub,
 			// execute records the read-time version token here on the preventFocusDisruption save path.
+			// Merging main kept this branch's stub rather than main's inline double. Both emulate the
+			// real open() re-read that records the save baseline, and both land on "old\n" because the
+			// fs mock resolves that text, so main's fail-closed assertion survives; the stub is kept
+			// because its re-read goes through the same fs double the tool reads through, which is what
+			// keeps a stale base from being reported that never happened. The observe field stays on
+			// this double because the merged product code calls task.observationRegistry.observe here.
 			observationRegistry: { observe: vi.fn() },
 			fileContextTracker: { trackFileContext: vi.fn().mockResolvedValue(undefined) },
 			say: vi.fn().mockResolvedValue(undefined),
