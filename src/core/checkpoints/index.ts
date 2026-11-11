@@ -344,10 +344,31 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 	// reported to the caller the same way a missing service is (a resolve with no commit), which is
 	// how the task-start baseline already treats it - by retrying on a later loop entry.
 	const timeoutSeconds = task.checkpointTimeout > 0 ? task.checkpointTimeout : DEFAULT_CHECKPOINT_TIMEOUT_SECONDS
+	// A task-start baseline describes the workspace before any agent write: it is the rollback point for
+	// the first write of the request loop. The queue orders this save behind whatever is already running,
+	// but ordering is not content - saveCheckpoint stages when it executes - so a baseline that is still
+	// running when the first write lands would commit the write bytes as the pre-task state, and the
+	// per-write save queued behind it would then find nothing to commit. The branch taken here is to
+	// decline to publish. The other branch the ask names - freezing what the baseline stages, by copying
+	// the workspace at request time or by staging and writing a tree then - is worse: either does its
+	// expensive git work outside the very lock whose comment claims it makes late work safe, a copy can
+	// catch a file half-written and so records a state that is neither pre-write nor post-write, and it
+	// would leave the shadow git meaning two different things by what the workspace looked like. A
+	// declined baseline costs the caller nothing it does not already handle: a resolve with no commit is
+	// how a dropped save is reported today, which is how the task-start baseline already treats it - by
+	// retrying on a later loop entry. The content the task started with stays recorded in the
+	// initialization commit, and the write keeps a record of its own whose diff base is that content.
+	// Per-write saves carry no premise, because recording the workspace as it stands when the save runs
+	// is exactly what a per-write save is for.
+	const requestedBeforeAnyWrite = force && !task.didEditFile
 	return enqueueCheckpointWork(
 		task.taskId,
 		() =>
-			service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage }),
+			service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, {
+				allowEmpty: force,
+				suppressMessage,
+				contentPremise: requestedBeforeAnyWrite ? () => !task.didEditFile : undefined,
+			}),
 		{
 			label: force ? "queued task-start checkpoint baseline" : "queued per-write checkpoint save",
 			expiresAt: Date.now() + Math.max(1, timeoutSeconds * 1000),

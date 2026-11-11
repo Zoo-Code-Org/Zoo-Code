@@ -302,9 +302,11 @@ describe("Checkpoint functionality", () => {
 			const result = await savePromise
 
 			// saveCheckpoint should have been called
+			// The baseline carries a content premise now: it describes the workspace before any agent
+			// write, and saveCheckpoint declines to publish if a write landed before it staged.
 			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledWith(
 				expect.stringContaining("Task: test-task-id"),
-				{ allowEmpty: true, suppressMessage: false },
+				{ allowEmpty: true, suppressMessage: false, contentPremise: expect.any(Function) },
 			)
 
 			// Result should contain the commit hash
