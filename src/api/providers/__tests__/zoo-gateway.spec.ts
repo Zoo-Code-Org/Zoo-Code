@@ -566,6 +566,18 @@ describe("ZooGatewayHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("rejects with an AbortError when the timeout alone expires during model lookup", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementation(() => new Promise(() => {}))
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test", { timeoutMs: 20 })).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Zoo Gateway request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("rejects with an AbortError when the signal aborts during model lookup", async () => {
 			const { getModels } = await import("../fetchers/modelCache")
 			vitest.mocked(getModels).mockImplementation(() => new Promise(() => {}))
@@ -618,27 +630,36 @@ describe("ZooGatewayHandler", () => {
 			expect(showErrorMessage).not.toHaveBeenCalled()
 		})
 
-		it("does not return a completion that resolves after the caller aborts", async () => {
+		it("does not return a completion that resolves just before the caller aborts", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const caller = new AbortController()
-			mockCreate.mockImplementation(async () => {
-				caller.abort()
-				return { choices: [{ message: { role: "assistant", content: "late" } }] }
+			let resolveCompletion: (value: unknown) => void = () => {}
+			const completion = new Promise((resolve) => {
+				resolveCompletion = resolve
 			})
+			mockCreate.mockImplementation(() => completion)
 
-			await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
-				name: "AbortError",
-			})
+			const pending = handler.completePrompt("Test", { abortSignal: caller.signal })
+			await vitest.waitFor(() => expect(mockCreate).toHaveBeenCalled())
+			// This callback runs after the handler's own race settles but before completePrompt resumes,
+			// so only the check after the await can drop the late result.
+			void completion.then(() => caller.abort())
+			resolveCompletion({ choices: [{ message: { role: "assistant", content: "late" } }] })
+
+			await expect(pending).rejects.toMatchObject({ name: "AbortError" })
 		})
 
-		it("detaches its listener from the caller's signal after the request", async () => {
+		it("removes the same abort listener from the caller's signal that it added", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const caller = new AbortController()
+			const addListener = vitest.spyOn(caller.signal, "addEventListener")
 			const removeListener = vitest.spyOn(caller.signal, "removeEventListener")
 
 			await handler.completePrompt("Test", { abortSignal: caller.signal })
 
-			expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function))
+			const abortListeners = addListener.mock.calls.filter(([type]) => type === "abort")
+			expect(abortListeners).toHaveLength(1)
+			expect(removeListener).toHaveBeenCalledWith("abort", abortListeners[0][1])
 		})
 
 		it("returns an empty string when the model returns no content", async () => {

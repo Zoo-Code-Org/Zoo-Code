@@ -296,6 +296,12 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["a Cookie header", "+Cookie: session=abc123; theme=dark", "+Cookie: [REDACTED]"],
 			["a Set-Cookie header", "+set-cookie: sid=xyz; Path=/; HttpOnly", "+set-cookie: [REDACTED]"],
+			[
+				"a Cookie header whose first name is a type name",
+				"+Cookie:string=opaqueA1b2c3; sid=opaqueD4e5f6",
+				"+Cookie:[REDACTED]",
+			],
+			["an upper-case bearer token", "+curl -H x BEARER abc123def456", "+curl -H x BEARER [REDACTED]"],
 			["an npmrc auth value", "+_auth=dXNlcjpwYXNz", "+_auth=[REDACTED]"],
 			["a passphrase", "+  passphrase: correct-horse", "+  passphrase: [REDACTED]"],
 			["a passphrase with spaces", "+passphrase: correct horse battery staple", "+passphrase: [REDACTED]"],
@@ -352,6 +358,7 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["Slack", ["https://hooks.slack.com/services", "T000", "B000", "XXXXXXXX"].join("/")],
 			["Discord", ["https://discord.com/api/webhooks", "123", "abc-DEF_ghi"].join("/")],
+			["mixed-case Slack", ["HTTPS://Hooks.Slack.Com/services", "T000", "B000", "XXXXXXXX"].join("/")],
 		])("redacts the secret path of a %s webhook URL", (_label, url) => {
 			const redacted = redactSensitiveInformation(`+  url: "${url}"`)
 			expect(redacted).not.toContain("XXXXXXXX")
@@ -369,6 +376,7 @@ describe("commitMessageGenerator", () => {
 			["lower-case token fields", "+  token: string"],
 			["optional token fields", "+  token?: string"],
 			["camelCase token fields", "+  nextPageToken: string"],
+			["cookie type annotations", "+  cookie: string;"],
 			["YAML mappings under a credential key", "+credentials:\n+  username: admin"],
 			["primitive credential types", "+  apiKey: string | undefined"],
 			["primitive array types", "+  passwords: string[]"],
@@ -1280,6 +1288,7 @@ describe("commitMessageGenerator", () => {
 				"+token: Abcdefghijklmnop",
 				"+PASSWORD=string=MySecurePass123",
 				"+passphrase: correct horse battery staple",
+				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
 				"+  token: string",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
@@ -1301,6 +1310,7 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("Abcdefghijklmnop")
 			expect(prompt).not.toContain("MySecurePass123")
 			expect(prompt).not.toContain("battery staple")
+			expect(prompt).not.toContain("WEBHOOKSECRET")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 

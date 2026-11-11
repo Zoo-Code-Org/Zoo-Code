@@ -135,17 +135,17 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>$<scheme>$<bareScheme>[REDACTED]$<open>",
 	},
-	// Bearer tokens outside an Authorization header. The token must contain a digit so prose such as
-	// "Bearer authentication" is not redacted.
+	// Bearer tokens outside an Authorization header, in any case. The token must contain a digit so
+	// prose such as "Bearer authentication" is not redacted.
 	{
-		pattern: /(?<prefix>\b[Bb]earer\s+)(?=[A-Za-z_\-.~+/]*\d)[A-Za-z0-9_\-.~+/]{8,}=*/g,
+		pattern: /(?<prefix>\bbearer\s+)(?=[A-Za-z_\-.~+/]*\d)[A-Za-z0-9_\-.~+/]{8,}=*/gi,
 		replacement: "$<prefix>[REDACTED]",
 	},
 	// Cookie headers carry session tokens and can hold spaces ("Cookie: a=1; b=2"), so the whole
 	// header value is redacted up to the end of the line.
 	{
 		pattern: new RegExp(
-			String.raw`(?<prefix>\b(?:set-)?cookie${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${PRIMITIVE_TYPE_VALUE})[^\n]+)`,
+			String.raw`(?<prefix>\b(?:set-)?cookie${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${PRIMITIVE_TYPE_VALUE})[^\s][^\n]*)`,
 			"gi",
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
@@ -173,10 +173,10 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 			/\b(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{36,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|pypi-[A-Za-z0-9_-]{50,}|dop_v1_[a-f0-9]{64}|shp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
 		replacement: "[REDACTED_SECRET]",
 	},
-	// Webhook URLs carry their secret in the path
+	// Webhook URLs carry their secret in the path. Scheme and host are case-insensitive (RFC 3986).
 	{
 		pattern:
-			/(?<prefix>https:\/\/(?:hooks\.slack\.com\/services|(?:discord|discordapp)\.com\/api\/webhooks)\/)[^\s"'\x60)]+/g,
+			/(?<prefix>https:\/\/(?:hooks\.slack\.com\/services|(?:discord|discordapp)\.com\/api\/webhooks)\/)[^\s"'\x60)]+/gi,
 		replacement: "$<prefix>[REDACTED]",
 	},
 	// Credentials embedded in URLs: scheme://user:password@host
