@@ -5,14 +5,9 @@
  * independent. The S4 guarded-write will compare these versions against the
  * token recomputed pre-write to detect stale reads or file replacement.
  *
- * Pure in-memory — zero I/O, no dependencies. The observations ARE consulted:
- * guardedWrite reads this registry before publishing (src/core/tools/guardedWrite.ts)
- * and compares the recorded version token against the token recomputed from disk, so a
- * stale read or an out-of-band replacement that the check detects is rejected instead of
- * published over. Detection is best effort against a non-cooperating process: the token is
- * recomputed before the publish, so a replacement that lands after that check and before
- * the rename is not observable from here and can still win. Closing that last window needs
- * a cross-process lock or an atomic create, not a token comparison.
+ * Pure in-memory — zero I/O, no dependencies. The S4 guarded-write consults
+ * these observations for the version check and for the completeness check that
+ * gates a full-file replacement.
  */
 
 export interface FileObservation {
@@ -20,28 +15,37 @@ export interface FileObservation {
 	version: string
 	/** Millisecond timestamp when the observation was recorded. */
 	observedAt: number
+	/**
+	 * Whether the read that produced this observation returned the complete
+	 * file. A slice, line-range, truncated, or indentation-block read returns
+	 * only a view of the file; such an observation authorizes targeted edits
+	 * on the view the model saw, but never a full-file replacement.
+	 */
+	complete: boolean
 }
 
 export class ObservationRegistry {
 	private readonly entries = new Map<string, FileObservation>()
-
-	/** Set by close(): after disposal the registry refuses further observations. */
-	private closed = false
+	// Set once the owning Task starts disposal. Reads that were already awaiting I/O when
+	// disposal began resume afterwards, and without this flag they would repopulate a
+	// registry that disposeOnce() has just retired.
+	private retired = false
 
 	/**
-	 * Record an observation for a file at its absolute path, unless the registry is closed.
+	 * Record an observation for a file at its absolute path.
 	 *
-	 * Re-observing replaces the entry with a fresh observedAt timestamp and
-	 * the new version token. A read that was already in flight can finish after
-	 * Task.disposeOnce() dropped the observations; recording then would hand a version token
-	 * to a task that no longer serves any request, and a later guarded write could consult
-	 * it. close() therefore makes this a no-op, so disposal is terminal at this layer.
+	 * Re-observing replaces the entry with a fresh observedAt timestamp, the
+	 * new version token, and the read's completeness. `complete` defaults to
+	 * true for callers that read the whole file themselves (spec doubles,
+	 * WriteToFileTool). A caller whose read is internal to a targeted edit must
+	 * carry the model's prior completeness instead, so the tool's own read cannot
+	 * upgrade a partial read into authority for a full-file replacement.
 	 */
-	observe(absolutePath: string, version: string): void {
-		if (this.closed) {
+	observe(absolutePath: string, version: string, complete: boolean = true): void {
+		if (this.retired) {
 			return
 		}
-		this.entries.set(absolutePath, { version, observedAt: Date.now() })
+		this.entries.set(absolutePath, { version, observedAt: Date.now(), complete })
 	}
 
 	get(absolutePath: string): FileObservation | undefined {
@@ -57,16 +61,21 @@ export class ObservationRegistry {
 	}
 
 	/**
-	 * Drop every observation and refuse any later one. Task.disposeOnce() calls this so a
-	 * disposed task's registry cannot be repopulated by a read that finishes late.
+	 * Retire the registry: drop every entry and refuse later observations.
+	 *
+	 * Task.disposeOnce() calls this so a task that is being torn down cannot end up holding
+	 * observations again - an awaited read that resumes after disposal would otherwise
+	 * re-record the file it had already read, leaving a disposed Task (still reachable
+	 * through a parent/subtask reference) with authority it no longer deserves.
 	 */
 	close(): void {
-		this.closed = true
+		this.retired = true
 		this.entries.clear()
 	}
 
-	get isClosed(): boolean {
-		return this.closed
+	/** Whether close() has already run; observations are ignored once this is true. */
+	get closed(): boolean {
+		return this.retired
 	}
 
 	get size(): number {
