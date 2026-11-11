@@ -132,6 +132,12 @@ const CREDENTIAL_NAME_VALUE = new RegExp(
 	String.raw`(?<prefix>\b(?:key|name)["']?[ \t]*[:=][ \t]*["'][^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS})[^"'\n]{0,256}["'][^\n]{0,256}?\bvalue["']?[ \t]*[:=][ \t]*)(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
 	"gi",
 )
+// The same pair with the value first: {"value": "…", "name": "API_TOKEN"}. An unquoted value ends at
+// whitespace, a quote, `,`, or `}`, so the name after it stays readable.
+const VALUE_BEFORE_CREDENTIAL_NAME = new RegExp(
+	String.raw`(?<prefix>\bvalue["']?[ \t]*[:=][ \t]*)(?:${QUOTED_VALUE}|[^\s"',}]+)(?=[^\n]{0,256}?\b(?:key|name)["']?[ \t]*[:=][ \t]*["'][^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS}))`,
+	"gi",
+)
 // key = value, key: value, "key": "value" (env files, YAML, JSON, code). The key has no leading
 // boundary, so prefixed and camelCase names match too (NPM_TOKEN, npmToken, DB_PASSWORD).
 const CREDENTIAL_KEY_VALUE = new RegExp(
@@ -161,6 +167,7 @@ const REDACTION_RULES: ReadonlyArray<[RegExp, string]> = [
 	[BEARER_TOKEN, "$<prefix>[REDACTED]"],
 	[COOKIE_HEADER, REDACTED_VALUE],
 	[CREDENTIAL_NAME_VALUE, REDACTED_VALUE],
+	[VALUE_BEFORE_CREDENTIAL_NAME, REDACTED_VALUE],
 	[CREDENTIAL_KEY_VALUE, REDACTED_VALUE],
 	[BARE_TOKEN, "[REDACTED_SECRET]"],
 	[WEBHOOK_URL, "$<prefix>[REDACTED]"],
@@ -205,73 +212,104 @@ function redactEmailAddresses(content: string): string {
  * Redacts secrets, private keys, credential tokens, and email addresses from content before it is
  * sent to an LLM.
  */
-// A YAML block value under a credential key (`password: |`, `secret: >- # note`). Group 1: indent of the key.
+// A YAML block value under a credential key (`password: |`, `secret: >- # note`)
 const YAML_BLOCK_KEY = new RegExp(
-	String.raw`^([ \t]*)[^\n]*?(?:${CREDENTIAL_KEYWORDS})["']?[ \t]*:[ \t]*[|>][-+0-9]*(?:[ \t]+#[^\n]*)?[ \t\r]*$`,
+	String.raw`^[^\n]*?(?:${CREDENTIAL_KEYWORDS})["']?[ \t]*:[ \t]*[|>][-+0-9]*(?:[ \t]+#[^\n]*)?[ \t\r]*$`,
 	"i",
 )
-// A name/value pair whose name is a credential (Kubernetes `- name: DB_PASSWORD`, then `value: …`).
+const YAML_BLOCK_INDICATOR = /^[|>][-+0-9]*(?:[ \t]+#[^\n]*)?[ \t\r]*$/
+// A name/value pair whose name is a credential (Kubernetes `- name: DB_PASSWORD` and `value: …`)
 const YAML_CREDENTIAL_NAME = new RegExp(
 	String.raw`^[ \t]*(?:-[ \t]+)?["']?name["']?[ \t]*:[ \t]*["']?[^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS})`,
 	"i",
 )
 const YAML_VALUE = /^([ \t]*(?:-[ \t]+)?["']?value["']?[ \t]*:[ \t]*)\S/i
 const DIFF_HEADER = /^(?:diff --git |@@ )/
+// Files with generic types (`Promise<Token>`). There, an XML credential element must close to count.
+const CODE_FILE = /\.(?:[cm]?[jt]sx?|java|kts?|cs|c|cc|cpp|cxx|h|hh|hpp|hxx|rs|swift|scala|dart|fs|vb)$/i
+const XML_CREDENTIAL_NAME = new RegExp(String.raw`^[\w.:-]*(?:${CREDENTIAL_KEYWORDS})[\w.:-]*$`, "i")
+const XML_MARKUP = /<!\[CDATA\[|<!--|<(\/?)([\w.:-]+)/gi
 
-/** Each line index of one diff side (context lines and the side's `-` or `+` lines) and its prefix length. */
-function sideLines(lines: string[], side: "-" | "+"): Array<{ i: number; prefix: number }> {
+type LineEntry = { i: number; prefix: number }
+type AddEdit = (line: number, from: number, to: number) => void
+
+/** Each line of one diff side (context lines and the side's `-` or `+` lines) with its prefix length. */
+function sideLines(lines: string[], side: "-" | "+"): LineEntry[] {
 	const other = side === "-" ? "+" : "-"
 	return lines.flatMap((line, i) => (line[0] === other ? [] : [{ i, prefix: /^[+\- ]/.test(line) ? 1 : 0 }]))
 }
 
-/**
- * Redacts YAML values that a single-line pattern cannot see: block values under credential keys and the
- * `value:` that follows a credential `name:`. A diff mixes the old and new file, so the scan runs once
- * over each side: a line of one side cannot end a value of the other side. A diff header ends any value.
- */
-function redactYamlValues(content: string): string {
-	const lines = content.split("\n")
-	for (const side of ["-", "+"] as const) {
-		let blockIndent: number | undefined
-		let afterCredentialName = false
-		for (const { i, prefix } of sideLines(lines, side)) {
-			const line = lines[i]
-			const body = line.slice(prefix)
-			const indent = body.length - body.trimStart().length
-			if (DIFF_HEADER.test(line) || (body.trim() !== "" && blockIndent !== undefined && indent <= blockIndent)) {
-				blockIndent = undefined
-			}
-			if (blockIndent !== undefined || DIFF_HEADER.test(line) || body.trim() === "") {
-				lines[i] =
-					blockIndent === undefined || body.trim() === ""
-						? line
-						: `${line.slice(0, prefix + indent)}[REDACTED]`
-				continue
-			}
-			const value = afterCredentialName ? YAML_VALUE.exec(body) : null
-			if (value) {
-				lines[i] = `${line.slice(0, prefix)}${value[1]}[REDACTED]`
-			}
-			afterCredentialName = YAML_CREDENTIAL_NAME.test(body)
-			blockIndent = YAML_BLOCK_KEY.exec(body)?.[1].length
+/** Sorts ranges and merges the ones that overlap or touch. */
+function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
+	const merged: Array<[number, number]> = []
+	for (const [from, to] of [...ranges].sort((a, b) => a[0] - b[0])) {
+		const last = merged.at(-1)
+		if (last && from <= last[1]) {
+			last[1] = Math.max(last[1], to)
+		} else {
+			merged.push([from, to])
 		}
 	}
-	return lines.join("\n")
+	return merged
 }
 
-// XML-type files, where the XML scan runs. Elsewhere `<Token>` is usually a generic type, not an element.
-const XML_FILE = /\.(?:xml|config|[a-z]*proj|props|targets|nuspec|resx|xaml|plist|xsd|xslt?|wsdl)$/i
-const XML_CREDENTIAL_NAME = new RegExp(String.raw`^[\w.:-]*(?:${CREDENTIAL_KEYWORDS})[\w.:-]*$`, "i")
-const XML_MARKUP = /<!\[CDATA\[|<!--|<(\/?)([\w.:-]+)/gi
-
-/** Index after the `>` that ends a tag, or -1 when another `<` or the end comes first. */
-function xmlTagEnd(text: string, from: number): number {
-	for (let i = from; i < text.length; i++) {
-		if (text[i] === ">") {
-			return i + 1
+/**
+ * Finds YAML values that a single-line pattern cannot see: block values under credential keys, and the
+ * `value:` of a list item or mapping whose `name:` is a credential, in either order and across comments.
+ */
+function addYamlEdits(lines: string[], entries: LineEntry[], add: AddEdit) {
+	let blockIndent: number | undefined
+	let credentialIndent: number | undefined
+	let pendingValue: { i: number; from: number } | undefined
+	for (const { i, prefix } of entries) {
+		const body = lines[i].slice(prefix)
+		const indent = body.length - body.trimStart().length
+		if (DIFF_HEADER.test(lines[i])) {
+			blockIndent = credentialIndent = pendingValue = undefined
+			continue
 		}
+		if (body.trim() === "" || /^[ \t]*#/.test(body)) {
+			continue
+		}
+		if (blockIndent !== undefined && indent > blockIndent) {
+			add(i, prefix + indent, lines[i].length)
+			continue
+		}
+		blockIndent = undefined
+		if (/^[ \t]*-[ \t]/.test(body) || (credentialIndent !== undefined && indent < credentialIndent)) {
+			credentialIndent = pendingValue = undefined
+		}
+		if (YAML_CREDENTIAL_NAME.test(body)) {
+			credentialIndent = indent
+			if (pendingValue) {
+				add(pendingValue.i, pendingValue.from, lines[pendingValue.i].length)
+			}
+		}
+		const value = YAML_VALUE.exec(body)
+		const from = prefix + (value?.[1].length ?? 0)
+		if (value && credentialIndent !== undefined) {
+			add(i, from, lines[i].length)
+			blockIndent = YAML_BLOCK_INDICATOR.test(lines[i].slice(from)) ? indent : undefined
+		} else if (value) {
+			pendingValue = { i, from }
+		}
+		blockIndent = YAML_BLOCK_KEY.test(body) ? indent : blockIndent
+	}
+}
+
+/** Index after the `>` that ends a tag (a `>` inside a quoted attribute does not), or -1 at a `<` or the end. */
+function xmlTagEnd(text: string, from: number): number {
+	let quote = ""
+	for (let i = from; i < text.length; i++) {
 		if (text[i] === "<") {
 			return -1
+		}
+		if (quote) {
+			quote = text[i] === quote ? "" : quote
+		} else if (text[i] === '"' || text[i] === "'") {
+			quote = text[i]
+		} else if (text[i] === ">") {
+			return i + 1
 		}
 	}
 	return -1
@@ -280,11 +318,12 @@ function xmlTagEnd(text: string, from: number): number {
 /**
  * Value ranges `[start, end)` of XML elements named after credential keys. An opening tag can span lines
  * and carry any attributes. The value runs to the matching closing tag: CDATA sections and comments are
- * skipped, and nested elements with the same name are counted. An element that never closes runs to the end.
+ * skipped, and nested elements with the same name are counted. With `keepUnclosed`, an element that
+ * never closes runs to the end of the text.
  */
-function xmlCredentialValueRanges(text: string): Array<[number, number]> {
+function xmlCredentialValueRanges(text: string, keepUnclosed: boolean): Array<[number, number]> {
 	const ranges: Array<[number, number]> = []
-	let open: { name: string; start: number; depth: number } | undefined
+	const open = new Map<string, { start: number; depth: number }>()
 	XML_MARKUP.lastIndex = 0
 	for (let match = XML_MARKUP.exec(text); match; match = XML_MARKUP.exec(text)) {
 		if (match[0].startsWith("<!")) {
@@ -297,75 +336,83 @@ function xmlCredentialValueRanges(text: string): Array<[number, number]> {
 			continue
 		}
 		const end = xmlTagEnd(text, XML_MARKUP.lastIndex)
-		if (end === -1) {
+		if (end === -1 || text[end - 2] === "/") {
 			continue
 		}
 		XML_MARKUP.lastIndex = end
 		const name = match[2].toLowerCase()
-		const selfClosing = text[end - 2] === "/"
-		if (!open && !match[1] && !selfClosing && XML_CREDENTIAL_NAME.test(name)) {
-			open = { name, start: end, depth: 1 }
-		} else if (open && name === open.name && !selfClosing) {
-			open.depth += match[1] ? -1 : 1
-			if (open.depth === 0) {
-				ranges.push([open.start, match.index])
-				open = undefined
-			}
+		const element = open.get(name)
+		if (match[1] && element && --element.depth === 0) {
+			ranges.push([element.start, match.index])
+			open.delete(name)
+		} else if (!match[1] && element) {
+			element.depth++
+		} else if (!match[1] && XML_CREDENTIAL_NAME.test(name)) {
+			open.set(name, { start: end, depth: 1 })
 		}
 	}
-	if (open) {
-		ranges.push([open.start, text.length])
+	for (const { start } of keepUnclosed ? open.values() : []) {
+		ranges.push([start, text.length])
 	}
 	return ranges
 }
 
-/** Redacts the parts of the given lines that fall inside XML credential values; each line keeps its prefix. */
-function redactXmlSegment(lines: string[], segment: Array<{ i: number; prefix: number }>) {
+/** Finds the parts of one hunk side that fall inside XML credential values. */
+function addXmlEdits(lines: string[], segment: LineEntry[], keepUnclosed: boolean, add: AddEdit) {
 	const bodies = segment.map(({ i, prefix }) => lines[i].slice(prefix))
-	const ranges = xmlCredentialValueRanges(bodies.join("\n"))
+	const ranges = mergeRanges(xmlCredentialValueRanges(bodies.join("\n"), keepUnclosed))
 	let lineStart = 0
 	let first = 0
-	segment.forEach(({ i, prefix }, k) => {
+	for (let k = 0; k < segment.length; k++) {
 		const lineEnd = lineStart + bodies[k].length
 		while (first < ranges.length && ranges[first][1] <= lineStart) {
 			first++
 		}
-		let body = bodies[k]
-		const overlapping = ranges.slice(first).filter(([from]) => from < lineEnd)
-		for (const [from, to] of overlapping.reverse()) {
-			const a = Math.max(from, lineStart) - lineStart
-			const b = Math.min(to, lineEnd) - lineStart
-			const part = body.slice(a, b)
-			if (part.trim() !== "") {
-				body = `${body.slice(0, a)}${part.slice(0, part.length - part.trimStart().length)}[REDACTED]${body.slice(b)}`
-			}
+		for (let r = first; r < ranges.length && ranges[r][0] < lineEnd; r++) {
+			const from = Math.max(ranges[r][0], lineStart) - lineStart
+			add(segment[k].i, segment[k].prefix + from, segment[k].prefix + Math.min(ranges[r][1], lineEnd) - lineStart)
 		}
-		lines[i] = lines[i].slice(0, prefix) + body
 		lineStart = lineEnd + 1
-	})
+	}
 }
 
 /**
- * Redacts the values of XML credential elements in XML-type files (or in content without a diff file
- * header). Each side of each hunk is scanned as one text, so an element can span lines on that side.
+ * Redacts values that a single-line pattern cannot see (YAML blocks and name/value pairs, XML credential
+ * elements). A diff mixes the old and new file, so each side (context lines plus its `-` or `+` lines) is
+ * scanned on its own, and a diff file or hunk header ends any value. Both sides read the original lines;
+ * the edits are merged and applied once. Each redacted part keeps its diff prefix and leading whitespace.
  */
-function redactXmlCredentialElements(content: string): string {
+function redactStructuredValues(content: string): string {
 	const lines = content.split("\n")
+	const edits = new Map<number, Array<[number, number]>>()
+	const add: AddEdit = (i, from, to) => {
+		const intervals = edits.get(i) ?? []
+		intervals.push([from, to])
+		edits.set(i, intervals)
+	}
 	for (const side of ["-", "+"] as const) {
-		let xmlFile = true
-		let segment: Array<{ i: number; prefix: number }> = []
-		for (const entry of [...sideLines(lines, side), { i: lines.length, prefix: 0 }]) {
+		const entries = sideLines(lines, side)
+		addYamlEdits(lines, entries, add)
+		let codeFile = false
+		let segment: LineEntry[] = []
+		for (const entry of [...entries, { i: lines.length, prefix: 0 }]) {
 			const line = lines[entry.i] ?? "@@ "
 			if (!DIFF_HEADER.test(line)) {
 				segment.push(entry)
 				continue
 			}
-			if (xmlFile && segment.length > 0) {
-				redactXmlSegment(lines, segment)
-			}
+			addXmlEdits(lines, segment, !codeFile, add)
 			segment = []
 			const file = /^diff --git a\/.* b\/(.*)$/.exec(line)
-			xmlFile = file ? XML_FILE.test(file[1]) : xmlFile
+			codeFile = file ? CODE_FILE.test(file[1]) : codeFile
+		}
+	}
+	for (const [i, intervals] of edits) {
+		for (const [from, to] of mergeRanges(intervals).reverse()) {
+			const part = lines[i].slice(from, to)
+			const kept = part.slice(0, part.length - part.trimStart().length)
+			lines[i] =
+				part.trim() === "" ? lines[i] : `${lines[i].slice(0, from)}${kept}[REDACTED]${lines[i].slice(to)}`
 		}
 	}
 	return lines.join("\n")
@@ -373,7 +420,7 @@ function redactXmlCredentialElements(content: string): string {
 
 export function redactSensitiveInformation(content: string): string {
 	// Run first, while the YAML block indicator (`|` or `>`) and the XML tags are unchanged.
-	let redacted = redactXmlCredentialElements(redactYamlValues(content))
+	let redacted = redactStructuredValues(content)
 	for (const [pattern, replacement] of REDACTION_RULES) {
 		redacted = redacted.replace(pattern, replacement)
 	}

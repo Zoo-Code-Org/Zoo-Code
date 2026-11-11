@@ -391,6 +391,31 @@ describe("commitMessageGenerator", () => {
 				"diff --git a/app.ts b/app.ts\n+let x = 1\ndiff --git a/pom.xml b/pom.xml\n@@ -1 +1 @@\n+<password>[REDACTED]</password>",
 			],
 			[
+				"a JSON pair with the value first",
+				'+{"value":"hunter2","name":"API_TOKEN"}',
+				'+{"value":"[REDACTED]","name":"API_TOKEN"}',
+			],
+			[
+				"a YAML pair with the value first",
+				"+  - value: hunter2\n+    name: DB_PASSWORD",
+				"+  - value: [REDACTED]\n+    name: DB_PASSWORD",
+			],
+			[
+				"a YAML block value under a credential name",
+				"+  - name: DB_PASSWORD\n+    value: |-\n+      hunter2\n+  - name: LOG_LEVEL",
+				"+  - name: DB_PASSWORD\n+    value: [REDACTED]\n+      [REDACTED]\n+  - name: LOG_LEVEL",
+			],
+			[
+				"a YAML credential value after a comment",
+				"+  - name: DB_PASSWORD\n+    # Deployment credential\n+    value: hunter2",
+				"+  - name: DB_PASSWORD\n+    # Deployment credential\n+    value: [REDACTED]",
+			],
+			[
+				"a quoted /> inside an XML attribute",
+				'+<password note="/>">hunter2</password>',
+				'+<password note="/>">[REDACTED]</password>',
+			],
+			[
 				"an unclosed XML credential element up to the next hunk",
 				" <secret>\n s3cr3t\n@@ -1 +1 @@\n+next",
 				" <secret>\n [REDACTED]\n@@ -1 +1 @@\n+next",
@@ -511,6 +536,55 @@ describe("commitMessageGenerator", () => {
 			["an address next to a decorator", "@Input() admin@corp.example", "@Input() [REDACTED_EMAIL]"],
 		])("redacts %s", (_label, content, expected) => {
 			expect(redactSensitiveInformation(content)).toBe(expected)
+		})
+
+		it("redacts many XML credential elements in linear time", () => {
+			const startedAt = performance.now()
+			expect(redactSensitiveInformation("+<password>s</password>\n".repeat(10_000))).toBe(
+				"+<password>[REDACTED]</password>\n".repeat(10_000),
+			)
+			expect(performance.now() - startedAt).toBeLessThan(1000)
+		})
+
+		it("redacts an XML value on both diff sides when the sides share context lines", () => {
+			const diff = [
+				"diff --git a/settings.xml b/settings.xml",
+				"@@ -1,5 +1,5 @@",
+				"-<secret>",
+				"+<config>",
+				"   <password>",
+				"-    oldvalue",
+				"+    hunter2",
+				"   </password>",
+				"-</secret>",
+				"+</config>",
+			].join("\n")
+			const redacted = redactSensitiveInformation(diff)
+			expect(redacted).not.toContain("hunter2")
+			expect(redacted).not.toContain("oldvalue")
+			expect(redacted).toContain("+<config>")
+		})
+
+		it("redacts only closed XML credential elements in code files", () => {
+			const diff = [
+				"diff --git a/auth.ts b/auth.ts",
+				"@@ -1 +1,2 @@",
+				"+type Loader = Promise<Credentials>",
+				'+const xml = "<password>hunter2</password>"',
+			].join("\n")
+			expect(redactSensitiveInformation(diff)).toBe(
+				diff.replace("<password>hunter2</password>", "<password>[REDACTED]</password>"),
+			)
+		})
+
+		it.each([
+			["settings.xml.template", "+<password><![CDATA[</password>hunter2]]></password>"],
+			["diagram.svg", '+<password encoding="plain">hunter2</password>'],
+			["app.config.dist", "+<apiKey>\n+  hunter2\n+</apiKey>"],
+		])("redacts XML credential values in %s", (file, body) => {
+			const redacted = redactSensitiveInformation(`diff --git a/${file} b/${file}\n@@ -0,0 +1 @@\n${body}`)
+			expect(redacted).not.toContain("hunter2")
+			expect(redacted).toContain("[REDACTED]")
 		})
 
 		it.each([
@@ -1481,6 +1555,49 @@ describe("commitMessageGenerator", () => {
 				expect(prompt).not.toContain(secret)
 			}
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
+		})
+
+		it.each([
+			["a staged diff", true],
+			["a working-tree diff", false],
+		])("keeps XML and YAML secrets behind real diff headers out of the prompt (%s)", async (_label, staged) => {
+			const diff = [
+				"diff --git a/settings.xml.template b/settings.xml.template",
+				"@@ -0,0 +1,3 @@",
+				"+<password><![CDATA[</password>templatesecret]]></password>",
+				`+<apiKey note="${"a".repeat(600)}">longattrsecret</apiKey>`,
+				'+<secret note="/>">quotedgtsecret</secret>',
+				"diff --git a/diagram.svg b/diagram.svg",
+				"@@ -0,0 +1 @@",
+				'+<password encoding="plain">svgsecret</password>',
+				"diff --git a/auth.ts b/auth.ts",
+				"@@ -0,0 +1,2 @@",
+				"+type Loader = Promise<Credentials>",
+				'+const xml = "<token>tssecret</token>"',
+				"diff --git a/deploy.yaml b/deploy.yaml",
+				"@@ -0,0 +1,9 @@",
+				"+  - name: DB_PASSWORD",
+				"+    # Deployment credential",
+				"+    value: commentsecret",
+				"+  - value: reversedsecret",
+				"+    name: API_TOKEN",
+				"+  - name: SIGNING_KEY_PASSWORD",
+				"+    value: |-",
+				"+      blocksecret",
+				'+  extra: {"value":"jsonsecret","name":"API_TOKEN"}',
+			].join("\n")
+			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
+			;(singleCompletionHandler as Mock).mockResolvedValue("chore: update settings")
+
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
+			const secrets = ["templatesecret", "longattrsecret", "quotedgtsecret", "svgsecret", "tssecret"]
+			secrets.push("commentsecret", "reversedsecret", "blocksecret", "jsonsecret")
+			for (const secret of secrets) {
+				expect(prompt).not.toContain(secret)
+			}
+			expect(prompt).toContain("+type Loader = Promise<Credentials>")
 		})
 
 		it("does not read the working tree when cancelled while the staged diff is pending", async () => {
