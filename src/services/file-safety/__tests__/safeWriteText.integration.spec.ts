@@ -137,6 +137,12 @@ describe("safeWriteText against a real filesystem", () => {
 		// and said neither is the outcome this finding was raised about.
 		const carryOver = await tryWrite(targetPath)
 		if (warnings.length === 0) {
+			// A privileged runner is the only place this row executes on this box, and it
+			// executes nowhere when the token is filtered, which is why the sibling branch below
+			// is the one that printed here. A publish that carried the rights onto the renamed
+			// file and stayed silent is exactly the outcome the finding was raised about, so the
+			// silence is asserted rather than assumed.
+			expect(warnings).toEqual([])
 			expect(carryOver).toBe("denied")
 		} else {
 			expect(warnings).toEqual(["dacl-restore-failed"])

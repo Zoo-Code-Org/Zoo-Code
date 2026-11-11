@@ -1022,6 +1022,49 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
+		it("win32 DACL: a successful restore reports nothing on the warning channel", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			// Both icacls runs answer successfully, which is the shape the neighbouring case
+			// inverts: that one pins what a failed restore reports, this one pins what a
+			// successful restore does not.
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") {
+					cb(null, "", "")
+				}
+				return fakeChild
+			})
+
+			const warnings: { kind: string; path: string; cause: unknown }[] = []
+			await expect(
+				safeWriteText(targetPath, "data", {
+					platform: "win32",
+					onPostCommitWarning: (warning) => {
+						warnings.push({ kind: warning.kind, path: warning.path, cause: warning.cause })
+					},
+				}),
+			).resolves.toBeUndefined()
+
+			// The restore has to have run or the silence below proves nothing: a write that
+			// never reached the restore step is also silent.
+			expect(execFile).toHaveBeenCalledTimes(2)
+			const secondCall = vi.mocked(execFile).mock.calls[1]
+			expect(secondCall[0]).toBe("icacls")
+			expect(secondCall[1]).toEqual([
+				expect.stringContaining("/tmp/test-dir"),
+				"/restore",
+				expect.stringContaining("safeWriteText.acl"),
+			])
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
+
+			// The option doc says an omitted callback is a call that chose not to hear, so an
+			// empty list means what it says only because a callback was supplied to hear it.
+			expect(warnings).toEqual([])
+		})
+
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
