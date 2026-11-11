@@ -804,6 +804,145 @@ describe("extension.ts", () => {
 			}
 		})
 
+		test("disposes the output channel last when seeding rejects activation", async () => {
+			// The output channel is the first resource `activate` acquires, and the
+			// host does not guarantee `deactivate()` after a failed activation, so
+			// the failure path must release it too — last, because every earlier
+			// teardown step logs its own failure through this channel.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const teardownOrder: string[] = []
+			const proxyDispose = vi.fn(() => void teardownOrder.push("proxy-disposed"))
+			vi.doMock("../utils/networkProxy", () => ({
+				// The mock returns the aggregate disposable unconditionally; the
+				// mode-gating of the real initializer is pinned in its own spec.
+				initializeNetworkProxy: vi.fn().mockResolvedValue({ dispose: proxyDispose }),
+				getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
+				isProxyEnabled: vi.fn().mockReturnValue(false),
+				createProxyRoutingRequestHandler: vi.fn().mockReturnValue(undefined),
+			}))
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi
+					.fn()
+					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
+			}))
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			shutdown.mockImplementation(() => {
+				teardownOrder.push("telemetry-shutdown")
+				return Promise.resolve()
+			})
+			try {
+				const vscode = await import("vscode")
+				// The factory double is a fixed object, so calling the mock now hands
+				// back the same channel `activate` will create; arming its dispose
+				// before activation lets the order assertion observe the step.
+				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
+				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
+
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+				// Strict reverse acquisition: the channel was acquired first, so it is
+				// disposed after auth, telemetry, and the proxy — every teardown log
+				// line was still writable when those steps ran.
+				expect(teardownOrder).toEqual([
+					"auth-listener-disposed",
+					"telemetry-shutdown",
+					"proxy-disposed",
+					"channel-disposed",
+				])
+				expect(channel.dispose).toHaveBeenCalledExactlyOnceWith()
+				// Still registered for the normal deactivate path; the failure-path
+				// dispose must not have replaced the subscription push.
+				expect(mockContext.subscriptions).toContain(channel)
+			} finally {
+				shutdown.mockReset()
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+				vi.doUnmock("../utils/networkProxy")
+			}
+		})
+
+		test("clears the persistence trace sink before disposing the output channel when seeding rejects", async () => {
+			// The persistence trace sink installed at activation start mirrors
+			// trace lines through the output channel, so the failure path must
+			// unregister it before the channel goes away: a later trace — such as
+			// `deactivate()`'s shutdown event — would otherwise write into a
+			// disposed channel.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const teardownOrder: string[] = []
+			const proxyDispose = vi.fn(() => void teardownOrder.push("proxy-disposed"))
+			vi.doMock("../utils/networkProxy", () => ({
+				// The mock returns the aggregate disposable unconditionally; the
+				// mode-gating of the real initializer is pinned in its own spec.
+				initializeNetworkProxy: vi.fn().mockResolvedValue({ dispose: proxyDispose }),
+				getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
+				isProxyEnabled: vi.fn().mockReturnValue(false),
+				createProxyRoutingRequestHandler: vi.fn().mockReturnValue(undefined),
+			}))
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi
+					.fn()
+					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
+			}))
+			// Only the teardown call is an order marker: installation passes the
+			// channel-logging sink, while clearing passes undefined — the setter's
+			// documented way to restore the default console sink.
+			const setPersistenceTraceSink = vi.fn((sink?: unknown) => {
+				if (sink === undefined) {
+					teardownOrder.push("trace-sink-cleared")
+				}
+			})
+			vi.doMock("../core/task-persistence/persistenceTrace", () => ({
+				setPersistenceTraceSink,
+				tracePersistenceEvent: vi.fn(),
+			}))
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			shutdown.mockImplementation(() => {
+				teardownOrder.push("telemetry-shutdown")
+				return Promise.resolve()
+			})
+			try {
+				const vscode = await import("vscode")
+				// The factory double is a fixed object, so calling the mock now hands
+				// back the same channel `activate` will create; arming its dispose
+				// before activation lets the order assertion observe the step.
+				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
+				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
+
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+				// Reverse acquisition order pins the clear between the proxy release
+				// and the channel dispose: the sink was installed after the channel
+				// it logs through but before the proxy, so it is released after the
+				// proxy — and before the channel, which goes last.
+				expect(teardownOrder).toEqual([
+					"auth-listener-disposed",
+					"telemetry-shutdown",
+					"proxy-disposed",
+					"trace-sink-cleared",
+					"channel-disposed",
+				])
+				// Exactly the install call and the clear: the failure path neither
+				// skips the clear nor repeats it.
+				expect(setPersistenceTraceSink).toHaveBeenCalledTimes(2)
+				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(1, expect.any(Function))
+				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(2, undefined)
+			} finally {
+				shutdown.mockReset()
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+				vi.doUnmock("../utils/networkProxy")
+				vi.doUnmock("../core/task-persistence/persistenceTrace")
+			}
+		})
+
 		test("propagates the seed rejection when the proxy initializer acquired nothing", async () => {
 			// Outside debug mode the real initializer returns a no-op disposable, so the
 			// failed-activation teardown on the catch path must stay harmless: auth and

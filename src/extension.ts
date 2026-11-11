@@ -190,10 +190,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Activation aborts here, and `deactivate()` is not guaranteed to run
 		// afterward, so this catch is the only teardown for everything
 		// initialized before the seed point: release the secret-storage
-		// listener, shut down the telemetry client registered above, and
-		// release the debug-proxy resources initialized before the seed — in
-		// strict reverse acquisition order (auth was acquired last, the proxy
-		// first), each step disposed only after the previous one settles.
+		// listener, shut down the telemetry client registered above, release
+		// the debug-proxy resources, clear the persistence trace sink, and
+		// dispose the output channel — in strict reverse acquisition order
+		// (auth was acquired last, the output channel first), each step
+		// disposed only after the previous one settles.
 		// Teardown failures are logged rather than rethrown so they cannot mask
 		// the seed rejection; the telemetry service bounds its own drain and
 		// client-flush phases, so a stuck client cannot hang the host here.
@@ -211,6 +212,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			outputChannel.appendLine(
 				`Failed to dispose network proxy resources: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`,
 			)
+		}
+		// The persistence trace sink installed above writes its lines through
+		// the output channel, so it is cleared — passing undefined restores the
+		// default console sink — before the channel is disposed, keeping any
+		// later trace event (such as a deactivate() shutdown trace) from
+		// writing into a disposed channel.
+		setPersistenceTraceSink(undefined)
+		// The channel is disposed after every step that logs through it, so no
+		// teardown log is written to an already-dead channel. Once it is gone,
+		// no extension output sink is left to report a failed dispose to; the
+		// error is deliberately dropped rather than routed to the console.
+		try {
+			outputChannel.dispose()
+		} catch {
+			// The extension output sink is itself being torn down.
 		}
 		throw error
 	}
