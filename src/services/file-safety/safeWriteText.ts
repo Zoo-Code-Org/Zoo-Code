@@ -653,6 +653,13 @@ export async function safeWriteText(
 	// between that validation and the open; the open's own descriptor identity is compared
 	// against this value before anything touches the file.
 	let stagingIdentity: { dev: bigint; ino: bigint } | null = null
+	// The identity this write's OWN descriptor reported for the staging file, captured while that
+	// descriptor was open. The commit below publishes whatever the staging NAME holds at the instant
+	// link(2) or rename(2) runs, so an identity read back from the name afterwards agrees with
+	// itself across a substitution that already happened. An identity taken from the descriptor this
+	// write opened cannot agree with anything but the file it wrote, and that is what the published
+	// entry is compared against after the commit, on either commit path.
+	let stagedIdentity: { dev: bigint; ino: bigint } | null = null
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -752,6 +759,11 @@ export async function safeWriteText(
 			// caller-staged branch does; a fresh target keeps the default mode.
 			const fd = fsSync.openSync(tempPath, "w", targetMode)
 			try {
+				// Take the identity of the file this descriptor opened, before anything is written through it.
+				// The name can be swapped after this point and the commit would then publish a different file;
+				// the post-commit comparison needs the identity of the file this write actually wrote into.
+				const opened = fsSync.fstatSync(fd, { bigint: true })
+				stagedIdentity = { dev: opened.dev, ino: opened.ino }
 				if (targetExists) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
@@ -798,12 +810,16 @@ export async function safeWriteText(
 				// have been replaced in between. Compare the descriptor's own identity with the one that
 				// was authorized and refuse before fchmodSync or fsyncSync acts on whatever the name
 				// holds now.
-				if (stagingIdentity !== null) {
-					const opened = fsSync.fstatSync(fd, { bigint: true })
-					if (opened.dev !== stagingIdentity.dev || opened.ino !== stagingIdentity.ino) {
-						throw new StagingPathError("Staging file was replaced between validation and open", tempPath)
-					}
+				const opened = fsSync.fstatSync(fd, { bigint: true })
+				if (
+					stagingIdentity !== null &&
+					(opened.dev !== stagingIdentity.dev || opened.ino !== stagingIdentity.ino)
+				) {
+					throw new StagingPathError("Staging file was replaced between validation and open", tempPath)
 				}
+				// From here the reference for the post-commit comparison is this descriptor's own identity:
+				// the file this write holds open and is about to fsync, whatever the staging name points at later.
+				stagedIdentity = { dev: opened.dev, ino: opened.ino }
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
@@ -1030,33 +1046,29 @@ export async function safeWriteText(
 			// name whose content is already published.
 			stagingCommitted = true
 
-			if (options?.failIfExist) {
-				// Both names should now be one inode. They diverge when the entry under either name is
-				// replaced after the commit, and the published name then holds bytes this write never
-				// staged. A substitution completed BEFORE the link is not detectable from here: link(2)
-				// links whatever entry the staging name holds at that moment, so both stats report the
-				// substituted inode and the comparison passes. Checked after the link because link(2) is
-				// the first point at which the target name exists, and a check of either name before it
-				// cannot see what landed at the other. Neither name is removed on a mismatch and the
-				// commit marker above is already set, so the
-				// cleanup below cannot unlink a name that may belong to another process. The ordinary
-				// rename path cannot be verified this way: rename(2) moves the staged inode itself and
-				// leaves no second name to compare, and a re-stat of the target proves only that the
-				// rename took effect, not that the staging file was still ours when it did. Issue
-				// #2391 is where that gap is carried; what it must prove is how a commit that leaves
-				// no second name detects a staging substitution before publication and how its cleanup
-				// avoids removing an entry it does not own. This unit does not claim that answer.
-				const [stagedNow, publishedNow] = await Promise.all([
-					fs.stat(tempPath, { bigint: true }),
-					fs.stat(targetPath, { bigint: true }),
-				])
-				if (stagedNow.dev !== publishedNow.dev || stagedNow.ino !== publishedNow.ino) {
+			// The reference is the identity this write's own descriptor reported before the commit, not a
+			// re-stat of the staging name. A no-replace commit links whatever entry the name holds at that
+			// instant, and a replace commit moves whatever the name holds and leaves no second name behind,
+			// so two names read after the commit can only prove that they agree now, which a substitution
+			// completed BEFORE the commit answers by agreeing on the substituted inode. Against the
+			// descriptor's identity a mismatch says the published entry is not the file this write staged
+			// and fsynced, on either commit path: that is the detection half of what issue #2391 carries
+			// for a commit that leaves no second name. Nothing is removed on a mismatch - the entry under
+			// the target is not this write's to remove, and the staging name may be the only path to a
+			// file another process owns, which is the ownership half of the same issue. The null test is
+			// for the type and not for a path that can reach here: one of the two step-1 opens always runs
+			// first, and both record an identity before releasing their descriptor.
+			if (stagedIdentity !== null) {
+				const publishedNow = await fs.stat(targetPath, { bigint: true })
+				if (publishedNow.dev !== stagedIdentity.dev || publishedNow.ino !== stagedIdentity.ino) {
 					throw new PublishedEntryMismatchError(
 						targetPath,
 						`${publishedNow.dev}:${publishedNow.ino}`,
-						`${stagedNow.dev}:${stagedNow.ino}`,
+						`${stagedIdentity.dev}:${stagedIdentity.ino}`,
 					)
 				}
+			}
+			if (options?.failIfExist) {
 				// The target name is published at this point; the staged name is only a second
 				// link to the same inode (or a copy of it). Removal is best-effort: on Windows
 				// an antivirus handle can make unlink fail with EBUSY/EPERM after the content
