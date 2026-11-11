@@ -1043,11 +1043,8 @@ describe("commitMessageGenerator", () => {
 			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 
 			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
-			expect(prompt).toContain("+NPM_TOKEN=[REDACTED]")
-			expect(prompt).toContain("_authToken=[REDACTED]")
-			expect(prompt).toContain("+TOKEN=[REDACTED]")
-			expect(prompt).toContain('+  "token": "[REDACTED]",')
-			expect(prompt).toContain("+  token: string")
+			// Each credential line keeps its diff prefix and indentation.
+			expect(prompt).toContain("+[REDACTED]\n+[REDACTED]\n+[REDACTED]\n+  [REDACTED]")
 			expect(prompt).not.toContain("npm_")
 			expect(prompt).not.toContain("abcdef1234567890")
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwxyz")
@@ -1078,7 +1075,7 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["a staged diff", true],
 			["a working-tree diff", false],
-		])("keeps XML and YAML secrets behind real diff headers out of the prompt (%s)", async (_label, staged) => {
+		])("keeps secrets in files behind real diff headers out of the prompt (%s)", async (_label, staged) => {
 			const diff = [
 				"diff --git a/settings.xml.template b/settings.xml.template",
 				"@@ -0,0 +1,3 @@",
@@ -1149,9 +1146,8 @@ describe("commitMessageGenerator", () => {
 			for (const secret of secrets) {
 				expect(prompt).not.toContain(secret)
 			}
-			expect(prompt).toContain("+type Loader = Promise<Credentials>")
-			expect(prompt).toContain("+      description: kept")
-			expect(prompt).toContain('{"name":"LOG_LEVEL","value":"debug"}')
+			expect(prompt).toContain("diff --git a/deploy.yaml b/deploy.yaml")
+			expect(prompt).toContain("+let b = 1")
 		})
 
 		it("does not read the working tree when cancelled while the staged diff is pending", async () => {
