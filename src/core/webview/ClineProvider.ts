@@ -432,6 +432,7 @@ export class ClineProvider
 		localIds: new Map<string, string>(),
 		writeOwners: new Map<string, symbol>(),
 		writes: new Map<Mode, Promise<void>>(),
+		reset: undefined as Promise<void> | undefined,
 		// Capture the shared map once when the window opens; late tabs reuse that snapshot.
 		// Undefined means the opening snapshot failed, rather than an empty mapping.
 		initialIds: Promise.resolve<Record<string, string> | undefined>({}),
@@ -2243,10 +2244,13 @@ export class ClineProvider
 	}
 
 	public async setModeConfig(mode: Mode, id: string): Promise<void> {
+		if (this.modeProfileState.reset) return
 		const pending = this.modeConfigWrites.get(mode)
 		const write = (async () => {
 			// A failed predecessor must roll back before this operation captures its previous choice.
 			if (pending) await pending.catch(() => {})
+			// Reset invalidates queued selections before their profiles are deleted.
+			if (this.modeProfileState.reset) return
 			await this.writeModeConfig(mode, id)
 		})()
 		this.modeConfigWrites.set(mode, write)
@@ -3852,6 +3856,21 @@ export class ClineProvider
 		if (answer !== t("common:answers.yes")) {
 			return
 		}
+
+		if (this.modeProfileState.reset) return this.modeProfileState.reset
+		const reset = this.resetStateAfterModeWrites()
+		this.modeProfileState.reset = reset
+		try {
+			await reset
+		} finally {
+			this.modeProfileState.reset = undefined
+		}
+	}
+
+	private async resetStateAfterModeWrites(): Promise<void> {
+		// Finish active writes and cancel queued ones before deleting their persisted mappings.
+		// The shared reset promise also blocks new selections in other tabs until reset finishes.
+		await Promise.allSettled([...this.modeConfigWrites.values()])
 
 		// Log out from cloud if authenticated
 		if (CloudService.hasInstance()) {

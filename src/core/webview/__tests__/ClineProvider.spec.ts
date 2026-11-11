@@ -4966,6 +4966,56 @@ describe("ClineProvider", () => {
 			},
 		)
 
+		it("does not restore stale mode mappings when reset overlaps two queued same-mode writes", async () => {
+			const { t } = await import("../../../i18n")
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			provider.customModesManager.resetCustomModes = vi.fn().mockResolvedValue(undefined)
+			const manager = provider.providerSettingsManager
+			await manager.import({
+				currentApiConfigName: "first",
+				apiConfigs: { first: { id: "first-id" }, second: { id: "second-id" } },
+				modeApiConfigs: {},
+			})
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+			const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
+				await pending
+				await originalStore(key, value)
+			})
+			const first = provider.setModeConfig("code", "first-id")
+			await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
+			const second = provider.setModeConfig("code", "second-id")
+			const resetConfigs = vi.spyOn(manager, "resetAllConfigs")
+			const resetting = provider.resetState()
+			await vi.waitFor(() => expect(provider["modeProfileState"].reset).toBeDefined())
+			// Deletion waits for the active write; another selection during reset must also be ignored.
+			expect(resetConfigs).not.toHaveBeenCalled()
+			await provider.setModeConfig("code", "second-id")
+			release()
+			await Promise.all([first, second, resetting])
+
+			expect(await mockContext.secrets.get(manager["secretsKey"])).toBeUndefined()
+			const resetId = await manager.getModeConfigId("code")
+			expect(["first-id", "second-id"]).not.toContain(resetId)
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe(resetId)
+			expect(provider["localModeConfigIds"].has("code")).toBe(false)
+
+			// A fresh choice after reset can still be persisted and resolved.
+			await manager.import({
+				currentApiConfigName: "fresh",
+				apiConfigs: { fresh: { id: "fresh-id" } },
+				modeApiConfigs: {},
+			})
+			await provider.setModeConfig("code", "fresh-id")
+			await expect(manager.getModeConfigId("code")).resolves.toBe("fresh-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("fresh-id")
+		})
+
 		it("drops local choices and re-reads the mapping when state is reset", async () => {
 			const { t } = await import("../../../i18n")
 			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)

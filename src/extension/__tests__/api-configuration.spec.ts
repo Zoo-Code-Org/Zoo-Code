@@ -27,6 +27,7 @@ describe("API - configuration", () => {
 					{ name: "custom", id: "architect-config" },
 				]),
 			},
+			modeProfileState: { reset: undefined },
 			localModeConfigIds: new Map<string, string>(),
 			modeConfigWriteOwners: new Map<string, symbol>(),
 			modeConfigWrites: new Map<string, Promise<void>>(),
