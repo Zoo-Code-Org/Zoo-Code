@@ -141,6 +141,10 @@ describe("ClineProvider - persisted view state write ordering", () => {
 	let durable: Record<string, unknown>
 	let failNextViewStatesWrite = false
 	let mockContext: vscode.ExtensionContext
+	// The durable profile value the storage double held at the instant the per-view write
+	// rejected, so a test can tell a shared write that reached storage from one that only
+	// moved the in-memory cache.
+	let durableProfileAtViewWriteFailure: unknown
 	let mockOutputChannel: vscode.OutputChannel
 
 	// The tombstone set and the write queue are per-class, so every test starts from an
@@ -155,6 +159,7 @@ describe("ClineProvider - persisted view state write ordering", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		failNextViewStatesWrite = false
+		durableProfileAtViewWriteFailure = undefined
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -171,6 +176,7 @@ describe("ClineProvider - persisted view state write ordering", () => {
 		const update = vi.fn((key: string, value: unknown) => {
 			if (key === "viewStates" && failNextViewStatesWrite) {
 				failNextViewStatesWrite = false
+				durableProfileAtViewWriteFailure = globalState["currentApiConfigName"]
 				return Promise.reject(new Error("durable write failed"))
 			}
 			globalState[key] = value
@@ -467,11 +473,20 @@ describe("ClineProvider - persisted view state write ordering", () => {
 
 		await expect(provider.setValues({ currentApiConfigName: "profile-a" })).rejects.toThrow("durable write failed")
 
+		// The shared write landed before the per-view write was attempted: the double held
+		// "profile-a" in storage at the instant of the failure, so what follows is a rollback of
+		// a value that really moved, not a no-op over a key that never left the cache.
+		expect(durableProfileAtViewWriteFailure).toBe("profile-a")
+
 		// A rollback here has no earlier name to restore: the only correct outcomes are that the
-		// shared key stays unset, that no per-view entry was created for the write that failed,
-		// and that the ledger stayed empty because nothing was ever cleared from storage.
+		// shared key stays unset in storage and not only in the cache this call reads back, that
+		// no per-view entry was created for the write that failed, that the view-local buffer
+		// never took the profile because it is advanced only after the durable write lands, and
+		// that the ledger stayed empty because nothing was ever cleared from storage.
 		expect(provider.contextProxy.getValue("currentApiConfigName")).toBeUndefined()
+		expect(durable["currentApiConfigName"]).toBeUndefined()
 		expect(Object.hasOwn(viewStates() ?? {}, viewStateId)).toBe(false)
+		expect(Object.hasOwn(provider["viewLocalState"], "currentApiConfigName")).toBe(false)
 		expect(tombstones().size).toBe(0)
 	})
 })
