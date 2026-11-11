@@ -1,6 +1,7 @@
-import { spawnSync } from "child_process"
+import { spawn, spawnSync } from "child_process"
 import * as fs from "fs"
 import * as os from "os"
+import { createRequire } from "module"
 import * as path from "path"
 
 import * as lockfile from "proper-lockfile"
@@ -695,4 +696,372 @@ describe("identity keeps inodes above 2^53 distinct", () => {
 		const uncreated = path.resolve(path.join(precisionRoot, "uncreated", "nested", "history.json"))
 		expect(canonicalLockKey(uncreated)).toBe(uncreated)
 	})
+})
+/**
+ * A second OS process contending for the same artefact, run by the suite below against the real lock
+ * library with no mocks. The mocked suites above can only model contention inside one process: they
+ * hand `proper-lockfile` a function of the test's making, so a second caller is refused because a
+ * table says so, not because a directory on disk already exists. What is under test here is whether
+ * the module and another process land on one and the same path, since the library implements mutual
+ * exclusion by `mkdir` on `lockfilePath` and reports `ELOCKED` when that path is already there, so
+ * two spellings that produced two artefacts would let both writers in and no assertion in this file
+ * would notice.
+ *
+ * The child is plain CommonJS inside a template literal rather than a TypeScript import: loading
+ * `fileLock.ts` from a child fails with ERR_MODULE_NOT_FOUND on the extensionless
+ * `../core/task-persistence/persistenceTrace` import, which is the module's own import chain, and the
+ * child therefore restates the one rule it needs - the artefact naming of `lockLeafSpelling`, naming
+ * the artefact by the spelling the volume reports for the leaf and falling back to the caller's own
+ * spelling where the volume has none - while the key comes from the module's `canonicalLockKey`,
+ * computed by the parent and passed in, so the child decides nothing else for itself.
+ *
+ * The handshake is a trace file the child appends to synchronously, not its stdout. Node writes to a
+ * piped stdout asynchronously, including on Windows, so a child that ends the process can lose the
+ * lines it wrote a moment before: that is what the first version of this suite did, and it failed on
+ * an empty buffer rather than on the lock. `appendFileSync` cannot be truncated that way, and the
+ * child sets `process.exitCode` instead of calling `process.exit`, so nothing is cut off at all.
+ * The exported `lock` of proper-lockfile 4.1.2 is its promise wrapper, measured at this head in
+ * `index.js`: `module.exports = lock` over `async function lock(file, options)`, which takes no callback,
+ * so a callback passed as a third argument is dropped without a word and the child would sit forever
+ * holding a lock it never told anyone about. The child therefore chains `.then` and `.catch`, which is
+ * the same shape `fileLock.ts` itself awaits.
+ */
+const HOLDER_SCRIPT = `const fs = require("fs")
+const path = require("path")
+const lockfile = require(process.env.DSH_LOCK_MODULE)
+const spelling = process.env.DSH_LOCK_SPELLING
+const trace = process.env.DSH_LOCK_TRACE
+const holdMs = Number(process.env.DSH_LOCK_HOLD_MS || 0)
+function traceLine(line) {
+	fs.appendFileSync(trace, line + "\\n", "utf8")
+}
+let artefact = (function (target) {
+	let leaf
+	try {
+		leaf = path.basename(fs.realpathSync.native(target))
+	} catch {
+		leaf = path.basename(target)
+	}
+	return path.join(path.dirname(target), leaf) + ".lock"
+})(spelling)
+if (process.env.DSH_LOCK_NAIVE === "1") {
+	artefact = path.join(path.dirname(spelling), path.basename(spelling)) + ".lock"
+}
+traceLine("ARTEFACT " + artefact)
+lockfile.lock(process.env.DSH_LOCK_KEY, { lockfilePath: artefact, stale: 31000, update: 10000, realpath: false, retries: 0 })
+	.then((release) => {
+		if (typeof release !== "function") {
+			traceLine("OUTCOME failed no-release-function")
+			process.exitCode = 1
+			return
+		}
+		traceLine("OUTCOME held")
+		const letGo = () => {
+			release().then(() => {
+				traceLine("RELEASED")
+				process.exitCode = 0
+			}).catch((releaseError) => {
+				traceLine("RELEASE-FAILED " + String(releaseError.code))
+				process.exitCode = 1
+			})
+		}
+		if (holdMs > 0) {
+			setTimeout(letGo, holdMs)
+			return
+		}
+		letGo()
+	})
+	.catch((error) => {
+		traceLine("OUTCOME failed " + String(error.code))
+		process.exitCode = 1
+	})`
+
+interface HolderHandle {
+	pid: number | undefined
+	tracePath: string
+	childOutput: () => string
+	waitForExit: () => Promise<number | null>
+}
+
+/**
+ * Start the other process. `mode: "try"` asks it to take the lock and end, which is what a contention
+ * assertion needs; `mode: "hold"` makes it hold for six seconds so the suite can assert from this
+ * process that a live foreign holder is enough to keep the module out.
+ */
+function startLockHolder(
+	spelling: string,
+	mode: "try" | "hold",
+	lockModule: string,
+	directory: string,
+	traceName: string,
+	naive = false,
+): HolderHandle {
+	const tracePath = path.join(directory, traceName)
+	const child = spawn(process.execPath, ["-e", HOLDER_SCRIPT], {
+		cwd: process.cwd(),
+		stdio: ["ignore", "pipe", "pipe"],
+		windowsHide: true,
+		env: {
+			...process.env,
+			NO_COLOR: "1",
+			DSH_LOCK_MODULE: lockModule,
+			DSH_LOCK_SPELLING: spelling,
+			DSH_LOCK_TRACE: tracePath,
+			DSH_LOCK_HOLD_MS: mode === "hold" ? "6000" : "0",
+			DSH_LOCK_NAIVE: naive ? "1" : "0",
+			DSH_LOCK_KEY: canonicalLockKey(path.resolve(spelling)),
+		},
+	})
+	let output = ""
+	const note = (chunk: string): void => {
+		output += chunk
+	}
+	if (child.stdout) {
+		child.stdout.setEncoding("utf8")
+		child.stdout.on("data", note)
+	}
+	if (child.stderr) {
+		child.stderr.setEncoding("utf8")
+		child.stderr.on("data", note)
+	}
+	return {
+		pid: child.pid,
+		tracePath,
+		childOutput: () => (output.length > 400 ? output.slice(-400) : output),
+		waitForExit: () =>
+			new Promise((resolve) => {
+				if (child.exitCode !== null) {
+					resolve(child.exitCode)
+					return
+				}
+				child.once("close", (code) => resolve(code))
+			}),
+	}
+}
+
+/** Read one line of the child's trace file, waiting at most `timeoutMs` for it to appear. */
+async function readHolderTrace(
+	tracePath: string,
+	marker: string,
+	timeoutMs: number,
+	childOutput: () => string,
+): Promise<string> {
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		let content = ""
+		try {
+			content = fs.readFileSync(tracePath, "utf8")
+		} catch {
+			content = ""
+		}
+		const hit = content.split("\n").find((line) => line.startsWith(marker))
+		if (hit) {
+			return hit.trim()
+		}
+		if (Date.now() > deadline) {
+			throw new Error(
+				`no "${marker}" in ${tracePath} within ${timeoutMs} ms; trace was ${JSON.stringify(content)} and the child said ${JSON.stringify(childOutput())}`,
+			)
+		}
+		await new Promise((sleep) => setTimeout(sleep, 25))
+	}
+}
+
+function traceArtefact(traceLineText: string): string {
+	const hit = traceLineText.match(/ARTEFACT (.+)/)
+	if (!hit) {
+		throw new Error(`the child never reported an artefact path; trace line was ${JSON.stringify(traceLineText)}`)
+	}
+	return hit[1].trim()
+}
+
+function traceOutcome(traceLineText: string): string {
+	const hit = traceLineText.match(/OUTCOME (\S+)(?: (\S+))?/)
+	if (!hit) {
+		throw new Error(`the child never reported an acquire outcome; trace line was ${JSON.stringify(traceLineText)}`)
+	}
+	return hit[2] ? hit[1] + " " + hit[2] : hit[1]
+}
+
+function artefactsOf(directory: string): string[] {
+	return fs
+		.readdirSync(directory)
+		.filter((name) => name.endsWith(".lock"))
+		.sort()
+}
+
+describe("another process contends for the same artefact", () => {
+	const root = useTemporaryRoot("fileLock-crossproc-")
+	let actualLock: typeof lockfile.lock
+	let lockModule = ""
+	let generatesShortNames = false
+	let traceIndex = 0
+	beforeAll(async () => {
+		actualLock = (await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")).lock
+		// The child requires the library by path: it runs with no module resolution context of its own.
+		lockModule = createRequire(import.meta.url).resolve("proper-lockfile")
+		generatesShortNames = process.platform === "win32" && shortNamesGenerated(root())
+	})
+	beforeEach(() => {
+		vi.mocked(lockfile.lock).mockImplementation((target, options) => actualLock(target, options))
+	})
+
+	function scenario(name: string): { directory: string; target: string } {
+		const directory = path.join(root(), name)
+		fs.mkdirSync(directory, { recursive: true })
+		const target = path.join(directory, "history.json")
+		fs.writeFileSync(target, "{}", "utf8")
+		return { directory, target }
+	}
+
+	function nextTraceName(): string {
+		traceIndex += 1
+		return `holder-trace-${traceIndex}.txt`
+	}
+
+	it(
+		"refuses a second process that arrives by the same spelling while the module holds",
+		{ timeout: 30000 },
+		async () => {
+			const { directory, target } = scenario("same-spelling-held")
+			const release = await acquireFileLock(target, { immediate: true })
+			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+			const holder = startLockHolder(target, "try", lockModule, directory, nextTraceName())
+			const artefactLine = await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			expect(traceArtefact(artefactLine)).toBe(path.join(directory, "history.json.lock"))
+			expect(traceOutcome(outcomeLine)).toBe("failed ELOCKED")
+			expect(await holder.waitForExit()).toBe(1)
+			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+			await release()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	it(
+		"keeps this process out while another process holds, and admits it once that process ends",
+		{ timeout: 30000 },
+		async () => {
+			const { directory, target } = scenario("same-spelling-free")
+			const holder = startLockHolder(target, "hold", lockModule, directory, nextTraceName())
+			await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			expect(traceOutcome(outcomeLine)).toBe("held")
+			if (typeof holder.pid !== "number") {
+				throw new Error(
+					`the holder child never reported a pid; it said ${JSON.stringify(holder.childOutput())}`,
+				)
+			}
+			expect(process.kill(holder.pid, 0)).toBe(true)
+			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+			await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+			expect(await holder.waitForExit()).toBe(0)
+			const traceNow = fs.readFileSync(holder.tracePath, "utf8")
+			expect(traceNow.split("\n")).toContain("RELEASED")
+			expect(artefactsOf(directory)).toEqual([])
+			const admitted = await acquireFileLock(target, { immediate: true })
+			await admitted()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	const itWindowsLeafAlias = (name: string, fn: () => Promise<void>) =>
+		it(name, { timeout: 30000 }, async (context) => {
+			if (!generatesShortNames) {
+				return context.skip()
+			}
+			await fn()
+		})
+
+	itWindowsLeafAlias(
+		"refuses a second process arriving by the 8.3 alias of the leaf while the module holds the alias",
+		async () => {
+			const directory = path.join(root(), "leaf-alias-crossproc")
+			fs.mkdirSync(directory, { recursive: true })
+			const longLeaf = path.join(directory, "task-history-leaf-for-crossproc-alias-testing.json")
+			fs.writeFileSync(longLeaf, "{}", "utf8")
+			const aliasLeaf = aliasOf(longLeaf)
+			expect(aliasLeaf).not.toBe(longLeaf)
+			const release = await acquireFileLock(aliasLeaf, { immediate: true })
+			const placed = ["task-history-leaf-for-crossproc-alias-testing.json.lock"]
+			expect(artefactsOf(directory)).toEqual(placed)
+			const holder = startLockHolder(aliasLeaf, "try", lockModule, directory, nextTraceName())
+			const artefactLine = await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			expect(traceArtefact(artefactLine)).toBe(path.join(directory, placed[0]))
+			expect(traceOutcome(outcomeLine)).toBe("failed ELOCKED")
+			expect(await holder.waitForExit()).toBe(1)
+			expect(artefactsOf(directory)).toEqual(placed)
+			await release()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	// The negative control for the alias case above. Name the artefact by the caller's own spelling, the
+	// way a module that never consulted the volume would, and this same pair of writers lands on two
+	// artefacts and both get in. That is the shape the bots described, and it is the spelling rule that
+	// keeps it out of the suite; if the module ever fell back to the caller's spelling the case below would
+	// go red rather than pass for the wrong reason.
+	itWindowsLeafAlias(
+		"lets a second process in when the artefact is named by the caller's spelling instead of the volume's",
+		async () => {
+			const directory = path.join(root(), "leaf-alias-crossproc-control")
+			fs.mkdirSync(directory, { recursive: true })
+			const longLeaf = path.join(directory, "task-history-leaf-for-crossproc-control-testing.json")
+			fs.writeFileSync(longLeaf, "{}", "utf8")
+			const aliasLeaf = aliasOf(longLeaf)
+			expect(aliasLeaf).not.toBe(longLeaf)
+			const release = await acquireFileLock(aliasLeaf, { immediate: true })
+			expect(artefactsOf(directory)).toEqual(["task-history-leaf-for-crossproc-control-testing.json.lock"])
+			// Hold, rather than take-and-release, so that both artefacts are on disk at the moment of looking.
+			const holder = startLockHolder(aliasLeaf, "hold", lockModule, directory, nextTraceName(), true)
+			const artefactLine = await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			const callerNamed = (path.basename(aliasLeaf) + ".lock").toLowerCase()
+			const moduleNamed = "task-history-leaf-for-crossproc-control-testing.json.lock"
+			expect(traceArtefact(artefactLine).toLowerCase()).toBe(path.join(directory, callerNamed).toLowerCase())
+			expect(callerNamed).not.toBe(moduleNamed)
+			expect(traceOutcome(outcomeLine)).toBe("held")
+			expect(
+				artefactsOf(directory)
+					.map((name) => name.toLowerCase())
+					.sort(),
+			).toEqual([callerNamed, moduleNamed].sort())
+			expect(await holder.waitForExit()).toBe(0)
+			expect(fs.readFileSync(holder.tracePath, "utf8").split("\n")).toContain("RELEASED")
+			await release()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	const itPosixLeaf = (name: string, fn: () => Promise<void>) =>
+		it(name, { timeout: 30000 }, async (context) => {
+			if (process.platform === "win32") {
+				return context.skip()
+			}
+			await fn()
+		})
+
+	itPosixLeaf(
+		"refuses a second process arriving by the target of a link while the module holds the link",
+		async () => {
+			const directory = path.join(root(), "link-leaf-crossproc")
+			fs.mkdirSync(directory, { recursive: true })
+			const target = path.join(directory, "history.json")
+			fs.writeFileSync(target, "{}", "utf8")
+			const link = path.join(directory, "history-link.json")
+			fs.symlinkSync("history.json", link)
+			const release = await acquireFileLock(link, { immediate: true })
+			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+			const holder = startLockHolder(link, "try", lockModule, directory, nextTraceName())
+			const artefactLine = await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			expect(traceArtefact(artefactLine)).toBe(path.join(directory, "history.json.lock"))
+			expect(traceOutcome(outcomeLine)).toBe("failed ELOCKED")
+			expect(await holder.waitForExit()).toBe(1)
+			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+			await release()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
 })
