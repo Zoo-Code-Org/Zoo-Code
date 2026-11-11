@@ -5229,6 +5229,72 @@ describe("ClineProvider", () => {
 			},
 		)
 
+		it.each(["activation", "profile save"])(
+			"drains an active %s before resetting and rejects later mutations",
+			async (operation) => {
+				const { t } = await import("../../../i18n")
+				await provider.setValue("mode", "code")
+				vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				provider.customModesManager.resetCustomModes = vi.fn().mockResolvedValue(undefined)
+				const manager = provider.providerSettingsManager
+				await manager.import({
+					currentApiConfigName: "opened",
+					apiConfigs: {
+						opened: { id: "opened-id", apiProvider: providerIdentifiers.anthropic },
+						selected: { id: "selected-id", apiProvider: providerIdentifiers.anthropic },
+					},
+					modeApiConfigs: {},
+				})
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const originalActivate = manager.activateProfile.bind(manager)
+				const originalSave = manager.saveConfig.bind(manager)
+				const activate = vi.spyOn(manager, "activateProfile")
+				const save = vi.spyOn(manager, "saveConfig")
+				if (operation === "activation") {
+					activate.mockImplementationOnce(async (...args) => {
+						await pending
+						return originalActivate(...args)
+					})
+				} else {
+					save.mockImplementationOnce(async (...args) => {
+						await pending
+						return originalSave(...args)
+					})
+				}
+				const active =
+					operation === "activation"
+						? provider.activateProviderProfile({ name: "selected" })
+						: provider.upsertProviderProfile("selected", { apiProvider: providerIdentifiers.anthropic })
+				await vi.waitFor(() => expect(operation === "activation" ? activate : save).toHaveBeenCalledOnce())
+				const queued = expect(provider.activateProviderProfile({ name: "opened" })).rejects.toThrow(
+					"settings reset",
+				)
+				const resetConfigs = vi.spyOn(manager, "resetAllConfigs")
+				const resetContext = vi.spyOn(provider.contextProxy, "resetAllState")
+				const resetting = provider.resetState()
+				await vi.waitFor(() => expect(provider["modeProfileState"].reset).toBeDefined())
+				expect(resetConfigs).not.toHaveBeenCalled()
+				expect(resetContext).not.toHaveBeenCalled()
+				await expect(provider.activateProviderProfile({ name: "opened" })).rejects.toThrow("settings reset")
+				release()
+				const result = await active
+				if (operation === "profile save") expect(result).toBe("selected-id")
+				await Promise.all([queued, resetting])
+
+				expect(resetConfigs).toHaveBeenCalledOnce()
+				expect(await mockContext.secrets.get(manager["secretsKey"])).toBeUndefined()
+				expect(provider["localModeConfigIds"].size).toBe(0)
+				expect(provider["modeProfileState"].mutations.size).toBe(0)
+				expect(activate).toHaveBeenCalledTimes(operation === "activation" ? 1 : 0)
+				expect(save).toHaveBeenCalledTimes(operation === "profile save" ? 1 : 0)
+			},
+		)
+
 		it("does not restore stale mode mappings when reset overlaps two queued same-mode writes", async () => {
 			const { t } = await import("../../../i18n")
 			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)

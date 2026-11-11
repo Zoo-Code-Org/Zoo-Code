@@ -345,14 +345,24 @@ export class ClineProvider
 		fn: (signal: AbortSignal) => Promise<T>,
 		options: { runToCompletion?: boolean } = {},
 	): Promise<T> {
+		if (this.modeProfileState.reset) {
+			return Promise.reject(new Error("Provider profile mutation cancelled by settings reset"))
+		}
 		const controller = new AbortController()
 		const signal = AbortSignal.any([controller.signal, this.profileMutationAbortController.signal])
-		const invoke = () => {
+		const invoke = async () => {
 			signal.throwIfAborted()
-			return fn(signal)
+			if (this.modeProfileState.reset) throw new Error("Provider profile mutation cancelled by settings reset")
+			this.modeProfileState.activeMutationSignals.add(signal)
+			try {
+				return await fn(signal)
+			} finally {
+				this.modeProfileState.activeMutationSignals.delete(signal)
+			}
 		}
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(invoke, invoke)
+		this.modeProfileState.mutations.add(run)
 		const callerResult = this.withProviderProfileMutationTimeout(
 			run,
 			() => {
@@ -369,11 +379,13 @@ export class ClineProvider
 
 		void run.then(
 			() => {
+				this.modeProfileState.mutations.delete(run)
 				if (controller.signal.aborted) {
 					this.log("Provider profile mutation completed after cancellation")
 				}
 			},
 			(error) => {
+				this.modeProfileState.mutations.delete(run)
 				if (controller.signal.aborted) {
 					this.log(
 						`Provider profile mutation errored after cancellation: ${
@@ -448,6 +460,8 @@ export class ClineProvider
 		localIds: new Map<string, string>(),
 		writeOwners: new Map<string, symbol>(),
 		writes: new Map<Mode, Promise<void>>(),
+		mutations: new Set<Promise<unknown>>(),
+		activeMutationSignals: new Set<AbortSignal>(),
 		reset: undefined as Promise<void> | undefined,
 		// Capture the shared map once when the window opens; late tabs reuse that snapshot.
 		// Undefined means the opening snapshot failed, rather than an empty mapping.
@@ -2246,18 +2260,22 @@ export class ClineProvider
 	}
 
 	public async setModeConfig(mode: Mode, id: string, signal?: AbortSignal): Promise<void> {
+		// An activation that reset is draining must finish all its writes before deletion.
+		const completingMutation = signal !== undefined && this.modeProfileState.activeMutationSignals.has(signal)
 		const writeSignal = signal
 			? AbortSignal.any([signal, this.profileMutationAbortController.signal])
 			: this.profileMutationAbortController.signal
 		writeSignal.throwIfAborted()
-		if (this.modeProfileState.reset) throw new Error("Mode profile write cancelled by settings reset")
+		if (this.modeProfileState.reset && !completingMutation)
+			throw new Error("Mode profile write cancelled by settings reset")
 		const pending = this.modeConfigWrites.get(mode)
 		const write = (async () => {
 			// A failed predecessor must roll back before this operation captures its previous choice.
 			if (pending) await pending.catch(() => {})
 			// Reset invalidates queued selections before their profiles are deleted.
 			writeSignal.throwIfAborted()
-			if (this.modeProfileState.reset) throw new Error("Mode profile write cancelled by settings reset")
+			if (this.modeProfileState.reset && !completingMutation)
+				throw new Error("Mode profile write cancelled by settings reset")
 			await this.writeModeConfig(mode, id, writeSignal)
 		})()
 		this.modeConfigWrites.set(mode, write)
@@ -3884,7 +3902,7 @@ export class ClineProvider
 		}
 
 		if (this.modeProfileState.reset) return this.modeProfileState.reset
-		const reset = this.resetStateAfterModeWrites()
+		const reset = this.resetStateAfterProfileMutations()
 		this.modeProfileState.reset = reset
 		try {
 			await reset
@@ -3893,10 +3911,10 @@ export class ClineProvider
 		}
 	}
 
-	private async resetStateAfterModeWrites(): Promise<void> {
-		// Finish active writes and cancel queued ones before deleting their persisted mappings.
-		// The shared reset promise also blocks new selections in other tabs until reset finishes.
-		await Promise.allSettled([...this.modeConfigWrites.values()])
+	private async resetStateAfterProfileMutations(): Promise<void> {
+		// Drain whole profile mutations, including saves and context updates, before deleting state.
+		// The shared reset promise rejects new/queued mutations in every tab while active ones finish.
+		await Promise.allSettled([...this.modeProfileState.mutations, ...this.modeConfigWrites.values()])
 
 		// Log out from cloud if authenticated
 		if (CloudService.hasInstance()) {

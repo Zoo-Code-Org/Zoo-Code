@@ -28,7 +28,7 @@ describe("API - configuration", () => {
 				]),
 			},
 			profileMutationAbortController: new AbortController(),
-			modeProfileState: { reset: undefined },
+			modeProfileState: { reset: undefined, activeMutationSignals: new Set<AbortSignal>() },
 			localModeConfigIds: new Map<string, string>(),
 			modeConfigWriteOwners: new Map<string, symbol>(),
 			modeConfigWrites: new Map<string, Promise<void>>(),

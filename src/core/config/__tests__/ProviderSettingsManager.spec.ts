@@ -154,6 +154,9 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	it.each([false, true])("checks cancellation after loading profiles (cancelled: %s)", async (cancel) => {
+		// Drain constructor initialization so the delayed read belongs to this operation.
+		await providerSettingsManager.getModeConfigIds()
+		mockSecrets.get.mockClear()
 		let release = () => {}
 		const pending = new Promise<void>((resolve) => {
 			release = resolve
@@ -194,17 +197,55 @@ describe("ProviderSettingsManager", () => {
 			modeApiConfigs: {},
 		})
 		await vi.waitFor(() => expect(mockSecrets.store).toHaveBeenCalledOnce())
-		vi.spyOn(providerSettingsManager, "getProfile").mockResolvedValue({ name: "selected", id: "selected-id" })
+		mockSecrets.get.mockClear()
+		const profile = vi
+			.spyOn(providerSettingsManager, "getProfile")
+			.mockResolvedValue({ name: "selected", id: "selected-id" })
 		const controller = new AbortController()
 		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal)
+		// Resume past getProfile while the import still holds the storage lock.
+		await profile.mock.results[0].value
 		if (cancel) controller.abort()
 		const result = cancel
-			? expect(selected).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+			? expect(selected).rejects.toMatchObject({
+					name: "Error",
+					message: "Failed to activate profile: This operation was aborted",
+				})
 			: expect(selected).resolves.toMatchObject({ name: "selected", id: "selected-id" })
 		release()
 		await Promise.all([imported, result])
 
+		expect(mockSecrets.get).toHaveBeenCalledTimes(cancel ? 0 : 1)
 		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 1 : 2)
+	})
+
+	it.each([false, true])("cancels activation during the locked profile load (cancelled: %s)", async (cancel) => {
+		// Drain constructor initialization so the delayed read belongs to this operation.
+		await providerSettingsManager.getModeConfigIds()
+		mockSecrets.get.mockClear()
+		vi.spyOn(providerSettingsManager, "getProfile").mockResolvedValue({ name: "selected", id: "selected-id" })
+		let release = () => {}
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		mockSecrets.get.mockImplementationOnce(async () => {
+			await pending
+			return null
+		})
+		const controller = new AbortController()
+		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal)
+		await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledOnce())
+		if (cancel) controller.abort()
+		const result = cancel
+			? expect(selected).rejects.toMatchObject({
+					name: "Error",
+					message: "Failed to activate profile: This operation was aborted",
+				})
+			: expect(selected).resolves.toMatchObject({ name: "selected", id: "selected-id" })
+		release()
+		await result
+
+		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 0 : 1)
 	})
 
 	describe("initialize", () => {
