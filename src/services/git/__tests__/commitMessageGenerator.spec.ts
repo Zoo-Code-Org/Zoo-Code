@@ -221,6 +221,25 @@ describe("commitMessageGenerator", () => {
 				"abcdefghijklmnopqrstuvwxyz",
 			],
 			["a camelCase unquoted token", "+Token=opaqueValue", "+Token=[REDACTED]", "opaqueValue"],
+			[
+				"a camelCase token key",
+				'+const npmToken = "opaque12345678"',
+				'+const npmToken = "[REDACTED]"',
+				"opaque12345678",
+			],
+			[
+				"a dotted unquoted token",
+				"+  token: abcdefghijklmnop.qrstuvwxyzabcdefgh",
+				"+  token: [REDACTED]",
+				"qrstuvwxyz",
+			],
+			["a token that starts like a type name", "+token: Abc/def+ghi=", "+token: [REDACTED]", "def+ghi"],
+			[
+				"a qualified type, which reads like a dotted secret",
+				"+  token: vscode.CancellationToken",
+				"+  token: [REDACTED]",
+				"vscode.",
+			],
 			["a quoted token variable", '+SLACK_BOT_TOKEN="xyz;123"', '+SLACK_BOT_TOKEN="[REDACTED]"', "xyz"],
 			["a YAML secret variable", "+  CI_DEPLOY_SECRET: hunter2", "+  CI_DEPLOY_SECRET: [REDACTED]", "hunter2"],
 			[
@@ -267,7 +286,8 @@ describe("commitMessageGenerator", () => {
 			["awaited token expressions", "+const token = await fetchToken()"],
 			["token property reads", "+const token = this.token"],
 			["PascalCase token types", "+  token: CancellationToken"],
-			["qualified token types", "+  token: vscode.CancellationToken"],
+			["camelCase token fields", "+  nextPageToken: string"],
+			["camelCase token calls", "+const sessionToken = createToken()"],
 			["union token types", "+  token: Token | undefined"],
 			["generic token types", "+  token: Record<string, string>"],
 			["Python token type hints", "+def run(token: str = None):"],
@@ -1074,6 +1094,39 @@ describe("commitMessageGenerator", () => {
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
 		})
 
+		it("discards an older result when the Git API returns a new wrapper for the same repository", async () => {
+			// The VS Code Git API creates a new repository wrapper on each read of `repositories`.
+			// The wrappers share one underlying input box.
+			const sharedInputBox = { value: "" }
+			;(vscode.extensions.getExtension as Mock).mockReturnValue({
+				isActive: true,
+				exports: {
+					getAPI: () => ({
+						get repositories() {
+							return [makeRepo("/workspace/repo", { inputBox: sharedInputBox })]
+						},
+					}),
+				},
+			})
+			const first = deferred<string>()
+			const second = deferred<string>()
+			;(singleCompletionHandler as Mock)
+				.mockImplementationOnce(() => first.promise)
+				.mockImplementationOnce(() => second.promise)
+
+			const older = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			const newer = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(2))
+
+			first.resolve("feat: older")
+			await older
+			second.resolve("feat: newer")
+			await newer
+
+			expect(sharedInputBox.value).toBe("feat: newer")
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
+		})
+
 		it("keeps the latest request of each repository independent", async () => {
 			const otherRepo = makeRepo("/workspace/other")
 			;(vscode.extensions.getExtension as Mock).mockReturnValue({
@@ -1129,6 +1182,8 @@ describe("commitMessageGenerator", () => {
 				"+TOKEN=abcdef1234567890",
 				'+  "token": "abcdef1234567890",',
 				"+  token: abcdefghijklmnopqrstuvwxyz",
+				'+const npmToken = "opaque12345678"',
+				"+  token: abcdefghijklmnop.qrstuvwxyzabcdefgh",
 				"+  token: string",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
@@ -1145,6 +1200,8 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("npm_")
 			expect(prompt).not.toContain("abcdef1234567890")
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwxyz")
+			expect(prompt).not.toContain("opaque12345678")
+			expect(prompt).not.toContain("qrstuvwxyz")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 

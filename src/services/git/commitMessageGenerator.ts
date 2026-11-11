@@ -104,11 +104,16 @@ const QUOTED_VALUE = String.raw`(?<open>["'\x60])(?:\\.|(?!\k<open>)[^\\\n])+\k<
 // An unquoted (or unterminated) value runs to the next whitespace or quote.
 const UNQUOTED_VALUE = String.raw`["'\x60]?[^\s"'\x60]+`
 const AUTH_SCHEME = String.raw`(?:Bearer|Basic|Digest|Token)\s+`
-// An unquoted value that reads as code, not as a secret: a primitive type or keyword (`string`,
-// `await`), an identifier followed by code punctuation (`getToken()`, `vscode.CancellationToken`,
-// `Token | undefined`), or a PascalCase type name (`CancellationToken`). The identifier length is
-// bounded to keep the scan linear.
-const CODE_LIKE_VALUE = String.raw`&?(?:(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|true|false|str|int|float|bool|bytes|await|new|typeof|this|self)\b|[A-Za-z_$][\w$]{0,256}\s*[(.<[|&?,;)]|[A-Z][a-z]+(?:[A-Z][a-z]+)*\b)`
+// An unquoted value that reads as code, not as a secret. Only a small set stays readable:
+// - a primitive type (`string`, Python `str`, Rust `&str`) or a PascalCase type name
+//   (`CancellationToken`, `Record<…>`, `Token | undefined`) that ends at whitespace, code punctuation,
+//   or the end of the input;
+// - a call (`getToken()`);
+// - an expression that starts with `await`, `new`, `typeof`, `this.`, or `self.`.
+// Everything else is redacted, also dotted values such as `vscode.CancellationToken`, because an
+// unquoted secret can contain dots. The identifier length is bounded to keep the scan linear.
+const CODE_VALUE_END = String.raw`(?=[\s|&,;<>()[\]{}?]|$)`
+const CODE_LIKE_VALUE = String.raw`(?:&?(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|true|false|str|int|float|bool|bytes|[A-Z][a-z]+(?:[A-Z][a-z]+)*)${CODE_VALUE_END}|[A-Za-z_$][\w$]{0,256}\(|(?:await|new|typeof)\s|(?:this|self)\.)`
 
 /**
  * Each entry replaces one class of sensitive value. Patterns with a `prefix` capture group keep the
@@ -154,13 +159,13 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
-	// Any-case `token` keys (token, "token", npm_token). A quoted value is always redacted. An unquoted
+	// Any-case `token` keys (token, "token", npm_token, npmToken). A quoted value is always redacted. An unquoted
 	// value is redacted unless it looks like code (CODE_LIKE_VALUE), so type declarations and
 	// expressions such as `token: string` or `token = getToken()` stay readable. The flags are
 	// case-sensitive because CODE_LIKE_VALUE tells PascalCase type names from other words.
 	{
 		pattern: new RegExp(
-			String.raw`(?<prefix>\b(?:[A-Za-z0-9]+_)*[Tt][Oo][Kk][Ee][Nn]${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${CODE_LIKE_VALUE})${UNQUOTED_VALUE})`,
+			String.raw`(?<prefix>\b[A-Za-z0-9_]*[Tt][Oo][Kk][Ee][Nn]${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${CODE_LIKE_VALUE})${UNQUOTED_VALUE})`,
 			"g",
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
@@ -399,7 +404,13 @@ export function buildCommitMessagePrompt(diff: string): CommitMessagePrompt {
 // follow call order. The latest number is tracked per repository so that a request for one
 // repository never discards the result for another.
 let invocationCounter = 0
-const latestInvocationByRepository = new WeakMap<GitRepository, number>()
+// Keyed by scheme and root path, not by the repository object: the Git API returns new wrapper objects
+// for the same repository on each read of `repositories`.
+const latestInvocationByRepository = new Map<string, number>()
+
+function repositoryKey(repository: GitRepository): string {
+	return `${repository.rootUri.scheme}:${repository.rootUri.fsPath}`
+}
 
 /**
  * Generates a commit message using the active LLM provider and populates the SCM input box.
@@ -421,8 +432,9 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 			return
 		}
 
-		if (invocationId > (latestInvocationByRepository.get(repository) ?? 0)) {
-			latestInvocationByRepository.set(repository, invocationId)
+		const ownerKey = repositoryKey(repository)
+		if (invocationId > (latestInvocationByRepository.get(ownerKey) ?? 0)) {
+			latestInvocationByRepository.set(ownerKey, invocationId)
 		}
 		const draft = repository.inputBox.value
 
@@ -500,7 +512,7 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 					}
 
 					// A newer request for this repository owns the input box now.
-					if (latestInvocationByRepository.get(repository) !== invocationId) {
+					if (latestInvocationByRepository.get(ownerKey) !== invocationId) {
 						return
 					}
 
