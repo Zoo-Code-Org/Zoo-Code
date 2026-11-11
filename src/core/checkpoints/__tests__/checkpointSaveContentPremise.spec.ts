@@ -104,9 +104,9 @@ async function recorded(service: RepoPerTaskCheckpointService, from: string, to:
 	return { count: diffs.length, before: file?.content.before, after: file?.content.after }
 }
 
-type Setup = Awaited<ReturnType<typeof setupCheckpointTask>>
-
-async function setupCheckpointTask(taskId: string): Promise<Setup> {
+// The return type is inferred, not aliased to Awaited<ReturnType<typeof itself>>: an alias that
+// resolves through the function it annotates is circular and tsc rejects it (TS2456, TS2577).
+async function setupCheckpointTask(taskId: string) {
 	const workspaceDir = path.join(tmpDir, `workspace-${taskId}`)
 	const shadowDir = path.join(tmpDir, `storage-${taskId}`)
 	await fs.mkdir(workspaceDir, { recursive: true })
