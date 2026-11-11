@@ -520,6 +520,7 @@ describe("ZooGatewayHandler", () => {
 					temperature: ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
+				{},
 			)
 		})
 
@@ -532,6 +533,112 @@ describe("ZooGatewayHandler", () => {
 			await expect(handler.completePrompt("Test")).rejects.toThrow(
 				"Zoo Gateway completion error: upstream failure",
 			)
+		})
+
+		it("forwards a per-request signal and the timeout to the SDK", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+
+			await handler.completePrompt("Test", { abortSignal: caller.signal, timeoutMs: 5_000 })
+
+			const requestOptions = mockCreate.mock.calls[0][1] as { signal?: AbortSignal; timeout?: number }
+			expect(requestOptions.signal).toBeInstanceOf(AbortSignal)
+			expect(requestOptions.signal).not.toBe(caller.signal)
+			expect(requestOptions.timeout).toBe(5_000)
+		})
+
+		it("sends no signal when the caller gives none", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await handler.completePrompt("Test")
+
+			expect(mockCreate.mock.calls[0][1]).toEqual({})
+		})
+
+		it("rejects with an AbortError and sends no request when the signal is pre-aborted", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+			caller.abort()
+
+			await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
+				name: "AbortError",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("rejects with an AbortError when the signal aborts during model lookup", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementation(() => new Promise(() => {}))
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+
+			const pending = handler.completePrompt("Test", { abortSignal: caller.signal })
+			caller.abort()
+
+			await expect(pending).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Zoo Gateway request was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("rejects with an AbortError at once when aborted mid-flight, without a gateway error", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+			let sdkSignal: AbortSignal | undefined
+			// The SDK call never settles, as when the SDK sleeps between retries.
+			mockCreate.mockImplementation((_params: unknown, requestOptions: { signal?: AbortSignal }) => {
+				sdkSignal = requestOptions.signal
+				return new Promise(() => {})
+			})
+
+			const pending = handler.completePrompt("Test", { abortSignal: caller.signal })
+			await vitest.waitFor(() => expect(mockCreate).toHaveBeenCalled())
+			caller.abort()
+
+			await expect(pending).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Zoo Gateway request was aborted",
+			})
+			expect(sdkSignal?.aborted).toBe(true)
+			expect(showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("reports an SDK abort error after the caller aborts as an AbortError, not a gateway error", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+			mockCreate.mockImplementation(async () => {
+				caller.abort()
+				throw new Error("Request was aborted.")
+			})
+
+			await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
+				name: "AbortError",
+			})
+			expect(showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("does not return a completion that resolves after the caller aborts", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+			mockCreate.mockImplementation(async () => {
+				caller.abort()
+				return { choices: [{ message: { role: "assistant", content: "late" } }] }
+			})
+
+			await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("detaches its listener from the caller's signal after the request", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+			const removeListener = vitest.spyOn(caller.signal, "removeEventListener")
+
+			await handler.completePrompt("Test", { abortSignal: caller.signal })
+
+			expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function))
 		})
 
 		it("returns an empty string when the model returns no content", async () => {
