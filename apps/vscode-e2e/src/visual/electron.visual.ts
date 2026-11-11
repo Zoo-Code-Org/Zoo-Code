@@ -5,6 +5,7 @@ import {
 	attachFailureArtifacts,
 	CHAT_RESULT,
 	extensionDevelopmentPath,
+	SCM_ACTION_TITLE,
 	startScene,
 	stopScene,
 	vscodeVersion,
@@ -119,3 +120,30 @@ for (const scenario of scenarios) {
 		}
 	})
 }
+
+const scmScenario: VisualScenario = {
+	name: "scm-title-dark",
+	scene: "scm",
+	themeId: "Default Dark Modern",
+	landmark: SCM_ACTION_TITLE,
+}
+
+test("renders the Generate Commit Message action in the Source Control title bar", async ({
+	browserName: _browserName,
+}, testInfo) => {
+	const running = await startScene(vscodeExecutablePath, scmScenario, testInfo)
+	try {
+		// Keep the pointer away from the sidebar so no action shows a hover state or tooltip.
+		await running.page.mouse.move(900, 400)
+		const action = running.page.locator(`.part.sidebar .pane-header [aria-label="${SCM_ACTION_TITLE}"]`)
+		await expect(action).toBeVisible()
+		const header = running.page.locator(".part.sidebar .pane-header").filter({ has: action })
+		await expect(header).toHaveCount(1)
+		await expect(header).toHaveScreenshot("electron-scm-title-dark-header.png")
+	} catch (error) {
+		await attachFailureArtifacts(running, testInfo)
+		throw error
+	} finally {
+		await stopScene(running, testInfo)
+	}
+})
