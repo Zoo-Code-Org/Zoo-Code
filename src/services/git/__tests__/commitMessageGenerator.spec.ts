@@ -273,6 +273,57 @@ describe("commitMessageGenerator", () => {
 			expect(redacted).toBe("+const value = callWith([REDACTED_SECRET])")
 		})
 
+		// A credential key decides, not the shape of its value: casing or syntax cannot tell a
+		// secret from code, so code under a credential key is redacted too.
+		it.each([
+			["a call", "+const token = getToken()", "+const token = [REDACTED]"],
+			["an awaited call", "+const token = await fetchToken()", "+const token = [REDACTED] fetchToken()"],
+			["a property read", "+const token = this.token", "+const token = [REDACTED]"],
+			["a PascalCase type", "+  token: CancellationToken", "+  token: [REDACTED]"],
+			["a PascalCase secret", "+token: Abcdefghijklmnop", "+token: [REDACTED]"],
+			["a union type", "+  token: Token | undefined", "+  token: [REDACTED] | undefined"],
+			["a camelCase call", "+const sessionToken = createToken()", "+const sessionToken = [REDACTED]"],
+			["a primitive name followed by a dot", "+token: string.abcdef123", "+token: [REDACTED]"],
+		])("redacts %s under a credential key", (_label, content, expected) => {
+			expect(redactSensitiveInformation(content)).toBe(expected)
+		})
+
+		it.each([
+			["a Cookie header", "+Cookie: session=abc123; theme=dark", "+Cookie: [REDACTED]"],
+			["a Set-Cookie header", "+set-cookie: sid=xyz; Path=/; HttpOnly", "+set-cookie: [REDACTED]"],
+			["an npmrc auth value", "+_auth=dXNlcjpwYXNz", "+_auth=[REDACTED]"],
+			["a passphrase", "+  passphrase: correct-horse", "+  passphrase: [REDACTED]"],
+		])("redacts %s", (_label, content, expected) => {
+			expect(redactSensitiveInformation(content)).toBe(expected)
+		})
+
+		// Built from parts so that secret scanners do not flag these fake values in the source.
+		it.each([
+			["Stripe secret key", ["sk", "live", "a1b2c3d4e5f6g7h8i9j0"].join("_")],
+			["Stripe restricted key", ["rk", "test", "a1b2c3d4e5f6g7h8i9j0"].join("_")],
+			["Hugging Face token", `hf_${"aB3".repeat(11)}`],
+			["Google OAuth token", `ya29.${"aB3-_".repeat(5)}`],
+			["SendGrid key", `SG.${"aB3".repeat(8)}.${"cD4".repeat(8)}`],
+			["PyPI token", `pypi-${"aB3".repeat(20)}`],
+			["DigitalOcean token", `dop_v1_${"a1".repeat(32)}`],
+			["Shopify token", `shpat_${"a1".repeat(16)}`],
+			["Slack app token", `xapp-1-${"A1".repeat(8)}`],
+			["temporary AWS key id", `ASIA${"ABCD".repeat(4)}`],
+		])("redacts a bare %s", (_label, token) => {
+			const redacted = redactSensitiveInformation(`+const value = callWith(${token})`)
+			expect(redacted).toBe("+const value = callWith([REDACTED_SECRET])")
+		})
+
+		it.each([
+			["Slack", ["https://hooks.slack.com/services", "T000", "B000", "XXXXXXXX"].join("/")],
+			["Discord", ["https://discord.com/api/webhooks", "123", "abc-DEF_ghi"].join("/")],
+		])("redacts the secret path of a %s webhook URL", (_label, url) => {
+			const redacted = redactSensitiveInformation(`+  url: "${url}"`)
+			expect(redacted).not.toContain("XXXXXXXX")
+			expect(redacted).not.toContain("abc-DEF_ghi")
+			expect(redacted).toContain("[REDACTED]")
+		})
+
 		it.each([
 			["comparisons", "+if (password === confirmation) {"],
 			["arrow functions", "+const check = (password) => verify(password)"],
@@ -282,14 +333,15 @@ describe("commitMessageGenerator", () => {
 			["empty quoted credentials", '+  password: "",'],
 			["lower-case token fields", "+  token: string"],
 			["optional token fields", "+  token?: string"],
-			["token expressions", "+const token = getToken()"],
-			["awaited token expressions", "+const token = await fetchToken()"],
-			["token property reads", "+const token = this.token"],
-			["PascalCase token types", "+  token: CancellationToken"],
 			["camelCase token fields", "+  nextPageToken: string"],
-			["camelCase token calls", "+const sessionToken = createToken()"],
-			["union token types", "+  token: Token | undefined"],
-			["generic token types", "+  token: Record<string, string>"],
+			["primitive credential types", "+  apiKey: string | undefined"],
+			["primitive array types", "+  passwords: string[]"],
+			["typed password fields", "+  password: string[]"],
+			["null credentials", "+  token: null,"],
+			["LLM token limits", "+  max_tokens: 4096,"],
+			["camelCase token limits", "+  maxTokens: 4096,"],
+			["token counters", "+const tokenCount = countTokens(text)"],
+			["author fields", "+  author: Jane"],
 			["Python token type hints", "+def run(token: str = None):"],
 			["Rust token types", "+fn run(token: &str) {"],
 			["plural token keys", "+  tokens: 5"],
@@ -320,7 +372,6 @@ describe("commitMessageGenerator", () => {
 			["many local-part characters before one @", `${"a.".repeat(100_000)}@`],
 			["a long upper-case name without a TOKEN suffix", "A_".repeat(100_000)],
 			["many token type declarations", "token: string\n".repeat(14_286)],
-			["many token calls with long names", `token=${"a".repeat(250)}(`.repeat(700)],
 			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
 		])("redacts %s in linear time", (_label, content) => {
 			// A quadratic scan of 200k characters takes far longer than this budget.
@@ -1184,6 +1235,7 @@ describe("commitMessageGenerator", () => {
 				"+  token: abcdefghijklmnopqrstuvwxyz",
 				'+const npmToken = "opaque12345678"',
 				"+  token: abcdefghijklmnop.qrstuvwxyzabcdefgh",
+				"+token: Abcdefghijklmnop",
 				"+  token: string",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
@@ -1202,6 +1254,7 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwxyz")
 			expect(prompt).not.toContain("opaque12345678")
 			expect(prompt).not.toContain("qrstuvwxyz")
+			expect(prompt).not.toContain("Abcdefghijklmnop")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 

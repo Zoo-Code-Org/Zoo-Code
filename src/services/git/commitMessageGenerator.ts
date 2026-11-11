@@ -84,13 +84,13 @@ const UNTRACKED_STATUS = 7
 const CREDENTIAL_KEYWORDS = [
 	"api[_-]?key",
 	"access[_-]?key(?:[_-]?id)?",
-	"access[_-]?token",
-	"refresh[_-]?token",
-	"auth[_-]?token",
+	"token",
+	"auth",
 	"client[_-]?secret",
 	"private[_-]?key",
 	"secret(?:[_-]?(?:access[_-]?)?key)?",
 	"passw(?:or)?d",
+	"passphrase",
 	"pwd",
 	"credentials?",
 ].join("|")
@@ -104,16 +104,10 @@ const QUOTED_VALUE = String.raw`(?<open>["'\x60])(?:\\.|(?!\k<open>)[^\\\n])+\k<
 // An unquoted (or unterminated) value runs to the next whitespace or quote.
 const UNQUOTED_VALUE = String.raw`["'\x60]?[^\s"'\x60]+`
 const AUTH_SCHEME = String.raw`(?:Bearer|Basic|Digest|Token)\s+`
-// An unquoted value that reads as code, not as a secret. Only a small set stays readable:
-// - a primitive type (`string`, Python `str`, Rust `&str`) or a PascalCase type name
-//   (`CancellationToken`, `Record<…>`, `Token | undefined`) that ends at whitespace, code punctuation,
-//   or the end of the input;
-// - a call (`getToken()`);
-// - an expression that starts with `await`, `new`, `typeof`, `this.`, or `self.`.
-// Everything else is redacted, also dotted values such as `vscode.CancellationToken`, because an
-// unquoted secret can contain dots. The identifier length is bounded to keep the scan linear.
-const CODE_VALUE_END = String.raw`(?=[\s|&,;<>()[\]{}?]|$)`
-const CODE_LIKE_VALUE = String.raw`(?:&?(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|true|false|str|int|float|bool|bytes|[A-Z][a-z]+(?:[A-Z][a-z]+)*)${CODE_VALUE_END}|[A-Za-z_$][\w$]{0,256}\(|(?:await|new|typeof)\s|(?:this|self)\.)`
+// A value under a credential key is always redacted, whatever its shape: casing or syntax cannot tell a
+// secret from code. The only exception is an unquoted value that is exactly a primitive type name
+// (`token: string`, Python `str`, Rust `&str`), because such a value can never be a secret.
+const PRIMITIVE_TYPE_VALUE = String.raw`&?(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|none|true|false|str|int|float|bool|bytes)(?=[\s|&,;<>()[\]{}?=]|$)`
 
 /**
  * Each entry replaces one class of sensitive value. Patterns with a `prefix` capture group keep the
@@ -142,39 +136,35 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		pattern: /(?<prefix>\b[Bb]earer\s+)(?=[A-Za-z_\-.~+/]*\d)[A-Za-z0-9_\-.~+/]{8,}=*/g,
 		replacement: "$<prefix>[REDACTED]",
 	},
-	// key = value, key: value, "key": "value" (env files, YAML, JSON, code)
+	// Cookie headers carry session tokens and can hold spaces ("Cookie: a=1; b=2"), so the whole
+	// header value is redacted up to the end of the line.
 	{
 		pattern: new RegExp(
-			String.raw`(?<prefix>(?:${CREDENTIAL_KEYWORDS})${ASSIGNMENT})(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
+			String.raw`(?<prefix>\b(?:set-)?cookie${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${PRIMITIVE_TYPE_VALUE})[^\n]+)`,
 			"gi",
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
-	// Upper-case environment variable names that are or end in TOKEN or SECRET (TOKEN, NPM_TOKEN,
-	// SLACK_BOT_TOKEN). The match is case-sensitive, so code such as `maxTokens = 5` is not redacted.
+	// key = value, key: value, "key": "value" (env files, YAML, JSON, code). The key has no leading
+	// boundary, so prefixed and camelCase names match too (NPM_TOKEN, npmToken, DB_PASSWORD).
 	{
 		pattern: new RegExp(
-			String.raw`(?<prefix>\b(?:[A-Z][A-Z0-9_]*_)?(?:TOKEN|SECRET)${ASSIGNMENT})(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
-			"g",
-		),
-		replacement: "$<prefix>$<open>[REDACTED]$<open>",
-	},
-	// Any-case `token` keys (token, "token", npm_token, npmToken). A quoted value is always redacted. An unquoted
-	// value is redacted unless it looks like code (CODE_LIKE_VALUE), so type declarations and
-	// expressions such as `token: string` or `token = getToken()` stay readable. The flags are
-	// case-sensitive because CODE_LIKE_VALUE tells PascalCase type names from other words.
-	{
-		pattern: new RegExp(
-			String.raw`(?<prefix>\b[A-Za-z0-9_]*[Tt][Oo][Kk][Ee][Nn]${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${CODE_LIKE_VALUE})${UNQUOTED_VALUE})`,
-			"g",
+			String.raw`(?<prefix>(?:${CREDENTIAL_KEYWORDS})${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${PRIMITIVE_TYPE_VALUE})${UNQUOTED_VALUE})`,
+			"gi",
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
 	// Well-known token formats that can appear without a key name
 	{
 		pattern:
-			/\b(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{36,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
+			/\b(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{36,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|pypi-[A-Za-z0-9_-]{50,}|dop_v1_[a-f0-9]{64}|shp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
 		replacement: "[REDACTED_SECRET]",
+	},
+	// Webhook URLs carry their secret in the path
+	{
+		pattern:
+			/(?<prefix>https:\/\/(?:hooks\.slack\.com\/services|(?:discord|discordapp)\.com\/api\/webhooks)\/)[^\s"'\x60)]+/g,
+		replacement: "$<prefix>[REDACTED]",
 	},
 	// Credentials embedded in URLs: scheme://user:password@host
 	{
