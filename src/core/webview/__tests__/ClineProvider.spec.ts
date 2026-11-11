@@ -7527,15 +7527,26 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "model-x",
 			})
-			// Public reader 2: getState() and the state posted to the webview still resolve the
-			// shared profile, while the mode they report is already the view-local one. That split is
-			// what row 4509495951 asks to close; pinning both sides here makes the fix flip a visible
-			// assertion instead of passing unnoticed.
+			// Public reader 2: getState() and the state posted to the webview resolve the pinned pair
+			// belonging to this view rather than the pair the shared store carries, because task creation
+			// and the webview read these fields. Row 4509495951 asked for exactly this, and these are the
+			// assertions that flip when it lands; the mode line is asserted beside them to show that the
+			// two now agree.
 			const state = await provider.getState()
-			expect(state.currentApiConfigName).toBe("shared-profile")
-			expect(state.apiConfiguration).toMatchObject({ apiProvider: providerIdentifiers.anthropic })
+			expect(state.currentApiConfigName).toBe("my-profile")
+			expect(state.apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
 			expect(state.mode).toBe("architect")
-			expect((await provider.getStateToPostToWebview()).currentApiConfigName).toBe("shared-profile")
+			expect((await provider.getStateToPostToWebview()).currentApiConfigName).toBe("my-profile")
+			// Fallback half of the rule: once this view stops pinning, readers get the shared pair again,
+			// so the fix cannot strand a view that never picked a profile.
+			await provider.saveViewState("apiConfiguration", undefined)
+			await provider.saveViewState("currentApiConfigName", undefined)
+			const afterClear = await provider.getState()
+			expect(afterClear.currentApiConfigName).toBe("shared-profile")
+			expect(afterClear.apiConfiguration).toMatchObject({ apiProvider: providerIdentifiers.anthropic })
 			await provider.dispose()
 		})
 

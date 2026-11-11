@@ -4370,6 +4370,16 @@ export class ClineProvider
 			providerSettings.apiProvider = apiProvider
 		}
 
+		// The profile pair this view restored or edited lives in its own buffer: loadViewState seeds it
+		// from the pinned profile, and every per-view write merges into it. The shared store only carries
+		// the pair the last committing view activated, so returning that here would let an idle view
+		// display and start tasks with a profile it never picked. Return this view's pair, and fall back
+		// to the shared pair when this view holds no pin - the rule the mode line below already follows
+		// for mode.
+		const viewApiConfiguration: ProviderSettings = this.viewLocalState.apiConfiguration ?? providerSettings
+		const viewApiConfigName =
+			this.viewLocalState.currentApiConfigName ?? stateValues.currentApiConfigName ?? "default"
+
 		let organizationAllowList = ORGANIZATION_ALLOW_ALL
 
 		try {
@@ -4421,7 +4431,7 @@ export class ClineProvider
 
 		// Return the same structure as before.
 		return {
-			apiConfiguration: providerSettings,
+			apiConfiguration: viewApiConfiguration,
 			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
 			customInstructions: stateValues.customInstructions,
 			apiModelId: stateValues.apiModelId,
@@ -4477,7 +4487,7 @@ export class ClineProvider
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
-			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
+			currentApiConfigName: viewApiConfigName,
 			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
 			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
 			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),

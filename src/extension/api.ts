@@ -636,8 +636,32 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	// Global Settings Management
 
 	public getConfiguration(): RooCodeSettings {
-		return Object.fromEntries(
+		const values = Object.fromEntries(
 			Object.entries(this.sidebarProvider.getValues()).filter(([key]) => !isSecretStateKey(key)),
+		)
+		const apiConfiguration = values.apiConfiguration
+		// The secret storage keys are keys of ProviderSettings (SecretState in
+		// packages/types/src/global-settings.ts), so a profile-shaped value can carry a secret that the
+		// top-level filter above cannot see: getValues() merges this view's restored apiConfiguration,
+		// and any extension holding the API could read a key that a profile happened to save. Strip the
+		// nested secrets, and hand the merged object back untouched when there is nothing to strip, so
+		// readers that compare identity are not disturbed. A value that is absent, a primitive, or an
+		// array is not a profile-shaped object and is left alone.
+		if (!apiConfiguration || typeof apiConfiguration !== "object" || Array.isArray(apiConfiguration)) {
+			return values
+		}
+		const visibleApiConfiguration = Object.fromEntries(
+			Object.entries(apiConfiguration).filter(([key]) => !isSecretStateKey(key)),
+		)
+		// Nothing was stripped when the key counts agree, so hand back the merged object untouched;
+		// otherwise put the filtered profile back in place of the original one.
+		if (Object.keys(visibleApiConfiguration).length === Object.keys(apiConfiguration).length) {
+			return values
+		}
+		return Object.fromEntries(
+			Object.entries(values).map(([key, value]) =>
+				key === "apiConfiguration" ? [key, visibleApiConfiguration] : [key, value],
+			),
 		)
 	}
 
