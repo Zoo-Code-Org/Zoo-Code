@@ -135,10 +135,12 @@ test("renders the Generate Commit Message action in the Source Control title bar
 	try {
 		// Keep the pointer away from the sidebar so no action shows a hover state or tooltip.
 		await running.page.mouse.move(900, 400)
-		const action = running.page.locator(`.part.sidebar .pane-header [aria-label="${SCM_ACTION_TITLE}"]`)
-		await expect(action).toBeVisible()
-		const header = running.page.locator(".part.sidebar .pane-header").filter({ has: action })
+		// `has` takes a locator relative to each header, so it names only the action itself.
+		const header = running.page
+			.locator(".part.sidebar .pane-header")
+			.filter({ has: running.page.locator(`[aria-label="${SCM_ACTION_TITLE}"]`) })
 		await expect(header).toHaveCount(1)
+		await expect(header.locator(`[aria-label="${SCM_ACTION_TITLE}"]`)).toBeVisible()
 		await expect(header).toHaveScreenshot("electron-scm-title-dark-header.png")
 	} catch (error) {
 		await attachFailureArtifacts(running, testInfo)
