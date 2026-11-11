@@ -2175,7 +2175,12 @@ describe("caller-supplied staging path", () => {
 
 	it("rejects a staging file outside the target's directory before writing anything", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The guard canonicalizes both directories before comparing them, so a stub that answers
+		// every realpath with the target file cannot serve this case: it reports one canonical
+		// path for /tmp/other-dir and for /tmp/test-dir, which is the distinction the case is
+		// about. An identity canonicalization is what a real filesystem returns for a path that
+		// is its own canonical form, and it keeps the two directories apart here.
+		vi.mocked(fs.realpath).mockImplementation((p) => Promise.resolve(String(p)))
 
 		// A rename across filesystems fails with EXDEV, and a path elsewhere lets
 		// a caller publish an unrelated file onto the target.

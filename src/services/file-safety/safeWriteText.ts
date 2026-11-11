@@ -588,6 +588,20 @@ async function canonicalizeNearestAncestor(absoluteFilePath: string): Promise<st
 }
 
 /**
+ * The directory's canonical spelling when the filesystem can report one.
+ * canonicalizeNearestAncestor goes through fs.realpath, which rewrites a Windows 8.3 short
+ * name and a directory alias to the directory's own form -- the form resolvePublishTarget
+ * already put targetPath in. A canonicalization that reports nothing (an inspection
+ * failure, or a stub that answers nothing) falls back to the spelling it was given, so a
+ * caller that compares two of these accepts more than a lexical comparison would and never
+ * less.
+ */
+async function canonicalSpellingOf(directory: string): Promise<string> {
+	const canonical: string | undefined = await canonicalizeNearestAncestor(directory).catch(() => undefined)
+	return canonical === undefined || canonical.length === 0 ? directory : canonical
+}
+
+/**
  * Lock key for a publish target: the symlink referent when the path is an
  * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
  * tolerates a dangling link, because the lock key has to be computable while a
@@ -682,7 +696,19 @@ export async function safeWriteText(
 		// link points at, which is the same trust problem as writing through a
 		// dangling symlink in resolvePublishTarget.
 		const supplied = path.resolve(options.tempPath)
-		if (path.dirname(supplied) !== path.resolve(dirPath)) {
+		// The target side of this comparison is already canonical: targetPath came from
+		// resolvePublishTarget, which runs fs.realpath, and fs.realpath rewrites a directory
+		// alias and a Windows 8.3 short name to the directory's own form. On a GitHub Windows
+		// runner %TEMP% expands to the short form (...\RUNNER~1\...) while fs.realpath reports
+		// the long one (...\runneradmin\...), so a caller that staged beside its target from
+		// os.tmpdir() held one directory under two spellings and this guard refused it: the
+		// four cases in safeWriteText.stagingIdentity.spec.ts failed on platform-unit-test
+		// (windows-latest) while the same suites passed on ubuntu-latest, whose tmpdir is
+		// already canonical. Canonicalize the supplied side the way the target side was
+		// canonicalized before comparing them, as the identity checks below do.
+		const stagingDirCanonical = await canonicalSpellingOf(path.dirname(supplied))
+		const targetDirCanonical = await canonicalSpellingOf(dirPath)
+		if (stagingDirCanonical !== targetDirCanonical) {
 			throw new StagingPathError(
 				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
 				supplied,
