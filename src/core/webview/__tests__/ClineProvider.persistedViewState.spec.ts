@@ -1,11 +1,11 @@
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
-// pnpm --dir src exec vitest run --config vitest.unit.config.mjs core/webview/__tests__/ClineProvider.persistedViewState.spec.ts
+// pnpm --dir src exec vitest run --config vitest.core.config.ts core/webview/__tests__/ClineProvider.persistedViewState.spec.ts
 
 import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import type { GlobalState } from "@roo-code/types"
+import type { GlobalState, ModeConfig } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
@@ -140,6 +140,8 @@ describe("ClineProvider - persisted view state write ordering", () => {
 	let provider: ClineProvider
 	let durable: Record<string, unknown>
 	let failNextViewStatesWrite = false
+	let mockContext: vscode.ExtensionContext
+	let mockOutputChannel: vscode.OutputChannel
 
 	// The tombstone set and the write queue are per-class, so every test starts from an
 	// empty ledger: otherwise a ledger entry from the previous test reads as a failure
@@ -174,7 +176,7 @@ describe("ClineProvider - persisted view state write ordering", () => {
 			globalState[key] = value
 			return Promise.resolve()
 		})
-		const mockContext = {
+		mockContext = {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" },
 			globalState: {
@@ -204,7 +206,7 @@ describe("ClineProvider - persisted view state write ordering", () => {
 		} as unknown as vscode.ExtensionContext
 
 		// Structural double providing only the logging members ClineProvider calls.
-		const mockOutputChannel = {
+		mockOutputChannel = {
 			appendLine: vi.fn(),
 			clear: vi.fn(),
 			dispose: vi.fn(),
@@ -335,5 +337,120 @@ describe("ClineProvider - persisted view state write ordering", () => {
 		expect(Object.hasOwn(viewStates() ?? {}, tempId)).toBe(true)
 		expect(Object.hasOwn(viewStates() ?? {}, "stable-view")).toBe(false)
 		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
+	})
+
+	// Every reject path in setViewStateId stops before a write, so the assertions are about the id
+	// this provider ends up holding and the map on disk, not about which log line it emitted.
+	const rejectedViewIds: { label: string; value: string | undefined }[] = [
+		{ label: "a non-string id", value: undefined },
+		{ label: "an Object.prototype member name", value: "__proto__" },
+		{
+			label: "an id longer than the bound",
+			value: "v".repeat(ClineProvider["MAX_VIEW_STATE_ID_LENGTH"] + 6),
+		},
+	]
+
+	it.each(rejectedViewIds)(
+		"refuses $label through the public setter and writes nothing durable",
+		async ({ value }) => {
+			const initialId = provider["viewStateId"]
+
+			await provider.setViewStateId(value)
+
+			expect(provider["viewStateId"]).toBe(initialId)
+			expect(viewStates()).toEqual({})
+			expect(tombstones().size).toBe(0)
+		},
+	)
+
+	test("refuses a view id another live view already claimed", async () => {
+		const initialId = provider["viewStateId"]
+		const other = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		other["viewStateId"] = "shared-view-id"
+
+		try {
+			expect(ClineProvider.getAllInstances()).toContain(other)
+
+			await provider.setViewStateId("shared-view-id")
+
+			// Staying on the temporary id is the whole refusal: adopting the claimant's id would
+			// load that view's pinned profile into this provider and let this webview overwrite
+			// that view's persisted entry.
+			expect(provider["viewStateId"]).toBe(initialId)
+			expect(other["viewStateId"]).toBe("shared-view-id")
+			expect(viewStates()).toEqual({})
+		} finally {
+			await other.dispose()
+		}
+	})
+
+	test("adopts a valid id through the public setter and re-keys the entry this view wrote", async () => {
+		const tempId = provider["viewId"]
+		const stableId = "11111111-1111-4111-8111-111111111111"
+		// Registering an id ends with a load, and that load reads the custom-modes registry.
+		// Stubbing the registry read keeps this test about adoption and re-keying rather than
+		// about what the mode file happens to contain.
+		vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+
+		await provider["savePersistedViewState"]({ mode: "code", currentApiConfigName: "profile-a" })
+
+		await provider.setViewStateId(stableId)
+
+		expect(provider["viewStateId"]).toBe(stableId)
+		expect(viewStates()?.[stableId]?.currentApiConfigName).toBe("profile-a")
+		expect(Object.hasOwn(viewStates() ?? {}, tempId)).toBe(false)
+		expect(tombstones().has(tempId)).toBe(true)
+		expect(tombstones().has(stableId)).toBe(false)
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(false)
+	})
+
+	test("keeps a mode slug only while the custom-modes registry knows it", async () => {
+		const viewStateId = provider["viewId"]
+		const getCustomModes = vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+		const customMode: ModeConfig = {
+			slug: "custom-review",
+			name: "Custom Review",
+			roleDefinition: "Review role",
+			groups: ["read"],
+		}
+
+		// Captured rather than assumed: the proxy seeds its cache from the double's storage, and
+		// this suite only needs the dropped slug to leave the shared value where it started.
+		const before = provider.contextProxy.getValue("mode")
+
+		await provider.setValues({ mode: "custom-review" })
+
+		// The mode gate runs before anything is forwarded, so a slug the registry does not know
+		// must reach neither the shared store nor this view's persisted entry.
+		expect(provider.contextProxy.getValue("mode")).toBe(before)
+		expect(viewStates()?.[viewStateId]?.mode).toBeUndefined()
+
+		getCustomModes.mockResolvedValue([customMode])
+
+		await provider.setValues({ mode: "custom-review" })
+
+		expect(provider.contextProxy.getValue("mode")).toBe("custom-review")
+		expect(viewStates()?.[viewStateId]?.mode).toBe("custom-review")
+	})
+
+	test("restores the shared value and rethrows when the per-view write fails", async () => {
+		const viewStateId = provider["viewId"]
+
+		await provider.setValues({ currentApiConfigName: "profile-a" })
+		failNextViewStatesWrite = true
+
+		await expect(provider.setValues({ currentApiConfigName: "profile-b" })).rejects.toThrow("durable write failed")
+
+		// The shared store already carried the new name when the per-view record failed, so it is
+		// rolled back to the value this call started from instead of being left ahead of the
+		// durable per-view record.
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-a")
+		expect(viewStates()?.[viewStateId]?.currentApiConfigName).toBe("profile-a")
 	})
 })
