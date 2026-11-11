@@ -642,11 +642,13 @@ describe("safeWriteText", () => {
 				DaclRestoreError,
 			)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-			// Save, then the restore attempt (icacls is retried once if it fails, so >= 2).
+			// One save, then the restore attempt and its single transient retry: production retries a
+			// non-privilege restore failure exactly once (see safeWriteText.ts step 5), so the count is
+			// pinned rather than bounded, and a removed retry has to fail here.
 			const restoreCalls = vi.mocked(execFile).mock.calls.filter(function (call) {
 				return Array.isArray(call[1]) && String(call[1]).includes("/restore")
 			})
-			expect(restoreCalls.length).toBeGreaterThan(0)
+			expect(restoreCalls.length).toBe(2)
 		})
 
 		it("skips the DACL save and restore after a restore reports the missing privilege and still succeeds", async () => {
@@ -1644,7 +1646,11 @@ describe("safeWriteText", () => {
 					"UnsafeStagingDirectoryError",
 				)
 
-				// Nothing is staged and nothing is published from the foreign directory.
+				// Nothing is staged and nothing is published from the foreign directory, and the guard saw
+				// an existing directory, so it must not remove it either.
+				expect(fsSync.openSync).not.toHaveBeenCalled()
+				expect(fs.rename).not.toHaveBeenCalled()
+				expect(fsSync.rmdirSync).not.toHaveBeenCalled()
 			},
 		)
 
@@ -2012,25 +2018,17 @@ describe("resolvePublishTarget symlink cycle (S1)", () => {
 	})
 })
 
-describe("parent directory creation (safeWriteText.ts:288-290)", () => {
+describe("parent directory creation", () => {
 	beforeEach(() => {
-		// This block sits outside describe("safeWriteText"), so the resetAllMocks there
-		// never runs for it: without its own reset it inherits whatever the previous block
-		// left in the mocks, and a run with -t that selects only these tests gets bare
-		// vi.fn() stubs (undefined stats) and fails for unrelated reasons.
-		vi.resetAllMocks()
-		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
-		vi.mocked(fs.access).mockResolvedValue(undefined)
-		vi.mocked(fs.rename).mockResolvedValue(undefined)
-		vi.mocked(fs.unlink).mockResolvedValue(undefined)
-		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
-		vi.mocked(fsSync.lstatSync).mockReturnValue(_dirStats())
-		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
-			typeof args[3] === "number" ? args[3] : 0,
-		)
+		// This block sits outside describe("safeWriteText"), so the resetAllMocks there never runs
+		// for it: without its own reset it inherits whatever the previous block left in the mocks,
+		// and a run with -t that selects only these tests gets bare vi.fn() stubs, undefined
+		// stats, and fails for unrelated reasons. The shared helper is the baseline the other
+		// top-level suites call, so a default added to it later reaches this block instead of
+		// drifting from it; the copy below had already lost the fs.lstat default it sets.
+		_restoreFsDefaults()
+		// Defaults this block needs that the shared helper does not carry.
 		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
-		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
-		vi.mocked(fs.access).mockResolvedValue(undefined)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
 	})
 
