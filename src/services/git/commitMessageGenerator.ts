@@ -126,18 +126,14 @@ const COOKIE_HEADER = new RegExp(
 	String.raw`(?<prefix>\b(?:set-)?cookie${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${PRIMITIVE_TYPE_VALUE})[^\s][^\n]*)`,
 	"gi",
 )
-// A value paired with a credential name in one line: <add key="DbPassword" value="…"/>,
-// {"name": "API_TOKEN", "value": "…"}
-const CREDENTIAL_NAME_VALUE = new RegExp(
-	String.raw`(?<prefix>\b(?:key|name)["']?[ \t]*[:=][ \t]*["'][^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS})[^"'\n]{0,256}["'][^\n]{0,256}?\bvalue["']?[ \t]*[:=][ \t]*)(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
-	"gi",
+// A record without nested braces or tags (`{"name": "API_TOKEN", "value": "…"}` or
+// `<add key="DbPassword" value="…" />`), its credential name or key field, and its value field.
+const FLAT_RECORD = /\{[^{}]*\}|<[^<>]*>/g
+const RECORD_CREDENTIAL_NAME = new RegExp(
+	String.raw`\b(?:key|name)["']?[ \t]*[:=][ \t]*["'][^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS})`,
+	"i",
 )
-// The same pair with the value first: {"value": "…", "name": "API_TOKEN"}. An unquoted value ends at
-// whitespace, a quote, `,`, or `}`, so the name after it stays readable.
-const VALUE_BEFORE_CREDENTIAL_NAME = new RegExp(
-	String.raw`(?<prefix>\bvalue["']?[ \t]*[:=][ \t]*)(?:${QUOTED_VALUE}|[^\s"',}]+)(?=[^\n]{0,256}?\b(?:key|name)["']?[ \t]*[:=][ \t]*["'][^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS}))`,
-	"gi",
-)
+const RECORD_VALUE = new RegExp(String.raw`(\bvalue["']?[ \t]*[:=][ \t]*)(?:${QUOTED_VALUE}|[^\s"',}>/]+)`, "gi")
 // key = value, key: value, "key": "value" (env files, YAML, JSON, code). The key has no leading
 // boundary, so prefixed and camelCase names match too (NPM_TOKEN, npmToken, DB_PASSWORD).
 const CREDENTIAL_KEY_VALUE = new RegExp(
@@ -166,8 +162,6 @@ const REDACTION_RULES: ReadonlyArray<[RegExp, string]> = [
 	[AUTHORIZATION_HEADER, "$<prefix>$<open>$<scheme>$<bareScheme>[REDACTED]$<open>"],
 	[BEARER_TOKEN, "$<prefix>[REDACTED]"],
 	[COOKIE_HEADER, REDACTED_VALUE],
-	[CREDENTIAL_NAME_VALUE, REDACTED_VALUE],
-	[VALUE_BEFORE_CREDENTIAL_NAME, REDACTED_VALUE],
 	[CREDENTIAL_KEY_VALUE, REDACTED_VALUE],
 	[BARE_TOKEN, "[REDACTED_SECRET]"],
 	[WEBHOOK_URL, "$<prefix>[REDACTED]"],
@@ -212,18 +206,19 @@ function redactEmailAddresses(content: string): string {
  * Redacts secrets, private keys, credential tokens, and email addresses from content before it is
  * sent to an LLM.
  */
-// A YAML block value under a credential key (`password: |`, `secret: >- # note`)
-const YAML_BLOCK_KEY = new RegExp(
-	String.raw`^[^\n]*?(?:${CREDENTIAL_KEYWORDS})["']?[ \t]*:[ \t]*[|>][-+0-9]*(?:[ \t]+#[^\n]*)?[ \t\r]*$`,
+const YAML_BLOCK_INDICATOR = /^[|>][-+0-9]*(?:[ \t]+#[^\n]*)?[ \t\r]*$/
+const YAML_ITEM_START = /^[ \t]*-[ \t]+/
+const YAML_KEY_LINE = /^[ \t]*(?:-[ \t]+)?(?:"[^"\n]*"|'[^'\n]*'|[^\s:#"'][^:#\n]*?)[ \t]*:(?:[ \t]|$)/
+// A key named after a credential (`password:`), and the `name:` of a credential pair (`name: DB_PASSWORD`)
+const YAML_CREDENTIAL_KEY = new RegExp(
+	String.raw`^[ \t]*(?:-[ \t]+)?["']?[^"'\n:#]{0,256}?(?:${CREDENTIAL_KEYWORDS})[^"'\n:#]{0,256}["']?[ \t]*:[ \t]*`,
 	"i",
 )
-const YAML_BLOCK_INDICATOR = /^[|>][-+0-9]*(?:[ \t]+#[^\n]*)?[ \t\r]*$/
-// A name/value pair whose name is a credential (Kubernetes `- name: DB_PASSWORD` and `value: …`)
 const YAML_CREDENTIAL_NAME = new RegExp(
 	String.raw`^[ \t]*(?:-[ \t]+)?["']?name["']?[ \t]*:[ \t]*["']?[^"'\n]{0,256}?(?:${CREDENTIAL_KEYWORDS})`,
 	"i",
 )
-const YAML_VALUE = /^([ \t]*(?:-[ \t]+)?["']?value["']?[ \t]*:[ \t]*)\S/i
+const YAML_VALUE_KEY = /^[ \t]*(?:-[ \t]+)?["']?value["']?[ \t]*:[ \t]*/i
 const DIFF_HEADER = /^(?:diff --git |@@ )/
 // Files with generic types (`Promise<Token>`). There, an XML credential element must close to count.
 const CODE_FILE = /\.(?:[cm]?[jt]sx?|java|kts?|cs|c|cc|cpp|cxx|h|hh|hpp|hxx|rs|swift|scala|dart|fs|vb)$/i
@@ -254,47 +249,75 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
 }
 
 /**
- * Finds YAML values that a single-line pattern cannot see: block values under credential keys, and the
- * `value:` of a list item or mapping whose `name:` is a credential, in either order and across comments.
+ * Finds YAML (and multi-line JSON) values that a single-line pattern cannot see. Lines are grouped into
+ * mappings by key column; a list item starts a new mapping. A key whose value starts on later lines (a
+ * block scalar `|-`, or an empty value) owns the lines indented deeper than its key. Those lines are
+ * redacted under a credential key (`password: |`), and under the `value:` key of a mapping whose `name:`
+ * is a credential (Kubernetes env), in either order. A diff header ends every mapping.
  */
 function addYamlEdits(lines: string[], entries: LineEntry[], add: AddEdit) {
-	let blockIndent: number | undefined
-	let credentialIndent: number | undefined
-	let pendingValue: { i: number; from: number } | undefined
-	for (const { i, prefix } of entries) {
+	type Mapping = { col: number; credential: boolean; values: Array<() => void> }
+	const mappings: Mapping[] = []
+	const credentialKeys: Array<() => void> = []
+	let stack: Mapping[] = []
+	let owner: { col: number; block: boolean; lines: LineEntry[] } | undefined
+	for (const entry of entries) {
+		const { i, prefix } = entry
 		const body = lines[i].slice(prefix)
 		const indent = body.length - body.trimStart().length
 		if (DIFF_HEADER.test(lines[i])) {
-			blockIndent = credentialIndent = pendingValue = undefined
+			stack = []
+			owner = undefined
 			continue
 		}
-		if (body.trim() === "" || /^[ \t]*#/.test(body)) {
+		if (body.trim() === "") {
 			continue
 		}
-		if (blockIndent !== undefined && indent > blockIndent) {
-			add(i, prefix + indent, lines[i].length)
+		if (owner && indent > owner.col && (owner.block || !YAML_KEY_LINE.test(body))) {
+			owner.lines.push(entry)
 			continue
 		}
-		blockIndent = undefined
-		if (/^[ \t]*-[ \t]/.test(body) || (credentialIndent !== undefined && indent < credentialIndent)) {
-			credentialIndent = pendingValue = undefined
+		owner = undefined
+		const dash = YAML_ITEM_START.exec(body)
+		const col = dash ? dash[0].length : indent
+		if (/^[ \t]*#/.test(body)) {
+			continue
 		}
-		if (YAML_CREDENTIAL_NAME.test(body)) {
-			credentialIndent = indent
-			if (pendingValue) {
-				add(pendingValue.i, pendingValue.from, lines[pendingValue.i].length)
+		while (
+			stack.length > 0 &&
+			(stack[stack.length - 1].col > col || (dash && stack[stack.length - 1].col === col))
+		) {
+			stack.pop()
+		}
+		if (stack.at(-1)?.col !== col) {
+			stack.push({ col, credential: false, values: [] })
+			mappings.push(stack[stack.length - 1])
+		}
+		const mapping = stack[stack.length - 1]
+		mapping.credential ||= YAML_CREDENTIAL_NAME.test(body)
+		const key = YAML_CREDENTIAL_KEY.exec(body) ?? YAML_VALUE_KEY.exec(body)
+		if (!key) {
+			continue
+		}
+		const from = prefix + key[0].length
+		const rest = lines[i].slice(from)
+		const owned: LineEntry[] = []
+		const block = YAML_BLOCK_INDICATOR.test(rest)
+		owner = rest.trim() === "" || block ? { col, block, lines: owned } : undefined
+		// The single-line rules redact the inline value of a credential key (keeping `password: string`).
+		// The value of a credential pair has no credential key name, so it is redacted here.
+		const isValue = YAML_VALUE_KEY.test(body)
+		const redact = () => {
+			if (isValue) {
+				add(i, from, lines[i].length)
 			}
+			owned.forEach((line) => add(line.i, line.prefix, lines[line.i].length))
 		}
-		const value = YAML_VALUE.exec(body)
-		const from = prefix + (value?.[1].length ?? 0)
-		if (value && credentialIndent !== undefined) {
-			add(i, from, lines[i].length)
-			blockIndent = YAML_BLOCK_INDICATOR.test(lines[i].slice(from)) ? indent : undefined
-		} else if (value) {
-			pendingValue = { i, from }
-		}
-		blockIndent = YAML_BLOCK_KEY.test(body) ? indent : blockIndent
+		;(isValue ? mapping.values : credentialKeys).push(redact)
 	}
+	// Runs after the scan, when every key has collected the lines it owns.
+	credentialKeys.forEach((redact) => redact())
+	mappings.filter((mapping) => mapping.credential).forEach((mapping) => mapping.values.forEach((redact) => redact()))
 }
 
 /** Index after the `>` that ends a tag (a `>` inside a quoted attribute does not), or -1 at a `<` or the end. */
@@ -323,7 +346,7 @@ function xmlTagEnd(text: string, from: number): number {
  */
 function xmlCredentialValueRanges(text: string, keepUnclosed: boolean): Array<[number, number]> {
 	const ranges: Array<[number, number]> = []
-	const open = new Map<string, { start: number; depth: number }>()
+	const open = new Map<string, number[]>()
 	XML_MARKUP.lastIndex = 0
 	for (let match = XML_MARKUP.exec(text); match; match = XML_MARKUP.exec(text)) {
 		if (match[0].startsWith("<!")) {
@@ -341,17 +364,15 @@ function xmlCredentialValueRanges(text: string, keepUnclosed: boolean): Array<[n
 		}
 		XML_MARKUP.lastIndex = end
 		const name = match[2].toLowerCase()
-		const element = open.get(name)
-		if (match[1] && element && --element.depth === 0) {
-			ranges.push([element.start, match.index])
-			open.delete(name)
-		} else if (!match[1] && element) {
-			element.depth++
-		} else if (!match[1] && XML_CREDENTIAL_NAME.test(name)) {
-			open.set(name, { start: end, depth: 1 })
+		const starts = open.get(name)
+		if (match[1] && starts?.length) {
+			ranges.push([starts.pop() ?? end, match.index])
+		} else if (!match[1] && (starts || XML_CREDENTIAL_NAME.test(name))) {
+			open.set(name, starts ?? [])
+			open.get(name)?.push(end)
 		}
 	}
-	for (const { start } of keepUnclosed ? open.values() : []) {
+	for (const start of keepUnclosed ? [...open.values()].flat() : []) {
 		ranges.push([start, text.length])
 	}
 	return ranges
@@ -408,19 +429,26 @@ function redactStructuredValues(content: string): string {
 		}
 	}
 	for (const [i, intervals] of edits) {
-		for (const [from, to] of mergeRanges(intervals).reverse()) {
-			const part = lines[i].slice(from, to)
+		const line = lines[i]
+		let rebuilt = ""
+		let cursor = 0
+		for (const [from, to] of mergeRanges(intervals)) {
+			const part = line.slice(from, to)
 			const kept = part.slice(0, part.length - part.trimStart().length)
-			lines[i] =
-				part.trim() === "" ? lines[i] : `${lines[i].slice(0, from)}${kept}[REDACTED]${lines[i].slice(to)}`
+			rebuilt += line.slice(cursor, from) + (part.trim() === "" ? part : `${kept}[REDACTED]`)
+			cursor = to
 		}
+		lines[i] = rebuilt + line.slice(cursor)
 	}
 	return lines.join("\n")
 }
 
 export function redactSensitiveInformation(content: string): string {
 	// Run first, while the YAML block indicator (`|` or `>`) and the XML tags are unchanged.
-	let redacted = redactStructuredValues(content)
+	// A credential name and its value in one record, in any field order and at any distance.
+	let redacted = redactStructuredValues(content).replace(FLAT_RECORD, (record) =>
+		RECORD_CREDENTIAL_NAME.test(record) ? record.replace(RECORD_VALUE, `$1$<open>[REDACTED]$<open>`) : record,
+	)
 	for (const [pattern, replacement] of REDACTION_RULES) {
 		redacted = redacted.replace(pattern, replacement)
 	}

@@ -416,6 +416,31 @@ describe("commitMessageGenerator", () => {
 				'+<password note="/>">[REDACTED]</password>',
 			],
 			[
+				"a reversed YAML pair with a block value",
+				"+  - value: |-\n+      hunter2\n+    name: API_TOKEN",
+				"+  - value: [REDACTED]\n+      [REDACTED]\n+    name: API_TOKEN",
+			],
+			[
+				"a comment-like line inside a credential block",
+				"+  - name: DB_PASSWORD\n+    value: |-\n+      #hunter2",
+				"+  - name: DB_PASSWORD\n+    value: [REDACTED]\n+      [REDACTED]",
+			],
+			[
+				"a credential value on the next line",
+				"+  - name: DB_PASSWORD\n+    value:\n+      hunter2",
+				"+  - name: DB_PASSWORD\n+    value:\n+      [REDACTED]",
+			],
+			[
+				"a credential key with a plain scalar on the next line",
+				"+password:\n+  hunter2\n+user: admin",
+				"+password:\n+  [REDACTED]\n+user: admin",
+			],
+			[
+				"a multi-line XML element with a credential key attribute",
+				'+<add\n+  key="DbPassword"\n+  value="hunter2" />',
+				'+<add\n+  key="DbPassword"\n+  value="[REDACTED]" />',
+			],
+			[
 				"an unclosed XML credential element up to the next hunk",
 				" <secret>\n s3cr3t\n@@ -1 +1 @@\n+next",
 				" <secret>\n [REDACTED]\n@@ -1 +1 @@\n+next",
@@ -542,6 +567,40 @@ describe("commitMessageGenerator", () => {
 			const startedAt = performance.now()
 			expect(redactSensitiveInformation("+<password>s</password>\n".repeat(10_000))).toBe(
 				"+<password>[REDACTED]</password>\n".repeat(10_000),
+			)
+			expect(performance.now() - startedAt).toBeLessThan(1000)
+		})
+
+		it("redacts a JSON value whose credential name comes far after it", () => {
+			const record = `+{"value":"hunter2","description":"${"x".repeat(400)}","name":"API_TOKEN"}`
+			expect(redactSensitiveInformation(record)).toBe(record.replace("hunter2", "[REDACTED]"))
+		})
+
+		it("matches a credential name and value only within one record", () => {
+			const records = '+[{"name":"API_TOKEN","value":"hunter2"},{"name":"LOG_LEVEL","value":"debug"}]'
+			expect(redactSensitiveInformation(records)).toBe(records.replace("hunter2", "[REDACTED]"))
+		})
+
+		it("redacts the value of a pretty-printed JSON credential pair", () => {
+			const redacted = redactSensitiveInformation('+{\n+  "value": "hunter2",\n+  "name": "API_TOKEN"\n+}')
+			expect(redacted).not.toContain("hunter2")
+			expect(redacted).toContain('"name": "API_TOKEN"')
+		})
+
+		it("redacts a closed XML element after an unclosed generic with the same name in code files", () => {
+			const diff = [
+				"diff --git a/auth.ts b/auth.ts",
+				"@@ -0,0 +1,2 @@",
+				"+type Loader = Promise<Credentials>",
+				'+const xml = "<Credentials>hunter2</Credentials>"',
+			].join("\n")
+			expect(redactSensitiveInformation(diff)).toBe(diff.replace("hunter2", "[REDACTED]"))
+		})
+
+		it("redacts many XML credential values on one line in linear time", () => {
+			const startedAt = performance.now()
+			expect(redactSensitiveInformation(`+${"<password>s</password>".repeat(8_000)}`)).toBe(
+				`+${"<password>[REDACTED]</password>".repeat(8_000)}`,
 			)
 			expect(performance.now() - startedAt).toBeLessThan(1000)
 		})
@@ -1574,6 +1633,8 @@ describe("commitMessageGenerator", () => {
 				"@@ -0,0 +1,2 @@",
 				"+type Loader = Promise<Credentials>",
 				'+const xml = "<token>tssecret</token>"',
+				"+type Other = Promise<Credentials>",
+				'+const generic = "<Credentials>genericsecret</Credentials>"',
 				"diff --git a/deploy.yaml b/deploy.yaml",
 				"@@ -0,0 +1,9 @@",
 				"+  - name: DB_PASSWORD",
@@ -1585,6 +1646,16 @@ describe("commitMessageGenerator", () => {
 				"+    value: |-",
 				"+      blocksecret",
 				'+  extra: {"value":"jsonsecret","name":"API_TOKEN"}',
+				"+  - value: |-",
+				"+      reversedblocksecret",
+				"+    name: API_TOKEN",
+				"+  - name: DB_PASSWORD",
+				"+    value: |-",
+				"+      #commentblocksecret",
+				"+  - name: DB_PASSWORD",
+				"+    value:",
+				"+      nextlinesecret",
+				`+  far: {"value":"farsecret","note":"${"x".repeat(400)}","name":"API_TOKEN"}`,
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
 			;(singleCompletionHandler as Mock).mockResolvedValue("chore: update settings")
@@ -1593,7 +1664,8 @@ describe("commitMessageGenerator", () => {
 
 			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
 			const secrets = ["templatesecret", "longattrsecret", "quotedgtsecret", "svgsecret", "tssecret"]
-			secrets.push("commentsecret", "reversedsecret", "blocksecret", "jsonsecret")
+			secrets.push("commentsecret", "reversedsecret", "blocksecret", "jsonsecret", "genericsecret")
+			secrets.push("reversedblocksecret", "commentblocksecret", "nextlinesecret", "farsecret")
 			for (const secret of secrets) {
 				expect(prompt).not.toContain(secret)
 			}
