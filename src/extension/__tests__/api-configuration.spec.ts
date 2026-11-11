@@ -81,9 +81,10 @@ describe("API - configuration", () => {
 		const pending = new Promise<void>((resolve) => {
 			release = resolve
 		})
+		const cancellationError = new Error("Mode profile write cancelled by settings reset")
 		const setModeConfig = vi
 			.fn()
-			.mockRejectedValueOnce(new Error("Mode profile write cancelled by settings reset"))
+			.mockRejectedValueOnce(cancellationError)
 			.mockImplementationOnce(async () => {
 				await pending
 			})
@@ -109,6 +110,7 @@ describe("API - configuration", () => {
 			.finally(() => {
 				outcomes.push("settled")
 			})
+		const failure = updated.catch((error: unknown) => error)
 		const failed = expect(updated).rejects.toThrow("Configuration update may be partially persisted")
 		await vi.waitFor(() => expect(setModeConfig).toHaveBeenCalledTimes(2))
 		expect(setValues).toHaveBeenCalledOnce()
@@ -116,6 +118,9 @@ describe("API - configuration", () => {
 		expect(outcomes).toEqual([])
 		release()
 		await failed
+		const error = await failure
+		expect(error).toBeInstanceOf(Error)
+		if (error instanceof Error) expect(error.cause).toBe(cancellationError)
 
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})

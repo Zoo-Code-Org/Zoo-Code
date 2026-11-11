@@ -2543,10 +2543,8 @@ export class ClineProvider
 		// we rely on the `ContextProxy`'s data store and in other cases
 		// we rely on the `ProviderSettingsManager`'s data store. It might
 		// be simpler to unify these two.
-		if (activate) this.modeProfileState.committingMutationSignals.add(signal)
+		this.modeProfileState.committingMutationSignals.add(signal)
 		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
-
-		if (signal.aborted && !activate) return id
 
 		if (activate) {
 			const { mode } = await this.getState()

@@ -51,6 +51,7 @@ import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
+vi.mock("@roo-code/ipc", () => ({ IpcServer: class {} }))
 vi.mock("../../prompts/sections/custom-instructions")
 
 vi.mock("p-wait-for", () => ({
@@ -4992,6 +4993,57 @@ describe("ClineProvider", () => {
 			},
 		)
 
+		it("finishes an inactive profile save after tab disposal and prevents a duplicate API retry", async () => {
+			const { API } = await import("../../../extension/api")
+			const { makeClineProviderFactory } = await import("../../../test-utils/provider")
+			const tab = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				provider.contextProxy,
+				provider.webviewFocusTracker,
+			)
+			const manager = provider.providerSettingsManager
+			const originalSave = manager.saveConfig.bind(manager)
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const save = vi.spyOn(manager, "saveConfig").mockImplementationOnce(async (...args) => {
+				await pending
+				return originalSave(...args)
+			})
+			const post = vi.spyOn(tab, "postStateToWebview").mockResolvedValue(undefined)
+			try {
+				let settled = false
+				const saving = tab
+					.upsertProviderProfile("inactive", { apiProvider: providerIdentifiers.anthropic }, false)
+					.finally(() => {
+						settled = true
+					})
+				await vi.waitFor(() => expect(save).toHaveBeenCalledOnce())
+				await tab.dispose()
+				await new Promise<void>((resolve) => setImmediate(resolve))
+				expect(settled).toBe(false)
+				release()
+				const id = await saving
+				expect(id).toEqual(expect.any(String))
+				expect(provider.getProviderProfileEntry("inactive")).toMatchObject({ id, name: "inactive" })
+				expect(post).not.toHaveBeenCalled()
+				const api = new API(mockOutputChannel, provider, makeClineProviderFactory())
+				await expect(
+					api.createProfile("inactive", { apiProvider: providerIdentifiers.openai }, false),
+				).rejects.toThrow('Profile with name "inactive" already exists')
+				expect(save).toHaveBeenCalledOnce()
+				await expect(manager.getProfile({ name: "inactive" })).resolves.toMatchObject({
+					apiProvider: providerIdentifiers.anthropic,
+				})
+			} finally {
+				release()
+				await tab.dispose()
+			}
+		})
+
 		it("invalidates a closed tab's queued activations while a reopened tab can finish its choice", async () => {
 			await provider.setValue("mode", "code")
 			const manager = provider.providerSettingsManager
@@ -5511,6 +5563,16 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			await provider.setModeConfig("architect", "chosen-id")
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
+		})
+
+		it("falls back to the shared mapping when the opening snapshot profile was removed", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "removed-id" })
+			existingProfiles("shared-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
+
+			expect(provider["localModeConfigIds"].has("code")).toBe(false)
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("shared-id")
+			expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledExactlyOnceWith("code")
 		})
 
 		it("drops a local choice whose profile was removed and falls back to the shared mapping", async () => {
