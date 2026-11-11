@@ -530,12 +530,102 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return { ok: false, mutated }
 			}
 
+			// Both refusals below report the way the destination checks above do: a counted mistake, a
+			// recorded tool error, the message to the user and a diff-view reset. Hoisted so that a
+			// link which fails inspection is refused exactly like a path that fails the workspace edge.
+			const reportMoveRefusal = async (message: string): Promise<void> => {
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_patch")
+				await task.say("error", message)
+				pushToolResult(formatResponse.toolError(message))
+				await task.diffViewProvider.reset()
+			}
+
+			// Resolve the destination through any symlink before anything is read, written or renamed.
+			// The renames below move paths, so a destination symlink would be carried to the backup
+			// name and replaced by a regular file at the requested path while its own target kept the
+			// old bytes. The target is where the moved content has to land, and it is also the path
+			// the access, protection and workspace checks have to see: a link is not a way to move
+			// content past .rooignore, a write-protected path or the workspace edge.
+			let linkTargetPath: string | undefined
+			try {
+				const destinationShape = await fs.lstat(moveAbsolutePath)
+				if (destinationShape.isSymbolicLink()) {
+					// A link target is spelled relative to the directory holding the link.
+					const rawTarget = await fs.readlink(moveAbsolutePath)
+					linkTargetPath = path.resolve(path.dirname(moveAbsolutePath), rawTarget)
+				}
+			} catch (error) {
+				// ENOENT, there is no destination at all. ENOTDIR, a parent is a file rather than a
+				// directory. Neither has a link to preserve, so the destination keeps its requested
+				// spelling and the checks above already covered it. Any other failure is a state this
+				// move cannot describe, so it is refused the way the destination read below is refused.
+				const shapeError = error as NodeJS.ErrnoException
+				if (shapeError.code !== "ENOENT" && shapeError.code !== "ENOTDIR") {
+					await reportMoveRefusal(
+						"Failed to inspect move destination " + change.movePath + ": " + shapeError.message,
+					)
+					return { ok: false, mutated }
+				}
+			}
+			// Where the moved bytes land: the link target when the destination is a link, and the
+			// requested path otherwise. realpath gives one spelling for the checks and the writes to
+			// agree on even when the target is itself reached through further links, and a missing
+			// target, the dangling-link case, keeps the spelled path because there is nothing to
+			// resolve yet.
+			const destinationWritePath = linkTargetPath ?? moveAbsolutePath
+			let resolvedWritePath = destinationWritePath
+			try {
+				resolvedWritePath = await fs.realpath(destinationWritePath)
+			} catch (error) {
+				const resolvedError = error as NodeJS.ErrnoException
+				if (resolvedError.code !== "ENOENT" && resolvedError.code !== "ENOTDIR") {
+					await reportMoveRefusal(
+						"Failed to resolve move destination " + change.movePath + ": " + resolvedError.message,
+					)
+					return { ok: false, mutated }
+				}
+			}
+			// The requested spelling and the spelling that receives the bytes can differ, and when
+			// they do the three checks above covered only the requested one. A link whose target
+			// sits under .rooignore, behind write protection or outside the workspace is refused
+			// exactly as the requested path would be.
+			const targetDiffersFromRequested = path.resolve(resolvedWritePath) !== path.resolve(moveAbsolutePath)
+			if (targetDiffersFromRequested) {
+				const resolvedRelative = path.relative(task.cwd, resolvedWritePath)
+				if (task.rooIgnoreController && !task.rooIgnoreController.validateAccess(resolvedRelative)) {
+					await task.say("rooignore_error", resolvedRelative)
+					pushToolResult(formatResponse.rooIgnoreError(resolvedRelative))
+					await task.diffViewProvider.reset()
+					return { ok: false, mutated }
+				}
+				if (task.rooProtectedController?.isWriteProtected(resolvedRelative) || false) {
+					await reportMoveRefusal("Cannot move file to write-protected target " + resolvedRelative + ".")
+					return { ok: false, mutated }
+				}
+				if (isPathOutsideWorkspace(resolvedWritePath)) {
+					await reportMoveRefusal(
+						"Cannot move file to a path outside the workspace: " +
+							change.movePath +
+							" resolves to " +
+							getReadablePath(task.cwd, resolvedWritePath) +
+							".",
+					)
+					return { ok: false, mutated }
+				}
+			}
+
 			// A patch whose "Move to" resolves back onto its own source path is a rewrite of
 			// that path, not a relocation: once the staged content is renamed onto the destination
 			// there is no second file left, and unlinking the source would delete the content that
 			// was just committed. Computed from resolved paths because case-insensitive and
 			// normalized spellings can name the same file differently.
-			const isMoveOntoSource = path.resolve(moveAbsolutePath) === path.resolve(absolutePath)
+			// A destination link that resolves onto the source is the same rewrite the comment below
+			// describes: the staged bytes land on the source path through the link, so unlinking the
+			// source afterwards would delete the content the patch just committed.
+			const isMoveOntoSource =
+				path.resolve(moveAbsolutePath) === path.resolve(absolutePath) ||
+				path.resolve(resolvedWritePath) === path.resolve(absolutePath)
 
 			// Capture the destination state before either supported write path: a
 			// failed move must restore an existing destination instead of deleting
@@ -544,7 +634,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// write rather than risking an unrecoverable clobber.
 			let destinationBackup: Buffer | undefined
 			try {
-				destinationBackup = await fs.readFile(moveAbsolutePath)
+				destinationBackup = await fs.readFile(destinationWritePath)
 			} catch (error) {
 				const code = (error as NodeJS.ErrnoException).code
 				if (code !== "ENOENT") {
@@ -563,7 +653,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// or executable destination.
 			let destinationMode: number | undefined
 			if (destinationBackup !== undefined) {
-				destinationMode = await fs.stat(moveAbsolutePath).then(
+				destinationMode = await fs.stat(destinationWritePath).then(
 					(stat) => stat.mode,
 					() => undefined,
 				)
@@ -575,8 +665,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// source unlinked. Any failure renames the backup back, so the workspace
 			// never shows a half-applied move.
 			const moveStamp = `${process.pid}.${Date.now()}`
-			const moveDir = path.dirname(moveAbsolutePath)
-			const moveBase = path.basename(moveAbsolutePath)
+			const moveDir = path.dirname(destinationWritePath)
+			const moveBase = path.basename(destinationWritePath)
 			const stagingPath = path.join(moveDir, `.${moveBase}.${moveStamp}.staging`)
 			const backupPath = path.join(moveDir, `.${moveBase}.${moveStamp}.backup`)
 			await fs.mkdir(moveDir, { recursive: true })
@@ -592,9 +682,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (destinationBackup !== undefined) {
 					// Preserve the pre-move bytes on disk (atomic rename): the in-memory
 					// copy alone cannot restore the destination after a crash.
-					await fs.rename(moveAbsolutePath, backupPath)
+					await fs.rename(destinationWritePath, backupPath)
 				}
-				await fs.rename(stagingPath, moveAbsolutePath)
+				await fs.rename(stagingPath, destinationWritePath)
 				destinationCommitted = true
 				// The destination content changed: even a later failed source unlink (which
 				// rolls the destination back) is a workspace mutation the checkpoint must see.
@@ -614,14 +704,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			} catch (writeError) {
 				await fs.rm(stagingPath, { force: true }).catch(() => {})
 				if (destinationCommitted) {
-					await fs.rm(moveAbsolutePath, { force: true }).catch(() => {})
+					await fs.rm(destinationWritePath, { force: true }).catch(() => {})
 				}
 				let destinationMissing = false
 				if (destinationBackup !== undefined) {
 					// Put the captured destination bytes back with one rename. If that rename
 					// fails as well, the destination is missing and its content survives only
 					// under the backup name, so the report has to say where it is.
-					await fs.rename(backupPath, moveAbsolutePath).catch(() => {
+					await fs.rename(backupPath, destinationWritePath).catch(() => {
 						destinationMissing = true
 					})
 				}
@@ -664,9 +754,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// Atomic restore of the captured destination bytes: the rename
 						// replaces the clobbered destination in one step, so there is no
 						// window where the file is missing.
-						await fs.rename(backupPath, moveAbsolutePath)
+						await fs.rename(backupPath, destinationWritePath)
 					} else {
-						await fs.rm(moveAbsolutePath, { force: true })
+						await fs.rm(destinationWritePath, { force: true })
 					}
 				} catch (restoreError) {
 					restoreFailure = restoreError

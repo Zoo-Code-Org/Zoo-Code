@@ -12,6 +12,11 @@ import { ApplyPatchTool } from "../ApplyPatchTool"
 // The vi.mock factory exposes the fs/promises functions under a `default`
 // property (matching the SUT's default import), which the static module type
 // does not declare; cast once at this boundary rather than at each call site.
+// The move path asks lstat only whether the destination is a link, readlink only for the
+// target of that link and realpath only for the spelling of a path that exists, so the
+// boundary double declares those shapes rather than the whole fs/promises surface.
+type DestinationShape = { isSymbolicLink: () => boolean }
+
 const mockedFsPromises = vi.mocked(
 	fsPromises as unknown as {
 		default: {
@@ -22,6 +27,9 @@ const mockedFsPromises = vi.mocked(
 			stat: MockedFunction<typeof fsPromises.stat>
 			chmod: MockedFunction<typeof fsPromises.chmod>
 			writeFile: MockedFunction<typeof fsPromises.writeFile>
+			lstat: MockedFunction<(target: string) => Promise<DestinationShape>>
+			readlink: MockedFunction<(target: string) => Promise<string>>
+			realpath: MockedFunction<(target: string) => Promise<string>>
 		}
 	},
 )
@@ -33,6 +41,13 @@ vi.mock("fs/promises", () => ({
 		rm: vi.fn().mockResolvedValue(undefined),
 		rename: vi.fn().mockResolvedValue(undefined),
 		stat: vi.fn().mockResolvedValue({ mode: 0o755, uid: 0, gid: 0 }),
+		lstat: vi.fn(async () => {
+			// No destination exists in the default world, the way readFile below is stubbed for
+			// a plain file: the caller treats ENOENT as an absent destination.
+			throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		}),
+		readlink: vi.fn(async () => ""),
+		realpath: vi.fn(async (target: string) => target),
 		chmod: vi.fn().mockResolvedValue(undefined),
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
@@ -205,6 +220,135 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 			expect(mockTask.diffViewProvider.pushToolWriteResult).toHaveBeenCalledOnce()
+		})
+
+		it("keeps a destination symlink and writes the moved content through its target", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The destination is a symlink. Renaming the link itself would carry it to the backup name
+			// and install a regular file at the requested path while the target kept the old bytes,
+			// so the moved bytes have to land on the target and the link has to stay where it is.
+			mockedFsPromises.default.lstat.mockResolvedValueOnce({ isSymbolicLink: (): boolean => true })
+			mockedFsPromises.default.readlink.mockResolvedValueOnce("target.ts")
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The path the destination checks were run against, captured from the handler itself so
+			// the assertion does not have to guess how the workspace spelling was built.
+			const linkPath = mockedFsPromises.default.lstat.mock.calls[0]?.[0]
+			expect(linkPath).toEqual(expect.stringContaining("new.ts"))
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining("target.ts"),
+				expect.stringContaining(".backup"),
+			)
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".staging"),
+				expect.stringContaining("target.ts"),
+			)
+			// Never the link itself, in either direction of either rename.
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalledWith(expect.any(String), linkPath)
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalledWith(linkPath, expect.any(String))
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("restores the symlink target bytes when the source deletion fails", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// A link whose target already holds content: the backup captured the target bytes, so the
+			// rollback has to put them back at the target, which is where the link still points. The
+			// read is keyed on the path because the hunk pass reads the source file through the same
+			// stub, and only the destination read may see the link target content.
+			mockedFsPromises.default.lstat.mockResolvedValueOnce({ isSymbolicLink: (): boolean => true })
+			mockedFsPromises.default.readlink.mockResolvedValueOnce("target.ts")
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("target.ts")) {
+					return "target file content"
+				}
+				return "original file content"
+			})
+			mockedFsPromises.default.unlink.mockRejectedValueOnce(
+				Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }),
+			)
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			const linkPath = mockedFsPromises.default.lstat.mock.calls[0]?.[0]
+			// The restore rename runs from the backup name back onto the target, never onto the link.
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".backup"),
+				expect.stringContaining("target.ts"),
+			)
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalledWith(expect.any(String), linkPath)
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to delete original file after move"),
+			)
+			// The destination was written and then rolled back: still a workspace mutation, so the
+			// partial-state checkpoint is recorded even though the move reports failure.
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// Restore the default readFile behavior for later tests.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content")
+		})
+
+		it("materializes the target of a dangling destination symlink instead of replacing the link", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The link points at a path that does not exist. There is nothing to back up, so the only
+			// write is the staged rename, and it has to land at the target so that the link resolves
+			// rather than being replaced by a regular file at the requested path.
+			mockedFsPromises.default.lstat.mockResolvedValueOnce({ isSymbolicLink: (): boolean => true })
+			mockedFsPromises.default.readlink.mockResolvedValueOnce("target.ts")
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("target.ts")) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+				return "original file content"
+			})
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			const linkPath = mockedFsPromises.default.lstat.mock.calls[0]?.[0]
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".staging"),
+				expect.stringContaining("target.ts"),
+			)
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalledWith(
+				expect.stringContaining(".backup"),
+				expect.any(String),
+			)
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalledWith(expect.any(String), linkPath)
+			expect(mockHandleError).not.toHaveBeenCalled()
+			// Restore the default readFile behavior for later tests.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content")
 		})
 
 		it("restores the pre-move state and fails the operation when source deletion fails", async () => {
