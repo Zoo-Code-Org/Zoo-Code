@@ -453,4 +453,25 @@ describe("ClineProvider - persisted view state write ordering", () => {
 		expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-a")
 		expect(viewStates()?.[viewStateId]?.currentApiConfigName).toBe("profile-a")
 	})
+
+	test("leaves the shared profile unset and creates no entry when the first per-view write fails", async () => {
+		const viewStateId = provider["viewId"]
+
+		// Cold state: this profile was never chosen, so there is no earlier value to roll back to.
+		// Unset through the same store the provider reads, so the proxy cache and storage agree
+		// that the key is unset before the call starts instead of merely disagreeing about it.
+		await provider.contextProxy.setValue("currentApiConfigName", undefined)
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBeUndefined()
+
+		failNextViewStatesWrite = true
+
+		await expect(provider.setValues({ currentApiConfigName: "profile-a" })).rejects.toThrow("durable write failed")
+
+		// A rollback here has no earlier name to restore: the only correct outcomes are that the
+		// shared key stays unset, that no per-view entry was created for the write that failed,
+		// and that the ledger stayed empty because nothing was ever cleared from storage.
+		expect(provider.contextProxy.getValue("currentApiConfigName")).toBeUndefined()
+		expect(Object.hasOwn(viewStates() ?? {}, viewStateId)).toBe(false)
+		expect(tombstones().size).toBe(0)
+	})
 })
