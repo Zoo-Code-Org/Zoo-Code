@@ -5,7 +5,6 @@ import * as path from "path"
 
 import { safeWriteText } from "../safeWriteText"
 
-
 // The real icacls against a real file: this spec exists to say what a filesystem ends
 // up holding, so the access-rights primitive is invoked here rather than stubbed.
 async function runIcacls(args: string[]): Promise<void> {
@@ -90,9 +89,7 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(dir)).toEqual(["target-dir"])
 	})
 
-		it(
-			"either carries a denying DACL onto the published file or reports the failed restore",
-			async (ctx) => {
+	it("either carries a denying DACL onto the published file or reports the failed restore", async (ctx) => {
 		// The finding behind this case is that the write path never asks whether the
 		// target permits writes: both probes it makes on the target carry no mode, so a
 		// file whose DACL denies writes while its directory permits replacement publishes
@@ -144,6 +141,5 @@ describe("safeWriteText against a real filesystem", () => {
 		} else {
 			expect(warnings).toEqual(["dacl-restore-failed"])
 		}
-		},
-	)
+	})
 })
