@@ -4521,6 +4521,31 @@ describe("ClineProvider", () => {
 			}
 		})
 
+		it.each([false, true])(
+			"only seeds an absent mode default after a readable opening snapshot (read failure: %s)",
+			async (fails) => {
+				const manager = provider.providerSettingsManager
+				await manager.import({
+					currentApiConfigName: "current",
+					apiConfigs: { current: { id: "current-id" }, saved: { id: "saved-id" } },
+					modeApiConfigs: fails ? { code: "saved-id" } : {},
+				})
+				await provider.contextProxy.setValue("currentApiConfigName", "current")
+				const snapshot = vi.spyOn(manager, "getModeConfigIds")
+				if (fails) snapshot.mockRejectedValueOnce(new Error("temporarily unreadable"))
+				provider["captureInitialModeConfigIds"]()
+				await provider["initialModeConfigIds"]
+
+				// Storage has recovered by the time the mode switch reads profiles and could write a default.
+				const write = vi.spyOn(manager, "setModeConfig")
+				await provider["handleModeSwitchUnlocked"]("code", null)
+
+				expect(write).toHaveBeenCalledTimes(fails ? 0 : 1)
+				await expect(manager.getModeConfigId("code")).resolves.toBe(fails ? "saved-id" : "current-id")
+				expect(provider["getGlobalState"]("currentApiConfigName")).toBe("current")
+			},
+		)
+
 		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
 			let release = () => {}
 			const pending = new Promise<void>((resolve) => {

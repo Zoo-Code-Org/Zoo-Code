@@ -2151,8 +2151,10 @@ export class ClineProvider
 			} else {
 				// The task will continue with the current/default configuration.
 			}
-		} else {
-			// If no saved config for this mode, save current config as default.
+		} else if ((await this.initialModeConfigIds) !== undefined) {
+			if (signal?.aborted) return
+			// Only seed a default when the opening snapshot was readable.
+			// An unreadable snapshot must not let the current profile overwrite a saved default.
 			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
 			if (currentApiConfigNameAfter) {
