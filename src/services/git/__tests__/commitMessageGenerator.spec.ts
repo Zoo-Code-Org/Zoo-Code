@@ -214,6 +214,13 @@ describe("commitMessageGenerator", () => {
 			["a quoted token in code", "+const token = 'opaque'", "+const token = '[REDACTED]'", "opaque"],
 			["an unquoted YAML token", "+  token: abc123def456", "+  token: [REDACTED]", "abc123def456"],
 			["a snake_case token key", "+npm_token: s3cr3tvalue", "+npm_token: [REDACTED]", "s3cr3tvalue"],
+			[
+				"an unquoted token without a digit",
+				"+  token: abcdefghijklmnopqrstuvwxyz",
+				"+  token: [REDACTED]",
+				"abcdefghijklmnopqrstuvwxyz",
+			],
+			["a camelCase unquoted token", "+Token=opaqueValue", "+Token=[REDACTED]", "opaqueValue"],
 			["a quoted token variable", '+SLACK_BOT_TOKEN="xyz;123"', '+SLACK_BOT_TOKEN="[REDACTED]"', "xyz"],
 			["a YAML secret variable", "+  CI_DEPLOY_SECRET: hunter2", "+  CI_DEPLOY_SECRET: [REDACTED]", "hunter2"],
 			[
@@ -257,6 +264,14 @@ describe("commitMessageGenerator", () => {
 			["lower-case token fields", "+  token: string"],
 			["optional token fields", "+  token?: string"],
 			["token expressions", "+const token = getToken()"],
+			["awaited token expressions", "+const token = await fetchToken()"],
+			["token property reads", "+const token = this.token"],
+			["PascalCase token types", "+  token: CancellationToken"],
+			["qualified token types", "+  token: vscode.CancellationToken"],
+			["union token types", "+  token: Token | undefined"],
+			["generic token types", "+  token: Record<string, string>"],
+			["Python token type hints", "+def run(token: str = None):"],
+			["Rust token types", "+fn run(token: &str) {"],
 			["plural token keys", "+  tokens: 5"],
 			["token reads without an assignment", "+const value = env.TOKEN"],
 			["upper-case names that only contain TOKEN", "+const MAX_TOKENS = 4096"],
@@ -284,7 +299,8 @@ describe("commitMessageGenerator", () => {
 			["many @ signs with no domain", "a@".repeat(100_000)],
 			["many local-part characters before one @", `${"a.".repeat(100_000)}@`],
 			["a long upper-case name without a TOKEN suffix", "A_".repeat(100_000)],
-			["many token assignments without a digit", "token=".repeat(33_334)],
+			["many token type declarations", "token: string\n".repeat(14_286)],
+			["many token calls with long names", `token=${"a".repeat(250)}(`.repeat(700)],
 			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
 		])("redacts %s in linear time", (_label, content) => {
 			// A quadratic scan of 200k characters takes far longer than this budget.
@@ -1112,6 +1128,7 @@ describe("commitMessageGenerator", () => {
 				`+//registry.npmjs.org/:_authToken=${FAKE_NPM_TOKEN}`,
 				"+TOKEN=abcdef1234567890",
 				'+  "token": "abcdef1234567890",',
+				"+  token: abcdefghijklmnopqrstuvwxyz",
 				"+  token: string",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
@@ -1127,6 +1144,7 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).toContain("+  token: string")
 			expect(prompt).not.toContain("npm_")
 			expect(prompt).not.toContain("abcdef1234567890")
+			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwxyz")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 

@@ -104,6 +104,11 @@ const QUOTED_VALUE = String.raw`(?<open>["'\x60])(?:\\.|(?!\k<open>)[^\\\n])+\k<
 // An unquoted (or unterminated) value runs to the next whitespace or quote.
 const UNQUOTED_VALUE = String.raw`["'\x60]?[^\s"'\x60]+`
 const AUTH_SCHEME = String.raw`(?:Bearer|Basic|Digest|Token)\s+`
+// An unquoted value that reads as code, not as a secret: a primitive type or keyword (`string`,
+// `await`), an identifier followed by code punctuation (`getToken()`, `vscode.CancellationToken`,
+// `Token | undefined`), or a PascalCase type name (`CancellationToken`). The identifier length is
+// bounded to keep the scan linear.
+const CODE_LIKE_VALUE = String.raw`&?(?:(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|true|false|str|int|float|bool|bytes|await|new|typeof|this|self)\b|[A-Za-z_$][\w$]{0,256}\s*[(.<[|&?,;)]|[A-Z][a-z]+(?:[A-Z][a-z]+)*\b)`
 
 /**
  * Each entry replaces one class of sensitive value. Patterns with a `prefix` capture group keep the
@@ -150,13 +155,13 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
 	// Any-case `token` keys (token, "token", npm_token). A quoted value is always redacted. An unquoted
-	// value is redacted only when it contains a digit, so type declarations and expressions such as
-	// `token: string` or `token = getToken()` stay readable. The digit lookahead is bounded to keep
-	// the scan linear.
+	// value is redacted unless it looks like code (CODE_LIKE_VALUE), so type declarations and
+	// expressions such as `token: string` or `token = getToken()` stay readable. The flags are
+	// case-sensitive because CODE_LIKE_VALUE tells PascalCase type names from other words.
 	{
 		pattern: new RegExp(
-			String.raw`(?<prefix>\b(?:[A-Za-z0-9]+_)*token${ASSIGNMENT})(?:${QUOTED_VALUE}|(?=["'\x60]?[^\s"'\x60\d]{0,256}\d)${UNQUOTED_VALUE})`,
-			"gi",
+			String.raw`(?<prefix>\b(?:[A-Za-z0-9]+_)*[Tt][Oo][Kk][Ee][Nn]${ASSIGNMENT})(?:${QUOTED_VALUE}|(?!${CODE_LIKE_VALUE})${UNQUOTED_VALUE})`,
+			"g",
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
