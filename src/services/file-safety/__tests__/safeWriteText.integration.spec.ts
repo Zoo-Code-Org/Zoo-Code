@@ -1,9 +1,31 @@
+import { execFile } from "child_process"
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 
 import { safeWriteText } from "../safeWriteText"
 
+
+// The real icacls against a real file: this spec exists to say what a filesystem ends
+// up holding, so the access-rights primitive is invoked here rather than stubbed.
+async function runIcacls(args: string[]): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		execFile("icacls", args, { windowsHide: true }, (error) => (error ? reject(error) : resolve()))
+	})
+}
+
+// Names the outcome of a write instead of throwing, so a case about access rights
+// reports which of accepted, denied and some other failure happened rather than
+// dying on an errno a reader cannot see.
+async function tryWrite(filePath: string): Promise<string> {
+	try {
+		await fs.writeFile(filePath, "probe")
+		return "accepted"
+	} catch (error: unknown) {
+		const code = (error as { code?: string }).code
+		return code === "EACCES" || code === "EPERM" ? "denied" : "other:" + String(code ?? "no code")
+	}
+}
 // No fs mocks in this file: the point is to assert what a real filesystem ends up
 // holding after a publish attempt, which the mocked spec cannot show. The failure is
 // provoked with real filesystem semantics rather than with a stubbed call.
@@ -67,4 +89,61 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
 		expect(await fs.readdir(dir)).toEqual(["target-dir"])
 	})
+
+		it(
+			"either carries a denying DACL onto the published file or reports the failed restore",
+			async (ctx) => {
+		// The finding behind this case is that the write path never asks whether the
+		// target permits writes: both probes it makes on the target carry no mode, so a
+		// file whose DACL denies writes while its directory permits replacement publishes
+		// anyway, and a probe of fs.access with W_OK against such a file on this machine
+		// answers ok, which is the claim this case exists to pin down. That publish is
+		// safe only if the denied rights reach the file that arrives by rename, and the
+		// assertion below is a disjunction precisely because which branch happens is a
+		// machine fact. The deny is on write
+		// data rather than generic write because a generic-write deny on this machine also
+		// refuses to open the file for reading, which is a different scenario. Gated on the
+		// platform rather than skipped wholesale: on Windows a deny that will not take
+		// effect is a failure here, not a silent pass.
+		if (process.platform !== "win32") {
+			ctx.skip()
+			return
+		}
+		const targetPath = path.join(dir, "target.txt")
+		await fs.writeFile(targetPath, "old bytes")
+		const account = process.env.USERNAME ?? os.userInfo().username
+		await runIcacls([targetPath, "/deny", account + ":(WD)"])
+
+		// The guard is the deny itself. Until a write has actually been refused, every
+		// assertion below would be reporting on rights this machine never applied.
+		expect(await tryWrite(targetPath)).toBe("denied")
+
+		const warnings: string[] = []
+		await safeWriteText(targetPath, "published bytes", {
+			backup: true,
+			onPostCommitWarning: (warning) => {
+				warnings.push(warning.kind)
+			},
+		})
+
+		expect(await fs.readFile(targetPath, "utf8")).toBe("published bytes")
+		// Residue includes this write's own ACL dump file: a dump left behind is a second
+		// artefact naming the same file, which is the thing the naming exists to prevent.
+		expect(await fs.readdir(dir)).toEqual(["target.txt"])
+
+		// The two branches below are machine facts, not code facts: icacls /restore needs
+		// SeRestorePrivilege, and on a filtered token here it answers Win32 error 1300, so
+		// the restore fails and has to be reported, while a runner that holds the privilege
+		// carries the rights onto the published file and must report nothing. The bytes at
+		// the target arrived by rename, so they are a different file from the one the deny
+		// was placed on. What may never happen is silence: a publish that widened access
+		// and said neither is the outcome this finding was raised about.
+		const carryOver = await tryWrite(targetPath)
+		if (warnings.length === 0) {
+			expect(carryOver).toBe("denied")
+		} else {
+			expect(warnings).toEqual(["dacl-restore-failed"])
+		}
+		},
+	)
 })
