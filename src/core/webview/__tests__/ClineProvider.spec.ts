@@ -4546,6 +4546,112 @@ describe("ClineProvider", () => {
 			},
 		)
 
+		it.each([false, true])(
+			"preserves shared defaults written after this window opened (shared mapping exists: %s)",
+			async (hasSharedMapping) => {
+				const manager = provider.providerSettingsManager
+				provider["initialModeConfigIds"] = Promise.resolve({})
+				await manager.import({
+					currentApiConfigName: "current",
+					apiConfigs: { current: { id: "current-id" }, other: { id: "other-id" } },
+					modeApiConfigs: hasSharedMapping ? { code: "other-id" } : {},
+				})
+				await provider.contextProxy.setValue("currentApiConfigName", "current")
+				const write = vi.spyOn(manager, "setModeConfig")
+				const activate = vi.spyOn(manager, "activateProfile")
+
+				await provider["handleModeSwitchUnlocked"]("code", null)
+
+				expect(write).toHaveBeenCalledTimes(hasSharedMapping ? 0 : 1)
+				expect(activate).not.toHaveBeenCalled()
+				await expect(manager.getModeConfigId("code")).resolves.toBe(
+					hasSharedMapping ? "other-id" : "current-id",
+				)
+				expect(provider["getGlobalState"]("currentApiConfigName")).toBe("current")
+			},
+		)
+
+		it.each(["snapshot", "local"])("shares the window's %s choice with late-opening tabs", async (source) => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "opened-id" })
+			if (source === "local") provider.adoptModeConfigIds({ code: "local-id" })
+			const snapshot = vi
+				.spyOn(ProviderSettingsManager.prototype, "getModeConfigIds")
+				.mockResolvedValue({ code: "other-window-id" })
+			const tab = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				provider.contextProxy,
+				provider.webviewFocusTracker,
+			)
+			try {
+				expect(snapshot).not.toHaveBeenCalled()
+				vi.spyOn(tab.providerSettingsManager, "listConfig").mockResolvedValue([
+					{ name: "opened", id: "opened-id" },
+					{ name: "local", id: "local-id" },
+				])
+				const expectedName = source === "local" ? "local" : "opened"
+				vi.spyOn(tab.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: expectedName,
+					id: `${expectedName}-id`,
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				const activate = vi.fn<typeof tab.activateProviderProfile>()
+				tab["activateProviderProfileUnlocked"] = activate
+
+				await tab["handleModeSwitchUnlocked"]("code", null)
+
+				expect(activate).toHaveBeenCalledWith(
+					{ name: expectedName },
+					{ skipCurrentTaskRebuild: true },
+					undefined,
+				)
+				await expect(tab["getModeConfigId"]("code")).resolves.toBe(`${expectedName}-id`)
+
+				// The parent double supplies only the execution context and flush methods read during delegation.
+				const parent = {
+					taskId: "tab-parent",
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+					getTaskMode: vi.fn().mockResolvedValue("architect"),
+					getTaskApiConfigName: vi.fn().mockResolvedValue("parent-profile"),
+					flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+				} as unknown as Task
+				// The child double supplies the identity and run method consumed by the scheduler.
+				const child = { taskId: "tab-child", run: vi.fn().mockResolvedValue(undefined) } as unknown as Task
+				vi.spyOn(tab, "getCurrentTask").mockReturnValue(parent)
+				vi.spyOn(tab, "removeClineFromStack").mockResolvedValue(undefined)
+				const create = vi.spyOn(tab, "createTask").mockResolvedValue(child)
+				vi.spyOn(tab["taskHistoryStore"], "invalidate").mockResolvedValue(undefined)
+				vi.spyOn(tab["taskHistoryStore"], "get").mockReturnValue(undefined)
+				vi.spyOn(tab["taskHistoryStore"], "atomicReadAndUpdate").mockResolvedValue([])
+				await tab.delegateParentAndOpenChild({
+					parentTaskId: "tab-parent",
+					message: "Child",
+					initialTodos: [],
+					mode: "code",
+				})
+				expect(create).toHaveBeenCalledWith(
+					"Child",
+					undefined,
+					parent,
+					expect.objectContaining({
+						handoffExecutionContext: expect.objectContaining({ mode: "code", apiConfigName: expectedName }),
+					}),
+				)
+
+				// Later explicit choices and imports also belong to the window, in either direction.
+				vi.spyOn(tab.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				await tab.setModeConfig("code", "local-id")
+				existingProfiles("local-id", "opened-id")
+				await expect(provider["getModeConfigId"]("code")).resolves.toBe("local-id")
+				provider.adoptModeConfigIds({ code: "opened-id" })
+				await expect(tab["getModeConfigId"]("code")).resolves.toBe("opened-id")
+			} finally {
+				await tab.dispose()
+				snapshot.mockRestore()
+			}
+		})
+
 		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
 			let release = () => {}
 			const pending = new Promise<void>((resolve) => {

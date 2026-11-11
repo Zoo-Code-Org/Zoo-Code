@@ -424,19 +424,38 @@ export class ClineProvider
 	 * Mode -> profile id choices made by this window. The persisted mode map in
 	 * `providerSettingsManager` is shared by every VS Code window, so reading it
 	 * alone lets another window's profile selection leak into this window's tasks.
+	 * The window's focus tracker is shared by sidebar and tab providers, so it keys their shared choices.
 	 */
-	private readonly localModeConfigIds = new Map<string, string>()
-	private readonly modeConfigWriteOwners = new Map<string, symbol>()
+	private static readonly modeProfilesByWindow = new WeakMap<WebviewFocusTracker, ClineProvider["modeProfileState"]>()
 
-	/**
-	 * The shared mode map as it was when this window opened. Modes this window has not changed
-	 * resolve against it, so another window's later selection cannot reach this window's tasks
-	 * (including delegated subtasks). `undefined` when the map could not be read.
-	 */
-	private initialModeConfigIds: Promise<Record<string, string> | undefined> = Promise.resolve({})
+	private modeProfileState = {
+		localIds: new Map<string, string>(),
+		writeOwners: new Map<string, symbol>(),
+		writes: new Map<Mode, Promise<void>>(),
+		// Capture the shared map once when the window opens; late tabs reuse that snapshot.
+		// Undefined means the opening snapshot failed, rather than an empty mapping.
+		initialIds: Promise.resolve<Record<string, string> | undefined>({}),
+	}
 
-	/** Serialize each mode’s local choice and persisted write, including failure rollback. */
-	private readonly modeConfigWrites = new Map<Mode, Promise<void>>()
+	private get localModeConfigIds() {
+		return this.modeProfileState.localIds
+	}
+
+	private get modeConfigWriteOwners() {
+		return this.modeProfileState.writeOwners
+	}
+
+	private get modeConfigWrites() {
+		return this.modeProfileState.writes
+	}
+
+	private get initialModeConfigIds() {
+		return this.modeProfileState.initialIds
+	}
+
+	private set initialModeConfigIds(ids: Promise<Record<string, string> | undefined>) {
+		this.modeProfileState.initialIds = ids
+	}
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -475,7 +494,13 @@ export class ClineProvider
 		this._workspaceTracker = new WorkspaceTracker(this)
 
 		this.providerSettingsManager = new ProviderSettingsManager(this.context)
-		this.captureInitialModeConfigIds()
+		const windowModeProfiles = ClineProvider.modeProfilesByWindow.get(webviewFocusTracker)
+		if (windowModeProfiles) {
+			this.modeProfileState = windowModeProfiles
+		} else {
+			ClineProvider.modeProfilesByWindow.set(webviewFocusTracker, this.modeProfileState)
+			this.captureInitialModeConfigIds()
+		}
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
@@ -2161,7 +2186,10 @@ export class ClineProvider
 				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
 				if (config?.id) {
-					await this.setModeConfig(newMode, config.id)
+					const sharedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+					if (signal?.aborted) return
+					// Keep this window's current profile without replacing another window's saved default.
+					if (sharedConfigId === undefined) await this.setModeConfig(newMode, config.id)
 				}
 			}
 		}
