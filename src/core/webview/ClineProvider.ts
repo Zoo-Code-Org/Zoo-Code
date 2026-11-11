@@ -768,21 +768,20 @@ export class ClineProvider
 			}
 
 			let wroteEntry = false
+			// Tombstone and eviction record durable outcomes, so they are captured here and applied
+			// only after the write below lands - the rule the authorship flag already follows.
+			let tombstoned = false
 			if (!next.mode && !next.currentApiConfigName) {
 				delete states[viewStateId]
-				ClineProvider.clearedViewStateIds.add(viewStateId)
+				tombstoned = true
 			} else {
 				next.updatedAt = values.updatedAt ?? Date.now()
 				states[viewStateId] = next
-				ClineProvider.clearedViewStateIds.delete(viewStateId)
 				wroteEntry = true
 			}
 
 			const pruned = this.prunePersistedViewStates(states)
 			const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
-			if (evicted.length > 0) {
-				this.prunedViewIdsDuringActivation.push(...evicted)
-			}
 
 			try {
 				await this.contextProxy.setValue("viewStates", pruned)
@@ -800,6 +799,14 @@ export class ClineProvider
 					// durable value regardless of whether this restore write landed.
 				}
 				throw error
+			}
+			if (tombstoned) {
+				ClineProvider.clearedViewStateIds.add(viewStateId)
+			} else {
+				ClineProvider.clearedViewStateIds.delete(viewStateId)
+			}
+			if (evicted.length > 0) {
+				this.prunedViewIdsDuringActivation.push(...evicted)
 			}
 			// Authorship is recorded only after the durable write lands: a failed persistence
 			// must not mark the temporary id as owned, or a later load would adopt an entry
@@ -879,10 +886,6 @@ export class ClineProvider
 			if (changed) {
 				const pruned = this.prunePersistedViewStates(states)
 				const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
-				if (evicted.length > 0) {
-					this.prunedViewIdsDuringActivation.push(...evicted)
-				}
-
 				try {
 					await this.contextProxy.setValue("viewStates", pruned)
 				} catch (error) {
@@ -897,6 +900,12 @@ export class ClineProvider
 						// durable value regardless of whether this restore write landed.
 					}
 					throw error
+				}
+				// Evictions are recorded only for a map that actually reached disk: a rejected
+				// re-point leaves the old names durable, so recording an eviction here would let a
+				// rollback restore entries that were never removed.
+				if (evicted.length > 0) {
+					this.prunedViewIdsDuringActivation.push(...evicted)
 				}
 			}
 		})
@@ -962,18 +971,14 @@ export class ClineProvider
 			}
 
 			delete states[previousViewStateId]
-			ClineProvider.clearedViewStateIds.add(previousViewStateId)
 
-			if (!Object.prototype.hasOwnProperty.call(states, nextViewStateId)) {
+			const nextEntryExists = Object.prototype.hasOwnProperty.call(states, nextViewStateId)
+			if (!nextEntryExists) {
 				states[nextViewStateId] = previous
-				ClineProvider.clearedViewStateIds.delete(nextViewStateId)
 			}
 
 			const pruned = this.prunePersistedViewStates(states)
 			const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
-			if (evicted.length > 0) {
-				this.prunedViewIdsDuringActivation.push(...evicted)
-			}
 
 			try {
 				await this.contextProxy.setValue("viewStates", pruned)
@@ -993,6 +998,13 @@ export class ClineProvider
 				throw error
 			}
 
+			ClineProvider.clearedViewStateIds.add(previousViewStateId)
+			if (!nextEntryExists) {
+				ClineProvider.clearedViewStateIds.delete(nextViewStateId)
+			}
+			if (evicted.length > 0) {
+				this.prunedViewIdsDuringActivation.push(...evicted)
+			}
 			// Only a successful write clears authorship: a failed attempt leaves the entry
 			// under the temporary name, and a retry must still be able to re-key it.
 			this.wroteUnderTemporaryViewStateId = false
