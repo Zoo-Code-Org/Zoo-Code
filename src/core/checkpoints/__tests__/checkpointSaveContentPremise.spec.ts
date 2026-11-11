@@ -183,7 +183,12 @@ describe("checkpointSave against a write that lands while the task-start baselin
 		// The write then gets the record the drifted baseline would have swallowed: its own save, whose
 		// diff base is the content the task started with.
 		const writeSave = await checkpointSave(task, false, true)
-		if (!writeSave || typeof writeSave !== "object" || !("commit" in writeSave) || typeof writeSave.commit !== "string") {
+		if (
+			!writeSave ||
+			typeof writeSave !== "object" ||
+			!("commit" in writeSave) ||
+			typeof writeSave.commit !== "string"
+		) {
 			throw new Error("the per-write save resolved with no commit, so the write has no record")
 		}
 		const writeCommit = writeSave.commit
