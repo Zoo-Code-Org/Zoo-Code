@@ -112,20 +112,28 @@ function applyTlsVerificationOverride(config: ProxyConfig): void {
  * Initialize the network proxy module with the extension context.
  * Must be called early in extension activation before any network requests.
  *
+ * Each resource created here is also registered on `context.subscriptions` for the normal
+ * deactivate path. The returned disposable covers the same resources so a failed activation
+ * can tear them down itself: `deactivate()` is not guaranteed to run after activation fails,
+ * and a retained configuration listener would let a `debugProxy.*` settings toggle re-apply
+ * proxy configuration (including the TLS verification override) inside a dead extension.
+ *
  * @param context The VS Code extension context
  * @param channel Optional output channel for logging
+ * @returns A disposable releasing everything initialized here; a no-op outside debug mode, where nothing is created.
  */
 export async function initializeNetworkProxy(
 	context: vscode.ExtensionContext,
 	channel?: vscode.OutputChannel,
-): Promise<void> {
+): Promise<vscode.Disposable> {
 	extensionContext = context
 
 	// extensionMode is immutable for the process lifetime - exit early if not in debug mode.
 	// This avoids any overhead (listeners, logging, etc.) in production.
 	const isDebugMode = context.extensionMode === vscode.ExtensionMode.Development
 	if (!isDebugMode) {
-		return
+		// Nothing was acquired in production, so there is nothing for the caller to tear down.
+		return { dispose: () => {} }
 	}
 
 	outputChannel = channel ?? null
@@ -139,48 +147,66 @@ export async function initializeNetworkProxy(
 		`Proxy config: enabled=${config.enabled}, serverUrl=${redactProxyUrl(config.serverUrl)}, tlsInsecure=${config.tlsInsecure}`,
 	)
 
+	// Collect every resource created here so the returned disposable can release them when a
+	// later activation step fails; the same objects also go to context.subscriptions for the
+	// deactivate path, and both restores below are idempotent, so double disposal is safe.
+	const resources: vscode.Disposable[] = []
+
 	// Listen for configuration changes to allow toggling proxy during a debug session.
 	// Guard for test environments where onDidChangeConfiguration may not be mocked.
 	if (typeof vscode.workspace.onDidChangeConfiguration === "function") {
-		context.subscriptions.push(
-			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (
-					e.affectsConfiguration(`${Package.name}.debugProxy.enabled`) ||
-					e.affectsConfiguration(`${Package.name}.debugProxy.serverUrl`) ||
-					e.affectsConfiguration(`${Package.name}.debugProxy.tlsInsecure`)
-				) {
-					const newConfig = getProxyConfig()
+		const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
+			if (
+				e.affectsConfiguration(`${Package.name}.debugProxy.enabled`) ||
+				e.affectsConfiguration(`${Package.name}.debugProxy.serverUrl`) ||
+				e.affectsConfiguration(`${Package.name}.debugProxy.tlsInsecure`)
+			) {
+				const newConfig = getProxyConfig()
 
-					if (newConfig.enabled) {
-						applyTlsVerificationOverride(newConfig)
-						configureGlobalProxy(newConfig)
-						configureUndiciProxy(newConfig)
-					} else {
-						// Proxy disabled - but we can't easily un-bootstrap global-agent or reset undici dispatcher safely.
-						// We *can* restore any global fetch patch immediately.
-						restoreGlobalFetchPatch()
-						restoreTlsVerificationOverride()
-						log("Debug proxy disabled. Restart VS Code to fully disable proxy routing.")
-					}
+				if (newConfig.enabled) {
+					applyTlsVerificationOverride(newConfig)
+					configureGlobalProxy(newConfig)
+					configureUndiciProxy(newConfig)
+				} else {
+					// Proxy disabled - but we can't easily un-bootstrap global-agent or reset undici dispatcher safely.
+					// We *can* restore any global fetch patch immediately.
+					restoreGlobalFetchPatch()
+					restoreTlsVerificationOverride()
+					log("Debug proxy disabled. Restart VS Code to fully disable proxy routing.")
 				}
-			}),
-		)
+			}
+		})
+		context.subscriptions.push(configListener)
+		resources.push(configListener)
 	}
 
 	// Ensure we restore any overrides when the extension unloads.
-	context.subscriptions.push({
+	const overrideCleanup: vscode.Disposable = {
 		dispose: () => {
 			restoreGlobalFetchPatch()
 			restoreTlsVerificationOverride()
 		},
-	})
+	}
+	context.subscriptions.push(overrideCleanup)
+	resources.push(overrideCleanup)
 
 	if (config.enabled) {
 		applyTlsVerificationOverride(config)
 		await configureGlobalProxy(config)
-		await configureUndiciProxy(config)
+		const fetchPatch = await configureUndiciProxy(config)
+		if (fetchPatch) {
+			resources.push(fetchPatch)
+		}
 	} else {
 		log(`Debug proxy not enabled.`)
+	}
+
+	return {
+		dispose: () => {
+			for (const resource of resources) {
+				resource.dispose()
+			}
+		},
 	}
 }
 
@@ -261,16 +287,21 @@ async function configureGlobalProxy(config: ProxyConfig): Promise<void> {
 /**
  * Configure undici's global dispatcher so Node's built-in `fetch()` and any undici-based
  * clients route through the proxy.
+ *
+ * @returns A disposable restoring the global fetch patch when one was applied, or undefined
+ * when no patch was made (nothing to undo). Also registered on `context.subscriptions`.
  */
-async function configureUndiciProxy(config: ProxyConfig): Promise<void> {
+async function configureUndiciProxy(config: ProxyConfig): Promise<vscode.Disposable | undefined> {
 	if (!config.enabled || !config.serverUrl) {
-		return
+		return undefined
 	}
 
 	if (undiciProxyInitialized) {
 		log(`undici global dispatcher already configured; restart VS Code to change proxy safely`)
-		return
+		return undefined
 	}
+
+	let fetchPatch: vscode.Disposable | undefined
 
 	try {
 		const {
@@ -307,15 +338,16 @@ async function configureUndiciProxy(config: ProxyConfig): Promise<void> {
 			fetchPatched = true
 			log(`globalThis.fetch patched to undici.fetch (debug proxy mode)`)
 
+			fetchPatch = { dispose: () => restoreGlobalFetchPatch() }
 			if (extensionContext) {
-				extensionContext.subscriptions.push({
-					dispose: () => restoreGlobalFetchPatch(),
-				})
+				extensionContext.subscriptions.push(fetchPatch)
 			}
 		}
 	} catch (error) {
 		log(`Failed to configure undici proxy dispatcher: ${error instanceof Error ? error.message : String(error)}`)
 	}
+
+	return fetchPatch
 }
 /**
  * Update environment variables for proxy configuration.

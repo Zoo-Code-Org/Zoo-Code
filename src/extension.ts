@@ -135,8 +135,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize network proxy configuration early, before any network requests.
 	// When proxyUrl is configured, all HTTP/HTTPS traffic will be routed through it.
-	// Only applied in debug mode (F5).
-	await initializeNetworkProxy(context, outputChannel)
+	// Only applied in debug mode (F5). The returned disposable covers the debug-proxy
+	// resources; keep it for both the normal deactivate path and the failed-activation
+	// path below.
+	const proxyResources = await initializeNetworkProxy(context, outputChannel)
 
 	// Set extension path for custom tool registry to find bundled esbuild
 	customToolRegistry.setExtensionPath(context.extensionPath)
@@ -188,16 +190,26 @@ export async function activate(context: vscode.ExtensionContext) {
 		// Activation aborts here, and `deactivate()` is not guaranteed to run
 		// afterward, so this catch is the only teardown for everything
 		// initialized before the seed point: release the secret-storage
-		// listener and shut down the telemetry client registered above.
-		// Shutdown failures are logged rather than rethrown so they cannot mask
-		// the seed rejection; the service bounds its own drain and client-flush
-		// phases, so a stuck client cannot hang the host here.
+		// listener, shut down the telemetry client registered above, and
+		// release the debug-proxy resources initialized before the seed — in
+		// strict reverse acquisition order (auth was acquired last, the proxy
+		// first), each step disposed only after the previous one settles.
+		// Teardown failures are logged rather than rethrown so they cannot mask
+		// the seed rejection; the telemetry service bounds its own drain and
+		// client-flush phases, so a stuck client cannot hang the host here.
 		authSecretsListener.dispose()
 		try {
 			await telemetryService.shutdown()
 		} catch (shutdownError) {
 			outputChannel.appendLine(
 				`Failed to shut down telemetry service: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+			)
+		}
+		try {
+			proxyResources.dispose()
+		} catch (disposeError) {
+			outputChannel.appendLine(
+				`Failed to dispose network proxy resources: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`,
 			)
 		}
 		throw error

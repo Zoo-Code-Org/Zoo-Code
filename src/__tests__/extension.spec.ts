@@ -45,6 +45,7 @@ vi.mock("vscode", () => ({
 	},
 	ExtensionMode: {
 		Production: 1,
+		Development: 2,
 	},
 }))
 
@@ -744,6 +745,90 @@ describe("extension.ts", () => {
 					"Failed to shut down telemetry service: shutdown drain failed",
 				)
 				// Teardown still runs in order on this path: listener released before the shutdown call.
+				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"])
+			} finally {
+				shutdown.mockReset()
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+			}
+		})
+
+		test("disposes the network proxy resources when seeding rejects activation", async () => {
+			// The debug-proxy resources are initialized before the seed point, and the host
+			// does not guarantee `deactivate()` after a failed activation, so the failure path
+			// must release them too: a retained configuration listener would let a
+			// `debugProxy.*` toggle re-apply proxy configuration inside a dead extension.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const teardownOrder: string[] = []
+			const proxyDispose = vi.fn(() => void teardownOrder.push("proxy-disposed"))
+			vi.doMock("../utils/networkProxy", () => ({
+				// The initializer resolves to the aggregate disposable covering the
+				// configuration listener, override cleanup, and fetch-patch restore.
+				initializeNetworkProxy: vi.fn().mockResolvedValue({ dispose: proxyDispose }),
+				getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
+				isProxyEnabled: vi.fn().mockReturnValue(false),
+				createProxyRoutingRequestHandler: vi.fn().mockReturnValue(undefined),
+			}))
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi
+					.fn()
+					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
+			}))
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			shutdown.mockImplementation(() => {
+				teardownOrder.push("telemetry-shutdown")
+				return Promise.resolve()
+			})
+			try {
+				// Debug mode is the only mode in which the proxy initializer acquires
+				// resources, so it is the mode the failed-activation teardown applies to.
+				const vscode = await import("vscode")
+				const devContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
+
+				const { activate } = await import("../extension")
+				await expect(activate(devContext)).rejects.toThrow("seed state write failed")
+
+				// Strict reverse acquisition order: the proxy initializes first, telemetry
+				// second, the auth listener last, so teardown runs auth → telemetry → proxy,
+				// and the proxy disposable is released exactly once.
+				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown", "proxy-disposed"])
+				expect(proxyDispose).toHaveBeenCalledExactlyOnceWith()
+			} finally {
+				shutdown.mockReset()
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("../services/zoo-code-auth")
+				vi.doUnmock("../utils/networkProxy")
+			}
+		})
+
+		test("propagates the seed rejection when the proxy initializer acquired nothing", async () => {
+			// Outside debug mode the real initializer returns a no-op disposable, so the
+			// failed-activation teardown on the catch path must stay harmless: auth and
+			// telemetry still tear down, and the seed error still reaches the host.
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
+			}))
+			const teardownOrder: string[] = []
+			vi.doMock("../services/zoo-code-auth", () => ({
+				initZooCodeAuth: vi
+					.fn()
+					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
+			}))
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			shutdown.mockImplementation(() => {
+				teardownOrder.push("telemetry-shutdown")
+				return Promise.resolve()
+			})
+			try {
+				// mockContext carries no Development extensionMode, so the unmocked
+				// initializer takes its early return and acquires nothing.
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
 				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"])
 			} finally {
 				shutdown.mockReset()

@@ -2,6 +2,7 @@ import * as vscode from "vscode"
 import { NodeHttpHandler } from "@smithy/node-http-handler"
 import { HttpProxyAgent } from "http-proxy-agent"
 import { HttpsProxyAgent } from "https-proxy-agent"
+import { makeWorkspaceConfiguration } from "../../test-utils/vscode"
 import {
 	initializeNetworkProxy,
 	getProxyConfig,
@@ -200,6 +201,83 @@ describe("networkProxy", () => {
 			expect(() => {
 				void initializeNetworkProxy(context, mockOutputChannel)
 			}).not.toThrow()
+		})
+
+		// A failed activation does not guarantee deactivate() runs, so the disposable
+		// initializeNetworkProxy returns must release every resource that was also registered on
+		// context.subscriptions - a retained configuration listener could re-apply proxy and TLS
+		// overrides inside a dead extension. The module is re-imported so the debug-mode resource
+		// paths (listener, override cleanup, fetch patch) all execute: the latches that keep
+		// global-agent bootstrap and the fetch patch one-shot would otherwise be tripped by
+		// earlier tests, leaving a one-sided registration invisible to this equivalence check.
+		it("should dispose every resource registered on context.subscriptions when the returned disposable is disposed", async () => {
+			// Other tests in this file call initializeNetworkProxy without awaiting it, and a
+			// debug-mode run patches global fetch only after its dynamic imports settle. Awaiting
+			// one debug-mode run and one production-mode run here first: the awaited debug run
+			// settles the module's one-shot fetch-patch latch, so any still-pending earlier run
+			// skips its patch instead of racing this test's sentinel, and the trailing
+			// production-mode run leaves the shared module on the extension context and
+			// no-patch state the following tests expect.
+			mockConfig.get.mockImplementation((key: string) => {
+				if (key === "debugProxy.enabled") return true
+				if (key === "debugProxy.serverUrl") return "http://localhost:8080"
+				if (key === "debugProxy.tlsInsecure") return true
+				return ""
+			})
+			const fetchBefore = globalThis.fetch
+			try {
+				await initializeNetworkProxy(createMockContext(vscode.ExtensionMode.Development), mockOutputChannel)
+				await initializeNetworkProxy(createMockContext(vscode.ExtensionMode.Production), mockOutputChannel)
+
+				vi.resetModules()
+				// The runs above left the TLS override applied; drop it so the run under test
+				// captures "unset" as its restore target.
+				delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
+
+				// A local sentinel function stands in for the pre-patch global fetch: asserting
+				// the restore comes back to this exact reference is deterministic regardless of
+				// which fetch implementation is installed at this point.
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+
+				const freshModule = await import("../networkProxy")
+				const freshVscode = await import("vscode")
+				// resetModules re-runs the vscode mock factory, so the re-imported module reads
+				// its configuration through a fresh getConfiguration spy that needs the stub.
+				vi.mocked(freshVscode.workspace.getConfiguration).mockReturnValue(
+					makeWorkspaceConfiguration({
+						"debugProxy.enabled": true,
+						"debugProxy.serverUrl": "http://localhost:8080",
+						"debugProxy.tlsInsecure": true,
+					}),
+				)
+
+				const context = createMockContext(vscode.ExtensionMode.Development)
+				const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+				// Snapshot the registration side, then observe each registered object's own
+				// dispose: the assertion below holds only if the returned aggregate releases the
+				// same objects registered on context.subscriptions, which is the invariant.
+				const registered = [...context.subscriptions]
+				// Configuration listener, override cleanup, and fetch patch: the scenario must
+				// register all three for the equivalence to cover every acquisition.
+				expect(registered.length).toBe(3)
+				// Both observable overrides are applied before teardown.
+				expect(globalThis.fetch).not.toBe(fetchSentinel)
+				expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe("0")
+
+				const spiedDisposes = registered.map((resource) => vi.spyOn(resource, "dispose"))
+				returned.dispose()
+
+				for (const dispose of spiedDisposes) {
+					expect(dispose).toHaveBeenCalledOnce()
+				}
+				// Teardown restores both observable overrides: fetch and the TLS setting.
+				expect(globalThis.fetch).toBe(fetchSentinel)
+				expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
+			} finally {
+				globalThis.fetch = fetchBefore
+			}
 		})
 	})
 

@@ -1017,6 +1017,123 @@ it("checkAutoApproval command: decides each sub-command of a chain by its own ma
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" } })
 })
 
+// The layered aggregator also owns the chain parsing, redirect sanitization,
+// substitution veto, and deny reporting of the flat matcher — the enforcement
+// path selects it whenever both raw global lists are present, regardless of
+// the gate. These cases run through the public boundary with the raw lists
+// populated: a fixture without them exercises the pre-composed fallback
+// instead, and a regression in the layered copy would pass unnoticed.
+it("checkAutoApproval command: approves a blank command under the layered composition", async () => {
+	vi.clearAllMocks()
+	// A whitespace-only command parses to zero sub-commands and the layered
+	// aggregator returns approval for that before any chain logic; pinning it
+	// on the raw-lists path keeps the blanket branch from reclassifying an
+	// empty command as unapproved.
+	const state = layeredState([], [])
+
+	expect(await checkAutoApproval({ state, ask: "command", text: "   " })).toEqual({ decision: "approve" })
+	expect(
+		await checkAutoApproval({
+			state: { ...state, alwaysDenyUnapprovedCommands: true },
+			ask: "command",
+			text: "   ",
+		}),
+	).toEqual({ decision: "approve" })
+})
+
+it("checkAutoApproval command: denies a malformed command under blanket and prompts without it", async () => {
+	vi.clearAllMocks()
+	// "sh" is allowlisted, so only the layered path's own syntax-error
+	// detection — not prefix matching — can keep an unterminated quote from
+	// being auto-approved.
+	const state = layeredState(["sh"])
+
+	expect(await checkAutoApproval({ state, ask: "command", text: "sh -c 'echo a" })).toEqual({ decision: "ask" })
+
+	const result = await checkAutoApproval({
+		state: { ...state, alwaysDenyUnapprovedCommands: true },
+		ask: "command",
+		text: "sh -c 'echo a",
+	})
+	expect(result).toEqual({
+		decision: "deny",
+		autoDeny: expect.objectContaining({
+			kind: "malformed_command",
+			command: "sh -c 'echo a",
+			parseError: expect.stringContaining("unterminated"),
+		}),
+	})
+})
+
+it("checkAutoApproval command: matches a 2>&1 redirect sub-command on its sanitized form", async () => {
+	vi.clearAllMocks()
+	// The redirect token survives command splitting, so the aggregator strips
+	// it before deciding. The deny witness pins both halves: the verdict as
+	// if the redirect were absent, and the reported offending sub-command as
+	// the sanitized text rather than the raw token.
+	const allowed = await checkAutoApproval({
+		state: layeredState(["git"]),
+		ask: "command",
+		text: "git status 2>&1",
+	})
+	expect(allowed).toEqual({ decision: "approve" })
+
+	const denied = await checkAutoApproval({
+		state: layeredState([], ["git"]),
+		ask: "command",
+		text: "git status 2>&1",
+	})
+	expect(denied).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "git status", pattern: "git" } })
+})
+
+it("checkAutoApproval command: never auto-approves an allowed command containing a command substitution", async () => {
+	vi.clearAllMocks()
+	// Here-string command substitution: every sub-command is allowlisted, so
+	// only the chain-wide substitution veto can keep this off the
+	// auto-approve side.
+	const state = layeredState(["cat"])
+
+	expect(await checkAutoApproval({ state, ask: "command", text: "cat <<<$(whoami)" })).toEqual({ decision: "ask" })
+
+	const result = await checkAutoApproval({
+		state: { ...state, alwaysDenyUnapprovedCommands: true },
+		ask: "command",
+		text: "cat <<<$(whoami)",
+	})
+	expect(result).toEqual({
+		decision: "deny",
+		autoDeny: { kind: "dangerous_substitution", command: "cat <<<$(whoami)" },
+	})
+})
+
+it("checkAutoApproval command: reports the denied pattern in the case the user stored", async () => {
+	vi.clearAllMocks()
+	// Matching is case-insensitive, but the reported pattern must be the
+	// stored entry rather than the lower-cased match, so the denial names
+	// what the user's list actually contains.
+	const result = await checkAutoApproval({
+		state: layeredState([], ["RM"]),
+		ask: "command",
+		text: "rm file",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "rm file", pattern: "RM" } })
+})
+
+it("checkAutoApproval command: reports the denied sub-command of a chain in its sanitized form", async () => {
+	vi.clearAllMocks()
+	// The denied index selects the reported sub-command from the sanitized
+	// list: here that is both the second sub-command rather than the approved
+	// first one, and the redirect-stripped text rather than the raw token.
+	const result = await checkAutoApproval({
+		state: layeredState(["git"], ["RM"]),
+		ask: "command",
+		text: "git status && Rm file 2>&1",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "Rm file", pattern: "RM" } })
+})
+
 // Creating a directory symlink on Windows needs developer mode or elevation; a
 // junction needs neither and is resolved by realpath like a POSIX link, so the
 // fixture tries a symlink first and falls back to a junction. Where neither can
@@ -1207,6 +1324,52 @@ it("commandListFolderForResource: returns the registry Uri of the deepest matchi
 	// configuration resolves against the registry, not the real path).
 	expect(result).toBe(innerUri)
 	expect(result?.fsPath).toBe(innerRegistered)
+})
+
+it("commandListFolderForResource: returns the deepest matching root when it is registered before the shallower root", () => {
+	vi.clearAllMocks()
+	// The reverse registration order of the test above. The deepest-wins rule
+	// is a comparison, not a scan order, so it must hold whichever root the
+	// registry happens to list first; a lookup that simply kept the last
+	// candidate would return the outer root for this order while still
+	// passing a shallower-first fixture.
+	const outerRoot = path.sep + "mock"
+	const innerReal = path.join(outerRoot, "inner")
+	const outerUri = makeUri(outerRoot)
+	const innerUri = makeUri(innerReal)
+	workspaceState.workspaceFolders = [{ uri: innerUri }, { uri: outerUri }]
+
+	expect(commandListFolderForResource(path.join(innerReal, "sub"))).toBe(innerUri)
+})
+
+it("checkAutoApproval command: judges a cwd inside a deeper root by that root's layer when the deeper root is registered first", async () => {
+	vi.clearAllMocks()
+	// The enforcement consequence of the order-independent deepest-wins rule,
+	// with the registration order the other symlinked-root test does not use:
+	// the deeper root comes first, so a lookup that returned the last match
+	// would enforce the outer folder's list here — the outer entry allows what
+	// the deeper entry denies, so the decision names the winning folder.
+	const outerRoot = path.sep + "mock"
+	const outerUri = makeUri(outerRoot)
+	const innerReal = path.join(outerRoot, "inner")
+	const innerUri = makeUri(innerReal)
+	workspaceState.workspaceFolders = [{ uri: innerUri }, { uri: outerUri }]
+	workspaceState.foldersByPath.set(outerRoot, outerUri)
+	mockFolderConfigurations({
+		[outerRoot]: { gate: true, allow: ["echo"] },
+		[innerReal]: { gate: true, deny: ["echo"] },
+	})
+
+	const result = await checkAutoApproval({
+		// Empty raw global layers: only the winning folder's layer can decide.
+		state: taskFolderState([]),
+		cwd: path.join(innerReal, "sub"),
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
+	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, innerUri)
 })
 
 it("checkAutoApproval command: judges a cwd inside a symlinked root by that root's layer when an outer root also contains it lexically", async () => {
