@@ -1,11 +1,11 @@
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
 	addToClineMessages: () => Promise<void>
 	lastMessageTs?: number
-	abort: boolean
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
@@ -15,8 +15,13 @@ const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestA
 
 describe("Task.ask queued message drain", () => {
 	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
-		const task = Object.create(Task.prototype) as Task
-		;(task as any).abort = false
+		// Distinct task and instance ids, so an abort assertion can name this task instead of
+		// accepting whatever the fixture left unset.
+		const task = Object.create(Task.prototype, {
+			taskId: { value: "task-ask-drain", enumerable: true },
+			instanceId: { value: "instance-ask-drain", enumerable: true },
+		}) as Task
+		setAbortLatch(task, false)
 		;(task as any).clineMessages = []
 		;(task as any).askResponse = undefined
 		;(task as any).askResponseText = undefined
@@ -346,10 +351,17 @@ describe("Task.ask queued message drain", () => {
 		task.messageQueueService.addMessage("Persist me later")
 		const ask = task.ask("completion_result", "Done", false)
 		await Promise.resolve()
-		access.abort = true
+		setAbortLatch(task, true)
 		finishAddingAsk()
 
-		await expect(ask).rejects.toThrow("aborted")
+		// The abort must name this task and this instance: a regex that accepts any id would also
+		// pass for another task's abort or a different prefix.
+		await expect(ask).rejects.toMatchObject({
+			message: `[ZooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
+		await expect(ask).rejects.toMatchObject({
+			message: "[ZooCode#ask] task task-ask-drain.instance-ask-drain aborted",
+		})
 		expect(task.messageQueueService.messages).toHaveLength(1)
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Persist me later")
 	})
@@ -398,7 +410,7 @@ describe("Task.ask queued message drain", () => {
 			await vi.advanceTimersByTimeAsync(0)
 			expect(access.saveClineMessages).toHaveBeenCalledTimes(1)
 
-			access.abort = true
+			setAbortLatch(task, true)
 			await vi.advanceTimersByTimeAsync(250)
 
 			await expect(persistence).resolves.toBe(false)
