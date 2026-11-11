@@ -8830,6 +8830,49 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 		}
 	})
 
+	it("omits the status key when the stored row has none so the merge keeps the stored status", async () => {
+		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue([])
+		const metaSpy = vi.spyOn(taskMetadataModule, "taskMetadata").mockResolvedValue({
+			historyItem: { ...staleHistoryItem, tokensIn: 11, tokensOut: 7, totalCost: 0.02 },
+			tokenUsage: getApiMetrics([]),
+		})
+
+		try {
+			const mockProvider = makeMockProvider()
+			// Every other row here arms a stored row that carries a status, so the falsy side
+			// of Task.ts:1909 never ran under test. A stored row without a status must produce
+			// the bare detached item: upsertCore merges over the stored record, so a
+			// `status: undefined` key in the payload would clear the status the store holds.
+			;(mockProvider.taskHistoryStore.get as ReturnType<typeof vi.fn>).mockReturnValue({ id: "orphan-subtask" })
+			const task = createTask(mockProvider)
+			task.clineMessages = [{ ts: 1, type: "say", say: "text", text: "seeded message" }]
+			task.requestAbort(true)
+
+			const saved = await getTaskTestAccess(task).saveClineMessages()
+
+			expect(saved).toBe(true)
+			expect(mockProvider.updateTaskHistory).toHaveBeenCalledTimes(1)
+			const update = (mockProvider.updateTaskHistory as ReturnType<typeof vi.fn>).mock.calls[0][0]
+			// Refreshed metadata and no link keys, exactly as the status-bearing row above.
+			expect(update).toEqual(
+				expect.objectContaining({
+					id: "orphan-subtask",
+					tokensIn: 11,
+					tokensOut: 7,
+					totalCost: 0.02,
+				}),
+			)
+			expect(update).not.toHaveProperty("parentTaskId")
+			expect(update).not.toHaveProperty("rootTaskId")
+			// And no status key at all: the falsy branch hands over the detached item rather
+			// than stamping the stored row's absent status onto the update.
+			expect(update).not.toHaveProperty("status")
+		} finally {
+			saveSpy.mockRestore()
+			metaSpy.mockRestore()
+		}
+	})
+
 	it("updates task history for a non-abandoned task (guard does not block the normal path)", async () => {
 		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue([])
 		const metaSpy = vi
