@@ -112,6 +112,11 @@ describe("writeToFileTool", () => {
 	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
 	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let toolResult: ToolResponse | undefined
+	// The edit type each open() call actually saw. open() reads this.editType to decide
+	// whether the target exists and empties the file for anything that is not "modify"
+	// (DiffViewProvider.ts:127, 154-158, 167-168), so the value at the call, not the value
+	// after handle() returns, is what the user's content depends on.
+	const editTypeAtOpen: Array<"create" | "modify" | undefined> = []
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -158,6 +163,7 @@ describe("writeToFileTool", () => {
 		mockCline.rooIgnoreController = {
 			validateAccess: vi.fn().mockReturnValue(true),
 		}
+		editTypeAtOpen.length = 0
 		mockCline.diffViewProvider = {
 			editType: undefined,
 			isEditing: false,
@@ -166,7 +172,10 @@ describe("writeToFileTool", () => {
 			// where the contract says it must be set.
 			approvedSaveCommitted: false,
 			originalContent: "",
-			open: vi.fn().mockResolvedValue(undefined),
+			open: vi.fn(() => {
+				editTypeAtOpen.push(mockCline.diffViewProvider.editType)
+				return Promise.resolve(undefined)
+			}),
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
@@ -305,12 +314,16 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: true })
 
 			expect(mockCline.diffViewProvider.editType).toBe("modify")
+			// The value open() saw, not just the value the run ended on: an assignment moved
+			// below the open would leave the final state correct and the file emptied.
+			expect(editTypeAtOpen).toEqual(["modify"])
 		})
 
 		it("installs create as the edit type for a target that does not exist yet", async () => {
 			await executeWriteFileTool({}, { fileExists: false })
 
 			expect(mockCline.diffViewProvider.editType).toBe("create")
+			expect(editTypeAtOpen).toEqual(["create"])
 		})
 
 		it("uses cached editType without filesystem check", async () => {
