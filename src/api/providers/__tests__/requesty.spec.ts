@@ -1169,6 +1169,38 @@ describe("RequestyHandler", () => {
 			})
 		})
 
+		it("rejects with AbortError when the SDK call never settles behind its retry backoff", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// openai@5.23.2 sleeps through the retry backoff (or a server retry-after-ms) without
+			// observing the signal, so the promise create() returns can still be pending a minute
+			// after the caller cancelled. Emulate exactly that: a create() that was handed the
+			// request signal and never settles.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			mockCreate.mockImplementationOnce(() => {
+				notifyCreateStarted()
+				return new Promise<never>(() => {})
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+			const nextPromise = generator.next()
+			void nextPromise.catch(() => {})
+			await withSettleGuard(createStarted)
+			controller.abort()
+
+			// Without the race at requesty.ts the awaited SDK promise stays pending and this guard
+			// rejects with its own timeout instead of the provider AbortError.
+			await expect(withSettleGuard(nextPromise)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The Requesty request was aborted",
+			})
+		})
+
 		it("rethrows non-abort creation errors from createMessage", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			mockCreate.mockImplementationOnce(async () => {

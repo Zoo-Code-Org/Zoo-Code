@@ -239,7 +239,14 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			let stream
 			try {
 				// With streaming params type, SDK returns an async iterable stream
-				stream = await this.client.chat.completions.create(completionParams, { signal: requestSignal })
+				const pendingStream = this.client.chat.completions.create(completionParams, { signal: requestSignal })
+				// Race the creation against the cancellation scope, as completePrompt does below:
+				// openai@5.23.2 does not observe the signal inside `retryRequest`, which sleeps for the
+				// backoff (or a server-provided `retry-after-ms`, up to about a minute) before issuing
+				// the next attempt, so awaiting the SDK call alone can hold createMessage open long
+				// after the caller cancelled. The race settles at once, and a rejection the SDK wins
+				// first is still normalized by the catch below.
+				stream = await rejectOnAbort(pendingStream, requestSignal, this.providerName)
 			} catch (error) {
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
