@@ -314,11 +314,15 @@ async function _restoreDaclWindows(
 }
 
 // Set once a restore has failed with the missing-privilege exit code: from then on the
-// process skips the save/restore pair instead of paying for it on every write and warning
-// about the same host limitation each time. Skipping the pair is a cost decision only: it
-// must not change what a publish reports. A later write that replaces an existing target
-// still loses that target's descriptor, so step 2b records it and the call reports the
-// condition instead of resolving quietly. The reason is logged once, when the memo is set.
+// process skips the save/restore pair instead of paying for it on every write. Skipping is
+// a cost decision and it does change what a later publish reports, which is the honest
+// statement: step 2b is skipped too, so nothing is recorded per call and nothing is
+// reported per call. A later write that replaces an existing target does lose that
+// target's descriptor, and the only signal a caller gets is the single warning logged when
+// the memo was set - by design, because the host capability cannot change mid-process and
+// repeating the sentence per write would not give a caller anything to act on. No later
+// write on such a host throws DaclRestoreError for this reason: the restore step runs only
+// when a dump was saved.
 let daclRestorePrivilegeUnavailable = false
 
 // icacls exit code for "a required privilege is not held by the client".
