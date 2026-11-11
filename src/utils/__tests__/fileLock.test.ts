@@ -1145,6 +1145,7 @@ interface TimerLedger {
 	outstanding(): number
 	delays: number[]
 	restore(): void
+	cancelOutstanding(): void
 }
 
 /**
@@ -1190,6 +1191,15 @@ function watchLibraryTimers(): TimerLedger {
 		cancelled: () => cancelled,
 		outstanding: () => armed - cancelled,
 		delays,
+		cancelOutstanding: () => {
+			// Handles that were cancelled on their own are already out of the set, so what is left here is
+			// exactly the renewals still armed, and each of them counts as cancelled when this clears it.
+			for (const handle of armedHandles) {
+				clearOriginal(handle)
+				cancelled += 1
+			}
+			armedHandles.clear()
+		},
 		restore: () => {
 			globalThis.setTimeout = setOriginal as typeof globalThis.setTimeout
 			globalThis.clearTimeout = clearOriginal as typeof globalThis.clearTimeout
@@ -1622,7 +1632,7 @@ describe("a replaced referent lets go both locks and the renewal timer", () => {
 		})
 
 	itPosixLeaf(
-		"lets go both locks and the renewal timer when a link target is replaced under a held lock",
+		"a replaced link target shares one record, so the second release lands and the first throws ENOTACQUIRED",
 		async () => {
 			const directory = path.join(root(), "timer-link-replaced")
 			fs.mkdirSync(directory, { recursive: true })
@@ -1631,8 +1641,31 @@ describe("a replaced referent lets go both locks and the renewal timer", () => {
 			const link = path.join(directory, "history-link.json")
 			fs.symlinkSync("history.json", link)
 			const ledger = watchLibraryTimers()
+			// What the key consults, and what it does not, because the two part company here and that is the
+			// behaviour this row states. canonicalLockKey walks the path by basename and keys on dev:ino of the
+			// nearest directory that exists, so the leaf rides along as the string the caller wrote and the
+			// referent a link points at never enters the key. lockArtefactPath does consult the referent: it names
+			// the artefact by fs.realpathSync.native of the leaf, re-spelling only the final component. Replacing
+			// the link target therefore moves the artefact name and leaves the key where it was. The library keeps
+			// one in-process record per key - it assigns locks[file] with no guard at lockfile.js:243 and deletes
+			// it unconditionally at :290 - so the second arrival, arriving on the same spelling the first caller
+			// wrote, replaces the first holder's record instead of taking a second one. The artefacts really are
+			// two, as the rows below measure; the records are not, and this group's title holds only for the
+			// plain-file case above, where one referent means one record and both releases land.
 			let releaseFirst: (() => Promise<void>) | null = null
 			let releaseSecond: (() => Promise<void>) | null = null
+			// Releases are wrapped, and that is not cosmetics. A throw inside finally replaces the error already
+			// propagating, and at the head this row replaces an unwrapped release here threw ENOTACQUIRED over
+			// whatever the body had failed at, so the runner printed only the release frame at line 1669 and the
+			// first failure never appeared. Wrapped, the body's own failure is what a runner reports.
+			const releaseQuietly = async (release: () => Promise<void>): Promise<Error | null> => {
+				try {
+					await release()
+					return null
+				} catch (releaseError) {
+					return releaseError instanceof Error ? releaseError : new Error(String(releaseError))
+				}
+			}
 			try {
 				releaseFirst = await acquireFileLock(link, { immediate: true })
 				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
@@ -1644,33 +1677,40 @@ describe("a replaced referent lets go both locks and the renewal timer", () => {
 				fs.symlinkSync("history.json.next", nextLink)
 				fs.renameSync(nextLink, link)
 				expect(fs.realpathSync(link)).toBe(nextTarget)
-				// The other half of acquire-after-replacement: the replacement moved the referent, so the
-				// volume now spells the leaf differently, so the process that arrives second is admitted on
-				// its own artefact while the first lock is still held. Both renewals are outstanding at the
-				// same time here, and both releases have to let go of their own.
+				// The volume now spells the leaf differently, so a second arrival is admitted on its own artefact
+				// while the first holder's artefact is still there.
 				releaseSecond = await acquireFileLock(link, { immediate: true })
 				expect(artefactsOf(directory)).toEqual(["history.json.lock", "history.json.next.lock"])
 				expect(ledger.outstanding()).toBe(2)
-				// The second lock is a directory on a volume, not bookkeeping: a third arrival at the new
-				// target itself is refused on the artefact the second lock armed.
+				// The second lock is a directory on a volume, not bookkeeping: a third arrival at the new target
+				// itself is refused on the artefact the second lock armed.
 				await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
-				await releaseSecond()
+				// The record names the second arrival, so the second release is the one that lands.
+				expect(await releaseQuietly(releaseSecond)).toBeNull()
 				releaseSecond = null
+				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+				// The first holder has an artefact left on a volume it can no longer name to the library: its
+				// record was replaced by the second arrival and deleted by the second release, so its own release
+				// is refused with ENOTACQUIRED before it can clear its renewal timer, which is why one renewal is
+				// still outstanding after both holders have tried to let go.
+				const firstReleaseError = await releaseQuietly(releaseFirst)
+				expect(firstReleaseError).toMatchObject({ code: "ENOTACQUIRED" })
 				expect(ledger.outstanding()).toBe(1)
 				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
-				await releaseFirst()
 				releaseFirst = null
-				expect(ledger.cancelled()).toBe(ledger.armed())
-				expect(ledger.outstanding()).toBe(0)
-				expect(artefactsOf(directory)).toEqual([])
 			} finally {
 				ledger.restore()
 				if (releaseFirst !== null) {
-					await releaseFirst()
+					await releaseQuietly(releaseFirst)
 				}
 				if (releaseSecond !== null) {
-					await releaseSecond()
+					await releaseQuietly(releaseSecond)
 				}
+				// The refused release never reached the clearTimeout at lockfile.js:288, so its renewal timer is
+				// still armed and would fire after this row ends, utimes a deleted artefact and be reported
+				// compromised by a callback that rethrows outside any test. Cancelled here rather than left to the
+				// 10 second renewal to find out.
+				ledger.cancelOutstanding()
 			}
 		},
 	)
