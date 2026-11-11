@@ -96,18 +96,23 @@ const CREDENTIAL_KEYWORDS = [
 ].join("|")
 
 // `\x60` is a backtick. An assignment operator not followed by `=` or `>` skips comparisons
-// (`password === x`) and arrow functions.
-const ASSIGNMENT = String.raw`["'\x60]?\s*[:=](?![=>])\s*`
+// (`password === x`) and arrow functions. Only spaces and tabs may surround it, so a key at the end of
+// a line (a YAML mapping such as `credentials:`) never takes the next line as its value.
+const ASSIGNMENT = String.raw`["'\x60]?[ \t]*[:=](?![=>])[ \t]*`
 // A quoted value runs to its closing quote, so `;` or `,` inside the quotes is redacted too.
 // Backslash escapes are honored. Empty quotes are left alone.
 const QUOTED_VALUE = String.raw`(?<open>["'\x60])(?:\\.|(?!\k<open>)[^\\\n])+\k<open>`
-// An unquoted (or unterminated) value runs to the next whitespace or quote.
-const UNQUOTED_VALUE = String.raw`["'\x60]?[^\s"'\x60]+`
-const AUTH_SCHEME = String.raw`(?:Bearer|Basic|Digest|Token)\s+`
+// An unquoted (or unterminated) value runs to the end of the line, so a value with spaces
+// (`passphrase: correct horse battery staple`) is redacted completely.
+const UNQUOTED_VALUE = String.raw`["'\x60]?[^\s"'\x60][^\n]*`
+const AUTH_SCHEME = String.raw`(?:Bearer|Basic|Digest|Token)[ \t]+`
 // A value under a credential key is always redacted, whatever its shape: casing or syntax cannot tell a
-// secret from code. The only exception is an unquoted value that is exactly a primitive type name
-// (`token: string`, Python `str`, Rust `&str`), because such a value can never be a secret.
-const PRIMITIVE_TYPE_VALUE = String.raw`&?(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|none|true|false|str|int|float|bool|bytes)(?=[\s|&,;<>()[\]{}?=]|$)`
+// secret from code. The only exception is a type declaration such as `token: string;`: the rest of the
+// line is a primitive type name or a union of them (`string | undefined`), optionally followed by `[]`
+// and `,`, `;`, `)`, and an opening `{` or `:` (`(token: string) {`). Such a value can
+// never be a secret. Anything more on the line (`string=abc`, `string abc`) is redacted.
+const PRIMITIVE_TYPE = String.raw`&?(?:string|number|boolean|bigint|symbol|object|unknown|any|never|void|undefined|null|none|true|false|str|int|float|bool|bytes)(?:\[\])*`
+const PRIMITIVE_TYPE_VALUE = String.raw`${PRIMITIVE_TYPE}(?:[ \t]*\|[ \t]*${PRIMITIVE_TYPE})*[,;)]*(?:[ \t]*[{:])?[ \t\r]*(?=\n|$)`
 
 /**
  * Each entry replaces one class of sensitive value. Patterns with a `prefix` capture group keep the
@@ -145,6 +150,14 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
+	// XML elements named after a credential key: <password>secret</password>, <apiKey>…</apiKey>
+	{
+		pattern: new RegExp(
+			String.raw`<(?<tag>[\w.:-]{0,64}?(?:${CREDENTIAL_KEYWORDS})[\w.:-]{0,64})>[^<\n]+</\k<tag>>`,
+			"gi",
+		),
+		replacement: "<$<tag>>[REDACTED]</$<tag>>",
+	},
 	// key = value, key: value, "key": "value" (env files, YAML, JSON, code). The key has no leading
 	// boundary, so prefixed and camelCase names match too (NPM_TOKEN, npmToken, DB_PASSWORD).
 	{
@@ -168,7 +181,9 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 	},
 	// Credentials embedded in URLs: scheme://user:password@host
 	{
-		pattern: /(?<prefix>:\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g,
+		// The user may be empty (`redis://:password@host`), and the password may contain `@`: the value
+		// runs to the last `@` before the host.
+		pattern: /(?<prefix>:\/\/[^\s:@/]*:)[^\s/]+(?=@)/g,
 		replacement: "$<prefix>[REDACTED]",
 	},
 ]
@@ -211,8 +226,44 @@ function redactEmailAddresses(content: string): string {
  * Redacts secrets, private keys, credential tokens, and email addresses from content before it is
  * sent to an LLM.
  */
+// A YAML block value under a credential key (`password: |` or `secret: >-`). Groups: diff prefix, indent.
+const YAML_BLOCK_KEY = new RegExp(
+	String.raw`^([+\- ]?)([ \t]*)[^\n]*?(?:${CREDENTIAL_KEYWORDS})["']?[ \t]*:[ \t]*[|>][-+0-9]*[ \t\r]*$`,
+	"i",
+)
+
+/**
+ * Redacts the lines of a YAML block value under a credential key. The block is every following line
+ * that is indented deeper than the key, ignoring the one-character diff prefix (`+`, `-`, or space).
+ */
+function redactYamlBlockValues(content: string): string {
+	const lines = content.split("\n")
+	for (let i = 0; i < lines.length; i++) {
+		const match = YAML_BLOCK_KEY.exec(lines[i])
+		if (!match) {
+			continue
+		}
+		const keyIndent = match[2].length
+		let j = i + 1
+		for (; j < lines.length; j++) {
+			const body = lines[j].replace(/^[+\- ]/, "")
+			if (body.trim() === "") {
+				continue
+			}
+			const indent = body.length - body.trimStart().length
+			if (indent <= keyIndent) {
+				break
+			}
+			lines[j] = `${lines[j].slice(0, lines[j].length - body.length + indent)}[REDACTED]`
+		}
+		i = j - 1
+	}
+	return lines.join("\n")
+}
+
 export function redactSensitiveInformation(content: string): string {
-	let redacted = content
+	// Runs first, while the block indicator (`|` or `>`) is still on the key line.
+	let redacted = redactYamlBlockValues(content)
 	for (const { pattern, replacement } of REDACTION_RULES) {
 		redacted = redacted.replace(pattern, replacement)
 	}
@@ -402,6 +453,41 @@ function repositoryKey(repository: GitRepository): string {
 	return `${repository.rootUri.scheme}:${repository.rootUri.fsPath}`
 }
 
+// A provider request that the user cancelled but that is still running, per repository. A provider that
+// ignores the abort signal keeps working after the cancel, so the next request for the repository waits
+// until this one settles. Then a cancel followed by a retry does not run two provider requests at once.
+// The wait is capped, so a provider request that never settles cannot block the repository forever.
+const abandonedCompletionByRepository = new Map<string, Promise<void>>()
+export const ABANDONED_REQUEST_WAIT_MS = 30_000
+export const WAITING_FOR_CANCELLED_REQUEST_MESSAGE = "Waiting for the cancelled request to finish..."
+
+/**
+ * Clears the per-repository request state, so that tests do not share it.
+ * @internal
+ */
+export function resetCommitMessageRequestState(): void {
+	latestInvocationByRepository.clear()
+	abandonedCompletionByRepository.clear()
+}
+
+/** Resolves when `work` settles or after `ms` milliseconds, whichever comes first. */
+function waitAtMost(work: Promise<void>, ms: number): Promise<void> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const timeout = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, ms)
+	})
+	return Promise.race([work, timeout]).finally(() => clearTimeout(timer))
+}
+
+function holdUntilSettled(key: string, settled: Promise<void>) {
+	abandonedCompletionByRepository.set(key, settled)
+	void settled.then(() => {
+		if (abandonedCompletionByRepository.get(key) === settled) {
+			abandonedCompletionByRepository.delete(key)
+		}
+	})
+}
+
 /**
  * Generates a commit message using the active LLM provider and populates the SCM input box.
  */
@@ -434,7 +520,7 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 				title: "Generating commit message...",
 				cancellable: true,
 			},
-			async (_progress, token) => {
+			async (progress, token) => {
 				// One listener aborts the provider request and ends every pending wait below, so the
 				// notification closes as soon as the user cancels, even when Git or the provider
 				// ignores the abort signal.
@@ -491,13 +577,37 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 						return
 					}
 
+					// Wait for a cancelled request that is still running, so that provider requests for this
+					// repository do not overlap. The wait itself can be cancelled.
+					const abandoned = abandonedCompletionByRepository.get(ownerKey)
+					if (abandoned) {
+						progress.report({ message: WAITING_FOR_CANCELLED_REQUEST_MESSAGE })
+						await untilCancelled(waitAtMost(abandoned, ABANDONED_REQUEST_WAIT_MS))
+						if (isCancelled()) {
+							return
+						}
+						// A newer request for this repository came in during the wait and owns the input box.
+						if (latestInvocationByRepository.get(ownerKey) !== invocationId) {
+							return
+						}
+					}
+
 					const { prompt, truncated } = buildCommitMessagePrompt(diff)
-					const rawMessage = await untilCancelled(
-						singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
-							abortSignal: abortController.signal,
-						}),
-					)
-					if (isCancelled() || rawMessage === undefined) {
+					const completion = singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
+						abortSignal: abortController.signal,
+					})
+					const rawMessage = await untilCancelled(completion)
+					if (isCancelled()) {
+						holdUntilSettled(
+							ownerKey,
+							completion.then(
+								() => undefined,
+								() => undefined,
+							),
+						)
+						return
+					}
+					if (rawMessage === undefined) {
 						return
 					}
 

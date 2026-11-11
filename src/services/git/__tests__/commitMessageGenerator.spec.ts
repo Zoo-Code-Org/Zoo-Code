@@ -15,7 +15,10 @@ import {
 	getRepositoryDiff,
 	NO_CHANGES_MESSAGE,
 	redactSensitiveInformation,
+	resetCommitMessageRequestState,
 	resolveGitRepository,
+	ABANDONED_REQUEST_WAIT_MS,
+	WAITING_FOR_CANCELLED_REQUEST_MESSAGE,
 	type GitAPI,
 	type GitRepository,
 } from "../commitMessageGenerator"
@@ -104,6 +107,7 @@ function useCancellableProgress({ once = false }: { once?: boolean } = {}) {
 describe("commitMessageGenerator", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		resetCommitMessageRequestState()
 		;(vscode.window as unknown as { activeTextEditor?: vscode.TextEditor }).activeTextEditor = undefined
 	})
 
@@ -277,11 +281,12 @@ describe("commitMessageGenerator", () => {
 		// secret from code, so code under a credential key is redacted too.
 		it.each([
 			["a call", "+const token = getToken()", "+const token = [REDACTED]"],
-			["an awaited call", "+const token = await fetchToken()", "+const token = [REDACTED] fetchToken()"],
+			["an awaited call", "+const token = await fetchToken()", "+const token = [REDACTED]"],
 			["a property read", "+const token = this.token", "+const token = [REDACTED]"],
 			["a PascalCase type", "+  token: CancellationToken", "+  token: [REDACTED]"],
 			["a PascalCase secret", "+token: Abcdefghijklmnop", "+token: [REDACTED]"],
-			["a union type", "+  token: Token | undefined", "+  token: [REDACTED] | undefined"],
+			["a union type", "+  token: Token | undefined", "+  token: [REDACTED]"],
+			["a Python type hint with a default", "+def run(token: str = None):", "+def run(token: [REDACTED]"],
 			["a camelCase call", "+const sessionToken = createToken()", "+const sessionToken = [REDACTED]"],
 			["a primitive name followed by a dot", "+token: string.abcdef123", "+token: [REDACTED]"],
 		])("redacts %s under a credential key", (_label, content, expected) => {
@@ -293,6 +298,36 @@ describe("commitMessageGenerator", () => {
 			["a Set-Cookie header", "+set-cookie: sid=xyz; Path=/; HttpOnly", "+set-cookie: [REDACTED]"],
 			["an npmrc auth value", "+_auth=dXNlcjpwYXNz", "+_auth=[REDACTED]"],
 			["a passphrase", "+  passphrase: correct-horse", "+  passphrase: [REDACTED]"],
+			["a passphrase with spaces", "+passphrase: correct horse battery staple", "+passphrase: [REDACTED]"],
+			["a value that starts with a type name", "+PASSWORD=string=MySecurePass123", "+PASSWORD=[REDACTED]"],
+			["a type name followed by a word", "+PASSWORD=string MySecurePass123", "+PASSWORD=[REDACTED]"],
+			["an XML credential element", "+  <password>hunter2</password>", "+  <password>[REDACTED]</password>"],
+			["an XML API key element", "+<apiKey>abc123</apiKey>", "+<apiKey>[REDACTED]</apiKey>"],
+			[
+				"a URL password with an empty user",
+				"+REDIS_URL=redis://:s3cret@cache:6379",
+				"+REDIS_URL=redis://:[REDACTED]@cache:6379",
+			],
+			[
+				"a URL password that contains @",
+				"+url = postgres://admin:p@ss@db/app",
+				"+url = postgres://admin:[REDACTED]@db/app",
+			],
+			[
+				"a Digest authorization header",
+				'+Authorization: Digest username="u", response="abc123"',
+				"+Authorization: Digest [REDACTED]",
+			],
+			[
+				"a YAML block value",
+				"+  password: |\n+    first line\n+    second line\n+  user: admin",
+				"+  password: [REDACTED]\n+    [REDACTED]\n+    [REDACTED]\n+  user: admin",
+			],
+			[
+				"a folded YAML block value in context lines",
+				"   client_secret: >-\n     folded\n\n     more\n   name: app",
+				"   client_secret: [REDACTED]\n     [REDACTED]\n\n     [REDACTED]\n   name: app",
+			],
 		])("redacts %s", (_label, content, expected) => {
 			expect(redactSensitiveInformation(content)).toBe(expected)
 		})
@@ -334,6 +369,7 @@ describe("commitMessageGenerator", () => {
 			["lower-case token fields", "+  token: string"],
 			["optional token fields", "+  token?: string"],
 			["camelCase token fields", "+  nextPageToken: string"],
+			["YAML mappings under a credential key", "+credentials:\n+  username: admin"],
 			["primitive credential types", "+  apiKey: string | undefined"],
 			["primitive array types", "+  passwords: string[]"],
 			["typed password fields", "+  password: string[]"],
@@ -342,8 +378,11 @@ describe("commitMessageGenerator", () => {
 			["camelCase token limits", "+  maxTokens: 4096,"],
 			["token counters", "+const tokenCount = countTokens(text)"],
 			["author fields", "+  author: Jane"],
-			["Python token type hints", "+def run(token: str = None):"],
-			["Rust token types", "+fn run(token: &str) {"],
+			["typed parameters", "+function run(token: string) {"],
+			["typed parameter lists", "+  password: string,"],
+			["Python typed parameters", "+def run(token: str):"],
+			["Rust typed parameters", "+fn run(token: &str) {"],
+			["semicolon type members", "+  secret: string | null;"],
 			["plural token keys", "+  tokens: 5"],
 			["token reads without an assignment", "+const value = env.TOKEN"],
 			["upper-case names that only contain TOKEN", "+const MAX_TOKENS = 4096"],
@@ -372,6 +411,9 @@ describe("commitMessageGenerator", () => {
 			["many local-part characters before one @", `${"a.".repeat(100_000)}@`],
 			["a long upper-case name without a TOKEN suffix", "A_".repeat(100_000)],
 			["many token type declarations", "token: string\n".repeat(14_286)],
+			["long lines of credential words without a value", `${"token ".repeat(50)}\n`.repeat(600)],
+			["many unclosed XML credential tags", "<password>".repeat(20_000)],
+			["many URL schemes without a password", "://:".repeat(50_000)],
 			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
 		])("redacts %s in linear time", (_label, content) => {
 			// A quadratic scan of 200k characters takes far longer than this budget.
@@ -1236,6 +1278,8 @@ describe("commitMessageGenerator", () => {
 				'+const npmToken = "opaque12345678"',
 				"+  token: abcdefghijklmnop.qrstuvwxyzabcdefgh",
 				"+token: Abcdefghijklmnop",
+				"+PASSWORD=string=MySecurePass123",
+				"+passphrase: correct horse battery staple",
 				"+  token: string",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
@@ -1255,6 +1299,8 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("opaque12345678")
 			expect(prompt).not.toContain("qrstuvwxyz")
 			expect(prompt).not.toContain("Abcdefghijklmnop")
+			expect(prompt).not.toContain("MySecurePass123")
+			expect(prompt).not.toContain("battery staple")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 
@@ -1275,7 +1321,7 @@ describe("commitMessageGenerator", () => {
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 		})
 
-		it("keeps the retry result when a cancelled request that ignored the abort finishes later", async () => {
+		it("waits for a cancelled request that ignores the abort before it sends the retry", async () => {
 			const { cancel } = useCancellableProgress({ once: true })
 			const cancelledRequest = deferred<string>()
 			;(singleCompletionHandler as Mock)
@@ -1286,15 +1332,100 @@ describe("commitMessageGenerator", () => {
 			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
 			cancel()
 			await first
-			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
-			expect(mockRepo.inputBox.value).toBe("feat: retry")
+
+			const retry = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(mockProvider.getState).toHaveBeenCalledTimes(2))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			// The retry does not start a second provider request while the cancelled one runs.
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
 
 			cancelledRequest.resolve("feat: cancelled")
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			await retry
 
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
 			expect(mockRepo.inputBox.value).toBe("feat: retry")
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("lets the user cancel a retry while it waits for the cancelled request", async () => {
+			const firstProgress = useCancellableProgress({ once: true })
+			const retryProgress = useCancellableProgress({ once: true })
+			const cancelledRequest = deferred<string>()
+			;(singleCompletionHandler as Mock).mockImplementationOnce(() => cancelledRequest.promise)
+
+			const first = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
+			firstProgress.cancel()
+			await first
+
+			const retry = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(mockProvider.getState).toHaveBeenCalledTimes(2))
+			retryProgress.cancel()
+			await retry
+
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
+			expect(mockRepo.inputBox.value).toBe("")
+			cancelledRequest.resolve("feat: cancelled")
+		})
+
+		it("stops waiting for a cancelled request that never settles after the wait limit", async () => {
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+			try {
+				const { cancel } = useCancellableProgress({ once: true })
+				const report = vi.fn()
+				;(singleCompletionHandler as Mock)
+					.mockImplementationOnce(() => new Promise(() => {}))
+					.mockResolvedValueOnce("feat: retry")
+
+				const first = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+				await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
+				cancel()
+				await first
+
+				;(vscode.window.withProgress as Mock).mockImplementationOnce((_opts, callback) =>
+					callback(
+						{ report },
+						{ isCancellationRequested: false, onCancellationRequested: () => ({ dispose: vi.fn() }) },
+					),
+				)
+				const retry = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+				// vi.waitFor advances fake timers by its poll interval, so keep a margin below the limit.
+				await vi.waitFor(
+					() => expect(report).toHaveBeenCalledWith({ message: WAITING_FOR_CANCELLED_REQUEST_MESSAGE }),
+					{ interval: 1 },
+				)
+				await vi.advanceTimersByTimeAsync(ABANDONED_REQUEST_WAIT_MS - 1_000)
+				expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
+
+				await vi.advanceTimersByTimeAsync(1_000)
+				await retry
+
+				expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
+				expect(mockRepo.inputBox.value).toBe("feat: retry")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not wait when the cancelled request already settled", async () => {
+			const { cancel } = useCancellableProgress({ once: true })
+			const cancelledRequest = deferred<string>()
+			;(singleCompletionHandler as Mock)
+				.mockImplementationOnce(() => cancelledRequest.promise)
+				.mockResolvedValueOnce("feat: retry")
+
+			const first = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
+			cancel()
+			await first
+			cancelledRequest.resolve("feat: cancelled")
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
+			expect(mockRepo.inputBox.value).toBe("feat: retry")
 		})
 
 		it("does not report a provider rejection that arrives after cancellation", async () => {
