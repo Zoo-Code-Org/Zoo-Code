@@ -52,6 +52,10 @@ describe("safeWriteText commits the file its own descriptor opened", () => {
 	// publishes has an inode of its own rather than the one this write opened, wrote and fsynced.
 	function substituteWithAnotherFile(content: string): void {
 		substituteBeforeCommit = function (staged: string): void {
+			// Pin the original inode under a second name before the staged name is removed. Without this
+			// the substitute can take back the inode number the unlink just freed, which Linux does readily
+			// and NTFS does not do that fast, and then dev:ino agree and nothing is a mismatch.
+			fsSync.linkSync(staged, staged + ".orig")
 			fsSync.rmSync(staged, { force: true })
 			fsSync.writeFileSync(staged, content)
 		}
@@ -77,7 +81,7 @@ describe("safeWriteText commits the file its own descriptor opened", () => {
 		// other process's file is what arrived, and it stays there: the entry under the target is not this
 		// write's to remove.
 		expect(await fs.readFile(targetPath, "utf8")).toBe(SUBSTITUTED)
-		expect(await namesIn(dir)).toEqual(["target.txt"])
+		expect(await namesIn(dir)).toEqual(["staging.txt.orig", "target.txt"])
 	})
 
 	it("reports the substitution completed before a no-replace commit, where the two names agree on it", async () => {
@@ -97,7 +101,7 @@ describe("safeWriteText commits the file its own descriptor opened", () => {
 		// report the substituted inode and comparing the two names against each other passes. Neither name
 		// is removed, because the staged name may be the only path to a file another process owns.
 		expect(await fs.readFile(targetPath, "utf8")).toBe(SUBSTITUTED)
-		expect(await namesIn(dir)).toEqual(["staging.txt", "target.txt"])
+		expect(await namesIn(dir)).toEqual(["staging.txt", "staging.txt.orig", "target.txt"])
 	})
 
 	it("publishes the staged bytes when the staged name gains a second link but keeps its inode", async () => {

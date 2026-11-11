@@ -612,6 +612,18 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+// A stat result reports the identity of the file it was taken from, but a filesystem double that
+// returns a bare object reports no dev and no ino at all. Reading such a result as an identity would
+// turn the double's own gap into a mismatch this write reports, so an identity is recorded only when
+// both halves were actually reported. On a real filesystem both halves are always present; the null
+// this can return keeps the guard silent instead of inventing a reference out of a gap.
+function usableDescriptorIdentity(stats: { dev: unknown; ino: unknown }): { dev: bigint; ino: bigint } | null {
+	if (typeof stats.dev === "bigint" && typeof stats.ino === "bigint") {
+		return { dev: stats.dev, ino: stats.ino }
+	}
+	return null
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
@@ -763,7 +775,7 @@ export async function safeWriteText(
 				// The name can be swapped after this point and the commit would then publish a different file;
 				// the post-commit comparison needs the identity of the file this write actually wrote into.
 				const opened = fsSync.fstatSync(fd, { bigint: true })
-				stagedIdentity = { dev: opened.dev, ino: opened.ino }
+				stagedIdentity = usableDescriptorIdentity(opened)
 				if (targetExists) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
@@ -819,7 +831,7 @@ export async function safeWriteText(
 				}
 				// From here the reference for the post-commit comparison is this descriptor's own identity:
 				// the file this write holds open and is about to fsync, whatever the staging name points at later.
-				stagedIdentity = { dev: opened.dev, ino: opened.ino }
+				stagedIdentity = usableDescriptorIdentity(opened)
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
@@ -1055,9 +1067,11 @@ export async function safeWriteText(
 			// and fsynced, on either commit path: that is the detection half of what issue #2391 carries
 			// for a commit that leaves no second name. Nothing is removed on a mismatch - the entry under
 			// the target is not this write's to remove, and the staging name may be the only path to a
-			// file another process owns, which is the ownership half of the same issue. The null test is
-			// for the type and not for a path that can reach here: one of the two step-1 opens always runs
-			// first, and both record an identity before releasing their descriptor.
+			// file another process owns, which is the ownership half of the same issue. The null test keeps the check
+			// silent when the descriptor reported no identity at all, which is what a filesystem double answers with
+			// when its fstat stand-in returns a bare object; a real filesystem always reports both halves. The
+			// both-names comparison inside the failIfExist branch below still covers the no-replace path in that
+			// case, exactly as it did before this check was added.
 			if (stagedIdentity !== null) {
 				const publishedNow = await fs.stat(targetPath, { bigint: true })
 				if (publishedNow.dev !== stagedIdentity.dev || publishedNow.ino !== stagedIdentity.ino) {
@@ -1069,6 +1083,32 @@ export async function safeWriteText(
 				}
 			}
 			if (options?.failIfExist) {
+				// Both names should now be one inode. They diverge when the entry under either name is
+				// replaced after the commit, and the published name then holds bytes this write never
+				// staged. A substitution completed BEFORE the link is not detectable from here: link(2)
+				// links whatever entry the staging name holds at that moment, so both stats report the
+				// substituted inode and the comparison passes. Checked after the link because link(2) is
+				// the first point at which the target name exists, and a check of either name before it
+				// cannot see what landed at the other. Neither name is removed on a mismatch and the
+				// commit marker above is already set, so the
+				// cleanup below cannot unlink a name that may belong to another process. The ordinary
+				// rename path cannot be verified this way: rename(2) moves the staged inode itself and
+				// leaves no second name to compare, and a re-stat of the target proves only that the
+				// rename took effect, not that the staging file was still ours when it did. Issue
+				// #2391 is where that gap is carried; what it must prove is how a commit that leaves
+				// no second name detects a staging substitution before publication and how its cleanup
+				// avoids removing an entry it does not own. This unit does not claim that answer.
+				const [stagedNow, publishedNow] = await Promise.all([
+					fs.stat(tempPath, { bigint: true }),
+					fs.stat(targetPath, { bigint: true }),
+				])
+				if (stagedNow.dev !== publishedNow.dev || stagedNow.ino !== publishedNow.ino) {
+					throw new PublishedEntryMismatchError(
+						targetPath,
+						`${publishedNow.dev}:${publishedNow.ino}`,
+						`${stagedNow.dev}:${stagedNow.ino}`,
+					)
+				}
 				// The target name is published at this point; the staged name is only a second
 				// link to the same inode (or a copy of it). Removal is best-effort: on Windows
 				// an antivirus handle can make unlink fail with EBUSY/EPERM after the content
