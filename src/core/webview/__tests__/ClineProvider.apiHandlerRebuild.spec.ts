@@ -643,7 +643,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
 		})
 
-		test("finishes activation after the caller timed out instead of leaving a saved but inactive profile", async () => {
+		test("waits beyond timeout for a committing model update", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -664,11 +664,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				})
 
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
-				await update
 				expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
 
 				release()
 				await vi.advanceTimersByTimeAsync(0)
+				await update
 
 				const manager = provider["providerSettingsManager"]
 				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
@@ -680,7 +680,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
-		test("upsertProviderProfile finishes activation after the caller timed out", async () => {
+		test("upsertProviderProfile waits beyond timeout for its persistence outcome", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -703,7 +703,6 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				)
 
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
-				await expect(upsert).resolves.toBeUndefined()
 
 				const manager = provider["providerSettingsManager"]
 				expect(manager.setModeConfig).not.toHaveBeenCalled()
@@ -711,6 +710,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				release()
 				await vi.advanceTimersByTimeAsync(0)
 
+				await expect(upsert).resolves.toBe("test-id")
 				expect(manager.saveConfig).toHaveBeenCalledTimes(1)
 				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
 			} finally {
@@ -718,7 +718,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
-		test("holds the next profile mutation until a timed-out model update settles", async () => {
+		test("holds the next profile mutation until a committing model update settles", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -744,7 +744,6 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					openRouterModelId: "anthropic/claude",
 				})
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
-				await update
 
 				const next = provider.activateProviderProfile({ name: "other-profile" })
 				await vi.advanceTimersByTimeAsync(0)
@@ -752,7 +751,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				release()
 				await vi.advanceTimersByTimeAsync(0)
-				await next
+				await Promise.all([update, next])
 
 				expect(manager.activateProfile).toHaveBeenCalledTimes(1)
 				// One write set from the model update, one from the queued activation.

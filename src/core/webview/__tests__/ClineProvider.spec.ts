@@ -4901,12 +4901,12 @@ describe("ClineProvider", () => {
 				})
 				const fresh = reopened.activateProviderProfile({ name: "reopened" }, { skipCurrentTaskRebuild: true })
 				await new Promise<void>((resolve) => setImmediate(resolve))
-				expect(freshActivate).not.toHaveBeenCalled()
+				expect(freshActivate).toHaveBeenCalledOnce()
 				release()
 				await Promise.all([first, active, fresh])
 
-				expect(activate).toHaveBeenCalledOnce()
-				expect(write).toHaveBeenCalledOnce()
+				expect(activate).toHaveBeenCalledTimes(2)
+				expect(write).toHaveBeenCalledTimes(2)
 				expect(rebuild).not.toHaveBeenCalled()
 				expect(sticky).not.toHaveBeenCalled()
 				await expect(manager.getModeConfigId("code")).resolves.toBe("reopened-id")
@@ -4917,6 +4917,180 @@ describe("ClineProvider", () => {
 				await reopened?.dispose()
 			}
 		})
+
+		it("serializes a tab import with a sidebar mode write and publishes in persisted order", async () => {
+			const manager = provider.providerSettingsManager
+			await manager.import({
+				currentApiConfigName: "chosen",
+				apiConfigs: { chosen: { id: "chosen-id" }, imported: { id: "imported-id" } },
+				modeApiConfigs: {},
+			})
+			const tab = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				provider.contextProxy,
+				provider.webviewFocusTracker,
+			)
+			let release = () => {}
+			const pending = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			try {
+				const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+				const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
+					await pending
+					await originalStore(key, value)
+				})
+				const chosen = provider.setModeConfig("code", "chosen-id")
+				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
+				const publish = vi.fn(() => tab.adoptModeConfigIds({ code: "imported-id" }))
+				const imported = tab.providerSettingsManager.import(
+					{
+						currentApiConfigName: "imported",
+						apiConfigs: {
+							chosen: { id: "chosen-id" },
+							imported: { id: "imported-id" },
+							added: { id: "added-id" },
+						},
+						modeApiConfigs: { code: "imported-id" },
+					},
+					publish,
+				)
+				await new Promise<void>((resolve) => setImmediate(resolve))
+				expect(publish).not.toHaveBeenCalled()
+				release()
+				await Promise.all([chosen, imported])
+
+				expect(publish).toHaveBeenCalledOnce()
+				await expect(manager.getModeConfigId("code")).resolves.toBe("imported-id")
+				await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
+				await expect(tab["getModeConfigId"]("code")).resolves.toBe("imported-id")
+				expect(await manager.listConfig()).toEqual(
+					expect.arrayContaining([expect.objectContaining({ id: "added-id" })]),
+				)
+			} finally {
+				release()
+				await tab.dispose()
+			}
+		})
+
+		it("does not adopt shared mappings when an import omits modeApiConfigs", async () => {
+			const manager = provider.providerSettingsManager
+			await manager.import({
+				currentApiConfigName: "local",
+				apiConfigs: { local: { id: "local-id" }, shared: { id: "shared-id" } },
+				modeApiConfigs: { code: "shared-id" },
+			})
+			provider.adoptModeConfigIds({ code: "local-id" })
+			const fsPromises = (await import("fs/promises")).default
+			vi.mocked(fsPromises.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "imported",
+						apiConfigs: { imported: { id: "imported-id", apiProvider: providerIdentifiers.anthropic } },
+					},
+					globalSettings: {},
+				}),
+			)
+			const adopt = vi.spyOn(provider, "adoptModeConfigIds")
+			const { importSettingsFromPath } = await import("../../config/importExport")
+			const result = await importSettingsFromPath("/settings.json", {
+				providerSettingsManager: manager,
+				contextProxy: provider.contextProxy,
+				customModesManager: provider.customModesManager,
+				onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
+			})
+
+			expect(result.success).toBe(true)
+			expect(adopt).toHaveBeenCalledExactlyOnceWith({})
+			await expect(manager.getModeConfigId("code")).resolves.toBe("shared-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("local-id")
+		})
+
+		it("logs a fixed snapshot failure message without secret-storage error content", async () => {
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValueOnce(
+				new Error("api-key-must-not-appear"),
+			)
+			const log = vi.spyOn(provider, "log")
+			provider["captureInitialModeConfigIds"]()
+			await provider["initialModeConfigIds"]
+
+			expect(log).toHaveBeenCalledWith("Failed to snapshot mode profile choices")
+			expect(log.mock.calls.flat().join("\n")).not.toContain("api-key-must-not-appear")
+		})
+
+		it.each([false, true])(
+			"awaits a committing activation beyond timeout and reports its outcome (context failure: %s)",
+			async (fails) => {
+				vi.useFakeTimers()
+				let release = () => {}
+				try {
+					const manager = provider.providerSettingsManager
+					await provider.setValue("mode", "code")
+					await manager.import({
+						currentApiConfigName: "first",
+						apiConfigs: {
+							first: { id: "first-id", apiProvider: providerIdentifiers.anthropic },
+							second: { id: "second-id", apiProvider: providerIdentifiers.anthropic },
+						},
+						modeApiConfigs: {},
+					})
+					const pending = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					const originalList = manager.listConfig.bind(manager)
+					const list = vi.spyOn(manager, "listConfig").mockImplementationOnce(async () => {
+						await pending
+						return originalList()
+					})
+					const activate = vi.spyOn(manager, "activateProfile")
+					let finished = false
+					const first = provider.activateProviderProfile({ name: "first" })
+					const outcome = first.then(
+						() => {
+							finished = true
+							return undefined
+						},
+						(error: unknown) => {
+							finished = true
+							return error
+						},
+					)
+					await vi.advanceTimersByTimeAsync(0)
+					expect(list).toHaveBeenCalledOnce()
+					const firstSignal = activate.mock.calls[0][1]
+					if (!firstSignal) throw new Error("Missing activation signal")
+					await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+					expect(finished).toBe(false)
+					expect(firstSignal.aborted).toBe(false)
+					const second = provider.activateProviderProfile({ name: "second" })
+					await vi.advanceTimersByTimeAsync(0)
+					expect(activate).toHaveBeenCalledOnce()
+					if (fails)
+						vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+							new Error("settings failed after timeout"),
+						)
+					release()
+					await vi.advanceTimersByTimeAsync(0)
+					const error = await outcome
+					if (fails)
+						expect(error).toMatchObject({
+							name: "Error",
+							message: "Profile activation may be partially persisted: settings failed after timeout",
+						})
+					else expect(error).toBeUndefined()
+					await second
+
+					expect(activate).toHaveBeenCalledTimes(2)
+					expect(provider["modeProfileState"].committingMutationSignals.has(firstSignal)).toBe(false)
+					expect(provider["modeProfileState"].committingMutationSignals.size).toBe(0)
+				} finally {
+					release()
+					vi.useRealTimers()
+				}
+			},
+		)
 
 		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
 			let release = () => {}

@@ -355,6 +355,7 @@ export class ClineProvider
 			return Promise.reject(new Error("Provider profile mutation cancelled by settings reset"))
 		}
 		const controller = new AbortController()
+		let timedOut = false
 		const signal = AbortSignal.any([controller.signal, this.profileMutationAbortController.signal])
 		const invoke = async () => {
 			signal.throwIfAborted()
@@ -373,6 +374,7 @@ export class ClineProvider
 		const callerResult = this.withProviderProfileMutationTimeout(
 			run,
 			() => {
+				timedOut = true
 				if (options.runToCompletion || this.modeProfileState.committingMutationSignals.has(signal)) {
 					this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
 					return
@@ -393,14 +395,12 @@ export class ClineProvider
 					this.log("Provider profile mutation completed after cancellation")
 				}
 			},
-			(error) => {
+			() => {
 				this.modeProfileState.mutations.delete(run)
 				this.modeProfileState.committingMutationSignals.delete(signal)
-				if (signal.aborted) {
+				if (signal.aborted || timedOut) {
 					this.log(
-						`Provider profile mutation errored after cancellation: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
+						"Provider profile mutation failed after cancellation or timeout; settings may be partially persisted",
 					)
 				}
 			},
@@ -410,7 +410,7 @@ export class ClineProvider
 		this.providerProfileMutationQueue = callerResult.then(
 			() => undefined,
 			async () => {
-				if (options.runToCompletion || this.modeProfileState.committingMutationSignals.has(signal)) {
+				if (options.runToCompletion) {
 					await run.catch(() => {})
 				} else {
 					// Cancelling a queued item must not bypass an earlier committing mutation.
@@ -431,7 +431,9 @@ export class ClineProvider
 		const timeout = new Promise<never>((_, reject) => {
 			timeoutId = setTimeout(() => {
 				onTimeout()
-				reject(new Error("Provider profile mutation timed out"))
+				if (!this.modeProfileState.committingMutationSignals.has(mutationSignal)) {
+					reject(new Error("Provider profile mutation timed out"))
+				}
 			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 		})
 		let onAbort = () => {}
@@ -473,7 +475,10 @@ export class ClineProvider
 	 * alone lets another window's profile selection leak into this window's tasks.
 	 * The window's focus tracker is shared by sidebar and tab providers, so it keys their shared choices.
 	 */
-	private static readonly modeProfilesByWindow = new WeakMap<WebviewFocusTracker, ClineProvider["modeProfileState"]>()
+	private static readonly modeProfilesByWindow = new WeakMap<
+		WebviewFocusTracker,
+		{ state: ClineProvider["modeProfileState"]; manager: ProviderSettingsManager }
+	>()
 
 	private modeProfileState = {
 		localIds: new Map<string, string>(),
@@ -545,12 +550,16 @@ export class ClineProvider
 
 		this._workspaceTracker = new WorkspaceTracker(this)
 
-		this.providerSettingsManager = new ProviderSettingsManager(this.context)
 		const windowModeProfiles = ClineProvider.modeProfilesByWindow.get(webviewFocusTracker)
 		if (windowModeProfiles) {
-			this.modeProfileState = windowModeProfiles
+			this.modeProfileState = windowModeProfiles.state
+			this.providerSettingsManager = windowModeProfiles.manager
 		} else {
-			ClineProvider.modeProfilesByWindow.set(webviewFocusTracker, this.modeProfileState)
+			this.providerSettingsManager = new ProviderSettingsManager(this.context)
+			ClineProvider.modeProfilesByWindow.set(webviewFocusTracker, {
+				state: this.modeProfileState,
+				manager: this.providerSettingsManager,
+			})
 			this.captureInitialModeConfigIds()
 		}
 
@@ -2240,8 +2249,8 @@ export class ClineProvider
 	// Provider Profile Management
 
 	private captureInitialModeConfigIds(): void {
-		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch((error) => {
-			this.log(`Failed to snapshot mode profile choices: ${error instanceof Error ? error.message : error}`)
+		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch(() => {
+			this.log("Failed to snapshot mode profile choices")
 			return undefined
 		})
 	}
