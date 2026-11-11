@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as os from "os"
 import { createRequire } from "module"
 import * as path from "path"
+import { fileURLToPath, pathToFileURL } from "url"
 
 import * as lockfile from "proper-lockfile"
 
@@ -31,6 +32,16 @@ vi.mock("fs", async (importOriginal) => {
 			: statSyncOverride(target, options as { bigint?: boolean } | undefined)) as typeof actual.statSync
 	return { ...actual, statSync }
 })
+
+/**
+ * The paths the cross-process child needs in order to load the production module instead of imitating
+ * it. This file and the module sit in the same package, so resolving from this file's own address gives
+ * absolute paths without guessing the layout, and the loader is the repository's own `tsx`, resolved the
+ * same way the child's copy of `proper-lockfile` is resolved below.
+ */
+const productionModulePath = path.resolve(fileURLToPath(new URL("../fileLock.ts", import.meta.url)))
+const leafSpellingModulePath = path.resolve(fileURLToPath(new URL("../lockLeafSpelling.ts", import.meta.url)))
+const productionLoaderUrl = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href
 
 describe("file lock protocol", () => {
 	beforeEach(() => vi.clearAllMocks())
@@ -708,13 +719,17 @@ describe("identity keeps inodes above 2^53 distinct", () => {
  * two spellings that produced two artefacts would let both writers in and no assertion in this file
  * would notice.
  *
- * The child is plain CommonJS inside a template literal rather than a TypeScript import: loading
- * `fileLock.ts` from a child fails with ERR_MODULE_NOT_FOUND on the extensionless
- * `../core/task-persistence/persistenceTrace` import, which is the module's own import chain, and the
- * child therefore restates the one rule it needs - the artefact naming of `lockLeafSpelling`, naming
- * the artefact by the spelling the volume reports for the leaf and falling back to the caller's own
- * spelling where the volume has none - while the key comes from the module's `canonicalLockKey`,
- * computed by the parent and passed in, so the child decides nothing else for itself.
+ * The child is a script inside a template literal that the parent runs through the repository's own
+ * TypeScript loader, `node --input-type=module --import <tsx> -e <script>`, and it then imports the
+ * production `fileLock.ts` and calls its `acquireFileLock`. Plain node cannot load that file from a
+ * child: it fails with ERR_MODULE_NOT_FOUND on the extensionless
+ * `../core/task-persistence/persistenceTrace` import, which is the module's own import chain. Measured
+ * at this head with the loader registered, the import resolves, so the staleness window, the retry
+ * shape, the lock key and the artefact spelling all come from the module rather than from this script,
+ * and the artefact the child reports is the one produced by the same `canonicalLeafSpelling` call the
+ * module makes. The negative control below deliberately opts out with `DSH_LOCK_NAIVE`, drives the
+ * library itself and names the artefact by the caller's own spelling, which is the behaviour that
+ * control exists to show.
  *
  * The handshake is a trace file the child appends to synchronously, not its stdout. Node writes to a
  * piped stdout asynchronously, including on Windows, so a child that ends the process can lose the
@@ -724,18 +739,22 @@ describe("identity keeps inodes above 2^53 distinct", () => {
  * The exported `lock` of proper-lockfile 4.1.2 is its promise wrapper, measured at this head in
  * `index.js`: `module.exports = lock` over `async function lock(file, options)`, which takes no callback,
  * so a callback passed as a third argument is dropped without a word and the child would sit forever
- * holding a lock it never told anyone about. The child therefore chains `.then` and `.catch`, which is
- * the same shape `fileLock.ts` itself awaits.
+ * holding a lock it never told anyone about. The child therefore awaits it, which is the same shape
+ * `fileLock.ts` itself awaits, and it awaits the module's `acquireFileLock` the same way.
  */
-const HOLDER_SCRIPT = `const fs = require("fs")
-const path = require("path")
-const lockfile = require(process.env.DSH_LOCK_MODULE)
+const HOLDER_SCRIPT = `import { pathToFileURL } from "url"
+const fs = await import("fs")
+const path = await import("path")
+const { createRequire } = await import("module")
 const spelling = process.env.DSH_LOCK_SPELLING
 const trace = process.env.DSH_LOCK_TRACE
 const holdMs = Number(process.env.DSH_LOCK_HOLD_MS || 0)
 const retries = Number(process.env.DSH_LOCK_RETRIES || 0)
+const retryMs = Number(process.env.DSH_LOCK_RETRY_MS || 250)
+const doneFile = process.env.DSH_LOCK_DONE_FILE || ""
 const baseMode = process.env.DSH_LOCK_BASE
 const writeKey = process.env.DSH_LOCK_WRITE_KEY || ""
+const naive = process.env.DSH_LOCK_NAIVE === "1"
 function traceLine(line) {
 	fs.appendFileSync(trace, line + "\\n", "utf8")
 }
@@ -746,75 +765,124 @@ function readBody(target) {
 		return {}
 	}
 }
-let artefact = (function (target) {
-	let leaf
-	try {
-		leaf = path.basename(fs.realpathSync.native(target))
-	} catch {
-		leaf = path.basename(target)
-	}
-	return path.join(path.dirname(target), leaf) + ".lock"
-})(spelling)
-if (process.env.DSH_LOCK_NAIVE === "1") {
+function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms))
+}
+// The production module, loaded through the loader the parent registered, so the staleness window, the
+// lock key and the artefact spelling are the module's and not this script's. The naive control is the
+// one shape that must not import it: it names the artefact by the caller's own spelling and drives the
+// library directly, which is the behaviour that control exists to show.
+const leafSpelling = naive ? null : await import(pathToFileURL(process.env.DSH_LOCK_SPELLING_MODULE_TS).href)
+const production = naive ? null : await import(pathToFileURL(process.env.DSH_LOCK_MODULE_TS).href)
+const absolute = path.resolve(spelling)
+let artefact
+if (naive) {
 	artefact = path.join(path.dirname(spelling), path.basename(spelling)) + ".lock"
+} else {
+	const canonical = leafSpelling.canonicalLeafSpelling(absolute)
+	artefact = path.join(path.dirname(canonical), path.basename(canonical)) + ".lock"
 }
 traceLine("ARTEFACT " + artefact)
 const staleBase = baseMode === "before" ? readBody(spelling) : null
 if (baseMode === "before") {
 	traceLine("BASE-BEFORE " + JSON.stringify(staleBase))
 }
-lockfile.lock(process.env.DSH_LOCK_KEY, { lockfilePath: artefact, stale: 31000, update: 10000, realpath: false, retries: retries })
-	.then((release) => {
-		if (typeof release !== "function") {
-			traceLine("OUTCOME failed no-release-function")
-			process.exitCode = 1
-			return
-		}
-		traceLine("OUTCOME held")
-		if (writeKey) {
-			const base = baseMode === "before" ? staleBase : readBody(spelling)
-			traceLine(baseMode === "before" ? "BASE-USED " + JSON.stringify(base) : "BASE-UNDER-LOCK " + JSON.stringify(base))
-			const merged = Object.assign({}, base)
-			merged[writeKey] = 1
-			fs.writeFileSync(spelling, JSON.stringify(merged), "utf8")
-			traceLine("WROTE " + JSON.stringify(readBody(spelling)))
-		}
-		const letGo = () => {
-			release().then(() => {
-				traceLine("RELEASED")
-				process.exitCode = 0
-			}).catch((releaseError) => {
-				traceLine("RELEASE-FAILED " + String(releaseError.code))
-				process.exitCode = 1
-			})
-		}
-		if (holdMs > 0) {
-			setTimeout(letGo, holdMs)
-			return
-		}
-		letGo()
+async function naiveAcquire() {
+	const requireFromChild = createRequire(path.join(path.dirname(trace), "holder.cjs"))
+	const lockfile = requireFromChild(process.env.DSH_LOCK_MODULE)
+	const releaseNaive = await lockfile.lock(process.env.DSH_LOCK_KEY, {
+		lockfilePath: artefact,
+		stale: Number(process.env.DSH_LOCK_STALE_MS),
+		update: 10000,
+		realpath: false,
+		retries: 0,
 	})
-	.catch((error) => {
-		traceLine("OUTCOME failed " + String(error.code))
+	if (typeof releaseNaive !== "function") {
+		const notARelease = new Error("the library resolved to something other than a release function")
+		notARelease.code = "no-release-function"
+		throw notARelease
+	}
+	return releaseNaive
+}
+let release = null
+let attempt = 0
+let refusal = ""
+while (release === null) {
+	attempt += 1
+	traceLine("ATTEMPT " + attempt)
+	try {
+		release = naive ? await naiveAcquire() : await production.acquireFileLock(absolute, { immediate: true })
+	} catch (error) {
+		refusal = String(error && error.code)
+		traceLine("REFUSED " + refusal)
+		if (attempt > retries) {
+			traceLine("OUTCOME failed " + refusal)
+			process.exitCode = 1
+			break
+		}
+		await sleep(retryMs)
+	}
+}
+if (release !== null) {
+	traceLine("OUTCOME held")
+	if (writeKey) {
+		const base = baseMode === "before" ? staleBase : readBody(spelling)
+		traceLine(baseMode === "before" ? "BASE-USED " + JSON.stringify(base) : "BASE-UNDER-LOCK " + JSON.stringify(base))
+		const merged = Object.assign({}, base)
+		merged[writeKey] = 1
+		fs.writeFileSync(spelling, JSON.stringify(merged), "utf8")
+		traceLine("WROTE " + JSON.stringify(readBody(spelling)))
+	}
+	const startedAt = Date.now()
+	if (holdMs > 0 || doneFile !== "") {
+		traceLine("HOLDING " + String(holdMs))
+		// Either the parent signals that its assertions are finished, or the ceiling it was handed runs
+		// out, and the trace names which of the two let go.
+		for (;;) {
+			if (doneFile !== "" && fs.existsSync(doneFile)) {
+				traceLine("ASSERTIONS-DONE " + String(Date.now() - startedAt))
+				break
+			}
+			if (holdMs > 0 && Date.now() - startedAt >= holdMs) {
+				traceLine("HOLD-EXPIRED " + String(Date.now() - startedAt))
+				break
+			}
+			await sleep(25)
+		}
+	}
+	try {
+		await release()
+		traceLine("RELEASED")
+	} catch (releaseError) {
+		traceLine("RELEASE-FAILED " + String(releaseError.code))
 		process.exitCode = 1
-	})`
-
+	}
+}`
 interface HolderHandle {
 	pid: number | undefined
 	tracePath: string
+	donePath: string
 	childOutput: () => string
+	/** Tell the child its lock may go; it waits for this file to appear before releasing. */
+	signalRelease: () => void
 	waitForExit: () => Promise<number | null>
 }
 
 interface HolderOptions {
-	/** Milliseconds to hold before releasing; overrides the mode default. */
+	/** Milliseconds to hold before releasing; overrides the mode default, and with waitForAssertions
+	 * it is the ceiling the child falls back on rather than the moment it lets go. */
 	holdMs?: number
 	/** A key the child merges into the file under its own lock; empty means no write. */
 	writeKey?: string
 	/** Where the child reads the base it merges into: after admission, or before it ever tried. */
 	baseMode?: "under" | "before"
-	/** Retry budget the child hands the library, so it can be the writer that has to wait. */
+	/** Attempts the child makes before reporting the lock refused, so it can be the writer that has to wait. */
 	retries?: number
+	/** Milliseconds between the child's attempts. */
+	retryMs?: number
+	/** Keep the lock until this process calls signalRelease, so the assertions run under the other
+	 * process's lock rather than under a timeout this row happened to win. */
+	waitForAssertions?: boolean
 }
 
 /**
@@ -822,7 +890,9 @@ interface HolderOptions {
  * assertion needs; `mode: "hold"` makes it hold for six seconds so the suite can assert from this
  * process that a live foreign holder is enough to keep the module out. The options turn the same child
  * into the two shapes the persistence and lifecycle rows need: a writer that lands while others queue,
- * and a writer that has to queue behind a lock this process is holding.
+ * and a writer that has to queue behind a lock this process is holding. With waitForAssertions the
+ * child keeps its own lock until this process signals, so an assertion in a row below runs while the
+ * foreign holder still holds rather than after a timer released it.
  */
 function startLockHolder(
 	spelling: string,
@@ -834,24 +904,36 @@ function startLockHolder(
 	options: HolderOptions = {},
 ): HolderHandle {
 	const tracePath = path.join(directory, traceName)
-	const child = spawn(process.execPath, ["-e", HOLDER_SCRIPT], {
-		cwd: process.cwd(),
-		stdio: ["ignore", "pipe", "pipe"],
-		windowsHide: true,
-		env: {
-			...process.env,
-			NO_COLOR: "1",
-			DSH_LOCK_MODULE: lockModule,
-			DSH_LOCK_SPELLING: spelling,
-			DSH_LOCK_TRACE: tracePath,
-			DSH_LOCK_HOLD_MS: String(options.holdMs ?? (mode === "hold" ? 6000 : 0)),
-			DSH_LOCK_RETRIES: String(options.retries ?? 0),
-			DSH_LOCK_BASE: options.baseMode ?? "under",
-			DSH_LOCK_WRITE_KEY: options.writeKey ?? "",
-			DSH_LOCK_NAIVE: naive ? "1" : "0",
-			DSH_LOCK_KEY: canonicalLockKey(path.resolve(spelling)),
+	const donePath = path.join(directory, traceName + ".done")
+	// The loader argument is what makes the production import resolvable in a child at all; without it
+	// the module's extensionless import chain fails before the child can call anything.
+	const child = spawn(
+		process.execPath,
+		["--input-type=module", "--import", productionLoaderUrl, "-e", HOLDER_SCRIPT],
+		{
+			cwd: process.cwd(),
+			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
+			env: {
+				...process.env,
+				NO_COLOR: "1",
+				DSH_LOCK_MODULE: lockModule,
+				DSH_LOCK_MODULE_TS: productionModulePath,
+				DSH_LOCK_SPELLING_MODULE_TS: leafSpellingModulePath,
+				DSH_LOCK_STALE_MS: String(LOCK_STALE_MS),
+				DSH_LOCK_SPELLING: spelling,
+				DSH_LOCK_TRACE: tracePath,
+				DSH_LOCK_HOLD_MS: String(options.holdMs ?? (mode === "hold" ? 6000 : 0)),
+				DSH_LOCK_RETRIES: String(options.retries ?? 0),
+				DSH_LOCK_RETRY_MS: String(options.retryMs ?? 250),
+				DSH_LOCK_BASE: options.baseMode ?? "under",
+				DSH_LOCK_WRITE_KEY: options.writeKey ?? "",
+				DSH_LOCK_NAIVE: naive ? "1" : "0",
+				DSH_LOCK_KEY: canonicalLockKey(path.resolve(spelling)),
+				DSH_LOCK_DONE_FILE: options.waitForAssertions === true ? donePath : "",
+			},
 		},
-	})
+	)
 	let output = ""
 	const note = (chunk: string): void => {
 		output += chunk
@@ -867,7 +949,11 @@ function startLockHolder(
 	return {
 		pid: child.pid,
 		tracePath,
+		donePath,
 		childOutput: () => (output.length > 400 ? output.slice(-400) : output),
+		signalRelease: () => {
+			fs.writeFileSync(donePath, "", "utf8")
+		},
 		waitForExit: () =>
 			new Promise((resolve) => {
 				if (child.exitCode !== null) {
@@ -1326,17 +1412,28 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 		fs.writeFileSync(sibling, '{"pre":1}', "utf8")
 		const releaseLeaf = await acquireFileLock(target, { immediate: true })
 		const holder = startLockHolder(sibling, "hold", lockModule, directory, nextTraceName(), false, {
-			holdMs: 1500,
+			holdMs: 6000,
+			waitForAssertions: true,
 		})
 		await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
 		const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
 		expect(traceOutcome(outcomeLine)).toBe("held")
+		// Armed, and the trace says so: the child holds until this process tells it otherwise.
+		await readHolderTrace(holder.tracePath, "HOLDING", 15000, holder.childOutput)
 		expect(artefactsOf(directory)).toEqual([
 			"state-sidecar-leaf-for-sibling-admission.json.lock",
 			"task-history-leaf-for-sibling-admission.json.lock",
 		])
+		// The release is this process's to start. Everything above ran while the other process still held
+		// the sibling lock, and the trace has to name the signal rather than the six-second ceiling the
+		// child was handed as a backstop: a row that passed because the child timed out would leave
+		// HOLD-EXPIRED in the trace and reddens here.
+		holder.signalRelease()
 		expect(await holder.waitForExit()).toBe(0)
-		expect(fs.readFileSync(holder.tracePath, "utf8").split("\n")).toContain("RELEASED")
+		const traceLines = fs.readFileSync(holder.tracePath, "utf8").split("\n")
+		expect(traceLines).toContain("RELEASED")
+		expect(traceLines.some((line) => line.startsWith("ASSERTIONS-DONE "))).toBe(true)
+		expect(traceLines.some((line) => line.startsWith("HOLD-EXPIRED "))).toBe(false)
 		await releaseLeaf()
 		expect(artefactsOf(directory)).toEqual([])
 	})
@@ -1462,6 +1559,10 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				retries: 5,
 			})
 			await readHolderTrace(waiter.tracePath, "ARTEFACT", 15000, waiter.childOutput)
+			// Observed rather than assumed: the waiter attempted while this process still held the lock and
+			// was refused, so the row cannot pass with a writer that merely ran after the write below.
+			const refusedLine = await readHolderTrace(waiter.tracePath, "REFUSED", 15000, waiter.childOutput)
+			expect(refusedLine).toBe("REFUSED ELOCKED")
 			// Measured rather than assumed: this process wrote while the other one had still not been
 			// admitted, which is what makes it a waiting writer at all rather than a second writer that
 			// merely ran later.
@@ -1492,6 +1593,10 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 			})
 			const beforeLine = await readHolderTrace(waiter.tracePath, "BASE-BEFORE", 15000, waiter.childOutput)
 			expect(tracePayload(beforeLine, "BASE-BEFORE")).toEqual({ pre: 1 })
+			// The base was read before the attempt, and the attempt then happened and was refused; both are
+			// in the trace before this process touches the file, which is the barrier this row was missing.
+			const refusedLine = await readHolderTrace(waiter.tracePath, "REFUSED", 15000, waiter.childOutput)
+			expect(refusedLine).toBe("REFUSED ELOCKED")
 			expect(fs.readFileSync(waiter.tracePath, "utf8")).not.toContain("OUTCOME held")
 			writeMergedKey(target, "writerA")
 			await release()
@@ -1683,8 +1788,12 @@ describe("a replaced referent lets go both locks and the renewal timer", () => {
 				expect(artefactsOf(directory)).toEqual(["history.json.lock", "history.json.next.lock"])
 				expect(ledger.outstanding()).toBe(2)
 				// The second lock is a directory on a volume, not bookkeeping: a third arrival at the new target
-				// itself is refused on the artefact the second lock armed.
-				await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+				// itself is refused on the artefact the second lock armed. Probed through `nextTarget`, because
+				// `target` names the first holder's artefact, and asking there measures a refusal this row is not
+				// claiming.
+				await expect(acquireFileLock(nextTarget, { immediate: true })).rejects.toMatchObject({
+					code: "ELOCKED",
+				})
 				// The record names the second arrival, so the second release is the one that lands.
 				expect(await releaseQuietly(releaseSecond)).toBeNull()
 				releaseSecond = null
