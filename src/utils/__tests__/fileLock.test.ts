@@ -7,6 +7,7 @@ import * as path from "path"
 import * as lockfile from "proper-lockfile"
 
 import { acquireFileLock, canonicalLockKey, LOCK_STALE_MS, withFileLock } from "../fileLock"
+import { safeWriteJson } from "../safeWriteJson"
 
 vi.mock("proper-lockfile", () => ({ lock: vi.fn() }))
 
@@ -732,8 +733,18 @@ const lockfile = require(process.env.DSH_LOCK_MODULE)
 const spelling = process.env.DSH_LOCK_SPELLING
 const trace = process.env.DSH_LOCK_TRACE
 const holdMs = Number(process.env.DSH_LOCK_HOLD_MS || 0)
+const retries = Number(process.env.DSH_LOCK_RETRIES || 0)
+const baseMode = process.env.DSH_LOCK_BASE
+const writeKey = process.env.DSH_LOCK_WRITE_KEY || ""
 function traceLine(line) {
 	fs.appendFileSync(trace, line + "\\n", "utf8")
+}
+function readBody(target) {
+	try {
+		return JSON.parse(fs.readFileSync(target, "utf8"))
+	} catch {
+		return {}
+	}
 }
 let artefact = (function (target) {
 	let leaf
@@ -748,7 +759,11 @@ if (process.env.DSH_LOCK_NAIVE === "1") {
 	artefact = path.join(path.dirname(spelling), path.basename(spelling)) + ".lock"
 }
 traceLine("ARTEFACT " + artefact)
-lockfile.lock(process.env.DSH_LOCK_KEY, { lockfilePath: artefact, stale: 31000, update: 10000, realpath: false, retries: 0 })
+const staleBase = baseMode === "before" ? readBody(spelling) : null
+if (baseMode === "before") {
+	traceLine("BASE-BEFORE " + JSON.stringify(staleBase))
+}
+lockfile.lock(process.env.DSH_LOCK_KEY, { lockfilePath: artefact, stale: 31000, update: 10000, realpath: false, retries: retries })
 	.then((release) => {
 		if (typeof release !== "function") {
 			traceLine("OUTCOME failed no-release-function")
@@ -756,6 +771,14 @@ lockfile.lock(process.env.DSH_LOCK_KEY, { lockfilePath: artefact, stale: 31000, 
 			return
 		}
 		traceLine("OUTCOME held")
+		if (writeKey) {
+			const base = baseMode === "before" ? staleBase : readBody(spelling)
+			traceLine(baseMode === "before" ? "BASE-USED " + JSON.stringify(base) : "BASE-UNDER-LOCK " + JSON.stringify(base))
+			const merged = Object.assign({}, base)
+			merged[writeKey] = 1
+			fs.writeFileSync(spelling, JSON.stringify(merged), "utf8")
+			traceLine("WROTE " + JSON.stringify(readBody(spelling)))
+		}
 		const letGo = () => {
 			release().then(() => {
 				traceLine("RELEASED")
@@ -783,10 +806,23 @@ interface HolderHandle {
 	waitForExit: () => Promise<number | null>
 }
 
+interface HolderOptions {
+	/** Milliseconds to hold before releasing; overrides the mode default. */
+	holdMs?: number
+	/** A key the child merges into the file under its own lock; empty means no write. */
+	writeKey?: string
+	/** Where the child reads the base it merges into: after admission, or before it ever tried. */
+	baseMode?: "under" | "before"
+	/** Retry budget the child hands the library, so it can be the writer that has to wait. */
+	retries?: number
+}
+
 /**
  * Start the other process. `mode: "try"` asks it to take the lock and end, which is what a contention
  * assertion needs; `mode: "hold"` makes it hold for six seconds so the suite can assert from this
- * process that a live foreign holder is enough to keep the module out.
+ * process that a live foreign holder is enough to keep the module out. The options turn the same child
+ * into the two shapes the persistence and lifecycle rows need: a writer that lands while others queue,
+ * and a writer that has to queue behind a lock this process is holding.
  */
 function startLockHolder(
 	spelling: string,
@@ -795,6 +831,7 @@ function startLockHolder(
 	directory: string,
 	traceName: string,
 	naive = false,
+	options: HolderOptions = {},
 ): HolderHandle {
 	const tracePath = path.join(directory, traceName)
 	const child = spawn(process.execPath, ["-e", HOLDER_SCRIPT], {
@@ -807,7 +844,10 @@ function startLockHolder(
 			DSH_LOCK_MODULE: lockModule,
 			DSH_LOCK_SPELLING: spelling,
 			DSH_LOCK_TRACE: tracePath,
-			DSH_LOCK_HOLD_MS: mode === "hold" ? "6000" : "0",
+			DSH_LOCK_HOLD_MS: String(options.holdMs ?? (mode === "hold" ? 6000 : 0)),
+			DSH_LOCK_RETRIES: String(options.retries ?? 0),
+			DSH_LOCK_BASE: options.baseMode ?? "under",
+			DSH_LOCK_WRITE_KEY: options.writeKey ?? "",
 			DSH_LOCK_NAIVE: naive ? "1" : "0",
 			DSH_LOCK_KEY: canonicalLockKey(path.resolve(spelling)),
 		},
@@ -1062,6 +1102,576 @@ describe("another process contends for the same artefact", () => {
 			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
 			await release()
 			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+})
+
+/**
+ * A shallow merge of two decoded JSON bodies: the shape every merge callback below hands
+ * `safeWriteJson`, and the shape the child script performs with `Object.assign`. The one assertion is
+ * the step the guard cannot make for TypeScript - an `unknown` that passed `typeof value === "object"`
+ * is still not a record, and an array would spread into numeric keys rather than into nothing.
+ */
+const asRecord = (value: unknown): Record<string, unknown> =>
+	value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+
+const mergeRecords = (existing: unknown, incoming: unknown): unknown => ({
+	...asRecord(existing),
+	...asRecord(incoming),
+})
+
+/** Merge one key into a JSON file, onto whatever the file holds at the moment of writing. */
+function writeMergedKey(filePath: string, key: string): void {
+	const base = asRecord(JSON.parse(fs.readFileSync(filePath, "utf8")))
+	fs.writeFileSync(filePath, JSON.stringify({ ...base, [key]: 1 }), "utf8")
+}
+
+function readJsonBody(filePath: string): Record<string, unknown> {
+	return JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>
+}
+
+/** The JSON payload of one line the child traced. */
+function tracePayload(traceLineText: string, marker: string): Record<string, unknown> {
+	const hit = traceLineText.trim().match(new RegExp("^" + marker + " (.+)$"))
+	if (!hit) {
+		throw new Error(`no "${marker}" payload in the trace line ${JSON.stringify(traceLineText)}`)
+	}
+	return JSON.parse(hit[1]) as Record<string, unknown>
+}
+
+interface TimerLedger {
+	armed(): number
+	cancelled(): number
+	outstanding(): number
+	delays: number[]
+	restore(): void
+}
+
+/**
+ * Count the timers proper-lockfile arms and the ones it cancels, attributed by the stack of the call
+ * that armed them. The obvious instrument is not available here: the library hands its renewal timer to
+ * `unref()` at `lib/lockfile.js:180-181`, and an un-ref-ed timer drops out of
+ * `process.getActiveResourcesInfo()` - measured on this box, one live `setInterval` counts 1 and the
+ * same timer after `unref()` counts 0 - so the renewal has to be watched where it is created, by
+ * wrapping `setTimeout` and `clearTimeout` for the length of one row and counting only the calls whose
+ * stack names the library. Every other timer in the process gets back exactly what it asked for.
+ *
+ * The assertions below are load-bearing rather than decorative: on this platform `setTimeout` and
+ * `clearTimeout` are overload unions, and a wrapper that hands the callback, the delay and any further
+ * arguments through unchanged cannot be written without asserting past the union. vitest and node both
+ * arm timers with extra arguments, so dropping them here would change the run instead of only watching
+ * it, which is the difference between an instrument and a disturbance.
+ */
+function watchLibraryTimers(): TimerLedger {
+	const setOriginal = globalThis.setTimeout as unknown as (...callArguments: unknown[]) => unknown
+	const clearOriginal = globalThis.clearTimeout as unknown as (handle: unknown) => void
+	const armedHandles = new Set<unknown>()
+	const delays: number[] = []
+	let armed = 0
+	let cancelled = 0
+	globalThis.setTimeout = ((callback: unknown, ms?: unknown, ...rest: unknown[]): unknown => {
+		const stack = new Error().stack ?? ""
+		const handle = setOriginal(callback, ms, ...rest)
+		if (stack.includes("proper-lockfile")) {
+			armed += 1
+			delays.push(Number(ms))
+			armedHandles.add(handle)
+		}
+		return handle
+	}) as typeof globalThis.setTimeout
+	globalThis.clearTimeout = ((handle: unknown): void => {
+		if (armedHandles.delete(handle)) {
+			cancelled += 1
+		}
+		clearOriginal(handle)
+	}) as typeof globalThis.clearTimeout
+	return {
+		armed: () => armed,
+		cancelled: () => cancelled,
+		outstanding: () => armed - cancelled,
+		delays,
+		restore: () => {
+			globalThis.setTimeout = setOriginal as typeof globalThis.setTimeout
+			globalThis.clearTimeout = clearOriginal as typeof globalThis.clearTimeout
+		},
+	}
+}
+
+/**
+ * The reviewer-bot's "Regression Evidence" row asks for a real-library test that holds the link and
+ * unrelated sibling locks concurrently while keeping the alias contention. Two thirds of that already
+ * has a name in this file: the two 8.3 alias rows and the junction row in the suite above run against
+ * the unmocked library, and so does "contends an unrelated sibling named like the link target against
+ * the link's lock", which proves the collision a *similarly named* sibling causes. What none of them
+ * proves is the coexistence half - that a sibling with its own name and its own inode takes its own
+ * artefact and that both writers then hold locks at the same time - nor that a held lock is a directory
+ * on a volume rather than a table entry in this process, which only a second process can show. The
+ * middle row is the control that tells those two statements apart: the same launcher, the same
+ * directory, the same trace assertions, and opposite outcomes for the alias of the held leaf and for
+ * the unrelated sibling, so no row here can be green because the harness refused everything or admitted
+ * everything.
+ */
+describe("an unrelated lock and a held leaf coexist while the alias contends", () => {
+	const root = useTemporaryRoot("fileLock-coheld-")
+	let actualLock: typeof lockfile.lock
+	let lockModule = ""
+	let generatesShortNames = false
+	let traceIndex = 0
+	beforeAll(async () => {
+		actualLock = (await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")).lock
+		lockModule = createRequire(import.meta.url).resolve("proper-lockfile")
+		generatesShortNames = process.platform === "win32" && shortNamesGenerated(root())
+	})
+	beforeEach(() => {
+		vi.mocked(lockfile.lock).mockImplementation((target, options) => actualLock(target, options))
+	})
+
+	function scenario(name: string, leafName: string): { directory: string; target: string } {
+		const directory = path.join(root(), name)
+		fs.mkdirSync(directory, { recursive: true })
+		const target = path.join(directory, leafName)
+		fs.writeFileSync(target, '{"pre":1}', "utf8")
+		return { directory, target }
+	}
+
+	function nextTraceName(): string {
+		traceIndex += 1
+		return `coheld-trace-${traceIndex}.txt`
+	}
+
+	const itVolumeAlias = (name: string, fn: () => Promise<void>) =>
+		it(name, { timeout: 30000 }, async (context) => {
+			if (!generatesShortNames) {
+				return context.skip()
+			}
+			await fn()
+		})
+
+	const itPosixLeaf = (name: string, fn: () => Promise<void>) =>
+		it(name, { timeout: 30000 }, async (context) => {
+			if (process.platform === "win32") {
+				return context.skip()
+			}
+			await fn()
+		})
+
+	itVolumeAlias(
+		"holds the leaf lock and an unrelated sibling lock at once and still refuses the alias of the held leaf",
+		async () => {
+			const { directory, target } = scenario("coheld-alias", "task-history-leaf-for-coheld-lock-testing.json")
+			const sibling = path.join(directory, "state-sidecar-leaf-for-coheld-lock-testing.json")
+			fs.writeFileSync(sibling, '{"pre":1}', "utf8")
+			const aliasLeaf = aliasOf(target)
+			expect(aliasLeaf).not.toBe(target)
+			const releaseLeaf = await acquireFileLock(target, { immediate: true })
+			// The coexistence half: a sibling with its own name and its own inode has to get in.
+			const releaseSibling = await acquireFileLock(sibling, { immediate: true })
+			const bothPlaced = [
+				"state-sidecar-leaf-for-coheld-lock-testing.json.lock",
+				"task-history-leaf-for-coheld-lock-testing.json.lock",
+			].sort()
+			expect(artefactsOf(directory)).toEqual(bothPlaced)
+			expect(canonicalLockKey(target)).not.toBe(canonicalLockKey(sibling))
+			expect(artefactsOf(directory)[0]).not.toBe(artefactsOf(directory)[1])
+			// The alias half inside the same row: a foreign process arriving by the 8.3 spelling of the
+			// held leaf is refused on the long-name artefact, which is the point the row on #1395 holds open.
+			const aliasProbe = startLockHolder(aliasLeaf, "try", lockModule, directory, nextTraceName())
+			const aliasArtefact = await readHolderTrace(aliasProbe.tracePath, "ARTEFACT", 15000, aliasProbe.childOutput)
+			const aliasOutcome = await readHolderTrace(aliasProbe.tracePath, "OUTCOME", 15000, aliasProbe.childOutput)
+			expect(traceArtefact(aliasArtefact)).toBe(
+				path.join(directory, "task-history-leaf-for-coheld-lock-testing.json.lock"),
+			)
+			expect(traceOutcome(aliasOutcome)).toBe("failed ELOCKED")
+			expect(await aliasProbe.waitForExit()).toBe(1)
+			// And the sibling's lock is a directory on a volume rather than bookkeeping in this process:
+			// a foreign process arriving at the sibling is refused too, on the sibling's own artefact.
+			const siblingProbe = startLockHolder(sibling, "try", lockModule, directory, nextTraceName())
+			const siblingArtefact = await readHolderTrace(
+				siblingProbe.tracePath,
+				"ARTEFACT",
+				15000,
+				siblingProbe.childOutput,
+			)
+			const siblingOutcome = await readHolderTrace(
+				siblingProbe.tracePath,
+				"OUTCOME",
+				15000,
+				siblingProbe.childOutput,
+			)
+			expect(traceArtefact(siblingArtefact)).toBe(
+				path.join(directory, "state-sidecar-leaf-for-coheld-lock-testing.json.lock"),
+			)
+			expect(traceOutcome(siblingOutcome)).toBe("failed ELOCKED")
+			expect(await siblingProbe.waitForExit()).toBe(1)
+			expect(artefactsOf(directory)).toEqual(bothPlaced)
+			await releaseLeaf()
+			await releaseSibling()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	itVolumeAlias("admits a second process locking the unrelated sibling while the leaf lock is held", async () => {
+		const { directory, target } = scenario("coheld-sibling-free", "task-history-leaf-for-sibling-admission.json")
+		const sibling = path.join(directory, "state-sidecar-leaf-for-sibling-admission.json")
+		fs.writeFileSync(sibling, '{"pre":1}', "utf8")
+		const releaseLeaf = await acquireFileLock(target, { immediate: true })
+		const holder = startLockHolder(sibling, "hold", lockModule, directory, nextTraceName(), false, {
+			holdMs: 1500,
+		})
+		await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+		const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+		expect(traceOutcome(outcomeLine)).toBe("held")
+		expect(artefactsOf(directory)).toEqual([
+			"state-sidecar-leaf-for-sibling-admission.json.lock",
+			"task-history-leaf-for-sibling-admission.json.lock",
+		])
+		expect(await holder.waitForExit()).toBe(0)
+		expect(fs.readFileSync(holder.tracePath, "utf8").split("\n")).toContain("RELEASED")
+		await releaseLeaf()
+		expect(artefactsOf(directory)).toEqual([])
+	})
+
+	itPosixLeaf(
+		"holds a link lock and an unrelated sibling lock at once and refuses a process arriving at the target",
+		async () => {
+			const directory = path.join(root(), "coheld-link")
+			fs.mkdirSync(directory, { recursive: true })
+			const target = path.join(directory, "history.json")
+			fs.writeFileSync(target, '{"pre":1}', "utf8")
+			const link = path.join(directory, "history-link.json")
+			fs.symlinkSync("history.json", link)
+			const sibling = path.join(directory, "state-sidecar.json")
+			fs.writeFileSync(sibling, '{"pre":1}', "utf8")
+			expect(fs.statSync(link).ino).toBe(fs.statSync(target).ino)
+			const releaseLink = await acquireFileLock(link, { immediate: true })
+			const releaseSibling = await acquireFileLock(sibling, { immediate: true })
+			expect(artefactsOf(directory)).toEqual(["history.json.lock", "state-sidecar.json.lock"])
+			expect(canonicalLockKey(link)).not.toBe(canonicalLockKey(sibling))
+			const probe = startLockHolder(target, "try", lockModule, directory, nextTraceName())
+			const probeArtefact = await readHolderTrace(probe.tracePath, "ARTEFACT", 15000, probe.childOutput)
+			const probeOutcome = await readHolderTrace(probe.tracePath, "OUTCOME", 15000, probe.childOutput)
+			expect(traceArtefact(probeArtefact)).toBe(path.join(directory, "history.json.lock"))
+			expect(traceOutcome(probeOutcome)).toBe("failed ELOCKED")
+			expect(await probe.waitForExit()).toBe(1)
+			expect(artefactsOf(directory)).toEqual(["history.json.lock", "state-sidecar.json.lock"])
+			await releaseLink()
+			await releaseSibling()
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+})
+
+/**
+ * The "Persistence Integrity" row asks for a cross-process test with a waiting writer and concurrent
+ * safeWriteJson merge writes. The cross-process suite above proves admission and refusal but no writer
+ * in it ever wrote a body through the lock, and the merge rows above never leave this process. These
+ * three rows put a writer in another process with a queue in front of it. The first lands a foreign
+ * writer and this process's two concurrent merge writers onto one file through one artefact. The second
+ * and third are one scenario told twice with a single flag between them: a process that has to wait
+ * behind a lock this process is holding, which either re-reads the file after it is admitted or merges
+ * into the copy it read before it ever tried. The second keeps the key that landed while it waited, the
+ * third loses it. Without the third row the second only proves that nothing was lost, which is not the
+ * same as proving that the re-read under the lock is the thing that kept it.
+ */
+describe("a writer that had to wait merges into what landed while it waited", () => {
+	const root = useTemporaryRoot("fileLock-merge-wait-")
+	let actualLock: typeof lockfile.lock
+	let lockModule = ""
+	let traceIndex = 0
+	beforeAll(async () => {
+		actualLock = (await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")).lock
+		lockModule = createRequire(import.meta.url).resolve("proper-lockfile")
+	})
+	beforeEach(() => {
+		vi.mocked(lockfile.lock).mockImplementation((target, options) => actualLock(target, options))
+	})
+
+	// The queue this module builds when the artefact belongs to someone else: for a plain call
+	// fileLock.ts:119-125 hands the library five retries after the first attempt, capped at 1000 ms
+	// each, so attempts land at about 0, 100, 300, 700, 1500 and 2500 ms and a queued writer gives up
+	// after roughly 2.5 seconds. Two consequences shape the rows below: a foreign hold has to end
+	// inside that horizon or the queued writers of this process would fail rather than wait, and a row
+	// that sits behind another process gets a minute of row budget rather than the fifteen seconds the
+	// faster rows here get.
+	function scenario(name: string): { directory: string; target: string } {
+		const directory = path.join(root(), name)
+		fs.mkdirSync(directory, { recursive: true })
+		const target = path.join(directory, "history.json")
+		fs.writeFileSync(target, '{"pre":1}', "utf8")
+		return { directory, target }
+	}
+
+	function nextTraceName(): string {
+		traceIndex += 1
+		return "merge-trace-" + traceIndex + ".txt"
+	}
+
+	it(
+		"lands two concurrent merge writers and a foreign writer into one file through one artefact",
+		{ timeout: 60000 },
+		async () => {
+			const { directory, target } = scenario("merge-three-writers")
+			// One second, which is inside the 2.5 s the two merge writers below are willing to wait, so
+			// they are admitted on their third or fourth attempt instead of exhausting the budget.
+			const holder = startLockHolder(target, "hold", lockModule, directory, nextTraceName(), false, {
+				holdMs: 1000,
+				writeKey: "child",
+				baseMode: "under",
+			})
+			const artefactLine = await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			expect(traceArtefact(artefactLine)).toBe(path.join(directory, "history.json.lock"))
+			expect(traceOutcome(outcomeLine)).toBe("held")
+			// The foreign writer read its base after it was admitted, which is the only reason its key is
+			// still in the file at the end of the row.
+			const foreignBase = await readHolderTrace(holder.tracePath, "BASE-UNDER-LOCK", 15000, holder.childOutput)
+			expect(tracePayload(foreignBase, "BASE-UNDER-LOCK")).toEqual({ pre: 1 })
+			// Both of these arrive at a file another process holds, so both take the retry path described
+			// above, and neither resolves until its own write has landed under its own lock. A rejection
+			// here fails the row, so awaiting them is the assertion that both got in.
+			await Promise.all([
+				safeWriteJson(target, { writerA: 1 }, { merge: mergeRecords }),
+				safeWriteJson(target, { writerB: 1 }, { merge: mergeRecords }),
+			])
+			expect(await holder.waitForExit()).toBe(0)
+			expect(readJsonBody(target)).toEqual({ pre: 1, child: 1, writerA: 1, writerB: 1 })
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	it(
+		"re-reads under the lock when the process that had to wait is admitted after another key landed",
+		{ timeout: 60000 },
+		async () => {
+			const { directory, target } = scenario("merge-waiter-under")
+			const release = await acquireFileLock(target, { immediate: true })
+			const waiter = startLockHolder(target, "hold", lockModule, directory, nextTraceName(), false, {
+				holdMs: 0,
+				writeKey: "child",
+				baseMode: "under",
+				retries: 5,
+			})
+			await readHolderTrace(waiter.tracePath, "ARTEFACT", 15000, waiter.childOutput)
+			// Measured rather than assumed: this process wrote while the other one had still not been
+			// admitted, which is what makes it a waiting writer at all rather than a second writer that
+			// merely ran later.
+			expect(fs.readFileSync(waiter.tracePath, "utf8")).not.toContain("OUTCOME held")
+			writeMergedKey(target, "writerA")
+			await release()
+			const outcomeLine = await readHolderTrace(waiter.tracePath, "OUTCOME", 25000, waiter.childOutput)
+			expect(traceOutcome(outcomeLine)).toBe("held")
+			const baseLine = await readHolderTrace(waiter.tracePath, "BASE-UNDER-LOCK", 15000, waiter.childOutput)
+			expect(tracePayload(baseLine, "BASE-UNDER-LOCK")).toEqual({ pre: 1, writerA: 1 })
+			expect(await waiter.waitForExit()).toBe(0)
+			expect(readJsonBody(target)).toEqual({ pre: 1, writerA: 1, child: 1 })
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	it(
+		"loses the key that landed while it waited when the waiting process merges against a base read before it tried",
+		{ timeout: 60000 },
+		async () => {
+			const { directory, target } = scenario("merge-waiter-before")
+			const release = await acquireFileLock(target, { immediate: true })
+			const waiter = startLockHolder(target, "hold", lockModule, directory, nextTraceName(), false, {
+				holdMs: 0,
+				writeKey: "child",
+				baseMode: "before",
+				retries: 5,
+			})
+			const beforeLine = await readHolderTrace(waiter.tracePath, "BASE-BEFORE", 15000, waiter.childOutput)
+			expect(tracePayload(beforeLine, "BASE-BEFORE")).toEqual({ pre: 1 })
+			expect(fs.readFileSync(waiter.tracePath, "utf8")).not.toContain("OUTCOME held")
+			writeMergedKey(target, "writerA")
+			await release()
+			const outcomeLine = await readHolderTrace(waiter.tracePath, "OUTCOME", 25000, waiter.childOutput)
+			expect(traceOutcome(outcomeLine)).toBe("held")
+			const usedLine = await readHolderTrace(waiter.tracePath, "BASE-USED", 15000, waiter.childOutput)
+			expect(tracePayload(usedLine, "BASE-USED")).toEqual({ pre: 1 })
+			expect(await waiter.waitForExit()).toBe(0)
+			const content = readJsonBody(target)
+			expect(content).toEqual({ pre: 1, child: 1 })
+			expect(content).not.toHaveProperty("writerA")
+			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+})
+
+/**
+ * The "Lifecycle Resource Cleanup" row asks for a regression test that acquires after replacement while
+ * the first lock is still held, and then checks both releases and the timer cleanup. The posix row that
+ * holds two locks on one referent after the directory it lived in was replaced already covers
+ * acquire-after-replacement and the disappearance of both artefacts, and it names the compromised-lock
+ * hazard the renewal can hit; what none of the existing rows does is look at the renewal timer at all,
+ * and the acquire-after-replacement row never runs on the platform this suite is being run on. These
+ * rows put the replacement and the renewal in one row where the row executes. The second row is the
+ * control that makes the first row's arithmetic mean something: it shows a renewal timer sitting
+ * outstanding while a lock is held, shows an attempt that never owned the artefact adding nothing
+ * outstanding, and shows the release being the thing that cancels it, so a row that ends balanced is
+ * balanced because the release let go and not because nothing was ever armed.
+ */
+describe("a replaced referent lets go both locks and the renewal timer", () => {
+	const root = useTemporaryRoot("fileLock-timer-")
+	let actualLock: typeof lockfile.lock
+	beforeAll(async () => {
+		actualLock = (await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")).lock
+	})
+	beforeEach(() => {
+		vi.mocked(lockfile.lock).mockImplementation((target, options) => actualLock(target, options))
+	})
+
+	function scenario(name: string, leafName: string): { directory: string; target: string } {
+		const directory = path.join(root(), name)
+		fs.mkdirSync(directory, { recursive: true })
+		const target = path.join(directory, leafName)
+		fs.writeFileSync(target, '{"pre":1}', "utf8")
+		return { directory, target }
+	}
+
+	it(
+		"lets go both locks and the renewal timer when the referent is replaced under a held lock",
+		{ timeout: 30000 },
+		async () => {
+			const { directory, target } = scenario("timer-replaced-referent", "history.json")
+			const ledger = watchLibraryTimers()
+			let releaseFirst: (() => Promise<void>) | null = null
+			let releaseSecond: (() => Promise<void>) | null = null
+			try {
+				releaseFirst = await acquireFileLock(target, { immediate: true })
+				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+				// The renewal the library armed for this lock: fileLock.ts asks for update 10000 at
+				// fileLock.ts:108, the library clamps it against the staleness window at
+				// lib/lockfile.js:220-221, and lib/lockfile.js:109 is where the timer is armed.
+				expect(ledger.armed()).toBeGreaterThanOrEqual(1)
+				expect(ledger.outstanding()).toBe(1)
+				expect(ledger.delays).toContain(10000)
+				const replacement = path.join(directory, "history.json.next")
+				fs.writeFileSync(replacement, '{"replaced":1}', "utf8")
+				fs.renameSync(replacement, target)
+				expect(readJsonBody(target)).toEqual({ replaced: 1 })
+				// The half the row is named for: an acquisition attempted after the referent was replaced,
+				// while the first lock is still held. The leaf name survived the replacement, so the volume
+				// still spells the file the same way, so this is refused on the artefact the first one
+				// armed rather than quietly taking a second lock beside it.
+				await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+				expect(ledger.outstanding()).toBe(1)
+				await releaseFirst()
+				releaseFirst = null
+				// The release is what cancels the renewal: lib/lockfile.js:288 clears the update timeout
+				// before it removes the artefact, and the artefact going is the other half of the same call.
+				expect(ledger.cancelled()).toBe(ledger.armed())
+				expect(ledger.outstanding()).toBe(0)
+				expect(artefactsOf(directory)).toEqual([])
+				releaseSecond = await acquireFileLock(target, { immediate: true })
+				expect(ledger.outstanding()).toBe(1)
+				writeMergedKey(target, "writer")
+				await releaseSecond()
+				releaseSecond = null
+				expect(ledger.outstanding()).toBe(0)
+				expect(artefactsOf(directory)).toEqual([])
+				expect(readJsonBody(target)).toEqual({ replaced: 1, writer: 1 })
+			} finally {
+				ledger.restore()
+				if (releaseFirst !== null) {
+					await releaseFirst()
+				}
+				if (releaseSecond !== null) {
+					await releaseSecond()
+				}
+			}
+		},
+	)
+
+	it(
+		"keeps a renewal timer outstanding until the lock that armed it is let go, and arms none for an attempt that never owned the artefact",
+		{ timeout: 30000 },
+		async () => {
+			const { directory, target } = scenario("timer-outstanding", "history.json")
+			const ledger = watchLibraryTimers()
+			let release: (() => Promise<void>) | null = null
+			try {
+				release = await acquireFileLock(target, { immediate: true })
+				expect(ledger.armed()).toBeGreaterThanOrEqual(1)
+				expect(ledger.outstanding()).toBe(1)
+				const armedBeforeAttempt = ledger.armed()
+				await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+				expect(ledger.armed()).toBe(armedBeforeAttempt)
+				expect(ledger.outstanding()).toBe(1)
+				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+				await release()
+				release = null
+				expect(ledger.cancelled()).toBe(ledger.armed())
+				expect(ledger.outstanding()).toBe(0)
+				expect(artefactsOf(directory)).toEqual([])
+			} finally {
+				ledger.restore()
+				if (release !== null) {
+					await release()
+				}
+			}
+		},
+	)
+
+	const itPosixLeaf = (name: string, fn: () => Promise<void>) =>
+		it(name, { timeout: 30000 }, async (context) => {
+			if (process.platform === "win32") {
+				return context.skip()
+			}
+			await fn()
+		})
+
+	itPosixLeaf(
+		"lets go both locks and the renewal timer when a link target is replaced under a held lock",
+		async () => {
+			const directory = path.join(root(), "timer-link-replaced")
+			fs.mkdirSync(directory, { recursive: true })
+			const target = path.join(directory, "history.json")
+			fs.writeFileSync(target, '{"pre":1}', "utf8")
+			const link = path.join(directory, "history-link.json")
+			fs.symlinkSync("history.json", link)
+			const ledger = watchLibraryTimers()
+			let releaseFirst: (() => Promise<void>) | null = null
+			let releaseSecond: (() => Promise<void>) | null = null
+			try {
+				releaseFirst = await acquireFileLock(link, { immediate: true })
+				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+				expect(ledger.outstanding()).toBe(1)
+				expect(ledger.delays).toContain(10000)
+				const nextTarget = path.join(directory, "history.json.next")
+				fs.writeFileSync(nextTarget, '{"replaced":1}', "utf8")
+				const nextLink = path.join(directory, "history-link.json.next")
+				fs.symlinkSync("history.json.next", nextLink)
+				fs.renameSync(nextLink, link)
+				expect(fs.realpathSync(link)).toBe(nextTarget)
+				// The other half of acquire-after-replacement: the replacement moved the referent, so the
+				// volume now spells the leaf differently, so the process that arrives second is admitted on
+				// its own artefact while the first lock is still held. Both renewals are outstanding at the
+				// same time here, and both releases have to let go of their own.
+				releaseSecond = await acquireFileLock(link, { immediate: true })
+				expect(artefactsOf(directory)).toEqual(["history.json.lock", "history.json.next.lock"])
+				expect(ledger.outstanding()).toBe(2)
+				// The second lock is a directory on a volume, not bookkeeping: a third arrival at the new
+				// target itself is refused on the artefact the second lock armed.
+				await expect(acquireFileLock(target, { immediate: true })).rejects.toMatchObject({ code: "ELOCKED" })
+				await releaseSecond()
+				releaseSecond = null
+				expect(ledger.outstanding()).toBe(1)
+				expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+				await releaseFirst()
+				releaseFirst = null
+				expect(ledger.cancelled()).toBe(ledger.armed())
+				expect(ledger.outstanding()).toBe(0)
+				expect(artefactsOf(directory)).toEqual([])
+			} finally {
+				ledger.restore()
+				if (releaseFirst !== null) {
+					await releaseFirst()
+				}
+				if (releaseSecond !== null) {
+					await releaseSecond()
+				}
+			}
 		},
 	)
 })
