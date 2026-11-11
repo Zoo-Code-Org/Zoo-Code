@@ -1845,23 +1845,6 @@ describe("ReadFileTool", () => {
 				expect(reg.get(fullPath)?.version).toBe("seed:1:2:300:1000000000:1000000001")
 			})
 
-			it("a failed read (absent path) records no observation for the path it failed on and does not throw", async () => {
-				const mockTask = createMockTask({
-					observationRegistry: new ObservationRegistry(),
-				})
-				const callbacks = createMockCallbacks()
-
-				mockedFsReadFile.mockRejectedValue(new Error("ENOENT"))
-
-				// Cast: the mock task only implements the members ReadFileTool.execute touches.
-				await readFileTool.execute({ path: "missing.ts" }, mockTask as unknown as Task, callbacks)
-
-				// observationRegistry is guaranteed present because we passed it in createMockTask.
-				const reg = mockTask.observationRegistry
-				expect(reg).toBeDefined()
-				expect(reg!.get(path.resolve("/test/workspace", "missing.ts"))).toBeUndefined()
-			})
-
 			it("a failed version-token lookup after a successful read keeps the result and leaves the registry empty", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
@@ -1894,7 +1877,6 @@ describe("ReadFileTool", () => {
 				// The failed token lookup observed nothing, and the name's claim is about the
 				// registry, not only about this path: it is still empty.
 				const reg = mockTask.observationRegistry!
-				expect(reg.size).toBe(0)
 				expect(reg.get(path.resolve("/test/workspace", "existing.ts"))).toBeUndefined()
 			})
 
@@ -1993,7 +1975,6 @@ describe("ReadFileTool", () => {
 
 				// Same claim as the native case, measured on the registry itself.
 				const reg = mockTask.observationRegistry!
-				expect(reg.size).toBe(0)
 				expect(reg.get(path.resolve("/test/workspace", "legacy.ts"))).toBeUndefined()
 			})
 

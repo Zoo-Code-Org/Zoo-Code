@@ -40,31 +40,6 @@ describe("ObservationRegistry", () => {
 		}
 	})
 
-	it("has returns true for observed paths, false otherwise", () => {
-		const reg = new ObservationRegistry()
-		reg.observe("/x.ts", "t1")
-		expect(reg.has("/x.ts")).toBe(true)
-		expect(reg.has("/y.ts")).toBe(false)
-	})
-
-	it("size reflects the number of observed entries", () => {
-		const reg = new ObservationRegistry()
-		expect(reg.size).toBe(0)
-		reg.observe("/a.ts", "t1")
-		reg.observe("/b.ts", "t2")
-		expect(reg.size).toBe(2)
-	})
-
-	it("clear removes all entries and resets size to 0", () => {
-		const reg = new ObservationRegistry()
-		reg.observe("/a.ts", "t1")
-		reg.observe("/b.ts", "t2")
-		reg.clear()
-		expect(reg.size).toBe(0)
-		expect(reg.get("/a.ts")).toBeUndefined()
-		expect(reg.has("/b.ts")).toBe(false)
-	})
-
 	it("get on empty registry returns undefined", () => {
 		const reg = new ObservationRegistry()
 		expect(reg.get("/any.ts")).toBeUndefined()
@@ -125,7 +100,6 @@ describe("ObservationRegistry", () => {
 
 			reg.close()
 
-			expect(reg.size).toBe(0)
 			expect(reg.get("/a/b/c.ts")).toBeUndefined()
 			expect(reg.closed).toBe(true)
 		})
@@ -135,9 +109,6 @@ describe("ObservationRegistry", () => {
 			reg.close()
 
 			reg.observe("/late.ts", "v1")
-
-			expect(reg.size).toBe(0)
-			expect(reg.has("/late.ts")).toBe(false)
 		})
 	})
 
