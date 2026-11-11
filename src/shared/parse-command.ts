@@ -1,6 +1,9 @@
 import { parse } from "shell-quote"
 
-export type ShellToken = string | { op: string } | { command: string }
+// Glob tokens are a distinct shape: shell-quote keeps the glob text on
+// `pattern` and collapses the word itself to the literal `glob` op. Every
+// other operator token carries only `op`.
+export type ShellToken = string | { op: "glob"; pattern: string } | { op: string } | { command: string }
 
 /**
  * The kind of structural region a malformed-command error refers to.
@@ -50,6 +53,13 @@ export type ShellToken = string | { op: string } | { command: string }
  *   The tokenizer keeps only the literal `glob` for such a word, which
  *   under-approximates the files bash expands the pattern to. The scan
  *   refuses the input instead of reconstructing a bare `glob` word.
+ * - `placeholder-glob`: a host-level glob word that shares its word with a
+ *   masked construct. The collapsed word swallows the construct's
+ *   placeholder, so the construct's payload — a command substitution's inner
+ *   command — is never extracted, re-scanned, or checked. The collapsed word
+ *   rides the host's allow rule to an approval while bash runs the embedded
+ *   command. The scan refuses the input. A glob word with no placeholder is
+ *   host text unchanged.
  */
 export type QuoteType =
 	| "posix-single"
@@ -68,6 +78,7 @@ export type QuoteType =
 	| "tokenize-failure"
 	| "ambiguous-opener"
 	| "payload-glob"
+	| "placeholder-glob"
 
 /**
  * The result of parsing a command string.
@@ -78,10 +89,10 @@ export type QuoteType =
  * expansion delimiter or arithmetic expression that never closes, a stray
  * closer, a raw NUL byte, substitution nesting beyond the re-scan depth cap,
  * the shell tokenizer rejecting the masked command, a `{` opener joined to
- * its `$` across a carriage-return continuation, or a glob word inside a
- * re-scanned substitution payload. `commands` then holds the raw input as one
- * opaque token. Callers can surface the error without splitting unsafe
- * fragments.
+ * its `$` across a carriage-return continuation, a glob word inside a
+ * re-scanned substitution payload, or a host glob word carrying a masked
+ * construct. `commands` then holds the raw input as one opaque token.
+ * Callers can surface the error without splitting unsafe fragments.
  *
  * Callers that only need the sub-command list can destructure `{ commands }`.
  * A caller that must tell a parse error from a normal single-command result
@@ -136,13 +147,16 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 		"ambiguous-opener":
 			"ambiguous parameter-expansion opener (a carriage return sits in the line continuation before `{`)",
 		"payload-glob": "glob pattern inside a substitution payload (glob expansion cannot be accounted for)",
+		"placeholder-glob":
+			"glob word carrying a command substitution (substitution expansion cannot be accounted for)",
 	}
 	const problem =
 		quoteType === "stray-closer" ||
 		quoteType === "nul-byte" ||
 		quoteType === "nesting-too-deep" ||
 		quoteType === "ambiguous-opener" ||
-		quoteType === "payload-glob"
+		quoteType === "payload-glob" ||
+		quoteType === "placeholder-glob"
 			? labels[quoteType]
 			: `unterminated ${labels[quoteType]}`
 	const snippetStart = Math.max(0, openIndex - 10)
@@ -259,6 +273,21 @@ interface ScanOutcome {
  * literally.
  */
 const NUL = "\x00"
+
+/**
+ * True when `pattern` carries a placeholder for a construct whose masked text
+ * can hide a command the executing shell may run: a command substitution
+ * (`S`), a quote region (`Q`), a parameter expansion (`P`), a heredoc (`H`),
+ * or an arithmetic expression (`A`). A glob word that swallows one of these
+ * loses the only channel that extracts and checks the construct's payload.
+ * Variables (`V`) and redirections (`R`) restore verbatim and carry no
+ * payload, so a glob word sharing its word with one of those keeps its
+ * main-line host-glob behavior. The pattern is built from `NUL` rather than a
+ * literal so the sentinel stays the scan's single source of truth.
+ */
+function carriesExecutablePlaceholder(pattern: string): boolean {
+	return new RegExp(`${NUL}[SQPHA]\\d+${NUL}`).test(pattern)
+}
 
 /**
  * Cap on payload re-scan depth. The scan re-scans every substitution payload
@@ -2936,6 +2965,32 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 					// the model also reads.
 					message: unterminatedQuoteMessage("payload-glob", 0, expandPlaceholders(line, outcome)),
 				}
+				return []
+			} else if (
+				// Stryker disable next-line ConditionalExpression,LogicalOperator: only glob tokens carry `pattern` at runtime, so widening the `in` check (to true, or across the `&&`) sends every reachable token to the same branch; the operand exists only to type the pattern access.
+				"pattern" in token &&
+				carriesExecutablePlaceholder(token.pattern)
+			) {
+				// A host-level glob word that shares its word with a masked
+				// construct swallows that construct's placeholder into the
+				// collapsed pattern. The placeholder never reaches the word
+				// loop below, so the construct's payload — a command
+				// substitution's inner command — is never extracted,
+				// re-scanned, or checked. The collapsed word `glob` then rides
+				// the host's allow rule to an approval while bash runs the
+				// embedded command. A glob word that shares its word only with
+				// a payload-free variable or redirection keeps its main-line
+				// host-glob behavior. Only placeholder-carrying glob words fail
+				// closed, on the shared error channel like `payload-glob`.
+				outcome.error = {
+					quoteType: "placeholder-glob",
+					openIndex: 0,
+					// Expand before excerpting: the raw masked line would expose
+					// the placeholder sentinel and internal names in a message
+					// the model also reads.
+					message: unterminatedQuoteMessage("placeholder-glob", 0, expandPlaceholders(line, outcome)),
+				}
+				// Stryker disable next-line ArrayDeclaration: with the error already recorded, `parseCommand` discards this list and returns the raw input as the one opaque token, so no reachable test can observe the difference between `[]` and a non-empty list.
 				return []
 			} else {
 				// Other operators (>, <) are part of the command word.

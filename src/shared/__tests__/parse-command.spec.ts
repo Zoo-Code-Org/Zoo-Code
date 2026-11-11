@@ -2421,6 +2421,63 @@ describe("parseCommand", () => {
 			expect(parseError?.message).not.toMatch(/\0[A-Z]\d+\0/)
 			expect(parseError?.message).toContain("glob pattern inside a substitution payload")
 			expect(parseError?.message).toContain("rm* 'a $b'")
+			// A rejection kind renders its label bare, never behind the
+			// `unterminated ` prefix an unclosed region gets.
+			expect(parseError?.message).not.toContain("unterminated")
+		})
+
+		it.each([
+			"echo $(rm -rf /tmp/victim)*",
+			'echo "$(rm -rf /tmp/victim)"*',
+			"echo ${x:-$(rm -rf /tmp/victim)}*",
+			"echo <(rm -rf /tmp/victim)*",
+		])("fails closed on a host glob word carrying a substitution: %s", (input) => {
+			// The tokenizer collapses the whole word to the literal `glob`,
+			// swallowing the construct's placeholder, so the construct's
+			// payload is never extracted, re-scanned, or checked. The bare
+			// `glob` word could ride an allow rule to an approval while bash
+			// runs the embedded command. The word fails closed on the shared
+			// error channel, like the payload-glob rule above.
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError?.quoteType).toBe("placeholder-glob")
+			expect(commands).toEqual([input])
+		})
+
+		it("keeps glob words that carry no executable placeholder on the main-line path", () => {
+			// The strict rule is scoped to glob words that swallow a masked
+			// executable construct. A plain host glob, a plain substitution,
+			// and a glob sharing its word with a payload-free variable all
+			// behave exactly as before.
+			expect(parseCommand("ls *.log").parseError).toBeNull()
+			expect(parseCommand("ls *.log").commands).toEqual(["ls glob"])
+			expect(parseCommand("echo $(ls)").parseError).toBeNull()
+			expect(parseCommand("echo $(ls)").commands).toEqual(["echo", "ls"])
+			expect(parseCommand("ls $HOME/*.log").parseError).toBeNull()
+			expect(parseCommand("ls $HOME/*.log").commands).toEqual(["ls glob"])
+			// Two adjacent variable placeholders sit side by side in the
+			// masked word, but neither is an executable construct: the match
+			// must carry a class letter, not just sentinels.
+			expect(parseCommand("ls $a$b*.log").parseError).toBeNull()
+			expect(parseCommand("ls $a$b*.log").commands).toEqual(["ls glob"])
+			// A glob word sharing its word with a redirection stays unchanged.
+			expect(parseCommand("cat <file*.txt").parseError).toBeNull()
+			// A quoted substitution without a glob character is unchanged.
+			expect(parseCommand('echo "$(ls)"').parseError).toBeNull()
+		})
+
+		it("expands placeholders in the placeholder-glob message excerpt", () => {
+			// The excerpt quotes the rejected line back to the user and the
+			// model, so it must not expose the placeholder sentinel or
+			// internal names.
+			const { parseError } = parseCommand('echo "$(rm x)"*')
+			expect(parseError?.quoteType).toBe("placeholder-glob")
+			expect(parseError?.message).not.toContain("\x00")
+			expect(parseError?.message).not.toMatch(/\0[A-Z]\d+\0/)
+			expect(parseError?.message).toContain("glob word carrying a command substitution")
+			expect(parseError?.message).toContain('echo "$(rm x)"*')
+			// A rejection kind renders its label bare, never behind the
+			// `unterminated ` prefix an unclosed region gets.
+			expect(parseError?.message).not.toContain("unterminated")
 		})
 
 		it("keeps a carriage return inside a delimiter word from joining a dollar to a quote byte", () => {

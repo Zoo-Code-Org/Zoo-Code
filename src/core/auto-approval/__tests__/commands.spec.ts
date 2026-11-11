@@ -594,6 +594,26 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		)
 	})
 
+	it("does not let a host glob word swallowing a substitution ride the allowlist", () => {
+		// `$(rm -rf /tmp/victim)*` shares its word with a command
+		// substitution, so shell-quote collapses the whole word to the bare
+		// `glob` and the hidden `rm` is never extracted or checked. The
+		// collapsed word used to ride an `echo` allow rule to an approval
+		// even with `rm` denied. The word now fails closed, so no rule set
+		// can carry it — not even one that allowlists the collapsed `glob`.
+		expect(getCommandDecision("echo $(rm -rf /tmp/victim)*", ["echo", "glob"], ["rm"])).toBe("malformed_command")
+		// Deny side without the collapsed word allowlisted: same rejection,
+		// not an ask built on a segment list missing the hidden command.
+		expect(getCommandDecision("echo $(rm -rf /tmp/victim)*", ["echo"], ["rm"])).toBe("malformed_command")
+		// Accept path: a substitution whose word does not glob still
+		// decomposes into independent segments and rides the allowlist.
+		expect(getCommandDecision("echo $(printf x /tmp/victim)", ["echo", "printf x /tmp/victim"], [])).toBe(
+			"auto_approve",
+		)
+		// A plain host glob is unchanged main-line behavior.
+		expect(getCommandDecision("ls *.log", ["ls"], [])).toBe("auto_approve")
+	})
+
 	it("asks user when a quoted-empty heredoc delimiter lets a later command escape", () => {
 		// bash's quote removal makes `<<''` terminate at the first blank line,
 		// so `rm -rf /` really executes as its own command. Now that the parser
