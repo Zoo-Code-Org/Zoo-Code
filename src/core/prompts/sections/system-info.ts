@@ -6,6 +6,28 @@ import { getShell } from "../../../utils/shell"
 import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
 
 /**
+ * Describes the host operating system for the system prompt.
+ *
+ * Windows bypasses `os-name`: its `windows-release` dependency runs `wmic`, then PowerShell,
+ * through `execaSync` with no timeout. This section is built for every request, so that call
+ * blocks the extension host for as long as the process runs. `os.version()` reads the product
+ * name without starting a process.
+ */
+function getOsInfo(): string {
+	const fallback = `${os.platform()} ${os.release()}`
+
+	if (os.platform() === "win32") {
+		return os.version() || fallback
+	}
+
+	try {
+		return osName()
+	} catch {
+		return fallback
+	}
+}
+
+/**
  * Builds the SYSTEM INFORMATION section of the system prompt.
  *
  * The workspace-directory / file-tree facts are stated once here; the
@@ -16,16 +38,7 @@ import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
  * @param policy The request's effective tool policy.
  */
 export function getSystemInfoSection(cwd: string, policy: EffectiveToolPolicy): string {
-	// Try to get detailed OS name, fall back to basic info if it fails
-	let osInfo: string
-	try {
-		osInfo = osName()
-	} catch {
-		// Fallback when os-name fails (e.g., PowerShell not available on Windows)
-		const platform = os.platform()
-		const release = os.release()
-		osInfo = `${platform} ${release}`
-	}
+	const osInfo = getOsInfo()
 
 	const executeCommandAvailable = policy.tools.has("execute_command")
 

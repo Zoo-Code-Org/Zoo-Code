@@ -12,7 +12,7 @@ vi.mock("../../../../utils/shell", () => ({
 import { getSystemInfoSection } from "../system-info"
 import osName from "os-name"
 
-const mockOsName = osName as unknown as ReturnType<typeof vi.fn>
+const mockOsName = vi.mocked(osName)
 
 describe("getSystemInfoSection", () => {
 	const mockCwd = "/test/workspace"
@@ -20,7 +20,7 @@ describe("getSystemInfoSection", () => {
 
 	beforeEach(() => {
 		vi.spyOn(os, "homedir").mockReturnValue(mockHomeDir)
-		vi.spyOn(os, "platform").mockReturnValue("linux" as any)
+		vi.spyOn(os, "platform").mockReturnValue("linux")
 		vi.spyOn(os, "release").mockReturnValue("5.15.0")
 	})
 
@@ -34,6 +34,7 @@ describe("getSystemInfoSection", () => {
 
 	afterEach(() => {
 		vi.clearAllMocks()
+		vi.restoreAllMocks()
 	})
 
 	it("should return system info with os-name when available", () => {
@@ -60,16 +61,31 @@ describe("getSystemInfoSection", () => {
 		expect(result).toContain(`Current Workspace Directory: ${mockCwd}`)
 	})
 
-	it("should handle Windows platform in fallback", () => {
-		mockOsName.mockImplementation(() => {
-			throw new Error("Command failed with ENOENT: powershell")
+	describe("on Windows", () => {
+		beforeEach(() => {
+			vi.spyOn(os, "platform").mockReturnValue("win32")
+			vi.spyOn(os, "release").mockReturnValue("10.0.26300")
 		})
-		vi.spyOn(os, "platform").mockReturnValue("win32" as any)
-		vi.spyOn(os, "release").mockReturnValue("10.0.19043")
 
-		const result = getSystemInfoSection(mockCwd, policyFor())
+		it("reads the product name from os.version() without calling os-name", () => {
+			// os-name runs wmic and PowerShell synchronously on Windows; a PowerShell that never
+			// exits freezes the extension host, so it must not be reached at all.
+			vi.spyOn(os, "version").mockReturnValue("Windows 11 Pro")
 
-		expect(result).toContain("Operating System: win32 10.0.19043")
+			const result = getSystemInfoSection(mockCwd, policyFor())
+
+			expect(result).toContain("Operating System: Windows 11 Pro")
+			expect(mockOsName).not.toHaveBeenCalled()
+		})
+
+		it("falls back to platform and release when os.version() is empty", () => {
+			vi.spyOn(os, "version").mockReturnValue("")
+
+			const result = getSystemInfoSection(mockCwd, policyFor())
+
+			expect(result).toContain("Operating System: win32 10.0.26300")
+			expect(mockOsName).not.toHaveBeenCalled()
+		})
 	})
 
 	it("omits the terminal sentence when execute_command is absent", () => {
