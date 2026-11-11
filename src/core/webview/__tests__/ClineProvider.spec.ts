@@ -15,6 +15,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type HistoryItem,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -5088,6 +5089,65 @@ describe("ClineProvider", () => {
 				} finally {
 					release()
 					vi.useRealTimers()
+				}
+			},
+		)
+
+		it.each([false, true])(
+			"drains a delayed mode-switch history write before another tab selects a mode (disposed: %s)",
+			async (dispose) => {
+				const task = new Task(defaultTaskOptions)
+				task["_taskMode"] = "code"
+				const history: HistoryItem = {
+					id: task.taskId,
+					number: 1,
+					ts: 1,
+					task: "Mode switch",
+					mode: "code",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				}
+				provider["getTaskHistoryItem"] = vi.fn().mockReturnValue(history)
+				let release = () => {}
+				const pending = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const write = vi.spyOn(provider, "updateTaskHistory").mockImplementationOnce(async () => {
+					await pending
+					return [history]
+				})
+				const first = provider.handleModeSwitch("ask", task)
+				const outcome = first.then(
+					() => undefined,
+					(error: unknown) => error,
+				)
+				await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
+				if (dispose) await provider.dispose()
+				const tab = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"editor",
+					provider.contextProxy,
+					provider.webviewFocusTracker,
+				)
+				try {
+					vi.spyOn(tab, "postStateToWebview").mockResolvedValue(undefined)
+					let finished = false
+					const second = tab.handleModeSwitch("architect", null).then(() => {
+						finished = true
+					})
+					await new Promise<void>((resolve) => setImmediate(resolve))
+					expect(finished).toBe(false)
+					release()
+					await second
+
+					expect(await outcome).toBeUndefined()
+					expect(tab.getValue("mode")).toBe("architect")
+					expect(task["_taskMode"]).toBe(dispose ? "code" : "ask")
+				} finally {
+					release()
+					await tab.dispose()
 				}
 			},
 		)

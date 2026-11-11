@@ -2159,7 +2159,11 @@ export class ClineProvider
 		targetTask: Task | null | undefined,
 		signal?: AbortSignal,
 	): Promise<void> {
+		if (signal?.aborted) return
 		const task = targetTask
+		const startWrite = () => {
+			if (signal) this.modeProfileState.committingMutationSignals.add(signal)
+		}
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
@@ -2170,11 +2174,13 @@ export class ClineProvider
 				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
 
 				if (taskHistoryItem) {
+					startWrite()
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
 				}
+				if (signal?.aborted) return
 
 				// Only update the task's mode after successful persistence.
-				;(task as any)._taskMode = newMode
+				task["_taskMode"] = newMode
 			} catch (error) {
 				// If persistence fails, log the error but don't update the in-memory state.
 				this.log(
@@ -2187,7 +2193,10 @@ export class ClineProvider
 			}
 		}
 
+		if (signal?.aborted) return
+		startWrite()
 		await this.updateGlobalState("mode", newMode)
+		if (signal?.aborted) return
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
 
@@ -2211,6 +2220,7 @@ export class ClineProvider
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+		if (signal?.aborted) return
 
 		// If this mode has a saved config, use it.
 		if (savedConfigId) {
