@@ -1850,6 +1850,8 @@ describe("ReadFileTool", () => {
 					observationRegistry: new ObservationRegistry(),
 				})
 				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
 
 				// Only computeVersionToken asks for bigint stats, so arm the failure on that
 				// call rather than on call parity, which ties the test to how many stats a read
@@ -1874,9 +1876,10 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("existing.ts"))
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("content"))
 
-				// The failed token lookup observed nothing, and the name's claim is about the
-				// registry, not only about this path: it is still empty.
-				const reg = mockTask.observationRegistry!
+				// The failed token lookup recorded nothing. The registry-wide claim in the name
+				// is measured on the observe entry point against this row's fresh registry, and
+				// the path-level get stays as the concrete symptom.
+				expect(observeSpy).toHaveBeenCalledTimes(0)
 				expect(reg.get(path.resolve("/test/workspace", "existing.ts"))).toBeUndefined()
 			})
 
@@ -1935,6 +1938,8 @@ describe("ReadFileTool", () => {
 					observationRegistry: new ObservationRegistry(),
 				})
 				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
 
 				// Same shape as the native case, on the legacy multi-file path: only the bigint
 				// stat that computeVersionToken asks for is made to reject.
@@ -1973,8 +1978,9 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy.ts"))
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy content"))
 
-				// Same claim as the native case, measured on the registry itself.
-				const reg = mockTask.observationRegistry!
+				// Same claim as the native case: nothing recorded against this row's fresh
+				// registry, plus the path-level get as the concrete symptom.
+				expect(observeSpy).toHaveBeenCalledTimes(0)
 				expect(reg.get(path.resolve("/test/workspace", "legacy.ts"))).toBeUndefined()
 			})
 
