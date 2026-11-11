@@ -156,7 +156,7 @@ Example:
 
 To list the plural forms of any locale, run: `node -p 'new Intl.PluralRules("<locale>").resolvedOptions().pluralCategories'`.
 
-`node scripts/find-missing-translations.js` reports a plural key only when a locale has no key with its base name (`key` or `key_*`). `node scripts/validate-plural-forms.js` reports missing forms, extra forms, bare keys next to plural forms and plural mistakes in English.
+`node scripts/find-missing-translations.js` reports a plural key only when a locale has no key with its base name (`key` or `key_*`). `node scripts/validate-plural-forms.js` reports missing forms, forms without `{{count}}`, extra forms, bare keys next to plural forms and plural mistakes in English.
 
 ## Translation Workflow
 

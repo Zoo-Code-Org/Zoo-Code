@@ -23,6 +23,14 @@ describe("validate-plural-forms", () => {
 		assert.equal(status, 0, output)
 	})
 
+	it("accepts formatted and unescaped {{count}} placeholders", () => {
+		const { status, output } = validate({
+			en: { files_one: "{{count, number}} file", files_other: "{{- count}} files" },
+			ja: { files_other: "{{ count }} ファイル" },
+		})
+		assert.equal(status, 0, output)
+	})
+
 	it("lists missing forms from zero to other", () => {
 		const { status, output } = validate({ en: { ...en, files_zero: "No files" }, fr: {}, ru: {} })
 		assert.equal(status, 1, output)
@@ -35,6 +43,30 @@ describe("validate-plural-forms", () => {
 			].map(([, form]) => form)
 		assert.deepEqual(forms("fr"), ["zero", "one", "many", "other"])
 		assert.deepEqual(forms("ru"), ["zero", "one", "few", "many", "other"])
+	})
+
+	it("prints statistics by problem type and the steps to fix them", () => {
+		const { status, output } = validate({
+			en,
+			ru: { ...ru, files_one: "1 файл", files_few: undefined, files: "{{count}} файл" },
+			ja: { ...ja, files_one: "1 ファイル" },
+		})
+		assert.equal(status, 1, output)
+		assert.match(output, /Missing plural forms: +1\n/)
+		assert.match(output, /Forms without \{\{count\}\}: +1\n/)
+		assert.match(output, /Forms that are not CLDR plural forms: +1\n/)
+		assert.match(output, /Bare keys next to plural forms: +1\n/)
+		assert.match(output, /Total problems: +4\n/)
+		assert.match(output, /Locale files with problems: +2\n/)
+		assert.match(output, /Locales with problems: +2\n/)
+		const steps = [...output.split("To fix the plural form problems:")[1].matchAll(/^(\d)\. /gm)].map(([, n]) => n)
+		assert.deepEqual(steps, ["1", "2", "3", "4", "5"])
+	})
+
+	it("prints no statistics when every plural form is correct", () => {
+		const { status, output } = validate({ en, ru, ja })
+		assert.equal(status, 0, output)
+		assert.doesNotMatch(output, /Plural Forms Statistics|To fix the plural form problems/)
 	})
 
 	it("ignores keys that are not plural", () => {
@@ -86,6 +118,18 @@ describe("validate-plural-forms", () => {
 			{ en, ru: { files: "{{count}} файлов" } },
 			"ru",
 			/files_few: missing the "few" plural form/,
+		],
+		[
+			"a hardcoded number in place of {{count}}",
+			{ en, ru: { ...ru, files_one: "1 файл" } },
+			"ru",
+			/files_one: the "one" form has no \{\{count\}\} placeholder/,
+		],
+		[
+			"an English form without {{count}}",
+			{ en: { ...en, files_one: "One file" }, ja },
+			"en",
+			/files_one: the "one" form has no \{\{count\}\} placeholder/,
 		],
 	]) {
 		it(`rejects ${name}`, () => {

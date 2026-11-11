@@ -42,6 +42,7 @@ Validate Plural Forms
 
 Checks that every plural key has exactly the CLDR plural forms of each locale, English included:
   - no missing form (ru needs one, few, many, other; ja needs only other)
+  - {{count}} in every form except "zero" (ru "one" also covers 21, fr "one" also covers 0)
   - no form the locale does not have (no _one in ja)
   - no bare key next to the plural forms (i18next uses it in place of a missing form)
 
@@ -91,7 +92,11 @@ function readJson(filePath) {
 	}
 }
 
-// Each English plural key must have exactly the locale's forms, and no bare key next to them
+// {{count}}, {{count, number}} and {{- count}}
+const COUNT_PLACEHOLDER = /\{\{-?\s*count\s*(,[^}]*)?\}\}/
+
+// Each English plural key must have exactly the locale's forms, each with {{count}} (except the "zero" override),
+// and no bare key next to them
 function validatePluralForms(locale, values, pluralBases) {
 	const problems = []
 
@@ -99,14 +104,23 @@ function validatePluralForms(locale, values, pluralBases) {
 		const required = requiredPluralForms(locale, entry)
 
 		for (const form of required) {
-			if (!values.has(`${base}_${form}`)) {
-				problems.push({ key: `${base}_${form}`, problem: `missing the "${form}" plural form` })
+			const value = values.get(`${base}_${form}`)
+			if (value === undefined) {
+				problems.push({ type: "missing", key: `${base}_${form}`, problem: `missing the "${form}" plural form` })
+			} else if (form !== "zero" && typeof value === "string" && !COUNT_PLACEHOLDER.test(value)) {
+				// "_one" also covers 21 in ru and 0 in fr, so a hardcoded "1" shows the wrong number
+				problems.push({
+					type: "nocount",
+					key: `${base}_${form}`,
+					problem: `the "${form}" form has no {{count}} placeholder`,
+				})
 			}
 		}
 
 		for (const form of PLURAL_FORMS) {
 			if (!required.includes(form) && values.has(`${base}_${form}`)) {
 				problems.push({
+					type: "extra",
 					key: `${base}_${form}`,
 					problem: `"${form}" is not a CLDR plural form for ${locale}; remove it`,
 				})
@@ -114,7 +128,7 @@ function validatePluralForms(locale, values, pluralBases) {
 		}
 
 		if (typeof values.get(base) === "string") {
-			problems.push({ key: base, problem: "bare key next to plural forms; remove it" })
+			problems.push({ type: "bare", key: base, problem: "bare key next to plural forms; remove it" })
 		}
 	}
 
@@ -151,7 +165,7 @@ function validateArea(area) {
 	const pluralBases = new Map(
 		englishFiles.map((file) => [file, findPluralBases(flatten(readJson(path.join(englishDir, file))))]),
 	)
-	let hasProblems = false
+	const report = []
 
 	for (const locale of locales) {
 		const problemsByFile = []
@@ -169,26 +183,51 @@ function validateArea(area) {
 			continue
 		}
 
-		hasProblems = true
 		console.log(`📝 ${locale}:`)
 		for (const { file, problems } of problemsByFile) {
 			console.log(`  - ${file}: ${problems.length} plural form problem(s)`)
 			for (const { key, problem } of problems) {
 				console.log(`      ${key}: ${problem}`)
 			}
+			report.push({ area, locale, file, problems })
 		}
 		console.log("")
 	}
 
-	return hasProblems
+	return report
+}
+
+// Counts the problems of every checked area by type
+function printStatistics(report) {
+	const problems = report.flatMap((entry) => entry.problems)
+	const count = (type) => problems.filter((problem) => problem.type === type).length
+	const locales = new Set(report.map((entry) => entry.locale))
+
+	console.log("\nPlural Forms Statistics:\n")
+	console.log(`  Missing plural forms:                 ${count("missing")}`)
+	console.log(`  Forms without {{count}}:              ${count("nocount")}`)
+	console.log(`  Forms that are not CLDR plural forms: ${count("extra")}`)
+	console.log(`  Bare keys next to plural forms:       ${count("bare")}`)
+	console.log(`  Total problems:                       ${problems.length}`)
+	console.log(`  Locale files with problems:           ${report.length}`)
+	console.log(`  Locales with problems:                ${locales.size}`)
 }
 
 const areas = args.area === "all" ? ["core", "webview"] : [args.area]
-const hasProblems = areas.map(validateArea).some(Boolean)
+const report = areas.flatMap(validateArea)
 
-if (hasProblems) {
-	console.log("\n✏️  Give each plural key exactly the CLDR plural forms of its locale.")
-	console.log("List a locale's forms with Intl.PluralRules(<locale>).resolvedOptions().pluralCategories")
+if (report.length > 0) {
+	printStatistics(report)
+	console.log("\n✏️  To fix the plural form problems:")
+	console.log(
+		"1. List the plural forms of a locale with: node -p 'new Intl.PluralRules(\"<locale>\").resolvedOptions().pluralCategories'",
+	)
+	console.log(
+		"2. Synchronize the plural forms of each key with that list: add each missing form, translated from the English plural key, and remove each form that is not in the list",
+	)
+	console.log('3. Put {{count}} in every form, including "one", instead of a hardcoded number')
+	console.log("4. Remove each bare key that is next to plural forms")
+	console.log("5. Run this script again to verify that all plural forms are correct")
 	process.exit(1)
 }
 
