@@ -31,6 +31,8 @@ describe("redactSensitiveInformation", () => {
 			["a quoted path", 'diff --git "a/my app/.env" "b/my app/.env"'],
 			["a path without a/ and b/ prefixes", "diff --git .env .env"],
 			["a CRLF header line", "diff --git a/.env b/.env\r"],
+			["an escaped non-ASCII name", 'diff --git "a/.env.pr\\303\\266d" "b/.env.pr\\303\\266d"'],
+			["an escaped quote in the name", 'diff --git "a/keys/a\\"b.pem" "b/keys/a\\"b.pem"'],
 		])("finds a sensitive file with %s", (_label, header) => {
 			const redacted = redactSensitiveInformation(`${header}\n@@ -0,0 +1 @@\n+HOST=hunter2`)
 			expect(redacted).not.toContain("hunter2")
@@ -157,6 +159,29 @@ describe("redactSensitiveInformation", () => {
 			)
 			expect(redactSensitiveInformation(diff)).toBe(
 				fileDiff("app.ts", "   env: {", "-    [REDACTED]", "+    [REDACTED]", "     [REDACTED]", "   },"),
+			)
+		})
+
+		it("tracks blocks on each diff side, so a removed line does not end an added block", () => {
+			const diff = fileDiff(
+				"config.ts",
+				" const entry = {",
+				'   name: "API_TOKEN",',
+				"-}",
+				'+  value: "hunter2",',
+				"+};",
+				" export default entry",
+			)
+			expect(redactSensitiveInformation(diff)).toBe(
+				fileDiff(
+					"config.ts",
+					" const entry = {",
+					"   [REDACTED]",
+					"-}",
+					"+  [REDACTED]",
+					"+};",
+					" export default entry",
+				),
 			)
 		})
 

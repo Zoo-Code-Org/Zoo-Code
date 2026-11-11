@@ -1131,6 +1131,16 @@ describe("commitMessageGenerator", () => {
 				'diff --git "a/my settings.xml" "b/my settings.xml"',
 				"@@ -0,0 +1 @@",
 				"+<password>quotedpathsecret",
+				'diff --git "a/.env.pr\\303\\266d" "b/.env.pr\\303\\266d"',
+				"@@ -0,0 +1 @@",
+				"+SESSION=escapedpathsecret",
+				"diff --git a/config.ts b/config.ts",
+				"@@ -1,4 +1,5 @@",
+				" const entry = {",
+				'   name: "API_TOKEN",',
+				"-}",
+				'+  value: "mixedsidesecret",',
+				"+};",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
 			;(singleCompletionHandler as Mock).mockResolvedValue("chore: update settings")
@@ -1142,7 +1152,7 @@ describe("commitMessageGenerator", () => {
 			secrets.push("commentsecret", "reversedsecret", "blocksecret", "jsonsecret", "genericsecret")
 			secrets.push("reversedblocksecret", "commentblocksecret", "nextlinesecret", "farsecret")
 			secrets.push("nestedyamlsecret", "nestedjsonsecret", "bracesecret", "separatesecret", "attrvaluesecret")
-			secrets.push("multilinexmlsecret", "quotedpathsecret")
+			secrets.push("multilinexmlsecret", "quotedpathsecret", "escapedpathsecret", "mixedsidesecret")
 			for (const secret of secrets) {
 				expect(prompt).not.toContain(secret)
 			}

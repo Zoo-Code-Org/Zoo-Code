@@ -95,7 +95,9 @@ function redactEmailAddresses(content: string): string {
 
 /** Hides the content lines of one file of the diff (rules 1 to 3). `header` is its `diff --git` line. */
 function hideFileLines(lines: string[], header: string | undefined): string[] {
-	const path = header?.replace(/"?\r?$/, "")
+	// Git quotes a path with special characters and escapes them (`"b/.env.pr\303\266d"`). Each escape
+	// becomes one `_`, so the name keeps its shape for the file rules.
+	const path = header?.replace(/"?\r?$/, "").replace(/\\(?:[0-7]{1,3}|[^0-7])/g, "_")
 	// Text before the first `diff --git` line (for example a list of untracked files) is all content.
 	let inHunk = path === undefined
 	const isContent = lines.map((line) => {
@@ -108,12 +110,16 @@ function hideFileLines(lines: string[], header: string | undefined): string[] {
 			!CODE_FILE.test(path) &&
 			lines.some((line, i) => isContent[i] && CREDENTIAL_WORD.test(line)))
 	const hidden = lines.map(() => hideAll)
-	// Marks the blocks of credential lines (rule 3) in one direction. A hunk header ends every block.
-	const markBlocks = (order: number[], backward: boolean) => {
+	// Marks the blocks of credential lines (rule 3) in one direction, on one diff side: the context lines
+	// and the lines of that side. Lines of the other side are skipped. A hunk header ends every block.
+	const markBlocks = (order: number[], backward: boolean, otherSide: string) => {
 		let blockIndent = -1
 		for (const i of order) {
-			const [, , indent = "", rest = ""] = CONTENT_LINE.exec(lines[i] ?? "") ?? []
-			if (!isContent[i]) {
+			const line = lines[i] ?? ""
+			const [, , indent = "", rest = ""] = CONTENT_LINE.exec(line) ?? []
+			if (isContent[i] && line.startsWith(otherSide)) {
+				continue
+			} else if (!isContent[i]) {
 				blockIndent = -1
 			} else if (rest.trim() !== "") {
 				blockIndent = indent.length < Math.max(blockIndent, 1) ? -1 : blockIndent
@@ -125,8 +131,10 @@ function hideFileLines(lines: string[], header: string | undefined): string[] {
 		}
 	}
 	const order = lines.map((_, i) => i)
-	markBlocks(order, false)
-	markBlocks(order.reverse(), true)
+	for (const otherSide of ["+", "-"]) {
+		markBlocks(order, false, otherSide)
+		markBlocks([...order].reverse(), true, otherSide)
+	}
 	return lines.map((line, i) => {
 		const hunk = HUNK_HEADER.exec(line)
 		if (hunk) {
