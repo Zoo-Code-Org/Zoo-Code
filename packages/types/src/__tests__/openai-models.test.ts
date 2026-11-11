@@ -2,6 +2,71 @@ import { openAiCodexDefaultModelId, openAiCodexModels } from "../providers/opena
 import { openAiNativeDefaultModelId, openAiNativeModels } from "../providers/openai.js"
 
 describe("OpenAI native models", () => {
+	it("describes GPT-6.1 Terra pricing and optional native reasoning without changing defaults", () => {
+		expect(openAiNativeDefaultModelId).toBe("gpt-5.6-sol")
+		expect(openAiCodexDefaultModelId).toBe("gpt-5.6-sol")
+		const model = openAiNativeModels["gpt-6.1-terra"]
+		expect(model).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			supportsTemperature: false,
+			supportsVerbosity: true,
+			inputPrice: 1,
+			outputPrice: 5,
+			cacheWritesPrice: 1.25,
+			cacheWritesPrice12h: 2.5,
+			cacheReadsPrice: 0.05,
+			longContextPricing: {
+				thresholdTokens: 272_000,
+				inputPriceMultiplier: 2,
+				outputPriceMultiplier: 1.5,
+				cacheWritesPriceMultiplier: 2,
+				cacheReadsPriceMultiplier: 2,
+				appliesToServiceTiers: ["default", "flex", "priority"],
+			},
+		})
+		expect(model).not.toHaveProperty("requiredReasoningEffort", true)
+		expect(model.tiers).toEqual([
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 0.5,
+				outputPrice: 2.5,
+				cacheWritesPrice: 0.625,
+				cacheReadsPrice: 0.025,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 2,
+				outputPrice: 10,
+				cacheWritesPrice: 2.5,
+				cacheReadsPrice: 0.1,
+			},
+		])
+		expect(openAiCodexModels["gpt-6.1-terra"]).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 872_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+			requiredReasoningEffort: true,
+			reasoningEffort: "low",
+			supportsTemperature: false,
+			supportsVerbosity: true,
+			inputPrice: 0,
+			outputPrice: 0,
+		})
+	})
+
 	it("describes GPT-6.1 Sol pricing and required reasoning without changing defaults", () => {
 		expect(openAiNativeDefaultModelId).toBe("gpt-5.6-sol")
 		expect(openAiCodexDefaultModelId).toBe("gpt-5.6-sol")
