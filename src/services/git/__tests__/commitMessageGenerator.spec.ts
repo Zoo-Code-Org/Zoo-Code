@@ -17,9 +17,9 @@ import {
 	redactSensitiveInformation,
 	resetCommitMessageRequestState,
 	resolveGitRepository,
-	ABANDONED_REQUEST_WAIT_MS,
-	WAITING_FOR_CANCELLED_REQUEST_MESSAGE,
-	CANCELLED_REQUEST_STILL_RUNNING_MESSAGE,
+	PREVIOUS_REQUEST_WAIT_MS,
+	WAITING_FOR_PREVIOUS_REQUEST_MESSAGE,
+	PREVIOUS_REQUEST_STILL_RUNNING_MESSAGE,
 	type GitAPI,
 	type GitRepository,
 } from "../commitMessageGenerator"
@@ -309,6 +309,22 @@ describe("commitMessageGenerator", () => {
 				'+const header = "Bearer [REDACTED]"',
 			],
 			["a word after Bearer in prose", "+// Uses Bearer authentication", "+// Uses Bearer [REDACTED]"],
+			["a short bearer token", '+const header = "Bearer hunter2"', '+const header = "Bearer [REDACTED]"'],
+			[
+				"a multi-line XML credential element",
+				"+  <password>\n+    hunter2\n+  </password>\n+  <user>admin</user>",
+				"+  <password>\n+    [REDACTED]\n+  </password>\n+  <user>admin</user>",
+			],
+			[
+				"an XML value that starts on the tag line",
+				"+<apiKey>abc\n+def</apiKey>",
+				"+<apiKey>[REDACTED]\n+[REDACTED]</apiKey>",
+			],
+			[
+				"an unclosed XML credential element up to the next hunk",
+				" <secret>\n s3cr3t\n@@ -1 +1 @@\n+next",
+				" <secret>\n [REDACTED]\n@@ -1 +1 @@\n+next",
+			],
 			["an npmrc auth value", "+_auth=dXNlcjpwYXNz", "+_auth=[REDACTED]"],
 			["a passphrase", "+  passphrase: correct-horse", "+  passphrase: [REDACTED]"],
 			["a passphrase with spaces", "+passphrase: correct horse battery staple", "+passphrase: [REDACTED]"],
@@ -428,6 +444,7 @@ describe("commitMessageGenerator", () => {
 			["many token type declarations", "token: string\n".repeat(14_286)],
 			["long lines of credential words without a value", `${"token ".repeat(50)}\n`.repeat(600)],
 			["many unclosed XML credential tags", "<password>".repeat(20_000)],
+			["many lines with a closed XML element", "<a>x</a>\n".repeat(20_000)],
 			["many URL schemes without a password", "://:".repeat(50_000)],
 			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
 		])("redacts %s in linear time", (_label, content) => {
@@ -1182,27 +1199,37 @@ describe("commitMessageGenerator", () => {
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
 		})
 
-		it("discards an older result that finishes after a newer request for the same repository", async () => {
+		it("aborts an older request for the same repository and sends the newer one after it settles", async () => {
 			const first = deferred<string>()
-			const second = deferred<string>()
+			let olderSignal: AbortSignal | undefined
 			;(singleCompletionHandler as Mock)
-				.mockImplementationOnce(() => first.promise)
-				.mockImplementationOnce(() => second.promise)
+				.mockImplementationOnce((_config, _prompt, options: { abortSignal: AbortSignal }) => {
+					olderSignal = options.abortSignal
+					// This provider ignores the abort signal and settles later.
+					return first.promise
+				})
+				.mockResolvedValueOnce("feat: newer")
 
 			const older = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
 			const newer = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
-			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(2))
-
-			second.resolve("feat: newer")
-			await newer
-			first.resolve("feat: older")
 			await older
+			expect(olderSignal?.aborted).toBe(true)
 
+			await vi.waitFor(() => expect(mockProvider.getState).toHaveBeenCalledTimes(2))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			// No second provider request while the older one still runs.
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
+
+			first.resolve("feat: older")
+			await newer
+
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
 			expect(mockRepo.inputBox.value).toBe("feat: newer")
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
 		})
 
-		it("discards an older result when the Git API returns a new wrapper for the same repository", async () => {
+		it("treats new Git API wrappers for one repository as the same repository", async () => {
 			// The VS Code Git API creates a new repository wrapper on each read of `repositories`.
 			// The wrappers share one underlying input box.
 			const sharedInputBox = { value: "" }
@@ -1217,22 +1244,43 @@ describe("commitMessageGenerator", () => {
 				},
 			})
 			const first = deferred<string>()
-			const second = deferred<string>()
 			;(singleCompletionHandler as Mock)
 				.mockImplementationOnce(() => first.promise)
-				.mockImplementationOnce(() => second.promise)
+				.mockResolvedValueOnce("feat: newer")
 
 			const older = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
 			const newer = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
-			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(2))
-
-			first.resolve("feat: older")
 			await older
-			second.resolve("feat: newer")
+			first.resolve("feat: older")
 			await newer
 
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
 			expect(sharedInputBox.value).toBe("feat: newer")
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(DRAFT_CHANGED_MESSAGE)
+		})
+
+		it("never runs two provider requests for one repository, even with several waiting requests", async () => {
+			const first = deferred<string>()
+			;(singleCompletionHandler as Mock)
+				.mockImplementationOnce(() => first.promise)
+				.mockResolvedValueOnce("feat: latest")
+
+			const a = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
+			const b = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(mockProvider.getState).toHaveBeenCalledTimes(2))
+			const c = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(mockProvider.getState).toHaveBeenCalledTimes(3))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
+
+			first.resolve("feat: first")
+			await Promise.all([a, b, c])
+
+			// The middle request is no longer the newest after the wait, so it sends nothing.
+			expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
+			expect(mockRepo.inputBox.value).toBe("feat: latest")
 		})
 
 		it("keeps the latest request of each repository independent", async () => {
@@ -1296,6 +1344,10 @@ describe("commitMessageGenerator", () => {
 				"+PASSWORD=string=MySecurePass123",
 				"+passphrase: correct horse battery staple",
 				'+const header = "Bearer abcdefghijklmnopqrstuvwx"',
+				'+const short = "Bearer hunter2"',
+				"+<password>",
+				"+  multilinesecret",
+				"+</password>",
 				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
 				"+  token: string",
 			].join("\n")
@@ -1320,6 +1372,8 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("battery staple")
 			expect(prompt).not.toContain("WEBHOOKSECRET")
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwx")
+			expect(prompt).not.toContain("hunter2")
+			expect(prompt).not.toContain("multilinesecret")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 
@@ -1409,17 +1463,17 @@ describe("commitMessageGenerator", () => {
 				const retry = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 				// vi.waitFor advances fake timers by its poll interval, so keep a margin below the limit.
 				await vi.waitFor(
-					() => expect(report).toHaveBeenCalledWith({ message: WAITING_FOR_CANCELLED_REQUEST_MESSAGE }),
+					() => expect(report).toHaveBeenCalledWith({ message: WAITING_FOR_PREVIOUS_REQUEST_MESSAGE }),
 					{ interval: 1 },
 				)
-				await vi.advanceTimersByTimeAsync(ABANDONED_REQUEST_WAIT_MS - 1_000)
+				await vi.advanceTimersByTimeAsync(PREVIOUS_REQUEST_WAIT_MS - 1_000)
 				expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
 
 				await vi.advanceTimersByTimeAsync(1_000)
 				await retry
 
 				expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
-				expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(CANCELLED_REQUEST_STILL_RUNNING_MESSAGE)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(PREVIOUS_REQUEST_STILL_RUNNING_MESSAGE)
 				expect(mockRepo.inputBox.value).toBe("")
 			} finally {
 				vi.useRealTimers()

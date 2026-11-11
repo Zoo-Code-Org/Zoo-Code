@@ -135,11 +135,11 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>$<scheme>$<bareScheme>[REDACTED]$<open>",
 	},
-	// Bearer tokens outside an Authorization header, in any case. Any word of 8 or more token characters
-	// after "Bearer" is redacted: no shape test can tell an alphabetic token from a word, and a redacted
-	// word in prose ("Bearer [REDACTED]") costs little.
+	// Bearer tokens outside an Authorization header, in any case and of any length (RFC 6750 sets no
+	// minimum). The word after "Bearer" is always redacted: no shape test can tell a token from a word,
+	// and a redacted word in prose ("Bearer [REDACTED]") costs little.
 	{
-		pattern: /(?<prefix>\bbearer[ \t]+)[A-Za-z0-9_\-.~+/]{8,}=*/gi,
+		pattern: /(?<prefix>\bbearer[ \t]+)[A-Za-z0-9_\-.~+/]+=*/gi,
 		replacement: "$<prefix>[REDACTED]",
 	},
 	// Cookie headers carry session tokens and can hold spaces ("Cookie: a=1; b=2"), so the whole
@@ -262,9 +262,65 @@ function redactYamlBlockValues(content: string): string {
 	return lines.join("\n")
 }
 
+// An XML element named after a credential key. The single-line form is a REDACTION_RULES entry.
+const XML_CREDENTIAL_OPEN_TAG = new RegExp(String.raw`<([\w.:-]{0,64}?(?:${CREDENTIAL_KEYWORDS})[\w.:-]{0,64})>`, "gi")
+
+/**
+ * Redacts the value of an XML credential element that spans lines (`<password>` on one line, the value
+ * on the next lines, `</password>` after them). Each line keeps its diff prefix and indentation. The
+ * value ends at the closing tag, or at the next diff file or hunk header when the tag never closes.
+ */
+function redactMultilineXmlValues(content: string): string {
+	const lines = content.split("\n")
+	for (let i = 0; i < lines.length; i++) {
+		// Only the last credential tag on the line can start a value that continues on the next line.
+		let open: RegExpExecArray | undefined
+		XML_CREDENTIAL_OPEN_TAG.lastIndex = 0
+		for (
+			let match = XML_CREDENTIAL_OPEN_TAG.exec(lines[i]);
+			match;
+			match = XML_CREDENTIAL_OPEN_TAG.exec(lines[i])
+		) {
+			open = match
+		}
+		if (!open) {
+			continue
+		}
+		const closingTag = `</${open[1].toLowerCase()}>`
+		const valueStart = open.index + open[0].length
+		if (lines[i].toLowerCase().includes(closingTag, valueStart)) {
+			continue
+		}
+		if (lines[i].slice(valueStart).trim() !== "") {
+			lines[i] = `${lines[i].slice(0, valueStart)}[REDACTED]`
+		}
+		let j = i + 1
+		for (; j < lines.length; j++) {
+			if (/^(?:diff --git |@@ )/.test(lines[j])) {
+				break
+			}
+			const prefixLength = /^[+\- ]/.test(lines[j]) ? 1 : 0
+			const body = lines[j].slice(prefixLength)
+			const indent = body.length - body.trimStart().length
+			const keep = lines[j].slice(0, prefixLength + indent)
+			const closeAt = lines[j].toLowerCase().indexOf(closingTag)
+			if (closeAt !== -1) {
+				const before = lines[j].slice(prefixLength + indent, closeAt)
+				lines[j] = before.trim() === "" ? lines[j] : `${keep}[REDACTED]${lines[j].slice(closeAt)}`
+				break
+			}
+			if (body.trim() !== "") {
+				lines[j] = `${keep}[REDACTED]`
+			}
+		}
+		i = j
+	}
+	return lines.join("\n")
+}
+
 export function redactSensitiveInformation(content: string): string {
-	// Runs first, while the block indicator (`|` or `>`) is still on the key line.
-	let redacted = redactYamlBlockValues(content)
+	// Run first, while the block indicator (`|` or `>`) and the open tag are still on their lines.
+	let redacted = redactMultilineXmlValues(redactYamlBlockValues(content))
 	for (const { pattern, replacement } of REDACTION_RULES) {
 		redacted = redacted.replace(pattern, replacement)
 	}
@@ -454,16 +510,20 @@ function repositoryKey(repository: GitRepository): string {
 	return `${repository.rootUri.scheme}:${repository.rootUri.fsPath}`
 }
 
-// A provider request that the user cancelled but that is still running, per repository. A provider that
-// ignores the abort signal keeps working after the cancel, so the next request for the repository waits
-// until this one settles. Then a cancel followed by a retry never runs two provider requests at once.
-// The wait is capped: when the cancelled request is still running after the cap, the retry stops with a
-// message and starts no request.
-const abandonedCompletionByRepository = new Map<string, Promise<void>>()
-export const ABANDONED_REQUEST_WAIT_MS = 30_000
-export const WAITING_FOR_CANCELLED_REQUEST_MESSAGE = "Waiting for the cancelled request to finish..."
-export const CANCELLED_REQUEST_STILL_RUNNING_MESSAGE =
-	"The cancelled request is still running, so Zoo Code did not start a new one. Try again when it finishes."
+// The provider requests in flight, per repository, until each one settles. At most one provider request
+// per repository runs at a time: a newer request first aborts the older ones (their results would be
+// discarded anyway) and waits until they settle, because a provider that ignores the abort signal keeps
+// working after the abort. The wait is capped: when an older request is still running after the cap,
+// the newer request stops with a message and starts no provider request.
+interface InFlightRequest {
+	settled: Promise<void>
+	cancel: () => void
+}
+const inFlightRequestsByRepository = new Map<string, Set<InFlightRequest>>()
+export const PREVIOUS_REQUEST_WAIT_MS = 30_000
+export const WAITING_FOR_PREVIOUS_REQUEST_MESSAGE = "Waiting for the previous request to finish..."
+export const PREVIOUS_REQUEST_STILL_RUNNING_MESSAGE =
+	"The previous request is still running, so Zoo Code did not start a new one. Try again when it finishes."
 
 /**
  * Clears the per-repository request state, so that tests do not share it.
@@ -471,7 +531,7 @@ export const CANCELLED_REQUEST_STILL_RUNNING_MESSAGE =
  */
 export function resetCommitMessageRequestState(): void {
 	latestInvocationByRepository.clear()
-	abandonedCompletionByRepository.clear()
+	inFlightRequestsByRepository.clear()
 }
 
 /** Resolves to true when `work` settles, or to false after `ms` milliseconds, whichever comes first. */
@@ -483,11 +543,18 @@ function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
 	return Promise.race([work.then(() => true), timeout]).finally(() => clearTimeout(timer))
 }
 
-function holdUntilSettled(key: string, settled: Promise<void>) {
-	abandonedCompletionByRepository.set(key, settled)
-	void settled.then(() => {
-		if (abandonedCompletionByRepository.get(key) === settled) {
-			abandonedCompletionByRepository.delete(key)
+/** Tracks a provider request for the repository until it settles. */
+function trackInFlight(key: string, request: InFlightRequest) {
+	let requests = inFlightRequestsByRepository.get(key)
+	if (!requests) {
+		requests = new Set()
+		inFlightRequestsByRepository.set(key, requests)
+	}
+	requests.add(request)
+	void request.settled.then(() => {
+		requests.delete(request)
+		if (requests.size === 0 && inFlightRequestsByRepository.get(key) === requests) {
+			inFlightRequestsByRepository.delete(key)
 		}
 	})
 }
@@ -581,17 +648,29 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 						return
 					}
 
-					// Wait for a cancelled request that is still running, so that provider requests for this
-					// repository do not overlap. The wait itself can be cancelled.
-					const abandoned = abandonedCompletionByRepository.get(ownerKey)
-					if (abandoned) {
-						progress.report({ message: WAITING_FOR_CANCELLED_REQUEST_MESSAGE })
-						const settled = await untilCancelled(settlesWithin(abandoned, ABANDONED_REQUEST_WAIT_MS))
+					// Only the newest request for a repository calls the provider.
+					if (latestInvocationByRepository.get(ownerKey) !== invocationId) {
+						return
+					}
+
+					// Abort older provider requests for this repository and wait until they settle, so that
+					// provider requests for one repository never overlap. The wait itself can be cancelled.
+					const older = inFlightRequestsByRepository.get(ownerKey)
+					if (older && older.size > 0) {
+						const olderRequests = [...older]
+						olderRequests.forEach((request) => request.cancel())
+						progress.report({ message: WAITING_FOR_PREVIOUS_REQUEST_MESSAGE })
+						const settled = await untilCancelled(
+							settlesWithin(
+								Promise.all(olderRequests.map((request) => request.settled)).then(() => undefined),
+								PREVIOUS_REQUEST_WAIT_MS,
+							),
+						)
 						if (isCancelled()) {
 							return
 						}
 						if (!settled) {
-							vscode.window.showWarningMessage(CANCELLED_REQUEST_STILL_RUNNING_MESSAGE)
+							vscode.window.showWarningMessage(PREVIOUS_REQUEST_STILL_RUNNING_MESSAGE)
 							return
 						}
 						// A newer request for this repository came in during the wait and owns the input box.
@@ -604,18 +683,15 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 					const completion = singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
 						abortSignal: abortController.signal,
 					})
+					trackInFlight(ownerKey, {
+						settled: completion.then(
+							() => undefined,
+							() => undefined,
+						),
+						cancel,
+					})
 					const rawMessage = await untilCancelled(completion)
-					if (isCancelled()) {
-						holdUntilSettled(
-							ownerKey,
-							completion.then(
-								() => undefined,
-								() => undefined,
-							),
-						)
-						return
-					}
-					if (rawMessage === undefined) {
+					if (isCancelled() || rawMessage === undefined) {
 						return
 					}
 
