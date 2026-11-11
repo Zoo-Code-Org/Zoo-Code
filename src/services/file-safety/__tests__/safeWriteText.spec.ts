@@ -85,6 +85,17 @@ function _fileStats(isLink: boolean): fsSync.Stats {
 	return s
 }
 
+// Two-flag stand-in for a path that is neither a link nor a regular file, such as a directory
+// supplied as the staging path. The one-flag helper above cannot express that shape, which is why
+// the right half of the guard at safeWriteText.ts line 721 and the other branch of its message at
+// line 723 have never been exercised. Built on the Stats prototype as above.
+function _fileTypeStats(isLink: boolean, isFile: boolean): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+	s.isSymbolicLink = () => isLink
+	s.isFile = () => isFile
+	return s
+}
+
 function mockDefaults(): void {
 	vi.resetAllMocks()
 	// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
@@ -1908,6 +1919,69 @@ describe("safeWriteText", () => {
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
 	})
 
+	it("names the directory it rejected when a pinned ancestor changes identity", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		// The directory is swapped after the preflight at module line 372 has read the authorized
+		// identity and before the step 2b revalidation at module line 921 runs, which is the window that
+		// revalidation exists for. Answering every lookup with one value would let the preflight throw
+		// and leave the revalidation unexecuted, so the answers change once the path has been walked.
+		// The directory is swapped after the preflight at module line 372 has read the authorized
+		// identity and before the step 2b revalidation at module line 921 runs, which is the window
+		// that revalidation exists for. Answering every lookup with one value lets the preflight throw
+		// and leaves the revalidation unexecuted, so the swap is reported from the mkdir between them.
+		let swapped = false
+		vi.mocked(fs.mkdir).mockImplementation(async () => {
+			swapped = true
+			return undefined
+		})
+		vi.mocked(fs.stat).mockImplementation(async () =>
+			swapped ? _crossIdentity(2n, 100n) : _crossIdentity(1n, 100n),
+		)
+		vi.mocked(fs.realpath).mockImplementation(async (p) => (path.resolve(String(p)) === dir ? dir : targetPath))
+
+		let failure: unknown
+		try {
+			await safeWriteText(targetPath, "new data", {
+				expectedResolvedPath: targetPath,
+				expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+				platform: "linux",
+			})
+		} catch (error) {
+			failure = error
+		}
+		expect(failure).toBeInstanceOf(AncestorReplacedError)
+		expect((failure as AncestorReplacedError).message).toContain("is no longer the directory that was authorized")
+	})
+
+	it("passes through a realpath failure that is not a vanished ancestor", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		// Only ENOENT and ENOTDIR mean the authorized name is gone. A transient EACCES says nothing
+		// about containment and must reach the caller as itself rather than as an ancestor that was
+		// replaced, which would point the user at a security problem that is not there.
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			if (path.resolve(String(p)) === dir) {
+				throw eacces
+			}
+			return targetPath
+		})
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
+
+		let failure: unknown
+		try {
+			await safeWriteText(targetPath, "new data", {
+				expectedResolvedPath: targetPath,
+				expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+				platform: "linux",
+			})
+		} catch (error) {
+			failure = error
+		}
+		expect((failure as { code?: string }).code).toBe("EACCES")
+	})
+
 	it("publishes when a pinned ancestor is a stable symlink alias", async () => {
 		// A caller that authorized a chain running THROUGH an alias records the alias spelling as
 		// dir and the location that alias resolves to as resolvedPath. The alias's realpath differs
@@ -2227,9 +2301,19 @@ describe("caller-supplied staging path", () => {
 
 		// A rename across filesystems fails with EXDEV, and a path elsewhere lets
 		// a caller publish an unrelated file onto the target.
-		await expect(
-			safeWriteText(targetPath, "data", { tempPath: "/tmp/other-dir/x.tmp", platform: "linux" }),
-		).rejects.toThrow(StagingPathError)
+		let failure: unknown
+		try {
+			await safeWriteText(targetPath, "data", {
+				tempPath: "/tmp/other-dir/x.tmp",
+				platform: "linux",
+			})
+		} catch (error) {
+			failure = error
+		}
+		expect(failure).toBeInstanceOf(StagingPathError)
+		// The guard names both the directory it wanted and the path it was given, and that text is
+		// how a caller tells a misplaced staging file apart from every other failure.
+		expect((failure as StagingPathError).message).toContain("Staging file must sit in the target's directory")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
@@ -2240,9 +2324,17 @@ describe("caller-supplied staging path", () => {
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
 
 		// Renaming a link over the target publishes whatever the link points at.
-		await expect(
-			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/x.tmp", platform: "linux" }),
-		).rejects.toThrow(StagingPathError)
+		let failure: unknown
+		try {
+			await safeWriteText(targetPath, "data", {
+				tempPath: "/tmp/test-dir/x.tmp",
+				platform: "linux",
+			})
+		} catch (error) {
+			failure = error
+		}
+		expect(failure).toBeInstanceOf(StagingPathError)
+		expect((failure as StagingPathError).message).toContain("Staging file must be a regular file, not a symlink")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
@@ -2256,9 +2348,17 @@ describe("caller-supplied staging path", () => {
 		const stats = _fileIdentity(42n, 7n)
 		vi.mocked(fs.lstat).mockResolvedValue(stats)
 
-		await expect(safeWriteText(targetPath, "data", { tempPath: targetPath, platform: "linux" })).rejects.toThrow(
-			StagingPathError,
-		)
+		let failure: unknown
+		try {
+			await safeWriteText(targetPath, "data", {
+				tempPath: targetPath,
+				platform: "linux",
+			})
+		} catch (error) {
+			failure = error
+		}
+		expect(failure).toBeInstanceOf(StagingPathError)
+		expect((failure as StagingPathError).message).toContain("Staging file must not be the target itself")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 		// The comparison is only sound when both stats are read as bigint: on NTFS/ReFS the file
@@ -2299,6 +2399,52 @@ describe("caller-supplied staging path", () => {
 		for (const c of identityLookups) {
 			expect(c[1]).toEqual({ bigint: true })
 		}
+	})
+
+	it("publishes when the staging file shares the target inode on another device", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/custom-temp.tmp"
+		vi.mocked(fs.realpath).mockImplementation((p) => Promise.resolve(String(p)))
+		// Same inode on different devices is two different files, so the guard that refuses an alias
+		// of the target must not refuse this. An alias shares the device as well as the inode, and
+		// the pairing of these two answers is what the device half of the comparison exists for.
+		vi.mocked(fs.lstat).mockImplementation(async (p) =>
+			String(p) === path.resolve(stagingPath) ? _fileIdentity(1n, 11n) : _fileIdentity(2n, 11n),
+		)
+		vi.mocked(fsSync.openSync).mockReturnValue(9)
+		vi.mocked(fsSync.fstatSync).mockReturnValue(_fileIdentity(1n, 11n))
+		// After the publish the target IS the staged file, so the post-publish identity read must
+		// answer with the staged identity rather than with the stand-in default directory.
+		vi.mocked(fs.stat).mockResolvedValue(_fileIdentity(1n, 11n))
+
+		await safeWriteText(targetPath, "new bytes", { tempPath: stagingPath, platform: "linux" })
+
+		// The publish lands on the resolved spelling of the target, which on Windows carries a drive
+		// letter, so the assertion names that spelling rather than the literal it was called with.
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("custom-temp.tmp"), path.resolve(targetPath))
+	})
+
+	it("rejects a staging path that is neither a link nor a regular file", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// A directory standing at the caller-supplied staging path, not a link and not a regular
+		// file. The one-flag stand-in cannot build this shape, which is why the right half of the
+		// guard at line 721 and the other branch of its message were never exercised.
+		vi.mocked(fs.lstat).mockResolvedValue(_fileTypeStats(false, false))
+
+		let failure: unknown
+		try {
+			await safeWriteText(targetPath, "data", {
+				tempPath: "/tmp/test-dir/staging-dir",
+				platform: "linux",
+			})
+		} catch (error) {
+			failure = error
+		}
+		expect(failure).toBeInstanceOf(StagingPathError)
+		expect((failure as StagingPathError).message).toContain(
+			"Staging file must be a regular file, not another file type",
+		)
 	})
 })
 
