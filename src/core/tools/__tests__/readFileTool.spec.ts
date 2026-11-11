@@ -1868,11 +1868,17 @@ describe("ReadFileTool", () => {
 				})
 				const callbacks = createMockCallbacks()
 
-				// The directory-check stat succeeds; the stat inside computeVersionToken
-				// rejects, so the token lookup fails after the file was read successfully.
+				// Only computeVersionToken asks for bigint stats, so arm the failure on that
+				// call rather than on call parity, which ties the test to how many stats a read
+				// happens to make: the directory check stays green and only the token lookup
+				// rejects.
 				const okStats = makeStats()
-				mockedFsStat.mockResolvedValueOnce(okStats)
-				mockedFsStat.mockRejectedValueOnce(new Error("EACCES"))
+				mockedFsStat.mockImplementation(async (_path: unknown, options?: { bigint?: boolean }) => {
+					if (options?.bigint === true) {
+						throw new Error("EACCES")
+					}
+					return okStats
+				})
 				mockedIsBinaryFile.mockResolvedValue(false)
 				mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
 
@@ -1885,8 +1891,11 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("existing.ts"))
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("content"))
 
-				// The failed token lookup never observes: with a fresh registry the only path this read
-				// touches is the one it read, so target-absence is what "stays empty" means here.
+				// The failed token lookup observed nothing, and the name's claim is about the
+				// registry, not only about this path: it is still empty.
+				const reg = mockTask.observationRegistry!
+				expect(reg.size).toBe(0)
+				expect(reg.get(path.resolve("/test/workspace", "existing.ts"))).toBeUndefined()
 			})
 
 			it("drops the stale observation when the version-token lookup fails after an earlier successful read", async () => {
@@ -1945,11 +1954,15 @@ describe("ReadFileTool", () => {
 				})
 				const callbacks = createMockCallbacks()
 
-				// Same shape as the native case, on the legacy multi-file path:
-				// directory-check stat succeeds, the token stat rejects after the read.
+				// Same shape as the native case, on the legacy multi-file path: only the bigint
+				// stat that computeVersionToken asks for is made to reject.
 				const okStats = makeStats()
-				mockedFsStat.mockResolvedValueOnce(okStats)
-				mockedFsStat.mockRejectedValueOnce(new Error("EACCES"))
+				mockedFsStat.mockImplementation(async (_path: unknown, options?: { bigint?: boolean }) => {
+					if (options?.bigint === true) {
+						throw new Error("EACCES")
+					}
+					return okStats
+				})
 				mockedIsBinaryFile.mockResolvedValue(false)
 				mockedFsReadFile.mockResolvedValue("legacy content")
 				// The legacy path slices the raw content through readWithSlice, so the slice
@@ -1978,8 +1991,10 @@ describe("ReadFileTool", () => {
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy.ts"))
 				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("legacy content"))
 
-				// The failed token lookup never observes: with a fresh registry the only path this read
-				// touches is the one it read, so target-absence is what "stays empty" means here.
+				// Same claim as the native case, measured on the registry itself.
+				const reg = mockTask.observationRegistry!
+				expect(reg.size).toBe(0)
+				expect(reg.get(path.resolve("/test/workspace", "legacy.ts"))).toBeUndefined()
 			})
 
 			it("drops the stale observation when a legacy read loses its version token after an earlier successful read", async () => {
