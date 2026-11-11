@@ -488,6 +488,7 @@ export class ProviderSettingsManager {
 	public async activateProfile(
 		params: { name: string } | { id: string },
 		signal?: AbortSignal,
+		onPersisting?: () => void,
 	): Promise<ProviderSettingsWithId & { name: string }> {
 		signal?.throwIfAborted()
 		const { name, ...providerSettings } = await this.getProfile(params)
@@ -499,6 +500,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 				signal?.throwIfAborted()
 				providerProfiles.currentApiConfigName = name
+				onPersisting?.()
 				await this.store(providerProfiles)
 				return { name, ...providerSettings }
 			})

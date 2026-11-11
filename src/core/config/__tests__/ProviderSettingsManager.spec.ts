@@ -202,7 +202,8 @@ describe("ProviderSettingsManager", () => {
 			.spyOn(providerSettingsManager, "getProfile")
 			.mockResolvedValue({ name: "selected", id: "selected-id" })
 		const controller = new AbortController()
-		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal)
+		const onPersisting = vi.fn()
+		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal, onPersisting)
 		// Resume past getProfile while the import still holds the storage lock.
 		await profile.mock.results[0].value
 		if (cancel) controller.abort()
@@ -217,6 +218,7 @@ describe("ProviderSettingsManager", () => {
 
 		expect(mockSecrets.get).toHaveBeenCalledTimes(cancel ? 0 : 1)
 		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 1 : 2)
+		expect(onPersisting).toHaveBeenCalledTimes(cancel ? 0 : 1)
 	})
 
 	it.each([false, true])("cancels activation during the locked profile load (cancelled: %s)", async (cancel) => {
@@ -233,7 +235,8 @@ describe("ProviderSettingsManager", () => {
 			return null
 		})
 		const controller = new AbortController()
-		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal)
+		const onPersisting = vi.fn()
+		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal, onPersisting)
 		await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledOnce())
 		if (cancel) controller.abort()
 		const result = cancel
@@ -246,6 +249,28 @@ describe("ProviderSettingsManager", () => {
 		await result
 
 		expect(mockSecrets.store).toHaveBeenCalledTimes(cancel ? 0 : 1)
+		expect(onPersisting).toHaveBeenCalledTimes(cancel ? 0 : 1)
+	})
+
+	it("announces the activation commit boundary before an uninterruptible storage write", async () => {
+		await providerSettingsManager.getModeConfigIds()
+		vi.spyOn(providerSettingsManager, "getProfile").mockResolvedValue({ name: "selected", id: "selected-id" })
+		let release = () => {}
+		const pending = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		mockSecrets.store.mockImplementationOnce(async () => {
+			await pending
+		})
+		const controller = new AbortController()
+		const onPersisting = vi.fn()
+		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal, onPersisting)
+		await vi.waitFor(() => expect(mockSecrets.store).toHaveBeenCalledOnce())
+		expect(onPersisting).toHaveBeenCalledOnce()
+		controller.abort()
+		release()
+
+		await expect(selected).resolves.toMatchObject({ name: "selected", id: "selected-id" })
 	})
 
 	describe("initialize", () => {

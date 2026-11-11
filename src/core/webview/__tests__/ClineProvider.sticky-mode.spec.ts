@@ -777,7 +777,11 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
-			expect(activate).toHaveBeenCalledWith({ name: "architect-config" }, expect.any(AbortSignal))
+			expect(activate).toHaveBeenCalledWith(
+				{ name: "architect-config" },
+				expect.any(AbortSignal),
+				expect.any(Function),
+			)
 			await expect(provider.providerSettingsManager.getModeConfigId("architect")).resolves.toBe(codeConfigId)
 
 			// Verify that the mode was restored

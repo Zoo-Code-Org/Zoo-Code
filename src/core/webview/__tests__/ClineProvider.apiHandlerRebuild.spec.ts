@@ -882,7 +882,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("timed-out uncommitted mutations abort before writes and advance the queue", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -892,8 +892,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			provider["providerSettingsManager"].activateProfile = vi
 				.fn()
-				.mockImplementationOnce(async () => {
+				.mockImplementationOnce(async (_args, signal) => {
 					await firstActivation
+					signal?.throwIfAborted()
 					return {
 						name: "first-profile",
 						id: "first-id",
@@ -914,10 +915,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// Queue advanced immediately on timeout — second enqueues now.
+				// An uncommitted timeout releases the queue while its cancelled storage read settles.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
 				// activateProfile not yet called for second (it runs in the next microtask).
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+
+				await vi.advanceTimersByTimeAsync(0)
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
 				// The aborted signal prevents it from writing any state.
@@ -1014,6 +1018,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith(
 				{ name: "ask-profile" },
 				expect.any(AbortSignal),
+				expect.any(Function),
 			)
 		})
 
