@@ -4451,7 +4451,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
+										// Stryker disable next-line ConditionalExpression,EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4887,7 +4887,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+						// Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
