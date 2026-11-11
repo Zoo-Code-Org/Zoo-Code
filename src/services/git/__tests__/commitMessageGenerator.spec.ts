@@ -341,6 +341,56 @@ describe("commitMessageGenerator", () => {
 				" password: [REDACTED]\n+newkey: value\n   [REDACTED]",
 			],
 			[
+				"closing-tag text inside CDATA",
+				"+<password><![CDATA[</password>hunter2]]></password>",
+				"+<password>[REDACTED]</password>",
+			],
+			[
+				"closing-tag text inside an XML comment",
+				"+<secret><!-- </secret> -->hunter2</secret>",
+				"+<secret>[REDACTED]</secret>",
+			],
+			[
+				"a nested element with the same name",
+				"+<password><password>a</password>hunter2</password>",
+				"+<password>[REDACTED]</password>",
+			],
+			[
+				"an opening tag that spans lines",
+				'+<password\n+  encoding="plain">hunter2</password>',
+				'+<password\n+  encoding="plain">[REDACTED]</password>',
+			],
+			[
+				"an opening tag with very long attributes",
+				`+<password note="${"a".repeat(600)}">hunter2</password>`,
+				`+<password note="${"a".repeat(600)}">[REDACTED]</password>`,
+			],
+			[
+				"a YAML block header with a comment",
+				"+password: | # deployment secret\n+  hunter2\n+user: admin",
+				"+password: [REDACTED]\n+  [REDACTED]\n+user: admin",
+			],
+			[
+				"a Kubernetes env value under a credential name",
+				"+  - name: DB_PASSWORD\n+    value: hunter2\n+  - name: LOG_LEVEL\n+    value: debug",
+				"+  - name: DB_PASSWORD\n+    value: [REDACTED]\n+  - name: LOG_LEVEL\n+    value: debug",
+			],
+			[
+				"a .NET appSettings value",
+				'+<add key="DbPassword" value="hunter2" />',
+				'+<add key="DbPassword" value="[REDACTED]" />',
+			],
+			[
+				"a JSON name/value pair",
+				'+{"name": "API_TOKEN", "value": "hunter2"}',
+				'+{"name": "API_TOKEN", "value": "[REDACTED]"}',
+			],
+			[
+				"an XML value in an XML file of a multi-file diff",
+				"diff --git a/app.ts b/app.ts\n+let x = 1\ndiff --git a/pom.xml b/pom.xml\n@@ -1 +1 @@\n+<password>hunter2</password>",
+				"diff --git a/app.ts b/app.ts\n+let x = 1\ndiff --git a/pom.xml b/pom.xml\n@@ -1 +1 @@\n+<password>[REDACTED]</password>",
+			],
+			[
 				"an unclosed XML credential element up to the next hunk",
 				" <secret>\n s3cr3t\n@@ -1 +1 @@\n+next",
 				" <secret>\n [REDACTED]\n@@ -1 +1 @@\n+next",
@@ -422,6 +472,12 @@ describe("commitMessageGenerator", () => {
 			["cookie type annotations", "+  cookie: string;"],
 			["YAML mappings under a credential key", "+credentials:\n+  username: admin"],
 			["self-closing XML credential tags", "+<password/>\n+<token />\n+<name>app</name>"],
+			[
+				"TypeScript generics named like credentials",
+				"diff --git a/auth.ts b/auth.ts\n@@ -1,2 +1,2 @@\n+const a: Promise<Credentials> = load()\n+const keys: Array<ApiKey> = []\n+export function f() {}",
+			],
+			["Kubernetes values under ordinary names", "+  - name: LOG_LEVEL\n+    value: debug"],
+			["Kubernetes secret references", "+  - name: DB_PASSWORD\n+    valueFrom:\n+      secretKeyRef:"],
 			["primitive credential types", "+  apiKey: string | undefined"],
 			["primitive array types", "+  passwords: string[]"],
 			["typed password fields", "+  password: string[]"],
@@ -466,6 +522,9 @@ describe("commitMessageGenerator", () => {
 			["long lines of credential words without a value", `${"token ".repeat(50)}\n`.repeat(600)],
 			["many empty XML credential elements", "<password></password>".repeat(10_000)],
 			["many self-closing XML credential tags", "<password />".repeat(18_000)],
+			["many unfinished tags", "<a".repeat(100_000)],
+			["many unterminated comments", "<!-".repeat(60_000)],
+			["many name lines without a value", "+- name: DB_PASSWORD\n".repeat(9_000)],
 			["many lines with a closed XML element", "<a>x</a>\n".repeat(20_000)],
 			["many URL schemes without a password", "://:".repeat(50_000)],
 			["a long snake_case name without a token suffix", "a_".repeat(100_000)],
@@ -1375,6 +1434,14 @@ describe("commitMessageGenerator", () => {
 				" <password>",
 				"-  removedsecret</password>",
 				"+  addedsecret</password>",
+				"+<password><![CDATA[</password>cdataclosesecret]]></password>",
+				"+<password",
+				'+  encoding="plain">splittagsecret</password>',
+				"+yamlkey: | # note",
+				"+password: | # note",
+				"+  yamlcommentsecret",
+				"+  - name: DB_PASSWORD",
+				"+    value: k8ssecret",
 				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
 				"+  token: string",
 			].join("\n")
@@ -1401,7 +1468,16 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwx")
 			expect(prompt).not.toContain("hunter2")
 			expect(prompt).not.toContain("multilinesecret")
-			for (const secret of ["attrsecret", "cdatasecret", "removedsecret", "addedsecret"]) {
+			for (const secret of [
+				"attrsecret",
+				"cdatasecret",
+				"removedsecret",
+				"addedsecret",
+				"cdataclosesecret",
+				"splittagsecret",
+				"yamlcommentsecret",
+				"k8ssecret",
+			]) {
 				expect(prompt).not.toContain(secret)
 			}
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
