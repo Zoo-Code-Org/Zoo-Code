@@ -917,6 +917,10 @@
 			"refreshSuccess": "Làm mới công cụ thành công",
 			"refreshError": "Không thể làm mới công cụ",
 			"toolParameters": "Thông số"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Nỗ lực suy nghĩ động",
+			"description": "Chuẩn bị công cụ set_thinking_effort cho hỗ trợ sau này: cài đặt này chỉ lưu tùy chọn, hành vi theo từng yêu cầu sẽ đến trong công việc tiếp theo. (thử nghiệm)"
 		}
 	},
 	"temperature": {
@@ -1118,5 +1122,41 @@
 			"descriptionTooLong": "Mô tả phải có tối đa 1024 ký tự"
 		},
 		"footer": "Tạo các skill của riêng bạn với chế độ Skill Writer, có sẵn tại <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Ngôn ngữ và cách hiển thị ngày/giờ.",
+		"languageTitle": "Ngôn ngữ",
+		"displayLanguage": "Ngôn ngữ hiển thị",
+		"displayLanguageDescription": "Ngôn ngữ của giao diện Zoo Code.",
+		"dateTimeTitle": "Ngày và giờ",
+		"timeFormat": {
+			"label": "Định dạng giờ",
+			"description": "Tự động sẽ theo ngôn ngữ hiển thị của bạn.",
+			"options": {
+				"auto": "Tự động",
+				"12h": "12 giờ",
+				"24h": "24 giờ"
+			}
+		},
+		"dateFormat": {
+			"label": "Định dạng ngày",
+			"example": "ví dụ: {{example}}",
+			"options": {
+				"auto": "Tự động",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Hiển thị thời gian tương đối (\"5 phút trước\") trong lịch sử nhiệm vụ"
+		},
+		"preview": {
+			"title": "Xem trước",
+			"chat": "Tin nhắn chat",
+			"history": "Lịch sử nhiệm vụ",
+			"relative": "5 phút trước",
+			"hover": "(di chuột: {{value}})"
+		}
 	}
 }

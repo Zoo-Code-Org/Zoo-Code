@@ -47,11 +47,11 @@ Zoo Code parte de los cimientos creados por Roo Code y continúa ampliándolos c
 - **Flujos de terminal y edición más fiables** — correcciones para la finalización prematura del terminal, las condiciones de carrera del estado de las tareas, la gestión del contexto, la edición de diff y el uso de herramientas específicas de cada proveedor.
 - **Más control sobre tu espacio de trabajo** — gestión de reglas, restricciones de MCP por modo, controles de rutas multirraíz, opciones de razonamiento de modelos y acciones para revisar los cambios al completar una tarea.
 
-## Novedades de la v3.94.0
+## Novedades de la v3.96.0
 
-- ✨ **Compatibilidad más amplia con modelos y proveedores:** Usa Claude Haiku 5.5 a través de Anthropic, envía imágenes a modelos VS Code LM compatibles, ajusta la temperatura para los modelos OpenCode Go Responses y cancela solicitudes limpiamente en más proveedores.
-- 🔐 **MCP OAuth más flexible:** Configura ajustes estáticos del cliente OAuth, usa rutas de callback personalizadas, descubre detalles de autenticación en `WWW-Authenticate` y ve los errores de callback antes de reintentarlo.
-- 🧭 **Chats y sesiones largas más fluidos:** Renombra tareas en el historial, arrastra archivos al chat sin mantener Shift, reduce la memoria que se conserva durante las sesiones largas y mantén estables los enlaces de subtareas y los webviews reemplazados.
+- ✨ **Nuevos ajustos de chat y diagnósticos:** Muestra marcas de tiempo en los mensajes con formatos de hora y fecha configurables, ajusta el TTL de la caché de prompts para los perfiles de Anthropic y genera informes de diagnóstico que respetan la privacidad.
+- 💸 **Costes y caché de proveedores más precisos:** Mantiene intactos los resultados de herramientas de Anthropic, adopta los tokens de salida acumulativos en los costes de Anthropic y MiniMax, lee los contadores de caché de prompts de DeepSeek, apunta a la caché de Responses de xAI y factura las lecturas de caché de Mistral a 0,1x.
+- 🧭 **Chats más fiables y rápidos:** Reanuda tareas completadas tras un reinicio, restaura checkpoints cuando falta el commit guardado, recarga automáticamente un renderizador de webview muerto, limita las actualizaciones de streaming y carga los idiomas bajo demanda.
 
 ## ¿Qué puede hacer Zoo Code por TI?
 

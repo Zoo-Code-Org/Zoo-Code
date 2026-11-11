@@ -5,6 +5,7 @@ import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { readTaskMessages, TaskMessagesReadError } from "../../core/task-persistence/taskMessages"
 import { makeClineProviderFactory } from "../../test-utils/provider"
+import { setPersistenceTraceSink } from "../../core/task-persistence/persistenceTrace"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
@@ -73,9 +74,19 @@ describe("API#hasTaskUiMessageText", () => {
 		"returns false instead of throwing on a %s read failure",
 		async (kind) => {
 			// The completion write may not have landed yet; callers poll until it does.
-			vi.mocked(readTaskMessages).mockRejectedValue(new TaskMessagesReadError(kind, `read failed: ${kind}`))
-
-			await expect(api.hasTaskUiMessageText("task-1", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(false)
+			const lines: string[] = []
+			setPersistenceTraceSink((line) => lines.push(line))
+			vi.mocked(readTaskMessages).mockRejectedValue(
+				new TaskMessagesReadError(kind, "private content", { code: "EIO" }),
+			)
+			try {
+				await expect(api.hasTaskUiMessageText("task-1", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(false)
+				expect(lines).toHaveLength(1)
+				expect(lines[0]).toContain(`"detail":"${kind}:EIO"`)
+				expect(lines[0]).not.toContain("private content")
+			} finally {
+				setPersistenceTraceSink(undefined)
+			}
 		},
 	)
 

@@ -5,6 +5,7 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getReadablePath } from "../../utils/path"
+import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -138,11 +139,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 			// Check if file is write-protected
 			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
+			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
 
 			const sharedMessageProps: ClineSayTool = {
 				tool: "appliedDiff",
 				path: getReadablePath(task.cwd, relPath),
 				diff: diffContent,
+				isOutsideWorkspace,
 			}
 
 			if (isPreventFocusDisruptionEnabled) {
@@ -332,10 +335,14 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			return
 		}
 
+		// relPath is guaranteed non-null after hasPathStabilized
+		const absolutePath = path.resolve(task.cwd, relPath!)
+
 		const sharedMessageProps: ClineSayTool = {
 			tool: "appliedDiff",
 			path: getReadablePath(task.cwd, relPath),
 			diff: diffContent,
+			isOutsideWorkspace: isPathOutsideWorkspace(absolutePath),
 		}
 
 		let toolProgressStatus

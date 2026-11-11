@@ -5,6 +5,7 @@ import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import { experimentDefault } from "@roo/experiments"
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
@@ -506,6 +507,76 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	describe("time and date settings", () => {
+		const savedSettings = () => {
+			const save = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.map((call) => call[0])
+				.filter((message) => message.type === "updateSettings")
+				.at(-1)
+			return save?.updatedSettings as Record<string, unknown>
+		}
+
+		it("saves the defaults when nothing was ever set, so an unset value cannot hide a lost one", () => {
+			const { activateTab } = renderSettingsView()
+			activateTab("language")
+
+			// Make a change elsewhere so Save is available.
+			fireEvent.click(screen.getByTestId("time-format-12h"))
+			fireEvent.click(screen.getByTestId("time-format-auto"))
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			expect(savedSettings()).toMatchObject({ timeFormat: "auto", dateFormat: "auto", showRelativeTimes: true })
+		})
+
+		it("saves explicit non-default values, including showRelativeTimes: false", () => {
+			const { activateTab } = renderSettingsView()
+			activateTab("language")
+
+			fireEvent.click(screen.getByTestId("time-format-24h"))
+			fireEvent.click(screen.getByTestId("relative-times-checkbox"))
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			expect(savedSettings()).toMatchObject({ timeFormat: "24h", showRelativeTimes: false })
+		})
+
+		it("shows English as the display language when none is stored", async () => {
+			const { activateTab, getSettingsContent } = renderSettingsView({
+				language: undefined,
+				settingsImportedAt: "no-stored-language",
+			})
+			activateTab("language")
+
+			// The select is mocked in this spec: it shows the value it was given in a button before its trigger.
+			await waitFor(() =>
+				expect(within(getSettingsContent()).getAllByTestId("select-trigger").length).toBeGreaterThan(0),
+			)
+			const shownValue = within(getSettingsContent()).getAllByTestId("select-trigger")[0].previousElementSibling
+			expect(shownValue?.textContent).toBe("en")
+		})
+
+		it("shows the values it was given when the tab opens, and keeps edits buffered until Save", async () => {
+			const { activateTab } = renderSettingsView({
+				timeFormat: "24h",
+				dateFormat: "ymd",
+				showRelativeTimes: false,
+				// Marks the state as imported, which is how a test seeds the buffered (cached) settings.
+				settingsImportedAt: "initial-time-settings",
+			})
+			activateTab("language")
+
+			// The state arrives by message, so wait for it to reach the screen.
+			await waitFor(() => expect(screen.getByTestId("time-format-24h")).toHaveAttribute("aria-checked", "true"))
+			expect((screen.getByTestId("relative-times-checkbox") as HTMLInputElement).checked).toBe(false)
+
+			// An edit changes the screen but is not sent until Save.
+			vi.mocked(vscode.postMessage).mockClear()
+			fireEvent.click(screen.getByTestId("time-format-12h"))
+			expect(screen.getByTestId("time-format-12h")).toHaveAttribute("aria-checked", "true")
+			expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+		})
+	})
+
 	it("saves fallback defaults for checkpoint and terminal settings", async () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({
 			enableCheckpoints: undefined,
@@ -876,6 +947,93 @@ describe("SettingsView - Duplicate Commands", () => {
 		// The buffered edit must be reverted before leaving Settings
 		expect(within(getSettingsContent()).queryByText("npm test")).not.toBeInTheDocument()
 		expect(onDone).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("SettingsView - Experimental Settings", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("includes the dynamic thinking effort toggle in the updateSettings payload on save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: experimentDefault })
+		activateTab("experimental")
+		const content = getSettingsContent()
+		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
+		const checkbox = within(label).getByRole("checkbox")
+		expect(checkbox).not.toBeChecked()
+		fireEvent.click(checkbox)
+		// The toggle only buffers the edit in cachedState. Nothing may reach the
+		// extension host before Save, or a discarded edit would persist.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					experiments: expect.objectContaining({ dynamicThinkingEffort: true }),
+				}),
+			}),
+		)
+	})
+
+	it("persists the unset representation of dynamicThinkingEffort as false on save", () => {
+		const experiments: Record<string, boolean> = { ...experimentDefault }
+		delete experiments.dynamicThinkingEffort
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments })
+		activateTab("experimental")
+		const content = getSettingsContent()
+		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
+		const checkbox = within(label).getByRole("checkbox")
+		expect(checkbox).not.toBeChecked()
+		fireEvent.click(checkbox)
+		fireEvent.click(checkbox)
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					experiments: expect.objectContaining({ dynamicThinkingEffort: false }),
+				}),
+			}),
+		)
+	})
+
+	// The false case has to survive being loaded, not only being toggled: an
+	// explicit hydrated false must come back unchanged in the payload when the
+	// edit the user actually made is a different experiment.
+	it("keeps a hydrated false dynamicThinkingEffort in the payload when another experiment is edited", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			experiments: { ...experimentDefault, dynamicThinkingEffort: false },
+		})
+		activateTab("experimental")
+		const content = getSettingsContent()
+		const effortLabel = within(content)
+			.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name")
+			.closest("label")!
+		const effortCheckbox = within(effortLabel).getByRole("checkbox")
+		expect(effortCheckbox).not.toBeChecked()
+
+		const focusLabel = within(content)
+			.getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name")
+			.closest("label")!
+		const focusCheckbox = within(focusLabel).getByRole("checkbox")
+		expect(focusCheckbox).not.toBeChecked()
+		fireEvent.click(focusCheckbox)
+		expect(focusCheckbox).toBeChecked()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					experiments: expect.objectContaining({
+						dynamicThinkingEffort: false,
+						preventFocusDisruption: true,
+					}),
+				}),
+			}),
+		)
 	})
 })
 

@@ -47,11 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.94.0
+## Novidades na v3.96.0
 
-- ✨ **Suporte mais amplo a modelos e provedores:** Use Claude Haiku 5.5 pela Anthropic, envie imagens para modelos VS Code LM compatíveis, ajuste a temperatura para modelos OpenCode Go Responses e cancele solicitações de forma limpa em mais provedores.
-- 🔐 **MCP OAuth mais flexível:** Configure definições estáticas de cliente OAuth, use caminhos de callback personalizados, descubra detalhes de autenticação no `WWW-Authenticate` e veja falhas de callback antes de tentar de novo.
-- 🧭 **Chats mais fluidos e sessões longas:** Renomeie tarefas no histórico, arraste arquivos para o chat sem segurar Shift, reduza a memória retida durante sessões longas e mantenha estáveis os links de subtarefas e as webviews substituídas.
+- ✨ **Novas configurações de chat e diagnósticos:** Mostra carimbos de data/hora nas mensagens com formatos de hora e data configuráveis, ajusta o TTL do prompt-cache para perfis Anthropic e gera relatórios de diagnóstico que preservam a privacidade.
+- 💸 **Custos e cache de provedores mais precisos:** Mantém os resultados de ferramentas do Anthropic intactos, adota tokens de saída cumulativos nos custos do Anthropic e MiniMax, lê os contadores de prompt-cache do DeepSeek, mira o cache de Responses do xAI e cobra leituras de cache do Mistral a 0,1x.
+- 🧭 **Chats mais confiáveis e rápidos:** Retoma tarefas concluídas depois de reiniciar, restaura checkpoints quando o commit salvo está ausente, recarrega automaticamente um renderizador de webview morto, limita atualizações de streaming e carrega idiomas sob demanda.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

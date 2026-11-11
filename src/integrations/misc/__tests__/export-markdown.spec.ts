@@ -69,7 +69,8 @@ describe("export-markdown", () => {
 		})
 
 		it("should handle unexpected content types", () => {
-			const block = { type: "unknown_type" as const } as any
+			// Deliberately malformed block exercising the default branch.
+			const block = { type: "unknown_type" } as unknown as ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Unexpected content type: unknown_type]")
 		})
 
@@ -97,6 +98,14 @@ describe("export-markdown", () => {
 				tool_name: "read_file",
 			} satisfies ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Tool Reference]")
+		})
+
+		it("should format browser_state blocks", () => {
+			const block = {
+				type: "browser_state",
+				tabs: [],
+			} satisfies ExtendedContentBlock
+			expect(formatContentBlockToMarkdown(block)).toBe("[Browser State]")
 		})
 	})
 })
