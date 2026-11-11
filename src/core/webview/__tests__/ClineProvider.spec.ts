@@ -17,6 +17,7 @@ import {
 	type ExtensionMessage,
 	type ExtensionState,
 	type RooCodeSettings,
+	type ModeConfig,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -4113,6 +4114,62 @@ describe("ClineProvider", () => {
 
 			expect(setValues).toHaveBeenCalledWith({ mode: "code" })
 		})
+
+		it("initializes a new task with a custom mode passed beside its own slug", async () => {
+			// Row 4509495977: createTask registers the custom modes of a configuration before it
+			// calls setValues(), and setValues() only keeps a mode the custom-mode store can already
+			// resolve. The double below makes a slug resolvable exactly once registration has stored
+			// it, so moving the registration after setValues() drops the mode here.
+			const slug = "release-reviewer"
+			const registered = new Map<string, ModeConfig>()
+			const updateCustomMode = vi.fn().mockImplementation(async (modeSlug: string, mode: ModeConfig) => {
+				registered.set(modeSlug, mode)
+			})
+			;(provider as MemberSwapTarget).customModesManager = {
+				updateCustomMode,
+				getCustomModes: vi.fn().mockImplementation(async () => [...registered.values()]),
+			}
+			const setValues = vi.spyOn(provider.contextProxy, "setValues").mockResolvedValue(undefined)
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+
+			const { getModeBySlug, modes } = await import("../../../shared/modes")
+			const resolver = vi.mocked(getModeBySlug)
+			// The harness default answers every slug with the code mode (mock factory above). This test
+			// mirrors the real resolver instead: a slug is a mode only while the custom-mode list the
+			// provider just read holds it. The finally block re-applies the factory's answer so later
+			// tests are unaffected by this override.
+			const harnessDefaultMode: ModeConfig = {
+				slug: "code",
+				name: "Code Mode",
+				roleDefinition: "You are a code assistant",
+				groups: ["read", "edit"],
+			}
+			resolver.mockImplementation(
+				(modeSlug: string, customModes?: ModeConfig[]) =>
+					customModes?.find((mode) => mode.slug === modeSlug) ?? modes.find((mode) => mode.slug === modeSlug),
+			)
+
+			try {
+				const mode: ModeConfig = {
+					slug,
+					name: "Release reviewer",
+					roleDefinition: "You review releases before they ship",
+					groups: ["read"],
+				}
+
+				await provider
+					.createTask("hello", undefined, undefined, {}, hand({ customModes: [mode], mode: slug }))
+					.catch(() => undefined) // what happens after the configuration is written is not under test
+
+				expect(updateCustomMode).toHaveBeenCalledWith(slug, mode)
+				expect(updateCustomMode.mock.invocationCallOrder[0]).toBeLessThan(setValues.mock.invocationCallOrder[0])
+				// The mode the new task initializes with is the one getState() now reports.
+				expect((await provider.getState()).mode).toBe(slug)
+			} finally {
+				resolver.mockReset()
+				resolver.mockReturnValue(harnessDefaultMode)
+			}
+		})
 	})
 
 	test.each([
@@ -7419,6 +7476,69 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps the restored profile visible to public readers when the shared store names another profile", async () => {
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await writer["setViewStateId"]("shared-view")
+			await writer.saveViewState("mode", "architect")
+			await writer.saveViewState("currentApiConfigName", "my-profile")
+
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const getProfile = vi.fn().mockResolvedValue({
+				name: "my-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			;(provider as MemberSwapTarget).providerSettingsManager = { getProfile }
+			// The writer has to release the id before this view adopts the entry it persisted.
+			await writer.dispose()
+
+			// Another view activated a different profile in the shared store in the meantime, so the
+			// shared pair and the pair this view restores disagree on purpose.
+			await provider.contextProxy.setValue("currentApiConfigName", "shared-profile")
+			await provider.contextProxy.setProviderSettings({ apiProvider: providerIdentifiers.anthropic })
+			await provider.contextProxy.setValue(
+				"viewStates",
+				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
+			)
+			await provider["setViewStateId"]("shared-view", persistedViewStateClaim(mockContext, "shared-view"))
+
+			expect(getProfile).toHaveBeenCalledWith({ name: "my-profile" })
+			expect(provider["viewLocalState"]).toEqual({
+				mode: "architect",
+				currentApiConfigName: "my-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" },
+			})
+			// Public reader 1: getValues() merges this view's buffer, so the restored name and the
+			// configuration it resolved to are visible outside the instance that loaded them.
+			expect(provider.getValues().currentApiConfigName).toBe("my-profile")
+			expect(provider.getValues().apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			// Public reader 2: getState() and the state posted to the webview still resolve the
+			// shared profile, while the mode they report is already the view-local one. That split is
+			// what row 4509495951 asks to close; pinning both sides here makes the fix flip a visible
+			// assertion instead of passing unnoticed.
+			const state = await provider.getState()
+			expect(state.currentApiConfigName).toBe("shared-profile")
+			expect(state.apiConfiguration).toMatchObject({ apiProvider: providerIdentifiers.anthropic })
+			expect(state.mode).toBe("architect")
+			expect((await provider.getStateToPostToWebview()).currentApiConfigName).toBe("shared-profile")
+			await provider.dispose()
+		})
+
 		it("should apply setValue mutations to global state and keep or clear the right buffer fields", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -10510,7 +10630,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				)
 			})
 
-			it("logs and posts state when profile persistence fails", async () => {
+			it("logs and posts state when the state read fails before the profile write", async () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as MemberSwapTarget).providerSettingsManager = {
@@ -10524,6 +10644,42 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				)
 				// State must still be refreshed even when profile persistence fails.
 				expect(provider.postStateToWebview).toHaveBeenCalled()
+			})
+
+			it("reports the failed profile write and still posts state", async () => {
+				// Row 4509500273: the case above rejects getState(), so it never reaches the write. Here
+				// the read succeeds and saveConfig rejects inside persistProviderProfile, which
+				// upsertProviderProfile swallows, logs, and reports to the user.
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
+				} as never)
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					apiProvider: providerIdentifiers.anthropic,
+				} as never)
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					currentApiConfigName: "Anthropic",
+				} as never)
+				const postStateToWebview = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const saveConfig = vi.fn().mockRejectedValue(new Error("saveConfig rejected"))
+				;(provider as MemberSwapTarget).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([]),
+					saveConfig,
+				}
+
+				await provider.handleZooCodeCallback("zoo_ext_token")
+
+				expect(saveConfig).toHaveBeenCalledWith(
+					"Zoo Gateway",
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.zooGateway,
+						zooSessionToken: "zoo_ext_token",
+					}),
+				)
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("Error create new api configuration"),
+				)
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+				expect(postStateToWebview).toHaveBeenCalled()
 			})
 			it("updates every zoo-gateway profile and activates only the active one", async () => {
 				vi.spyOn(provider, "getState").mockResolvedValue({
