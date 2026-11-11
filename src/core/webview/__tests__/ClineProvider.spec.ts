@@ -4732,7 +4732,12 @@ describe("ClineProvider", () => {
 			expect(provider["localModeConfigIds"].get("code")).toBe("selected-id")
 			if (cancel) controller.abort()
 			release()
-			const result = cancel ? expect(write).rejects.toThrow("aborted") : expect(write).resolves.toBeUndefined()
+			const result = cancel
+				? expect(write).rejects.toMatchObject({
+						name: "Error",
+						message: "Failed to set mode config: AbortError: This operation was aborted",
+					})
+				: expect(write).resolves.toBeUndefined()
 			await Promise.all([imported, result])
 
 			await expect(manager.getModeConfigId("code")).resolves.toBe(cancel ? "imported-id" : "selected-id")
@@ -4776,7 +4781,10 @@ describe("ClineProvider", () => {
 				release()
 				const result =
 					stage === "queued"
-						? expect(activation).rejects.toThrow("aborted")
+						? expect(activation).rejects.toMatchObject({
+								name: "AbortError",
+								message: "This operation was aborted",
+							})
 						: expect(activation).resolves.toBeUndefined()
 				await Promise.all([preceding, result])
 

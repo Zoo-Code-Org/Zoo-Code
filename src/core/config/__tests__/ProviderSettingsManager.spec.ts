@@ -140,7 +140,12 @@ describe("ProviderSettingsManager", () => {
 		const selected = providerSettingsManager.setModeConfig("code", "selected-id", published, controller.signal)
 		if (cancel) controller.abort()
 		release()
-		const result = cancel ? expect(selected).rejects.toThrow("aborted") : expect(selected).resolves.toBeUndefined()
+		const result = cancel
+			? expect(selected).rejects.toMatchObject({
+					name: "Error",
+					message: "Failed to set mode config: AbortError: This operation was aborted",
+				})
+			: expect(selected).resolves.toBeUndefined()
 		await Promise.all([imported, result])
 
 		expect(mockSecrets.get).toHaveBeenCalledTimes(cancel ? 0 : 1)
@@ -162,7 +167,12 @@ describe("ProviderSettingsManager", () => {
 		const selected = providerSettingsManager.setModeConfig("code", "selected-id", published, controller.signal)
 		await vi.waitFor(() => expect(mockSecrets.get).toHaveBeenCalledOnce())
 		if (cancel) controller.abort()
-		const result = cancel ? expect(selected).rejects.toThrow("aborted") : expect(selected).resolves.toBeUndefined()
+		const result = cancel
+			? expect(selected).rejects.toMatchObject({
+					name: "Error",
+					message: "Failed to set mode config: AbortError: This operation was aborted",
+				})
+			: expect(selected).resolves.toBeUndefined()
 		release()
 		await result
 
@@ -189,7 +199,7 @@ describe("ProviderSettingsManager", () => {
 		const selected = providerSettingsManager.activateProfile({ name: "selected" }, controller.signal)
 		if (cancel) controller.abort()
 		const result = cancel
-			? expect(selected).rejects.toThrow("aborted")
+			? expect(selected).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
 			: expect(selected).resolves.toMatchObject({ name: "selected", id: "selected-id" })
 		release()
 		await Promise.all([imported, result])
