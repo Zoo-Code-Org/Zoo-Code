@@ -4851,7 +4851,6 @@ describe("Cline", () => {
 			expect(task.cancellationGeneration).toBe(2)
 		})
 
-
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
 			const task = new Task({
 				provider: mockProvider,
