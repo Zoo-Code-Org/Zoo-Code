@@ -135,10 +135,11 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>$<scheme>$<bareScheme>[REDACTED]$<open>",
 	},
-	// Bearer tokens outside an Authorization header, in any case. The token must contain a digit so
-	// prose such as "Bearer authentication" is not redacted.
+	// Bearer tokens outside an Authorization header, in any case. Any word of 8 or more token characters
+	// after "Bearer" is redacted: no shape test can tell an alphabetic token from a word, and a redacted
+	// word in prose ("Bearer [REDACTED]") costs little.
 	{
-		pattern: /(?<prefix>\bbearer\s+)(?=[A-Za-z_\-.~+/]*\d)[A-Za-z0-9_\-.~+/]{8,}=*/gi,
+		pattern: /(?<prefix>\bbearer[ \t]+)[A-Za-z0-9_\-.~+/]{8,}=*/gi,
 		replacement: "$<prefix>[REDACTED]",
 	},
 	// Cookie headers carry session tokens and can hold spaces ("Cookie: a=1; b=2"), so the whole
@@ -455,11 +456,14 @@ function repositoryKey(repository: GitRepository): string {
 
 // A provider request that the user cancelled but that is still running, per repository. A provider that
 // ignores the abort signal keeps working after the cancel, so the next request for the repository waits
-// until this one settles. Then a cancel followed by a retry does not run two provider requests at once.
-// The wait is capped, so a provider request that never settles cannot block the repository forever.
+// until this one settles. Then a cancel followed by a retry never runs two provider requests at once.
+// The wait is capped: when the cancelled request is still running after the cap, the retry stops with a
+// message and starts no request.
 const abandonedCompletionByRepository = new Map<string, Promise<void>>()
 export const ABANDONED_REQUEST_WAIT_MS = 30_000
 export const WAITING_FOR_CANCELLED_REQUEST_MESSAGE = "Waiting for the cancelled request to finish..."
+export const CANCELLED_REQUEST_STILL_RUNNING_MESSAGE =
+	"The cancelled request is still running, so Zoo Code did not start a new one. Try again when it finishes."
 
 /**
  * Clears the per-repository request state, so that tests do not share it.
@@ -470,13 +474,13 @@ export function resetCommitMessageRequestState(): void {
 	abandonedCompletionByRepository.clear()
 }
 
-/** Resolves when `work` settles or after `ms` milliseconds, whichever comes first. */
-function waitAtMost(work: Promise<void>, ms: number): Promise<void> {
+/** Resolves to true when `work` settles, or to false after `ms` milliseconds, whichever comes first. */
+function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
 	let timer: ReturnType<typeof setTimeout> | undefined
-	const timeout = new Promise<void>((resolve) => {
-		timer = setTimeout(resolve, ms)
+	const timeout = new Promise<boolean>((resolve) => {
+		timer = setTimeout(() => resolve(false), ms)
 	})
-	return Promise.race([work, timeout]).finally(() => clearTimeout(timer))
+	return Promise.race([work.then(() => true), timeout]).finally(() => clearTimeout(timer))
 }
 
 function holdUntilSettled(key: string, settled: Promise<void>) {
@@ -582,8 +586,12 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 					const abandoned = abandonedCompletionByRepository.get(ownerKey)
 					if (abandoned) {
 						progress.report({ message: WAITING_FOR_CANCELLED_REQUEST_MESSAGE })
-						await untilCancelled(waitAtMost(abandoned, ABANDONED_REQUEST_WAIT_MS))
+						const settled = await untilCancelled(settlesWithin(abandoned, ABANDONED_REQUEST_WAIT_MS))
 						if (isCancelled()) {
+							return
+						}
+						if (!settled) {
+							vscode.window.showWarningMessage(CANCELLED_REQUEST_STILL_RUNNING_MESSAGE)
 							return
 						}
 						// A newer request for this repository came in during the wait and owns the input box.

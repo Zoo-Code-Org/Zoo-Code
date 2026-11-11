@@ -19,6 +19,7 @@ import {
 	resolveGitRepository,
 	ABANDONED_REQUEST_WAIT_MS,
 	WAITING_FOR_CANCELLED_REQUEST_MESSAGE,
+	CANCELLED_REQUEST_STILL_RUNNING_MESSAGE,
 	type GitAPI,
 	type GitRepository,
 } from "../commitMessageGenerator"
@@ -302,6 +303,12 @@ describe("commitMessageGenerator", () => {
 				"+Cookie:[REDACTED]",
 			],
 			["an upper-case bearer token", "+curl -H x BEARER abc123def456", "+curl -H x BEARER [REDACTED]"],
+			[
+				"an alphabetic bearer token",
+				'+const header = "Bearer abcdefghijklmnopqrstuvwx"',
+				'+const header = "Bearer [REDACTED]"',
+			],
+			["a word after Bearer in prose", "+// Uses Bearer authentication", "+// Uses Bearer [REDACTED]"],
 			["an npmrc auth value", "+_auth=dXNlcjpwYXNz", "+_auth=[REDACTED]"],
 			["a passphrase", "+  passphrase: correct-horse", "+  passphrase: [REDACTED]"],
 			["a passphrase with spaces", "+passphrase: correct horse battery staple", "+passphrase: [REDACTED]"],
@@ -369,7 +376,7 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["comparisons", "+if (password === confirmation) {"],
 			["arrow functions", "+const check = (password) => verify(password)"],
-			["prose mentioning auth schemes", "+// Adds basic functionality for Bearer authentication"],
+			["prose mentioning the Basic scheme", "+// Adds basic functionality for Basic authentication"],
 			["scoped package names", '+import { x } from "@roo-code/types"'],
 			["versioned package specs", "+npx react@18.3.1"],
 			["empty quoted credentials", '+  password: "",'],
@@ -1288,6 +1295,7 @@ describe("commitMessageGenerator", () => {
 				"+token: Abcdefghijklmnop",
 				"+PASSWORD=string=MySecurePass123",
 				"+passphrase: correct horse battery staple",
+				'+const header = "Bearer abcdefghijklmnopqrstuvwx"',
 				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
 				"+  token: string",
 			].join("\n")
@@ -1311,6 +1319,7 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("MySecurePass123")
 			expect(prompt).not.toContain("battery staple")
 			expect(prompt).not.toContain("WEBHOOKSECRET")
+			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwx")
 			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 
@@ -1379,14 +1388,12 @@ describe("commitMessageGenerator", () => {
 			cancelledRequest.resolve("feat: cancelled")
 		})
 
-		it("stops waiting for a cancelled request that never settles after the wait limit", async () => {
+		it("stops the retry with a message, without a second request, when the cancelled request outlasts the wait limit", async () => {
 			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
 			try {
 				const { cancel } = useCancellableProgress({ once: true })
 				const report = vi.fn()
-				;(singleCompletionHandler as Mock)
-					.mockImplementationOnce(() => new Promise(() => {}))
-					.mockResolvedValueOnce("feat: retry")
+				;(singleCompletionHandler as Mock).mockImplementationOnce(() => new Promise(() => {}))
 
 				const first = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 				await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
@@ -1411,8 +1418,9 @@ describe("commitMessageGenerator", () => {
 				await vi.advanceTimersByTimeAsync(1_000)
 				await retry
 
-				expect(singleCompletionHandler).toHaveBeenCalledTimes(2)
-				expect(mockRepo.inputBox.value).toBe("feat: retry")
+				expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
+				expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(CANCELLED_REQUEST_STILL_RUNNING_MESSAGE)
+				expect(mockRepo.inputBox.value).toBe("")
 			} finally {
 				vi.useRealTimers()
 			}
