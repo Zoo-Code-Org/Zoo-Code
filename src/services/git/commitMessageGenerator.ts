@@ -140,10 +140,19 @@ const REDACTION_RULES: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
 		),
 		replacement: "$<prefix>$<open>[REDACTED]$<open>",
 	},
+	// Upper-case environment variable names that end in TOKEN or SECRET (NPM_TOKEN, SLACK_BOT_TOKEN).
+	// The match is case-sensitive, so code such as `token: string` or `maxTokens = 5` is not redacted.
+	{
+		pattern: new RegExp(
+			String.raw`(?<prefix>\b[A-Z][A-Z0-9_]*_(?:TOKEN|SECRET)${ASSIGNMENT})(?:${QUOTED_VALUE}|${UNQUOTED_VALUE})`,
+			"g",
+		),
+		replacement: "$<prefix>$<open>[REDACTED]$<open>",
+	},
 	// Well-known token formats that can appear without a key name
 	{
 		pattern:
-			/\b(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
+			/\b(?:sk-(?:proj-|live-|test-|ant-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{36,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
 		replacement: "[REDACTED_SECRET]",
 	},
 	// Credentials embedded in URLs: scheme://user:password@host
@@ -214,18 +223,25 @@ export async function getGitApi(): Promise<GitAPI | undefined> {
 	return gitExtension.exports?.getAPI(1)
 }
 
-function isUriLike(value: unknown): value is vscode.Uri {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		typeof (value as { scheme?: unknown }).scheme === "string" &&
-		typeof (value as { fsPath?: unknown }).fsPath === "string"
-	)
+interface UriFields {
+	scheme: string
+	fsPath: string
 }
 
-function findRepositoryByRoot(git: GitAPI, uri: vscode.Uri): GitRepository | undefined {
-	const uriString = uri.toString()
-	return git.repositories.find((r) => r.rootUri.toString() === uriString || r.rootUri.fsPath === uri.fsPath)
+/**
+ * Reads `scheme` and `fsPath` from an untrusted Uri-like value once, as plain strings. No method of
+ * the value is called, so a forged `toString` cannot run.
+ */
+function readUriFields(value: unknown): UriFields | undefined {
+	if (typeof value !== "object" || value === null) {
+		return undefined
+	}
+	const { scheme, fsPath } = value as { scheme?: unknown; fsPath?: unknown }
+	return typeof scheme === "string" && typeof fsPath === "string" ? { scheme, fsPath } : undefined
+}
+
+function findRepositoryByRoot(git: GitAPI, root: UriFields): GitRepository | undefined {
+	return git.repositories.find((r) => r.rootUri.scheme === root.scheme && r.rootUri.fsPath === root.fsPath)
 }
 
 /**
@@ -248,13 +264,15 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
 		// A bare Uri, or a SourceControl from the scm/title menu (rootUri + inputBox).
 		// When an explicit context matches no repository, return undefined instead of
 		// silently picking a different repository.
-		if (isUriLike(context)) {
-			return findRepositoryByRoot(git, context)
+		const contextUri = readUriFields(context)
+		if (contextUri) {
+			return findRepositoryByRoot(git, contextUri)
 		}
 
 		const sc = context as { rootUri?: unknown; inputBox?: unknown }
-		if (isUriLike(sc.rootUri)) {
-			return findRepositoryByRoot(git, sc.rootUri)
+		const sourceControlRoot = readUriFields(sc.rootUri)
+		if (sourceControlRoot) {
+			return findRepositoryByRoot(git, sourceControlRoot)
 		}
 
 		if (sc.inputBox) {
@@ -291,16 +309,24 @@ export function resolveGitRepository(git: GitAPI, context?: unknown): GitReposit
  *
  * A failed `git diff` rejects. It is not reported as "no changes", because a failed staged read
  * would otherwise make the message describe unstaged changes that the next commit does not include.
+ *
+ * When `signal` is aborted, no further Git read starts and the result is undefined.
  */
-export async function getRepositoryDiff(repository: GitRepository): Promise<string | undefined> {
+export async function getRepositoryDiff(repository: GitRepository, signal?: AbortSignal): Promise<string | undefined> {
 	const staged = (await repository.diff(true))?.trim()
 	if (staged) {
 		return staged
+	}
+	if (signal?.aborted) {
+		return undefined
 	}
 
 	const workingTree = (await repository.diff(false))?.trim()
 	if (workingTree) {
 		return workingTree
+	}
+	if (signal?.aborted) {
+		return undefined
 	}
 
 	// `git diff` omits untracked files; surface them as a plain listing so the
@@ -426,7 +452,7 @@ export async function generateCommitMessage(options: GenerateCommitMessageOption
 						return
 					}
 
-					const diff = await untilCancelled(getRepositoryDiff(repository))
+					const diff = await untilCancelled(getRepositoryDiff(repository, abortController.signal))
 					if (isCancelled()) {
 						return
 					}

@@ -47,6 +47,9 @@ vi.mock("../../../utils/single-completion-handler", () => ({
 	singleCompletionHandler: vi.fn(),
 }))
 
+// A fake npm token: "npm_" followed by 36 letters and digits.
+const FAKE_NPM_TOKEN = `npm_${"a1B2c3D4e5".repeat(3)}f6G7h8`
+
 function makeRepo(root: string, overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
 		rootUri: makeUri(root),
@@ -68,11 +71,16 @@ function deferred<T>() {
  * Installs a withProgress mock whose token can be cancelled from the test. Every registered
  * cancellation listener runs on cancel(), like a real vscode.CancellationTokenSource.
  */
-function useCancellableProgress() {
+function useCancellableProgress({ once = false }: { once?: boolean } = {}) {
 	let cancelled = false
 	const listeners: Array<() => void> = []
 	const disposable = { dispose: vi.fn() }
-	;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
+	const withProgress = vscode.window.withProgress as Mock
+	// With `once`, only the next withProgress call gets this token; later calls use the default mock.
+	const install = once
+		? withProgress.mockImplementationOnce.bind(withProgress)
+		: withProgress.mockImplementation.bind(withProgress)
+	install((_opts: unknown, callback: (progress: unknown, token: unknown) => unknown) => {
 		const token = {
 			get isCancellationRequested() {
 				return cancelled
@@ -199,6 +207,15 @@ describe("commitMessageGenerator", () => {
 			["a backtick value", "+const pwd = `p;w`", "+const pwd = `[REDACTED]`", "p;w"],
 			["a quoted value with an escaped quote", String.raw`+password: "a\";b"`, '+password: "[REDACTED]"', ";b"],
 			["an unterminated quoted value", '+password: "abc;def', "+password: [REDACTED]", "abc"],
+			["an npm token variable", `+NPM_TOKEN=${FAKE_NPM_TOKEN}`, "+NPM_TOKEN=[REDACTED]", "npm_"],
+			["a quoted token variable", '+SLACK_BOT_TOKEN="xyz;123"', '+SLACK_BOT_TOKEN="[REDACTED]"', "xyz"],
+			["a YAML secret variable", "+  CI_DEPLOY_SECRET: hunter2", "+  CI_DEPLOY_SECRET: [REDACTED]", "hunter2"],
+			[
+				"an exported token variable",
+				"+export GITLAB_TOKEN=plain-value",
+				"+export GITLAB_TOKEN=[REDACTED]",
+				"plain-value",
+			],
 			[
 				"a quoted Authorization value with a semicolon",
 				'+"Authorization": "Basic ab;cd=="',
@@ -214,6 +231,8 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["OpenAI key", "sk-proj-abcdefghijklmnopqrstuvwx"],
 			["GitHub token", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"],
+			["npm token", FAKE_NPM_TOKEN],
+			["GitLab token", "glpat-abcdefghij0123456789"],
 			["AWS access key id", "AKIAABCDEFGHIJKLMNOP"],
 			["Slack token", "xoxb-1234567890-abcdef"],
 			["JWT", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"],
@@ -229,6 +248,9 @@ describe("commitMessageGenerator", () => {
 			["scoped package names", '+import { x } from "@roo-code/types"'],
 			["versioned package specs", "+npx react@18.3.1"],
 			["empty quoted credentials", '+  password: "",'],
+			["lower-case token fields", "+  token: string"],
+			["upper-case names that only contain TOKEN", "+const MAX_TOKENS = 4096"],
+			["upper-case token names without an assignment", "+if (env.NPM_TOKEN) {"],
 		])("leaves %s unchanged", (_label, content) => {
 			expect(redactSensitiveInformation(content)).toBe(content)
 		})
@@ -251,6 +273,7 @@ describe("commitMessageGenerator", () => {
 			["a long run without @", "a".repeat(200_000)],
 			["many @ signs with no domain", "a@".repeat(100_000)],
 			["many local-part characters before one @", `${"a.".repeat(100_000)}@`],
+			["a long upper-case name without a TOKEN suffix", "A_".repeat(100_000)],
 		])("redacts %s in linear time", (_label, content) => {
 			// A quadratic scan of 200k characters takes far longer than this budget.
 			const startedAt = performance.now()
@@ -358,6 +381,30 @@ describe("commitMessageGenerator", () => {
 			const resolved = resolveGitRepository(git, fake)
 			expect(resolved).toBe(known)
 			expect(resolved).not.toBe(fake)
+		})
+
+		it.each([
+			["a bare Uri", (root: vscode.Uri) => root],
+			["a SourceControl rootUri", (root: vscode.Uri) => ({ rootUri: root })],
+		])("matches %s by its scheme and fsPath without calling its methods", (_label, wrap) => {
+			const known = makeRepo("/workspace/repo")
+			const git: GitAPI = { repositories: [makeRepo("/workspace/other"), known] }
+			const forgedToString = vi.fn(() => "/workspace/repo")
+			const forged = { scheme: "file", fsPath: "/workspace/repo", toString: forgedToString }
+
+			expect(resolveGitRepository(git, wrap(forged as unknown as vscode.Uri))).toBe(known)
+			expect(forgedToString).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			["a different fsPath", { scheme: "file", fsPath: "/workspace/attacker" }],
+			["a different scheme", { scheme: "untitled", fsPath: "/workspace/repo" }],
+		])("rejects a forged Uri with %s even when its toString matches", (_label, fields) => {
+			const git: GitAPI = { repositories: [makeRepo("/workspace/repo"), makeRepo("/workspace/other")] }
+			const forgedToString = vi.fn(() => "/workspace/repo")
+
+			expect(resolveGitRepository(git, { ...fields, toString: forgedToString })).toBeUndefined()
+			expect(forgedToString).not.toHaveBeenCalled()
 		})
 
 		it("rejects a fake context with a matching-looking inputBox", () => {
@@ -600,6 +647,33 @@ describe("commitMessageGenerator", () => {
 			expect(diff).toBe("working diff")
 			expect(repo.diff).toHaveBeenCalledWith(true)
 			expect(repo.diff).toHaveBeenCalledWith(false)
+		})
+
+		it.each([
+			["the working tree", 1],
+			["untracked files", 2],
+		])("does not read %s after the signal aborts", async (_label, abortAfterCall) => {
+			// The signal aborts while the Git read with this call number is pending.
+			const controller = new AbortController()
+			const diff = vi.fn().mockImplementation(async () => {
+				if (diff.mock.calls.length === abortAfterCall) {
+					controller.abort()
+				}
+				return ""
+			})
+			const workingTreeChanges = vi.fn(() => [{ uri: makeUri("/workspace/repo/new.ts"), status: 7 }])
+			const repo = makeRepo("/workspace/repo", {
+				diff,
+				state: {
+					get workingTreeChanges() {
+						return workingTreeChanges()
+					},
+				},
+			})
+
+			await expect(getRepositoryDiff(repo, controller.signal)).resolves.toBeUndefined()
+			expect(diff).toHaveBeenCalledTimes(abortAfterCall)
+			expect(workingTreeChanges).not.toHaveBeenCalled()
 		})
 
 		it("rejects without reading the working tree when the staged diff fails", async () => {
@@ -1014,6 +1088,62 @@ describe("commitMessageGenerator", () => {
 			expect(capturedSignal?.aborted).toBe(true)
 			expect(disposable.dispose).toHaveBeenCalled()
 			expect(mockRepo.inputBox.value).toBe("")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			["a staged diff", true],
+			["a working-tree diff", false],
+		])("keeps an npm token in %s out of the prompt", async (_label, staged) => {
+			const tokenDiff = `+NPM_TOKEN=${FAKE_NPM_TOKEN}\n+//registry.npmjs.org/:_authToken=${FAKE_NPM_TOKEN}`
+			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
+			;(singleCompletionHandler as Mock).mockResolvedValue("chore: configure npm publishing")
+
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
+			expect(prompt).toContain("+NPM_TOKEN=[REDACTED]")
+			expect(prompt).toContain("_authToken=[REDACTED]")
+			expect(prompt).not.toContain("npm_")
+			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
+		})
+
+		it("does not read the working tree when cancelled while the staged diff is pending", async () => {
+			const { cancel } = useCancellableProgress()
+			const stagedDiff = deferred<string>()
+			mockRepo.diff = vi.fn((cached?: boolean) => (cached ? stagedDiff.promise : Promise.resolve("working diff")))
+
+			const run = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(mockRepo.diff).toHaveBeenCalledWith(true))
+			cancel()
+			await run
+			stagedDiff.resolve("")
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockRepo.diff).toHaveBeenCalledTimes(1)
+			expect(mockProvider.getState).not.toHaveBeenCalled()
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
+		})
+
+		it("keeps the retry result when a cancelled request that ignored the abort finishes later", async () => {
+			const { cancel } = useCancellableProgress({ once: true })
+			const cancelledRequest = deferred<string>()
+			;(singleCompletionHandler as Mock)
+				.mockImplementationOnce(() => cancelledRequest.promise)
+				.mockResolvedValueOnce("feat: retry")
+
+			const first = generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await vi.waitFor(() => expect(singleCompletionHandler).toHaveBeenCalledTimes(1))
+			cancel()
+			await first
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			expect(mockRepo.inputBox.value).toBe("feat: retry")
+
+			cancelledRequest.resolve("feat: cancelled")
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockRepo.inputBox.value).toBe("feat: retry")
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 		})
 
