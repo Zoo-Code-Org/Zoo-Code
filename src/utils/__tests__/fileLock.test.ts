@@ -1502,6 +1502,31 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 	beforeEach(() => {
 		vi.mocked(lockfile.lock).mockImplementation((target, options) => actualLock(target, options))
 	})
+	let heldRelease: (() => Promise<void>) | null = null
+	let liveWaiter: HolderHandle | null = null
+	let forcedDirectory: string | null = null
+	let forcedTarget: string | null = null
+	let forcedTrace: string | null = null
+
+	// The hole the three rows above share: a row that gives up part way, at an assertion between its
+	// acquire and its release, leaves this process holding the lock and the writer it launched still
+	// contending for it, because every release and every reap in those rows sits inline and an
+	// assertion that lands skips the lines after it. This guard takes the shape the row named for
+	// letting go of both locks and the renewal timer already uses, releasing only what has not been
+	// released yet, and it sits on the block rather than inside one row because the same hole is in
+	// all three of them here.
+	afterEach(async () => {
+		if (heldRelease !== null) {
+			await heldRelease()
+			heldRelease = null
+		}
+		if (liveWaiter !== null) {
+			// Releasing first is what lets the writer finish on its own: it is refused while this
+			// process still holds, and it writes, releases and exits once the artefact is gone.
+			await liveWaiter.waitForExit()
+			liveWaiter = null
+		}
+	})
 
 	// The queue this module builds when the artefact belongs to someone else: for a plain call
 	// fileLock.ts:119-125 hands the library five retries after the first attempt, capped at 1000 ms
@@ -1541,6 +1566,7 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				writeKey: "child",
 				baseMode: "under",
 			})
+			liveWaiter = holder
 			const artefactLine = await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
 			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
 			expect(traceArtefact(artefactLine)).toBe(path.join(directory, "history.json.lock"))
@@ -1557,6 +1583,7 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				safeWriteJson(target, { writerB: 1 }, { merge: mergeRecords }),
 			])
 			expect(await holder.waitForExit()).toBe(0)
+			liveWaiter = null
 			expect(readJsonBody(target)).toEqual({ pre: 1, child: 1, writerA: 1, writerB: 1 })
 			expect(artefactsOf(directory)).toEqual([])
 		},
@@ -1568,6 +1595,7 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 		async () => {
 			const { directory, target } = scenario("merge-waiter-under")
 			const release = await acquireFileLock(target, { immediate: true })
+			heldRelease = release
 			const waiter = startLockHolder(target, "hold", lockModule, directory, nextTraceName(), false, {
 				holdMs: 0,
 				writeKey: "child",
@@ -1575,6 +1603,7 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				retries: waiterAttemptsForOutcomeBudget,
 				retryMs: 250,
 			})
+			liveWaiter = waiter
 			await readHolderTrace(waiter.tracePath, "ARTEFACT", 15000, waiter.childOutput)
 			// Observed rather than assumed: the waiter attempted while this process still held the lock and
 			// was refused, so the row cannot pass with a writer that merely ran after the write below.
@@ -1586,11 +1615,13 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 			expect(fs.readFileSync(waiter.tracePath, "utf8")).not.toContain("OUTCOME held")
 			writeMergedKey(target, "writerA")
 			await release()
+			heldRelease = null
 			const outcomeLine = await readHolderTrace(waiter.tracePath, "OUTCOME", 25000, waiter.childOutput)
 			expect(traceOutcome(outcomeLine)).toBe("held")
 			const baseLine = await readHolderTrace(waiter.tracePath, "BASE-UNDER-LOCK", 15000, waiter.childOutput)
 			expect(tracePayload(baseLine, "BASE-UNDER-LOCK")).toEqual({ pre: 1, writerA: 1 })
 			expect(await waiter.waitForExit()).toBe(0)
+			liveWaiter = null
 			expect(readJsonBody(target)).toEqual({ pre: 1, writerA: 1, child: 1 })
 			expect(artefactsOf(directory)).toEqual([])
 		},
@@ -1602,6 +1633,7 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 		async () => {
 			const { directory, target } = scenario("merge-waiter-before")
 			const release = await acquireFileLock(target, { immediate: true })
+			heldRelease = release
 			const waiter = startLockHolder(target, "hold", lockModule, directory, nextTraceName(), false, {
 				holdMs: 0,
 				writeKey: "child",
@@ -1609,6 +1641,7 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				retries: waiterAttemptsForOutcomeBudget,
 				retryMs: 250,
 			})
+			liveWaiter = waiter
 			const beforeLine = await readHolderTrace(waiter.tracePath, "BASE-BEFORE", 15000, waiter.childOutput)
 			expect(tracePayload(beforeLine, "BASE-BEFORE")).toEqual({ pre: 1 })
 			// The base was read before the attempt, and the attempt then happened and was refused; both are
@@ -1618,15 +1651,72 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 			expect(fs.readFileSync(waiter.tracePath, "utf8")).not.toContain("OUTCOME held")
 			writeMergedKey(target, "writerA")
 			await release()
+			heldRelease = null
 			const outcomeLine = await readHolderTrace(waiter.tracePath, "OUTCOME", 25000, waiter.childOutput)
 			expect(traceOutcome(outcomeLine)).toBe("held")
 			const usedLine = await readHolderTrace(waiter.tracePath, "BASE-USED", 15000, waiter.childOutput)
 			expect(tracePayload(usedLine, "BASE-USED")).toEqual({ pre: 1 })
 			expect(await waiter.waitForExit()).toBe(0)
+			liveWaiter = null
 			const content = readJsonBody(target)
 			expect(content).toEqual({ pre: 1, child: 1 })
 			expect(content).not.toHaveProperty("writerA")
 			expect(artefactsOf(directory)).toEqual([])
+		},
+	)
+
+	it(
+		"leaves the lock held and the waiting writer refused when a row fails between the two",
+		{ timeout: 60000 },
+		async () => {
+			const { directory, target } = scenario("merge-waiter-forced-failure")
+			forcedDirectory = directory
+			forcedTarget = target
+			heldRelease = await acquireFileLock(target, { immediate: true })
+			liveWaiter = startLockHolder(target, "hold", lockModule, directory, nextTraceName(), false, {
+				holdMs: 0,
+				writeKey: "child",
+				baseMode: "under",
+				retries: waiterAttemptsForOutcomeBudget,
+				retryMs: 250,
+			})
+			forcedTrace = liveWaiter.tracePath
+			await readHolderTrace(liveWaiter.tracePath, "REFUSED", 15000, liveWaiter.childOutput)
+			let forced = ""
+			try {
+				// The failure these rows can hit, forced on purpose so that the letting go is what is
+				// tested and not the merge: an assertion that lands while this process still holds the
+				// lock and while the writer it launched is still being refused.
+				expect(artefactsOf(directory)).toEqual([])
+			} catch (thrown) {
+				forced = String(thrown).slice(0, 40)
+			}
+			expect(forced).not.toBe("")
+			// What that failure leaves at the moment it lands, before this block guard runs: the
+			// artefact still under this process and the writer still short of its outcome line. The
+			// next row is the assertion about the guard, because a hook cannot run inside the row that
+			// failed.
+			expect(artefactsOf(directory)).toEqual(["history.json.lock"])
+			expect(fs.readFileSync(forcedTrace ?? "", "utf8")).not.toContain("OUTCOME")
+		},
+	)
+
+	it(
+		"gives back the lock and reaps the waiting writer that a failed row left behind",
+		{ timeout: 60000 },
+		async () => {
+			if (forcedDirectory === null || forcedTarget === null || forcedTrace === null) {
+				throw new Error("the forced failure row recorded no objects to check")
+			}
+			// Running here, after the guard of this block, is the point: what is asserted is what the
+			// guard left, namely no artefact under this process, the writer admitted once the lock was
+			// free having written, let go and exited, and the same path acquirable again.
+			expect(artefactsOf(forcedDirectory)).toEqual([])
+			expect(fs.readFileSync(forcedTrace, "utf8")).toContain("RELEASED")
+			heldRelease = await acquireFileLock(forcedTarget, { immediate: true })
+			await heldRelease()
+			heldRelease = null
+			expect(artefactsOf(forcedDirectory)).toEqual([])
 		},
 	)
 })
