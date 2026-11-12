@@ -46,6 +46,11 @@ overrides:
   '@lmstudio/sdk>zod': 3.25.76
   katex: 0.19.1
 
+patchedDependencies:
+  '@qdrant/js-client-rest@1.20.0':
+    hash: a2f576a222593d493080be95751562c88867de5bd9cf6c4ab6e37a857eb5e8fd
+    path: patches/@qdrant__js-client-rest@1.20.0.patch
+
 importers:
 
   .:
@@ -471,7 +476,7 @@ importers:
         version: 1.32.2(zod@4.6.7)
       '@qdrant/js-client-rest':
         specifier: 1.20.0
-        version: 1.20.0(typescript@5.9.3)
+        version: 1.20.0(patch_hash=a2f576a222593d493080be95751562c88867de5bd9cf6c4ab6e37a857eb5e8fd)(typescript@5.9.3)
       '@roo-code/cloud':
         specifier: workspace:^
         version: link:../packages/cloud
@@ -577,9 +582,6 @@ importers:
       os-name:
         specifier: ^6.0.0
         version: 6.1.0
-      p-limit:
-        specifier: ^6.2.0
-        version: 6.2.0
       p-wait-for:
         specifier: ^5.0.2
         version: 5.0.2
@@ -7118,10 +7120,6 @@ packages:
     resolution: {integrity: sha512-TYOanM3wGwNGsZN2cVTYPArw454xnXj5qmWF1bEoAc4+cU/ol7GVh7odevjp1FNHduHc3KZMcFduxU5Xc6uJRQ==}
     engines: {node: '>=10'}
 
-  p-limit@6.2.0:
-    resolution: {integrity: sha512-kuUqqHNUqoIWp/c467RI4X6mmyuojY5jGutNU0wVTmEOOfcuwLqyMVoAi9MKi2Ak+5i9+nhmrK4ufZE8069kHA==}
-    engines: {node: '>=18'}
-
   p-locate@4.1.0:
     resolution: {integrity: sha512-R79ZZ/0wAxKGu3oYMlz8jy/kbhsNrS7SKZ7PxEHBgJ5+F2mtFW2fK2cOtBh1cHYkQsbzFV7I+EoRKe6Yt0oK7A==}
     engines: {node: '>=8'}
@@ -9047,10 +9045,6 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  yocto-queue@1.2.2:
-    resolution: {integrity: sha512-4LCcse/U2MHZ63HAJVE+v71o7yOdIe4cZ70Wpf8D/IyjDKYQLV5GD46B+hSTjJsvV5PztjvHoU580EftxjDZFQ==}
-    engines: {node: '>=12.20'}
-
   yoctocolors@2.2.0:
     resolution: {integrity: sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg==}
     engines: {node: '>=18'}
@@ -10697,7 +10691,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@qdrant/js-client-rest@1.20.0(typescript@5.9.3)':
+  '@qdrant/js-client-rest@1.20.0(patch_hash=a2f576a222593d493080be95751562c88867de5bd9cf6c4ab6e37a857eb5e8fd)(typescript@5.9.3)':
     dependencies:
       '@qdrant/openapi-typescript-fetch': 1.2.6
       typescript: 5.9.3
@@ -16148,10 +16142,6 @@ snapshots:
     dependencies:
       yocto-queue: 0.1.0
 
-  p-limit@6.2.0:
-    dependencies:
-      yocto-queue: 1.2.2
-
   p-locate@4.1.0:
     dependencies:
       p-limit: 2.3.0
@@ -18244,8 +18234,6 @@ snapshots:
       buffer-crc32: 0.2.13
 
   yocto-queue@0.1.0: {}
-
-  yocto-queue@1.2.2: {}
 
   yoctocolors@2.2.0: {}
 
