@@ -2307,6 +2307,64 @@ describe("DiffViewProvider", () => {
 				)
 			})
 
+			it("keeps the placeholder when the guard's read fails for a reason that does not say it is gone", async () => {
+				// The read that guards the unlink can fail for reasons that say nothing about the file being
+				// gone - a permission refusal, for example. Only ENOENT means there was nothing left to
+				// remove, so anything else is rethrown: the discard keeps the file and reports it through
+				// the console.error call this cleanup site already makes, and the method rejects with that
+				// error the way it rejects for an unlink it could not finish.
+				const relPath = "unreadable-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members open() touches.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// The guard's read now fails for a reason that is not 'already gone'.
+				const denied: NodeJS.ErrnoException = new Error("EACCES: permission denied, read")
+				denied.code = "EACCES"
+				vi.mocked(fs.readFile).mockRejectedValue(denied)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(/permission denied, read/)
+
+				// A read that said nothing about the file being gone does not license removing it.
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.objectContaining({ code: "EACCES" }),
+				)
+				// The edit drops its claim on the path with the failure, so a later discard does not
+				// report the same kept file twice.
+				expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+				expect(diffViewProvider["placeholderContent"]).toBeUndefined()
+			})
+
 			it("removes the placeholder that a new-file open() wrote, driven through the public methods", async () => {
 				// The ownership lifecycle lives at the public-method layer, so exercise it there:
 				// open() writes the empty placeholder and records it, and the discard of an abandoned
