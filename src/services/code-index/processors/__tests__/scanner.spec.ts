@@ -19,6 +19,9 @@ import { PARSING_CONCURRENCY, BATCH_PROCESSING_CONCURRENCY, MAX_FILE_SIZE_BYTES 
 import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
 
 vi.mock("fs/promises", () => ({ stat: vi.fn() }))
+
+// Stats has a private constructor in @types/node; the scanner reads only `size`.
+const statsOfSize = (size: number): Stats => Object.assign(Object.create(Stats.prototype) as Stats, { size })
 vi.mock("vscode", () => ({
 	workspace: { fs: { readFile: vi.fn() } },
 	Uri: { file: (filePath: string) => ({ fsPath: filePath }) },
@@ -185,9 +188,7 @@ function setup() {
 beforeEach(() => {
 	vi.useFakeTimers()
 	clearAllMocks()
-	const stats = new Stats()
-	stats.size = 100
-	vi.mocked(stat).mockReset().mockResolvedValue(stats)
+	vi.mocked(stat).mockReset().mockResolvedValue(statsOfSize(100))
 	vi.mocked(listFiles)
 		.mockReset()
 		.mockResolvedValue([[fileA], false])
@@ -474,9 +475,7 @@ describe("DirectoryScanner", () => {
 		if (selection === "deleted") vi.mocked(listFiles).mockResolvedValue([[], false])
 		if (selection === "excluded") ignored.add("a.ts")
 		if (selection === "oversized") {
-			const stats = new Stats()
-			stats.size = MAX_FILE_SIZE_BYTES + 1
-			vi.mocked(stat).mockResolvedValue(stats)
+			vi.mocked(stat).mockResolvedValue(statsOfSize(MAX_FILE_SIZE_BYTES + 1))
 		}
 		expect((await scanner.scanDirectory(workspacePath)).incompleteFiles).toEqual([])
 		expect(store.deletePointsByFilePath).toHaveBeenCalledExactlyOnceWith(fileA, expect.any(Number))

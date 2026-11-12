@@ -22,6 +22,8 @@ describe("WorkspaceIndexingEnablementManager", () => {
 				workspaceEnabled: true,
 				autoEnableDefault: false,
 				failedFiles: [],
+				failedFileSummary: undefined,
+				providerWaits: [],
 			}),
 		}
 		return {

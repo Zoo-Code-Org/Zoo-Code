@@ -921,7 +921,7 @@ describe("CodeIndexManager lifecycle", () => {
 	it("keeps folder URI enablement distinct and honors auto-enable false", async () => {
 		const other = new CodeIndexManager(
 			"/workspace",
-			{ ...vscode.Uri.file("/workspace"), toString: () => "remote:///workspace" },
+			Object.assign(vscode.Uri.file("/workspace"), { toString: () => "remote:///workspace" }),
 			context,
 			new CodeIndexStateManager(),
 		)

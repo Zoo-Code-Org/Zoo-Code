@@ -310,9 +310,7 @@ export class CodeIndexOrchestrator {
 		if (!this.isCurrentAttempt()) return Promise.resolve()
 		const paths = signal ? this.writeGate.uncertainFiles(signal) : []
 		return Promise.all(paths.map((filePath) => this.cacheManager.invalidateFile(filePath)))
-			.then(() => {
-				if (this.isCurrentAttempt()) return this.cacheManager.flush()
-			})
+			.then(() => (this.isCurrentAttempt() ? this.cacheManager.flush() : undefined))
 			.catch((error: unknown) => {
 				if (this.isCurrentAttempt()) codeIndexLog.error("Stopped index cache persistence failed", { error })
 			})

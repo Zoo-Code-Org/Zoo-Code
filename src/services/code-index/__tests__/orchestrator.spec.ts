@@ -87,7 +87,7 @@ describe("CodeIndexOrchestrator lifecycle", () => {
 	let gate: IndexWriteGate
 	let allocator: ReturnType<typeof fixtures>["allocator"]
 	let current: boolean
-	let fatal: ReturnType<typeof vi.fn>
+	let fatal: ReturnType<typeof vi.fn<(error: ParserFatalError, message: string) => void>>
 	let orchestrator: CodeIndexOrchestrator
 	let failures: FileFailureRegistry
 	let pacers: ProviderPacerRegistry
@@ -102,7 +102,7 @@ describe("CodeIndexOrchestrator lifecycle", () => {
 		vi.spyOn(state, "reportFileQueueProgress")
 		;({ cache, store, scanner, watcher, worker, gate, allocator } = fixtures())
 		current = true
-		fatal = vi.fn()
+		fatal = vi.fn<(error: ParserFatalError, message: string) => void>()
 		failures = new FileFailureRegistry()
 		pacers = new ProviderPacerRegistry()
 		orchestrator = createOrchestrator()
