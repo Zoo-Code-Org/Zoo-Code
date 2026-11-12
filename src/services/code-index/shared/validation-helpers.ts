@@ -55,13 +55,6 @@ export interface HttpError extends Error {
 	}
 }
 
-export interface ValidationError {
-	status?: number
-	message?: string
-	name?: string
-	code?: string
-}
-
 /**
  * Maps HTTP status codes to appropriate error messages
  */

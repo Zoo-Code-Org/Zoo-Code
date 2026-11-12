@@ -47,7 +47,9 @@ vi.mock("vscode", () => ({
 }))
 vi.mock("../../../i18n", () => ({ t: (key: string) => key }))
 vi.mock("../../../core/ignore/RooIgnoreController", () => ({
-	RooIgnoreController: vi.fn().mockImplementation(() => ({ initialize: vi.fn().mockResolvedValue(undefined) })),
+	RooIgnoreController: class {
+		initialize = vi.fn().mockResolvedValue(undefined)
+	},
 }))
 vi.mock("fs/promises", () => ({ default: { readFile: vi.fn().mockResolvedValue("") } }))
 vi.mock("ignore", () => ({ default: () => ({ add: vi.fn() }) }))
@@ -152,7 +154,9 @@ function semble() {
 		state: "Indexed" as const,
 	}
 	// Semble's public lifecycle surface is sufficient; its CLI fields are not used by the manager.
-	vi.mocked(SembleProvider).mockReturnValue(provider as unknown as SembleProvider)
+	vi.mocked(SembleProvider).mockImplementation(function () {
+		return provider as unknown as SembleProvider
+	})
 	return provider
 }
 

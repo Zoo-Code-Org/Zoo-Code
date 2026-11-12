@@ -6,8 +6,9 @@ vi.mock("../code-index-log", () => ({ codeIndexLog: { info: vi.fn() } }))
 vi.mock("vscode", () => ({
 	EventEmitter: class {
 		event = vi.fn()
-		fire = vi.fn()
-		dispose = vi.fn()
+		// Prototype methods give each vi.spyOn a fresh spy instead of an instance mock with earlier calls.
+		fire(): void {}
+		dispose(): void {}
 	},
 }))
 

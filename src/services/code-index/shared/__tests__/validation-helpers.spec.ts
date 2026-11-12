@@ -11,19 +11,16 @@ describe("formatEmbeddingError", () => {
 		[401, "permanent", "embeddings:authenticationFailed"],
 		[429, "rate-limit", "embeddings:failedWithStatus"],
 		[503, "server", "embeddings:failedWithStatus"],
-	] as const)(
-		"keeps classification and delay for HTTP %s as a single attempt",
-		(status, classification, key) => {
-			const cause = Object.assign(new Error("failure"), { status, headers: new Headers({ "retry-after": "2" }) })
-			const error = formatEmbeddingError(cause)
-			expect(error).toBeInstanceOf(EmbeddingError)
-			expect(error).toMatchObject({ classification, statusCode: status, retryAfterMs: 2000, cause })
-			expect(error.message).toBe(key)
-			if (status !== 401) {
-				expect(t).toHaveBeenLastCalledWith(key, { attempts: 1, statusCode: status, errorMessage: "failure" })
-			}
-		},
-	)
+	] as const)("keeps classification and delay for HTTP %s as a single attempt", (status, classification, key) => {
+		const cause = Object.assign(new Error("failure"), { status, headers: new Headers({ "retry-after": "2" }) })
+		const error = formatEmbeddingError(cause)
+		expect(error).toBeInstanceOf(EmbeddingError)
+		expect(error).toMatchObject({ classification, statusCode: status, retryAfterMs: 2000, cause })
+		expect(error.message).toBe(key)
+		if (status !== 401) {
+			expect(t).toHaveBeenLastCalledWith(key, { attempts: 1, statusCode: status, errorMessage: "failure" })
+		}
+	})
 
 	it("preserves connection errors with no headers", () => {
 		const cause = new TypeError("fetch failed", { cause: new Error("network") })

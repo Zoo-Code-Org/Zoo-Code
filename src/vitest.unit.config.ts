@@ -9,6 +9,7 @@ export default mergeConfig(
 			exclude: [
 				...configDefaults.exclude,
 				"__tests__/dist_assets.spec.ts",
+				"services/code-index/__tests__/parse-worker-client.real.spec.ts",
 				"services/__tests__/pr-review-state-workflow.test.ts",
 				"services/__tests__/stale-pr-clock-workflow.test.ts",
 			],

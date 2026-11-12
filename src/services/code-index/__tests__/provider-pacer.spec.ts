@@ -18,6 +18,7 @@ const limited = (retryAfterMs?: number) => ({ status: 429, retryAfterMs })
 const flush = () => vi.advanceTimersByTimeAsync(0)
 
 beforeEach(() => {
+	vi.mocked(codeIndexLog.info).mockClear()
 	vi.useFakeTimers()
 	vi.setSystemTime(0)
 	vi.spyOn(Math, "random").mockReturnValue(0)

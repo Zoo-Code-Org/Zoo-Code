@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http"
 import { createRequire } from "node:module"
 import path from "node:path"
+import nock from "nock"
 import { QdrantClientResourceExhaustedError } from "@qdrant/js-client-rest"
 import { QdrantVectorStore } from "../qdrant-client"
 import { VectorStoreError } from "../../shared/indexing-errors"
@@ -22,6 +23,7 @@ const workspacePath = path.resolve("qdrant-contract-workspace")
 
 beforeEach(async () => {
 	vi.clearAllMocks()
+	nock.enableNetConnect("127.0.0.1")
 	responseStatus = 200
 	retryAfter = undefined
 	requests = []

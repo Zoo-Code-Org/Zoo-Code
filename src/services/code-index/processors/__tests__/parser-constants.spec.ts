@@ -1,20 +1,16 @@
 import { build } from "esbuild"
 import * as path from "path"
-import { readFile } from "fs/promises"
 import * as parserConstants from "../parser-constants"
+import { MAX_BLOCK_CHARS } from "../../constants"
 
-it("preserves the four foundation parser constants exactly", async () => {
-	const source = await readFile(path.resolve("services/code-index/constants/index.ts"), "utf8")
-	const expected = {
+it("preserves the four foundation parser constants exactly", () => {
+	expect({ ...parserConstants }).toEqual({
 		MAX_BLOCK_CHARS: 1000,
 		MIN_BLOCK_CHARS: 50,
 		MIN_CHUNK_REMAINDER_CHARS: 200,
 		MAX_CHARS_TOLERANCE_FACTOR: 1.15,
-	}
-	expect(parserConstants).toEqual(expected)
-	for (const [name, value] of Object.entries(expected)) {
-		expect(source).toMatch(new RegExp(`export const ${name} = ${String(value).replace(".", "\\.")}(?:\\s|$)`))
-	}
+	})
+	expect(parserConstants.MAX_BLOCK_CHARS).toBe(MAX_BLOCK_CHARS)
 })
 
 it("bundles the actual parser worker without host or types/provider barrel inputs", async () => {

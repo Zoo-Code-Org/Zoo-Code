@@ -8,6 +8,13 @@ import type { IEmbedder } from "../interfaces/embedder"
 import type { IVectorStore } from "../interfaces/vector-store"
 import { EmbeddingError } from "../shared/indexing-errors"
 
+vi.mock("vscode", () => ({
+	EventEmitter: class {
+		event = vi.fn()
+		fire(): void {}
+		dispose(): void {}
+	},
+}))
 vi.mock("../../../i18n", () => ({ t: (key: string) => key }))
 
 vi.mock("../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), info: vi.fn() } }))

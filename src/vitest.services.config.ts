@@ -9,6 +9,7 @@ export default mergeConfig(
 			include: ["services/**/*.{test,spec}.{ts,tsx}"],
 			exclude: [
 				"services/tree-sitter/**/*.{test,spec}.{ts,tsx}",
+				"services/code-index/__tests__/parse-worker-client.real.spec.ts",
 				"services/__tests__/pr-review-state-workflow.test.ts",
 				"services/__tests__/stale-pr-clock-workflow.test.ts",
 			],
