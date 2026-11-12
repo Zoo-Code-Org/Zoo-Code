@@ -786,6 +786,17 @@ export class DiffViewProvider {
 			console.error("Error removing abandoned write_to_file artifacts:", error)
 		}
 
+		// Restore any preview tabs the diff evicted, reconstructing the user's prior
+		// not-yet-edited tab state, the way saveChanges() and revertChanges() do at their own ends.
+		// The discard path never reached this: reset() clears snapshotPreviewTabs right after, so a
+		// denied stream left every tab VS Code evicted to open the diff gone for the session.
+		// Skipped when the sweep failed - the placeholder is then still on disk and still owned, the
+		// snapshot is the only record the retry path has of what is left to remove, and reopening
+		// tabs on top of a half-removed artifact would report a workspace that is not restored.
+		// restorePreviewTabs() reports its own per-tab failures, so it cannot mask editorFailure.
+		if (!cleanupFailure) {
+			await this.restorePreviewTabs()
+		}
 		if (editorFailure) {
 			throw editorFailure instanceof Error ? editorFailure : new Error(String(editorFailure))
 		}
