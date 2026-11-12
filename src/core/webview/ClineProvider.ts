@@ -2180,7 +2180,9 @@ export class ClineProvider
 
 	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
 		const cachedId = this.localModeConfigIds.get(mode) ?? (await this.initialModeConfigIds)[mode]
-		if (cachedId && (await this.providerSettingsManager.listConfig()).some(({ id }) => id === cachedId)) {
+		// An unmapped mode keeps this provider's current profile, even if another window maps it later.
+		if (!cachedId) return undefined
+		if ((await this.providerSettingsManager.listConfig()).some(({ id }) => id === cachedId)) {
 			return cachedId
 		}
 		return this.providerSettingsManager.getModeConfigId(mode)

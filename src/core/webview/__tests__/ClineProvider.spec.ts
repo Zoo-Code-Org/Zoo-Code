@@ -562,8 +562,7 @@ describe("ClineProvider", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// Most tests stub providerSettingsManager and expect it to be consulted for mode profiles,
-		// so start without the snapshot the real manager would take of the seeded mode map.
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
 		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		defaultTaskOptions = {
@@ -4617,6 +4616,7 @@ describe("ClineProvider", () => {
 			apiProvider: providerIdentifiers.anthropic,
 		}
 
+		provider["initialModeConfigIds"] = Promise.resolve({ architect: "test-id" })
 		;(provider as any).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
@@ -4629,7 +4629,7 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "mode", text: "architect" })
 
 		// Should load the saved config for architect mode
-		expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+		expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "test-config" })
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
@@ -4647,8 +4647,8 @@ describe("ClineProvider", () => {
 
 		expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
 		await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
-		// A mode this window never chose still falls back to the shared value.
-		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("other-window-id")
+		// An unmapped mode keeps this provider's current profile.
+		await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
 	})
 
 	describe("mode profile initialization and imports", () => {
@@ -4718,6 +4718,19 @@ describe("ClineProvider", () => {
 			await expect(second.providerSettingsManager.getModeConfigId("code")).resolves.toBe("id2")
 			await expect(first["getModeConfigId"]("code")).resolves.toBe("id2")
 			await expect(second["getModeConfigId"]("code")).resolves.toBe("id1")
+		})
+
+		it("keeps an unmapped mode local when another provider saves a mapping later", async () => {
+			const first = newProvider()
+			const second = newProvider()
+			await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
+
+			await second.setModeConfig("new-mode", "id2")
+
+			await expect(first.providerSettingsManager.getModeConfigId("new-mode")).resolves.toBe("id2")
+			await expect(first["getModeConfigId"]("new-mode")).resolves.toBeUndefined()
+			await expect(second["getModeConfigId"]("new-mode")).resolves.toBe("id2")
+			await expect(newProvider()["getModeConfigId"]("new-mode")).resolves.toBe("id2")
 		})
 
 		it.each(["success", "profile write fails", "later settings write fails"])(
@@ -4801,8 +4814,8 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")
 
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("opened-with-id")
-			// A mode created after this window opened has no snapshot entry, so the shared value applies.
-			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBe("other-window-id")
+			// A mode created after this window opened keeps this provider's current profile.
+			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBeUndefined()
 		})
 
 		it("prefers an explicit local choice over the snapshot", async () => {
@@ -4814,13 +4827,13 @@ describe("ClineProvider", () => {
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
 		})
 
-		it("falls back to the shared value when the snapshot cannot be read", async () => {
+		it("keeps the current profile when the snapshot cannot be read", async () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValue(new Error("unreadable"))
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
 
 			provider["captureInitialModeConfigIds"]()
 
-			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("shared-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
 		})
 
 		it("drops local choices and re-reads the mapping when state is reset", async () => {
@@ -5428,6 +5441,7 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			}
 
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "saved-config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
@@ -5443,7 +5457,7 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
 			// Verify saved config was loaded
-			expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
 			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "saved-config" })
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "saved-config")
 
@@ -5552,6 +5566,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("preserves mode when it exists in custom modes", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ "custom-mode": "config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Mock custom modes that include the saved mode
@@ -5698,6 +5713,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("continues with task restoration even if mode config loading fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Mock custom modes
