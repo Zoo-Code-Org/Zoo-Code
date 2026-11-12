@@ -1,6 +1,7 @@
 import {
 	DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+	DEFAULT_PER_WRITE_CHECKPOINTS,
 	GLOBAL_SETTINGS_KEYS,
 	globalSettingsSchema,
 } from "../global-settings.js"
@@ -49,5 +50,20 @@ describe("collapseCommandOutputByDefault global setting", () => {
 	})
 	it("rejects non-boolean values", () => {
 		expect(globalSettingsSchema.safeParse({ collapseCommandOutputByDefault: "true" }).success).toBe(false)
+	})
+})
+
+describe("perWriteCheckpoints global setting", () => {
+	it("is on by default", () => {
+		expect(DEFAULT_PER_WRITE_CHECKPOINTS).toBe(true)
+	})
+
+	it("accepts and exposes the persisted setting", () => {
+		expect(globalSettingsSchema.parse({ perWriteCheckpoints: false })).toEqual({ perWriteCheckpoints: false })
+		expect(GLOBAL_SETTINGS_KEYS).toContain("perWriteCheckpoints")
+	})
+
+	it("rejects non-boolean setting values", () => {
+		expect(() => globalSettingsSchema.parse({ perWriteCheckpoints: "true" })).toThrow()
 	})
 })
