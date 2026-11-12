@@ -105,7 +105,8 @@ it.each([
 	expect(error).toMatchObject({ retryAfterMs: seconds * 1000, classification: "rate-limit", statusCode: 429 })
 	expect(error.cause).toBeInstanceOf(QdrantClientResourceExhaustedError)
 	expect(error.cause).toMatchObject({ retry_after: seconds })
-	expect(requests).toHaveLength(activity === "verify" ? 2 : 1)
+	// Verify issues two concurrent counts; the rejection can arrive before the second reaches the server.
+	await vi.waitFor(() => expect(requests).toHaveLength(activity === "verify" ? 2 : 1))
 })
 
 it.each(["upsert", "delete", "verify"] as const)("%s is a single attempt without the policy", async (activity) => {
