@@ -1621,13 +1621,18 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 		// release was attempted anyway, and nothing under this process holds a lock in that directory.
 		const refusal = cleanupError
 		expect(refusal).toBeInstanceOf(Error)
-		// The library carries the refusal code on the error object and the Error type does not declare
-		// it, so the assertion reads the code through the shape the library documents. The release of
-		// a lock whose in-process record is already gone answers ERELEASED, which is what the run of
-		// this file on windows printed and recorded here; the timer rows of this file meet the other
-		// code the library uses when it cannot honour a release, so both are admitted rather than a
-		// guess about which one a runner sees.
-		expect(["ERELEASED", "ENOTACQUIRED"]).toContain((refusal as NodeJS.ErrnoException).code)
+		// The guard attempt is the second call to the release function this row received when it
+		// acquired the leaf, and proper-lockfile 4.1.2 answers that branch before touching the
+		// filesystem: lib/lockfile.js line 255 tests the released flag on the lock record the
+		// closure captured and line 257 rejects Lock is already released carrying code ERELEASED,
+		// which is what the run of this file on windows printed for this row. The other release
+		// refusal in this library, ENOTACQUIRED at lib/lockfile.js line 285, means the key is not
+		// acquired or owned by this process at all, which is exactly what a guard that released a
+		// record it never owned would show. This file already pins ERELEASED for a second call to a
+		// release closure in the 8.3 alias block, and pins ENOTACQUIRED for the replaced record in
+		// the row titled a replaced link target shares one record, so admitting that code here too
+		// would let an ownership regression in the guard pass while the sibling still came back.
+		expect((refusal as NodeJS.ErrnoException).code).toBe("ERELEASED")
 		expect(artefactsOf(cleanupDirectory)).toEqual([])
 		cleanupError = null
 		cleanupDirectory = null
