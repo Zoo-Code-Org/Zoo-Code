@@ -1,5 +1,6 @@
 import * as path from "path"
 import { tracePersistenceEvent } from "../core/task-persistence/persistenceTrace"
+import { resolveLockKey } from "../services/file-safety/safeWriteText"
 import * as lockfile from "proper-lockfile"
 
 /**
@@ -73,7 +74,17 @@ export async function withFileLock<T>(
 	options?: FileLockOptions,
 ): Promise<T> {
 	const absoluteFilePath = path.resolve(filePath)
-	const releaseLock = await acquireFileLock(absoluteFilePath, options)
+	// Lock the canonical key - the same one safeWriteJson computes - so a symlink
+	// alias and its referent take ONE lock. Locking the raw path here would let a
+	// deletion through this helper run concurrently with a safeWriteJson
+	// read-modify-write on the referent (the two would watch different lock
+	// files), breaking the compound atomicity the deletion contract promises.
+	// The operation still receives the caller's resolved path: its own file
+	// operations (e.g. the task-history unlink) must keep the caller's alias
+	// semantics - unlinking the referent instead of the alias would delete a
+	// different directory entry.
+	const lockKey = await resolveLockKey(absoluteFilePath)
+	const releaseLock = await acquireFileLock(lockKey, options)
 
 	let result: T
 	try {
