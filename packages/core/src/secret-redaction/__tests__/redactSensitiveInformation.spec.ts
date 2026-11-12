@@ -38,6 +38,43 @@ describe("redactSensitiveInformation", () => {
 			expect(redacted).not.toContain("hunter2")
 		})
 
+		it.each([
+			["renamed from a sensitive path", "a/.env", "b/settings.txt", "rename"],
+			["renamed to a sensitive path", "a/settings.txt", "b/.env", "rename"],
+			["copied from a sensitive path", "a/certs/server.pem", "b/notes.txt", "copy"],
+		])("hides every content line of a file %s", (_label, from, to, kind) => {
+			const header = [
+				`diff --git ${from} ${to}`,
+				"similarity index 80%",
+				`${kind} from ${from.slice(2)}`,
+				`${kind} to ${to.slice(2)}`,
+				`--- ${from}`,
+				`+++ ${to}`,
+				"@@ -1,2 +1,2 @@",
+			].join("\n")
+			expect(redactSensitiveInformation(`${header}\n-SESSION=hunter2\n+HOST=x\n PORT=1`)).toBe(
+				`${header}\n-[REDACTED]\n+[REDACTED]\n [REDACTED]`,
+			)
+		})
+
+		it("reads the path of a renamed file from the --- line when Git gives no rename lines", () => {
+			const diff = "diff --git a/x b/y\n--- a/.env\n+++ b/settings.txt\n@@ -1 +1 @@\n-SESSION=hunter2"
+			expect(redactSensitiveInformation(diff)).not.toContain("hunter2")
+		})
+
+		it("does not treat /dev/null as a file that is not code", () => {
+			const diff = [
+				"diff --git a/app.ts b/app.ts",
+				"new file mode 100644",
+				"--- /dev/null",
+				"+++ b/app.ts",
+				"@@ -0,0 +1,2 @@",
+				"+const token = load()",
+				"+const other = 1",
+			].join("\n")
+			expect(redactSensitiveInformation(diff)).toBe(diff.replace("+const token = load()", "+[REDACTED]"))
+		})
+
 		it("keeps the header lines of a sensitive file", () => {
 			const diff =
 				"diff --git a/.env b/.env\nnew file mode 100644\n--- /dev/null\n+++ b/.env\n@@ -0,0 +1 @@\n+A=1"
@@ -131,6 +168,29 @@ describe("redactSensitiveInformation", () => {
 					"+  [REDACTED]",
 					"+}",
 					"+export default fixture",
+				),
+			)
+		})
+
+		it("keeps the outer block after a nested credential block ends", () => {
+			const diff = fileDiff(
+				"fixture.ts",
+				"+const fixture = {",
+				"+  auth: {",
+				'+    token: "a",',
+				"+  },",
+				'+  value: "hunter2",',
+				"+}",
+			)
+			expect(redactSensitiveInformation(diff)).toBe(
+				fileDiff(
+					"fixture.ts",
+					"+const fixture = {",
+					"+  [REDACTED]",
+					"+    [REDACTED]",
+					"+  [REDACTED]",
+					"+  [REDACTED]",
+					"+}",
 				),
 			)
 		})

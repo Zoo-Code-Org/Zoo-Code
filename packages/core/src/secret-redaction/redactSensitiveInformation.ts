@@ -4,7 +4,8 @@
  * The rules are blunt on purpose. No scan can find a secret value in every file format, so the rules
  * do not try to find the value. They hide every line that can hold one:
  *
- * 1. Sensitive files (`.env`, `*.pem`, `id_rsa`, `secrets.yaml`, ...): no content line is sent.
+ * 1. Sensitive files (`.env`, `*.pem`, `id_rsa`, `secrets.yaml`, ...): no content line is sent. A renamed
+ *    or copied file counts when its old or its new path is sensitive.
  * 2. Other files that are not code (YAML, JSON, XML, INI, Markdown, unknown types): when one content
  *    line contains a credential word, no content line of that file is sent. A value can be on a
  *    different line than its key (`- value: x` / `  name: API_TOKEN`), so the whole file is hidden.
@@ -36,6 +37,9 @@ const CODE_FILE =
 // A diff content line: its prefix (`+`, `-`, or a space), its indentation, and the rest
 const CONTENT_LINE = /^([+\- ]?)([ \t]*)([^\n]*)$/
 const HUNK_HEADER = /^(@@ [^@\n]* @@)([^\n]*)$/
+// Header lines that name a path of the file. A renamed or copied file has two paths, and both count.
+const PATH_LINE =
+	/^(?:diff --git |--- (?!\/dev\/null)|\+\+\+ (?!\/dev\/null)|rename from |rename to |copy from |copy to )/
 
 // Private key blocks. A block without an END line runs to the end of the text.
 const PEM_PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
@@ -93,21 +97,22 @@ function redactEmailAddresses(content: string): string {
 	return result + content.slice(copiedUpTo)
 }
 
-/** Hides the content lines of one file of the diff (rules 1 to 3). `header` is its `diff --git` line. */
-function hideFileLines(lines: string[], header: string | undefined): string[] {
-	// Git quotes a path with special characters and escapes them (`"b/.env.pr\303\266d"`). Each escape
-	// becomes one `_`, so the name keeps its shape for the file rules.
-	const path = header?.replace(/"?\r?$/, "").replace(/\\(?:[0-7]{1,3}|[^0-7])/g, "_")
+/** Hides the content lines of one file of the diff (rules 1 to 3). `hasHeader` is false for text before the first `diff --git` line. */
+function hideFileLines(lines: string[], hasHeader: boolean): string[] {
 	// Text before the first `diff --git` line (for example a list of untracked files) is all content.
-	let inHunk = path === undefined
+	let inHunk = !hasHeader
 	const isContent = lines.map((line) => {
 		inHunk = (inHunk && !line.startsWith("diff --git ")) || line.startsWith("@@")
 		return inHunk && !line.startsWith("@@")
 	})
+	// Each path is read from the end of its header line. Git quotes a path with special characters and
+	// escapes them (`"b/.env.pr\303\266d"`). Each escape becomes one `_`, so the name keeps its shape.
+	const paths = lines
+		.filter((line, i) => !isContent[i] && PATH_LINE.test(line))
+		.map((line) => line.replace(/"?\r?$/, "").replace(/\\(?:[0-7]{1,3}|[^0-7])/g, "_"))
 	const hideAll =
-		(path !== undefined && SENSITIVE_FILE.test(path)) ||
-		(path !== undefined &&
-			!CODE_FILE.test(path) &&
+		paths.some((path) => SENSITIVE_FILE.test(path)) ||
+		(paths.some((path) => !CODE_FILE.test(path)) &&
 			lines.some((line, i) => isContent[i] && CREDENTIAL_WORD.test(line)))
 	const hidden = lines.map(() => hideAll)
 	// Marks the blocks of credential lines (rule 3) in one direction, on one diff side: the context lines
@@ -123,7 +128,8 @@ function hideFileLines(lines: string[], header: string | undefined): string[] {
 				blockIndent = -1
 			} else if (rest.trim() !== "") {
 				blockIndent = indent.length < Math.max(blockIndent, 1) ? -1 : blockIndent
-				if (CREDENTIAL_WORD.test(rest) && (!backward || indent.length > 0)) {
+				// A credential line inside an open block keeps that block, so it does not end with a nested block.
+				if (blockIndent < 0 && CREDENTIAL_WORD.test(rest) && (!backward || indent.length > 0)) {
 					blockIndent = indent.length
 				}
 				hidden[i] ||= blockIndent >= 0
@@ -155,8 +161,8 @@ export function redactSensitiveInformation(content: string): string {
 	let start = 0
 	for (let i = 1; i <= lines.length; i++) {
 		if (i === lines.length || lines[i]?.startsWith("diff --git ")) {
-			const header = lines[start]?.startsWith("diff --git ") ? lines[start] : undefined
-			hideFileLines(lines.slice(start, i), header).forEach((line) => hidden.push(line))
+			const hasHeader = lines[start]?.startsWith("diff --git ") ?? false
+			hideFileLines(lines.slice(start, i), hasHeader).forEach((line) => hidden.push(line))
 			start = i
 		}
 	}

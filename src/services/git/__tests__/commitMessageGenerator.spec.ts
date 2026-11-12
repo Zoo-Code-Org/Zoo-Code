@@ -1019,21 +1019,21 @@ describe("commitMessageGenerator", () => {
 				'+const header = "Bearer abcdefghijklmnopqrstuvwx"',
 				'+const short = "Bearer hunter2"',
 				"+<password>",
-				"+  multilinesecret",
+				"+  multilinehunter2",
 				"+</password>",
-				'+<apiKey env="prod">attrsecret</apiKey>',
-				"+<secret><![CDATA[cdatasecret]]></secret>",
+				'+<apiKey env="prod">attrhunter2</apiKey>',
+				"+<secret><![CDATA[cdatahunter2]]></secret>",
 				" <password>",
-				"-  removedsecret</password>",
-				"+  addedsecret</password>",
-				"+<password><![CDATA[</password>cdataclosesecret]]></password>",
+				"-  removedhunter2</password>",
+				"+  addedhunter2</password>",
+				"+<password><![CDATA[</password>cdataclosehunter2]]></password>",
 				"+<password",
-				'+  encoding="plain">splittagsecret</password>',
+				'+  encoding="plain">splittaghunter2</password>',
 				"+yamlkey: | # note",
 				"+password: | # note",
-				"+  yamlcommentsecret",
+				"+  yamlcommenthunter2",
 				"+  - name: DB_PASSWORD",
-				"+    value: k8ssecret",
+				"+    value: k8shunter2",
 				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
 				"+  token: string",
 			].join("\n")
@@ -1056,16 +1056,16 @@ describe("commitMessageGenerator", () => {
 			expect(prompt).not.toContain("WEBHOOKSECRET")
 			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwx")
 			expect(prompt).not.toContain("hunter2")
-			expect(prompt).not.toContain("multilinesecret")
+			expect(prompt).not.toContain("multilinehunter2")
 			for (const secret of [
-				"attrsecret",
-				"cdatasecret",
-				"removedsecret",
-				"addedsecret",
-				"cdataclosesecret",
-				"splittagsecret",
-				"yamlcommentsecret",
-				"k8ssecret",
+				"attrhunter2",
+				"cdatahunter2",
+				"removedhunter2",
+				"addedhunter2",
+				"cdataclosehunter2",
+				"splittaghunter2",
+				"yamlcommenthunter2",
+				"k8shunter2",
 			]) {
 				expect(prompt).not.toContain(secret)
 			}
@@ -1079,68 +1079,85 @@ describe("commitMessageGenerator", () => {
 			const diff = [
 				"diff --git a/settings.xml.template b/settings.xml.template",
 				"@@ -0,0 +1,3 @@",
-				"+<password><![CDATA[</password>templatesecret]]></password>",
-				`+<apiKey note="${"a".repeat(600)}">longattrsecret</apiKey>`,
-				'+<secret note="/>">quotedgtsecret</secret>',
+				"+<password><![CDATA[</password>templatehunter2]]></password>",
+				`+<apiKey note="${"a".repeat(600)}">longattrhunter2</apiKey>`,
+				'+<secret note="/>">quotedgthunter2</secret>',
 				"diff --git a/diagram.svg b/diagram.svg",
 				"@@ -0,0 +1 @@",
-				'+<password encoding="plain">svgsecret</password>',
+				'+<password encoding="plain">svghunter2</password>',
 				"diff --git a/auth.ts b/auth.ts",
 				"@@ -0,0 +1,2 @@",
 				"+type Loader = Promise<Credentials>",
-				'+const xml = "<token>tssecret</token>"',
+				'+const xml = "<token>tshunter2</token>"',
 				"+type Other = Promise<Credentials>",
-				'+const generic = "<Credentials>genericsecret</Credentials>"',
+				'+const generic = "<Credentials>generichunter2</Credentials>"',
 				"diff --git a/deploy.yaml b/deploy.yaml",
 				"@@ -0,0 +1,9 @@",
 				"+  - name: DB_PASSWORD",
 				"+    # Deployment credential",
-				"+    value: commentsecret",
-				"+  - value: reversedsecret",
+				"+    value: commenthunter2",
+				"+  - value: reversedhunter2",
 				"+    name: API_TOKEN",
 				"+  - name: SIGNING_KEY_PASSWORD",
 				"+    value: |-",
-				"+      blocksecret",
-				'+  extra: {"value":"jsonsecret","name":"API_TOKEN"}',
+				"+      blockhunter2",
+				'+  extra: {"value":"jsonhunter2","name":"API_TOKEN"}',
 				"+  - value: |-",
-				"+      reversedblocksecret",
+				"+      reversedblockhunter2",
 				"+    name: API_TOKEN",
 				"+  - name: DB_PASSWORD",
 				"+    value: |-",
-				"+      #commentblocksecret",
+				"+      #commentblockhunter2",
 				"+  - name: DB_PASSWORD",
 				"+    value:",
-				"+      nextlinesecret",
-				`+  far: {"value":"farsecret","note":"${"x".repeat(400)}","name":"API_TOKEN"}`,
+				"+      nextlinehunter2",
+				`+  far: {"value":"farhunter2","note":"${"x".repeat(400)}","name":"API_TOKEN"}`,
 				"+  nested:",
 				"+    password:",
-				"+      value: nestedyamlsecret",
+				"+      value: nestedyamlhunter2",
 				"+      description: kept",
 				"diff --git a/config.json b/config.json",
 				"@@ -0,0 +1,8 @@",
-				'+{"value":"nestedjsonsecret","options":{},"name":"API_TOKEN"}',
-				'+{"name":"API_TOKEN","note":"a}b","value":"bracesecret"}',
-				'+[{"name":"API_TOKEN","value":"separatesecret"},{"name":"LOG_LEVEL","value":"debug"}]',
-				'+<password value="attrvaluesecret"/>',
+				'+{"value":"nestedjsonhunter2","options":{},"name":"API_TOKEN"}',
+				'+{"name":"API_TOKEN","note":"a}b","value":"bracehunter2"}',
+				'+[{"name":"API_TOKEN","value":"separatehunter2"},{"name":"LOG_LEVEL","value":"debug"}]',
+				'+<password value="attrvaluehunter2"/>',
 				"+<add",
 				'+  key="DbPassword"',
-				'+  value="multilinexmlsecret" />',
+				'+  value="multilinexmlhunter2" />',
 				"diff --git a/b.ts b/b.ts",
 				"@@ -0,0 +1 @@",
 				"+let b = 1",
 				'diff --git "a/my settings.xml" "b/my settings.xml"',
 				"@@ -0,0 +1 @@",
-				"+<password>quotedpathsecret",
+				"+<password>quotedpathhunter2",
 				'diff --git "a/.env.pr\\303\\266d" "b/.env.pr\\303\\266d"',
 				"@@ -0,0 +1 @@",
-				"+SESSION=escapedpathsecret",
+				"+SESSION=escapedpathhunter2",
 				"diff --git a/config.ts b/config.ts",
 				"@@ -1,4 +1,5 @@",
 				" const entry = {",
 				'   name: "API_TOKEN",',
 				"-}",
-				'+  value: "mixedsidesecret",',
+				'+  value: "mixedsidehunter2",',
 				"+};",
+				"diff --git a/.env b/settings.txt",
+				"similarity index 80%",
+				"rename from .env",
+				"rename to settings.txt",
+				"--- a/.env",
+				"+++ b/settings.txt",
+				"@@ -1,2 +1,2 @@",
+				"-SESSION=renamedhunter2",
+				"+HOST=example.org",
+				"diff --git a/fixture.ts b/fixture.ts",
+				"@@ -0,0 +1,6 @@",
+				"+const fixture = {",
+				"+  auth: {",
+				'+    token: "a",',
+				"+  },",
+				'+  value: "nestedouterhunter2",',
+				"+}",
 			].join("\n")
 			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
 			;(singleCompletionHandler as Mock).mockResolvedValue("chore: update settings")
@@ -1148,11 +1165,18 @@ describe("commitMessageGenerator", () => {
 			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 
 			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
-			const secrets = ["templatesecret", "longattrsecret", "quotedgtsecret", "svgsecret", "tssecret"]
-			secrets.push("commentsecret", "reversedsecret", "blocksecret", "jsonsecret", "genericsecret")
-			secrets.push("reversedblocksecret", "commentblocksecret", "nextlinesecret", "farsecret")
-			secrets.push("nestedyamlsecret", "nestedjsonsecret", "bracesecret", "separatesecret", "attrvaluesecret")
-			secrets.push("multilinexmlsecret", "quotedpathsecret", "escapedpathsecret", "mixedsidesecret")
+			const secrets = ["templatehunter2", "longattrhunter2", "quotedgthunter2", "svghunter2", "tshunter2"]
+			secrets.push("commenthunter2", "reversedhunter2", "blockhunter2", "jsonhunter2", "generichunter2")
+			secrets.push("reversedblockhunter2", "commentblockhunter2", "nextlinehunter2", "farhunter2")
+			secrets.push(
+				"nestedyamlhunter2",
+				"nestedjsonhunter2",
+				"bracehunter2",
+				"separatehunter2",
+				"attrvaluehunter2",
+			)
+			secrets.push("multilinexmlhunter2", "quotedpathhunter2", "escapedpathhunter2", "mixedsidehunter2")
+			secrets.push("renamedhunter2", "nestedouterhunter2")
 			for (const secret of secrets) {
 				expect(prompt).not.toContain(secret)
 			}
@@ -1377,6 +1401,12 @@ describe("commitMessageGenerator", () => {
 		})
 
 		it("generates commit message and assigns it to inputBox.value", async () => {
+			const apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+				apiKey: "test-key",
+			}
+			;(mockProvider.getState as Mock).mockResolvedValue({ apiConfiguration })
 			;(singleCompletionHandler as Mock).mockResolvedValue("feat(core): implement git commit message")
 			;(vscode.window.withProgress as Mock).mockImplementation((_opts, callback) => {
 				const progress = { report: vi.fn() }
@@ -1392,7 +1422,14 @@ describe("commitMessageGenerator", () => {
 				outputChannel: mockOutputChannel,
 			})
 
-			expect(singleCompletionHandler).toHaveBeenCalled()
+			// The configured provider and model reach the request unchanged, with the diff and an abort signal.
+			expect(singleCompletionHandler).toHaveBeenCalledWith(
+				apiConfiguration,
+				expect.stringContaining("diff content"),
+				{
+					abortSignal: expect.any(AbortSignal),
+				},
+			)
 			expect(mockRepo.inputBox.value).toBe("feat(core): implement git commit message")
 		})
 
