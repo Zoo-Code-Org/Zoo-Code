@@ -1523,10 +1523,12 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 		return "merge-trace-" + traceIndex + ".txt"
 	}
 
-	// The attempts a waiting child gets must outlast the 25000 ms this suite polls for its
-	// OUTCOME line, so the deadline is that poll budget divided by the 250 ms gap rather than
-	// a count that lets the child give up about 1.25 seconds after its first refusal.
-	const waiterAttemptsForOutcomeBudget = 100
+	// The attempts a waiting child needs are set by the two barrier polls that run while this process
+	// still holds the lock, 15000 ms each at lines 1576 and 1579 and at lines 1610 and 1614, so the
+	// ceiling is their sum of 30000 ms rather than the 25000 ms poll for the OUTCOME line, which
+	// starts after the release and cannot bind the child. 121 attempts at 250 ms is 30250 ms, 250 ms
+	// above that ceiling, and 100 attempts was 5000 ms below it.
+	const waiterAttemptsForOutcomeBudget = 121
 	it(
 		"lands two concurrent merge writers and a foreign writer into one file through one artefact",
 		{ timeout: 60000 },
