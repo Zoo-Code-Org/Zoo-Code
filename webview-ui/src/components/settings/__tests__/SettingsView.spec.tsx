@@ -1332,3 +1332,55 @@ describe("SettingsView - per-write checkpoints save (B1)", () => {
 		)
 	})
 })
+
+describe("SettingsView - per-write checkpoints default at the save boundary", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	// The provider seeds `perWriteCheckpoints: true` in createInitialExtensionState, and the
+	// hydration in this file only re-fills the buffered state behind a `settingsImportedAt`
+	// token, so these two cases mount the state the component buffers rather than posting it.
+	// Mounting is the only footing on which the buffered state can hold no value at all, and
+	// that is the only input on which `perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS` in
+	// handleSubmit differs from a plain read of `perWriteCheckpoints`, and from the `&&` form
+	// the mutation run generated at that line. The sibling checkbox is toggled so Save is
+	// enabled without touching the setting under test.
+	it("sends the shared default when the buffered state holds no value", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="checkpoints" />, {
+			state: { perWriteCheckpoints: undefined },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		const perWrite = within(content).getByRole("checkbox", { name: "settings:checkpoints.perWrite.label" })
+		expect(perWrite).toBeChecked()
+		fireEvent.click(within(content).getByRole("checkbox", { name: "settings:checkpoints.enable.label" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ perWriteCheckpoints: true }),
+			}),
+		)
+	})
+
+	it("sends the explicit false when the buffered state holds false", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="checkpoints" />, {
+			state: { perWriteCheckpoints: false },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		const perWrite = within(content).getByRole("checkbox", { name: "settings:checkpoints.perWrite.label" })
+		expect(perWrite).not.toBeChecked()
+		fireEvent.click(within(content).getByRole("checkbox", { name: "settings:checkpoints.enable.label" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ perWriteCheckpoints: false }),
+			}),
+		)
+	})
+})
