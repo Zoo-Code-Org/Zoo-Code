@@ -30,6 +30,8 @@ function createHarness(
 		settings?: Partial<TaskTitleSettings>
 		items?: HistoryItem[]
 		deps?: Partial<Pick<TaskTitleServiceDeps, "resolveProfile" | "isProfileAllowed">>
+		/** Keep a request pending after abort, like a provider that ignores the signal. */
+		ignoreAbort?: boolean
 	} = {},
 ) {
 	const items = new Map((options.items ?? []).map((item) => [item.id, item]))
@@ -50,7 +52,11 @@ function createHarness(
 		generate: (generateOptions) =>
 			new Promise<string | undefined>((resolve, reject) => {
 				requests.push({ options: generateOptions, resolve, reject })
-				generateOptions.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+				if (!options.ignoreAbort) {
+					generateOptions.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+						once: true,
+					})
+				}
 			}),
 		...options.deps,
 	})
@@ -376,7 +382,7 @@ describe("TaskTitleService", () => {
 		})
 
 		it("discards a late generated title after a user cancel", async () => {
-			const h = createHarness()
+			const h = createHarness({ ignoreAbort: true })
 			h.startTask("t1")
 			h.service.onTokenUsageUpdated("t1", USED)
 			await flush()
@@ -385,6 +391,7 @@ describe("TaskTitleService", () => {
 			h.requests[0]!.resolve("Too late")
 			await flush()
 
+			expect(h.requests[0]!.options.signal?.aborted).toBe(true)
 			expect(h.written).toEqual([{ taskId: "t1", title: FALLBACK }])
 		})
 

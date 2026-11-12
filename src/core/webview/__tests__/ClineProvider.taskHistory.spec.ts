@@ -12,6 +12,7 @@ import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
+import { ShadowCheckpointService } from "../../../services/checkpoints/ShadowCheckpointService"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -1280,5 +1281,43 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(forget).toHaveBeenCalledExactlyOnceWith("title-evicted")
 			expect(provider["taskTitleService"]["candidates"].has("title-evicted")).toBe(false)
 		})
+
+		it.each([
+			{
+				name: "deleteTaskWithId",
+				remove: () => provider.deleteTaskWithId("title-parent"),
+				storeMethod: "deleteMany" as const,
+				cancelledIds: ["title-parent", "title-child"],
+			},
+			{
+				name: "deleteTaskFromState",
+				remove: () => provider.deleteTaskFromState("title-parent"),
+				storeMethod: "delete" as const,
+				cancelledIds: ["title-parent"],
+			},
+		])(
+			"cancels title requests as deleted before $name removes the history",
+			async ({ remove, storeMethod, cancelledIds }) => {
+				await provider.updateTaskHistory(
+					createHistoryItem({ id: "title-parent", task: "Parent", childIds: ["title-child"] }),
+					{ broadcast: false },
+				)
+				await provider.updateTaskHistory(
+					createHistoryItem({ id: "title-child", task: "Child", parentTaskId: "title-parent" }),
+					{ broadcast: false },
+				)
+				vi.spyOn(ShadowCheckpointService, "deleteTask").mockResolvedValue(undefined)
+				const cancel = vi.spyOn(provider["taskTitleService"], "cancel")
+				const removeHistory = vi.spyOn(provider.taskHistoryStore, storeMethod)
+
+				await remove()
+
+				expect(cancel.mock.calls).toEqual(cancelledIds.map((id) => [id, "deleted"]))
+				expect(removeHistory).toHaveBeenCalledOnce()
+				for (const order of cancel.mock.invocationCallOrder) {
+					expect(order).toBeLessThan(removeHistory.mock.invocationCallOrder[0]!)
+				}
+			},
+		)
 	})
 })
