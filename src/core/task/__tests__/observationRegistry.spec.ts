@@ -105,6 +105,7 @@ describe("ObservationRegistry", () => {
 			expect(obs.complete).toBe(false)
 		})
 	})
+
 	describe("forget", () => {
 		it("drops the observation for one path and reports that it did", () => {
 			const reg = new ObservationRegistry()
@@ -142,6 +143,30 @@ describe("ObservationRegistry", () => {
 			// boolean to tell "I dropped the authorization" from "there was nothing to drop".
 			expect(reg.forget("/a/b/c.ts")).toBe(false)
 			expect(reg.size).toBe(0)
+		})
+	})
+
+	describe("closure on task disposal", () => {
+		it("close drops every entry and reports the registry closed", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			expect(reg.closed).toBe(false)
+
+			reg.close()
+
+			expect(reg.size).toBe(0)
+			expect(reg.get("/a/b/c.ts")).toBeUndefined()
+			expect(reg.closed).toBe(true)
+		})
+
+		it("observe is a no-op after close, so a read resuming after disposal records nothing", () => {
+			const reg = new ObservationRegistry()
+			reg.close()
+
+			reg.observe("/late.ts", "v1")
+
+			expect(reg.size).toBe(0)
+			expect(reg.has("/late.ts")).toBe(false)
 		})
 	})
 })

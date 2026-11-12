@@ -17,7 +17,8 @@
 		},
 		"tags": {
 			"label": "Filtrer par étiquettes :",
-			"clear": "Cliquez pour supprimer '{{count}}' des filtres",
+			"clear": "Effacer les étiquettes",
+			"removeFromFilter": "Clique pour retirer '{{tag}}' des filtres",
 			"placeholder": "Tapez pour rechercher et sélectionner des étiquettes...",
 			"noResults": "Aucune étiquette correspondante trouvée",
 			"selected": "Affichage des éléments avec l'une des étiquettes sélectionnées",

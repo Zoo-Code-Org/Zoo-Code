@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "Filtra per tag:",
 			"clear": "Cancella tag",
+			"removeFromFilter": "Clicca per rimuovere '{{tag}}' dai filtri",
 			"placeholder": "Digita per cercare e selezionare tag...",
 			"noResults": "Nessun tag corrispondente trovato",
 			"selected": "Mostra elementi con uno qualsiasi dei tag selezionati",

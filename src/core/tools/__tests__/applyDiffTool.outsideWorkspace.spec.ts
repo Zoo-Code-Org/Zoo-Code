@@ -20,17 +20,12 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn(),
-		// apply_diff stats around its own read (this branch's read/observe authorization, the
-		// same contract as ApplyPatchTool's hunk read). Without this double the stat call is
-		// undefined and every run below lands in handleError instead of reaching the approval
-		// the rows assert on. No row and no assertion below is changed by this.
-		stat: vi.fn().mockResolvedValue({
-			dev: 7n,
-			ino: 4242n,
-			size: 1234n,
-			mtimeNs: 1_700_000_000_123_456_789n,
-			ctimeNs: 1_700_000_000_789_999_999n,
-		}),
+		// ApplyDiffTool stats around its own read to capture the version token its guarded publish
+		// consumes, so the fs double has to carry a stat. Rejecting keeps the fixture honest about
+		// the case the code already tolerates: no stat, no token, publish unguarded-by-token.
+		stat: vi
+			.fn()
+			.mockRejectedValue(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })),
 	},
 }))
 
@@ -106,8 +101,9 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 					}),
 				}),
 			},
-			// The merged tool consults the observation registry during its pre-save authorization,
-			// so the double has to carry it. No row below asserts on it.
+			// The merged tool consults the observation registry during its read/observe
+			// authorization (the branch's side of this merge), so the task double has to
+			// carry it. No row below asserts on it.
 			observationRegistry: {
 				get: vi.fn().mockReturnValue(undefined),
 				observe: vi.fn(),
@@ -119,7 +115,12 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 			diffViewProvider: {
 				editType: undefined,
 				originalContent: "",
-				open: vi.fn().mockResolvedValue(undefined),
+				open: vi.fn().mockImplementation(async function () {
+					// The real open() re-reads the file and records that text as the save baseline; ApplyDiffTool
+					// compares that baseline against its own read and fails closed when they differ, so the
+					// double has to emulate the re-read instead of a no-op.
+					task.diffViewProvider.originalContent = "old\n"
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 				reset: vi.fn().mockResolvedValue(undefined),
 				revertChanges: vi.fn().mockResolvedValue(undefined),
