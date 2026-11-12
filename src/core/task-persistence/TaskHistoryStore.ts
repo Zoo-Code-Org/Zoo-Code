@@ -1109,15 +1109,27 @@ export class TaskHistoryStore {
 		try {
 			raw = await readFileWithMissingRetry(await this.getTaskFilePath(taskId))
 		} catch (error) {
-			return getErrorCode(error) === "ENOENT" ? { kind: "missing" } : { kind: "unreadable" }
+			if (getErrorCode(error) === "ENOENT") {
+				return { kind: "missing" }
+			}
+			return this.unreadableForAutoTitle(taskId, error)
 		}
 		try {
 			const item: unknown = JSON.parse(raw)
 			const id = typeof item === "object" && item !== null ? (item as { id?: unknown }).id : undefined
-			return id === taskId ? { kind: "found", item: item as HistoryItem } : { kind: "unreadable" }
-		} catch {
-			return { kind: "unreadable" }
+			if (id !== taskId) {
+				return this.unreadableForAutoTitle(taskId, `task file has id ${JSON.stringify(id)}`)
+			}
+			return { kind: "found", item: item as HistoryItem }
+		} catch (error) {
+			return this.unreadableForAutoTitle(taskId, error)
 		}
+	}
+
+	/** The caller only sees `applied: false`, so the reason is logged here. */
+	private unreadableForAutoTitle(taskId: string, reason: unknown): AutoTitleDiskRead {
+		console.warn(`[TaskHistoryStore] Failed to read task ${taskId} for auto title:`, reason)
+		return { kind: "unreadable" }
 	}
 
 	/**

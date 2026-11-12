@@ -3,6 +3,7 @@ import * as os from "os"
 import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
+import type { MockInstance } from "vitest"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
@@ -423,6 +424,14 @@ describe("TaskHistoryStore real cross-host locking", () => {
 	})
 
 	describe("setAutoTitleIfAbsent", () => {
+		let warn: MockInstance<typeof console.warn>
+		beforeEach(() => {
+			warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		})
+		afterEach(() => {
+			warn.mockRestore()
+		})
+
 		async function withTwoStores(
 			run: (a: TaskHistoryStore, b: TaskHistoryStore, storagePath: string) => Promise<void>,
 		) {
@@ -475,21 +484,25 @@ describe("TaskHistoryStore real cross-host locking", () => {
 				expect(result).toEqual({ applied: false })
 				expect(storeA.get("shared-task")).toBeUndefined()
 				await expect(fs.access(taskFile(storagePath))).rejects.toMatchObject({ code: "ENOENT" })
+				// A deleted task is an expected outcome, not a read failure.
+				expect(warn).not.toHaveBeenCalled()
 			})
 		})
 
 		it("does not recreate a task deleted after the early disk read", async () => {
 			await withTwoStores(async (storeA, storeB, storagePath) => {
 				const stale = storeA.get("shared-task")
-				const readTaskFile: unknown = Reflect.get(storeA, "readTaskFile")
-				if (!stale || typeof readTaskFile !== "function") throw new Error("test setup failed")
-				const original = readTaskFile.bind(storeA) as (id: string) => Promise<HistoryItem | null>
+				if (!stale) throw new Error("test setup failed")
+				const original = storeA["readTaskFileForAutoTitle"].bind(storeA)
 				let reads = 0
-				Reflect.set(storeA, "readTaskFile", async (id: string) => (reads++ === 0 ? stale : original(id)))
+				// The early read sees the record from before the delete; the merge and the re-read see the real disk.
+				storeA["readTaskFileForAutoTitle"] = async (id) =>
+					reads++ === 0 ? { kind: "found", item: stale } : original(id)
 
 				await storeB.delete("shared-task")
 
 				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Late title")
+				expect(reads).toBe(2)
 				expect(result.applied).toBe(false)
 				expect(storeA.get("shared-task")).toBeUndefined()
 				await expect(fs.access(taskFile(storagePath))).rejects.toMatchObject({ code: "ENOENT" })
@@ -524,7 +537,7 @@ describe("TaskHistoryStore real cross-host locking", () => {
 				},
 			]
 
-		it.each(unreadableCases)("keeps the cache and writes nothing on $name", async ({ corrupt }) => {
+		it.each(unreadableCases)("keeps the cache, writes nothing and logs on $name", async ({ corrupt }) => {
 			await withTwoStores(async (storeA, _storeB, storagePath) => {
 				const cached = storeA.get("shared-task")
 				const expectedOnDisk = await corrupt(storagePath, await fs.readFile(taskFile(storagePath), "utf8"))
@@ -533,6 +546,10 @@ describe("TaskHistoryStore real cross-host locking", () => {
 				expect(result.applied).toBe(false)
 				expect(storeA.get("shared-task")).toEqual(cached)
 				expect(await fs.readFile(taskFile(storagePath), "utf8")).toBe(expectedOnDisk)
+				expect(warn).toHaveBeenCalledExactlyOnceWith(
+					"[TaskHistoryStore] Failed to read task shared-task for auto title:",
+					expect.anything(),
+				)
 			})
 		})
 
