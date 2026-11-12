@@ -192,7 +192,7 @@ async function _restoreDaclWindows(
  * the resolved path: the commit is a rename onto the referent, and a rename
  * across filesystems fails with EXDEV.
  */
-async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
+export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
 	return fs.realpath(absoluteFilePath).catch(async (error: unknown) => {
 		if (getErrorCode(error) !== "ENOENT") throw error
 		// ENOENT also covers a dangling symlink, which must never be written through.
@@ -217,7 +217,7 @@ async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
  * the file exists when the key is computed, and two writers take two locks.
  */
 
-async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
+export async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
 	// Walk up to the nearest ancestor that EXISTS, canonicalize that, and re-join the
 	// components that are not there yet. Falling back to the unresolved spelling of the
