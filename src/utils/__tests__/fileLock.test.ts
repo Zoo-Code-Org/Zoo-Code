@@ -1523,6 +1523,10 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 		return "merge-trace-" + traceIndex + ".txt"
 	}
 
+	// The attempts a waiting child gets must outlast the 25000 ms this suite polls for its
+	// OUTCOME line, so the deadline is that poll budget divided by the 250 ms gap rather than
+	// a count that lets the child give up about 1.25 seconds after its first refusal.
+	const waiterAttemptsForOutcomeBudget = 100
 	it(
 		"lands two concurrent merge writers and a foreign writer into one file through one artefact",
 		{ timeout: 60000 },
@@ -1566,7 +1570,8 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				holdMs: 0,
 				writeKey: "child",
 				baseMode: "under",
-				retries: 5,
+				retries: waiterAttemptsForOutcomeBudget,
+				retryMs: 250,
 			})
 			await readHolderTrace(waiter.tracePath, "ARTEFACT", 15000, waiter.childOutput)
 			// Observed rather than assumed: the waiter attempted while this process still held the lock and
@@ -1599,7 +1604,8 @@ describe("a writer that had to wait merges into what landed while it waited", ()
 				holdMs: 0,
 				writeKey: "child",
 				baseMode: "before",
-				retries: 5,
+				retries: waiterAttemptsForOutcomeBudget,
+				retryMs: 250,
 			})
 			const beforeLine = await readHolderTrace(waiter.tracePath, "BASE-BEFORE", 15000, waiter.childOutput)
 			expect(tracePayload(beforeLine, "BASE-BEFORE")).toEqual({ pre: 1 })
