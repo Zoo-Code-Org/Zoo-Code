@@ -203,7 +203,7 @@ describe("ProviderPacer", () => {
 		expect(request).not.toHaveBeenCalled()
 	})
 
-	it.each([0, -1, NaN, Infinity, "invalid"])(
+	it.each([0, -1, NaN, Infinity, "invalid", 1e300, 8.64e15 + 1])(
 		"uses fallback for invalid or elapsed provider delay %s",
 		(retryAfterMs) => {
 			const pacer = new ProviderPacer("openai:test")

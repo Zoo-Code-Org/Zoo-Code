@@ -118,8 +118,11 @@ export class ProviderPacer {
 		const paused = now < this.pausedUntil
 		const stale = issueSeq < this.episodeSeq
 		const requestedDelay = new EmbeddingError("Provider rate limited", error).retryAfterMs
+		// An out-of-range deadline would break the ISO resume time, so back off instead.
 		const providerDelay =
-			typeof requestedDelay === "number" && Number.isFinite(requestedDelay) && requestedDelay > 0
+			typeof requestedDelay === "number" &&
+			requestedDelay > 0 &&
+			Number.isFinite(new Date(now + requestedDelay).getTime())
 				? requestedDelay
 				: undefined
 		if (stale && providerDelay === undefined) return

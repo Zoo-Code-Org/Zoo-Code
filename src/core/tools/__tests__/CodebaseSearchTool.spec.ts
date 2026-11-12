@@ -102,7 +102,7 @@ describe("CodebaseSearchTool", () => {
 		results: VectorStoreSearchResult[] = [],
 		failedPaths: string[] = [],
 		waitingPaths: string[] = [],
-		incomplete = failedPaths.length > 0 || waitingPaths.length > 0,
+		incomplete = false,
 	): Awaited<ReturnType<CodeIndexManager["searchIndex"]>> {
 		return { results, incomplete, failedPaths, waitingPaths }
 	}
@@ -299,7 +299,9 @@ describe("CodebaseSearchTool", () => {
 
 	it.each([false, true])("warns about an incomplete index with matches: %s", async (hasMatches) => {
 		const failedPaths = ["src/failed.ts", "other/unreadable.ts"]
-		vi.mocked(manager.searchIndex).mockResolvedValue(searchResponse(hasMatches ? [result()] : [], failedPaths))
+		vi.mocked(manager.searchIndex).mockResolvedValue(
+			searchResponse(hasMatches ? [result()] : [], failedPaths, [], true),
+		)
 
 		await tool.execute({ query, path: "src" }, task, callbacks)
 
@@ -612,7 +614,7 @@ describe("CodebaseSearchTool", () => {
 		"prints separate waiting and failed warnings before output, matches=%s",
 		async (hasMatches) => {
 			vi.mocked(manager.searchIndex).mockResolvedValue(
-				searchResponse(hasMatches ? [result()] : [], ["failed.ts"], ["waiting.ts"]),
+				searchResponse(hasMatches ? [result()] : [], ["failed.ts"], ["waiting.ts"], true),
 			)
 			await tool.execute({ query }, task, callbacks)
 			const output = vi.mocked(callbacks.pushToolResult).mock.calls[0][0]
