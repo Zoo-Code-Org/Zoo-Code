@@ -224,10 +224,14 @@ describe("IndexingStatusBadge", () => {
 	})
 
 	it("cleans up its event listener on unmount", () => {
+		const addListener = vi.spyOn(window, "addEventListener")
 		const { unmount } = render(<IndexingStatusBadge />)
+		const registered = addListener.mock.calls.find(([type]) => type === "message")?.[1]
+		expect(registered).toBeDefined()
 		const removeListener = vi.spyOn(window, "removeEventListener")
 		unmount()
-		expect(removeListener).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(removeListener).toHaveBeenCalledWith("message", registered)
+		addListener.mockRestore()
 		removeListener.mockRestore()
 	})
 })

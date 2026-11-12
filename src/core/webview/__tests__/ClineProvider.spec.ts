@@ -6350,6 +6350,36 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		}
 	})
 
+	it("keeps stopping other workspaces after one auto-disabled stop fails", async () => {
+		const { CodeIndexManagerRegistry } = await import("../../../services/code-index/code-index-manager-registry")
+		let workspaceEnabled = true
+		const managers = [0, 1].map(() => createIndexManager())
+		managers[0].setAutoEnableDefault.mockImplementation(async () => {
+			workspaceEnabled = false
+		})
+		managers[0].stopIndexing.mockRejectedValue(new Error("first stop failed"))
+		for (const manager of managers) {
+			Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
+		}
+		// The registry double provides the enablement, stop, and status members used by this handler.
+		const getAllInstances = vi
+			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
+			.mockReturnValue(managers as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: managers[0] }),
+		})
+		try {
+			await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: false })
+			expect(managers[0].stopIndexing).toHaveBeenCalledOnce()
+			expect(managers[1].stopIndexing).toHaveBeenCalledOnce()
+			expect(provider.log).toHaveBeenCalledExactlyOnceWith(
+				"Error stopping auto-disabled indexing: first stop failed",
+			)
+		} finally {
+			getAllInstances.mockRestore()
+		}
+	})
+
 	it("covers changed clear-index response paths", async () => {
 		const manager = createIndexManager()
 		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })

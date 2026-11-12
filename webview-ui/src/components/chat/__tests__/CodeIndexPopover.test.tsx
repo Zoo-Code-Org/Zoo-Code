@@ -284,13 +284,14 @@ const failedStatus = (
 	}
 }
 
-const renderStatusPopover = (status: IndexingStatus) =>
+const renderStatusPopover = (status: IndexingStatus, language: ExtensionState["language"] = "en") =>
 	renderWithExtensionState(
 		<CodeIndexPopover indexingStatus={status}>
 			<button>Open code index settings</button>
 		</CodeIndexPopover>,
 		{
 			state: {
+				language,
 				cwd: "/workspace",
 				codebaseIndexConfig: { ...baseSettings, codebaseIndexEmbedderProvider: providerIdentifiers.openai },
 				codebaseIndexModels: {},
@@ -316,14 +317,17 @@ describe("CodeIndexPopover indexing reliability", () => {
 		async (systemStatus) => {
 			await translation.changeLanguage("de")
 			const resumeAt = Date.parse("2026-11-11T12:02:00Z")
-			renderStatusPopover({
-				...indexingStatus,
-				systemStatus,
-				providerWaits: [
-					{ service: "openai", resumeAt, waitingFiles: ["waiting.ts"] },
-					{ service: "qdrant", waitingFiles: [] },
-				],
-			})
+			renderStatusPopover(
+				{
+					...indexingStatus,
+					systemStatus,
+					providerWaits: [
+						{ service: "openai", resumeAt, waitingFiles: ["waiting.ts"] },
+						{ service: "qdrant", waitingFiles: [] },
+					],
+				},
+				"de",
+			)
 			const active = systemStatus === "Indexing"
 			const timed = active ? "providerWaitingUntil" : "providerPausedUntil"
 			const untimed = active ? "providerWaiting" : "providerPaused"
@@ -331,7 +335,7 @@ describe("CodeIndexPopover indexing reliability", () => {
 				screen.getByText(
 					translation.t(`settings:codeIndex.${timed}`, {
 						service: "openai",
-						time: new Date(resumeAt).toLocaleString(),
+						time: new Date(resumeAt).toLocaleString("de"),
 					}),
 				),
 			).toBeVisible()

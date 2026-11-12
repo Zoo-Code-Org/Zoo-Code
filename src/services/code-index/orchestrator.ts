@@ -15,6 +15,7 @@ import { ProviderPacerRegistry } from "./provider-pacer"
 import { INDEX_STOP_LIMIT_MS } from "./constants"
 import { codeIndexLog } from "./code-index-log"
 import { formatProviderWaitMessage } from "./shared/provider-wait-message"
+import { generateRelativeFilePath } from "./shared/get-relative-path"
 
 export class CodeIndexOrchestrator {
 	private watcherSubscriptions: vscode.Disposable[] = []
@@ -41,7 +42,7 @@ export class CodeIndexOrchestrator {
 	constructor(
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly stateManager: CodeIndexStateManager,
-		workspacePath: string,
+		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
 		private readonly vectorStore: IVectorStore,
 		private readonly scanner: IDirectoryScanner,
@@ -175,11 +176,15 @@ export class CodeIndexOrchestrator {
 				if (!this.isLive(signal)) return
 				this.watcherBatchPending = false
 				this.naturallySettled = true
-				this.batchPartial =
-					!!summary.batchError ||
-					summary.processedFiles.some((file) => file.status === "error" || file.status === "local_error")
 				// Registry-backed failures recover through the registry, not a sticky batch flag.
-				if (this.failures.list().length > 0) this.batchPartial = false
+				const registered = new Set(this.failures.list().map((failure) => failure.path))
+				this.batchPartial =
+					(!!summary.batchError && summary.processedFiles.length === 0) ||
+					summary.processedFiles.some(
+						(file) =>
+							(file.status === "error" || file.status === "local_error") &&
+							!registered.has(generateRelativeFilePath(file.path, this.workspacePath)),
+					)
 				this.updateRecoveryStatus(signal)
 			}),
 		]

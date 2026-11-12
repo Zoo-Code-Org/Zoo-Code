@@ -367,17 +367,25 @@ describe("ProviderPacerRegistry and scope", () => {
 		embedder.reportRateLimit(limited(1000), embedder.markIssued())
 		store.reportRateLimit(limited(2000), store.markIssued())
 		const controller = new AbortController()
-		const outcomes = [embedder, embedder, store].map((pacer) =>
-			pacer.run("same.ts", controller.signal, async () => undefined).catch((error) => error),
+		const queued: [typeof embedder, string][] = [
+			[embedder, "same.ts"],
+			[embedder, "embed-only.ts"],
+			[embedder, "same.ts"],
+			[store, "same.ts"],
+			[store, "store-only.ts"],
+		]
+		const outcomes = queued.map(([pacer, file]) =>
+			pacer.run(file, controller.signal, async () => undefined).catch((error) => error),
 		)
 		await flush()
-		expect(registry.waitingPaths()).toEqual(["same.ts"])
+		const allPaths = ["same.ts", "embed-only.ts", "store-only.ts"]
+		expect(registry.waitingPaths()).toEqual(allPaths)
 		expect(registry.providerWaits()).toEqual([
-			{ service: "openai", resumeAt: 1000, waitingFiles: ["same.ts"] },
-			{ service: "qdrant", resumeAt: 2000, waitingFiles: ["same.ts"] },
+			{ service: "openai", resumeAt: 1000, waitingFiles: ["same.ts", "embed-only.ts"] },
+			{ service: "qdrant", resumeAt: 2000, waitingFiles: ["same.ts", "store-only.ts"] },
 		])
 		registry.providerWaits()[0].waitingFiles.push("mutated")
-		expect(registry.waitingPaths()).toEqual(["same.ts"])
+		expect(registry.waitingPaths()).toEqual(allPaths)
 		controller.abort()
 		await Promise.all(outcomes)
 		expect(registry.waitingPaths()).toEqual([])

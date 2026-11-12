@@ -366,8 +366,6 @@ describe("CodeIndexOrchestrator lifecycle", () => {
 		"does not complete a scan with %s",
 		async (reason) => {
 			scanner.scanDirectory.mockImplementation(async (_directory, onError, onIndexed, onParsed) => {
-				failures.renew("bad.ts", "revision")
-				failures.record("bad.ts", "revision", "verify", "save failed", 3, "exhausted")
 				if (reason === "batch error") onError?.(new Error("save failed"))
 				if (reason === "missing blocks") {
 					onParsed?.(10)
@@ -401,6 +399,18 @@ describe("CodeIndexOrchestrator lifecycle", () => {
 		watcher.onDidFinishBatchProcessing.mock.calls[0][0]({ processedFiles: [{ path: "bad.ts", status: "error" }] })
 		expect(state.state).toBe("Standby")
 		expect(vi.mocked(state.setSystemState).mock.calls.some(([next]) => next === "Indexed")).toBe(false)
+	})
+
+	it("keeps an unregistered watcher failure partial while another file is registered", async () => {
+		await orchestrator.startIndexing()
+		failures.renew("other.ts", "revision")
+		failures.record("other.ts", "revision", "read", "read failed", 1, "exhausted")
+		watcher.onDidFinishBatchProcessing.mock.calls[0][0]({
+			processedFiles: [{ path: "/workspace/unregistered.ts", status: "local_error" }],
+		})
+		failures.clear("other.ts", "revision")
+		await drain()
+		expect(state.state).toBe("Standby")
 	})
 
 	it("reports partial when cancellation interrupts a watcher before durable invalidation", async () => {

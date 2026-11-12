@@ -139,4 +139,24 @@ describe("CodeIndexScanExecutor", () => {
 			}
 		},
 	)
+
+	function embeddingFailure(status: number): Error {
+		return new Error("file embedding failed", {
+			cause: new IndexingRetryError(new EmbeddingError("provider failed", { status }), 1, "permanent", "embed"),
+		})
+	}
+
+	it.each([
+		{ method: "runIncrementalScan" as const, statuses: [401] },
+		{ method: "runFullScan" as const, statuses: [401, 500] },
+	])("does not escalate $method with statuses $statuses", async ({ method, statuses }) => {
+		const { executor, scanner } = setup()
+		scanner.scanDirectory.mockImplementation(async (_directory, onError, _onIndexed, onParsed) => {
+			onParsed?.(statuses.length)
+			for (const status of statuses) onError?.(embeddingFailure(status))
+			return { stats: { processed: 0, skipped: 0 }, totalBlockCount: statuses.length }
+		})
+		await expect(executor[method](new AbortController().signal)).resolves.toBe(true)
+		expect(executor.partial).toBe(true)
+	})
 })

@@ -102,8 +102,9 @@ describe("CodebaseSearchTool", () => {
 		results: VectorStoreSearchResult[] = [],
 		failedPaths: string[] = [],
 		waitingPaths: string[] = [],
+		incomplete = failedPaths.length > 0 || waitingPaths.length > 0,
 	): Awaited<ReturnType<CodeIndexManager["searchIndex"]>> {
-		return { results, incomplete: failedPaths.length > 0 || waitingPaths.length > 0, failedPaths, waitingPaths }
+		return { results, incomplete, failedPaths, waitingPaths }
 	}
 
 	it("exports a named tool instance", () => {
@@ -624,4 +625,20 @@ describe("CodebaseSearchTool", () => {
 			expect(output).toEqual(expect.stringContaining(hasMatches ? "Query:" : "No relevant code snippets"))
 		},
 	)
+
+	it.each([
+		{ waitingPaths: [], expected: "Partial index: results may be incomplete.\n\n" },
+		{
+			waitingPaths: ["waiting.ts"],
+			expected:
+				"Partial index: results may be incomplete.\n" +
+				"Waiting files (indexing resumes automatically):\n- waiting.ts\n\n",
+		},
+	])("follows the explicit incomplete flag with waiting paths $waitingPaths", async ({ waitingPaths, expected }) => {
+		vi.mocked(manager.searchIndex).mockResolvedValue(searchResponse([], [], waitingPaths, true))
+		await tool.execute({ query }, task, callbacks)
+		const output = vi.mocked(callbacks.pushToolResult).mock.calls[0][0]
+		expect(output).toEqual(expect.stringContaining(expected))
+		expect(output).not.toEqual(expect.stringContaining("Failed files:"))
+	})
 })

@@ -558,6 +558,25 @@ describe("FileIndexWriter", () => {
 		expect(cache.completeFile).toHaveBeenCalledWith(filePath, "hash")
 	})
 
+	it("filters only whitespace blocks from mixed content and types", async () => {
+		const mixed = blocks(4)
+		mixed[0].type = "class"
+		mixed[1].content = "  \n"
+		mixed[2].type = "method"
+		mixed[3].type = "interface"
+		mixed[3].content = "\t"
+		store.countPointsForFile.mockResolvedValue({ current: 2, other: 0 })
+		const onComplete = vi.fn()
+		await writer.replace(filePath, "hash", mixed, embedder, attempt.signal, undefined, onComplete)
+		expect(embedder.createEmbeddings.mock.calls.flatMap(([texts]) => texts)).toEqual([" block 0 ", " block 2 "])
+		const points = store.upsertPoints.mock.calls.flatMap(([batch]) => batch)
+		expect(points.map((point) => point.payload)).toEqual([
+			expect.objectContaining({ codeChunk: " block 0 ", segmentHash: "segment-0" }),
+			expect.objectContaining({ codeChunk: " block 2 ", segmentHash: "segment-2" }),
+		])
+		expect(onComplete).toHaveBeenCalledExactlyOnceWith(2)
+	})
+
 	it("does not issue cleanup or completion after a failed batch", async () => {
 		store.upsertPoints.mockRejectedValueOnce(new Error("Upsert failed"))
 		await expect(writer.replace(filePath, "hash", blocks(2), embedder, attempt.signal, 1)).rejects.toThrow(

@@ -201,7 +201,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 }) => {
 	const SECRET_PLACEHOLDER = "••••••••••••••••"
 	const { t } = useAppTranslation()
-	const { codebaseIndexConfig, codebaseIndexModels, cwd, apiConfiguration, platform, arch } = useExtensionState()
+	const { codebaseIndexConfig, codebaseIndexModels, cwd, apiConfiguration, platform, arch, language } =
+		useExtensionState()
 	const [open, setOpen] = useState(false)
 	const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false)
 	const [isSetupSettingsOpen, setIsSetupSettingsOpen] = useState(false)
@@ -706,7 +707,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 												time:
 													wait.resumeAt === undefined
 														? undefined
-														: new Date(wait.resumeAt).toLocaleString(),
+														: new Date(wait.resumeAt).toLocaleString(language),
 											},
 										)}
 									</p>
