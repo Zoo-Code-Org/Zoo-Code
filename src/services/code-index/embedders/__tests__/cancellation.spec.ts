@@ -219,11 +219,13 @@ describe("cancellable wait", () => {
 
 	it("removes its abort listener when the wait completes", async () => {
 		const controller = new AbortController()
+		const addListener = vi.spyOn(controller.signal, "addEventListener")
 		const removeListener = vi.spyOn(controller.signal, "removeEventListener")
 		const result = waitForRetry(100, controller.signal)
 		await vi.advanceTimersByTimeAsync(100)
 		await result
-		expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function))
+		expect(addListener).toHaveBeenCalledOnce()
+		expect(removeListener).toHaveBeenCalledWith("abort", addListener.mock.calls[0][1])
 		expect(vi.getTimerCount()).toBe(0)
 	})
 })
@@ -248,11 +250,13 @@ it("Ollama keeps its timeout when a caller signal is supplied and cleans up afte
 
 it("cancels a wait with the unchanged reason and removes its timer and listener", async () => {
 	const controller = new AbortController()
+	const addListener = vi.spyOn(controller.signal, "addEventListener")
 	const removeListener = vi.spyOn(controller.signal, "removeEventListener")
 	const reason = Object.freeze({ stopped: true })
 	const pending = waitForRetry(60_000, controller.signal)
 	controller.abort(reason)
 	await expect(pending).rejects.toBe(reason)
-	expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function))
+	expect(addListener).toHaveBeenCalledOnce()
+	expect(removeListener).toHaveBeenCalledWith("abort", addListener.mock.calls[0][1])
 	expect(vi.getTimerCount()).toBe(0)
 })

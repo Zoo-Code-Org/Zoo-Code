@@ -29,7 +29,16 @@ function nonnegativeNumber(value: unknown): number | undefined {
 	return Number.isFinite(number) && number >= 0 ? number : undefined
 }
 
+// A delay whose resume deadline falls outside the Date range would make toISOString() throw.
+function validDelay(delay: number | undefined, now: number): number | undefined {
+	return delay !== undefined && Number.isFinite(new Date(now + delay).getTime()) ? delay : undefined
+}
+
 export function parseRetryAfterMs(source: unknown, now = Date.now()): number | undefined {
+	return validDelay(parseRawRetryAfterMs(source, now), now)
+}
+
+function parseRawRetryAfterMs(source: unknown, now: number): number | undefined {
 	if (typeof source === "number") {
 		const seconds = nonnegativeNumber(source)
 		return seconds !== undefined && Number.isFinite(seconds * 1000) ? seconds * 1000 : undefined

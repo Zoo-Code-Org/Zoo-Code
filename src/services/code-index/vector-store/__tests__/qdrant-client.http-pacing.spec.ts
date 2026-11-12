@@ -164,7 +164,7 @@ it.each(scenarios)("T26/T32 HTTP $activity $scenario", async ({ activity, header
 		})
 		await vi.advanceTimersByTimeAsync(LATE_WRITE_GRACE_MS)
 		await waitForTransport(() => expect(cache.completeFile).toHaveBeenCalledOnce())
-		await pending
+		await expect(pending).resolves.toBeUndefined()
 		expect(requests).toBe((limits + 1) * perAttempt)
 		expect(failures.list()).toEqual([])
 		expect(cache.completeFile).toHaveBeenCalledOnce()

@@ -6337,19 +6337,14 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				expect(provider.log).toHaveBeenCalledExactlyOnceWith(
 					enabled
 						? "Error starting auto-enabled indexing: auto-enable failure"
-						: "Error setting auto-enable default: auto-enable failure",
+						: "Error stopping auto-disabled indexing: auto-enable failure",
 				)
 			} else expect(provider.log).not.toHaveBeenCalled()
-			if (!enabled && outcome === "reject") {
-				expect(manager.getCurrentStatus).not.toHaveBeenCalled()
-				expect(provider.postMessageToWebview).not.toHaveBeenCalled()
-			} else {
-				expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
-				expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
-					type: "indexingStatusUpdate",
-					values: manager.getCurrentStatus.mock.results[0].value,
-				})
-			}
+			expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
+			expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+				type: "indexingStatusUpdate",
+				values: manager.getCurrentStatus.mock.results[0].value,
+			})
 		} finally {
 			getAllInstances.mockRestore()
 		}

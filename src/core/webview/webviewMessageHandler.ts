@@ -3574,7 +3574,13 @@ export const webviewMessageHandler = async (
 					const wasEnabled = priorStates.get(m)!
 					const isNowEnabled = m.isWorkspaceEnabled
 					if (wasEnabled && !isNowEnabled) {
-						await m.stopIndexing()
+						try {
+							await m.stopIndexing()
+						} catch (error) {
+							provider.log(
+								`Error stopping auto-disabled indexing: ${error instanceof Error ? error.message : String(error)}`,
+							)
+						}
 					} else if (!wasEnabled && isNowEnabled && m.isFeatureEnabled && m.isFeatureConfigured) {
 						try {
 							await m.startIndexing(provider.contextProxy)

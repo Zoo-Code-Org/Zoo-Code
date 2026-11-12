@@ -102,6 +102,8 @@ describe("parseRetryAfterMs", () => {
 		[0, 0],
 		[-1, undefined],
 		[Infinity, undefined],
+		[{ "retry-after-ms": "1e308" }, undefined],
+		[1e300, undefined],
 		[undefined, undefined],
 	] as const)("parses %o", (source, expected) => {
 		expect(parseRetryAfterMs(source, now)).toBe(expected)
