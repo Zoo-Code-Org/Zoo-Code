@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "Lọc theo thẻ:",
 			"clear": "Xóa thẻ",
+			"removeFromFilter": "Nhấp để xóa '{{tag}}' khỏi bộ lọc",
 			"placeholder": "Nhập để tìm kiếm và chọn thẻ...",
 			"noResults": "Không tìm thấy thẻ phù hợp",
 			"selected": "Hiển thị các mục có bất kỳ thẻ nào được chọn",
