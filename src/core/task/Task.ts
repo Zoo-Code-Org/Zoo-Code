@@ -105,6 +105,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
+import { writeToFileTool } from "../tools/WriteToFileTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -1472,6 +1473,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
 	private resetAssistantMessagePersistence(): void {
 		this.cancelAssistantMessagePersistence()
+		// The refused-rollback marker is deliberately NOT released here. This runs at the start of
+		// every API request (and once in the constructor), and a marker means the dirty streamed
+		// buffer is still on disk: releasing it here lets the retried stream call open() on that
+		// still-dirty document, which saves unapproved content before approval. disposeOnce() is the
+		// only path that may drop it, because only there is the task unable to restore anything.
 		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve
 		})
@@ -3721,6 +3727,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.cancelAssistantMessagePersistence()
 		this.cancelPendingPartialMessageUpdate()
 
+		// Disposal is the one place a refused-rollback marker may be dropped: this task will never
+		// serve another request, so it can no longer re-open the dirty buffer it refused to restore,
+		// and a marker left behind would outlive the task in the tool's per-task map.
+		writeToFileTool.releaseTaskRollbackFailure(this)
+
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
 		// find nothing retired and so cannot dispose twice.
@@ -4244,6 +4255,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
 
 				await this.diffViewProvider.reset()
+
+				// A new API request starts a new stream. Clear any per-task partial-stream failure
+				// state left by a previous stream that failed without aborting (streaming_failed):
+				// otherwise the retried write would keep skipping previews and fail on the stale
+				// rollback error before it ever writes. A REFUSED rollback is the exception:
+				// clearTaskState() keeps that marker until the dirty buffer is restored (or the
+				// failure is reported), so the retry — this request — still fails closed instead
+				// of letting open() save unapproved streamed content.
+				writeToFileTool.clearTaskState(this)
 
 				await this.safeEnsureModelFetched()
 
