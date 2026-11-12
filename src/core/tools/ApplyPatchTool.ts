@@ -664,18 +664,42 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// staging file and renamed into place atomically, and only then is the
 			// source unlinked. Any failure renames the backup back, so the workspace
 			// never shows a half-applied move.
-			const moveStamp = `${process.pid}.${Date.now()}`
 			const moveDir = path.dirname(destinationWritePath)
 			const moveBase = path.basename(destinationWritePath)
-			const stagingPath = path.join(moveDir, `.${moveBase}.${moveStamp}.staging`)
-			const backupPath = path.join(moveDir, `.${moveBase}.${moveStamp}.backup`)
+			// The stamp is the only thing separating two staging entries, and it comes from the
+			// pid and a millisecond clock, so a name left behind by an interrupted run can come
+			// back around. A name that is already there belongs to another run, and it must not
+			// be truncated into the staging file of this one. The write below therefore creates
+			// the entry exclusively and, on a collision, re-stamps and tries again.
+			const stagingWriteAttempts = 3
+			let moveStamp = `${process.pid}.${Date.now()}`
+			let stagingPath = path.join(moveDir, `.${moveBase}.${moveStamp}.staging`)
+			let backupPath = path.join(moveDir, `.${moveBase}.${moveStamp}.backup`)
 			await fs.mkdir(moveDir, { recursive: true })
 
 			let destinationCommitted = false
 			try {
-				// Owner-only from creation: the staged content must never be readable by
-				// others, even between the write and the rename.
-				await fs.writeFile(stagingPath, newContent, { encoding: "utf8", mode: 0o600 })
+				for (let stagingAttempt = 0; ; stagingAttempt++) {
+					try {
+						// Owner-only from creation, and created exclusively: the staged content must
+						// never be readable by others, even between the write and the rename, and an
+						// entry that already exists, from another run or from one that was interrupted,
+						// must not be truncated into this staging file. The "wx" flag answers with
+						// EEXIST for any existing entry, whether link, socket or plain file.
+						await fs.writeFile(stagingPath, newContent, { encoding: "utf8", flag: "wx", mode: 0o600 })
+						break
+					} catch (error) {
+						const writeError = error as NodeJS.ErrnoException
+						if (writeError.code !== "EEXIST" || stagingAttempt >= stagingWriteAttempts - 1) {
+							throw error
+						}
+						// A collision means the stamp was reused. The backup name is derived from
+						// the same stamp, so it is re-stamped with it rather than left behind.
+						moveStamp = `${process.pid}.${Date.now()}.${stagingAttempt}`
+						stagingPath = path.join(moveDir, `.${moveBase}.${moveStamp}.staging`)
+						backupPath = path.join(moveDir, `.${moveBase}.${moveStamp}.backup`)
+					}
+				}
 				if (destinationMode !== undefined) {
 					await fs.chmod(stagingPath, destinationMode)
 				}

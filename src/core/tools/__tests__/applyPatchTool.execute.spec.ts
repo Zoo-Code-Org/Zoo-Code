@@ -222,6 +222,70 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockTask.diffViewProvider.pushToolWriteResult).toHaveBeenCalledOnce()
 		})
 
+		it("creates the staging entry exclusively rather than truncating whatever name is there", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The staging name is derived from the pid and a millisecond stamp, so a name an
+			// interrupted run left behind can come back around. Truncating it would put two
+			// moves behind one staging file, so the entry has to be created, not opened.
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The pin is the flag and the mode: the entry is created, not opened, and owner-only.
+			expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(".staging"),
+				expect.any(String),
+				expect.objectContaining({ encoding: "utf8", flag: "wx", mode: 0o600 }),
+			)
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("re-stamps the staging entry when the name it chose is already taken", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The first try is the collision: the entry exists, so the write answers with
+			// EEXIST rather than truncating it. A retry has to choose a different name.
+			mockedFsPromises.default.writeFile.mockImplementationOnce(async () => {
+				throw Object.assign(new Error("EEXIST: file already exists, open"), { code: "EEXIST" })
+			})
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			const stagingNames = mockedFsPromises.default.writeFile.mock.calls
+				.map((call) => String(call[0]))
+				.filter((name) => name.includes(".staging"))
+			expect(stagingNames.length).toBe(2)
+			expect(stagingNames[0]).not.toBe(stagingNames[1])
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".staging"),
+				expect.stringContaining("new.ts"),
+			)
+			expect(mockHandleError).not.toHaveBeenCalled()
+			// Restore the default writeFile behavior for later rows: the collision answer is
+			// queued as a one-shot, so a change that stopped retrying would leak the rejection
+			// into the next row instead of failing only this one.
+			mockedFsPromises.default.writeFile.mockResolvedValue(undefined)
+		})
+
 		it("keeps a destination symlink and writes the moved content through its target", async () => {
 			const patch = `*** Begin Patch
 *** Update File: src/old.ts
@@ -1065,6 +1129,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			// separately before the atomic rename.
 			expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(expect.any(String), "modified content\n", {
 				encoding: "utf8",
+				flag: "wx",
 				mode: 0o600,
 			})
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
