@@ -15,8 +15,8 @@ const UNSUPPORTED_STRICT_SCHEMA_KEYWORDS = new Set([
 	"maxProperties",
 ])
 
-const SUPPORTED_MIN_ITEMS = new Set([0, 1])
-const SUPPORTED_STRING_FORMATS = new Set([
+const SUPPORTED_MIN_ITEMS = new Set<unknown>([0, 1])
+const SUPPORTED_STRING_FORMATS = new Set<unknown>([
 	"date-time",
 	"time",
 	"date",
@@ -34,7 +34,6 @@ const SCHEMA_LIST_KEYWORDS = new Set(["anyOf", "oneOf", "allOf", "prefixItems"])
 const SCHEMA_VALUE_KEYWORDS = new Set([
 	"items",
 	"additionalItems",
-	"additionalProperties",
 	"unevaluatedItems",
 	"unevaluatedProperties",
 	"propertyNames",
@@ -53,10 +52,10 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
 		return true
 	}
 	if (key === "minItems") {
-		return typeof value !== "number" || !SUPPORTED_MIN_ITEMS.has(value)
+		return !SUPPORTED_MIN_ITEMS.has(value)
 	}
 	if (key === "format") {
-		return typeof value !== "string" || !SUPPORTED_STRING_FORMATS.has(value)
+		return !SUPPORTED_STRING_FORMATS.has(value)
 	}
 	if (key === "additionalProperties") {
 		return value !== false
@@ -67,6 +66,8 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
 /**
  * Removes constraints that Anthropic and Bedrock reject for strict tool use.
  * Removed constraints are retained in descriptions so models can still follow them.
+ * An unsupported additionalProperties value becomes false, because strict mode
+ * requires additionalProperties: false on every object schema.
  */
 export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 	if (!isRecord(schema)) {
@@ -79,6 +80,9 @@ export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 	for (const [key, originalValue] of Object.entries(schema)) {
 		if (isUnsupportedKeyword(key, originalValue)) {
 			removed[key] = originalValue
+			if (key === "additionalProperties") {
+				result[key] = false
+			}
 			continue
 		}
 

@@ -478,7 +478,7 @@ describe("BaseProvider", () => {
 			expect(parameters.else.minLength).toBeUndefined()
 		})
 
-		it("removes additionalProperties values other than false in nested schemas", () => {
+		it("replaces additionalProperties values other than false in nested schemas", () => {
 			const tools = [
 				{
 					type: "function",
@@ -502,8 +502,8 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 			const variants = result?.[0].function.parameters.properties.options.anyOf
 
-			expect(variants[0].additionalProperties).toBeUndefined()
-			expect(variants[1].additionalProperties).toBeUndefined()
+			expect(variants[0].additionalProperties).toBe(false)
+			expect(variants[1].additionalProperties).toBe(false)
 			expect(variants[0].description).toBe('Constraints: {"additionalProperties":true}')
 			expect(variants[1].description).toBe('Constraints: {"additionalProperties":{"type":"string"}}')
 		})
