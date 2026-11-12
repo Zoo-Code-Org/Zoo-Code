@@ -123,9 +123,10 @@ export function findLongestPrefixMatch(command: string, prefixes: string[]): str
  * ($(( or $[) that never closes. A stray "}" with no matching "{", a raw
  * NUL byte, substitution nesting deeper than the re-scan depth cap, the
  * shell tokenizer rejecting the masked command, a "${" opener joined only
- * across a carriage-return line continuation, and a glob word inside a
- * re-scanned substitution payload also produce this outcome. No approval
- * may use a partial decomposition of the command.
+ * across a carriage-return line continuation, a "#" comment terminated by a
+ * lone carriage return, and a glob word inside a re-scanned substitution
+ * payload also produce this outcome. No approval may use a partial
+ * decomposition of the command.
  * The parser does not extract substitutions inside double quotes, so an
  * unbalanced delimiter there does not qualify. This is a parser
  * limitation: a shell still expands `$(...)` inside double quotes.
@@ -156,12 +157,13 @@ export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malfo
  *   ($(( or $[) that never closes, a stray "}" with no matching "{", a raw
  *   NUL byte, substitution nesting deeper than the parser's re-scan depth
  *   cap, the shell tokenizer rejecting the masked command, a "${" opener
- *   joined only across a carriage-return line continuation, or a glob word
- *   inside a re-scanned substitution payload. The parser must not approve a
- *   command whose structure is unproven based on a partial decomposition.
- *   Unbalanced delimiters inside double quotes stay parseable because the
- *   parser does not extract substitutions there. A shell still expands
- *   `$(...)` inside double quotes.
+ *   joined only across a carriage-return line continuation, a "#" comment
+ *   terminated by a lone carriage return, or a glob word inside a
+ *   re-scanned substitution payload. The parser must not approve a command
+ *   whose structure is unproven based on a partial decomposition. Unbalanced
+ *   delimiters inside double quotes stay parseable because the parser does
+ *   not extract substitutions there. A shell still expands `$(...)` inside
+ *   double quotes.
  *
  * **Examples:**
  * ```typescript

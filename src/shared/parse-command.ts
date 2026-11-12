@@ -49,6 +49,13 @@ export type ShellToken = string | { op: "glob"; pattern: string } | { op: string
  *   continuation carrying a carriage return. The read models disagree about
  *   whether the joined bytes open a parameter expansion, so the scan masks
  *   nothing and refuses the input instead of guessing.
+ * - `ambiguous-comment`: a `#` comment whose line ends at a lone carriage
+ *   return. bash ends a comment only at a newline, so the comment text bash
+ *   still reads extends past where this scan resumes parsing, and a quote
+ *   opener among those bytes would open a live region here. The read models
+ *   disagree about where the comment ends, so the scan refuses the input
+ *   instead of guessing. A carriage return that is the CR of a CRLF pair is
+ *   a line ending for both models and does not trigger this refusal.
  * - `payload-glob`: a glob word inside a re-scanned substitution payload.
  *   The tokenizer keeps only the literal `glob` for such a word, which
  *   under-approximates the files bash expands the pattern to. The scan
@@ -77,6 +84,7 @@ export type QuoteType =
 	| "nesting-too-deep"
 	| "tokenize-failure"
 	| "ambiguous-opener"
+	| "ambiguous-comment"
 	| "payload-glob"
 	| "placeholder-glob"
 
@@ -89,9 +97,10 @@ export type QuoteType =
  * expansion delimiter or arithmetic expression that never closes, a stray
  * closer, a raw NUL byte, substitution nesting beyond the re-scan depth cap,
  * the shell tokenizer rejecting the masked command, a `{` opener joined to
- * its `$` across a carriage-return continuation, a glob word inside a
- * re-scanned substitution payload, or a host glob word carrying a masked
- * construct. `commands` then holds the raw input as one opaque token.
+ * its `$` across a carriage-return continuation, a comment that ends at a
+ * lone carriage return, a glob word inside a re-scanned substitution payload,
+ * or a host glob word carrying a masked construct. `commands` then holds the
+ * raw input as one opaque token.
  * Callers can surface the error without splitting unsafe fragments.
  *
  * Callers that only need the sub-command list can destructure `{ commands }`.
@@ -146,6 +155,8 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 		"tokenize-failure": "shell tokenizer rejected the masked command",
 		"ambiguous-opener":
 			"ambiguous parameter-expansion opener (a carriage return sits in the line continuation before `{`)",
+		"ambiguous-comment":
+			"comment terminated by a lone carriage return (the executing shell reads the comment as extending past it)",
 		"payload-glob": "glob pattern inside a substitution payload (glob expansion cannot be accounted for)",
 		"placeholder-glob":
 			"glob word carrying a command substitution (substitution expansion cannot be accounted for)",
@@ -155,6 +166,7 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 		quoteType === "nul-byte" ||
 		quoteType === "nesting-too-deep" ||
 		quoteType === "ambiguous-opener" ||
+		quoteType === "ambiguous-comment" ||
 		quoteType === "payload-glob" ||
 		quoteType === "placeholder-glob"
 			? labels[quoteType]
@@ -263,6 +275,13 @@ interface ScanOutcome {
 	arithmetic: string[]
 	/** For each `$((...))`: substitutions the shell expands inside it. */
 	arithmeticPayloads: string[][]
+	/**
+	 * Raw text of each host-level backslash-escaped glob character (`\*`,
+	 * `\?`, `\[`). The escaped character is a literal to the shell, so the
+	 * word cannot glob-expand on it; masking keeps the tokenizer from
+	 * collapsing such a word.
+	 */
+	escapedGlobs: string[]
 }
 
 /**
@@ -280,13 +299,37 @@ const NUL = "\x00"
  * (`S`), a quote region (`Q`), a parameter expansion (`P`), a heredoc (`H`),
  * or an arithmetic expression (`A`). A glob word that swallows one of these
  * loses the only channel that extracts and checks the construct's payload.
- * Variables (`V`) and redirections (`R`) restore verbatim and carry no
- * payload, so a glob word sharing its word with one of those keeps its
- * main-line host-glob behavior. The pattern is built from `NUL` rather than a
- * literal so the sentinel stays the scan's single source of truth.
+ * Variables (`V`), redirections (`R`), and escaped glob characters (`g`)
+ * restore verbatim and carry no payload, so a glob word sharing its word with
+ * one of those keeps its main-line host-glob behavior. The pattern is built
+ * from `NUL` rather than a literal so the sentinel stays the scan's single
+ * source of truth.
  */
 function carriesExecutablePlaceholder(pattern: string): boolean {
 	return new RegExp(`${NUL}[SQPHA]\\d+${NUL}`).test(pattern)
+}
+
+/**
+ * True when `token` carries a masked escaped glob character in the same word
+ * as a placeholder whose inner commands this loop cannot prove it has seen.
+ * Masking the escaped glob keeps the word out of the tokenizer's glob
+ * collapse, which is what exempts an escaped wildcard from the
+ * placeholder-glob rejection; carrying such a word past that rejection only
+ * makes sense when every construct in it still reaches the checks. A
+ * substitution (`S`) does: the loop consumes it as a segment boundary and
+ * re-scans its payload in full. A parameter expansion (`P`), heredoc (`H`),
+ * arithmetic expression (`A`), quote region (`Q`), or redirection (`R`) does
+ * not: the executing shell expands a command substitution that sits inside
+ * double quotes within one of them (`${x:-"$(rm y)"}`), and that nested
+ * command is absent from the payload list the host word queues, while a
+ * region's raw text is restored verbatim. Variables (`V`) carry no payload.
+ * So only `S`, `V`, and the escaped characters themselves take the accept
+ * path; any other placeholder riding a masked escaped glob keeps the
+ * rejection. Both patterns are built from `NUL` so the sentinel stays the
+ * scan's single source of truth.
+ */
+function escapedGlobRidesUncheckedPlaceholder(token: string): boolean {
+	return new RegExp(`${NUL}g\\d+${NUL}`).test(token) && new RegExp(`${NUL}[PHAQR]\\d+${NUL}`).test(token)
 }
 
 /**
@@ -532,6 +575,8 @@ function scanShellSyntax(text: string): ScanOutcome {
 		redirections: [],
 		arithmetic: [],
 		arithmeticPayloads: [],
+		// Stryker disable next-line ArrayDeclaration: a placeholder id is the post-push length minus one, so seeding this array cannot change which entry a `g<id>` name resolves to; no input distinguishes the mutant.
+		escapedGlobs: [],
 	}
 	const stack: RegionFrame[] = []
 	// Counts the parameter-expansion frames open on `stack`. While this count
@@ -605,6 +650,16 @@ function scanShellSyntax(text: string): ScanOutcome {
 		}
 		return j
 	}
+
+	// True when the scan's line ending at `end` is a lone carriage return: a
+	// CR not followed by an LF. The comment branches stop a comment at the
+	// first newline or carriage return, but the executing shell ends comments
+	// only at newlines. When the terminator is a lone CR, the comment bytes
+	// the shell still reads extend past this index, and quote openers among
+	// them would open a live region in this scan while the shell keeps them
+	// comment text. A CR followed by an LF is a CRLF pair — one line ending
+	// for both models — and stays parseable.
+	const terminatesAtLoneCR = (end: number): boolean => text[end] === "\r" && text[end + 1] !== "\n"
 
 	/** Open the quoted region starting at `i`, or return null if none. */
 	const openQuote = (i: number): RegionFrame | null => {
@@ -1531,10 +1586,18 @@ function scanShellSyntax(text: string): ScanOutcome {
 					i !== frameEscapeEnd &&
 					logicalWordBoundaryBefore(text, i)
 				) {
+					// A comment terminated by a lone CR reads differently in
+					// the executing shell, so its region extent is ambiguous.
+					// Fail closed instead of guessing how far the shell's
+					// comment reaches into the region.
+					const lineEnd = endOfLine(i)
+					if (terminatesAtLoneCR(lineEnd)) {
+						return errorAt("ambiguous-comment", i)
+					}
 					// Clamp at the region end. A comment that runs past it
 					// leaves the frame open, and the still-open frame fails
 					// closed.
-					i = Math.min(endOfLine(i), end)
+					i = Math.min(lineEnd, end)
 					continue
 				}
 				if (char === top.closer) {
@@ -2140,7 +2203,16 @@ function scanShellSyntax(text: string): ScanOutcome {
 				i !== frameEscapeEnd &&
 				logicalWordBoundaryBefore(text, i)
 			) {
-				i = endOfLine(i)
+				// A comment terminated by a lone CR reads differently in the
+				// executing shell. The comment (quotes inside it included)
+				// extends past where this scan resumes, so the region extent
+				// is ambiguous and the input fails closed.
+				const lineEnd = endOfLine(i)
+				if (terminatesAtLoneCR(lineEnd)) {
+					outcome.error = errorAt("ambiguous-comment", i)
+					return outcome
+				}
+				i = lineEnd
 				continue
 			}
 			// A bare `(` inside a substitution region opens a subshell group.
@@ -2319,6 +2391,22 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// exempt a `#` that follows from the comment rule and hide a
 			// comment that swallows the rest of the line. Byte consumption is
 			// identical either way.
+			// An escaped glob metacharacter is a literal word character to the
+			// shell, so the word cannot glob-expand on it. The tokenizer would
+			// still read the raw `\c` pair as a live glob and collapse the whole
+			// word, swallowing any masked construct that shares the word. Mask
+			// the pair as an opaque placeholder instead: the word keeps its
+			// placeholder structure, the escape survives restoration, and a
+			// substitution sharing the word still reaches extraction.
+			const escapedChar = text[i + 1]
+			if (escapedChar === "*" || escapedChar === "?" || escapedChar === "[") {
+				const id = outcome.escapedGlobs.push(text.slice(i, i + 2)) - 1
+				outcome.host += mark(`g${id}`)
+				// Stryker disable next-line ArithmeticOperator: both readers test the raw byte before the pair end, one of `*?[` — neither a word boundary for the comment branch nor a metacharacter for the placeholder branch, so the value decides nothing.
+				escapedWordCharEnd = i + 2
+				i += 2
+				continue
+			}
 			outcome.host += text.slice(i, i + 2)
 			if (text[i + 1] !== "\n") {
 				escapedWordCharEnd = i + 2
@@ -2349,6 +2437,16 @@ function scanShellSyntax(text: string): ScanOutcome {
 			// boundary byte is the one the shell sees, so backslash-newline
 			// continuations are walked over before the test.
 			const end = endOfLine(i)
+			// A comment terminated by a lone CR ends at a different byte for
+			// the executing shell: the shell's comment (quotes inside it
+			// included) extends past where this scan resumes, and a quote
+			// opener among those bytes would open a live region here while
+			// the shell never sees it as syntax. The disagreement cannot be
+			// resolved by either reading, so the input fails closed.
+			if (terminatesAtLoneCR(end)) {
+				outcome.error = errorAt("ambiguous-comment", i)
+				return outcome
+			}
 			outcome.host += text.slice(i, end)
 			i = end
 			continue
@@ -2777,6 +2875,8 @@ function lookupPlaceholder(name: string, outcome: ScanOutcome): string | undefin
 			return outcome.params[index]
 		case "V":
 			return outcome.variables[index]
+		case "g":
+			return outcome.escapedGlobs[index]
 		case "R":
 			return outcome.redirections[index]
 		case "A":
@@ -2800,6 +2900,23 @@ function lookupPlaceholder(name: string, outcome: ScanOutcome): string | undefin
  * a sentinel that collides with the ones used here.
  */
 function expandPlaceholders(text: string, outcome: ScanOutcome): string {
+	// Stryker disable next-line BooleanLiteral: substitution placeholders never reach decision-path restoration (the word loop consumes them as segment boundaries), so no input distinguishes true from false here.
+	return expandPlaceholdersWith(text, outcome, false)
+}
+
+/**
+ * Message-path variant of `expandPlaceholders`: it also renders substitution
+ * placeholders as their `$(…)` payload text. A rejection excerpt quotes the
+ * offending word back to the reader, and dropping the substitution there would
+ * hide the very construct the message names. Decision paths keep using
+ * `expandPlaceholders`: a substitution payload reaches those through segment
+ * extraction and the re-scan, never through restored host text.
+ */
+function expandPlaceholdersForMessage(text: string, outcome: ScanOutcome): string {
+	return expandPlaceholdersWith(text, outcome, true)
+}
+
+function expandPlaceholdersWith(text: string, outcome: ScanOutcome, withSubstitutions: boolean): string {
 	if (!text.includes(NUL)) {
 		return text
 	}
@@ -2808,6 +2925,12 @@ function expandPlaceholders(text: string, outcome: ScanOutcome): string {
 	for (let p = 0; p < parts.length; p++) {
 		if (p % 2 === 0) {
 			out += parts[p]
+			continue
+		}
+		if (withSubstitutions && parts[p][0] === "S") {
+			// Stryker disable next-line StringLiteral: every `S<id>` name was emitted at its push, so the registry entry always exists and the fallback is unreachable.
+			const raw = outcome.substitutions[Number(parts[p].slice(1))] ?? ""
+			out += `$(${raw})`
 			continue
 		}
 		const value = lookupPlaceholder(parts[p], outcome)
@@ -2962,8 +3085,9 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 					// The excerpt quotes the command back to the user, so expand
 					// the placeholders first: the raw masked text would expose
 					// the placeholder sentinel and internal names in a message
-					// the model also reads.
-					message: unterminatedQuoteMessage("payload-glob", 0, expandPlaceholders(line, outcome)),
+					// the model also reads. Substitutions render as their payload
+					// text so the excerpt shows the construct it rejects.
+					message: unterminatedQuoteMessage("payload-glob", 0, expandPlaceholdersForMessage(line, outcome)),
 				}
 				return []
 			} else if (
@@ -2987,8 +3111,13 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 					openIndex: 0,
 					// Expand before excerpting: the raw masked line would expose
 					// the placeholder sentinel and internal names in a message
-					// the model also reads.
-					message: unterminatedQuoteMessage("placeholder-glob", 0, expandPlaceholders(line, outcome)),
+					// the model also reads. Substitutions render as their payload
+					// text so the excerpt shows the construct it rejects.
+					message: unterminatedQuoteMessage(
+						"placeholder-glob",
+						0,
+						expandPlaceholdersForMessage(line, outcome),
+					),
 				}
 				// Stryker disable next-line ArrayDeclaration: with the error already recorded, `parseCommand` discards this list and returns the raw input as the one opaque token, so no reachable test can observe the difference between `[]` and a non-empty list.
 				return []
@@ -3005,9 +3134,23 @@ function parseLine(line: string, outcome: ScanOutcome, depth: number, fromPayloa
 			current.push(token)
 			continue
 		}
-		// This word carries placeholders. Reconstruct the non-substitution
-		// placeholders for verbatim restoration. Treat substitution
-		// placeholders as segment boundaries.
+		// This word carries placeholders. A masked escaped glob sharing the
+		// word with a placeholder whose inner commands this loop cannot prove
+		// it has seen stays on the placeholder-glob rejection channel: masking
+		// hides the word from the tokenizer's glob collapse, and a substitution
+		// the region's payload list does not carry would otherwise ride the
+		// accept path unexamined while the executing shell runs it.
+		if (escapedGlobRidesUncheckedPlaceholder(token)) {
+			outcome.error = {
+				quoteType: "placeholder-glob",
+				openIndex: 0,
+				message: unterminatedQuoteMessage("placeholder-glob", 0, expandPlaceholdersForMessage(line, outcome)),
+			}
+			// Stryker disable next-line ArrayDeclaration: with the error already recorded, `parseCommand` discards this list and returns the raw input as the one opaque token, so no reachable test can observe the difference between `[]` and a non-empty list.
+			return []
+		}
+		// Reconstruct the non-substitution placeholders for verbatim
+		// restoration. Treat substitution placeholders as segment boundaries.
 		const parts = token.split(NUL)
 		let buf = ""
 		for (let p = 0; p < parts.length; p++) {

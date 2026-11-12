@@ -594,6 +594,17 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		)
 	})
 
+	it("fails closed when a comment's lone-CR terminator hides an executable tail", () => {
+		// bash reads the whole first line — the quote opener included — as
+		// comment text and executes the following line, while the scan ends
+		// the comment at the carriage return and lets the quoted region mask
+		// the tail behind an allowlisted word. The parser now refuses the
+		// input, so the allowlist never carries it.
+		expect(getCommandDecision("echo;# '\recho '\nrm -rf /\n# '\n", ["echo", "ls", "touch", "x"], ["rm"])).toBe(
+			"malformed_command",
+		)
+	})
+
 	it("does not let a host glob word swallowing a substitution ride the allowlist", () => {
 		// `$(rm -rf /tmp/victim)*` shares its word with a command
 		// substitution, so shell-quote collapses the whole word to the bare

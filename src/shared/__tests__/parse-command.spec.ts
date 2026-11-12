@@ -2480,6 +2480,178 @@ describe("parseCommand", () => {
 			expect(parseError?.message).not.toContain("unterminated")
 		})
 
+		it("renders the substitution payload in the placeholder-glob excerpt", () => {
+			// The excerpt quotes the rejected word back to the user and the
+			// model. Dropping the masked substitution hides the very construct
+			// the rejection names, so the message path renders its payload
+			// text while the decision path keeps masking it.
+			const { parseError } = parseCommand("echo $(ls)*")
+			expect(parseError?.quoteType).toBe("placeholder-glob")
+			expect(parseError?.message).toContain("$(ls)")
+			expect(parseError?.message).not.toContain("\x00")
+			expect(parseError?.message).not.toMatch(/\0[A-Z]\d+\0/)
+		})
+
+		it("accepts a glob word whose glob characters are all backslash-escaped", () => {
+			// A backslash makes a glob character literal to bash, so the word
+			// cannot expand to files and the tokenizer's glob collapse hides
+			// no expansion. The word is not rejected; its placeholders keep
+			// their segment handling, so a substitution inside the word is
+			// still extracted and checked, and the glob character survives as
+			// literal word text (the escape character itself is word syntax,
+			// the same byte class quote characters are for a quoted word).
+			const simple = parseCommand("echo $(printf foo)\\*")
+			expect(simple.parseError).toBeNull()
+			expect(simple.commands).toEqual(["echo", "printf foo", "\\*"])
+			const question = parseCommand("echo $(printf foo)\\?")
+			expect(question.parseError).toBeNull()
+			expect(question.commands).toEqual(["echo", "printf foo", "\\?"])
+			const bracket = parseCommand("echo $(printf foo)\\[a")
+			expect(bracket.parseError).toBeNull()
+			expect(bracket.commands).toEqual(["echo", "printf foo", "\\[a"])
+			// A `#` directly after an escaped glob character sits at the end of
+			// the escape pair, so it is word interior: no comment starts and the
+			// whole word survives as one token.
+			const hashAfter = parseCommand("echo \\*#foo")
+			expect(hashAfter.parseError).toBeNull()
+			expect(hashAfter.commands).toEqual(["echo \\*#foo"])
+			// Word text that merely starts with the letter Q is literal content,
+			// not a quote placeholder: the accept path stays open.
+			const textQ = parseCommand("echo \\*Quality")
+			expect(textQ.parseError).toBeNull()
+			expect(textQ.commands).toEqual(["echo \\*Quality"])
+		})
+
+		it("still rejects a placeholder-carrying glob word with an unescaped glob character", () => {
+			// The accept path is scoped to fully escaped glob characters. The
+			// same word with a plain `*` collapses a live glob and keeps its
+			// placeholder hidden, so it stays on the rejection channel — and
+			// the escaped and unescaped spellings act as the discriminator
+			// pair for the guard.
+			const star = parseCommand("echo $(printf foo)*")
+			expect(star.parseError?.quoteType).toBe("placeholder-glob")
+			expect(star.commands).toEqual(["echo $(printf foo)*"])
+			// A quote region riding the masked escape stays on the rejection
+			// channel: the region is opaque, so a substitution inside it would
+			// never reach extraction, and bash runs it.
+			const quoted = parseCommand('echo "$(rm x)"\\*')
+			expect(quoted.parseError?.quoteType).toBe("placeholder-glob")
+			expect(quoted.commands).toEqual(['echo "$(rm x)"\\*'])
+			expect(quoted.parseError?.message).toContain("glob word carrying a command substitution")
+			// A parameter-expansion region riding the masked escape is rejected
+			// for the same reason: bash expands a substitution inside double
+			// quotes within the region, and the region's payload list does not
+			// carry that nested command, so no check would ever see it.
+			const paramQuoted = parseCommand('echo ${x:-"$(rm y)"}\\*')
+			expect(paramQuoted.parseError?.quoteType).toBe("placeholder-glob")
+			expect(paramQuoted.commands).toEqual(['echo ${x:-"$(rm y)"}\\*'])
+			// A parameter expansion riding the escape is rejected even when its
+			// own substitution would be extracted: the region can hide a
+			// substitution inside double quotes that its payload list does not
+			// carry, so the accept path cannot be proven complete for regions.
+			const paramQuoted2 = parseCommand("echo ${x:-$(printf x)}\\*")
+			expect(paramQuoted2.parseError?.quoteType).toBe("placeholder-glob")
+			expect(paramQuoted2.commands).toEqual(["echo ${x:-$(printf x)}\\*"])
+			// An arithmetic expression riding the escape is rejected for the same
+			// reason: the region may hide a quoted substitution.
+			const arith = parseCommand("echo $(( 1 + $(printf x) ))\\*")
+			expect(arith.parseError?.quoteType).toBe("placeholder-glob")
+		})
+
+		it("refuses a comment that ends at a lone carriage return", () => {
+			// bash ends a comment only at a newline. When this scan's comment
+			// stops at a lone carriage return, the comment text bash still
+			// keeps — a quote opener included — would open a live region in
+			// this scan. The two readings of the terminator disagree, so the
+			// input fails closed as one opaque token. Every comment terminated
+			// by a lone carriage return takes this path, with or without quote
+			// characters in its text.
+			const shapes = [
+				"echo;# '\recho '\nrm -rf /\n# '\n",
+				"echo;# '\rx '\nrm -rf /\n'",
+				"echo;#x\recho '\nrm -rf /\n'\n",
+				"echo;#x\r'\nrm -rf /\n'\n",
+				"echo;#x\rrm -rf /",
+				"echo #x\rrm -rf /",
+			]
+			for (const input of shapes) {
+				const { commands, parseError } = parseCommand(input)
+				expect(parseError?.quoteType).toBe("ambiguous-comment")
+				expect(commands).toEqual([input])
+			}
+			// The message names the disagreement by its own label: not the
+			// generic "unterminated ..." form, because no region is open.
+			const message = parseCommand(shapes[0]).parseError?.message ?? ""
+			expect(message).toContain(
+				"comment terminated by a lone carriage return (the executing shell reads the comment as extending past it)",
+			)
+			expect(message).not.toContain("unterminated")
+		})
+
+		it("refuses a comment inside a substitution frame that ends at a lone carriage return", () => {
+			// The frame-comment walks end comments at the same line boundary
+			// as the host comment branch, so the same disagreement exists
+			// there: inside a command substitution, and inside a substitution
+			// extracted from a heredoc body.
+			const nestedInput = "echo $(# '\recho '\nrm -rf /\n# '\n)"
+			const nested = parseCommand(nestedInput)
+			expect(nested.parseError?.quoteType).toBe("ambiguous-comment")
+			expect(nested.commands).toEqual([nestedInput])
+			const heredocInput = "cat <<EOF\n$(# c\rx)\nEOF\n"
+			const heredoc = parseCommand(heredocInput)
+			expect(heredoc.parseError?.quoteType).toBe("ambiguous-comment")
+			expect(heredoc.commands).toEqual([heredocInput])
+			// The frame walk's own refusal, before any unclosed-frame report:
+			// a lone CR ends the comment, and the terminator disagreement is
+			// what the scan reports — not the frame's missing closer.
+			const unclosedInput = "echo $(# c\rx"
+			const unclosed = parseCommand(unclosedInput)
+			expect(unclosed.parseError?.quoteType).toBe("ambiguous-comment")
+			expect(unclosed.commands).toEqual([unclosedInput])
+			// The frame closer sits on the same line as the comment. The
+			// frame's own walk refuses before any payload survives to be
+			// re-scanned: the bash reading runs the comment (closer included)
+			// past end of input, so the input is unparseable there too.
+			const closerInput = "echo $(# x\r)"
+			const closer = parseCommand(closerInput)
+			expect(closer.parseError?.quoteType).toBe("ambiguous-comment")
+			expect(closer.commands).toEqual([closerInput])
+		})
+
+		it("refuses a comment's lone carriage return before the quote region it opens", () => {
+			// The same terminator with an unclosed quote region: without the
+			// refusal the scan ends the comment at the carriage return and
+			// reports the quote after it as unterminated, while bash reads the
+			// whole tail as comment text. The terminator disagreement wins over
+			// the quote report.
+			const input = "echo;# '\rx '\nrm -rf /\n"
+			const { commands, parseError } = parseCommand(input)
+			expect(parseError?.quoteType).toBe("ambiguous-comment")
+			expect(commands).toEqual([input])
+		})
+
+		it("keeps an LF-terminated comment masking its text as comment bytes", () => {
+			// The LF-only twin of the refused shapes: bash and this scan agree
+			// the comment ends at the newline, so the quoted word after it
+			// parses as a region and the decomposition is unchanged.
+			const { commands, parseError } = parseCommand("echo;# '\necho '\nrm -rf /\n# '\n")
+			expect(parseError).toBeNull()
+			expect(commands).toEqual(["echo", "echo '\nrm -rf /\n# '"])
+		})
+
+		it("keeps CRLF line endings and CRLF-terminated comments on the parse path", () => {
+			// A carriage return that is the CR of a CRLF pair is a line ending
+			// for both read models (the splitter treats it as one), so nothing
+			// about these shapes changes: CRLF lines still split into
+			// segments, and a comment terminated by CRLF still masks its line.
+			const lines = parseCommand("echo a\r\nrm -rf /")
+			expect(lines.parseError).toBeNull()
+			expect(lines.commands).toEqual(["echo a", "rm -rf /"])
+			const comment = parseCommand("echo # c\r\nrm -rf /\n")
+			expect(comment.parseError).toBeNull()
+			expect(comment.commands).toEqual(["echo", "rm -rf /"])
+		})
+
 		it("keeps a carriage return inside a delimiter word from joining a dollar to a quote byte", () => {
 			// The delimiter-word walk asks which bytes the tokenizer removes
 			// inside a word, and a carriage return is not one of them: the run
