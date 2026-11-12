@@ -11,6 +11,7 @@
 // to publish at all - it resolves with no commit and costs the shadow git nothing - and the write
 // keeps its own record whose diff base is the content the task started with.
 import fs from "fs/promises"
+import fsSync from "fs"
 import os from "os"
 import path from "path"
 
@@ -36,6 +37,7 @@ const tmpDir = path.join(os.tmpdir(), "checkpointSaveContentPremise")
 const CHECKPOINTED_FILE = "checkpointed.txt"
 const PRE_WRITE = "content the task started with"
 const MID_FLIGHT_WRITE = "the write that landed mid-flight"
+const POST_ANSWER_WRITE = "the write that landed after the premise answered"
 
 const savedEnv: Partial<Record<string, string>> = {}
 
@@ -207,5 +209,47 @@ describe("checkpointSave against a write that lands while the task-start baselin
 		expect(record.before).toBe(PRE_WRITE)
 		expect(record.after).toBe(MID_FLIGHT_WRITE)
 		expect(afterWrite).toBe(beforeBaseline + 1)
+	}, 60_000)
+
+	it("the premise answers one instant and the git read happens at a later one", async () => {
+		// Thread 607pkP asks for the window between the premise answer and the staging read to be
+		// pinned rather than argued about. ShadowCheckpointService asks the premise at line 348 and
+		// stages at line 258 (`await git.add([".", "--ignore-errors"])`), reached through the await at
+		// line 356, so content that lands between the two is content the answer never saw. The
+		// write below is issued while the premise is being answered and completes before the answer
+		// returns, which is the earliest instant after the decision that a write can occupy; what the
+		// assertions pin is that the commit is built from what the read found, not from what the
+		// answer vouched for. The seam is saveCheckpoint itself, called here without the per-task
+		// queue, because the queue only orders saves and the window is inside one save.
+		const { service, shadowDir, task, baseHash } = await setupCheckpointTask("premise-answered-before-the-read")
+		const checkpointedFile = path.join(service.workspaceDir, CHECKPOINTED_FILE)
+		const beforeSave = await commitCount(shadowDir, task.taskId)
+		let premiseAnswers = 0
+
+		const contentPremise = (): boolean => {
+			premiseAnswers++
+			// Synchronous on purpose: the answer is not returned until the write is on disk,
+			// so the write cannot race the staging read further than the window already allows.
+			fsSync.writeFileSync(checkpointedFile, POST_ANSWER_WRITE)
+			return true
+		}
+
+		const save = await service.saveCheckpoint("Task: premise window", { allowEmpty: false, contentPremise })
+		const afterSave = await commitCount(shadowDir, task.taskId)
+
+		if (!save || typeof save.commit !== "string") {
+			throw new Error("the save resolved with no commit, so there is no capture to read")
+		}
+		const record = await recorded(service, baseHash!, save.commit)
+
+		// The premise ran once and did not decline, so the capture went ahead.
+		expect(premiseAnswers).toBe(1)
+		expect(afterSave).toBe(beforeSave + 1)
+		// And the capture holds the bytes that arrived after the answer, which is the window:
+		// the answer vouched for the workspace it saw, not for the workspace the read found.
+		expect(record.count).toBe(1)
+		expect(record.before).toBe(PRE_WRITE)
+		expect(record.after).toBe(POST_ANSWER_WRITE)
+		expect(await fs.readFile(checkpointedFile, "utf8")).toBe(POST_ANSWER_WRITE)
 	}, 60_000)
 })
