@@ -1861,6 +1861,48 @@ describe("DiffViewProvider", () => {
 				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
 			})
 
+			it("does not save the emptied buffer over content that arrived in the placeholder after open()", async () => {
+				// The reviewer's ordering ask, at the layer that would have caught it. The tests above all
+				// run with a dirty buffer and no recorded placeholder content, so open() wrote nothing this
+				// discard can recognise as its own and the identity check is skipped; this unit's own tests
+				// all set isDirty to false. Dirty plus a recorded identity is the combination none of them
+				// covered, and it is the case where an emptied buffer used to be saved onto the path before
+				// anything noticed that the path no longer held what open() wrote. Here the save is the only
+				// write this document can make, so a save that never happens is the whole claim.
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				diffViewProvider["placeholderContent"] = ""
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+					callOrder.push("applyEdit")
+					return true
+				})
+				// Somebody else's content is what now holds the placeholder's path.
+				vi.mocked(fs.readFile).mockResolvedValue("content the user saved after open()")
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					/no longer holds the empty placeholder/,
+				)
+
+				// The buffer is still blanked in memory and the tab is still closed - only the write is
+				// withheld. With the identity check running after the buffer work, this list would read
+				// closeDiffViews, applyEdit, save, closeFileTab.
+				expect(callOrder).toEqual(["closeDiffViews", "applyEdit", "closeFileTab"])
+				expect(document.save).not.toHaveBeenCalled()
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				// The file is kept, so nothing removed it either.
+				expect(fs.unlink).not.toHaveBeenCalled()
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.objectContaining({
+						message: expect.stringContaining("no longer holds the empty placeholder"),
+					}),
+				)
+				expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+				expect(diffViewProvider["placeholderContent"]).toBeUndefined()
+			})
+
 			it("restores a modify buffer in memory and never saves the target file", async () => {
 				// revertChanges() restores a modify by applyEdit + document.save(). For a stream the
 				// user never approved that save is a write they never asked for, and for a
