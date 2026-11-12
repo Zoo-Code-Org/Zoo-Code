@@ -588,6 +588,3 @@ export class CodeParser implements ICodeParser {
 		return results
 	}
 }
-
-// Export a singleton instance for convenience
-export const codeParser = new CodeParser()

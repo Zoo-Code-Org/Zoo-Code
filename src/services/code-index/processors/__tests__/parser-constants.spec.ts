@@ -1,7 +1,6 @@
 import { build } from "esbuild"
 import * as path from "path"
 import * as parserConstants from "../parser-constants"
-import { MAX_BLOCK_CHARS } from "../../constants"
 
 it("preserves the four foundation parser constants exactly", () => {
 	expect({ ...parserConstants }).toEqual({
@@ -10,7 +9,6 @@ it("preserves the four foundation parser constants exactly", () => {
 		MIN_CHUNK_REMAINDER_CHARS: 200,
 		MAX_CHARS_TOLERANCE_FACTOR: 1.15,
 	})
-	expect(parserConstants.MAX_BLOCK_CHARS).toBe(MAX_BLOCK_CHARS)
 })
 
 it("bundles the actual parser worker without host or types/provider barrel inputs", async () => {

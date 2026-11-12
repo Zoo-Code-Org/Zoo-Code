@@ -22,7 +22,6 @@
 				"!**/__tests__/**!",
 				"!vitest.setup.ts!",
 				"!utils/vitest-verbosity.ts!",
-				"!utils/TaskSemaphore.ts!",
 				"!utils/WorkspacePathResolver.ts!",
 				"!test-utils/**!",
 				"!utils/versionToken.ts!",

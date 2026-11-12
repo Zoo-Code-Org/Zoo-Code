@@ -1,6 +1,6 @@
 // npx vitest services/code-index/processors/__tests__/parser.spec.ts
 
-import { CodeParser, codeParser } from "../parser"
+import { CodeParser } from "../parser"
 import { loadRequiredLanguageParsers } from "../../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
@@ -309,15 +309,6 @@ describe("CodeParser", () => {
 				expect(chunk.content.length).toBeGreaterThanOrEqual(100)
 				expect(chunk.content.length).toBeLessThanOrEqual(1150)
 			})
-		})
-	})
-
-	describe("singleton instance", () => {
-		it("should maintain parser state across calls", async () => {
-			const result1 = await codeParser.parseFile("test.js", { content: "const a = 1" })
-			const result2 = await codeParser.parseFile("test.js", { content: "const b = 2" })
-			expect(result1).toBeDefined()
-			expect(result2).toBeDefined()
 		})
 	})
 

@@ -9,7 +9,7 @@ vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 	},
 }))
 
-import { shouldUseFallbackChunking } from "../../shared/supported-extensions"
+import { isFallbackExtension as shouldUseFallbackChunking } from "../../../shared/fallback-extensions"
 
 describe("CodeParser - VB.NET and Fallback Extensions Support", () => {
 	let parser: CodeParser

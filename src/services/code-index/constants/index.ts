@@ -1,7 +1,6 @@
 import { CODEBASE_INDEX_DEFAULTS } from "@roo-code/types"
 
 /**Parser */
-export const MAX_BLOCK_CHARS = 1000
 export const PARSE_TIMEOUT_MS = 10_000
 export const INDEX_STOP_LIMIT_MS = 2_000
 
