@@ -4638,6 +4638,8 @@ describe("ClineProvider", () => {
 		vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
 		vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
 
+		vi.spyOn(manager, "listConfig").mockResolvedValue([{ name: "local", id: "this-window-id" }])
+
 		await provider["setModeConfig"]("code", "this-window-id")
 
 		expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
@@ -4647,6 +4649,38 @@ describe("ClineProvider", () => {
 	})
 
 	describe("mode profile snapshot", () => {
+		beforeEach(() => {
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(
+				["opened-with-id", "chosen-id", "reset-id"].map((id) => ({ name: id, id })),
+			)
+		})
+
+		it("keeps the prior choice when the shared write fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "opened-with-id" })
+			const error = new Error("write failed")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(error)
+
+			await expect(provider.setModeConfig("code", "failed-id")).rejects.toBe(error)
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("opened-with-id")
+		})
+
+		it("returns undefined when no mapping exists", async () => {
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+
+			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBeUndefined()
+		})
+
+		it.each(["local", "snapshot"])("ignores a stale %s ID after another window resets profiles", async (source) => {
+			if (source === "local") {
+				provider["localModeConfigIds"].set("code", "removed-id")
+			} else {
+				provider["initialModeConfigIds"] = Promise.resolve({ code: "removed-id" })
+			}
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("reset-id")
+
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("reset-id")
+		})
+
 		it("keeps the choice this window opened with when another window changes the shared value", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")

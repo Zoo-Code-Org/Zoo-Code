@@ -22,7 +22,8 @@ describe("API - configuration", () => {
 			on: vi.fn(),
 			log: vi.fn(),
 			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig },
+			providerSettingsManager: { saveConfig },
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -56,7 +57,8 @@ describe("API - configuration", () => {
 			on: vi.fn(),
 			log: vi.fn(),
 			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig },
+			providerSettingsManager: { saveConfig },
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel

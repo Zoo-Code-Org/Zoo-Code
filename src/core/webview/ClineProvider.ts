@@ -2175,17 +2175,16 @@ export class ClineProvider
 	}
 
 	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
-		return (
-			this.localModeConfigIds.get(mode) ??
-			(await this.initialModeConfigIds)[mode] ??
-			// Modes created after this window opened have no snapshot entry.
-			(await this.providerSettingsManager.getModeConfigId(mode))
-		)
+		const cachedId = this.localModeConfigIds.get(mode) ?? (await this.initialModeConfigIds)[mode]
+		if (cachedId && (await this.providerSettingsManager.listConfig()).some(({ id }) => id === cachedId)) {
+			return cachedId
+		}
+		return this.providerSettingsManager.getModeConfigId(mode)
 	}
 
-	private async setModeConfig(mode: Mode, id: string): Promise<void> {
-		this.localModeConfigIds.set(mode, id)
+	public async setModeConfig(mode: Mode, id: string): Promise<void> {
 		await this.providerSettingsManager.setModeConfig(mode, id)
+		this.localModeConfigIds.set(mode, id)
 	}
 
 	/**
