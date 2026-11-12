@@ -12,7 +12,14 @@ import {
 	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
-import { makePosition, makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+import {
+	makeDisposable,
+	makePosition,
+	makeRange,
+	makeTextDocument,
+	makeTextEditor,
+	makeUri,
+} from "../../../test-utils/vscode"
 
 // Mock delay
 vi.mock("delay", () => ({
@@ -2786,6 +2793,112 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["placeholderPath"] as string | undefined).toBeUndefined()
 		})
 
+		it("disposes the touch listeners and cancels the deferred scroll while the buffer restore is still pending", async () => {
+			// Review row wM62emT0. The window a late deferred reveal can fire in is exactly the window the
+			// buffer restore is awaited in, so this test holds applyEdit() open, starts the discard, and
+			// asks whether the teardown already happened before the restoration is settled. Fake timers keep
+			// that window open instead of leaning on wall-clock scheduling, and the restoration is resolved in
+			// a finally block so the pending promise cannot outlive the test. The handle is declared out
+			// of the try on purpose: a failure inside the try must report itself instead of being replaced
+			// by the reference error a finally-block read of an uninitialised let would raise.
+			let settleRestore: (applied: boolean) => void = () => {}
+			vi.useFakeTimers()
+			try {
+				const callOrder: string[] = []
+				const revealRange = vi.fn()
+				const document = makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("a\nCHANGED\nc\nd\n"),
+					positionAt: vi.fn((offset: number) => ({ line: 0, character: offset })),
+				})
+				Object.assign(document, { isDirty: true })
+				const editor = makeTextEditor({ document, visibleRanges: [makeRange()], revealRange })
+				const disposeActive = vi.fn()
+				const disposeSelection = vi.fn()
+				const disposeScroll = vi.fn()
+				openAbandonedView(document, [], callOrder)
+				Object.assign(diffViewProvider, {
+					activeDiffEditor: editor,
+					editType: "modify",
+					originalContent: "a\nb\nc\nd\n",
+					placeholderPath: undefined,
+					diffScrollLine: 1,
+					activeEditorListener: makeDisposable({ dispose: disposeActive }),
+					diffEditorSelectionListener: makeDisposable({ dispose: disposeSelection }),
+					diffScrollListener: makeDisposable({ dispose: disposeScroll }),
+				})
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				// The keep path re-shows the edited file; give that re-show an editor double so the
+				// assertions below are the only thing this test can fail on.
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
+				// Schedule the deferred re-reveal the way a tool does, then deny the stream while it is
+				// still pending. The first reveal is the immediate one; only a surviving timer would add a
+				// second one after the buffer was already restored.
+				diffViewProvider.scrollToFirstDiff()
+				expect(revealRange).toHaveBeenCalledTimes(1)
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(
+					() =>
+						new Promise<boolean>((resolve) => {
+							settleRestore = resolve
+						}),
+				)
+				const discarding = diffViewProvider.discardUnapprovedStream()
+				await Promise.resolve()
+				await Promise.resolve()
+				expect(disposeActive).toHaveBeenCalledOnce()
+				expect(disposeSelection).toHaveBeenCalledOnce()
+				expect(disposeScroll).toHaveBeenCalledOnce()
+				expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+				// Advancing past the deferred reveal must not put the viewport anywhere: the timer was
+				// cancelled before the restore was awaited, so there is no late reveal left to fire.
+				vi.advanceTimersByTime(2000)
+				expect(revealRange).toHaveBeenCalledTimes(1)
+				settleRestore(true)
+				await discarding
+				expect(callOrder).toEqual(["closeDiffViews", "closeFileTab"])
+			} finally {
+				settleRestore(true)
+				vi.useRealTimers()
+			}
+		})
+
+		it("disposes the touch listeners on the path where the abandoned view is already closed", async () => {
+			// Review row wM62emT0, the half the sweep-only test below does not cover. open() installs
+			// onDidChangeActiveTextEditor, onDidChangeTextEditorSelection and
+			// onDidChangeTextEditorVisibleRanges, and close() clears activeDiffEditor without touching
+			// them. A discard reached from that state used to run the sweep and nothing else: the three
+			// window-level handlers and any pending deferred reveal stayed installed on a session the
+			// caller may keep for a retry, and reset() is not called when ownership is retained.
+			vi.useFakeTimers()
+			try {
+				const disposeActive = vi.fn()
+				const disposeSelection = vi.fn()
+				const disposeScroll = vi.fn()
+				const lateReveal = vi.fn()
+				Object.assign(diffViewProvider, {
+					relPath: "mock-target-file.ts",
+					activeDiffEditor: undefined,
+					editType: "create",
+					createdDirs: [],
+					placeholderPath: mockTargetPath,
+					activeEditorListener: makeDisposable({ dispose: disposeActive }),
+					diffEditorSelectionListener: makeDisposable({ dispose: disposeSelection }),
+					diffScrollListener: makeDisposable({ dispose: disposeScroll }),
+				})
+				diffViewProvider["deferredScrollTimer"] = setTimeout(lateReveal, 300)
+				vi.mocked(fs.unlink).mockResolvedValue(undefined)
+				await diffViewProvider.discardUnapprovedStream()
+				expect(disposeActive).toHaveBeenCalledOnce()
+				expect(disposeSelection).toHaveBeenCalledOnce()
+				expect(disposeScroll).toHaveBeenCalledOnce()
+				expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+				vi.advanceTimersByTime(1000)
+				expect(lateReveal).not.toHaveBeenCalled()
+				expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
 		it("removes the placeholder and created directories even when open() failed before activeDiffEditor was assigned", async () => {
 			// open() creates the directories (line 130) and the empty placeholder (line 134)
 			// BEFORE openDiffEditor() assigns activeDiffEditor (line 173). If that call rejects

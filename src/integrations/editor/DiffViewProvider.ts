@@ -668,6 +668,15 @@ export class DiffViewProvider {
 
 		let editorFailure: unknown
 
+		// Lifecycle teardown first: ahead of the editor branch below and therefore ahead of the awaited
+		// buffer restore. open() installs onDidChangeActiveTextEditor, onDidChangeTextEditorSelection
+		// and onDidChangeTextEditorVisibleRanges, and close() clears activeDiffEditor without
+		// disposing them, so a discard reached after the view was closed used to sweep the artifacts
+		// and leave three window-level handlers plus any pending deferred reveal installed on a
+		// session the caller keeps when this method returns with ownership retained.
+		this.disposeActiveEditorListener()
+		this.cancelDeferredScroll()
+
 		// open() creates the directories and the empty placeholder BEFORE it assigns
 		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
 		// vscode.diff call), so an abandoned create can leave artifacts on disk with no
@@ -681,9 +690,6 @@ export class DiffViewProvider {
 			// of that buffer recreate the file with content nobody ever approved.
 			let bufferUnconfirmed = true
 			try {
-				this.disposeActiveEditorListener()
-				this.cancelDeferredScroll()
-
 				if (document.isDirty) {
 					// Restore the buffer to what this edit started from - the empty placeholder for a create,
 					// the content already on disk for a modify. A refused applyEdit leaves the unapproved streamed
