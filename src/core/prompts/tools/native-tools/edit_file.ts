@@ -59,8 +59,7 @@ const edit_file = {
 				expected_replacements: {
 					type: "number",
 					description:
-						"Number of replacements expected. Defaults to 1 if not specified. Use when you want to replace multiple occurrences of the same text.",
-					minimum: 1,
+						"Number of replacements expected. Must be 1 or greater. Defaults to 1 if not specified. Use when you want to replace multiple occurrences of the same text.",
 				},
 			},
 			required: ["file_path", "old_string", "new_string"],

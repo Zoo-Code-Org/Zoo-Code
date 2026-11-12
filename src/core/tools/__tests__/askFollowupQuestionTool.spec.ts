@@ -166,6 +166,20 @@ describe("AskFollowupQuestionTool", () => {
 		expect(mockTask.ask).toHaveBeenCalledWith("followup", expectedJson, false)
 	})
 
+	it("limits follow-up suggestions to four", async () => {
+		const params = {
+			question: "Choose an option",
+			follow_up: ["A", "B", "C", "D", "E"].map((text) => ({ text })),
+		}
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		const payload = JSON.parse(vi.mocked(mockTask.ask).mock.calls[0][1] ?? "") as {
+			suggest: Array<{ answer: string }>
+		}
+		expect(payload.suggest.map(({ answer }) => answer)).toEqual(["A", "B", "C", "D"])
+	})
+
 	it("should normalize malformed object mode values", async () => {
 		const params = {
 			question: "Switch mode?",

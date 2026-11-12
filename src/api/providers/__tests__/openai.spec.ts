@@ -1895,6 +1895,26 @@ describe("OpenAiHandler - strict tool schemas", () => {
 			},
 		},
 	]
+	const constrainedTools: OpenAI.Chat.ChatCompletionFunctionTool[] = [
+		{
+			type: "function",
+			function: {
+				name: "ask_followup_question",
+				description: "Ask a question",
+				parameters: {
+					type: "object",
+					properties: {
+						follow_up: {
+							type: "array",
+							items: { type: "string" },
+							minItems: 1,
+							maxItems: 4,
+						},
+					},
+				},
+			},
+		},
+	]
 	const baseOptions = () =>
 		makeApiHandlerOptions({
 			openAiApiKey: "test-api-key",
@@ -1919,6 +1939,22 @@ describe("OpenAiHandler - strict tool schemas", () => {
 		expect(request.tools[0].function.parameters.additionalProperties).toBe(false)
 	})
 
+	it.each([undefined, true])("removes unsupported constraints when strict schemas are %s", async (strict) => {
+		const options = strict === undefined ? baseOptions() : { ...baseOptions(), openAiStrictToolSchemas: strict }
+		const handler = new OpenAiHandler(options)
+		const stream = handler.createMessage(systemPrompt, messages, {
+			taskId: "test-task",
+			tools: constrainedTools,
+		})
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		const followUp = request.tools[0].function.parameters.properties.follow_up
+		expect(request.tools[0].function.strict).toBe(true)
+		expect(followUp.minItems).toBe(1)
+		expect(followUp.maxItems).toBeUndefined()
+	})
+
 	it("sends strict: false with the declared schema when openAiStrictToolSchemas is false", async () => {
 		const handler = new OpenAiHandler({ ...baseOptions(), openAiStrictToolSchemas: false })
 		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
@@ -1928,6 +1964,19 @@ describe("OpenAiHandler - strict tool schemas", () => {
 		expect(request.tools[0].function.strict).toBe(false)
 		// Declared schema preserved: original required array, no additionalProperties coercion
 		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
+	it("keeps unsupported constraints when strict schemas are disabled", async () => {
+		const handler = new OpenAiHandler({ ...baseOptions(), openAiStrictToolSchemas: false })
+		const stream = handler.createMessage(systemPrompt, messages, {
+			taskId: "test-task",
+			tools: constrainedTools,
+		})
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters.properties.follow_up.maxItems).toBe(4)
 	})
 
 	it("propagates a gateway 400 that rejects strict tool schemas", async () => {
