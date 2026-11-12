@@ -1320,7 +1320,8 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 	let forcedDirectory: string | null = null
 	let forcedTarget: string | null = null
 
-	// The same hole the guard at line 1518 covers for the merge rows is here in three rows, and the
+	// The same hole the guard of commit 36ad6819342e covers for the merge rows is here in three
+	// rows, and the
 	// finding on row 4555925401 names the clearest of them: this block acquires a leaf lock, releases it
 	// inline, and a row that fails before that line leaves the lock held by this process while its
 	// renewal timer keeps the artefact fresh. Row by row guards would mean three of them, so the guard
