@@ -3820,7 +3820,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// If we're not streaming then `abortStream` won't be called.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				this.diffReversionPromise = this.diffViewProvider.revertChanges().catch(console.error)
+				// The field records that the reversion settled. Whether a rollback actually ran is
+				// revertChanges()'s own report, and a disposing task has nothing left to act on either way.
+				this.diffReversionPromise = this.diffViewProvider
+					.revertChanges()
+					.then(() => undefined)
+					.catch(console.error)
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
