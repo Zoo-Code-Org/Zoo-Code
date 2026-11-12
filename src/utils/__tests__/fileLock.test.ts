@@ -1313,6 +1313,42 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 	let lockModule = ""
 	let generatesShortNames = false
 	let traceIndex = 0
+	let heldAliasLeaf: (() => Promise<void>) | null = null
+	let heldAliasSibling: (() => Promise<void>) | null = null
+	let heldLinkLock: (() => Promise<void>) | null = null
+	let heldLinkSibling: (() => Promise<void>) | null = null
+	let forcedDirectory: string | null = null
+	let forcedTarget: string | null = null
+
+	// The same hole the guard at line 1518 covers for the merge rows is here in three rows, and the
+	// finding on row 4555925401 names the clearest of them: this block acquires a leaf lock, releases it
+	// inline, and a row that fails before that line leaves the lock held by this process while its
+	// renewal timer keeps the artefact fresh. Row by row guards would mean three of them, so the guard
+	// goes on the block in the same shape, releasing only what has not been released and clearing the
+	// record before awaiting, so a release that lands late cannot be released twice and the row that
+	// failed still reports its own assertion.
+	afterEach(async () => {
+		if (heldAliasLeaf !== null) {
+			const give = heldAliasLeaf
+			heldAliasLeaf = null
+			await give()
+		}
+		if (heldAliasSibling !== null) {
+			const give = heldAliasSibling
+			heldAliasSibling = null
+			await give()
+		}
+		if (heldLinkLock !== null) {
+			const give = heldLinkLock
+			heldLinkLock = null
+			await give()
+		}
+		if (heldLinkSibling !== null) {
+			const give = heldLinkSibling
+			heldLinkSibling = null
+			await give()
+		}
+	})
 	beforeAll(async () => {
 		actualLock = (await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")).lock
 		lockModule = createRequire(import.meta.url).resolve("proper-lockfile")
@@ -1363,8 +1399,10 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 			const aliasLeaf = aliasOf(target)
 			expect(aliasLeaf).not.toBe(target)
 			const releaseLeaf = await acquireFileLock(target, { immediate: true })
+			heldAliasLeaf = releaseLeaf
 			// The coexistence half: a sibling with its own name and its own inode has to get in.
 			const releaseSibling = await acquireFileLock(sibling, { immediate: true })
+			heldAliasSibling = releaseSibling
 			const bothPlaced = [
 				"state-sidecar-leaf-for-coheld-lock-testing.json.lock",
 				"task-history-leaf-for-coheld-lock-testing.json.lock",
@@ -1404,7 +1442,9 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 			expect(await siblingProbe.waitForExit()).toBe(1)
 			expect(artefactsOf(directory)).toEqual(bothPlaced)
 			await releaseLeaf()
+			heldAliasLeaf = null
 			await releaseSibling()
+			heldAliasSibling = null
 			expect(artefactsOf(directory)).toEqual([])
 		},
 	)
@@ -1414,6 +1454,7 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 		const sibling = path.join(directory, "state-sidecar-leaf-for-sibling-admission.json")
 		fs.writeFileSync(sibling, '{"pre":1}', "utf8")
 		const releaseLeaf = await acquireFileLock(target, { immediate: true })
+		heldAliasLeaf = releaseLeaf
 		const holder = startLockHolder(sibling, "hold", lockModule, directory, nextTraceName(), false, {
 			holdMs: volumeAliasTimeoutMs,
 			waitForAssertions: true,
@@ -1439,6 +1480,7 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 			expect(traceLines.some((line) => line.startsWith("ASSERTIONS-DONE "))).toBe(true)
 			expect(traceLines.some((line) => line.startsWith("HOLD-EXPIRED "))).toBe(false)
 			await releaseLeaf()
+			heldAliasLeaf = null
 			expect(artefactsOf(directory)).toEqual([])
 		} finally {
 			// Always this process to end it: an assertion failure above must not leave the child
@@ -1461,7 +1503,9 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 			fs.writeFileSync(sibling, '{"pre":1}', "utf8")
 			expect(fs.statSync(link).ino).toBe(fs.statSync(target).ino)
 			const releaseLink = await acquireFileLock(link, { immediate: true })
+			heldLinkLock = releaseLink
 			const releaseSibling = await acquireFileLock(sibling, { immediate: true })
+			heldLinkSibling = releaseSibling
 			expect(artefactsOf(directory)).toEqual(["history.json.lock", "state-sidecar.json.lock"])
 			expect(canonicalLockKey(link)).not.toBe(canonicalLockKey(sibling))
 			const probe = startLockHolder(target, "try", lockModule, directory, nextTraceName())
@@ -1472,10 +1516,47 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 			expect(await probe.waitForExit()).toBe(1)
 			expect(artefactsOf(directory)).toEqual(["history.json.lock", "state-sidecar.json.lock"])
 			await releaseLink()
+			heldLinkLock = null
 			await releaseSibling()
+			heldLinkSibling = null
 			expect(artefactsOf(directory)).toEqual([])
 		},
 	)
+
+	it("leaves the leaf lock held when a row fails before its release", { timeout: 30000 }, async () => {
+		const { directory, target } = scenario("coheld-forced-failure", "task-history-leaf-for-forced-failure.json")
+		forcedDirectory = directory
+		forcedTarget = target
+		heldAliasLeaf = await acquireFileLock(target, { immediate: true })
+		let forced = ""
+		try {
+			// The failure the finding names, forced on purpose so that the letting go is what is
+			// tested: an assertion that lands while this process still holds the leaf lock, before
+			// any release line in this block would have run.
+			expect(artefactsOf(directory)).toEqual([])
+		} catch (thrown) {
+			forced = String(thrown).slice(0, 40)
+		}
+		expect(forced).not.toBe("")
+		// What that failure leaves at the instant it lands, before any block guard can run: the
+		// artefact still sitting under this process. The row after this one is the assertion about
+		// the guard, because a hook cannot run inside the row that failed.
+		expect(artefactsOf(directory)).toEqual(["task-history-leaf-for-forced-failure.json.lock"])
+	})
+
+	it("gives back the leaf lock that a failed row left held", { timeout: 30000 }, async () => {
+		if (forcedDirectory === null || forcedTarget === null) {
+			throw new Error("the forced failure row recorded no objects to check")
+		}
+		// Running here, after the guard of this block, is the point: what is asserted is what the
+		// guard left, namely no artefact under this process and the same path acquirable again by
+		// an immediate call that refuses rather than waits.
+		expect(artefactsOf(forcedDirectory)).toEqual([])
+		heldAliasLeaf = await acquireFileLock(forcedTarget, { immediate: true })
+		await heldAliasLeaf()
+		heldAliasLeaf = null
+		expect(artefactsOf(forcedDirectory)).toEqual([])
+	})
 })
 
 /**
