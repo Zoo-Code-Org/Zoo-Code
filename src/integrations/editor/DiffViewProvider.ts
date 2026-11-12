@@ -41,6 +41,12 @@ export class DiffViewProvider {
 	 * unlink.
 	 */
 	private placeholderPath: string | undefined
+	/**
+	 * The exact content open() wrote at placeholderPath, recorded so the abandoned cleanup can
+	 * tell its own empty placeholder from content something else put in the same path between
+	 * open() and the discard. Cleared wherever placeholderPath is cleared.
+	 */
+	private placeholderContent: string | undefined
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -144,6 +150,9 @@ export class DiffViewProvider {
 			// the write succeeds, so a failed write does not claim ownership of a file we did
 			// not create.
 			this.placeholderPath = absolutePath
+			// Record what was written, not only where: the placeholder is empty by construction, and the
+			// abandoned cleanup below removes a file only while it still holds exactly this.
+			this.placeholderContent = ""
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -369,6 +378,7 @@ export class DiffViewProvider {
 		// The write below is the approved one: whatever placeholder open() created at this path
 		// becomes real content, so it is no longer an artifact this edit may remove.
 		this.placeholderPath = undefined
+		this.placeholderContent = undefined
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
@@ -582,7 +592,9 @@ export class DiffViewProvider {
 		// Same reason for the placeholder and its recorded content: an await below may reject and
 		// the caller then runs reset(), which drops both fields too.
 		const placeholderPath = this.placeholderPath
+		const placeholderContent = this.placeholderContent
 		this.placeholderPath = undefined
+		this.placeholderContent = undefined
 
 		let editorFailure: unknown
 		// open() creates the directories and the empty placeholder BEFORE it assigns
@@ -640,13 +652,43 @@ export class DiffViewProvider {
 			// saveDirectly() sets it for a file that was written with approval, so unlinking
 			// absolutePath unconditionally can delete content the user approved.
 			if (placeholderPath) {
-				await fs.unlink(placeholderPath).catch((error: unknown) => {
-					// open() creates the placeholder; if it is already gone there is nothing
-					// left to remove and the discard did its job.
-					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-						throw error
+				// Remove the placeholder only while it still holds what open() wrote there. Content can
+				// land in that path between open() and this discard - the user typing into the preview, a
+				// formatter, a later edit - and unlinking it here would delete bytes nobody approved. A
+				// placeholder with no recorded content is a path a caller installed without open() having
+				// written it, and it keeps the unconditional behaviour it has always had.
+				let placeholderAlreadyGone = false
+				let placeholderStillMatches = true
+				if (placeholderContent !== undefined) {
+					try {
+						placeholderStillMatches = (await fs.readFile(placeholderPath, "utf-8")) === placeholderContent
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+							placeholderAlreadyGone = true
+						} else {
+							throw error
+						}
 					}
-				})
+				}
+				if (!placeholderAlreadyGone) {
+					if (placeholderStillMatches) {
+						await fs.unlink(placeholderPath).catch((error: unknown) => {
+							// open() creates the placeholder; if it is already gone there is nothing
+							// left to remove and the discard did its job.
+							if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+								throw error
+							}
+						})
+					} else {
+						// Kept on disk and reported through the catch below, which is the channel this site
+						// already uses for a cleanup it could not finish, and surfaced to the caller as a
+						// cleanup failure exactly the way an unlink failure is. No new reporting channel is
+						// introduced here; the file does not have one to name.
+						throw new Error(
+							`Kept ${placeholderPath}: it no longer holds the empty placeholder this edit wrote.`,
+						)
+					}
+				}
 			}
 
 			// Remove only the directories this edit created, in reverse order.
@@ -709,6 +751,7 @@ export class DiffViewProvider {
 			await this.closeFileTab(absolutePath)
 			await fs.unlink(absolutePath)
 			this.placeholderPath = undefined
+			this.placeholderContent = undefined
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
@@ -1287,6 +1330,7 @@ export class DiffViewProvider {
 		this.originalContent = undefined
 		this.createdDirs = []
 		this.placeholderPath = undefined
+		this.placeholderContent = undefined
 		this.documentWasOpen = false
 		this.documentWasPinned = false
 		this.activeDiffEditor = undefined
