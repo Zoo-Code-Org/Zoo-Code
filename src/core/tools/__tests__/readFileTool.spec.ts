@@ -1746,6 +1746,22 @@ describe("ReadFileTool", () => {
 				expect(obs).toBeDefined()
 				expect(obs!.version).toBe(calledVersion)
 			})
+			it("a failed read (absent path) leaves the registry empty and flags the tool turn", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				// Full bigint stats, so a swallowed stat failure cannot be what makes this row pass.
+				mockedFsStat.mockResolvedValue(makeStats())
+				mockedFsReadFile.mockRejectedValue(new Error("ENOENT"))
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "missing.ts" }, mockTask as unknown as Task, callbacks)
+				expect(observeSpy).toHaveBeenCalledTimes(0)
+				expect(reg.get(path.resolve("/test/workspace", "missing.ts"))).toBeUndefined()
+				expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			})
 			it("observes the token taken before the read, not the one after it", async () => {
 				// A token computed after the read can describe bytes the model never saw: if the
 				// file changes between the read and the stat, the registry ends up holding a newer
