@@ -2809,7 +2809,7 @@ describe("DiffViewProvider", () => {
 				const document = makeTextDocument({
 					uri: makeUri(mockTargetPath),
 					getText: vi.fn().mockReturnValue("a\nCHANGED\nc\nd\n"),
-					positionAt: vi.fn((offset: number) => ({ line: 0, character: offset })),
+					positionAt: vi.fn((offset: number) => makePosition(0, offset)),
 				})
 				Object.assign(document, { isDirty: true })
 				const editor = makeTextEditor({ document, visibleRanges: [makeRange()], revealRange })
@@ -2884,8 +2884,12 @@ describe("DiffViewProvider", () => {
 					activeEditorListener: makeDisposable({ dispose: disposeActive }),
 					diffEditorSelectionListener: makeDisposable({ dispose: disposeSelection }),
 					diffScrollListener: makeDisposable({ dispose: disposeScroll }),
+					// The pending reveal is seeded here, next to the listeners, because the field is declared
+					// ReturnType<typeof setTimeout> on the provider while this file resolves the global timer call
+					// to the other declaration; assigning the same handle through bracket notation would need an
+					// assertion. Same handle, same fake clock, same late-reveal guard.
+					deferredScrollTimer: setTimeout(lateReveal, 300),
 				})
-				diffViewProvider["deferredScrollTimer"] = setTimeout(lateReveal, 300)
 				vi.mocked(fs.unlink).mockResolvedValue(undefined)
 				await diffViewProvider.discardUnapprovedStream()
 				expect(disposeActive).toHaveBeenCalledOnce()
