@@ -55,8 +55,8 @@ export interface SafeWriteTextOptions {
 export class StagingPathError extends Error {
 	readonly stagingPath: string
 
-	constructor(message: string, stagingPath: string) {
-		super(message)
+	constructor(message: string, stagingPath: string, cause?: unknown) {
+		super(message, cause === undefined ? undefined : { cause })
 		this.name = "StagingPathError"
 		this.stagingPath = stagingPath
 	}
@@ -163,8 +163,8 @@ function _fsyncFile(fd: number): void {
 }
 
 /** Save the DACL of *srcPath* to a dump file on Windows.
- * Returns null when the dump was written successfully, otherwise the icacls error so the
- * caller can attach it as the cause of the refusal. Never throws. */
+ * Returns null when the dump was written successfully, otherwise the icacls error.
+ * Never throws. */
 async function _saveDaclWindows(
 	srcPath: string,
 	dumpPath: string,
@@ -184,7 +184,7 @@ async function _saveDaclWindows(
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Returns null on success, otherwise the icacls error so the caller can attach it as the cause. */
+ * Returns null on success, otherwise the icacls error. */
 async function _restoreDaclWindows(
 	dirPath: string,
 	dumpPath: string,
@@ -431,7 +431,7 @@ export async function safeWriteText(
 		// protect.
 		const targetStat = await fs.lstat(targetPath, { bigint: true }).catch((error: unknown) => {
 			if (errorCode(error) !== "ENOENT") {
-				throw new StagingPathError("Staging file could not be compared with the target", supplied)
+				throw new StagingPathError("Staging file could not be compared with the target", supplied, error)
 			}
 			return null
 		})
@@ -578,10 +578,9 @@ export async function safeWriteText(
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
 					// Copy, never move. Renaming the target away leaves the canonical path absent for
-					// the whole commit window: readers see a missing file, and a concurrent
-					// writer can create a new target that a later rollback would destroy. A copy
-					// keeps the target present, so the step 4 rename is the only change to the
-					// canonical path. The copy is flushed so the retained content survives a crash.
+					// the whole commit window: readers see a missing file. A copy keeps the target
+					// present, so the step 4 rename is the only change to the canonical path. The
+					// copy is flushed so the retained content survives a crash.
 					try {
 						// Create the destination BEFORE any content exists at it, with the mode fixed
 						// at open time. fs.copyFile picks the destination mode itself (the platform
