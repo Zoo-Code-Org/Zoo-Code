@@ -35,7 +35,7 @@ function configure(configuration: CodeIndexLogConfiguration): void {
 			.sort((left, right) => right.length - left.length)
 		workspacePattern = roots.length
 			? new RegExp(
-					`(?:${roots.map((root) => root.split(/[\\/]/).map(escapePattern).join("[\\\\/]")).join("|")})(?:[\\\\/]|(?=$|[\\s\"',:)]))`,
+					`(?:${roots.map((root) => root.split(/[\\/]/).map(escapePattern).join("[\\\\/]")).join("|")})(?:[\\\\/]|(?=$|[\\s"',:)]))`,
 					"gi",
 				)
 			: undefined

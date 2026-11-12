@@ -48,6 +48,7 @@ vi.mock("../../../../core/ignore/RooIgnoreController", () => ({
 }))
 vi.mock("../../code-index-log", () => ({
 	codeIndexLog: {
+		info: vi.fn(),
 		redact: (message: string) => message,
 		createFailureBatch: vi.fn(() => ({ record: vi.fn(), flush: vi.fn() })),
 	},

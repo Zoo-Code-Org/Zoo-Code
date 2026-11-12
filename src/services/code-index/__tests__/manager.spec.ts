@@ -181,7 +181,9 @@ describe("CodeIndexManager lifecycle", () => {
 			parser: manager["parser"]!,
 		}))
 		vi.mocked(CodeIndexServiceFactory.prototype.validateEmbedder).mockResolvedValue({ valid: true })
-		vi.mocked(CodeIndexOrchestrator).mockImplementation(() => orchestratorDouble())
+		vi.mocked(CodeIndexOrchestrator).mockImplementation(function () {
+			return orchestratorDouble()
+		})
 		semble()
 	})
 
@@ -1018,9 +1020,9 @@ describe("CodeIndexManager lifecycle", () => {
 		const { EmbeddingError } = await import("../shared/indexing-errors")
 		const { CodeIndexOrchestrator: ActualOrchestrator } =
 			await vi.importActual<typeof import("../orchestrator")>("../orchestrator")
-		vi.mocked(CodeIndexOrchestrator).mockImplementation(
-			(...argumentsUsed) => new ActualOrchestrator(...argumentsUsed),
-		)
+		vi.mocked(CodeIndexOrchestrator).mockImplementation(function (...argumentsUsed) {
+			return new ActualOrchestrator(...argumentsUsed)
+		})
 		const pacer = manager.providerPacerRegistry.get(services.embedder.rateLimitScope)
 		pacer.reportRateLimit(
 			new EmbeddingError("limited", { status: 429 }, { retryAfterMs: 1000 }),

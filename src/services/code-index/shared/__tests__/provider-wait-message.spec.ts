@@ -1,10 +1,11 @@
 import { formatProviderWaitMessage } from "../provider-wait-message"
 import { t } from "../../../../i18n"
+import { clearAllMocks } from "../../../../test-utils/reset"
 
 vi.mock("../../../../i18n", () => ({ t: vi.fn((key: string) => key) }))
 
 describe("formatProviderWaitMessage", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it.each([undefined, 123_000])("formats a provider wait with resume time %s", (resumeAt) => {
 		const key =

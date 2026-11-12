@@ -7,6 +7,7 @@ import { QdrantVectorStore } from "../qdrant-client"
 import { VectorStoreError } from "../../shared/indexing-errors"
 import { retryWithPolicy, type RetryFailure } from "../../shared/retry-policy"
 import { waitForRetry } from "../../embedders/cancellation"
+import { clearAllMocks } from "../../../../test-utils/reset"
 
 vi.mock("../../../../i18n", () => ({ t: (key: string) => key }))
 vi.mock("../../code-index-log", () => ({
@@ -22,7 +23,7 @@ let requests: Array<{ method: string | undefined; url: string; body: unknown }>
 const workspacePath = path.resolve("qdrant-contract-workspace")
 
 beforeEach(async () => {
-	vi.clearAllMocks()
+	clearAllMocks()
 	nock.enableNetConnect("127.0.0.1")
 	responseStatus = 200
 	retryAfter = undefined
@@ -110,7 +111,8 @@ it.each([
 it.each(["upsert", "delete", "verify"] as const)("%s is a single attempt without the policy", async (activity) => {
 	responseStatus = 503
 	await expect(operation(activity)).rejects.toMatchObject({ classification: "server", statusCode: 503 })
-	expect(requests).toHaveLength(activity === "verify" ? 2 : 1)
+	// Verify issues two concurrent counts; the rejection can arrive before the second reaches the server.
+	await vi.waitFor(() => expect(requests).toHaveLength(activity === "verify" ? 2 : 1))
 	expect(waitForRetry).not.toHaveBeenCalled()
 })
 
