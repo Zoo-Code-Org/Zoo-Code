@@ -26,6 +26,7 @@ vitest.mock("../../../i18n", () => ({
 	t: (key: string) => key,
 }))
 
+import type { MockInstance } from "vitest"
 import OpenAI from "openai"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
@@ -500,10 +501,17 @@ describe("ZooGatewayHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		let consoleError: MockInstance<typeof console.error>
+
 		beforeEach(() => {
 			mockCreate.mockImplementation(async () => ({
 				choices: [{ message: { role: "assistant", content: "Test completion response" } }],
 			}))
+			consoleError = vitest.spyOn(console, "error").mockImplementation(() => {})
+		})
+
+		afterEach(() => {
+			consoleError.mockRestore()
 		})
 
 		it("returns completion text from the gateway", async () => {
@@ -586,6 +594,27 @@ describe("ZooGatewayHandler", () => {
 			)
 		})
 
+		it.each([
+			["a raw AbortError", Object.assign(new Error("The user aborted a request"), { name: "AbortError" })],
+			["the SDK abort error", new Error("Request was aborted.")],
+		])(
+			"normalizes %s from the model lookup to the provider AbortError while the caller signal is live",
+			async (_label, lookupFailure: Error) => {
+				const { getModels, refreshModels } = await import("../fetchers/modelCache")
+				vitest.mocked(getModels).mockRejectedValue(lookupFailure)
+				vitest.mocked(refreshModels).mockRejectedValue(lookupFailure)
+				const handler = new ZooGatewayHandler(mockOptions)
+
+				await expect(
+					handler.completePrompt("Test", { abortSignal: new AbortController().signal }),
+				).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The Zoo Gateway request was aborted",
+				})
+				expect(mockCreate).not.toHaveBeenCalled()
+			},
+		)
+
 		it("rejects with an AbortError when the timeout alone expires during the SDK call", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			let sdkSignal: AbortSignal | undefined
@@ -616,6 +645,36 @@ describe("ZooGatewayHandler", () => {
 				name: "AbortError",
 				message: "The Zoo Gateway request was aborted",
 			})
+			// The abort is not a failure of the notification, so nothing is logged.
+			expect(consoleError).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			["with a live caller signal", true, new Error("notification failed"), "notification failed"],
+			["without a caller signal", false, "notification dismissed", "notification dismissed"],
+		])(
+			"logs a failed gateway error notification and still rejects with the gateway error, %s",
+			async (_label, withSignal: boolean, notificationFailure: unknown, logged: string) => {
+				const handler = new ZooGatewayHandler(mockOptions)
+				mockCreate.mockRejectedValue(makeApiError(402, { message: "out of credits" }))
+				showErrorMessage.mockRejectedValue(notificationFailure)
+				const options = withSignal ? { abortSignal: new AbortController().signal } : undefined
+
+				await expect(handler.completePrompt("Test", options)).rejects.toThrow(
+					"Zoo Gateway completion error: out of credits",
+				)
+				expect(consoleError).toHaveBeenCalledWith("Failed to surface Zoo Gateway error:", logged)
+			},
+		)
+
+		it("rethrows an SDK failure that is not an Error unchanged", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const failure = { reason: "upstream failure" }
+			mockCreate.mockRejectedValue(failure)
+
+			await expect(handler.completePrompt("Test", { abortSignal: new AbortController().signal })).rejects.toBe(
+				failure,
+			)
 		})
 
 		it("rejects with an AbortError when the timeout alone expires during model lookup", async () => {
@@ -679,6 +738,26 @@ describe("ZooGatewayHandler", () => {
 			await expect(handler.completePrompt("Test", { abortSignal: caller.signal })).rejects.toMatchObject({
 				name: "AbortError",
 			})
+			expect(showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("shows no gateway error for a 402 that rejects just before the caller aborts", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const caller = new AbortController()
+			let rejectCompletion: (reason: unknown) => void = () => {}
+			const completion = new Promise((_resolve, reject) => {
+				rejectCompletion = reject
+			})
+			mockCreate.mockImplementation(() => completion)
+
+			const pending = handler.completePrompt("Test", { abortSignal: caller.signal })
+			await vitest.waitFor(() => expect(mockCreate).toHaveBeenCalled())
+			// This callback runs after the handler's own race settles with the 402 but before completePrompt
+			// resumes, so only the abort check before the notification keeps the 402 notification away.
+			completion.catch(() => caller.abort())
+			rejectCompletion(makeApiError(402))
+
+			await expect(pending).rejects.toMatchObject({ name: "AbortError" })
 			expect(showErrorMessage).not.toHaveBeenCalled()
 		})
 
