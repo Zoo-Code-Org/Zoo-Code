@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Der Suchanbieter hat die Anfragerate begrenzt. Die Indexierung wird nach der Wartezeit des Anbieters automatisch fortgesetzt.",
 	"authenticationFailed": "Erstellung von Einbettungen fehlgeschlagen: Authentifizierung fehlgeschlagen. Bitte überprüfe deinen API-Schlüssel.",
 	"failedWithStatus": "Erstellung von Einbettungen nach {{attempts}} Versuchen fehlgeschlagen: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Erstellung von Einbettungen nach {{attempts}} Versuchen fehlgeschlagen: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "Kann keine Dienste erstellen: Code-Indizierung ist nicht richtig konfiguriert"
 	},
 	"orchestrator": {
+		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
+		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
+		"parserFailed": "Die Code-Indexierung wurde beim Parsen von {{filePath}} ({{category}}) gestoppt. Behebe den Fehler in der Datei und starte die Indexierung ausdrücklich erneut, oder deaktiviere sie. Dies ist kein Modell- oder Anbieterfehler.",
+		"indexingFilesRetrying": "Fehlgeschlagene Dateien werden erneut versucht. Ein Teilindex ist verfügbar.",
+		"indexingFilesFailed": "Es bestehen weiterhin Dateifehler. Keine automatischen Wiederholungen ausstehend. Ein Teilindex ist verfügbar.",
+		"indexingStopping": "Indexierung wird gestoppt...",
 		"indexingFailedNoBlocks": "Indizierung fehlgeschlagen: Keine Code-Blöcke wurden erfolgreich indiziert. Dies deutet normalerweise auf ein Embedder-Konfigurationsproblem hin.",
 		"fileWatcherStarted": "Datei-Watcher gestartet.",
 		"fileWatcherStopped": "Datei-Watcher gestoppt.",

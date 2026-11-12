@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Nhà cung cấp tìm kiếm đã giới hạn tốc độ yêu cầu. Việc lập chỉ mục tự động tiếp tục sau khi hết thời gian chờ của nhà cung cấp.",
 	"authenticationFailed": "Không thể tạo nhúng: Xác thực không thành công. Vui lòng kiểm tra khóa API của bạn.",
 	"failedWithStatus": "Không thể tạo nhúng sau {{attempts}} lần thử: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Không thể tạo nhúng sau {{attempts}} lần thử: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "Không thể tạo dịch vụ: Lập chỉ mục mã không được cấu hình đúng cách"
 	},
 	"orchestrator": {
+		"providerWaiting": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục",
+		"providerWaitingUntil": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục lúc {{time}}",
+		"parserFailed": "Đã dừng lập chỉ mục mã khi phân tích {{filePath}} ({{category}}). Sửa tệp rồi chủ động bắt đầu lập chỉ mục để thử lại, hoặc tắt lập chỉ mục. Đây không phải lỗi mô hình hay nhà cung cấp.",
+		"indexingFilesRetrying": "Đang thử lại các tệp bị lỗi. Có thể dùng chỉ mục một phần.",
+		"indexingFilesFailed": "Vẫn còn tệp bị lỗi. Không có lần thử lại tự động nào đang chờ. Có thể dùng chỉ mục một phần.",
+		"indexingStopping": "Đang dừng lập chỉ mục...",
 		"indexingFailedNoBlocks": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công. Điều này thường cho thấy vấn đề cấu hình embedder.",
 		"fileWatcherStarted": "Trình theo dõi tệp đã khởi động.",
 		"fileWatcherStopped": "Trình theo dõi tệp đã dừng.",

@@ -8,13 +8,8 @@ import { Node } from "web-tree-sitter"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
-// Mock TelemetryService
-vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
-	TelemetryService: {
-		instance: {
-			captureEvent: vi.fn(),
-		},
-	},
+vi.mock("../../code-index-log", () => ({
+	codeIndexLog: { error: vi.fn(), warn: vi.fn() },
 }))
 
 // Override Jest-based fs/promises mock with vitest-compatible version
@@ -41,6 +36,7 @@ const mockLanguageParser = {
 	js: {
 		parser: {
 			parse: vi.fn((content: string) => ({
+				delete: vi.fn(),
 				rootNode: {
 					text: content,
 					startPosition: { row: 0 },

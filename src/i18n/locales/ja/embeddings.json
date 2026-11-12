@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "検索プロバイダーのレート制限に達しました。プロバイダーの待機時間が終了すると、インデックス作成が自動的に再開されます。",
 	"authenticationFailed": "埋め込みの作成に失敗しました：認証に失敗しました。APIキーを確認してください。",
 	"failedWithStatus": "{{attempts}}回試行しましたが、埋め込みの作成に失敗しました：HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "{{attempts}}回試行しましたが、埋め込みの作成に失敗しました：{{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "サービスを作成できません: コードインデックスが正しく設定されていません"
 	},
 	"orchestrator": {
+		"providerWaiting": "{{service}} を待機中です。インデックス作成は自動的に再開されます",
+		"providerWaitingUntil": "{{service}} を待機中です。インデックス作成は {{time}} に自動的に再開されます",
+		"parserFailed": "{{filePath}} の解析中にコードのインデックス作成が停止しました（{{category}}）。ファイルを修正し、インデックス作成を明示的に開始して再試行するか、インデックス作成を無効にしてください。モデルやプロバイダーのエラーではありません。",
+		"indexingFilesRetrying": "失敗したファイルを再試行しています。部分的なインデックスを利用できます。",
+		"indexingFilesFailed": "ファイルのエラーが残っています。自動再試行の予定はありません。部分的なインデックスを利用できます。",
+		"indexingStopping": "インデックス作成を停止中...",
 		"indexingFailedNoBlocks": "インデックス作成に失敗しました：コードブロックが正常にインデックス化されませんでした。これは通常、エンベッダーの設定問題を示しています。",
 		"fileWatcherStarted": "ファイルウォッチャーが開始されました。",
 		"fileWatcherStopped": "ファイルウォッチャーが停止されました。",

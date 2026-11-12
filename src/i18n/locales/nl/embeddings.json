@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "De zoekprovider heeft het aantal aanvragen beperkt. De indexering wordt automatisch hervat na de wachttijd van de provider.",
 	"authenticationFailed": "Insluitingen maken mislukt: Authenticatie mislukt. Controleer je API-sleutel.",
 	"failedWithStatus": "Insluitingen maken mislukt na {{attempts}} pogingen: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Insluitingen maken mislukt na {{attempts}} pogingen: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "Kan geen services maken: Code-indexering is niet correct geconfigureerd"
 	},
 	"orchestrator": {
+		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
+		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
+		"parserFailed": "Code-indexering is gestopt tijdens het parseren van {{filePath}} ({{category}}). Herstel het bestand en start de indexering expliciet om het opnieuw te proberen, of schakel indexering uit. Dit is geen model- of providerfout.",
+		"indexingFilesRetrying": "Mislukte bestanden worden opnieuw geprobeerd. Een gedeeltelijke index is beschikbaar.",
+		"indexingFilesFailed": "Er zijn nog bestandsfouten. Geen automatische nieuwe pogingen in afwachting. Een gedeeltelijke index is beschikbaar.",
+		"indexingStopping": "Indexering wordt gestopt...",
 		"indexingFailedNoBlocks": "Indexering mislukt: Geen codeblokken werden succesvol geïndexeerd. Dit duidt meestal op een embedder configuratieprobleem.",
 		"fileWatcherStarted": "Bestandsmonitor gestart.",
 		"fileWatcherStopped": "Bestandsmonitor gestopt.",

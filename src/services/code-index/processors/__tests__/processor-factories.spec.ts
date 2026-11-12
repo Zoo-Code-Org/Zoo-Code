@@ -7,15 +7,14 @@ import { CacheManager } from "../../cache-manager"
 import { BATCH_SEGMENT_THRESHOLD } from "../../constants"
 import { OpenAiEmbedder } from "../../embedders/openai"
 import { QdrantVectorStore } from "../../vector-store/qdrant-client"
-import { CodeIndexServiceFactory } from "../../service-factory"
-import { CodeIndexConfigManager } from "../../config-manager"
-import { EmbedderFactory } from "../../embedders/embedder-factory"
-import { VectorStoreFactory } from "../../vector-store/vector-store-factory"
-import type { CodeIndexConfig } from "../../interfaces/config"
+import { ParseWorkerClient } from "../../parse-worker-client"
+import { IndexWriteGate } from "../../index-write-gate"
+import { GenerationAllocator } from "../../generation-allocator"
+import { FileFailureRegistry } from "../../file-failure-registry"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { DirectoryScannerFactory } from "../directory-scanner-factory"
 import { FileWatcherFactory } from "../file-watcher-factory"
 import { getEmbeddingBatchSize } from "../get-embedding-batch-size"
-import { codeParser } from "../parser"
 import { DirectoryScanner } from "../scanner"
 import { FileWatcher } from "../file-watcher"
 
@@ -25,8 +24,7 @@ vi.mock("vscode", () => ({
 vi.mock("../../cache-manager")
 vi.mock("../../embedders/openai")
 vi.mock("../../vector-store/qdrant-client")
-vi.mock("../../config-manager")
-vi.mock("../parser", () => ({ codeParser: { parseFile: vi.fn() } }))
+vi.mock("../../parse-worker-client")
 vi.mock("../scanner")
 vi.mock("../file-watcher")
 
@@ -36,14 +34,20 @@ describe("processor factories", () => {
 
 	function dependencies() {
 		const context = makeExtensionContext()
+		const cacheManager = new CacheManager(context, "/workspace")
 		return {
 			context,
 			workspacePath: "/workspace",
-			cacheManager: new CacheManager(context, "/workspace"),
+			cacheManager,
 			embedder: new OpenAiEmbedder({ openAiNativeApiKey: "test-key" }),
 			vectorStore: new QdrantVectorStore("/workspace", "http://localhost:6333", 512),
-			parser: codeParser,
+			parser: new ParseWorkerClient(),
 			ignoreInstance: ignore(),
+			writeGate: new IndexWriteGate(),
+			generations: new GenerationAllocator(cacheManager),
+			failures: new FileFailureRegistry(),
+			isCurrentAttempt: vi.fn(() => true),
+			providerPacers: new ProviderPacerRegistry(),
 		}
 	}
 
@@ -67,6 +71,12 @@ describe("processor factories", () => {
 				options.cacheManager,
 				options.ignoreInstance,
 				batchSize,
+				options.writeGate,
+				options.generations,
+				options.failures,
+				options.workspacePath,
+				options.isCurrentAttempt,
+				options.providerPacers,
 			)
 			expect(FileWatcher).toHaveBeenCalledWith(
 				options.workspacePath,
@@ -77,6 +87,12 @@ describe("processor factories", () => {
 				options.ignoreInstance,
 				undefined,
 				batchSize,
+				options.parser,
+				options.writeGate,
+				options.generations,
+				options.failures,
+				options.isCurrentAttempt,
+				options.providerPacers,
 			)
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name)
 			expect(configuration.get).toHaveBeenCalledWith("codeIndex.embeddingBatchSize", BATCH_SEGMENT_THRESHOLD)
@@ -139,49 +155,62 @@ describe("processor factories", () => {
 		expect(warn).not.toHaveBeenCalled()
 	})
 
-	it("preserves service factory wiring, including the explicitly supplied watcher cache", () => {
+	it("keeps shared retry budgets and current-attempt callbacks across processor recreation", () => {
 		const options = dependencies()
-		const watcherCache = new CacheManager(options.context, "/workspace")
-		const configManager = Object.create(CodeIndexConfigManager.prototype) as CodeIndexConfigManager
-		const config: CodeIndexConfig = { isConfigured: true, embedderProvider: "openai-compatible" }
-		Object.defineProperty(configManager, "isFeatureConfigured", { value: true })
-		vi.mocked(configManager.getConfig).mockReturnValue(config)
-		const createEmbedder = vi.spyOn(EmbedderFactory.prototype, "create").mockReturnValue(options.embedder)
-		const createVectorStore = vi.spyOn(VectorStoreFactory.prototype, "create").mockReturnValue(options.vectorStore)
-		const factory = new CodeIndexServiceFactory(configManager, options.workspacePath, options.cacheManager)
+		options.failures.renew("file.ts", "revision")
+		const budget = options.failures.getRetryBudget("file.ts", "revision", "embed")
+		budget.retriesUsed = 2
+		const reset = vi.spyOn(options.failures, "resetAllBudgets")
+		const scanners = new DirectoryScannerFactory()
+		const watchers = new FileWatcherFactory()
 
-		const services = factory.createServices(options.context, watcherCache, options.ignoreInstance)
+		for (const current of [true, false]) {
+			options.isCurrentAttempt.mockReturnValue(current)
+			scanners.create(options)
+			watchers.create(options)
+			const scannerArguments = vi.mocked(DirectoryScanner).mock.lastCall!
+			const watcherArguments = vi.mocked(FileWatcher).mock.lastCall!
+			expect(scannerArguments[2]).toBe(options.parser)
+			expect(watcherArguments[8]).toBe(options.parser)
+			expect(scannerArguments[6]).toBe(options.writeGate)
+			expect(watcherArguments[9]).toBe(options.writeGate)
+			expect(scannerArguments[7]).toBe(options.generations)
+			expect(watcherArguments[10]).toBe(options.generations)
+			expect(scannerArguments[8]).toBe(options.failures)
+			expect(watcherArguments[11]).toBe(options.failures)
+			expect(scannerArguments[10]).toBe(options.isCurrentAttempt)
+			expect(watcherArguments[12]).toBe(options.isCurrentAttempt)
+			expect(scannerArguments[11]).toBe(options.providerPacers)
+			expect(watcherArguments[13]).toBe(options.providerPacers)
+			expect(scannerArguments[10]?.()).toBe(current)
+			expect(watcherArguments[12]?.()).toBe(current)
+		}
 
-		expect(configManager.getConfig).toHaveBeenCalledTimes(1)
-		expect(createEmbedder).toHaveBeenCalledExactlyOnceWith(config)
-		expect(createVectorStore).toHaveBeenCalledExactlyOnceWith(config, options.workspacePath)
-		expect(services).toEqual({
-			embedder: options.embedder,
-			vectorStore: options.vectorStore,
-			parser: codeParser,
-			scanner: vi.mocked(DirectoryScanner).mock.instances[0],
-			fileWatcher: vi.mocked(FileWatcher).mock.instances[0],
-		})
-		expect(vi.mocked(DirectoryScanner).mock.calls[0][3]).toBe(options.cacheManager)
-		expect(vi.mocked(FileWatcher).mock.calls[0][2]).toBe(watcherCache)
-		expect(vi.mocked(FileWatcher).mock.calls[0][0]).toBe(options.workspacePath)
+		expect(options.failures.getRetryBudget("file.ts", "revision", "embed")).toBe(budget)
+		expect(budget.retriesUsed).toBe(2)
+		expect(reset).not.toHaveBeenCalled()
 	})
 
-	it("does not create services when indexing is not configured", () => {
-		const options = dependencies()
-		const configManager = Object.create(CodeIndexConfigManager.prototype) as CodeIndexConfigManager
-		Object.defineProperty(configManager, "isFeatureConfigured", { value: false })
-		const createEmbedder = vi.spyOn(EmbedderFactory.prototype, "create")
-		const createVectorStore = vi.spyOn(VectorStoreFactory.prototype, "create")
-		const factory = new CodeIndexServiceFactory(configManager, options.workspacePath, options.cacheManager)
+	it("preserves optional constructor defaults for standalone factory callers", () => {
+		const { embedder, vectorStore, parser, cacheManager, ignoreInstance, context, workspacePath } = dependencies()
+		new DirectoryScannerFactory().create({ embedder, vectorStore, parser, cacheManager, ignoreInstance })
+		new FileWatcherFactory().create({ workspacePath, context, embedder, vectorStore, cacheManager, ignoreInstance })
 
-		expect(() => factory.createServices(options.context, options.cacheManager, options.ignoreInstance)).toThrow(
-			"serviceFactory.codeIndexingNotConfigured",
-		)
-		expect(configManager.getConfig).not.toHaveBeenCalled()
-		expect(createEmbedder).not.toHaveBeenCalled()
-		expect(createVectorStore).not.toHaveBeenCalled()
-		expect(DirectoryScanner).not.toHaveBeenCalled()
-		expect(FileWatcher).not.toHaveBeenCalled()
+		expect(vi.mocked(DirectoryScanner).mock.lastCall?.slice(6)).toEqual([
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		])
+		expect(vi.mocked(FileWatcher).mock.lastCall?.slice(8)).toEqual([
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		])
 	})
 })

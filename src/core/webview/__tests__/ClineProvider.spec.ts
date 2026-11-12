@@ -31,6 +31,7 @@ import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
+import type { CodeIndexManager } from "../../../services/code-index/manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -5813,10 +5814,23 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				initialize: vi.fn().mockResolvedValue(undefined),
 				state: "Standby",
 				isInitialized: true,
-				startIndexing: vi.fn().mockResolvedValue(undefined),
-				stopIndexing: vi.fn(),
+				startIndexing: vi.fn<CodeIndexManager["startIndexing"]>().mockResolvedValue(undefined),
+				stopIndexing: vi.fn<CodeIndexManager["stopIndexing"]>().mockResolvedValue(undefined),
+				recoverFromError: vi.fn().mockResolvedValue(undefined),
 				clearIndexData: vi.fn().mockResolvedValue(undefined),
-				getCurrentStatus: vi.fn().mockReturnValue({ systemStatus: "Standby" }),
+				getCurrentStatus: vi.fn<CodeIndexManager["getCurrentStatus"]>().mockReturnValue({
+					systemStatus: "Standby",
+					message: "Ready",
+					processedItems: 0,
+					totalItems: 0,
+					currentItemUnit: "blocks",
+					workspacePath: "/test/workspace",
+					workspaceEnabled: true,
+					autoEnableDefault: false,
+					failedFiles: [],
+					failedFileSummary: undefined,
+					providerWaits: [],
+				}),
 			},
 			overrides,
 		)
@@ -5825,27 +5839,51 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		vi.clearAllMocks()
 	})
 
-	it("logs a detached indexing rejection without rejecting the handler", async () => {
-		let rejectIndexing!: (error: Error) => void
-		const indexingPromise = new Promise<void>((_, reject) => {
-			rejectIndexing = reject
+	const deferred = () => {
+		let resolve!: () => void
+		let reject!: (error: Error) => void
+		const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+			resolve = resolvePromise
+			reject = rejectPromise
 		})
-		const manager = createIndexManager({
-			startIndexing: vi.fn().mockReturnValue(indexingPromise),
+		return { promise, resolve, reject }
+	}
+
+	it.each(["resolve", "reject"] as const)("awaits explicit indexing startup before %s", async (outcome) => {
+		const startup = deferred()
+		const entered = deferred()
+		const manager = createIndexManager()
+		manager.startIndexing.mockImplementation(() => {
+			entered.resolve()
+			return startup.promise
 		})
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
+		let completed = false
+		const pending = webviewMessageHandler(provider, { type: "startIndexing" }).then(() => {
+			completed = true
+		})
+		await entered.promise
+		await Promise.resolve()
+		await Promise.resolve()
 
-		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		expect(completed).toBe(false)
 		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(manager.setWorkspaceEnabled).toHaveBeenCalledExactlyOnceWith(true)
+		expect(manager.setWorkspaceEnabled).toHaveBeenCalledBefore(manager.startIndexing)
+		expect(manager.startIndexing).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
+		expect(manager.initialize).not.toHaveBeenCalled()
+		expect(manager.recoverFromError).not.toHaveBeenCalled()
+		expect(provider.log).not.toHaveBeenCalled()
+		if (outcome === "reject") startup.reject(new Error("boom"))
+		else startup.resolve()
+		await pending
+
+		expect(completed).toBe(true)
 		expect(manager.startIndexing).toHaveBeenCalledOnce()
-
-		rejectIndexing(new Error("boom"))
-		await Promise.resolve()
-		await Promise.resolve()
-
-		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: boom")
+		if (outcome === "reject") expect(provider.log).toHaveBeenCalledExactlyOnceWith("Error starting indexing: boom")
+		else expect(provider.log).not.toHaveBeenCalled()
 	})
 
 	it("covers the changed task-operation happy paths", async () => {
@@ -6001,7 +6039,15 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		expect(manager.getCurrentStatus).not.toHaveBeenCalled()
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "indexingStatusUpdate",
-			values: expect.objectContaining({ systemStatus: "Error", message: expect.any(String) }),
+			values: {
+				systemStatus: "Error",
+				message: expect.any(String),
+				processedItems: 0,
+				totalItems: 0,
+				currentItemUnit: "items",
+				workspacePath: undefined,
+				failedFiles: [],
+			},
 		})
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
 		expect(getScope).toHaveBeenCalledTimes(2)
@@ -6022,27 +6068,108 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		expect(provider.log).toHaveBeenCalledWith("Cannot start indexing: No workspace folder open")
 	})
 
-	it("catches both start-indexing calls during error recovery", async () => {
-		const manager = createIndexManager({
-			isInitialized: false,
-			startIndexing: vi
-				.fn()
-				.mockRejectedValueOnce(new Error("first failure"))
-				.mockRejectedValueOnce(new Error("second failure")),
+	it.each(["requestIndexingStatus", "stopIndexing"] as const)(
+		"forwards the whole computed status snapshot for %s",
+		async (type) => {
+			const status: ReturnType<CodeIndexManager["getCurrentStatus"]> = {
+				systemStatus: "Standby",
+				message: "Partial index: 2 files failed",
+				processedItems: 7,
+				totalItems: 9,
+				currentItemUnit: "files",
+				workspacePath: "/snapshot/workspace",
+				workspaceEnabled: false,
+				autoEnableDefault: true,
+				failedFiles: [
+					{ path: "src/first.ts", activity: "embed", reason: "Provider unavailable", state: "exhausted" },
+					{ path: "src/second.ts", activity: "verify", reason: "Verification failed", state: "exhausted" },
+				],
+				failedFileSummary: {
+					path: "src/first.ts",
+					activity: "embed",
+					reason: "Provider unavailable",
+					state: "exhausted",
+					count: 2,
+				},
+				providerWaits: [{ service: "embedding", resumeAt: 123_000, waitingFiles: ["src/waiting.ts"] }],
+			}
+			const manager = createIndexManager()
+			manager.getCurrentStatus.mockReturnValue(status)
+			const provider = createProvider({
+				getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
+			})
+
+			await webviewMessageHandler(provider, { type })
+
+			expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
+			expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+				type: "indexingStatusUpdate",
+				values: status,
+			})
+			const [message] = vi.mocked(provider.postMessageToWebview).mock.calls[0]
+			expect(message.values).toBe(status)
+		},
+	)
+
+	it.each(["resolve", "reject"] as const)("awaits stop completion before %s", async (outcome) => {
+		const stopping = deferred()
+		const entered = deferred()
+		const manager = createIndexManager()
+		manager.stopIndexing.mockImplementation(() => {
+			entered.resolve()
+			return stopping.promise
 		})
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
+		})
+		let completed = false
+		const pending = webviewMessageHandler(provider, { type: "stopIndexing" }).then(() => {
+			completed = true
+		})
+		await entered.promise
+		await Promise.resolve()
+		await Promise.resolve()
+
+		expect(completed).toBe(false)
+		expect(manager.stopIndexing).toHaveBeenCalledExactlyOnceWith()
+		expect(manager.getCurrentStatus).not.toHaveBeenCalled()
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(provider.log).not.toHaveBeenCalled()
+		if (outcome === "reject") stopping.reject(new Error("stop failure"))
+		else stopping.resolve()
+		await pending
+
+		expect(completed).toBe(true)
+		if (outcome === "reject") {
+			expect(provider.log).toHaveBeenCalledExactlyOnceWith("Error stopping indexing: stop failure")
+			expect(manager.getCurrentStatus).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		} else {
+			expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
+			expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+				type: "indexingStatusUpdate",
+				values: manager.getCurrentStatus.mock.results[0].value,
+			})
+			expect(provider.log).not.toHaveBeenCalled()
+		}
+	})
+
+	it("starts once from an uninitialized error without separate initialization or recovery", async () => {
+		const manager = createIndexManager({ isInitialized: false, state: "Error" })
+		manager.startIndexing.mockRejectedValue(new Error("startup failure"))
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await webviewMessageHandler(provider, { type: "startIndexing" })
-		await Promise.resolve()
 
-		expect(manager.startIndexing).toHaveBeenCalledTimes(2)
-		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: first failure")
-		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: second failure")
+		expect(manager.startIndexing).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
+		expect(manager.initialize).not.toHaveBeenCalled()
+		expect(manager.recoverFromError).not.toHaveBeenCalled()
+		expect(provider.log).toHaveBeenCalledExactlyOnceWith("Error starting indexing: startup failure")
 	})
 
-	it("covers changed stop, toggle, and detached toggle rejection paths", async () => {
+	it("logs workspace-toggle startup failures without publishing a successful toggle status", async () => {
 		const manager = createIndexManager({
 			startIndexing: vi.fn().mockRejectedValue(new Error("toggle failure")),
 		})
@@ -6060,13 +6187,11 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			values: manager.getCurrentStatus(),
 		})
 		await webviewMessageHandler(provider, { type: "toggleWorkspaceIndexing", bool: true })
-		await Promise.resolve()
-
 		expect(manager.stopIndexing).toHaveBeenCalledOnce()
-		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: toggle failure")
-		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "indexingStatusUpdate" }),
-		)
+		expect(manager.startIndexing).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
+		expect(manager.initialize).not.toHaveBeenCalled()
+		expect(provider.log).toHaveBeenCalledExactlyOnceWith("Error toggling workspace indexing: toggle failure")
+		expect(provider.postMessageToWebview).toHaveBeenCalledOnce()
 	})
 
 	it("does not toggle indexing or publish status without a workspace scope", async () => {
@@ -6148,16 +6273,28 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
+	it.each([
+		{ enabled: true, outcome: "resolve" },
+		{ enabled: true, outcome: "reject" },
+		{ enabled: false, outcome: "resolve" },
+		{ enabled: false, outcome: "reject" },
+	] as const)("awaits auto-enable enabled=$enabled with $outcome", async ({ enabled, outcome }) => {
 		const { CodeIndexManagerRegistry } = await import("../../../services/code-index/code-index-manager-registry")
-		let workspaceEnabled = false
+		const operation = deferred()
+		const entered = deferred()
+		let workspaceEnabled = !enabled
 		const manager = createIndexManager({
 			setAutoEnableDefault: vi.fn().mockImplementation(async () => {
-				workspaceEnabled = true
+				workspaceEnabled = enabled
 			}),
-			startIndexing: vi.fn().mockRejectedValue(new Error("auto-enable failure")),
+		})
+		const indexingOperation = enabled ? manager.startIndexing : manager.stopIndexing
+		indexingOperation.mockImplementation(() => {
+			entered.resolve()
+			return operation.promise
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
+		// The registry double provides the enablement, startup, stop, and status members used by this handler.
 		const getAllInstances = vi
 			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
 			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
@@ -6166,15 +6303,53 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		})
 
 		try {
-			await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: true })
+			let completed = false
+			const pending = webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: enabled }).then(
+				() => {
+					completed = true
+				},
+			)
+			await entered.promise
+			await Promise.resolve()
 			await Promise.resolve()
 
+			expect(completed).toBe(false)
 			expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
-			expect(manager.startIndexing).toHaveBeenCalledOnce()
-			expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: auto-enable failure")
-			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
-				expect.objectContaining({ type: "indexingStatusUpdate" }),
-			)
+			expect(manager.setAutoEnableDefault).toHaveBeenCalledExactlyOnceWith(enabled)
+			expect(manager.initialize).not.toHaveBeenCalled()
+			expect(manager.recoverFromError).not.toHaveBeenCalled()
+			expect(manager.getCurrentStatus).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+			if (enabled) {
+				expect(manager.startIndexing).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
+				expect(manager.stopIndexing).not.toHaveBeenCalled()
+			} else {
+				expect(manager.stopIndexing).toHaveBeenCalledExactlyOnceWith()
+				expect(manager.startIndexing).not.toHaveBeenCalled()
+			}
+			if (outcome === "reject") operation.reject(new Error("auto-enable failure"))
+			else operation.resolve()
+			await pending
+
+			expect(completed).toBe(true)
+			expect(indexingOperation).toHaveBeenCalledOnce()
+			if (outcome === "reject") {
+				expect(provider.log).toHaveBeenCalledExactlyOnceWith(
+					enabled
+						? "Error starting auto-enabled indexing: auto-enable failure"
+						: "Error setting auto-enable default: auto-enable failure",
+				)
+			} else expect(provider.log).not.toHaveBeenCalled()
+			if (!enabled && outcome === "reject") {
+				expect(manager.getCurrentStatus).not.toHaveBeenCalled()
+				expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+			} else {
+				expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
+				expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+					type: "indexingStatusUpdate",
+					values: manager.getCurrentStatus.mock.results[0].value,
+				})
+			}
 		} finally {
 			getAllInstances.mockRestore()
 		}

@@ -1,8 +1,10 @@
-import type { MockedClass, MockedFunction } from "vitest"
+import { codeIndexLog } from "../../code-index-log"
+vi.mock("../../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), warn: vi.fn() } }))
+import type { MockedClass } from "vitest"
 import { OpenAI } from "openai"
 
 import { OpenAiEmbedder } from "../openai"
-import { MAX_ITEM_TOKENS, INITIAL_RETRY_DELAY_MS } from "../../constants"
+import { MAX_ITEM_TOKENS } from "../../constants"
 import { clearAllMocks } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK
@@ -19,13 +21,13 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 // Mock i18n
 vitest.mock("../../../../i18n", () => ({
-	t: (key: string, params?: Record<string, any>) => {
+	t: (key: string, params?: Record<string, unknown>) => {
 		const translations: Record<string, string> = {
 			"embeddings:authenticationFailed":
 				"Failed to create embeddings: Authentication failed. Please check your OpenAI API key.",
-			"embeddings:failedWithStatus": `Failed to create embeddings after ${params?.attempts} attempts: HTTP ${params?.statusCode} - ${params?.errorMessage}`,
-			"embeddings:failedWithError": `Failed to create embeddings after ${params?.attempts} attempts: ${params?.errorMessage}`,
-			"embeddings:failedMaxAttempts": `Failed to create embeddings after ${params?.attempts} attempts`,
+			"embeddings:failedWithStatus": `Failed to create embeddings: HTTP ${params?.statusCode} - ${params?.errorMessage}`,
+			"embeddings:failedWithError": `Failed to create embeddings: ${params?.errorMessage}`,
+			"embeddings:failedMaxAttempts": `Failed to create embeddings`,
 			"embeddings:textExceedsTokenLimit": `Text at index ${params?.index} exceeds maximum token limit (${params?.itemTokens} > ${params?.maxTokens}). Skipping.`,
 			"embeddings:rateLimitRetry": `Rate limit hit, retrying in ${params?.delayMs}ms (attempt ${params?.attempt}/${params?.maxRetries})`,
 		}
@@ -35,13 +37,13 @@ vitest.mock("../../../../i18n", () => ({
 
 // Mock console methods
 const consoleMocks = {
-	error: vitest.spyOn(console, "error").mockImplementation(function () {}),
-	warn: vitest.spyOn(console, "warn").mockImplementation(function () {}),
+	error: vitest.spyOn(codeIndexLog, "error").mockImplementation(function () {}),
+	warn: vitest.spyOn(codeIndexLog, "warn").mockImplementation(function () {}),
 }
 
 describe("OpenAiEmbedder", () => {
 	let embedder: OpenAiEmbedder
-	let mockEmbeddingsCreate: MockedFunction<any>
+	let mockEmbeddingsCreate: ReturnType<typeof vi.fn<(...arguments_: unknown[]) => Promise<unknown>>>
 	let MockedOpenAI: MockedClass<typeof OpenAI>
 
 	beforeEach(() => {
@@ -52,9 +54,10 @@ describe("OpenAiEmbedder", () => {
 		MockedOpenAI = OpenAI as MockedClass<typeof OpenAI>
 		mockEmbeddingsCreate = vitest.fn()
 
+		// Only embeddings.create is used; the SDK resource's private client is not needed.
 		MockedOpenAI.prototype.embeddings = {
 			create: mockEmbeddingsCreate,
-		} as any
+		} as unknown as OpenAI.Embeddings
 
 		embedder = new OpenAiEmbedder({
 			openAiNativeApiKey: "test-api-key",
@@ -68,7 +71,7 @@ describe("OpenAiEmbedder", () => {
 
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
-			expect(MockedOpenAI).toHaveBeenCalledWith({ apiKey: "test-api-key" })
+			expect(MockedOpenAI).toHaveBeenCalledWith({ apiKey: "test-api-key", maxRetries: 0 })
 			expect(embedder.embedderInfo.name).toBe("openai")
 		})
 
@@ -77,7 +80,7 @@ describe("OpenAiEmbedder", () => {
 				openAiEmbeddingModelId: "text-embedding-3-small",
 			})
 
-			expect(MockedOpenAI).toHaveBeenCalledWith({ apiKey: "not-provided" })
+			expect(MockedOpenAI).toHaveBeenCalledWith({ apiKey: "not-provided", maxRetries: 0 })
 		})
 
 		it("should use default model if not specified", () => {
@@ -102,10 +105,13 @@ describe("OpenAiEmbedder", () => {
 
 			const result = await embedder.createEmbeddings(testTexts)
 
-			expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
-				input: testTexts,
-				model: testModelId,
-			})
+			expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
+				{
+					input: testTexts,
+					model: testModelId,
+				},
+				undefined,
+			)
 			expect(result).toEqual({
 				embeddings: [[0.1, 0.2, 0.3]],
 				usage: { promptTokens: 10, totalTokens: 15 },
@@ -122,10 +128,13 @@ describe("OpenAiEmbedder", () => {
 
 			const result = await embedder.createEmbeddings(testTexts)
 
-			expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
-				input: testTexts,
-				model: testModelId,
-			})
+			expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
+				{
+					input: testTexts,
+					model: testModelId,
+				},
+				undefined,
+			)
 			expect(result).toEqual({
 				embeddings: [
 					[0.1, 0.2, 0.3],
@@ -146,10 +155,13 @@ describe("OpenAiEmbedder", () => {
 
 			await embedder.createEmbeddings(testTexts, customModel)
 
-			expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
-				input: testTexts,
-				model: customModel,
-			})
+			expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
+				{
+					input: testTexts,
+					model: customModel,
+				},
+				undefined,
+			)
 		})
 
 		it("should handle missing usage data gracefully", async () => {
@@ -202,13 +214,16 @@ describe("OpenAiEmbedder", () => {
 				const result = await embedder.createEmbeddings(testTexts)
 
 				// Verify warning was logged
-				expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`exceeds maximum token limit`))
+				expect(codeIndexLog.warn).toHaveBeenCalledWith(expect.stringContaining(`exceeds maximum token limit`))
 
 				// Verify only normal texts were processed
-				expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
-					input: [normalText, "another normal"],
-					model: testModelId,
-				})
+				expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
+					{
+						input: [normalText, "another normal"],
+						model: testModelId,
+					},
+					undefined,
+				)
 				expect(result.embeddings).toHaveLength(2)
 			})
 
@@ -253,7 +268,7 @@ describe("OpenAiEmbedder", () => {
 
 				const result = await embedder.createEmbeddings(testTexts)
 
-				expect(console.warn).toHaveBeenCalledTimes(2)
+				expect(codeIndexLog.warn).toHaveBeenCalledTimes(2)
 				expect(mockEmbeddingsCreate).not.toHaveBeenCalled()
 				expect(result).toEqual({
 					embeddings: [],
@@ -274,38 +289,22 @@ describe("OpenAiEmbedder", () => {
 				vitest.useRealTimers()
 			})
 
-			it("should retry on rate limit errors with exponential backoff", async () => {
-				const testTexts = ["Hello world"]
-				const rateLimitError = { status: 429, message: "Rate limit exceeded" }
-
-				mockEmbeddingsCreate
-					.mockRejectedValueOnce(rateLimitError)
-					.mockRejectedValueOnce(rateLimitError)
-					.mockResolvedValueOnce({
-						data: [{ embedding: [0.1, 0.2, 0.3] }],
-						usage: { prompt_tokens: 10, total_tokens: 15 },
-					})
-
-				const resultPromise = embedder.createEmbeddings(testTexts)
-
-				// Fast-forward through the delays
-				await vitest.advanceTimersByTimeAsync(INITIAL_RETRY_DELAY_MS) // First retry delay
-				await vitest.advanceTimersByTimeAsync(INITIAL_RETRY_DELAY_MS * 2) // Second retry delay
-
-				const result = await resultPromise
-
-				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(3)
-				expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("Rate limit hit, retrying in"))
-				expect(result).toEqual({
-					embeddings: [[0.1, 0.2, 0.3]],
-					usage: { promptTokens: 10, totalTokens: 15 },
+			it("returns rate limits without internal retries", async () => {
+				const cause = Object.assign(new Error("rate limited"), { status: 429, name: "ThrottlingException" })
+				mockEmbeddingsCreate.mockRejectedValue(cause)
+				await expect(embedder.createEmbeddings(["test"])).rejects.toMatchObject({
+					classification: "rate-limit",
+					statusCode: 429,
+					cause,
 				})
+				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
+				expect(vi.getTimerCount()).toBe(0)
 			})
 
 			it("should not retry on non-rate-limit errors", async () => {
 				const testTexts = ["Hello world"]
 				const authError = new Error("Unauthorized")
-				;(authError as any).status = 401
+				Object.assign(authError, { status: 401 })
 
 				mockEmbeddingsCreate.mockRejectedValue(authError)
 
@@ -314,18 +313,18 @@ describe("OpenAiEmbedder", () => {
 				)
 
 				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
-				expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
+				expect(codeIndexLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
 			})
 
 			it("should throw error immediately on non-retryable errors", async () => {
 				const testTexts = ["Hello world"]
 				const serverError = new Error("Internal server error")
-				;(serverError as any).status = 500
+				Object.assign(serverError, { status: 500 })
 
 				mockEmbeddingsCreate.mockRejectedValue(serverError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: HTTP 500 - Internal server error",
+					"Failed to create embeddings: HTTP 500 - Internal server error",
 				)
 
 				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
@@ -343,10 +342,10 @@ describe("OpenAiEmbedder", () => {
 				mockEmbeddingsCreate.mockRejectedValue(apiError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: API connection failed",
+					"Failed to create embeddings: API connection failed",
 				)
 
-				expect(console.error).toHaveBeenCalledWith(
+				expect(codeIndexLog.error).toHaveBeenCalledWith(
 					expect.stringContaining("OpenAI embedder error"),
 					expect.any(Error),
 				)
@@ -379,7 +378,7 @@ describe("OpenAiEmbedder", () => {
 			it("should provide specific authentication error message", async () => {
 				const testTexts = ["Hello world"]
 				const authError = new Error("Invalid API key")
-				;(authError as any).status = 401
+				Object.assign(authError, { status: 401 })
 
 				mockEmbeddingsCreate.mockRejectedValue(authError)
 
@@ -391,12 +390,12 @@ describe("OpenAiEmbedder", () => {
 			it("should provide detailed error message for HTTP errors", async () => {
 				const testTexts = ["Hello world"]
 				const httpError = new Error("Bad request")
-				;(httpError as any).status = 400
+				Object.assign(httpError, { status: 400 })
 
 				mockEmbeddingsCreate.mockRejectedValue(httpError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: HTTP 400 - Bad request",
+					"Failed to create embeddings: HTTP 400 - Bad request",
 				)
 			})
 
@@ -407,7 +406,7 @@ describe("OpenAiEmbedder", () => {
 				mockEmbeddingsCreate.mockRejectedValue(networkError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: Network timeout",
+					"Failed to create embeddings: Network timeout",
 				)
 			})
 
@@ -418,7 +417,7 @@ describe("OpenAiEmbedder", () => {
 				mockEmbeddingsCreate.mockRejectedValue(weirdError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: Custom error object",
+					"Failed to create embeddings: Custom error object",
 				)
 			})
 
@@ -429,7 +428,7 @@ describe("OpenAiEmbedder", () => {
 				mockEmbeddingsCreate.mockRejectedValue(unknownError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: Unknown error",
+					"Failed to create embeddings: Unknown error",
 				)
 			})
 
@@ -440,7 +439,7 @@ describe("OpenAiEmbedder", () => {
 				mockEmbeddingsCreate.mockRejectedValue(stringError)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: Something went wrong",
+					"Failed to create embeddings: Something went wrong",
 				)
 			})
 
@@ -472,7 +471,7 @@ describe("OpenAiEmbedder", () => {
 				mockEmbeddingsCreate.mockRejectedValue(errorWithResponseStatus)
 
 				await expect(embedder.createEmbeddings(testTexts)).rejects.toThrow(
-					"Failed to create embeddings after 3 attempts: HTTP 403 - Request failed",
+					"Failed to create embeddings: HTTP 403 - Request failed",
 				)
 			})
 		})
@@ -498,7 +497,7 @@ describe("OpenAiEmbedder", () => {
 
 		it("should fail validation with authentication error", async () => {
 			const authError = new Error("Invalid API key")
-			;(authError as any).status = 401
+			Object.assign(authError, { status: 401 })
 			mockEmbeddingsCreate.mockRejectedValue(authError)
 
 			const result = await embedder.validateConfiguration()
@@ -509,13 +508,10 @@ describe("OpenAiEmbedder", () => {
 
 		it("should fail validation with rate limit error", async () => {
 			const rateLimitError = new Error("Rate limit exceeded")
-			;(rateLimitError as any).status = 429
+			Object.assign(rateLimitError, { status: 429 })
 			mockEmbeddingsCreate.mockRejectedValue(rateLimitError)
 
-			const result = await embedder.validateConfiguration()
-
-			expect(result.valid).toBe(false)
-			expect(result.error).toBe("embeddings:validation.serviceUnavailable")
+			await expect(embedder.validateConfiguration()).rejects.toBe(rateLimitError)
 		})
 
 		it("should fail validation with connection error", async () => {
@@ -530,7 +526,7 @@ describe("OpenAiEmbedder", () => {
 
 		it("should fail validation with generic error", async () => {
 			const genericError = new Error("Unknown error")
-			;(genericError as any).status = 500
+			Object.assign(genericError, { status: 500 })
 			mockEmbeddingsCreate.mockRejectedValue(genericError)
 
 			const result = await embedder.validateConfiguration()

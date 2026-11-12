@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "El proveïdor de cerca ha limitat les sol·licituds. La indexació es reprèn automàticament quan acaba l’espera del proveïdor.",
 	"authenticationFailed": "No s'han pogut crear les incrustacions: ha fallat l'autenticació. Comproveu la vostra clau d'API.",
 	"failedWithStatus": "No s'han pogut crear les incrustacions després de {{attempts}} intents: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "No s'han pogut crear les incrustacions després de {{attempts}} intents: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "No es poden crear serveis: La indexació de codi no està configurada correctament"
 	},
 	"orchestrator": {
+		"providerWaiting": "Esperant {{service}}; la indexació es reprèn automàticament",
+		"providerWaitingUntil": "Esperant {{service}}; la indexació es reprèn automàticament a les {{time}}",
+		"parserFailed": "La indexació del codi s'ha aturat en analitzar {{filePath}} ({{category}}). Corregeix el fitxer i inicia explícitament la indexació per tornar-ho a provar, o desactiva-la. No és un error del model ni del proveïdor.",
+		"indexingFilesRetrying": "S'estan reintentant els fitxers amb errors. Hi ha un índex parcial disponible.",
+		"indexingFilesFailed": "Encara hi ha errors en fitxers. No hi ha reintents automàtics pendents. Hi ha un índex parcial disponible.",
+		"indexingStopping": "S'està aturant la indexació...",
 		"indexingFailedNoBlocks": "Indexació fallida: No s'ha indexat cap bloc de codi amb èxit. Això normalment indica un problema de configuració de l'embedder.",
 		"fileWatcherStarted": "Monitor de fitxers iniciat.",
 		"fileWatcherStopped": "Monitor de fitxers aturat.",

@@ -1,4 +1,6 @@
-import type { MockedClass, MockedFunction } from "vitest"
+import { codeIndexLog } from "../../code-index-log"
+vi.mock("../../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), warn: vi.fn() } }))
+import type { MockedClass } from "vitest"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { OpenAI } from "openai"
 import { OpenRouterEmbedder, OPENROUTER_DEFAULT_PROVIDER_NAME } from "../openrouter"
@@ -21,14 +23,14 @@ vi.mock("@roo-code/telemetry", () => ({
 
 // Mock i18n
 vi.mock("../../../../i18n", () => ({
-	t: (key: string, params?: Record<string, any>) => {
+	t: (key: string, params?: Record<string, unknown>) => {
 		const translations: Record<string, string> = {
 			"embeddings:validation.apiKeyRequired": "validation.apiKeyRequired",
 			"embeddings:authenticationFailed":
 				"Failed to create embeddings: Authentication failed. Please check your OpenRouter API key.",
-			"embeddings:failedWithStatus": `Failed to create embeddings after ${params?.attempts} attempts: HTTP ${params?.statusCode} - ${params?.errorMessage}`,
-			"embeddings:failedWithError": `Failed to create embeddings after ${params?.attempts} attempts: ${params?.errorMessage}`,
-			"embeddings:failedMaxAttempts": `Failed to create embeddings after ${params?.attempts} attempts`,
+			"embeddings:failedWithStatus": `Failed to create embeddings: HTTP ${params?.statusCode} - ${params?.errorMessage}`,
+			"embeddings:failedWithError": `Failed to create embeddings: ${params?.errorMessage}`,
+			"embeddings:failedMaxAttempts": `Failed to create embeddings`,
 			"embeddings:textExceedsTokenLimit": `Text at index ${params?.index} exceeds maximum token limit (${params?.itemTokens} > ${params?.maxTokens}). Skipping.`,
 			"embeddings:rateLimitRetry": `Rate limit hit, retrying in ${params?.delayMs}ms (attempt ${params?.attempt}/${params?.maxRetries})`,
 		}
@@ -40,13 +42,13 @@ const MockedOpenAI = OpenAI as MockedClass<typeof OpenAI>
 
 describe("OpenRouterEmbedder", () => {
 	const mockApiKey = "test-api-key"
-	let mockEmbeddingsCreate: MockedFunction<any>
-	let mockOpenAIInstance: any
+	let mockEmbeddingsCreate: ReturnType<typeof vi.fn<(...arguments_: unknown[]) => Promise<unknown>>>
+	let mockOpenAIInstance: { embeddings: { create: typeof mockEmbeddingsCreate } }
 
 	beforeEach(() => {
 		clearAllMocks()
-		vi.spyOn(console, "warn").mockImplementation(function () {})
-		vi.spyOn(console, "error").mockImplementation(function () {})
+		vi.spyOn(codeIndexLog, "warn").mockImplementation(function () {})
+		vi.spyOn(codeIndexLog, "error").mockImplementation(function () {})
 
 		// Setup mock OpenAI instance
 		mockEmbeddingsCreate = vi.fn()
@@ -57,7 +59,8 @@ describe("OpenRouterEmbedder", () => {
 		}
 
 		MockedOpenAI.mockImplementation(function () {
-			return mockOpenAIInstance
+			// The embedder only uses embeddings.create on this client double.
+			return mockOpenAIInstance as unknown as OpenAI
 		})
 	})
 
@@ -92,6 +95,7 @@ describe("OpenRouterEmbedder", () => {
 			expect(MockedOpenAI).toHaveBeenCalledWith({
 				baseURL: "https://openrouter.ai/api/v1",
 				apiKey: mockApiKey,
+				maxRetries: 0,
 				defaultHeaders: {
 					"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
 					"X-Title": "Zoo Code",
@@ -329,7 +333,7 @@ describe("OpenRouterEmbedder", () => {
 
 		it("should handle validation failure", async () => {
 			const authError = new Error("Invalid API key")
-			;(authError as any).status = 401
+			Object.assign(authError, { status: 401 })
 
 			mockEmbeddingsCreate.mockRejectedValue(authError)
 

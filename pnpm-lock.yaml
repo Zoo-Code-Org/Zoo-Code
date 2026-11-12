@@ -470,7 +470,7 @@ importers:
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
       '@qdrant/js-client-rest':
-        specifier: ^1.14.0
+        specifier: 1.20.0
         version: 1.20.0(typescript@5.9.3)
       '@roo-code/cloud':
         specifier: workspace:^

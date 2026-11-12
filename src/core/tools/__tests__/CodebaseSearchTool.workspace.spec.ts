@@ -37,17 +37,23 @@ vi.mock("../../../services/code-index/manager", () => ({
 				initialized = true
 				return { requiresRestart: false }
 			}),
-			searchIndex: vi.fn().mockResolvedValue([
-				{
-					score: 0.9,
-					payload: {
-						filePath: `${workspacePath}/src/result.ts`,
-						startLine: 2,
-						endLine: 4,
-						codeChunk: " match ",
+			searchIndex: vi.fn<CodeIndexManager["searchIndex"]>().mockResolvedValue({
+				results: [
+					{
+						id: "workspace-result",
+						score: 0.9,
+						payload: {
+							filePath: `${workspacePath}/src/result.ts`,
+							startLine: 2,
+							endLine: 4,
+							codeChunk: " match ",
+						},
 					},
-				},
-			]),
+				],
+				incomplete: false,
+				failedPaths: [],
+				waitingPaths: [],
+			}),
 			dispose: vi.fn(),
 		}
 	}),
@@ -75,8 +81,9 @@ describe("CodebaseSearchTool workspace selection", () => {
 		vi.mocked(getWorkspacePath).mockReturnValue(first.uri.fsPath)
 		// Only the provider context and task members consumed by this tool are needed.
 		provider = { context: makeExtensionContext(), contextProxy: {} } as ClineProvider
-		const taskStub: Pick<Task, "cwd" | "providerRef" | "consecutiveMistakeCount" | "say"> = {
+		const taskStub: Pick<Task, "cwd" | "providerRef" | "lifecycleSignal" | "consecutiveMistakeCount" | "say"> = {
 			cwd: second.uri.fsPath,
+			lifecycleSignal: new AbortController().signal,
 			providerRef: new WeakRef(provider),
 			consecutiveMistakeCount: 0,
 			say: vi.fn<Task["say"]>().mockResolvedValue(undefined),
@@ -106,7 +113,7 @@ describe("CodebaseSearchTool workspace selection", () => {
 		await new CodebaseSearchTool().execute({ query: "find match", path: "src" }, task, callbacks)
 
 		expect(callbacks.handleError).not.toHaveBeenCalled()
-		expect(taskManager.searchIndex).toHaveBeenCalledExactlyOnceWith("find match", "src")
+		expect(taskManager.searchIndex).toHaveBeenCalledExactlyOnceWith("find match", "src", task.lifecycleSignal)
 		expect(taskManager.initialize).not.toHaveBeenCalled()
 		expect(editorManager.searchIndex).not.toHaveBeenCalled()
 		expect(getWorkspacePath).not.toHaveBeenCalled()
@@ -122,6 +129,9 @@ describe("CodebaseSearchTool workspace selection", () => {
 					results: [
 						{ filePath: "/second/src/result.ts", score: 0.9, startLine: 2, endLine: 4, codeChunk: "match" },
 					],
+					incomplete: false,
+					failedPaths: [],
+					waitingPaths: [],
 				},
 			}),
 		)
@@ -137,7 +147,7 @@ describe("CodebaseSearchTool workspace selection", () => {
 		await new CodebaseSearchTool().execute({ query: "fallback" }, task, callbacks)
 
 		expect(getWorkspacePath).toHaveBeenCalledExactlyOnceWith()
-		expect(taskManager.searchIndex).toHaveBeenCalledExactlyOnceWith("fallback", undefined)
+		expect(taskManager.searchIndex).toHaveBeenCalledExactlyOnceWith("fallback", undefined, task.lifecycleSignal)
 		expect(editorManager.searchIndex).not.toHaveBeenCalled()
 		expect(callbacks.handleError).not.toHaveBeenCalled()
 		expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(
@@ -181,9 +191,19 @@ describe("CodebaseSearchTool workspace selection", () => {
 		await tool.execute({ query: "without an editor" }, task, callbacks)
 
 		expect(taskManager.searchIndex).toHaveBeenCalledTimes(3)
-		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(1, "before editor switch", undefined)
-		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(2, "after editor switch", undefined)
-		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(3, "without an editor", undefined)
+		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(
+			1,
+			"before editor switch",
+			undefined,
+			task.lifecycleSignal,
+		)
+		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(
+			2,
+			"after editor switch",
+			undefined,
+			task.lifecycleSignal,
+		)
+		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(3, "without an editor", undefined, task.lifecycleSignal)
 		expect(editorManager.searchIndex).not.toHaveBeenCalled()
 		expect(getWorkspacePath).not.toHaveBeenCalled()
 		expect(callbacks.handleError).not.toHaveBeenCalled()
@@ -225,7 +245,7 @@ describe("CodebaseSearchTool workspace selection", () => {
 
 		expect(manager.state).toBe("Indexing")
 		expect(manager.initialize).not.toHaveBeenCalled()
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith("external match", undefined)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith("external match", undefined, task.lifecycleSignal)
 		expect(callbacks.handleError).not.toHaveBeenCalled()
 	})
 })

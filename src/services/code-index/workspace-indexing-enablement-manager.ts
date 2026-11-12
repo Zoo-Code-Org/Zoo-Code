@@ -9,7 +9,6 @@ export class WorkspaceIndexingEnablementManager {
 			| "setWorkspaceEnabled"
 			| "isFeatureEnabled"
 			| "isFeatureConfigured"
-			| "initialize"
 			| "startIndexing"
 			| "stopIndexing"
 			| "getCurrentStatus"
@@ -22,10 +21,9 @@ export class WorkspaceIndexingEnablementManager {
 	): Promise<void> {
 		await this.manager.setWorkspaceEnabled(enabled)
 		if (enabled && this.manager.isFeatureEnabled && this.manager.isFeatureConfigured) {
-			await this.manager.initialize(provider.contextProxy)
-			void this.manager.startIndexing().catch((error) => provider.log(`Indexing error: ${error}`))
+			await this.manager.startIndexing(provider.contextProxy)
 		} else if (!enabled) {
-			this.manager.stopIndexing()
+			await this.manager.stopIndexing()
 		}
 		await provider.postMessageToWebview({
 			type: "indexingStatusUpdate",

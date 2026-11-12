@@ -1,4 +1,7 @@
-import { QdrantClient, Schemas } from "@qdrant/js-client-rest"
+import { codeIndexLog } from "../code-index-log"
+import { parseRetryAfterMs, VectorStoreError } from "../shared/indexing-errors"
+import { makeRateLimitScope } from "../provider-pacer"
+import { QdrantClient, QdrantClientResourceExhaustedError, Schemas } from "@qdrant/js-client-rest"
 import { createHash } from "crypto"
 import * as path from "path"
 import { v5 as uuidv5 } from "uuid"
@@ -7,10 +10,21 @@ import { Payload, VectorStoreSearchResult } from "../interfaces"
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_SEARCH_MIN_SCORE, QDRANT_CODE_BLOCK_NAMESPACE } from "../constants"
 import { t } from "../../../i18n"
 
+function normalizeVectorStoreError(error: unknown): VectorStoreError {
+	return new VectorStoreError(
+		error instanceof Error ? error.message : String(error),
+		error,
+		error instanceof QdrantClientResourceExhaustedError
+			? { classification: "rate-limit", statusCode: 429, retryAfterMs: parseRetryAfterMs(error.retry_after) }
+			: undefined,
+	)
+}
+
 /**
  * Qdrant implementation of the vector store interface
  */
 export class QdrantVectorStore implements IVectorStore {
+	readonly rateLimitScope: string
 	private readonly vectorSize!: number
 	private readonly DISTANCE_METRIC = "Cosine"
 
@@ -30,6 +44,7 @@ export class QdrantVectorStore implements IVectorStore {
 
 		// Store the resolved URL for our property
 		this.qdrantUrl = parsedUrl
+		this.rateLimitScope = makeRateLimitScope("qdrant", parsedUrl)
 		this.workspacePath = workspacePath
 
 		try {
@@ -133,7 +148,7 @@ export class QdrantVectorStore implements IVectorStore {
 			return collectionInfo
 		} catch (error: unknown) {
 			if (error instanceof Error) {
-				console.warn(
+				codeIndexLog.warn(
 					`[QdrantVectorStore] Warning during getCollectionInfo for "${this.collectionName}". Collection may not exist or another error occurred:`,
 					error.message,
 				)
@@ -197,7 +212,7 @@ export class QdrantVectorStore implements IVectorStore {
 			return created
 		} catch (error: any) {
 			const errorMessage = error?.message || error
-			console.error(
+			codeIndexLog.error(
 				`[QdrantVectorStore] Failed to initialize Qdrant collection "${this.collectionName}":`,
 				errorMessage,
 			)
@@ -220,7 +235,7 @@ export class QdrantVectorStore implements IVectorStore {
 	 * @returns Promise resolving to boolean indicating if a new collection was created
 	 */
 	private async _recreateCollectionWithNewDimension(existingVectorSize: number): Promise<boolean> {
-		console.warn(
+		codeIndexLog.warn(
 			`[QdrantVectorStore] Collection ${this.collectionName} exists with vector size ${existingVectorSize}, but expected ${this.vectorSize}. Recreating collection.`,
 		)
 
@@ -229,10 +244,10 @@ export class QdrantVectorStore implements IVectorStore {
 
 		try {
 			// Step 1: Attempt to delete the existing collection
-			console.log(`[QdrantVectorStore] Deleting existing collection ${this.collectionName}...`)
+			codeIndexLog.info(`[QdrantVectorStore] Deleting existing collection ${this.collectionName}...`)
 			await this.client.deleteCollection(this.collectionName)
 			deletionSucceeded = true
-			console.log(`[QdrantVectorStore] Successfully deleted collection ${this.collectionName}`)
+			codeIndexLog.info(`[QdrantVectorStore] Successfully deleted collection ${this.collectionName}`)
 
 			// Step 2: Wait a brief moment to ensure deletion is processed
 			await new Promise((resolve) => setTimeout(resolve, 100))
@@ -244,7 +259,7 @@ export class QdrantVectorStore implements IVectorStore {
 			}
 
 			// Step 4: Create the new collection with correct dimensions
-			console.log(
+			codeIndexLog.info(
 				`[QdrantVectorStore] Creating new collection ${this.collectionName} with vector size ${this.vectorSize}...`,
 			)
 			recreationAttempted = true
@@ -260,7 +275,7 @@ export class QdrantVectorStore implements IVectorStore {
 					on_disk: true,
 				},
 			})
-			console.log(`[QdrantVectorStore] Successfully created new collection ${this.collectionName}`)
+			codeIndexLog.info(`[QdrantVectorStore] Successfully created new collection ${this.collectionName}`)
 			return true
 		} catch (recreationError) {
 			const errorMessage = recreationError instanceof Error ? recreationError.message : String(recreationError)
@@ -275,7 +290,7 @@ export class QdrantVectorStore implements IVectorStore {
 				contextualErrorMessage = `Deleted existing collection but failed to create new collection with vector size ${this.vectorSize}. ${errorMessage}`
 			}
 
-			console.error(
+			codeIndexLog.error(
 				`[QdrantVectorStore] CRITICAL: Failed to recreate collection ${this.collectionName} for dimension change (${existingVectorSize} -> ${this.vectorSize}). ${contextualErrorMessage}`,
 			)
 
@@ -296,16 +311,29 @@ export class QdrantVectorStore implements IVectorStore {
 	 * Creates payload indexes for the collection, handling errors gracefully.
 	 */
 	private async _createPayloadIndexes(): Promise<void> {
+		// Completion verification depends on these indexes; initialization must fail if creation fails.
+		await this.client.createPayloadIndex(this.collectionName, {
+			field_name: "filePath",
+			field_schema: "keyword",
+			wait: true,
+		})
+		await this.client.createPayloadIndex(this.collectionName, {
+			field_name: "generation",
+			field_schema: "integer",
+			wait: true,
+		})
+
 		// Create index for the 'type' field to enable metadata filtering
 		try {
 			await this.client.createPayloadIndex(this.collectionName, {
 				field_name: "type",
 				field_schema: "keyword",
+				wait: true,
 			})
 		} catch (indexError: any) {
 			const errorMessage = (indexError?.message || "").toLowerCase()
 			if (!errorMessage.includes("already exists")) {
-				console.warn(
+				codeIndexLog.warn(
 					`[QdrantVectorStore] Could not create payload index for type on ${this.collectionName}. Details:`,
 					indexError?.message || indexError,
 				)
@@ -313,17 +341,18 @@ export class QdrantVectorStore implements IVectorStore {
 		}
 
 		// Create indexes for pathSegments fields
-		for (let i = 0; i <= 4; i++) {
+		for (let segmentIndex = 0; segmentIndex <= 4; segmentIndex++) {
 			try {
 				await this.client.createPayloadIndex(this.collectionName, {
-					field_name: `pathSegments.${i}`,
+					field_name: `pathSegments.${segmentIndex}`,
 					field_schema: "keyword",
+					wait: true,
 				})
 			} catch (indexError: any) {
 				const errorMessage = (indexError?.message || "").toLowerCase()
 				if (!errorMessage.includes("already exists")) {
-					console.warn(
-						`[QdrantVectorStore] Could not create payload index for pathSegments.${i} on ${this.collectionName}. Details:`,
+					codeIndexLog.warn(
+						`[QdrantVectorStore] Could not create payload index for pathSegments.${segmentIndex} on ${this.collectionName}. Details:`,
 						indexError?.message || indexError,
 					)
 				}
@@ -369,8 +398,8 @@ export class QdrantVectorStore implements IVectorStore {
 				wait: true,
 			})
 		} catch (error) {
-			console.error("Failed to upsert points:", error)
-			throw error
+			codeIndexLog.error("Failed to upsert points:", error)
+			throw normalizeVectorStoreError(error)
 		}
 	}
 
@@ -462,81 +491,64 @@ export class QdrantVectorStore implements IVectorStore {
 
 			return filteredPoints as VectorStoreSearchResult[]
 		} catch (error) {
-			console.error("Failed to search points:", error)
+			codeIndexLog.error("Failed to search points:", error)
 			throw error
 		}
 	}
 
-	/**
-	 * Deletes points by file path
-	 * @param filePath Path of the file to delete points for
-	 */
-	async deletePointsByFilePath(filePath: string): Promise<void> {
-		return this.deletePointsByMultipleFilePaths([filePath])
+	private relativeFilePath(filePath: string): string {
+		return path.normalize(path.isAbsolute(filePath) ? path.relative(this.workspacePath, filePath) : filePath)
 	}
 
-	async deletePointsByMultipleFilePaths(filePaths: string[]): Promise<void> {
-		if (filePaths.length === 0) {
-			return
+	async deletePointsByFilePath(filePath: string, beforeGeneration: number): Promise<void> {
+		return this.deletePointsByMultipleFilePaths([filePath], beforeGeneration)
+	}
+
+	async deletePointsByMultipleFilePaths(filePaths: string[], beforeGeneration: number): Promise<void> {
+		if (!Number.isSafeInteger(beforeGeneration) || beforeGeneration < 0) {
+			throw new Error("A non-negative safe integer generation cutoff is required")
 		}
+		if (filePaths.length === 0) return
 
-		try {
-			// First check if the collection exists
-			const collectionExists = await this.collectionExists()
-			if (!collectionExists) {
-				console.warn(
-					`[QdrantVectorStore] Skipping deletion - collection "${this.collectionName}" does not exist`,
-				)
-				return
-			}
-
-			const workspaceRoot = this.workspacePath
-
-			// Build filters using pathSegments to match the indexed fields
-			const filters = filePaths.map((filePath) => {
-				// IMPORTANT: Use the relative path to match what's stored in upsertPoints
-				// upsertPoints stores the relative filePath, not the absolute path
-				const relativePath = path.isAbsolute(filePath) ? path.relative(workspaceRoot, filePath) : filePath
-
-				// Normalize the relative path
-				const normalizedRelativePath = path.normalize(relativePath)
-
-				// Split the path into segments like we do in upsertPoints
-				const segments = normalizedRelativePath.split(path.sep).filter(Boolean)
-
-				// Create a filter that matches all segments of the path
-				// This ensures we only delete points that match the exact file path
-				const mustConditions = segments.map((segment, index) => ({
-					key: `pathSegments.${index}`,
-					match: { value: segment },
-				}))
-
-				return { must: mustConditions }
-			})
-
-			// Use 'should' to match any of the file paths (OR condition)
-			const filter = filters.length === 1 ? filters[0] : { should: filters }
-
-			await this.client.delete(this.collectionName, {
-				filter,
+		await this.client
+			.delete(this.collectionName, {
+				filter: {
+					must: [
+						{
+							key: "filePath",
+							match: { any: filePaths.map((filePath) => this.relativeFilePath(filePath)) },
+						},
+						{
+							should: [
+								{ key: "generation", range: { lt: beforeGeneration } },
+								{ is_empty: { key: "generation" } },
+							],
+						},
+					],
+				},
 				wait: true,
 			})
-		} catch (error: any) {
-			// Extract more detailed error information
-			const errorMessage = error?.message || String(error)
-			const errorStatus = error?.status || error?.response?.status || error?.statusCode
-			const errorDetails = error?.response?.data || error?.data || ""
-
-			console.error(`[QdrantVectorStore] Failed to delete points by file paths:`, {
-				error: errorMessage,
-				status: errorStatus,
-				details: errorDetails,
-				collection: this.collectionName,
-				fileCount: filePaths.length,
-				// Include first few file paths for debugging (avoid logging too many)
-				samplePaths: filePaths.slice(0, 3),
+			.catch((error: unknown) => {
+				throw normalizeVectorStoreError(error)
 			})
-		}
+	}
+
+	async countPointsForFile(filePath: string, generation: number): Promise<{ current: number; other: number }> {
+		const fileCondition = { key: "filePath", match: { value: this.relativeFilePath(filePath) } }
+		const generationCondition = { key: "generation", match: { value: generation } }
+		const [current, other] = await Promise.all([
+			this.client.count(this.collectionName, {
+				filter: { must: [fileCondition, generationCondition] },
+				exact: true,
+			}),
+			this.client.count(this.collectionName, {
+				filter: { must: [fileCondition], must_not: [generationCondition] },
+				exact: true,
+			}),
+		]).catch((error: unknown) => {
+			throw normalizeVectorStoreError(error)
+		})
+		return { current: current.count, other: other.count }
 	}
 
 	/**
@@ -549,7 +561,7 @@ export class QdrantVectorStore implements IVectorStore {
 				await this.client.deleteCollection(this.collectionName)
 			}
 		} catch (error) {
-			console.error(`[QdrantVectorStore] Failed to delete collection ${this.collectionName}:`, error)
+			codeIndexLog.error(`[QdrantVectorStore] Failed to delete collection ${this.collectionName}:`, error)
 			throw error // Re-throw to allow calling code to handle it
 		}
 	}
@@ -566,7 +578,7 @@ export class QdrantVectorStore implements IVectorStore {
 				wait: true,
 			})
 		} catch (error) {
-			console.error("Failed to clear collection:", error)
+			codeIndexLog.error("Failed to clear collection:", error)
 			throw error
 		}
 	}
@@ -610,12 +622,12 @@ export class QdrantVectorStore implements IVectorStore {
 
 			// Backward compatibility: No marker exists (old index or pre-marker version)
 			// Fall back to old logic - assume complete if collection has points
-			console.log(
+			codeIndexLog.info(
 				"[QdrantVectorStore] No indexing metadata marker found. Using backward compatibility mode (checking points_count > 0).",
 			)
 			return pointsCount > 0
 		} catch (error) {
-			console.warn("[QdrantVectorStore] Failed to check if collection has data:", error)
+			codeIndexLog.warn("[QdrantVectorStore] Failed to check if collection has data:", error)
 			return false
 		}
 	}
@@ -644,9 +656,9 @@ export class QdrantVectorStore implements IVectorStore {
 				],
 				wait: true,
 			})
-			console.log("[QdrantVectorStore] Marked indexing as complete")
+			codeIndexLog.info("[QdrantVectorStore] Marked indexing as complete")
 		} catch (error) {
-			console.error("[QdrantVectorStore] Failed to mark indexing as complete:", error)
+			codeIndexLog.error("[QdrantVectorStore] Failed to mark indexing as complete:", error)
 			throw error
 		}
 	}
@@ -675,9 +687,9 @@ export class QdrantVectorStore implements IVectorStore {
 				],
 				wait: true,
 			})
-			console.log("[QdrantVectorStore] Marked indexing as incomplete (in progress)")
+			codeIndexLog.info("[QdrantVectorStore] Marked indexing as incomplete (in progress)")
 		} catch (error) {
-			console.error("[QdrantVectorStore] Failed to mark indexing as incomplete:", error)
+			codeIndexLog.error("[QdrantVectorStore] Failed to mark indexing as incomplete:", error)
 			throw error
 		}
 	}

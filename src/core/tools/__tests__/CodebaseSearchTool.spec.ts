@@ -46,6 +46,7 @@ describe("CodebaseSearchTool", () => {
 			Task,
 			| "cwd"
 			| "providerRef"
+			| "lifecycleSignal"
 			| "consecutiveMistakeCount"
 			| "didToolFailInCurrentTurn"
 			| "sayAndCreateMissingParamError"
@@ -54,6 +55,7 @@ describe("CodebaseSearchTool", () => {
 		> = {
 			cwd: "/task",
 			providerRef: { deref, [Symbol.toStringTag]: "WeakRef" },
+			lifecycleSignal: new AbortController().signal,
 			consecutiveMistakeCount: 3,
 			didToolFailInCurrentTurn: false,
 			sayAndCreateMissingParamError: vi
@@ -75,7 +77,7 @@ describe("CodebaseSearchTool", () => {
 			isFeatureConfigured: true,
 			isInitialized: true,
 			initialize: vi.fn<CodeIndexManager["initialize"]>().mockResolvedValue({ requiresRestart: false }),
-			searchIndex: vi.fn<CodeIndexManager["searchIndex"]>().mockResolvedValue([]),
+			searchIndex: vi.fn<CodeIndexManager["searchIndex"]>().mockResolvedValue(searchResponse()),
 		}
 		vi.mocked(CodeIndexManagerRegistry.getOrCreate).mockReturnValue(manager as CodeIndexManager)
 		vi.mocked(getWorkspacePath).mockReturnValue("/fallback")
@@ -94,6 +96,14 @@ describe("CodebaseSearchTool", () => {
 			payload: { filePath: "/task/src/result.ts", startLine: 2, endLine: 4, codeChunk: " \n first\n  second \t" },
 			...overrides,
 		}
+	}
+
+	function searchResponse(
+		results: VectorStoreSearchResult[] = [],
+		failedPaths: string[] = [],
+		waitingPaths: string[] = [],
+	): Awaited<ReturnType<CodeIndexManager["searchIndex"]>> {
+		return { results, incomplete: failedPaths.length > 0 || waitingPaths.length > 0, failedPaths, waitingPaths }
 	}
 
 	it("exports a named tool instance", () => {
@@ -264,51 +274,86 @@ describe("CodebaseSearchTool", () => {
 		async (path) => {
 			vi.mocked(manager.searchIndex).mockImplementation(async () => {
 				expect(task.consecutiveMistakeCount).toBe(0)
-				return []
+				return searchResponse()
 			})
 			await tool.execute({ query, path }, task, callbacks)
 			expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
-			expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, path)
+			expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, path, task.lifecycleSignal)
 			expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(
 				`No relevant code snippets found for the query: "${query}"`,
 			)
 			expect(callbacks.handleError).not.toHaveBeenCalled()
-			expect(task.say).not.toHaveBeenCalled()
+			expect(task.say).toHaveBeenCalledExactlyOnceWith(
+				"codebase_search_result",
+				JSON.stringify({
+					tool: "codebaseSearch",
+					content: { query, results: [], incomplete: false, failedPaths: [], waitingPaths: [] },
+				}),
+			)
+			expect(task.say).toHaveBeenCalledBefore(vi.mocked(callbacks.pushToolResult))
 			expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
 			expect(getWorkspacePath).not.toHaveBeenCalled()
 		},
 	)
 
-	it.each([null, undefined, false, 0, ""])(
-		"defensively handles a runtime-invalid falsy search response %j",
-		async (value) => {
-			// The manager promises an array. Deliberately violate that boundary to exercise the existing falsy guard.
-			vi.mocked(manager.searchIndex).mockResolvedValue(value as unknown as VectorStoreSearchResult[])
-			await tool.execute({ query }, task, callbacks)
-			expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(
-				`No relevant code snippets found for the query: "${query}"`,
-			)
-			expect(callbacks.handleError).not.toHaveBeenCalled()
-			expect(task.say).not.toHaveBeenCalled()
-			expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
-		},
-	)
+	it.each([false, true])("warns about an incomplete index with matches: %s", async (hasMatches) => {
+		const failedPaths = ["src/failed.ts", "other/unreadable.ts"]
+		vi.mocked(manager.searchIndex).mockResolvedValue(searchResponse(hasMatches ? [result()] : [], failedPaths))
+
+		await tool.execute({ query, path: "src" }, task, callbacks)
+
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src", task.lifecycleSignal)
+		expect(task.say).toHaveBeenCalledExactlyOnceWith(
+			"codebase_search_result",
+			JSON.stringify({
+				tool: "codebaseSearch",
+				content: {
+					query,
+					results: hasMatches
+						? [
+								{
+									filePath: "src/result.ts",
+									score: 0.9,
+									startLine: 2,
+									endLine: 4,
+									codeChunk: "first\n  second",
+								},
+							]
+						: [],
+					incomplete: true,
+					failedPaths,
+					waitingPaths: [],
+				},
+			}),
+		)
+		const notice =
+			"Partial index: results may be incomplete.\nFailed files:\n- src/failed.ts\n- other/unreadable.ts\n\n"
+		const output = hasMatches
+			? `Query: ${query}\nResults:\n\nFile path: src/result.ts\nScore: 0.9\nLines: 2-4\nCode Chunk: first\n  second\n`
+			: `No relevant code snippets found for the query: "${query}"`
+		expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(notice + output)
+		expect(task.say).toHaveBeenCalledBefore(vi.mocked(callbacks.pushToolResult))
+		expect(vscode.workspace.asRelativePath).toHaveBeenCalledTimes(hasMatches ? 1 : 0)
+		expect(callbacks.handleError).not.toHaveBeenCalled()
+	})
 
 	it("preserves result order and metadata, relativizes paths without workspace prefixes and trims chunks", async () => {
-		vi.mocked(manager.searchIndex).mockResolvedValue([
-			result(),
-			result({
-				id: "second",
-				score: 0.5,
-				payload: { filePath: "/task/lib/other.ts", startLine: 10, endLine: 10, codeChunk: " \t " },
-			}),
-		])
+		vi.mocked(manager.searchIndex).mockResolvedValue(
+			searchResponse([
+				result(),
+				result({
+					id: "second",
+					score: 0.5,
+					payload: { filePath: "/task/lib/other.ts", startLine: 10, endLine: 10, codeChunk: " \t " },
+				}),
+			]),
+		)
 		vi.mocked(vscode.workspace.asRelativePath)
 			.mockReturnValueOnce("src/result.ts")
 			.mockReturnValueOnce("lib/other.ts")
 		await tool.execute({ query }, task, callbacks)
 		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined, task.lifecycleSignal)
 		expect(vscode.workspace.asRelativePath).toHaveBeenCalledTimes(2)
 		expect(vscode.workspace.asRelativePath).toHaveBeenNthCalledWith(1, "/task/src/result.ts", false)
 		expect(vscode.workspace.asRelativePath).toHaveBeenNthCalledWith(2, "/task/lib/other.ts", false)
@@ -328,6 +373,9 @@ describe("CodebaseSearchTool", () => {
 						},
 						{ filePath: "lib/other.ts", score: 0.5, startLine: 10, endLine: 10, codeChunk: "" },
 					],
+					incomplete: false,
+					failedPaths: [],
+					waitingPaths: [],
 				},
 			}),
 		)
@@ -341,12 +389,9 @@ describe("CodebaseSearchTool", () => {
 	it("skips malformed entries while preserving a valid result", async () => {
 		// Missing filePath is invalid under Payload's type but explicitly guarded against at runtime.
 		const missingPath = { id: "malformed", score: 1, payload: { codeChunk: "ignored" } } as VectorStoreSearchResult
-		vi.mocked(manager.searchIndex).mockResolvedValue([
-			result({ payload: undefined }),
-			result({ payload: null }),
-			missingPath,
-			result(),
-		])
+		vi.mocked(manager.searchIndex).mockResolvedValue(
+			searchResponse([result({ payload: undefined }), result({ payload: null }), missingPath, result()]),
+		)
 		await tool.execute({ query }, task, callbacks)
 		expect(vscode.workspace.asRelativePath).toHaveBeenCalledExactlyOnceWith("/task/src/result.ts", false)
 		expect(task.say).toHaveBeenCalledExactlyOnceWith(
@@ -364,6 +409,9 @@ describe("CodebaseSearchTool", () => {
 							codeChunk: "first\n  second",
 						},
 					],
+					incomplete: false,
+					failedPaths: [],
+					waitingPaths: [],
 				},
 			}),
 		)
@@ -373,23 +421,26 @@ describe("CodebaseSearchTool", () => {
 		expect(callbacks.handleError).not.toHaveBeenCalled()
 	})
 
-	it("preserves the existing empty-header response when every entry is skipped", async () => {
+	it("reports no snippets with complete metadata when every entry is skipped", async () => {
 		// Missing filePath deliberately violates the backend payload contract.
 		const missingPath = { id: "malformed", score: 1, payload: { codeChunk: "ignored" } } as VectorStoreSearchResult
-		vi.mocked(manager.searchIndex).mockResolvedValue([
-			result({ payload: undefined }),
-			result({ payload: null }),
-			missingPath,
-		])
+		vi.mocked(manager.searchIndex).mockResolvedValue(
+			searchResponse([result({ payload: undefined }), result({ payload: null }), missingPath]),
+		)
 
 		await tool.execute({ query }, task, callbacks)
 
 		expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
 		expect(task.say).toHaveBeenCalledExactlyOnceWith(
 			"codebase_search_result",
-			JSON.stringify({ tool: "codebaseSearch", content: { query, results: [] } }),
+			JSON.stringify({
+				tool: "codebaseSearch",
+				content: { query, results: [], incomplete: false, failedPaths: [], waitingPaths: [] },
+			}),
 		)
-		expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(`Query: ${query}\nResults:\n\n`)
+		expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(
+			`No relevant code snippets found for the query: "${query}"`,
+		)
 		expect(callbacks.handleError).not.toHaveBeenCalled()
 	})
 
@@ -415,7 +466,7 @@ describe("CodebaseSearchTool", () => {
 
 		await tool.execute({ query }, task, callbacks)
 
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined, task.lifecycleSignal)
 		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(toolNamesSchema.enum.codebase_search, error)
 		expect(vi.mocked(callbacks.handleError).mock.calls[0][1]).toBe(error)
 		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
@@ -423,9 +474,43 @@ describe("CodebaseSearchTool", () => {
 		expect(task.say).not.toHaveBeenCalled()
 	})
 
+	it.each(["already aborted", "midflight"] as const)("preserves the exact %s cancellation reason", async (timing) => {
+		const controller = new AbortController()
+		const reason = Object.freeze({ cancelled: timing })
+		Object.defineProperty(task, "lifecycleSignal", { value: controller.signal })
+		if (timing === "already aborted") controller.abort(reason)
+		vi.mocked(manager.searchIndex).mockImplementation(async (_query, _path, signal) => {
+			expect(signal).toBe(controller.signal)
+			if (!signal) throw new Error("Missing lifecycle signal")
+			signal.throwIfAborted()
+			return new Promise<Awaited<ReturnType<CodeIndexManager["searchIndex"]>>>((_resolve, reject) => {
+				const onAbort = () => {
+					clearTimeout(deadline)
+					reject(signal.reason)
+				}
+				const deadline = setTimeout(() => {
+					signal.removeEventListener("abort", onAbort)
+					reject(new Error("Search cancellation was not observed"))
+				}, 1_000)
+				signal.addEventListener("abort", onAbort, { once: true })
+				queueMicrotask(() => controller.abort(reason))
+			})
+		})
+
+		await tool.execute({ query, path: "src" }, task, callbacks)
+
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src", controller.signal)
+		expect(controller.signal.reason).toBe(reason)
+		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(toolNamesSchema.enum.codebase_search, reason)
+		expect(vi.mocked(callbacks.handleError).mock.calls[0][1]).toBe(reason)
+		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
+		expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
+		expect(task.say).not.toHaveBeenCalled()
+	})
+
 	it("forwards a result-message rejection without publishing a text result", async () => {
 		const error = new Error("say failed")
-		vi.mocked(manager.searchIndex).mockResolvedValue([result()])
+		vi.mocked(manager.searchIndex).mockResolvedValue(searchResponse([result()]))
 		vi.mocked(task.say).mockRejectedValue(error)
 
 		await tool.execute({ query }, task, callbacks)
@@ -462,7 +547,7 @@ describe("CodebaseSearchTool", () => {
 		}
 
 		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src")
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src", task.lifecycleSignal)
 		expect(task.consecutiveMistakeCount).toBe(0)
 		expect(callbacks.handleError).not.toHaveBeenCalled()
 	})
@@ -521,4 +606,22 @@ describe("CodebaseSearchTool", () => {
 			expect(task.say).not.toHaveBeenCalled()
 		})
 	})
+
+	it.each([false, true])(
+		"prints separate waiting and failed warnings before output, matches=%s",
+		async (hasMatches) => {
+			vi.mocked(manager.searchIndex).mockResolvedValue(
+				searchResponse(hasMatches ? [result()] : [], ["failed.ts"], ["waiting.ts"]),
+			)
+			await tool.execute({ query }, task, callbacks)
+			const output = vi.mocked(callbacks.pushToolResult).mock.calls[0][0]
+			expect(output).toEqual(
+				expect.stringContaining(
+					"Partial index: results may be incomplete.\nFailed files:\n- failed.ts\n" +
+						"Waiting files (indexing resumes automatically):\n- waiting.ts\n\n",
+				),
+			)
+			expect(output).toEqual(expect.stringContaining(hasMatches ? "Query:" : "No relevant code snippets"))
+		},
+	)
 })

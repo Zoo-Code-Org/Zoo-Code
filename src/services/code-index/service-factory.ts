@@ -8,10 +8,15 @@ import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { EmbedderFactory } from "./embedders/embedder-factory"
 import { EmbedderValidationManager } from "./embedders/embedder-validation-manager"
 import { VectorStoreFactory } from "./vector-store/vector-store-factory"
-import { codeParser, DirectoryScanner } from "./processors"
+import type { DirectoryScanner } from "./processors/scanner"
+import { ParseWorkerClient } from "./parse-worker-client"
+import { IndexWriteGate } from "./index-write-gate"
+import { GenerationAllocator } from "./generation-allocator"
+import { FileFailureRegistry } from "./file-failure-registry"
+import { ProviderPacerRegistry } from "./provider-pacer"
 import { DirectoryScannerFactory } from "./processors/directory-scanner-factory"
 import { FileWatcherFactory } from "./processors/file-watcher-factory"
-import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
+import type { IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 
@@ -32,6 +37,12 @@ export class CodeIndexServiceFactory {
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
+		private readonly writeGate = new IndexWriteGate(),
+		private readonly generations = new GenerationAllocator(cacheManager),
+		private readonly failures = new FileFailureRegistry(),
+		private readonly parser = new ParseWorkerClient(),
+		private readonly isCurrentAttempt: () => boolean = () => true,
+		private readonly providerPacers = new ProviderPacerRegistry(),
 	) {}
 
 	/**
@@ -57,7 +68,7 @@ export class CodeIndexServiceFactory {
 	): {
 		embedder: IEmbedder
 		vectorStore: IVectorStore
-		parser: ICodeParser
+		parser: ParseWorkerClient
 		scanner: DirectoryScanner
 		fileWatcher: IFileWatcher
 	} {
@@ -68,13 +79,19 @@ export class CodeIndexServiceFactory {
 		const config = this.configManager.getConfig()
 		const embedder = this.embedderFactory.create(config)
 		const vectorStore = this.vectorStoreFactory.create(config, this.workspacePath)
-		const parser = codeParser
+		const parser = this.parser
 		const scanner = this.directoryScannerFactory.create({
 			embedder,
 			vectorStore,
 			parser,
 			cacheManager: this.cacheManager,
 			ignoreInstance,
+			writeGate: this.writeGate,
+			generations: this.generations,
+			failures: this.failures,
+			workspacePath: this.workspacePath,
+			isCurrentAttempt: this.isCurrentAttempt,
+			providerPacers: this.providerPacers,
 		})
 		const fileWatcher = this.fileWatcherFactory.create({
 			workspacePath: this.workspacePath,
@@ -84,6 +101,12 @@ export class CodeIndexServiceFactory {
 			cacheManager,
 			ignoreInstance,
 			rooIgnoreController,
+			parser,
+			writeGate: this.writeGate,
+			generations: this.generations,
+			failures: this.failures,
+			isCurrentAttempt: this.isCurrentAttempt,
+			providerPacers: this.providerPacers,
 		})
 
 		return {

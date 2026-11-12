@@ -8,6 +8,8 @@ export type PointStruct = {
 }
 
 export interface IVectorStore {
+	readonly rateLimitScope: string
+
 	/**
 	 * Initializes the vector store
 	 * @returns Promise resolving to boolean indicating if a new collection was created
@@ -36,16 +38,17 @@ export interface IVectorStore {
 	): Promise<VectorStoreSearchResult[]>
 
 	/**
-	 * Deletes points by file path
-	 * @param filePath Path of the file to delete points for
+	 * Deletes legacy points and generations below the mandatory cutoff for this exact file.
 	 */
-	deletePointsByFilePath(filePath: string): Promise<void>
+	deletePointsByFilePath(filePath: string, beforeGeneration: number): Promise<void>
 
 	/**
-	 * Deletes points by multiple file paths
-	 * @param filePaths Array of file paths to delete points for
+	 * Applies the same generation fence to every exact file path.
 	 */
-	deletePointsByMultipleFilePaths(filePaths: string[]): Promise<void>
+	deletePointsByMultipleFilePaths(filePaths: string[], beforeGeneration: number): Promise<void>
+
+	/** Other includes legacy points without a generation. Both counts are exact. */
+	countPointsForFile(filePath: string, generation: number): Promise<{ current: number; other: number }>
 
 	/**
 	 * Clears all points from the collection

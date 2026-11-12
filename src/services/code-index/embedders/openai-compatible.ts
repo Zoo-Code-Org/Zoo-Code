@@ -1,22 +1,17 @@
+import { codeIndexLog } from "../code-index-log"
+import { makeRateLimitScope } from "../provider-pacer"
 import { OpenAI } from "openai"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
-import {
-	MAX_BATCH_TOKENS,
-	MAX_ITEM_TOKENS,
-	MAX_BATCH_RETRIES as MAX_RETRIES,
-	INITIAL_RETRY_DELAY_MS as INITIAL_DELAY_MS,
-} from "../constants"
+import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../constants"
 import { getDefaultModelId, getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { t } from "../../../i18n"
 import { withValidationErrorHandling, HttpError, formatEmbeddingError } from "../shared/validation-helpers"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
-import { Mutex } from "async-mutex"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
 
 interface EmbeddingItem {
 	embedding: string | number[]
-	[key: string]: any
 }
 
 interface OpenAIEmbeddingResponse {
@@ -28,27 +23,18 @@ interface OpenAIEmbeddingResponse {
 }
 
 /**
- * OpenAI Compatible implementation of the embedder interface with batching and rate limiting.
+ * OpenAI Compatible implementation of the embedder interface with batching.
  * This embedder allows using any OpenAI-compatible API endpoint by specifying a custom baseURL.
  */
 
 export class OpenAICompatibleEmbedder implements IEmbedder {
+	readonly rateLimitScope: string
 	private embeddingsClient: OpenAI
 	private readonly defaultModelId: string
 	private readonly baseUrl: string
 	private readonly apiKey: string
 	private readonly isFullUrl: boolean
 	private readonly maxItemTokens: number
-
-	// Global rate limiting state shared across all instances
-	private static globalRateLimitState = {
-		isRateLimited: false,
-		rateLimitResetTime: 0,
-		consecutiveRateLimitErrors: 0,
-		lastRateLimitError: 0,
-		// Mutex to ensure thread-safe access to rate limit state
-		mutex: new Mutex(),
-	}
 
 	/**
 	 * Creates a new OpenAI Compatible embedder
@@ -67,11 +53,13 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 
 		this.baseUrl = baseUrl
 		this.apiKey = apiKey
+		this.rateLimitScope = makeRateLimitScope("openai-compatible", baseUrl, apiKey)
 
 		// Wrap OpenAI client creation to handle invalid API key characters
 		try {
 			this.embeddingsClient = new OpenAI({
 				baseURL: baseUrl,
+				maxRetries: 0,
 				apiKey: apiKey,
 			})
 		} catch (error) {
@@ -86,12 +74,13 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	}
 
 	/**
-	 * Creates embeddings for the given texts with batching and rate limiting
+	 * Creates embeddings for the given texts with batching
 	 * @param texts Array of text strings to embed
 	 * @param model Optional model identifier
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
+	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
+		signal?.throwIfAborted()
 		const modelToUse = model || this.defaultModelId
 
 		// Apply model-specific query prefix if required
@@ -105,7 +94,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 					const prefixedText = `${queryPrefix}${text}`
 					const estimatedTokens = Math.ceil(prefixedText.length / 4)
 					if (estimatedTokens > MAX_ITEM_TOKENS) {
-						console.warn(
+						codeIndexLog.warn(
 							t("embeddings:textWithPrefixExceedsTokenLimit", {
 								index,
 								estimatedTokens,
@@ -124,6 +113,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		const remainingTexts = [...processedTexts]
 
 		while (remainingTexts.length > 0) {
+			signal?.throwIfAborted()
 			const currentBatch: string[] = []
 			let currentBatchTokens = 0
 			const processedIndices: number[] = []
@@ -133,7 +123,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				const itemTokens = Math.ceil(text.length / 4)
 
 				if (itemTokens > this.maxItemTokens) {
-					console.warn(
+					codeIndexLog.warn(
 						t("embeddings:textExceedsTokenLimit", {
 							index: i,
 							itemTokens,
@@ -159,7 +149,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
-				const batchResult = await this._embedBatchWithRetries(currentBatch, modelToUse)
+				const batchResult = await this._embedBatch(currentBatch, modelToUse, signal)
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
@@ -203,9 +193,11 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		url: string,
 		batchTexts: string[],
 		model: string,
+		signal?: AbortSignal,
 	): Promise<OpenAIEmbeddingResponse> {
 		const response = await fetch(url, {
 			method: "POST",
+			...(signal ? { signal } : {}),
 			headers: {
 				"Content-Type": "application/json",
 				// Azure OpenAI uses 'api-key' header, while OpenAI uses 'Authorization'
@@ -235,6 +227,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 			}
 			const error = new Error(`HTTP ${status}: ${errorText}`) as HttpError
 			error.status = status || response?.status || 0
+			error.headers = response?.headers
 			throw error
 		}
 
@@ -247,113 +240,69 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		}
 	}
 
-	/**
-	 * Helper method to handle batch embedding with retries and exponential backoff
-	 * @param batchTexts Array of texts to embed in this batch
-	 * @param model Model identifier to use
-	 * @returns Promise resolving to embeddings and usage statistics
-	 */
-	private async _embedBatchWithRetries(
+	private async _embedBatch(
 		batchTexts: string[],
 		model: string,
+		signal?: AbortSignal,
 	): Promise<{ embeddings: number[][]; usage: { promptTokens: number; totalTokens: number } }> {
 		// Use cached value for performance
 		const isFullUrl = this.isFullUrl
 
-		for (let attempts = 0; attempts < MAX_RETRIES; attempts++) {
-			// Check global rate limit before attempting request
-			await this.waitForGlobalRateLimit()
+		try {
+			signal?.throwIfAborted()
+			let response: OpenAIEmbeddingResponse
 
-			try {
-				let response: OpenAIEmbeddingResponse
-
-				if (isFullUrl) {
-					// Use direct HTTP request for full endpoint URLs
-					response = await this.makeDirectEmbeddingRequest(this.baseUrl, batchTexts, model)
-				} else {
-					// Use OpenAI SDK for base URLs
-					response = (await this.embeddingsClient.embeddings.create({
+			if (isFullUrl) {
+				response = await this.makeDirectEmbeddingRequest(this.baseUrl, batchTexts, model, signal)
+			} else {
+				response = (await this.embeddingsClient.embeddings.create(
+					{
 						input: batchTexts,
 						model: model,
-						// OpenAI package (as of v4.78.1) has a parsing issue that truncates embedding dimensions to 256
-						// when processing numeric arrays, which breaks compatibility with models using larger dimensions.
-						// By requesting base64 encoding, we bypass the package's parser and handle decoding ourselves.
+						// Base64 with local decoding bypasses the OpenAI v4.78.1 numeric-array parser's
+						// 256-dimension truncation, which breaks larger models.
 						encoding_format: "base64",
-					})) as OpenAIEmbeddingResponse
-				}
-
-				// Convert base64 embeddings to float32 arrays
-				const processedEmbeddings = response.data.map((item: EmbeddingItem) => {
-					if (typeof item.embedding === "string") {
-						const buffer = Buffer.from(item.embedding, "base64")
-
-						// Create Float32Array view over the buffer
-						const float32Array = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
-
-						return {
-							...item,
-							embedding: Array.from(float32Array),
-						}
-					}
-					return item
-				})
-
-				// Replace the original data with processed embeddings
-				response.data = processedEmbeddings
-
-				const embeddings = response.data.map((item) => item.embedding as number[])
-
-				return {
-					embeddings: embeddings,
-					usage: {
-						promptTokens: response.usage?.prompt_tokens || 0,
-						totalTokens: response.usage?.total_tokens || 0,
 					},
-				}
-			} catch (error) {
-				// Capture telemetry before error is reformatted
-				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-					error: error instanceof Error ? error.message : String(error),
-					stack: error instanceof Error ? error.stack : undefined,
-					location: "OpenAICompatibleEmbedder:_embedBatchWithRetries",
-					attempt: attempts + 1,
-				})
+					...(signal ? [{ signal }] : []),
+				)) as OpenAIEmbeddingResponse
+			}
 
-				const hasMoreAttempts = attempts < MAX_RETRIES - 1
+			signal?.throwIfAborted()
+			const processedEmbeddings = response.data.map((item: EmbeddingItem) => {
+				if (typeof item.embedding === "string") {
+					const buffer = Buffer.from(item.embedding, "base64")
 
-				// Check if it's a rate limit error
-				const httpError = error as HttpError
-				if (httpError?.status === 429) {
-					// Update global rate limit state
-					await this.updateGlobalRateLimitState(httpError)
+					const float32Array = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
 
-					if (hasMoreAttempts) {
-						// Calculate delay based on global rate limit state
-						const baseDelay = INITIAL_DELAY_MS * Math.pow(2, attempts)
-						const globalDelay = await this.getGlobalRateLimitDelay()
-						const delayMs = Math.max(baseDelay, globalDelay)
-
-						console.warn(
-							t("embeddings:rateLimitRetry", {
-								delayMs,
-								attempt: attempts + 1,
-								maxRetries: MAX_RETRIES,
-							}),
-						)
-						await new Promise((resolve) => setTimeout(resolve, delayMs))
-						continue
+					return {
+						...item,
+						embedding: Array.from(float32Array),
 					}
 				}
+				return item
+			})
 
-				// Log the error for debugging
-				console.error(`OpenAI Compatible embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`, error)
+			response.data = processedEmbeddings
 
-				// Format and throw the error
-				throw formatEmbeddingError(error, MAX_RETRIES)
+			const embeddings = response.data.map((item) => item.embedding as number[])
+
+			return {
+				embeddings: embeddings,
+				usage: {
+					promptTokens: response.usage?.prompt_tokens || 0,
+					totalTokens: response.usage?.total_tokens || 0,
+				},
 			}
+		} catch (error) {
+			signal?.throwIfAborted()
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				location: "OpenAICompatibleEmbedder:_embedBatch",
+			})
+			codeIndexLog.error("OpenAI Compatible embedder error:", error)
+			throw formatEmbeddingError(error)
 		}
-
-		throw new Error(t("embeddings:failedMaxAttempts", { attempts: MAX_RETRIES }))
 	}
 
 	/**
@@ -408,89 +357,6 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	get embedderInfo(): EmbedderInfo {
 		return {
 			name: "openai-compatible",
-		}
-	}
-
-	/**
-	 * Waits if there's an active global rate limit
-	 */
-	private async waitForGlobalRateLimit(): Promise<void> {
-		const release = await OpenAICompatibleEmbedder.globalRateLimitState.mutex.acquire()
-		try {
-			const state = OpenAICompatibleEmbedder.globalRateLimitState
-
-			if (state.isRateLimited && state.rateLimitResetTime > Date.now()) {
-				const waitTime = state.rateLimitResetTime - Date.now()
-				// Silent wait - no logging to prevent flooding
-				release() // Release mutex before waiting
-				await new Promise((resolve) => setTimeout(resolve, waitTime))
-				return
-			}
-
-			// Reset rate limit if time has passed
-			if (state.isRateLimited && state.rateLimitResetTime <= Date.now()) {
-				state.isRateLimited = false
-				state.consecutiveRateLimitErrors = 0
-			}
-		} finally {
-			// Only release if we haven't already
-			try {
-				release()
-			} catch {
-				// Already released
-			}
-		}
-	}
-
-	/**
-	 * Updates global rate limit state when a 429 error occurs
-	 */
-	private async updateGlobalRateLimitState(_error: HttpError): Promise<void> {
-		const release = await OpenAICompatibleEmbedder.globalRateLimitState.mutex.acquire()
-		try {
-			const state = OpenAICompatibleEmbedder.globalRateLimitState
-			const now = Date.now()
-
-			// Increment consecutive rate limit errors
-			if (now - state.lastRateLimitError < 60000) {
-				// Within 1 minute
-				state.consecutiveRateLimitErrors++
-			} else {
-				state.consecutiveRateLimitErrors = 1
-			}
-
-			state.lastRateLimitError = now
-
-			// Calculate exponential backoff based on consecutive errors
-			const baseDelay = 5000 // 5 seconds base
-			const maxDelay = 300000 // 5 minutes max
-			const exponentialDelay = Math.min(baseDelay * Math.pow(2, state.consecutiveRateLimitErrors - 1), maxDelay)
-
-			// Set global rate limit
-			state.isRateLimited = true
-			state.rateLimitResetTime = now + exponentialDelay
-
-			// Silent rate limit activation - no logging to prevent flooding
-		} finally {
-			release()
-		}
-	}
-
-	/**
-	 * Gets the current global rate limit delay
-	 */
-	private async getGlobalRateLimitDelay(): Promise<number> {
-		const release = await OpenAICompatibleEmbedder.globalRateLimitState.mutex.acquire()
-		try {
-			const state = OpenAICompatibleEmbedder.globalRateLimitState
-
-			if (state.isRateLimited && state.rateLimitResetTime > Date.now()) {
-				return state.rateLimitResetTime - Date.now()
-			}
-
-			return 0
-		} finally {
-			release()
 		}
 	}
 }

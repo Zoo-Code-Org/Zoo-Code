@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "El proveedor de búsqueda ha limitado las solicitudes. La indexación se reanuda automáticamente cuando termina la espera del proveedor.",
 	"authenticationFailed": "No se pudieron crear las incrustaciones: Error de autenticación. Comprueba tu clave de API.",
 	"failedWithStatus": "No se pudieron crear las incrustaciones después de {{attempts}} intentos: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "No se pudieron crear las incrustaciones después de {{attempts}} intentos: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "No se pueden crear servicios: La indexación de código no está configurada correctamente"
 	},
 	"orchestrator": {
+		"providerWaiting": "Esperando a {{service}}; la indexación se reanuda automáticamente",
+		"providerWaitingUntil": "Esperando a {{service}}; la indexación se reanuda automáticamente a las {{time}}",
+		"parserFailed": "La indexación del código se detuvo al analizar {{filePath}} ({{category}}). Corrige el archivo e inicia explícitamente la indexación para reintentarlo, o desactívala. No es un error del modelo ni del proveedor.",
+		"indexingFilesRetrying": "Reintentando los archivos con errores. Hay un índice parcial disponible.",
+		"indexingFilesFailed": "Siguen existiendo errores en archivos. No hay reintentos automáticos pendientes. Hay un índice parcial disponible.",
+		"indexingStopping": "Deteniendo la indexación...",
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
 		"fileWatcherStarted": "Monitor de archivos iniciado.",
 		"fileWatcherStopped": "Monitor de archivos detenido.",

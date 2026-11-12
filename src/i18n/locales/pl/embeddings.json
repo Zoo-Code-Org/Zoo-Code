@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Dostawca wyszukiwania ograniczył częstotliwość żądań. Indeksowanie zostanie automatycznie wznowione po upływie czasu oczekiwania dostawcy.",
 	"authenticationFailed": "Nie udało się utworzyć osadzeń: Uwierzytelnianie nie powiodło się. Sprawdź swój klucz API.",
 	"failedWithStatus": "Nie udało się utworzyć osadzeń po {{attempts}} próbach: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Nie udało się utworzyć osadzeń po {{attempts}} próbach: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "Nie można utworzyć usług: Indeksowanie kodu nie jest poprawnie skonfigurowane"
 	},
 	"orchestrator": {
+		"providerWaiting": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione",
+		"providerWaitingUntil": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione o {{time}}",
+		"parserFailed": "Indeksowanie kodu zatrzymało się podczas parsowania {{filePath}} ({{category}}). Popraw plik i ręcznie uruchom indeksowanie, aby spróbować ponownie, lub wyłącz indeksowanie. To nie jest błąd modelu ani dostawcy.",
+		"indexingFilesRetrying": "Ponawianie prób dla plików z błędami. Dostępny jest częściowy indeks.",
+		"indexingFilesFailed": "Nadal występują błędy plików. Brak oczekujących automatycznych ponowień. Dostępny jest częściowy indeks.",
+		"indexingStopping": "Zatrzymywanie indeksowania...",
 		"indexingFailedNoBlocks": "Indeksowanie nie powiodło się: Żadne bloki kodu nie zostały pomyślnie zaindeksowane. To zwykle wskazuje na problem z konfiguracją embeddera.",
 		"fileWatcherStarted": "Monitor plików uruchomiony.",
 		"fileWatcherStopped": "Monitor plików zatrzymany.",

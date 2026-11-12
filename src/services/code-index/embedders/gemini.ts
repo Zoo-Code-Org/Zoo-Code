@@ -1,4 +1,5 @@
 import { OpenAICompatibleEmbedder } from "./openai-compatible"
+import { makeRateLimitScope } from "../provider-pacer"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import { GEMINI_MAX_ITEM_TOKENS } from "../constants"
 import { t } from "../../../i18n"
@@ -16,6 +17,8 @@ import { TelemetryService } from "@roo-code/telemetry"
  * migrated to gemini-embedding-001 for backward compatibility.
  */
 export class GeminiEmbedder implements IEmbedder {
+	readonly rateLimitScope: string
+
 	private readonly openAICompatibleEmbedder: OpenAICompatibleEmbedder
 	private static readonly GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 	private static readonly DEFAULT_MODEL = "gemini-embedding-001"
@@ -47,6 +50,8 @@ export class GeminiEmbedder implements IEmbedder {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
 
+		this.rateLimitScope = makeRateLimitScope("gemini", GeminiEmbedder.GEMINI_BASE_URL, apiKey)
+
 		// Migrate deprecated models to their replacements silently
 		const migratedModelId = modelId ? GeminiEmbedder.migrateModelId(modelId) : undefined
 
@@ -68,12 +73,14 @@ export class GeminiEmbedder implements IEmbedder {
 	 * @param model Optional model identifier (uses constructor model if not provided)
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
+	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
+		signal?.throwIfAborted()
 		try {
 			// Use the provided model or fall back to the instance's model
 			const modelToUse = model || this.modelId
-			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse)
+			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse, ...(signal ? [signal] : []))
 		} catch (error) {
+			signal?.throwIfAborted()
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,

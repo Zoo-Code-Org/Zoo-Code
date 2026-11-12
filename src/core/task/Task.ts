@@ -402,6 +402,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// write was queued with the value at publish time, so a queued write cannot publish
 	// after the task was cancelled or disposed.
 	cancellationGeneration: number = 0
+	private readonly lifecycleAbortController = new AbortController()
+
+	public get lifecycleSignal(): AbortSignal {
+		return this.lifecycleAbortController.signal
+	}
+
 	currentRequestAbortController?: AbortController
 	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
@@ -3613,6 +3619,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// the resumed run's, and only if it advances monotonically.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
+		this.lifecycleAbortController.abort()
 	}
 
 	requestAbandon(): void {
@@ -3626,6 +3633,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// task is gone.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
+		this.lifecycleAbortController.abort()
 	}
 
 	private driveRunEvent(event: RunEvent): void {

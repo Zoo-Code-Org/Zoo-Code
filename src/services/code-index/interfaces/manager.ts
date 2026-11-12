@@ -9,3 +9,5 @@ export type EmbedderProvider =
 	| "bedrock"
 	| "openrouter"
 	| "semble"
+
+export type { IndexingStatus as IndexProgressUpdate, ProviderWaitStatus } from "@roo-code/types"

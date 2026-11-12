@@ -1,24 +1,22 @@
+import { codeIndexLog } from "../code-index-log"
+import { makeRateLimitScope } from "../provider-pacer"
 import { OpenAI } from "openai"
 import { OpenAiNativeHandler } from "../../../api/providers/openai-native"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces"
-import {
-	MAX_BATCH_TOKENS,
-	MAX_ITEM_TOKENS,
-	MAX_BATCH_RETRIES as MAX_RETRIES,
-	INITIAL_RETRY_DELAY_MS as INITIAL_DELAY_MS,
-} from "../constants"
+import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../constants"
 import { getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { t } from "../../../i18n"
-import { withValidationErrorHandling, formatEmbeddingError, HttpError } from "../shared/validation-helpers"
+import { withValidationErrorHandling, formatEmbeddingError } from "../shared/validation-helpers"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
 
 /**
- * OpenAI implementation of the embedder interface with batching and rate limiting
+ * OpenAI implementation of the embedder interface with batching
  */
 export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
+	readonly rateLimitScope: string
 	private embeddingsClient: OpenAI
 	private readonly defaultModelId: string
 
@@ -29,10 +27,11 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 	constructor(options: ApiHandlerOptions & { openAiEmbeddingModelId?: string }) {
 		super(options)
 		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
+		this.rateLimitScope = makeRateLimitScope("openai", "https://api.openai.com/v1", apiKey)
 
 		// Wrap OpenAI client creation to handle invalid API key characters
 		try {
-			this.embeddingsClient = new OpenAI({ apiKey })
+			this.embeddingsClient = new OpenAI({ apiKey, maxRetries: 0 })
 		} catch (error) {
 			// Use the error handler to transform ByteString conversion errors
 			throw handleOpenAIError(error, "OpenAI")
@@ -42,12 +41,13 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 	}
 
 	/**
-	 * Creates embeddings for the given texts with batching and rate limiting
+	 * Creates embeddings for the given texts with batching
 	 * @param texts Array of text strings to embed
 	 * @param model Optional model identifier
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
+	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
+		signal?.throwIfAborted()
 		const modelToUse = model || this.defaultModelId
 
 		// Apply model-specific query prefix if required
@@ -61,7 +61,7 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 					const prefixedText = `${queryPrefix}${text}`
 					const estimatedTokens = Math.ceil(prefixedText.length / 4)
 					if (estimatedTokens > MAX_ITEM_TOKENS) {
-						console.warn(
+						codeIndexLog.warn(
 							t("embeddings:textWithPrefixExceedsTokenLimit", {
 								index,
 								estimatedTokens,
@@ -80,6 +80,7 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 		const remainingTexts = [...processedTexts]
 
 		while (remainingTexts.length > 0) {
+			signal?.throwIfAborted()
 			const currentBatch: string[] = []
 			let currentBatchTokens = 0
 			const processedIndices: number[] = []
@@ -89,7 +90,7 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 				const itemTokens = Math.ceil(text.length / 4)
 
 				if (itemTokens > MAX_ITEM_TOKENS) {
-					console.warn(
+					codeIndexLog.warn(
 						t("embeddings:textExceedsTokenLimit", {
 							index: i,
 							itemTokens,
@@ -115,7 +116,7 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
-				const batchResult = await this._embedBatchWithRetries(currentBatch, modelToUse)
+				const batchResult = await this._embedBatch(currentBatch, modelToUse, signal)
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
@@ -125,65 +126,39 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 		return { embeddings: allEmbeddings, usage }
 	}
 
-	/**
-	 * Helper method to handle batch embedding with retries and exponential backoff
-	 * @param batchTexts Array of texts to embed in this batch
-	 * @param model Model identifier to use
-	 * @returns Promise resolving to embeddings and usage statistics
-	 */
-	private async _embedBatchWithRetries(
+	private async _embedBatch(
 		batchTexts: string[],
 		model: string,
+		signal?: AbortSignal,
 	): Promise<{ embeddings: number[][]; usage: { promptTokens: number; totalTokens: number } }> {
-		for (let attempts = 0; attempts < MAX_RETRIES; attempts++) {
-			try {
-				const response = await this.embeddingsClient.embeddings.create({
+		try {
+			signal?.throwIfAborted()
+			const response = await this.embeddingsClient.embeddings.create(
+				{
 					input: batchTexts,
 					model: model,
-				})
+				},
+				signal ? { signal } : undefined,
+			)
 
-				return {
-					embeddings: response.data.map((item) => item.embedding),
-					usage: {
-						promptTokens: response.usage?.prompt_tokens || 0,
-						totalTokens: response.usage?.total_tokens || 0,
-					},
-				}
-			} catch (error: any) {
-				const hasMoreAttempts = attempts < MAX_RETRIES - 1
-
-				// Check if it's a rate limit error
-				const httpError = error as HttpError
-				if (httpError?.status === 429 && hasMoreAttempts) {
-					const delayMs = INITIAL_DELAY_MS * Math.pow(2, attempts)
-					console.warn(
-						t("embeddings:rateLimitRetry", {
-							delayMs,
-							attempt: attempts + 1,
-							maxRetries: MAX_RETRIES,
-						}),
-					)
-					await new Promise((resolve) => setTimeout(resolve, delayMs))
-					continue
-				}
-
-				// Capture telemetry before reformatting the error
-				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-					error: error instanceof Error ? error.message : String(error),
-					stack: error instanceof Error ? error.stack : undefined,
-					location: "OpenAiEmbedder:_embedBatchWithRetries",
-					attempt: attempts + 1,
-				})
-
-				// Log the error for debugging
-				console.error(`OpenAI embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`, error)
-
-				// Format and throw the error
-				throw formatEmbeddingError(error, MAX_RETRIES)
+			signal?.throwIfAborted()
+			return {
+				embeddings: response.data.map((item) => item.embedding),
+				usage: {
+					promptTokens: response.usage?.prompt_tokens || 0,
+					totalTokens: response.usage?.total_tokens || 0,
+				},
 			}
+		} catch (error) {
+			signal?.throwIfAborted()
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				location: "OpenAiEmbedder:_embedBatch",
+			})
+			codeIndexLog.error("OpenAI embedder error:", error)
+			throw formatEmbeddingError(error)
 		}
-
-		throw new Error(t("embeddings:failedMaxAttempts", { attempts: MAX_RETRIES }))
 	}
 
 	/**

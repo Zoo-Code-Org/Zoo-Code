@@ -13,7 +13,35 @@ import { BedrockEmbedder } from "../embedders/bedrock"
 import { OpenRouterEmbedder } from "../embedders/openrouter"
 import type { CodeIndexConfig } from "../interfaces/config"
 
+import { CodeIndexConfigManager } from "../config-manager"
+import { CacheManager } from "../cache-manager"
+import { ParseWorkerClient } from "../parse-worker-client"
+import { IndexWriteGate } from "../index-write-gate"
+import { GenerationAllocator } from "../generation-allocator"
+import { FileFailureRegistry } from "../file-failure-registry"
+import { ProviderPacerRegistry } from "../provider-pacer"
+import { DirectoryScanner } from "../processors/scanner"
+import { FileWatcher } from "../processors/file-watcher"
+import { makeExtensionContext } from "../../../test-utils/vscode"
+import ignore from "ignore"
+
 import { clearAllMocks } from "../../../test-utils/reset"
+
+vitest.mock("../config-manager")
+vitest.mock("../cache-manager")
+vitest.mock("../parse-worker-client", () => ({
+	ParseWorkerClient: vitest.fn(
+		class {
+			parseFile = vitest.fn<ParseWorkerClient["parseFile"]>().mockResolvedValue([])
+			stop = vitest.fn<ParseWorkerClient["stop"]>()
+			stopped = Promise.resolve()
+			logStopTimeout = vitest.fn<ParseWorkerClient["logStopTimeout"]>()
+			dispose = vitest.fn<ParseWorkerClient["dispose"]>()
+		},
+	),
+}))
+vitest.mock("../processors/scanner")
+vitest.mock("../processors/file-watcher")
 
 // Mock the embedders and vector store
 vitest.mock("../embedders/openai")
@@ -56,6 +84,166 @@ import { getDefaultModelId, getModelDimension } from "../../../shared/embeddingM
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 const mockGetDefaultModelId = getDefaultModelId as MockedFunction<typeof getDefaultModelId>
 const mockGetModelDimension = getModelDimension as MockedFunction<typeof getModelDimension>
+
+describe("workspace service integration", () => {
+	beforeEach(() => clearAllMocks())
+	afterEach(() => vitest.restoreAllMocks())
+
+	function setup(isConfigured = true) {
+		const context = makeExtensionContext()
+		const cache = new CacheManager(context, "/workspace")
+		const watcherCache = new CacheManager(context, "/workspace")
+		const configManager = Object.create(CodeIndexConfigManager.prototype) as CodeIndexConfigManager
+		const config: CodeIndexConfig = { isConfigured, embedderProvider: "openai-compatible" }
+		Object.defineProperty(configManager, "isFeatureConfigured", { value: isConfigured })
+		vitest.mocked(configManager.getConfig).mockReturnValue(config)
+		const embedder = new OpenAiEmbedder({ openAiNativeApiKey: "test-key" })
+		const vectorStore = new QdrantVectorStore("/workspace", "http://localhost:6333", 512)
+		const createEmbedder = vitest.spyOn(EmbedderFactory.prototype, "create").mockReturnValue(embedder)
+		const createVectorStore = vitest.spyOn(VectorStoreFactory.prototype, "create").mockReturnValue(vectorStore)
+		const gate = new IndexWriteGate()
+		const generations = new GenerationAllocator(cache)
+		const failures = new FileFailureRegistry()
+		const providerPacers = new ProviderPacerRegistry()
+		const parser = new ParseWorkerClient()
+		const isCurrentAttempt = vitest.fn(() => true)
+		const ignored = ignore()
+		const createFactory = () =>
+			new CodeIndexServiceFactory(
+				configManager,
+				"/workspace",
+				cache,
+				gate,
+				generations,
+				failures,
+				parser,
+				isCurrentAttempt,
+				providerPacers,
+			)
+		return {
+			context,
+			cache,
+			watcherCache,
+			configManager,
+			config,
+			embedder,
+			vectorStore,
+			createEmbedder,
+			createVectorStore,
+			gate,
+			generations,
+			failures,
+			parser,
+			isCurrentAttempt,
+			providerPacers,
+			ignored,
+			createFactory,
+		}
+	}
+
+	it("injects the same workspace dependencies into both processors across service and factory recreation", () => {
+		const options = setup()
+		options.failures.renew("file.ts", "revision")
+		const budget = options.failures.getRetryBudget("file.ts", "revision", "embed")
+		budget.retriesUsed = 2
+		options.failures.record("file.ts", "revision", "embed", "exhausted", 3, "exhausted", "server")
+		const reset = vitest.spyOn(options.failures, "resetAllBudgets")
+		const renew = vitest.spyOn(options.failures, "renew")
+		const clear = vitest.spyOn(options.failures, "clear")
+		const initialize = vitest.spyOn(options.generations, "initialize")
+		const factory = options.createFactory()
+
+		for (const currentFactory of [factory, factory, options.createFactory()]) {
+			const services = currentFactory.createServices(options.context, options.watcherCache, options.ignored)
+			const scannerArguments = vitest.mocked(DirectoryScanner).mock.lastCall!
+			const watcherArguments = vitest.mocked(FileWatcher).mock.lastCall!
+			expect(services).toEqual({
+				embedder: options.embedder,
+				vectorStore: options.vectorStore,
+				parser: options.parser,
+				scanner: vitest.mocked(DirectoryScanner).mock.instances.at(-1),
+				fileWatcher: vitest.mocked(FileWatcher).mock.instances.at(-1),
+			})
+			expect(scannerArguments[2]).toBe(options.parser)
+			expect(watcherArguments[8]).toBe(options.parser)
+			expect(scannerArguments[3]).toBe(options.cache)
+			expect(watcherArguments[2]).toBe(options.watcherCache)
+			expect(scannerArguments[6]).toBe(options.gate)
+			expect(watcherArguments[9]).toBe(options.gate)
+			expect(scannerArguments[7]).toBe(options.generations)
+			expect(watcherArguments[10]).toBe(options.generations)
+			expect(scannerArguments[8]).toBe(options.failures)
+			expect(watcherArguments[11]).toBe(options.failures)
+			expect(scannerArguments[9]).toBe("/workspace")
+			expect(scannerArguments[10]).toBe(options.isCurrentAttempt)
+			expect(watcherArguments[12]).toBe(options.isCurrentAttempt)
+			expect(scannerArguments[11]).toBe(options.providerPacers)
+			expect(watcherArguments[13]).toBe(options.providerPacers)
+			for (const current of [true, false]) {
+				options.isCurrentAttempt.mockReturnValue(current)
+				expect(scannerArguments[10]?.()).toBe(current)
+				expect(watcherArguments[12]?.()).toBe(current)
+			}
+		}
+
+		expect(options.configManager.getConfig).toHaveBeenCalledTimes(3)
+		expect(options.createEmbedder).toHaveBeenCalledWith(options.config)
+		expect(options.createVectorStore).toHaveBeenCalledWith(options.config, "/workspace")
+		expect(options.failures.getRetryBudget("file.ts", "revision", "embed")).toBe(budget)
+		expect(budget.retriesUsed).toBe(2)
+		expect(options.failures.isExhausted("file.ts", "revision", "embed")).toBe(true)
+		expect(reset).not.toHaveBeenCalled()
+		expect(renew).not.toHaveBeenCalled()
+		expect(clear).not.toHaveBeenCalled()
+		expect(initialize).not.toHaveBeenCalled()
+		expect(ParseWorkerClient).toHaveBeenCalledTimes(1)
+		expect(options.parser.stop).not.toHaveBeenCalled()
+	})
+
+	it("preserves the first three arguments and shares defaults within one factory, not across workspaces", async () => {
+		const options = setup()
+		const firstFactory = new CodeIndexServiceFactory(options.configManager, "/workspace", options.cache)
+		const otherFactory = new CodeIndexServiceFactory(options.configManager, "/other", options.cache)
+		const first = firstFactory.createServices(options.context, options.cache, options.ignored)
+		const second = firstFactory.createServices(options.context, options.cache, options.ignored)
+		const other = otherFactory.createServices(options.context, options.cache, options.ignored)
+		expect(first.parser).toBeInstanceOf(ParseWorkerClient)
+		expect(first.parser).toBe(second.parser)
+		expect(first.parser).not.toBe(other.parser)
+		const scannerCalls = vitest.mocked(DirectoryScanner).mock.calls
+		const watcherCalls = vitest.mocked(FileWatcher).mock.calls
+		for (const [scannerPosition, watcherPosition] of [
+			[6, 9],
+			[7, 10],
+			[8, 11],
+			[11, 13],
+		] as const) {
+			expect(scannerCalls[0][scannerPosition]).toBe(scannerCalls[1][scannerPosition])
+			expect(scannerCalls[0][scannerPosition]).toBe(watcherCalls[0][watcherPosition])
+			expect(scannerCalls[0][scannerPosition]).not.toBe(scannerCalls[2][scannerPosition])
+		}
+		first.parser.stop()
+		expect(first.parser.stop).toHaveBeenCalledOnce()
+		await first.parser.stopped
+		first.parser.logStopTimeout()
+		first.parser.dispose()
+		expect(first.parser.logStopTimeout).toHaveBeenCalledOnce()
+		expect(first.parser.dispose).toHaveBeenCalledOnce()
+	})
+
+	it("rejects unconfigured indexing before constructing processors or reading configuration", () => {
+		const options = setup(false)
+		const factory = options.createFactory()
+		expect(() => factory.createServices(options.context, options.cache, options.ignored)).toThrow(
+			"serviceFactory.codeIndexingNotConfigured",
+		)
+		expect(options.configManager.getConfig).not.toHaveBeenCalled()
+		expect(options.createEmbedder).not.toHaveBeenCalled()
+		expect(options.createVectorStore).not.toHaveBeenCalled()
+		expect(DirectoryScanner).not.toHaveBeenCalled()
+		expect(FileWatcher).not.toHaveBeenCalled()
+	})
+})
 
 describe("CodeIndexServiceFactory", () => {
 	let factory: CodeIndexServiceFactory

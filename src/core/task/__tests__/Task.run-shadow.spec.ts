@@ -97,6 +97,36 @@ describe("Task run-state write helpers", () => {
 		expect(task.runState.stream).toEqual({ tag: "live", generation: 2, cleanupFinished: false })
 	})
 
+	it.each(["abort", "abandon", "dispose"] as const)("keeps one lifetime signal after %s", (operation) => {
+		const signal = task.lifecycleSignal
+		const onAbort = vi.fn()
+		signal.addEventListener("abort", onAbort)
+		expect(signal.aborted).toBe(false)
+		expect(task.lifecycleSignal).toBe(signal)
+
+		if (operation === "dispose") task.requestDispose()
+		else task.requestAbort(operation === "abandon")
+
+		const reason: unknown = signal.reason
+		expect(reason).toBeInstanceOf(DOMException)
+		expect(reason).toHaveProperty("name", "AbortError")
+		expect(signal.aborted).toBe(true)
+		task.requestAbort(false)
+		task.requestDispose()
+		expect(task.lifecycleSignal).toBe(signal)
+		expect(task.lifecycleSignal.reason).toBe(reason)
+		expect(onAbort).toHaveBeenCalledOnce()
+		const resumed = makeTask()
+		expect(resumed.lifecycleSignal).not.toBe(signal)
+		expect(resumed.lifecycleSignal.aborted).toBe(false)
+	})
+
+	it("does not end the lifetime signal when cancelling an individual request", () => {
+		task.currentRequestAbortController = new AbortController()
+		task.cancelCurrentRequest()
+		expect(task.lifecycleSignal.aborted).toBe(false)
+	})
+
 	it("requestAbort(false) sets abort only", () => {
 		task.requestAbort(false)
 

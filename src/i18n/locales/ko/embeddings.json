@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "검색 공급자의 요청 속도 제한에 도달했습니다. 공급자의 대기 시간이 끝나면 인덱싱이 자동으로 재개됩니다.",
 	"authenticationFailed": "임베딩 생성 실패: 인증에 실패했습니다. API 키를 확인하세요.",
 	"failedWithStatus": "{{attempts}}번 시도 후 임베딩 생성 실패: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "{{attempts}}번 시도 후 임베딩 생성 실패: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "서비스를 생성할 수 없습니다: 코드 인덱싱이 올바르게 구성되지 않았습니다"
 	},
 	"orchestrator": {
+		"providerWaiting": "{{service}} 대기 중; 인덱싱이 자동으로 재개됩니다",
+		"providerWaitingUntil": "{{service}} 대기 중; {{time}}에 인덱싱이 자동으로 재개됩니다",
+		"parserFailed": "{{filePath}} 파싱 중 코드 인덱싱이 중지되었습니다({{category}}). 파일을 수정하고 인덱싱을 직접 시작해 다시 시도하거나 인덱싱을 비활성화하세요. 모델 또는 제공자 오류가 아닙니다.",
+		"indexingFilesRetrying": "실패한 파일을 다시 시도하고 있습니다. 부분 인덱스를 사용할 수 있습니다.",
+		"indexingFilesFailed": "파일 오류가 남아 있습니다. 예정된 자동 재시도가 없습니다. 부분 인덱스를 사용할 수 있습니다.",
+		"indexingStopping": "인덱싱 중지 중...",
 		"indexingFailedNoBlocks": "인덱싱 실패: 코드 블록이 성공적으로 인덱싱되지 않았습니다. 이는 일반적으로 임베더 구성 문제를 나타냅니다.",
 		"fileWatcherStarted": "파일 감시자가 시작되었습니다.",
 		"fileWatcherStopped": "파일 감시자가 중지되었습니다.",

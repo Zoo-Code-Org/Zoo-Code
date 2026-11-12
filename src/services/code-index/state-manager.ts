@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import { codeIndexLog } from "./code-index-log"
 
 export type IndexingState = "Standby" | "Indexing" | "Indexed" | "Error" | "Stopping"
 
@@ -9,6 +10,22 @@ export class CodeIndexStateManager {
 	private _totalItems: number = 0
 	private _currentItemUnit: string = "blocks"
 	private _progressEmitter = new vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>>()
+
+	private diagnosticContext: { source: string; attempt: number | string } = { source: "state-manager", attempt: 0 }
+
+	public setDiagnosticContext(context: { source: string; attempt: number | string }): void {
+		this.diagnosticContext = { ...context }
+	}
+
+	private logTransition(oldState: IndexingState, source?: string): void {
+		codeIndexLog.info("State transition", {
+			oldState,
+			newState: this._systemStatus,
+			message: this._statusMessage,
+			...this.diagnosticContext,
+			source: source ?? this.diagnosticContext.source,
+		})
+	}
 
 	// --- Public API ---
 
@@ -30,11 +47,12 @@ export class CodeIndexStateManager {
 
 	// --- State Management ---
 
-	public setSystemState(newState: IndexingState, message?: string): void {
+	public setSystemState(newState: IndexingState, message?: string, source?: string): void {
 		const stateChanged =
 			newState !== this._systemStatus || (message !== undefined && message !== this._statusMessage)
 
 		if (stateChanged) {
+			const oldState = this._systemStatus
 			this._systemStatus = newState
 			if (message !== undefined) {
 				this._statusMessage = message
@@ -51,15 +69,15 @@ export class CodeIndexStateManager {
 				if (newState === "Error" && message === undefined) this._statusMessage = "An error occurred."
 			}
 
+			this.logTransition(oldState, source)
 			this._progressEmitter.fire(this.getCurrentStatus())
 		}
 	}
 
-	public reportBlockIndexingProgress(processedItems: number, totalItems: number): void {
+	public reportBlockIndexingProgress(processedItems: number, totalItems: number, source = "block-progress"): void {
 		const progressChanged = processedItems !== this._processedItems || totalItems !== this._totalItems
 
-		// Don't override Stopping state with progress updates
-		if (this._systemStatus === "Stopping") return
+		if (this._systemStatus === "Error" || this._systemStatus === "Stopping") return
 		// Update if progress changes OR if the system wasn't already in 'Indexing' state
 		if (progressChanged || this._systemStatus !== "Indexing") {
 			this._processedItems = processedItems
@@ -73,6 +91,7 @@ export class CodeIndexStateManager {
 			this._systemStatus = "Indexing" // Ensure state is Indexing
 			this._statusMessage = message
 
+			if (oldStatus !== this._systemStatus) this.logTransition(oldStatus, source)
 			// Only fire update if status, message or progress actually changed
 			if (oldStatus !== this._systemStatus || oldMessage !== this._statusMessage || progressChanged) {
 				this._progressEmitter.fire(this.getCurrentStatus())
@@ -80,15 +99,20 @@ export class CodeIndexStateManager {
 		}
 	}
 
-	public reportFileQueueProgress(processedFiles: number, totalFiles: number, currentFileBasename?: string): void {
+	public reportFileQueueProgress(
+		processedFiles: number,
+		totalFiles: number,
+		currentFileBasename?: string,
+		source = "file-queue-progress",
+	): void {
 		const progressChanged = processedFiles !== this._processedItems || totalFiles !== this._totalItems
 
-		// Don't override Stopping state with progress updates
-		if (this._systemStatus === "Stopping") return
+		if (this._systemStatus === "Error" || this._systemStatus === "Stopping") return
 		if (progressChanged || this._systemStatus !== "Indexing") {
 			this._processedItems = processedFiles
 			this._totalItems = totalFiles
 			this._currentItemUnit = "files"
+			const oldStatus = this._systemStatus
 			this._systemStatus = "Indexing"
 
 			let message: string
@@ -102,10 +126,10 @@ export class CodeIndexStateManager {
 				message = `File queue processed.`
 			}
 
-			const oldStatus = this._systemStatus
 			const oldMessage = this._statusMessage
 
 			this._statusMessage = message
+			if (oldStatus !== this._systemStatus) this.logTransition(oldStatus, source)
 
 			if (oldStatus !== this._systemStatus || oldMessage !== this._statusMessage || progressChanged) {
 				this._progressEmitter.fire(this.getCurrentStatus())

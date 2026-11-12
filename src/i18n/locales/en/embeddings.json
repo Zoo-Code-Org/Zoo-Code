@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Search provider rate-limited. Indexing resumes automatically after the provider wait.",
 	"authenticationFailed": "Failed to create embeddings: Authentication failed. Please check your API key.",
 	"failedWithStatus": "Failed to create embeddings after {{attempts}} attempts: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Failed to create embeddings after {{attempts}} attempts: {{errorMessage}}",
@@ -57,6 +58,12 @@
 		"codeIndexingNotConfigured": "Cannot create services: Code indexing is not properly configured"
 	},
 	"orchestrator": {
+		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
+		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
+		"parserFailed": "Code indexing stopped while parsing {{filePath}} ({{category}}). Fix the file and explicitly start indexing to retry, or disable indexing. This is not a model/provider error.",
+		"indexingFilesRetrying": "Retrying failed files. Partial index available.",
+		"indexingFilesFailed": "File failures remain. No automatic retries pending. Partial index available.",
+		"indexingStopping": "Stopping indexing...",
 		"indexingFailedNoBlocks": "Indexing failed: No code blocks were successfully indexed. This usually indicates an embedder configuration issue.",
 		"fileWatcherStarted": "File watcher started.",
 		"fileWatcherStopped": "File watcher stopped.",

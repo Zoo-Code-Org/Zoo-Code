@@ -3452,22 +3452,14 @@ export const webviewMessageHandler = async (
 						processedItems: 0,
 						totalItems: 0,
 						currentItemUnit: "items",
-						workerspacePath: undefined,
+						workspacePath: undefined,
+						failedFiles: [],
 					},
 				})
 				return
 			}
 
-			const status = manager
-				? manager.getCurrentStatus()
-				: {
-						systemStatus: "Standby",
-						message: "No workspace folder open",
-						processedItems: 0,
-						totalItems: 0,
-						currentItemUnit: "items",
-						workspacePath: undefined,
-					}
+			const status = manager.getCurrentStatus()
 
 			await provider.postMessageToWebview({
 				type: "indexingStatusUpdate",
@@ -3526,19 +3518,7 @@ export const webviewMessageHandler = async (
 				await manager.setWorkspaceEnabled(true)
 
 				if (manager.isFeatureEnabled && manager.isFeatureConfigured) {
-					await manager.initialize(provider.contextProxy)
-
-					const currentState = manager.state
-					if (currentState === "Standby" || currentState === "Error") {
-						void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
-
-						if (!manager.isInitialized) {
-							await manager.initialize(provider.contextProxy)
-							if (manager.state === "Standby" || manager.state === "Error") {
-								void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
-							}
-						}
-					}
+					await manager.startIndexing(provider.contextProxy)
 				}
 			} catch (error) {
 				provider.log(`Error starting indexing: ${error instanceof Error ? error.message : String(error)}`)
@@ -3552,7 +3532,7 @@ export const webviewMessageHandler = async (
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
 				}
-				scope.codeIndexManager.stopIndexing()
+				await scope.codeIndexManager.stopIndexing()
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
 					values: scope.codeIndexManager.getCurrentStatus(),
@@ -3594,10 +3574,15 @@ export const webviewMessageHandler = async (
 					const wasEnabled = priorStates.get(m)!
 					const isNowEnabled = m.isWorkspaceEnabled
 					if (wasEnabled && !isNowEnabled) {
-						m.stopIndexing()
+						await m.stopIndexing()
 					} else if (!wasEnabled && isNowEnabled && m.isFeatureEnabled && m.isFeatureConfigured) {
-						await m.initialize(provider.contextProxy)
-						void m.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
+						try {
+							await m.startIndexing(provider.contextProxy)
+						} catch (error) {
+							provider.log(
+								`Error starting auto-enabled indexing: ${error instanceof Error ? error.message : String(error)}`,
+							)
+						}
 					}
 				}
 				await provider.postMessageToWebview({
