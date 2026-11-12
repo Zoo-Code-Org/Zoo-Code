@@ -3,6 +3,7 @@
 import type { ExtensionState } from "@roo-code/types"
 
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // Command-list enforcement resolves the command's cwd to a workspace folder and
 // reads that folder's configuration; the shared module mock resolves every
@@ -72,7 +73,7 @@ type ProviderStub = {
 
 function buildTask(provider: ProviderStub, taskCwd: string) {
 	const task = Object.create(Task.prototype) as Task
-	task["abort"] = false
+	setAbortLatch(task, false)
 	task["clineMessages"] = []
 	task["askResponse"] = undefined
 	task["askResponseText"] = undefined

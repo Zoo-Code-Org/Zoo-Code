@@ -435,6 +435,12 @@ const ApiOptions = ({
 			}
 		}
 
+		const zooGatewayIndex = options.findIndex((opt) => opt.value === providerIdentifiers.zooGateway)
+		if (zooGatewayIndex > 0) {
+			const [zooGatewayOption] = options.splice(zooGatewayIndex, 1)
+			options.unshift(zooGatewayOption)
+		}
+
 		return options
 	}, [organizationAllowList, apiConfiguration.apiProvider, fromWelcomeView])
 
@@ -777,6 +783,7 @@ const ApiOptions = ({
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
 									apiConfiguration,
+									routerModels,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
