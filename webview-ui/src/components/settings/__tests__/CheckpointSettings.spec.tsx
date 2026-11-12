@@ -2,6 +2,7 @@
 
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { CheckpointSettings } from "../CheckpointSettings"
+import { SearchIndexProvider, SearchableSettingData } from "../useSettingsSearch"
 import enSettings from "@/i18n/locales/en/settings.json"
 import caSettings from "@/i18n/locales/ca/settings.json"
 import deSettings from "@/i18n/locales/de/settings.json"
@@ -175,6 +176,38 @@ describe("CheckpointSettings", () => {
 		fireEvent.click(checkbox)
 
 		expect(setCachedStateField).toHaveBeenCalledWith("perWriteCheckpoints", false)
+	})
+
+	it("renders the per-write checkpoints description copy", () => {
+		render(<CheckpointSettings enableCheckpoints={false} setCachedStateField={setCachedStateField} />)
+
+		// The description is the only place the setting says what a per-write checkpoint covers,
+		// and it reaches the screen through the translated key, so the rendered copy is asserted
+		// here while the locale resources themselves are asserted by the rows below.
+		expect(
+			screen.getByText("Record a checkpoint snapshot after every successful file write by the agent"),
+		).toBeInTheDocument()
+	})
+
+	it("indexes the per-write checkpoints setting under its translated label", () => {
+		const registered: Omit<SearchableSettingData, "sectionLabel">[] = []
+		const contextValue = {
+			registerSetting: (setting: Omit<SearchableSettingData, "sectionLabel">) => {
+				registered.push(setting)
+			},
+		}
+
+		render(
+			<SearchIndexProvider value={contextValue}>
+				<CheckpointSettings enableCheckpoints={false} setCachedStateField={setCachedStateField} />
+			</SearchIndexProvider>,
+		)
+
+		// Settings search matches against the registered label, so a setting registered under an
+		// empty label stays invisible to the search box even though the control still renders.
+		const entry = registered.find((setting) => setting.settingId === "checkpoints-perWriteCheckpoints")
+		expect(entry?.label).toBe("Checkpoint after each file write")
+		expect(entry?.section).toBe("checkpoints")
 	})
 
 	it.each(Object.entries(localeSettings).map(([locale, settings]) => ({ locale, settings })))(
