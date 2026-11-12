@@ -2,7 +2,6 @@ import { codeIndexLog } from "./code-index-log"
 import { parentPort, workerData } from "node:worker_threads"
 import { readFile } from "node:fs/promises"
 import * as path from "node:path"
-import { Parser } from "web-tree-sitter"
 import { CodeParser } from "./processors/parser"
 import { isParserAbort } from "./parser-errors"
 import type { ParseRequest, ParseReply } from "./parse-worker-protocol"
@@ -22,6 +21,8 @@ parentPort!.on("message", async (request: ParseRequest) => {
 			codeIndexLog.info("parse worker entering wasm fault loop")
 			;(instance.exports.loop as () => void)()
 		}
+		// MUST use require: an ESM import bundles web-tree-sitter's ESM build, whose import.meta.url is undefined in CJS.
+		const { Parser } = require("web-tree-sitter") as typeof import("web-tree-sitter")
 		await Parser.init({ locateFile: (filename: string) => path.join(wasmDirectory, filename) })
 		const blocks = await parser.parseFile(request.filePath, {
 			content: request.content,
