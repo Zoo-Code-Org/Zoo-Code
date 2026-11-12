@@ -286,6 +286,50 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			mockedFsPromises.default.writeFile.mockResolvedValue(undefined)
 		})
 
+		it("decides a chained destination link from the entry the rename acts on", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// new.ts links to link2.ts, which links to target.ts. One hop gives link2.ts, a
+			// link; the bytes land on the entry the rename is given, and the checks below read
+			// a spelling two steps further, so the decision has to follow the chain to the
+			// plain file the write actually acts on.
+			mockedFsPromises.default.lstat
+				.mockResolvedValueOnce({ isSymbolicLink: (): boolean => true })
+				.mockResolvedValueOnce({ isSymbolicLink: (): boolean => true })
+				.mockResolvedValueOnce({ isSymbolicLink: (): boolean => false })
+			mockedFsPromises.default.readlink.mockResolvedValueOnce("link2.ts").mockResolvedValueOnce("target.ts")
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedFsPromises.default.rename).toHaveBeenCalledWith(
+				expect.stringContaining(".staging"),
+				expect.stringContaining("target.ts"),
+			)
+			// Never the intermediate link, in either direction of either rename.
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalledWith(
+				expect.any(String),
+				expect.stringContaining("link2.ts"),
+			)
+			expect(mockHandleError).not.toHaveBeenCalled()
+			// Restore the lstat and readlink defaults the chain walk consumed, the way the
+			// dangling-link row restores readFile, so a regression in the walk cannot leak the
+			// link answers into the rows that follow.
+			mockedFsPromises.default.lstat.mockImplementation(async () => {
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			})
+			mockedFsPromises.default.readlink.mockResolvedValue("")
+		})
+
 		it("keeps a destination symlink and writes the moved content through its target", async () => {
 			const patch = `*** Begin Patch
 *** Update File: src/old.ts

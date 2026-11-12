@@ -547,13 +547,31 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// old bytes. The target is where the moved content has to land, and it is also the path
 			// the access, protection and workspace checks have to see: a link is not a way to move
 			// content past .rooignore, a write-protected path or the workspace edge.
+			// A chain of links is walked to its last entry, so 8 hops stands for the longest
+			// chain this move will follow before it treats the destination as unresolvable.
+			const linkFollowLimit = 8
 			let linkTargetPath: string | undefined
 			try {
 				const destinationShape = await fs.lstat(moveAbsolutePath)
 				if (destinationShape.isSymbolicLink()) {
-					// A link target is spelled relative to the directory holding the link.
-					const rawTarget = await fs.readlink(moveAbsolutePath)
-					linkTargetPath = path.resolve(path.dirname(moveAbsolutePath), rawTarget)
+					// A link target is spelled relative to the directory holding the link. The chain is
+					// walked to its last entry rather than read one hop, because the rename below acts
+					// on the entry it is given: the entry whose spelling the write acts on is the entry
+					// the decision has to be made about, and a chain whose last hop is a plain file
+					// must not be decided from the first link while the checks below read a spelling
+					// that resolves two steps further. A dangling final target leaves the last spelled
+					// entry in place, which is what one hop leaves today.
+					let linkEntry = moveAbsolutePath
+					for (let hop = 0; hop < linkFollowLimit; hop++) {
+						const rawTarget = await fs.readlink(linkEntry)
+						const nextEntry = path.resolve(path.dirname(linkEntry), rawTarget)
+						linkTargetPath = nextEntry
+						const nextShape = await fs.lstat(nextEntry)
+						if (!nextShape.isSymbolicLink()) {
+							break
+						}
+						linkEntry = nextEntry
+					}
 				}
 			} catch (error) {
 				// ENOENT, there is no destination at all. ENOTDIR, a parent is a file rather than a
