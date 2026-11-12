@@ -1,4 +1,5 @@
 import * as fs from "fs/promises"
+import { constants as fsConstants } from "fs"
 
 /**
  * Write a file so readers only ever observe the previous bytes or the complete
@@ -15,15 +16,25 @@ export async function writeFileAtomically(absolutePath: string, content: string,
 	let targetPath = absolutePath
 	let targetMode = mode
 	let targetOwnership: { uid: number; gid: number } | undefined
+	let targetExists = false
 	try {
 		targetPath = await fs.realpath(absolutePath)
 		const stat = await fs.stat(targetPath)
+		targetExists = true
 		targetMode = targetMode ?? stat.mode & 0o7777
 		targetOwnership = { uid: stat.uid, gid: stat.gid }
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
 			throw error
 		}
+	}
+	// POSIX rename(2) only asks for write permission on the containing directory, so a
+	// rename would replace a destination the user marked read-only where the direct
+	// write this helper replaced failed with EACCES. Check the destination itself,
+	// before any staging file exists; a destination that is not there yet stays
+	// creatable. Windows reports the same condition as EPERM via the read-only attribute.
+	if (targetExists) {
+		await fs.access(targetPath, fsConstants.W_OK)
 	}
 	// Derive the sibling staging path with plain string operations so the helper stays
 	// usable in unit tests that mock the "path" module down to a few functions.
