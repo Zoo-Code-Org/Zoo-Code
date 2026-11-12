@@ -832,7 +832,17 @@ export interface WebviewMessage {
 	 * from list entries the user deleted: both look like "in the file, absent from the
 	 * submitted list". Senders that do not display the lists omit it.
 	 */
-	commandListBaseline?: { allowedCommands?: string[]; deniedCommands?: string[] }
+	commandListBaseline?: {
+		allowedCommands?: string[]
+		deniedCommands?: string[]
+		/**
+		 * The workspace-command-lists gate as the dialog last displayed it. Flipping the
+		 * gate between display and save hides workspace entries, so this travels with the
+		 * baseline to let the save path classify an entry the baseline already showed as
+		 * existing workspace knowledge rather than a brand-new promotion into the global layer.
+		 */
+		workspaceCommandListsEnabled?: boolean
+	}
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
 	// Worktree properties

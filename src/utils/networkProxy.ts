@@ -72,6 +72,17 @@ function restoreGlobalFetchPatch(): void {
 	originalFetch = undefined
 }
 
+/**
+ * Fire-and-log variant of ProxyAgent.close(): Disposable.dispose() is synchronous while
+ * close() is async, and neither a teardown sequence nor the late-import abort may block on
+ * (or reject into) its caller.
+ */
+function closeProxyAgentBestEffort(proxyAgent: { close(): Promise<void> }): void {
+	void proxyAgent.close().catch((error) => {
+		log(`Failed to close undici proxy agent: ${error instanceof Error ? error.message : String(error)}`)
+	})
+}
+
 function restoreTlsVerificationOverride(): void {
 	if (!tlsVerificationOverridden) {
 		return
@@ -152,6 +163,15 @@ export async function initializeNetworkProxy(
 	// deactivate path, and both restores below are idempotent, so double disposal is safe.
 	const resources: vscode.Disposable[] = []
 
+	// The two dynamic imports in the configure* helpers below are suspension points: a teardown
+	// can run while one is pending, and its continuation would write process-global state
+	// (dispatcher, fetch patch, global-agent bootstrap) after disposal. Both disposal paths set
+	// the flag - the aggregate dispose at the end of this function, and overrideCleanup, which
+	// VS Code also disposes item-by-item through context.subscriptions - and each continuation
+	// checks it before installing.
+	let disposed = false
+	const isDisposed = () => disposed
+
 	// Listen for configuration changes to allow toggling proxy during a debug session.
 	// Guard for test environments where onDidChangeConfiguration may not be mocked.
 	if (typeof vscode.workspace.onDidChangeConfiguration === "function") {
@@ -165,8 +185,8 @@ export async function initializeNetworkProxy(
 
 				if (newConfig.enabled) {
 					applyTlsVerificationOverride(newConfig)
-					configureGlobalProxy(newConfig)
-					configureUndiciProxy(newConfig)
+					configureGlobalProxy(newConfig, isDisposed)
+					configureUndiciProxy(newConfig, context, isDisposed)
 				} else {
 					// Proxy disabled - but we can't easily un-bootstrap global-agent or reset undici dispatcher safely.
 					// We *can* restore any global fetch patch immediately.
@@ -183,6 +203,9 @@ export async function initializeNetworkProxy(
 	// Ensure we restore any overrides when the extension unloads.
 	const overrideCleanup: vscode.Disposable = {
 		dispose: () => {
+			// Latching disposal here covers the path where VS Code disposes context.subscriptions
+			// item-by-item; the aggregate dispose below sets the same flag itself.
+			disposed = true
 			restoreGlobalFetchPatch()
 			restoreTlsVerificationOverride()
 		},
@@ -192,10 +215,10 @@ export async function initializeNetworkProxy(
 
 	if (config.enabled) {
 		applyTlsVerificationOverride(config)
-		await configureGlobalProxy(config)
-		const fetchPatch = await configureUndiciProxy(config)
-		if (fetchPatch) {
-			resources.push(fetchPatch)
+		await configureGlobalProxy(config, isDisposed)
+		const undiciResource = await configureUndiciProxy(config, context, isDisposed)
+		if (undiciResource) {
+			resources.push(undiciResource)
 		}
 	} else {
 		log(`Debug proxy not enabled.`)
@@ -203,6 +226,8 @@ export async function initializeNetworkProxy(
 
 	return {
 		dispose: () => {
+			// Stryker disable next-line BooleanLiteral: the override-cleanup resource disposed by the same loop latches the identical flag, so no interleaving distinguishes this assignment from its mutant.
+			disposed = true
 			for (const resource of resources) {
 				resource.dispose()
 			}
@@ -245,8 +270,11 @@ export function getProxyConfig(): ProxyConfig {
 
 /**
  * Configure global-agent to route all HTTP/HTTPS traffic through the proxy.
+ *
+ * @param isDisposed Teardown latch checked after the dynamic import below; bootstrap is
+ * skipped when the extension was disposed while the import was pending.
  */
-async function configureGlobalProxy(config: ProxyConfig): Promise<void> {
+async function configureGlobalProxy(config: ProxyConfig, isDisposed: () => boolean): Promise<void> {
 	if (proxyInitialized) {
 		// global-agent can only be bootstrapped once
 		// Update environment variables for any new connections
@@ -270,6 +298,13 @@ async function configureGlobalProxy(config: ProxyConfig): Promise<void> {
 		return
 	}
 
+	// A teardown may have run while the import above was pending; bootstrapping global-agent
+	// then would intercept this process's HTTP traffic for a dead extension.
+	if (isDisposed()) {
+		log("global-agent import completed after disposal; skipping bootstrap")
+		return
+	}
+
 	// Bootstrap global-agent to intercept all HTTP/HTTPS requests
 	log(`Calling global-agent bootstrap()...`)
 	try {
@@ -288,10 +323,17 @@ async function configureGlobalProxy(config: ProxyConfig): Promise<void> {
  * Configure undici's global dispatcher so Node's built-in `fetch()` and any undici-based
  * clients route through the proxy.
  *
- * @returns A disposable restoring the global fetch patch when one was applied, or undefined
- * when no patch was made (nothing to undo). Also registered on `context.subscriptions`.
+ * @param context The extension context whose subscriptions register the returned resource.
+ * @param isDisposed Teardown latch checked after the dynamic import below; a late import
+ * completion closes the freshly built agent instead of installing it.
+ * @returns A disposable that closes the created agent, or undefined when no agent was created
+ * (nothing to close). Also registered on `context.subscriptions`.
  */
-async function configureUndiciProxy(config: ProxyConfig): Promise<vscode.Disposable | undefined> {
+async function configureUndiciProxy(
+	config: ProxyConfig,
+	context: vscode.ExtensionContext,
+	isDisposed: () => boolean,
+): Promise<vscode.Disposable | undefined> {
 	if (!config.enabled || !config.serverUrl) {
 		return undefined
 	}
@@ -301,7 +343,7 @@ async function configureUndiciProxy(config: ProxyConfig): Promise<vscode.Disposa
 		return undefined
 	}
 
-	let fetchPatch: vscode.Disposable | undefined
+	let undiciResource: vscode.Disposable | undefined
 
 	try {
 		const {
@@ -320,6 +362,16 @@ async function configureUndiciProxy(config: ProxyConfig): Promise<vscode.Disposa
 				? ({ rejectUnauthorized: false } satisfies import("tls").ConnectionOptions) // lgtm[js/disabling-certificate-validation]
 				: undefined,
 		})
+
+		// A teardown may have run while the import above was pending. Installing the dispatcher
+		// or patching fetch then would leave process-global routing active for a dead extension,
+		// so the freshly built agent is closed and nothing is installed.
+		if (isDisposed()) {
+			log("undici import completed after disposal; closing the late proxy agent without installing it")
+			closeProxyAgentBestEffort(proxyAgent)
+			return undefined
+		}
+
 		setGlobalDispatcher(proxyAgent)
 		undiciProxyInitialized = true
 		log(`undici global dispatcher configured for proxy: ${redactProxyUrl(config.serverUrl)}`)
@@ -337,17 +389,28 @@ async function configureUndiciProxy(config: ProxyConfig): Promise<vscode.Disposa
 			globalThis.fetch = undiciFetch as unknown as typeof fetch
 			fetchPatched = true
 			log(`globalThis.fetch patched to undici.fetch (debug proxy mode)`)
-
-			fetchPatch = { dispose: () => restoreGlobalFetchPatch() }
-			if (extensionContext) {
-				extensionContext.subscriptions.push(fetchPatch)
-			}
 		}
+
+		// The agent owns sockets, so teardown must close it; restoring the fetch patch is owned
+		// by the override-cleanup resource, which every disposal path also disposes. Disposal
+		// reaches this resource from two owners (context.subscriptions and the aggregate
+		// returned by initializeNetworkProxy), so the once-guard keeps a double dispose to a
+		// single close of the same agent.
+		let agentClosed = false
+		undiciResource = {
+			dispose: () => {
+				if (!agentClosed) {
+					agentClosed = true
+					closeProxyAgentBestEffort(proxyAgent)
+				}
+			},
+		}
+		context.subscriptions.push(undiciResource)
 	} catch (error) {
 		log(`Failed to configure undici proxy dispatcher: ${error instanceof Error ? error.message : String(error)}`)
 	}
 
-	return fetchPatch
+	return undiciResource
 }
 /**
  * Update environment variables for proxy configuration.

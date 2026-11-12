@@ -1009,6 +1009,53 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		)
 	})
 
+	it("sends a list-only save with no answer id and releases it at submit", async () => {
+		// A save that changes only the command lists carries no request id - the answer path needs a
+		// display-setting change - so the ack-driven failure retention the neighboring tests pin is
+		// unreachable for it. What the current code can prove for a no-requestId save: the hold and the
+		// unsaved flag release at submit, and the following state post is classified against the submitted
+		// lists - showing the submitted entry (write landed) leaves the dialog clean, while a refresh
+		// without it (a rejected write is indistinguishable from an external edit at this point) folds
+		// into the dialog without re-dirtying it.
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<span data-testid="current-deny-list">{JSON.stringify(deniedCommands)}</span>
+					<button
+						data-testid="buffer-deny-edit"
+						onClick={() => setCachedStateField("deniedCommands", ["git status"])}>
+						Buffer deny edit
+					</button>
+				</div>
+			),
+		)
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+			queryClient,
+		})
+
+		fireEvent.click(await screen.findByTestId("buffer-deny-edit"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		// The list-only save posted the edit and asked for no answer.
+		expect(updateSettingsPosts()).toHaveLength(1)
+		expect(lastSaveRequestId(postMessage)).toBeUndefined()
+		// With no answer to wait for, the hold releases at submit and the flag goes clean.
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+
+		// The write did not land: the refresh carries the original list. The submitted entry is absent
+		// from it, so the merge treats the post as an external change over an already-committed dialog
+		// and folds it in - the edit is gone and the flag stays off.
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			deniedCommands: [],
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		await waitFor(() => expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify([])))
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+	})
+
 	it("reconciles each list's retry baseline with that list's own write outcome after a failed save", async () => {
 		// A failed save reports one outcome for the whole payload, yet its writes ran setting by setting: the
 		// refresh the host posts before the answer carries each list's configuration result. A list whose own

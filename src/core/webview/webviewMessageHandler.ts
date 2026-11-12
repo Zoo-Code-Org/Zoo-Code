@@ -758,8 +758,11 @@ export const webviewMessageHandler = async (
 			// times are shown, so a partial save is harmless, and saving again completes it. Either way the webview is
 			// refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`): the
 			// settings page keeps the user's edits as unsaved after a failure. The error is then thrown, as it always was.
+			// A command-list key whose scoped write fails is abandoned for that key only, without a throw, so its
+			// failure cannot ride the `failed` flag; it is tracked separately to keep the save result honest.
 			let failed = false
 			let failure: unknown
+			let commandListSaveFailed = false
 
 			try {
 				if (!message.updatedSettings) break
@@ -834,9 +837,16 @@ export const webviewMessageHandler = async (
 						// downgraded to a per-key save failure.
 						const config = commandListConfiguration()
 						let inspection: CommandListInspection | undefined
+						// The same save-start snapshot keeps its global layer: the
+						// rollback below distinguishes an absent Global layer from an
+						// empty one, and re-reading here would give the rollback a
+						// configuration state the scope read never saw.
+						let globalLayerAtSaveStart: string[] | undefined
 						let inspectionFailure: string | undefined
 						try {
-							inspection = config.inspect<string[]>(key)
+							const snapshot = config.inspect<string[]>(key)
+							inspection = snapshot
+							globalLayerAtSaveStart = snapshot?.globalValue
 						} catch (error) {
 							inspectionFailure = error instanceof Error ? error.message : String(error)
 						}
@@ -845,9 +855,11 @@ export const webviewMessageHandler = async (
 							// at, and a guessed-empty layer re-copies workspace entries
 							// into global settings, so this key's save is abandoned
 							// while the remaining keys of the payload persist normally.
+							// The abandoned key still reports through the save result.
 							vscode.window.showErrorMessage(
 								`Failed to save ${key}: ${inspectionFailure ?? "the configuration value could not be read"}`,
 							)
+							commandListSaveFailed = true
 							continue
 						}
 
@@ -898,68 +910,130 @@ export const webviewMessageHandler = async (
 										!hiddenWorkspaceEntries.includes(entry),
 								)
 							: []
+						// The baseline also carries the gate as the dialog last displayed
+						// it. When the gate flipped since, the hidden set can hold
+						// entries the user did see, and an entry the dialog displayed is
+						// existing workspace knowledge: keeping it must stay a workspace
+						// decision, not a brand-new promotion into the global layer.
+						// Entries hidden by shadowing (or by a gate state the baseline
+						// already reflects) are absent from the baseline, so their
+						// promotion behavior is unchanged. A baseline without the gate
+						// slot predates it and keeps the current classification.
+						const gateAtDisplay = message.commandListBaseline?.workspaceCommandListsEnabled
+						const promotionHiddenEntries =
+							gateAtDisplay === undefined || gateAtDisplay === workspaceCommandListsEnabled()
+								? hiddenWorkspaceEntries
+								: hiddenWorkspaceEntries.filter(
+										(entry) => !Array.isArray(baseline) || !baseline.includes(entry),
+									)
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
 							[...incoming, ...externallyAdded],
 							// Hidden entries are not existing knowledge for promotion
 							// purposes: the dialog never displayed them, so an entry the
 							// user just added is new even when the workspace layer
-							// already holds it hidden. The re-add below restores the
-							// hidden entries this reduced layer drops.
-							currentScopes.workspace.filter((entry) => !hiddenWorkspaceEntries.includes(entry)),
+							// already holds it hidden — except entries the baseline
+							// shows the dialog did display. The re-add below restores
+							// the hidden entries this reduced layer drops.
+							currentScopes.workspace.filter((entry) => !promotionHiddenEntries.includes(entry)),
 							currentScopes.global,
 						)
 
 						const workspaceWrite = [...new Set([...keptWorkspaceWrite, ...hiddenWorkspaceEntries])]
 						const workspaceTarget = resolveWorkspaceWriteTarget(key, inspection)
 
-						// The two configuration writes below are not atomic, so the raw
-						// previous workspace value comes from the same snapshot the split
-						// used, taken from the target that owns the workspace layer: a
-						// failed global write rewinds that target to exactly what it held
-						// beforehand, including the entries this save drops. The raw
-						// inspected value is used rather than the sanitized layer so the
-						// rewind reproduces the file contents instead of a cleaned-up
-						// approximation of them.
-						const previousWorkspaceValue =
-							workspaceTarget === vscode.ConfigurationTarget.WorkspaceFolder
-								? inspection.workspaceFolderValue
-								: inspection.workspaceValue
-						let workspaceWriteApplied = false
+						// The two configuration writes below are not atomic, so their
+						// order is chosen against the composed enforcement set — the set
+						// union of the layers: the global layer is written first, so a
+						// save interrupted between the writes can only leave an entry
+						// duplicated across the layers (inert under the union, no
+						// approval outcome differs), never absent from both. A failed
+						// global write changes nothing and needs no compensation; only a
+						// failed workspace write leaves the global layer holding this
+						// save's value, and that half is undone below.
+						let globalWriteApplied = false
 						try {
-							// Write the workspace layer first, at the target that owns it.
-							// When no workspace layer exists the write is skipped entirely
-							// so saving never materializes one; when entries were deleted
+							await config.update(key, globalWrite, vscode.ConfigurationTarget.Global)
+							globalWriteApplied = true
+
+							// Then the workspace layer, at the target that owns it. When
+							// no workspace layer exists the write is skipped entirely so
+							// saving never materializes one; when entries were deleted
 							// the `[]` write clears them at that scope.
 							if (workspaceTarget !== undefined) {
 								await config.update(key, workspaceWrite, workspaceTarget)
-								workspaceWriteApplied = true
 							}
-
-							await config.update(key, globalWrite, vscode.ConfigurationTarget.Global)
 						} catch (error) {
 							const failure = error instanceof Error ? error.message : String(error)
 
-							// A failed workspace write leaves nothing changed, so only a
-							// global-write failure has a changed workspace layer to rewind,
-							// and the rewind goes to the same target the write used.
-							if (workspaceWriteApplied) {
+							// Only a failed workspace write leaves a changed layer, and
+							// only the global one changed. The compensation undoes
+							// exactly this save's delta — removing the entries it added
+							// to the global layer and restoring the ones it deleted —
+							// against a fresh read, so entries a third party added to
+							// that layer mid-save survive. A whole-snapshot rewind
+							// would clobber them, and the configuration API offers no
+							// compare-and-set to make that safe.
+							if (globalWriteApplied) {
+								const addedByThisSave = globalWrite.filter(
+									(entry) => !currentScopes.global.includes(entry),
+								)
+								const removedByThisSave = currentScopes.global.filter(
+									(entry) => !globalWrite.includes(entry),
+								)
+								// The re-read is guarded: when even the read fails there
+								// is nothing safe to write, and falling back to the
+								// save-start value is the clobber this compensation
+								// exists to avoid. An undo that would empty a layer that
+								// is absent clears the key instead: the configuration
+								// distinguishes `[]` from absent, and the activation seed
+								// treats `[]` as an override, so writing `[]` where no
+								// value existed would suppress the default lists after a
+								// rolled-back save.
+								let freshGlobalValue: string[] | undefined
 								try {
-									await config.update(key, previousWorkspaceValue, workspaceTarget)
+									freshGlobalValue = config.inspect<string[]>(key)?.globalValue
+								} catch (reReadError) {
+									vscode.window.showErrorMessage(
+										`Failed to save ${key}: ${failure}. The global-scoped value could not be re-read to undo this save: ${reReadError}. Review the command lists in your user and workspace settings.`,
+									)
+									commandListSaveFailed = true
+									continue
+								}
+								const globalUndo = [
+									...new Set([
+										...(freshGlobalValue ?? []).filter((entry) => !addedByThisSave.includes(entry)),
+										...removedByThisSave,
+									]),
+								]
+								const hadGlobalLayer =
+									globalLayerAtSaveStart !== undefined && freshGlobalValue !== undefined
+								try {
+									if (globalUndo.length === 0 && !hadGlobalLayer) {
+										// Absent pre-save (or externally cleared mid-save)
+										// and nothing to restore: clear the key rather than
+										// materialize an empty layer.
+										await config.update(key, undefined, vscode.ConfigurationTarget.Global)
+									} else {
+										await config.update(key, globalUndo, vscode.ConfigurationTarget.Global)
+									}
 								} catch (restoreError) {
-									// The rewind itself failed: the configuration keeps the
+									// The undo itself failed: the configuration keeps the
 									// partially written values and the extension global-state
 									// write is skipped, so stored state never reflects a save
 									// that did not complete. The user hears about both failures.
 									vscode.window.showErrorMessage(
-										`Failed to save ${key}: ${failure}. The workspace-scoped restore also failed: ${restoreError}. Review the command lists in your user and workspace settings.`,
+										`Failed to save ${key}: ${failure}. The global-scoped restore also failed: ${restoreError}. Review the command lists in your user and workspace settings.`,
 									)
+									commandListSaveFailed = true
 									continue
 								}
 							}
 
 							// Only this key's save is abandoned; the remaining keys of the
-							// payload persist normally.
+							// payload persist normally, and the abandoned key reports
+							// through the save result without re-raising the failure.
 							vscode.window.showErrorMessage(`Failed to save ${key}: ${failure}`)
+							commandListSaveFailed = true
 							continue
 						}
 
@@ -1102,7 +1176,10 @@ export const webviewMessageHandler = async (
 				await provider.postMessageToWebview({
 					type: "settingsSaveResult",
 					requestId: message.requestId,
-					success: !failed,
+					// A per-key command-list failure does not throw, so it has to
+					// reach the result through its own flag; the error field stays
+					// with the thrown-failure path only.
+					success: !failed && !commandListSaveFailed,
 					...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
 				})
 			}

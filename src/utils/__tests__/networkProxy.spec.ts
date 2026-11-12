@@ -12,9 +12,29 @@ import {
 	createProxyRoutingRequestHandler,
 } from "../networkProxy"
 
-// Mock global-agent
-vi.mock("global-agent", () => ({
-	bootstrap: vi.fn(),
+// Mock global-agent and undici: the real bootstrap()/setGlobalDispatcher() write
+// process-global state every later test would inherit, and the real ProxyAgent owns sockets.
+const mocks = vi.hoisted(() => {
+	const closeSpy = vi.fn().mockResolvedValue(undefined)
+	return {
+		bootstrap: vi.fn(),
+		// mockImplementation with a plain function keeps the double constructible: the
+		// production path calls `new ProxyAgent(...)`, which an arrow implementation rejects.
+		proxyAgent: vi.fn().mockImplementation(function () {
+			return { close: closeSpy }
+		}),
+		proxyAgentClose: closeSpy,
+		setGlobalDispatcher: vi.fn(),
+		undiciFetch: vi.fn(),
+	}
+})
+
+vi.mock("global-agent", () => ({ bootstrap: mocks.bootstrap }))
+
+vi.mock("undici", () => ({
+	ProxyAgent: mocks.proxyAgent,
+	setGlobalDispatcher: mocks.setGlobalDispatcher,
+	fetch: mocks.undiciFetch,
 }))
 
 vi.mock("@smithy/node-http-handler", () => ({
@@ -259,8 +279,9 @@ describe("networkProxy", () => {
 				// dispose: the assertion below holds only if the returned aggregate releases the
 				// same objects registered on context.subscriptions, which is the invariant.
 				const registered = [...context.subscriptions]
-				// Configuration listener, override cleanup, and fetch patch: the scenario must
-				// register all three for the equivalence to cover every acquisition.
+				// Configuration listener, override cleanup, and the proxy-agent resource: the
+				// scenario must register all three for the equivalence to cover every
+				// acquisition.
 				expect(registered.length).toBe(3)
 				// Both observable overrides are applied before teardown.
 				expect(globalThis.fetch).not.toBe(fetchSentinel)
@@ -275,6 +296,267 @@ describe("networkProxy", () => {
 				// Teardown restores both observable overrides: fetch and the TLS setting.
 				expect(globalThis.fetch).toBe(fetchSentinel)
 				expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
+			} finally {
+				globalThis.fetch = fetchBefore
+			}
+		})
+
+		// The proxy agent owns sockets, and both configure* helpers suspend on dynamic imports,
+		// so teardown must close the agent and the import continuations must refuse to install
+		// process-global state after disposal. Each test re-imports the module after
+		// resetModules so the one-shot latches (global-agent bootstrap, fetch patch, dispatcher)
+		// start untripped, as the aggregate-invariant test above does.
+		describe("undici disposal and post-dispose import races", () => {
+			// A dynamic import of a mocked module still resolves asynchronously, so
+			// initializeNetworkProxy returns at its first await and the configure* continuations
+			// run only once the test awaits it: disposing synchronously in between lands the
+			// teardown while both imports are in flight, which is the interleaving the guards
+			// must reject.
+			function disposeMidFlight(context: vscode.ExtensionContext): void {
+				// Only the configuration listener and the override cleanup are registered while
+				// the imports are pending; disposing them is what VS Code does item-by-item on
+				// unload, and it latches the module's disposed flag.
+				expect(context.subscriptions).toHaveLength(2)
+				context.subscriptions.forEach((subscription) => subscription.dispose())
+			}
+
+			// Re-imported module plus a development-mode context with the debug proxy enabled;
+			// resetModules re-runs the vscode mock factory, so the fresh module's configuration
+			// spy needs the stub before initializeNetworkProxy reads it. The mock spies are
+			// shared across the file, so each test starts from a clean call log.
+			async function freshDebugRunContext(): Promise<{
+				freshModule: typeof import("../networkProxy")
+				context: vscode.ExtensionContext
+			}> {
+				vi.clearAllMocks()
+				mocks.proxyAgent.mockImplementation(function () {
+					return { close: mocks.proxyAgentClose }
+				})
+				const freshModule = await import("../networkProxy")
+				const freshVscode = await import("vscode")
+				vi.mocked(freshVscode.workspace.getConfiguration).mockReturnValue(
+					makeWorkspaceConfiguration({
+						"debugProxy.enabled": true,
+						"debugProxy.serverUrl": "http://localhost:8080",
+						"debugProxy.tlsInsecure": false,
+					}),
+				)
+				return { freshModule, context: createMockContext(vscode.ExtensionMode.Development) }
+			}
+
+			it("closes the proxy agent and restores the fetch patch when the returned disposable is disposed", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+					// Accept path: while the extension is alive the disposal guards are
+					// transparent, and everything this module can install gets installed.
+					expect(mocks.bootstrap).toHaveBeenCalledOnce()
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledWith(
+						expect.objectContaining({ close: mocks.proxyAgentClose }),
+					)
+					expect(globalThis.fetch).not.toBe(fetchSentinel)
+					// Configuration listener, override cleanup, and the agent-owning undici
+					// resource: the agent must be among the registered subscriptions for the
+					// deactivate path to reach its close.
+					expect(context.subscriptions).toHaveLength(3)
+
+					returned.dispose()
+
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			it("logs and swallows a rejected agent close during teardown", async () => {
+				vi.resetModules()
+				const closeFailure = new Error("close failed")
+				mocks.proxyAgentClose.mockRejectedValueOnce(closeFailure)
+				const fetchBefore = globalThis.fetch
+				globalThis.fetch = () => Promise.reject(new Error("sentinel fetch"))
+				let returned: vscode.Disposable | undefined
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+					// A rejected close must not throw out of the synchronous dispose or leave an
+					// unhandled rejection: the teardown logs it and continues releasing resources.
+					expect(() => returned?.dispose()).not.toThrow()
+					// The rejection is logged on the microtask the best-effort close awaits.
+					await new Promise((resolve) => setTimeout(resolve, 0))
+					expect(vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")).toContain(
+						"Failed to close undici proxy agent: close failed",
+					)
+				} finally {
+					returned?.dispose()
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			it("closes the agent only once when disposal runs through both owners", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+					// The undici resource is registered on context.subscriptions AND collected
+					// in the aggregate disposable, so an activation-failure teardown can reach
+					// it again after VS Code (or a re-disposal) already went through the list;
+					// the close must still happen exactly once.
+					returned.dispose()
+					returned.dispose()
+					context.subscriptions.forEach((subscription) => subscription.dispose())
+
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledOnce()
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			it("skips the global-agent bootstrap when disposal runs before the import settles", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const init = freshModule.initializeNetworkProxy(context, mockOutputChannel)
+					disposeMidFlight(context)
+					await init
+
+					// Reject path for the global-agent suspension point: the late continuation
+					// must not bootstrap global-agent for a disposed extension.
+					expect(mocks.bootstrap).not.toHaveBeenCalled()
+					expect(vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")).toContain(
+						"global-agent import completed after disposal; skipping bootstrap",
+					)
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			it("closes a late proxy agent without installing it when disposal runs before the undici import settles", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const init = freshModule.initializeNetworkProxy(context, mockOutputChannel)
+					disposeMidFlight(context)
+					await init
+
+					// Reject path for the undici suspension point: the agent is constructed only
+					// once the import settles - after teardown - so the guard must close it and
+					// install nothing: no dispatcher swap, no fetch patch for a dead extension.
+					expect(mocks.proxyAgent).toHaveBeenCalledOnce()
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(mocks.setGlobalDispatcher).not.toHaveBeenCalled()
+					expect(vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")).toContain(
+						"undici import completed after disposal; closing the late proxy agent without installing it",
+					)
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+		})
+
+		// The configuration-change listener re-runs the configure* helpers when the debug proxy
+		// is toggled on mid-session. Both helpers are latched (bootstrap and dispatcher are
+		// one-shot), so after a successful activation the listener path re-enters them and
+		// returns through their already-configured branches; without this test those call
+		// sites would never execute. Runs on a reset module instance so the shared latches
+		// start untripped, as in the disposal tests.
+		it("re-runs both configure paths without re-installing when the proxy is toggled on again", async () => {
+			vi.resetModules()
+			const freshModule = await import("../networkProxy")
+			const freshVscode = await import("vscode")
+			vi.mocked(freshVscode.workspace.getConfiguration).mockReturnValue(
+				makeWorkspaceConfiguration({
+					"debugProxy.enabled": true,
+					"debugProxy.serverUrl": "http://localhost:8080",
+					"debugProxy.tlsInsecure": false,
+				}),
+			)
+			let configListener: ((event: { affectsConfiguration: (section: string) => boolean }) => void) | undefined
+			vi.mocked(freshVscode.workspace.onDidChangeConfiguration).mockImplementation((listener) => {
+				configListener = listener as typeof configListener
+				return { dispose: vi.fn() }
+			})
+			const context = createMockContext(vscode.ExtensionMode.Development)
+
+			await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+			vi.clearAllMocks()
+
+			expect(configListener).toBeTypeOf("function")
+			configListener?.({ affectsConfiguration: () => true })
+			// The re-entrant calls resolve on their own microtasks.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// Nothing is installed twice: bootstrap and the dispatcher swap stay one-shot, and
+			// the log records both "already configured" branches rather than a failure.
+			expect(mocks.bootstrap).not.toHaveBeenCalled()
+			expect(mocks.setGlobalDispatcher).not.toHaveBeenCalled()
+			const logged = vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")
+			expect(logged).toContain("Proxy already initialized, updating env vars only")
+			expect(logged).toContain("undici global dispatcher already configured")
+		})
+
+		// A second initialize on the same module instance reaches configureUndiciProxy through
+		// the already-configured latch, which returns no resource: the aggregate then collects
+		// only the listener and the override cleanup, and disposing it must not touch the agent
+		// owned by the first activation.
+		it("collects no agent resource on a re-initialization while the dispatcher latch is tripped", async () => {
+			vi.resetModules()
+			vi.clearAllMocks()
+			const fetchBefore = globalThis.fetch
+			globalThis.fetch = () => Promise.reject(new Error("sentinel fetch"))
+			try {
+				const freshModule = await import("../networkProxy")
+				const freshVscode = await import("vscode")
+				vi.mocked(freshVscode.workspace.getConfiguration).mockReturnValue(
+					makeWorkspaceConfiguration({
+						"debugProxy.enabled": true,
+						"debugProxy.serverUrl": "http://localhost:8080",
+						"debugProxy.tlsInsecure": false,
+					}),
+				)
+
+				const context = createMockContext(vscode.ExtensionMode.Development)
+				const first = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+				expect(context.subscriptions).toHaveLength(3)
+
+				const secondContext = createMockContext(vscode.ExtensionMode.Development)
+				const second = await freshModule.initializeNetworkProxy(secondContext, mockOutputChannel)
+
+				// configureUndiciProxy returned undefined for the second run, so only the listener
+				// and the override cleanup are registered there.
+				expect(secondContext.subscriptions).toHaveLength(2)
+
+				second.dispose()
+				// The first activation still owns the agent; the second teardown must not close it.
+				expect(mocks.proxyAgentClose).not.toHaveBeenCalled()
+
+				first.dispose()
+				expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
 			} finally {
 				globalThis.fetch = fetchBefore
 			}

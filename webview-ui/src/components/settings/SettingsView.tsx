@@ -342,17 +342,21 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// are themselves unposted, so the stamp keeps its prior lists instead - a
 			// deletion inside the buffered edit must stay in the baseline for the save to
 			// apply it rather than resurrect the deleted entry as an external addition.
-			const [stampAllowed, stampDenied] = commandListsTouched.current
+			// The gate slot holds back with those lists because the stamp has to describe
+			// one displayed state: pairing held-back lists with an externally-flipped gate
+			// would claim the held-back entries were displayed under a gate they never
+			// appeared alongside.
+			const [stampAllowed, stampDenied, stampGate] = commandListsTouched.current
 				? (JSON.parse(lastDisplayedCommandSnapshot.current) as [string[], string[], boolean])
 				: [
 						merged.allowedCommands ?? prevState.allowedCommands,
 						merged.deniedCommands ?? prevState.deniedCommands,
+						merged.workspaceCommandListsEnabled ?? prevState.workspaceCommandListsEnabled,
 					]
 			lastDisplayedCommandSnapshot.current = commandListSnapshot({
 				allowedCommands: stampAllowed,
 				deniedCommands: stampDenied,
-				workspaceCommandListsEnabled:
-					merged.workspaceCommandListsEnabled ?? prevState.workspaceCommandListsEnabled,
+				workspaceCommandListsEnabled: stampGate,
 			})
 
 			if (changedFields === 0) {
@@ -506,11 +510,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
-			const [lastDisplayedAllowed, lastDisplayedDenied] = JSON.parse(lastDisplayedCommandSnapshot.current) as [
-				string[],
-				string[],
-				boolean,
-			]
+			const [lastDisplayedAllowed, lastDisplayedDenied, gateAtSubmit] = JSON.parse(
+				lastDisplayedCommandSnapshot.current,
+			) as [string[], string[], boolean]
 
 			const saveId = displayChanged ? nextSaveRequestId() : undefined
 			if (saveId) {
@@ -528,6 +530,16 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				commandListBaseline: {
 					allowedCommands: lastDisplayedAllowed,
 					deniedCommands: lastDisplayedDenied,
+					// The gate travels with the lists it was displayed alongside: the stamp
+					// always carries the gate that was on screen with its lists, so a gate
+					// flip between display and save cannot pair old-gate entries with a
+					// new-gate label and reclassify a baseline-shown entry as a brand-new
+					// promotion into the global layer. A dialog whose host never delivered
+					// the gate has no displayed gate to accompany the baseline: it posts
+					// none, and the save path keeps the legacy classification for an
+					// absent flag.
+					workspaceCommandListsEnabled:
+						cachedState.workspaceCommandListsEnabled === undefined ? undefined : gateAtSubmit,
 				},
 				updatedSettings: {
 					language,
@@ -616,7 +628,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			lastDisplayedCommandSnapshot.current = commandListSnapshot({
 				allowedCommands,
 				deniedCommands,
-				workspaceCommandListsEnabled: cachedState.workspaceCommandListsEnabled,
+				workspaceCommandListsEnabled: gateAtSubmit,
 			})
 			// The stamp records what is on screen, so it moves at submit; the settle below then re-derives each
 			// edited list's entry from whether that list's own write landed. The lists' ownership of the buffer
