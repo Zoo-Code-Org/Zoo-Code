@@ -1579,6 +1579,8 @@ export class DiffViewProvider {
 	 * @param relPath - Relative path to the file
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
+	 * @param onCommit - Called at the filesystem write below, the point after which a rollback
+	 *   would delete content that already landed
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1587,6 +1589,7 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		onCommit?: () => void,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1600,6 +1603,17 @@ export class DiffViewProvider {
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
 		await fs.writeFile(absolutePath, content, "utf-8")
+		// The write is the commit point, the same line saveChanges() signals its commit and releases
+		// the placeholder at: the document open, the forced save and the diagnostics below can all
+		// still reject, and a caller that rolled the call back after this point would delete content
+		// that already landed.
+		onCommit?.()
+		// Ownership is released at the same point saveChanges() releases it, and only for the
+		// placeholder that names this very file: a session retained on another path keeps its own
+		// placeholder owned, because this write never created it.
+		if (this.placeholderPath === absolutePath) {
+			this.placeholderPath = undefined
+		}
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
