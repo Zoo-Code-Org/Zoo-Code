@@ -534,6 +534,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// the single owner of that release: disposal and the stream abort teardown both await it
 	// instead of starting a second rollback over the same buffer (see releaseUnapprovedDiffView).
 	private diffReversionPromise: Promise<void> | undefined
+	// Set when the release this task owns finished with a failure. The promise stays resolved on purpose:
+	// abortTaskOnce() documents that abort must always succeed and disposeOnce() awaits it unguarded, so
+	// a failed release is recorded here and surfaced at the abort site instead of rejected to every waiter.
+	private diffReversionFailed = false
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -3751,6 +3755,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Reversion affects the user's workspace and must finish before the
 			// final task state is saved. Artifact deletion is drained separately.
 			await this.diffReversionPromise
+			if (this.diffReversionFailed) {
+				// The release this abort waited for failed. Report it the way a failed rollback is reported
+				// elsewhere - through the error say path - instead of letting the abort complete as if the
+				// workspace had been restored.
+				await this.say(
+					"error",
+					"The diff view could not be released after the stream was aborted, so the editor may still show content this task never approved.",
+				).catch((sayError) => {
+					console.error(
+						`Error reporting the failed diff release for ${this.taskId}.${this.instanceId}:`,
+						sayError,
+					)
+				})
+			}
 		} catch (error) {
 			console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
 			// Don't rethrow - we want abort to always succeed
@@ -3951,7 +3969,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.diffViewProvider.editType === "modify"
 				? this.diffViewProvider.revertChanges()
 				: this.diffViewProvider.discardUnapprovedStream()
-		this.diffReversionPromise = releaseUnapprovedEdit.catch(console.error)
+		this.diffReversionPromise = releaseUnapprovedEdit.catch((error) => {
+			// A failed release must not reject the waiters (see diffReversionFailed): record it so the site
+			// that reports the outcome can say the rollback did not happen instead of reporting it done.
+			this.diffReversionFailed = true
+			console.error(error)
+		})
 		return this.diffReversionPromise
 	}
 
@@ -4381,6 +4404,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// had one) is over, and this session's abandoned view has to be able to release
 				// itself instead of awaiting the settled promise of the one before.
 				this.diffReversionPromise = undefined
+				// The failure record belongs to the same release session: the next request has to be able to report
+				// its own failure rather than inherit this one.
+				this.diffReversionFailed = false
 
 				await this.safeEnsureModelFetched()
 

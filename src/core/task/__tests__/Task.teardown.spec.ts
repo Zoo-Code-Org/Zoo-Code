@@ -782,6 +782,227 @@ describe("Task teardown, dispose-time metadata repair and diff-view release", ()
 			disposeSpy.mockRestore()
 		})
 
+		it("surfaces a failed diff release instead of completing the abort as if the workspace were restored", async () => {
+			// The ask: a release that failed must not be reported as a completed rollback. Recording and surfacing
+			// is the chosen shape - propagating it would make dispose() itself begin rejecting on the path whose
+			// own comment says abort must always succeed - so the proof is that the abort still completes AND the
+			// user is told the rollback did not happen.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000009")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort release failure",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				void task.abortTask()
+			})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "partial model output" }]),
+			)
+			vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi
+				.spyOn(task.diffViewProvider, "discardUnapprovedStream")
+				.mockRejectedValue(new Error("placeholder could not be removed"))
+			// Observed, not replaced: replacing say() would change the streaming path this test runs through,
+			// so the spy keeps the real implementation and only records the calls.
+			const saySpy = vi.spyOn(task, "say")
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+			// Isolation as in the two tests above: disposal's own trigger is disabled on the way in, so the
+			// release whose failure is reported here can only be the stream-abort path's.
+			const disposeReal = task.dispose.bind(task)
+			let disposeCalls = 0
+			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {
+				disposeCalls++
+				task.isStreaming = false
+				return disposeReal.call(task)
+			})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this stream" }]).catch(() => {})
+			// abortTask() returns the shared abort promise, so awaiting it again cannot start a second abort;
+			// it only guarantees abortTaskOnce() has finished before the assertions below.
+			await task.abortTask()
+
+			expect(disposeCalls).toBeGreaterThan(0)
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+			// The failure is recorded rather than thrown, which is what lets the abort path finish.
+			expect(task["diffReversionFailed"]).toBe(true)
+			// The promise itself stays resolved: that is the half of the ruling this keeps abort semantics
+			// alone for, and awaiting it here fails the test if the release promise ever rejects.
+			const sharedRelease = task["diffReversionPromise"]
+			expect(sharedRelease).toBeDefined()
+			await sharedRelease
+			// Exactly one error say carries this release failure; a second would mean the abort reported the
+			// same hazard twice.
+			const releaseFailureSays = saySpy.mock.calls.filter(
+				(call: unknown[]) => call[0] === "error" && String(call[1]).includes("diff view could not be released"),
+			)
+			expect(releaseFailureSays.length).toBe(1)
+			saySpy.mockRestore()
+			discardSpy.mockRestore()
+			disposeSpy.mockRestore()
+		})
+
+		it("reports the release failure through the log when the error say itself fails", async () => {
+			// The surfacing block wraps its own say in a catch, so that a failed report does not turn the abort into
+			// a rejection either. That fallback only runs when say rejects, so it needs its own case: the first
+			// failing-release test leaves say with its real implementation and never reaches it.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "abort release failure, failing report",
+				startTask: false,
+			})
+			// These two cases are about the release record, not about persistence, and every Task in this file
+			// lands in the same task directory (uuid v7 is mocked to one constant), so a persisting test
+			// leaves files that the next run reads back. Mocking the two write stages keeps the directory as
+			// the run found it.
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				void task.abortTask()
+			})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "partial model output" }]),
+			)
+			vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi
+				.spyOn(task.diffViewProvider, "discardUnapprovedStream")
+				.mockRejectedValue(new Error("placeholder could not be removed"))
+			// Only the release-failure report rejects. Every other say keeps the real implementation, because
+			// replacing say() outright changes the streaming path this test runs through.
+			const sayReal = task.say.bind(task)
+			const saySpy = vi
+				.spyOn(task, "say")
+				.mockImplementation((...args) =>
+					args[0] === "error" && String(args[1] ?? "").includes("diff view could not be released")
+						? Promise.reject(new Error("the error say itself failed"))
+						: sayReal(...args),
+				)
+			const errorLogSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+			const disposeReal = task.dispose.bind(task)
+			let disposeCalls = 0
+			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {
+				disposeCalls++
+				task.isStreaming = false
+				return disposeReal.call(task)
+			})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this stream" }]).catch(() => {})
+			await task.abortTask()
+
+			expect(disposeCalls).toBeGreaterThan(0)
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+			expect(task["diffReversionFailed"]).toBe(true)
+			// The report was attempted once and failed. The abort still ran to the end of its try block, which is
+			// what the awaited abortTask() above proves, and the report's own failure went to the log rather than
+			// out through abortTask().
+			expect(
+				saySpy.mock.calls.filter(
+					(call: unknown[]) =>
+						call[0] === "error" && String(call[1]).includes("diff view could not be released"),
+				).length,
+			).toBe(1)
+			const reportedFailures = errorLogSpy.mock.calls.filter((call: unknown[]) =>
+				String(call[0]).includes("Error reporting the failed diff release"),
+			)
+			expect(reportedFailures.length).toBe(1)
+			expect(String(reportedFailures[0][1])).toContain("the error say itself failed")
+			saySpy.mockRestore()
+			discardSpy.mockRestore()
+			disposeSpy.mockRestore()
+			errorLogSpy.mockRestore()
+		})
+
+		it("clears the release-failure record when the failed stream is retried", async () => {
+			// The product"s own way back into a request after a release failed is the mid-stream failure retry:
+			// the stream throws, the handler releases the diff view (which fails here), and the same content is
+			// pushed back onto the request stack, so the next iteration runs the reset block again after the
+			// failure is on the books. A user cancel cannot do this - the run-state abort latch is one-way
+			// (latches.abort is set by abortRequested and never cleared), and a new request throws at its own
+			// abort check - so this case rides the retry path instead of a second message.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "failed release, then a stream retry",
+				startTask: false,
+			})
+			// These two cases are about the release record, not about persistence, and every Task in this file
+			// lands in the same task directory (uuid v7 is mocked to one constant), so a persisting test
+			// leaves files that the next run reads back. Mocking the two write stages keeps the directory as
+			// the run found it.
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+			// The request path awaits diffViewProvider.reset() immediately before the reset block, so it has to
+			// resolve; the release inside the failure handler is what fails.
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi
+				.spyOn(task.diffViewProvider, "discardUnapprovedStream")
+				.mockRejectedValue(new Error("placeholder could not be removed"))
+			// safeEnsureModelFetched is awaited directly after the reset block, so each call is a read of the
+			// record at exactly the point where the reset has just run, together with how many releases have
+			// happened by then.
+			const recordAtModelFetch: { failed: boolean; releases: number }[] = []
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockImplementation(async () => {
+				recordAtModelFetch.push({
+					failed: task["diffReversionFailed"],
+					releases: discardSpy.mock.calls.length,
+				})
+				return stubModelInfo
+			})
+			// First call: one chunk, then the provider stream breaks, which is what routes the request through
+			// abortStream on the streaming_failed path rather than through a user cancel.
+			// Second call: a clean stream, cancelled at its first presentation so the run ends promptly.
+			let streamCalls = 0
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				streamCalls++
+				if (streamCalls === 1) {
+					return (async function* (): AsyncGenerator<ApiStreamChunk> {
+						yield { type: "text", text: "partial model output" }
+						throw new Error("provider stream broke mid-request")
+					})()
+				}
+				return asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "second attempt" }])
+			})
+			let presentCalls = 0
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				presentCalls++
+				if (presentCalls >= 2) {
+					void task.abortTask()
+				}
+			})
+			vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "stream that fails" }]).catch(() => {})
+
+			// Two model fetches means the retry really re-entered the request path, and the first row shows that a
+			// failed release was already on the books before it did.
+			expect(recordAtModelFetch.length).toBeGreaterThanOrEqual(2)
+			expect(recordAtModelFetch[0]).toEqual({ failed: false, releases: 0 })
+			// The pin: at the retry"s model fetch - the first point after the reset block - the record is
+			// clear although exactly one failed release has run. Flip the reset from false to true and this row
+			// reads { failed: true } instead.
+			expect(recordAtModelFetch[1]).toEqual({ failed: false, releases: 1 })
+			// Exactly one release ran and it failed, and the retry opened no new one: the settled promise and its
+			// record were dropped together, so the session that follows starts clean and can report its own
+			// failure instead of inheriting this one.
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+			expect(task["diffReversionFailed"]).toBe(false)
+			expect(task["diffReversionPromise"]).toBeUndefined()
+			discardSpy.mockRestore()
+		})
+
 		it("starts one release per diff view and hands every later caller the same promise", async () => {
 			// Single owner: a release one path already started must not be repeated by the other over
 			// the same buffer (a second revertChanges() could roll back content the first release
