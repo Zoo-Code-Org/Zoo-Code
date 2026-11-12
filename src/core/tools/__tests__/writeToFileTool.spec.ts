@@ -1130,12 +1130,23 @@ describe("writeToFileTool", () => {
 			// content into it. This branch reported the denial and released the stream state, but
 			// never touched the diff view: the unapproved content sat in a saveable editor, and the
 			// provider kept this call's editType/relPath for whatever write came next.
+			// The first delta only records the path in hasPathStabilizedForTask(); it takes a second matching
+			// delta before open()/update() run. Without a streamed preview this test would check cleanup calls
+			// against a diff view that was never opened, so stream it first and pin its order before the denial.
 			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).toHaveBeenCalled()
 
 			await executeWriteFileTool({}, { accessAllowed: false })
 
 			expect(mockCline.say).toHaveBeenCalledWith("rooignore_error", testFilePath)
 			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			// The streamed preview above is what the denial cleanup has to run after.
+			expect(mockCline.diffViewProvider.open.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0],
+			)
 			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
 				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
 			)
