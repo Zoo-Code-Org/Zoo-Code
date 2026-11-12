@@ -4721,6 +4721,10 @@ describe("ClineProvider", () => {
 		})
 
 		it("keeps an unmapped mode local when another provider saves a mapping later", async () => {
+			await provider.providerSettingsManager.saveConfig("first", {
+				id: "id1",
+				apiProvider: providerIdentifiers.openrouter,
+			})
 			const first = newProvider()
 			const second = newProvider()
 			await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
@@ -4731,6 +4735,8 @@ describe("ClineProvider", () => {
 			await expect(first["getModeConfigId"]("new-mode")).resolves.toBeUndefined()
 			await expect(second["getModeConfigId"]("new-mode")).resolves.toBe("id2")
 			await first.contextProxy.setValue("currentApiConfigName", "first")
+			await first.handleModeSwitch("new-mode")
+			await first.handleModeSwitch("code")
 			await first.handleModeSwitch("new-mode")
 			await expect(first["getModeConfigId"]("new-mode")).resolves.toBe("id1")
 			await expect(second.providerSettingsManager.getModeConfigId("new-mode")).resolves.toBe("id2")

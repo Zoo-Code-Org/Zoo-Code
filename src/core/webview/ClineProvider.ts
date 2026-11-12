@@ -2142,7 +2142,7 @@ export class ClineProvider
 				if (hasActualSettings) {
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
-						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+						{ persistModeConfig: false, skipCurrentTaskRebuild: targetTask === null },
 						signal,
 					)
 				} else {
