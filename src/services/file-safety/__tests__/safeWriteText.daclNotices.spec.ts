@@ -219,6 +219,31 @@ describe("safeWriteText win32 DACL notices", () => {
 		expect(vi.mocked(fs.rename)).not.toHaveBeenCalled()
 	})
 
+	// The refusal at the target lstat only says the identity comparison could not be made; the
+	// caught error is the only thing that says why. It has to arrive as the cause, or a support
+	// report can repeat the sentence without learning whether the target was locked or unreadable.
+	it("carries the target lstat error as the cause of the staging-path refusal", async () => {
+		const unreadable = codeError("EACCES", "target identity unreadable")
+		vi.mocked(fs.lstat).mockImplementation(async (stagedPath) => {
+			if (String(stagedPath) === CALLER_STAGED) {
+				return fileStatsWithIdentity(7n, 3n)
+			}
+			throw unreadable
+		})
+
+		const failure = await publish({
+			tempPath: CALLER_STAGED,
+			execFileRunner: icaclsDouble({}).runner,
+		}).catch((error: unknown) => error)
+
+		expect(failure).toBeInstanceOf(StagingPathError)
+		// instanceof narrows instead of casting, and the assertion above already fails when the
+		// publish refused with anything else.
+		if (failure instanceof StagingPathError) {
+			expect(failure.cause).toBe(unreadable)
+		}
+	})
+
 	it("removes the backup copy after a successful publish", async () => {
 		const { leftoverPaths, warnings } = await publish({ backup: true, execFileRunner: icaclsDouble({}).runner })
 
