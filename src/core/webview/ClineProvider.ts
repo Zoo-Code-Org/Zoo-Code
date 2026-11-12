@@ -471,7 +471,11 @@ export class ClineProvider
 
 		this._workspaceTracker = new WorkspaceTracker(this)
 
-		this.providerSettingsManager = new ProviderSettingsManager(this.context)
+		this.providerSettingsManager = new ProviderSettingsManager(this.context, (modeConfigIds) => {
+			// Manual and automatic imports replace this provider's previous mode choices.
+			this.localModeConfigIds.clear()
+			this.initialModeConfigIds = Promise.resolve(modeConfigIds)
+		})
 		this.captureInitialModeConfigIds()
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {

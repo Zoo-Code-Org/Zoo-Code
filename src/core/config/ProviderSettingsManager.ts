@@ -80,7 +80,10 @@ export class ProviderSettingsManager {
 
 	private readonly context: ExtensionContext
 
-	constructor(context: ExtensionContext) {
+	constructor(
+		context: ExtensionContext,
+		private readonly onImport?: (modeConfigIds: Record<string, string>) => void,
+	) {
 		this.context = context
 
 		// TODO: We really shouldn't have async methods in the constructor.
@@ -653,7 +656,10 @@ export class ProviderSettingsManager {
 
 	public async import(providerProfiles: ProviderProfiles) {
 		try {
-			return await this.lock(() => this.store(providerProfiles))
+			await this.lock(async () => {
+				await this.store(providerProfiles)
+				this.onImport?.({ ...providerProfiles.modeApiConfigs })
+			})
 		} catch (error) {
 			throw new Error(`Failed to import provider profiles: ${error}`)
 		}

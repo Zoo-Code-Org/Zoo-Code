@@ -1,6 +1,7 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
 import fs from "fs"
+import fsPromises from "fs/promises"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
 
@@ -30,6 +31,8 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
+import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
+import { importSettingsFromPath } from "../../config/importExport"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -4646,6 +4649,112 @@ describe("ClineProvider", () => {
 		await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
 		// A mode this window never chose still falls back to the shared value.
 		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("other-window-id")
+	})
+
+	describe("mode profile initialization and imports", () => {
+		const profiles = {
+			currentApiConfigName: "first",
+			apiConfigs: { first: { id: "id1" }, second: { id: "id2" }, imported: { id: "id3" } },
+			modeApiConfigs: { code: "id1", architect: "id1" },
+		}
+		let createdProviders: ClineProvider[]
+
+		const newProvider = () => {
+			const created = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			createdProviders.push(created)
+			return created
+		}
+
+		beforeEach(async () => {
+			createdProviders = []
+			await provider.providerSettingsManager.import(profiles)
+		})
+
+		afterEach(async () => {
+			for (const created of createdProviders) {
+				await created.dispose()
+			}
+			vi.restoreAllMocks()
+		})
+
+		it("captures the opening snapshot during construction and waits for it on lookup", async () => {
+			let resolveSnapshot!: (value: Record<string, string>) => void
+			const snapshot = new Promise<Record<string, string>>((resolve) => {
+				resolveSnapshot = resolve
+			})
+			const getSnapshot = vi
+				.spyOn(ProviderSettingsManager.prototype, "getModeConfigIds")
+				.mockReturnValue(snapshot)
+			const created = newProvider()
+			expect(getSnapshot).toHaveBeenCalledOnce()
+
+			let settled = false
+			const lookup = created["getModeConfigId"]("code").then((id) => {
+				settled = true
+				return id
+			})
+			// Flush the real manager's initialization while the opening snapshot is pending.
+			await created.providerSettingsManager.listConfig()
+			expect(settled).toBe(false)
+
+			resolveSnapshot({ code: "id2" })
+			await expect(lookup).resolves.toBe("id2")
+			expect(getSnapshot).toHaveBeenCalledOnce()
+		})
+
+		it("isolates two providers using the same shared profile store", async () => {
+			const first = newProvider()
+			const second = newProvider()
+			await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
+
+			await first.setModeConfig("code", "id2")
+
+			await expect(second.providerSettingsManager.getModeConfigId("code")).resolves.toBe("id2")
+			await expect(first["getModeConfigId"]("code")).resolves.toBe("id2")
+			await expect(second["getModeConfigId"]("code")).resolves.toBe("id1")
+		})
+
+		it.each(["success", "profile write fails", "later settings write fails"])(
+			"refreshes imported local and snapshot choices only after profiles persist: %s",
+			async (outcome) => {
+				const first = newProvider()
+				const second = newProvider()
+				await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
+				await first.setModeConfig("code", "id2")
+				vi.mocked(fsPromises.readFile).mockResolvedValueOnce(
+					JSON.stringify({
+						providerProfiles: { ...profiles, modeApiConfigs: { code: "id3", architect: "id3" } },
+						globalSettings: {},
+					}),
+				)
+				if (outcome === "profile write fails") {
+					vi.spyOn(mockContext.secrets, "store").mockRejectedValueOnce(new Error("profile write failed"))
+				} else if (outcome === "later settings write fails") {
+					vi.spyOn(first.contextProxy, "setValues").mockRejectedValueOnce(new Error("settings write failed"))
+				}
+
+				const result = await importSettingsFromPath("/test/settings.json", {
+					providerSettingsManager: first.providerSettingsManager,
+					contextProxy: first.contextProxy,
+					customModesManager: first.customModesManager,
+				})
+
+				expect(result.success).toBe(outcome === "success")
+				await expect(first["getModeConfigId"]("code")).resolves.toBe(
+					outcome === "profile write fails" ? "id2" : "id3",
+				)
+				await expect(first["getModeConfigId"]("architect")).resolves.toBe(
+					outcome === "profile write fails" ? "id1" : "id3",
+				)
+				await expect(second["getModeConfigId"]("code")).resolves.toBe("id1")
+			},
+		)
 	})
 
 	describe("mode profile snapshot", () => {
