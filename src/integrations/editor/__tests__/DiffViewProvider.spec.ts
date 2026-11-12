@@ -3614,6 +3614,45 @@ describe("DiffViewProvider", () => {
 			expect(showEditedFile).not.toHaveBeenCalled()
 		})
 
+		it("lines 918 to 921: forwards the three settings in the slots the decision reads them from", async () => {
+			// The outcome of this footing cannot tell the two unreadable settings apart: with the base
+			// auto-close off and a modify rollback, the tab is kept whichever value the after-user-edited
+			// and new-files arguments hold. Only the arguments themselves can show that the values state
+			// holds reach keepOrCloseEditedFile in their own slots rather than as centralized defaults -
+			// and the two assertions below fail when a forwarded value is replaced by its default,
+			// while a swap of the two settings that share a value here would still pass.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const keepOrClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: false,
+						autoCloseZooOpenedFilesAfterUserEdited: true,
+						autoCloseZooOpenedNewFiles: false,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
+
+			await diffViewProvider.revertChanges()
+
+			const args = keepOrClose.mock.calls[0]
+			expect(args[2]).toBe(false)
+			expect(args[3]).toBe(true)
+			expect(args[4]).toBe(false)
+		})
+
 		it("lines 902 and 904: keeps the tab on the rollback path when the user touched the document and the after-user-edited setting is off", async () => {
 			// The touched-document branch is the only one where autoCloseZooOpenedFilesAfterUserEdited decides
 			// the outcome on a modify rollback, and it is the only branch where autoCloseZooOpenedNewFiles is
