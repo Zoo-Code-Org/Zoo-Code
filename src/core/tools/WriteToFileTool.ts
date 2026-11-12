@@ -276,6 +276,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
+	 * Whether an in-flight open() left anything this cleanup can reclaim: the directories it created, the
+	 * placeholder file it wrote, or the editor it opened. Read through bracket notation because the
+	 * provider keeps these private (AGENTS.md).
+	 */
+	private hasPublishedDiffArtifacts(task: Task): boolean {
+		const provider = task.diffViewProvider
+		// A test double may carry none of these fields, so every read is optional-chained.
+		return Boolean(
+			provider["placeholderPath"] || provider["activeDiffEditor"] || (provider["createdDirs"]?.length ?? 0) > 0,
+		) // test-double tolerant: fields may be absent
+	}
+
+	/**
 	 * Own the diff view that open() publishes AFTER cancellation already released this
 	 * stream. The TaskAborted teardown only knows about the view that existed when it ran;
 	 * a create that completes afterwards leaves its placeholder and the directories open()
@@ -288,7 +301,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * hazard twice.
 	 */
 	private async discardDiffViewOpenedAfterRelease(task: Task): Promise<void> {
-		if (!task.diffViewProvider.isEditing) {
+		// The gate cannot be the editing flag: this method exists for the view open() published AFTER the
+		// cancellation release had already run, and open() creates the directories and the empty placeholder
+		// before it assigns the editor (DiffViewProvider.open, discardUnapprovedStream), so a create whose
+		// editor never landed leaves artifacts with the flag never set. Gate on what the open actually
+		// published: discardUnapprovedStream() clears all three when it runs, so a second observation of the
+		// same release still finds nothing to do.
+		if (!this.hasPublishedDiffArtifacts(task)) {
 			return
 		}
 		const released = await this.releaseAbandonedDiffView(task)

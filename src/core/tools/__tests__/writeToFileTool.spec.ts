@@ -628,6 +628,10 @@ describe("writeToFileTool", () => {
 			// window open() is in flight.
 			mockCline.diffViewProvider.isEditing = false
 			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// What a create's open() publishes before it ever assigns the editor: the directories it made
+				// and the empty placeholder. The late cleanup below gates on these, not on the editing flag.
+				mockCline.diffViewProvider["createdDirs"] = ["mock-dir"]
+				mockCline.diffViewProvider["placeholderPath"] = "mock-file"
 				mockCline.diffViewProvider.isEditing = true
 				writeToFileTool.clearTaskState(mockCline)
 			})
@@ -642,6 +646,162 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
+		it("reclaims the placeholder and directories an in-flight open published with no editor and no editing flag", async () => {
+			// The ask: the late cleanup must not skip what open() published. open() creates the directories and
+			// the empty placeholder BEFORE it assigns the editor, so an open that lands after the cancellation
+			// release can leave them behind with isEditing never set, and execute() never runs for a cancelled
+			// stream, so nothing else would ever remove them.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.say.mockClear()
+			mockCline.diffViewProvider.isEditing = false
+			// The artifacts the in-flight open published, with no editor and no editing flag.
+			mockCline.diffViewProvider["createdDirs"] = ["mock-dir"]
+			mockCline.diffViewProvider["placeholderPath"] = "mock-file"
+			mockCline.diffViewProvider["activeDiffEditor"] = undefined
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// The cancellation teardown ran inside the window open() was in flight, which is what clears
+				// the stream state out from under the delta.
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			// The late cleanup read what open published instead of the editing flag, and reclaimed it once.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			// A clean release reports no hazard.
+			expect(mockCline.say).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reclaims the diff view an in-flight open published as only the placeholder file", async () => {
+			// Single-artifact case: the all-three test above passes even if two of the presence check's three operands
+			// stop working, because any one truthy field is enough to run the cleanup. Each of the three artifacts needs
+			// its own case so that the placeholder path alone is what the gate is actually reading.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.say.mockClear()
+			mockCline.diffViewProvider.isEditing = false
+			mockCline.diffViewProvider["placeholderPath"] = "mock-file"
+			mockCline.diffViewProvider["activeDiffEditor"] = undefined
+			mockCline.diffViewProvider["createdDirs"] = []
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// The cancellation teardown ran inside the window open() was in flight, which is what clears
+				// the stream state out from under the delta.
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.say).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reclaims the diff view an in-flight open published as only the diff editor", async () => {
+			// Single-artifact case: the all-three test above passes even if two of the presence check's three operands
+			// stop working, because any one truthy field is enough to run the cleanup. Each of the three artifacts needs
+			// its own case so that the editor reference alone is what the gate is actually reading.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.say.mockClear()
+			mockCline.diffViewProvider.isEditing = false
+			mockCline.diffViewProvider["placeholderPath"] = undefined
+			mockCline.diffViewProvider["activeDiffEditor"] = { hide: vi.fn() }
+			mockCline.diffViewProvider["createdDirs"] = []
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// The cancellation teardown ran inside the window open() was in flight, which is what clears
+				// the stream state out from under the delta.
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.say).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reclaims the diff view an in-flight open published as only the directories it created", async () => {
+			// Single-artifact case: the all-three test above passes even if two of the presence check's three operands
+			// stop working, because any one truthy field is enough to run the cleanup. Each of the three artifacts needs
+			// its own case so that the created-directories list alone is what the gate is actually reading.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.say.mockClear()
+			mockCline.diffViewProvider.isEditing = false
+			mockCline.diffViewProvider["placeholderPath"] = undefined
+			mockCline.diffViewProvider["activeDiffEditor"] = undefined
+			mockCline.diffViewProvider["createdDirs"] = ["mock-dir"]
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// The cancellation teardown ran inside the window open() was in flight, which is what clears
+				// the stream state out from under the delta.
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.say).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reclaims nothing when an in-flight open published no artifact at all", async () => {
+			// Control on top of the three single-artifact cases: with nothing published the cleanup must stay out of the
+			// way, and it must stay out of the way without reading a length off a field the provider double does not
+			// carry. The three fields are deleted rather than set to undefined, because the real DiffViewProvider
+			// declares them as fields that may hold nothing at all (placeholderPath is optional, and a double that
+			// never went through open() has no such property), which is what the optional chain is there for.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.say.mockClear()
+			mockCline.diffViewProvider.isEditing = false
+			Reflect.deleteProperty(mockCline.diffViewProvider, "placeholderPath")
+			Reflect.deleteProperty(mockCline.diffViewProvider, "activeDiffEditor")
+			Reflect.deleteProperty(mockCline.diffViewProvider, "createdDirs")
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// The cancellation teardown ran inside the window open() was in flight, which is what clears
+				// the stream state out from under the delta.
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+			expect(mockCline.say).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("does not roll back twice when a released stream is observed a second time", async () => {
 			// Idempotency: the discard is a no-op once reset() has cleared the provider, so a second
 			// observation of the same release cannot roll back again or report a hazard that never
@@ -650,6 +810,15 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			mockCline.diffViewProvider.open.mockClear()
 			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			// The real discardUnapprovedStream clears createdDirs, placeholderPath and the editor reference as it
+			// goes (DiffViewProvider.discardUnapprovedStream), and that clearing is what leaves a second observation
+			// of the same release with nothing to reclaim. The double has to clear them too, or the gate would see
+			// artifacts a mock discard left behind and the test would describe a provider that does not exist.
+			mockCline.diffViewProvider.discardUnapprovedStream.mockImplementation(async () => {
+				mockCline.diffViewProvider["createdDirs"] = []
+				mockCline.diffViewProvider["placeholderPath"] = undefined
+				mockCline.diffViewProvider["activeDiffEditor"] = undefined
+			})
 			mockCline.diffViewProvider.reset.mockClear()
 			mockCline.say.mockClear()
 			mockCline.diffViewProvider.isEditing = false
@@ -657,6 +826,10 @@ describe("writeToFileTool", () => {
 				mockCline.diffViewProvider.isEditing = false
 			})
 			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// Same: what a create's open() publishes before the editor lands. The first cleanup reclaims these,
+				// and reclaiming them is what leaves nothing for the second observation.
+				mockCline.diffViewProvider["createdDirs"] = ["mock-dir"]
+				mockCline.diffViewProvider["placeholderPath"] = "mock-file"
 				mockCline.diffViewProvider.isEditing = true
 				writeToFileTool.clearTaskState(mockCline)
 			})
