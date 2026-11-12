@@ -596,6 +596,32 @@ export class DiffViewProvider {
 		this.placeholderPath = undefined
 		this.placeholderContent = undefined
 
+		// The placeholder's identity has to be settled before the buffer work below rather than after it:
+		// that work saves an emptied create buffer into this very path, so a file that stopped holding
+		// what open() wrote has to be spared the save as well as the unlink - checked after the save, the
+		// read would only find what the save wrote, and the content that arrived in between would already
+		// be gone. ENOENT still means there is nothing left to remove. A read that fails for any other
+		// reason proves nothing about the file, so the discard then touches neither its content nor its
+		// existence, and the failure is recorded exactly as the cleanup catch below records one it could
+		// not finish, so the caller still sees a cleanup failure instead of a silent success.
+		let cleanupFailure: unknown
+		let placeholderAlreadyGone = false
+		let placeholderStillMatches = true
+		let placeholderReadFailed = false
+		if (placeholderPath && placeholderContent !== undefined) {
+			try {
+				placeholderStillMatches = (await fs.readFile(placeholderPath, "utf-8")) === placeholderContent
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+					placeholderAlreadyGone = true
+				} else {
+					placeholderReadFailed = true
+					cleanupFailure = error
+					console.error("Error removing abandoned write_to_file artifacts:", error)
+				}
+			}
+		}
+
 		let editorFailure: unknown
 		// open() creates the directories and the empty placeholder BEFORE it assigns
 		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
@@ -628,11 +654,15 @@ export class DiffViewProvider {
 						editorFailure = new Error(
 							`Could not restore the diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
 						)
-					} else if (this.editType !== "modify") {
-						// Only the emptied placeholder is ever saved: this edit created that file, and
-						// closing a dirty tab would prompt. A modify is never saved here - a modify's
-						// restore is an in-memory revert, and saving it would write to a file the user
-						// never approved (see the method comment).
+					} else if (this.editType !== "modify" && placeholderStillMatches && !placeholderReadFailed) {
+						// Only the emptied placeholder is ever saved: this edit created that file, and closing
+						// a dirty tab would prompt. A modify is never saved here - a modify's restore is an
+						// in-memory revert, and saving it would write to a file the user never approved (see the
+						// method comment). The placeholder is not saved once something else has written to it,
+						// or once a read proved nothing about it either: dropping the empty buffer onto that
+						// path would overwrite bytes nobody approved, which is the very reason the unlink below
+						// is guarded, and checking it after the save would be too late - the save would already
+						// have written over the content the read was looking for.
 						await document.save()
 					}
 				}
@@ -646,7 +676,6 @@ export class DiffViewProvider {
 			}
 		}
 
-		let cleanupFailure: unknown
 		try {
 			// Only a placeholder THIS edit created may be removed. relPath survives reset(), and
 			// saveDirectly() sets it for a file that was written with approval, so unlinking
@@ -654,23 +683,11 @@ export class DiffViewProvider {
 			if (placeholderPath) {
 				// Remove the placeholder only while it still holds what open() wrote there. Content can
 				// land in that path between open() and this discard - the user typing into the preview, a
-				// formatter, a later edit - and unlinking it here would delete bytes nobody approved. A
-				// placeholder with no recorded content is a path a caller installed without open() having
-				// written it, and it keeps the unconditional behaviour it has always had.
-				let placeholderAlreadyGone = false
-				let placeholderStillMatches = true
-				if (placeholderContent !== undefined) {
-					try {
-						placeholderStillMatches = (await fs.readFile(placeholderPath, "utf-8")) === placeholderContent
-					} catch (error) {
-						if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-							placeholderAlreadyGone = true
-						} else {
-							throw error
-						}
-					}
-				}
-				if (!placeholderAlreadyGone) {
+				// formatter, a later edit - and unlinking it here would delete bytes nobody approved. The
+				// read that answers that question ran above, before any buffer work, so the same finding
+				// can stop the save. A placeholder with no recorded content is a path a caller installed
+				// without open() having written it, and it keeps the unconditional behaviour it always had.
+				if (!placeholderAlreadyGone && !placeholderReadFailed) {
 					if (placeholderStillMatches) {
 						await fs.unlink(placeholderPath).catch((error: unknown) => {
 							// open() creates the placeholder; if it is already gone there is nothing
