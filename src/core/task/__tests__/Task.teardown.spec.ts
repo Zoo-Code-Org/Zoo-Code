@@ -431,9 +431,20 @@ describe("Task teardown, dispose-time metadata repair and diff-view release", ()
 			// already on disk.
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// The retry is held open by a gate. Ungated it settles the moment it starts, so the
+			// call-count assertions below would pass whether or not dispose() awaited it. Holding
+			// it open is what lets the test observe disposal still waiting on the retry.
+			let releaseRetry: (() => void) | undefined
+			const retryGate = new Promise<void>((resolve) => {
+				releaseRetry = resolve
+			})
 			const historySpy = vi
 				.spyOn(mockProvider, "updateTaskHistory")
 				.mockRejectedValueOnce(new Error("history stage unavailable"))
+				.mockImplementation(async () => {
+					await retryGate
+					return []
+				})
 
 			const task = new Task({
 				provider: mockProvider,
@@ -448,10 +459,31 @@ describe("Task teardown, dispose-time metadata repair and diff-view release", ()
 			expect(historySpy).toHaveBeenCalledTimes(1)
 			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
 
-			await task.dispose()
+			let disposalSettled = false
+			const disposalFinished = task.dispose().then(() => {
+				disposalSettled = true
+			})
+
+			try {
+				// Drain until disposal settles or the cap is reached. The gate is the only thing holding the
+				// retry open, so a disposal that awaits the retry cannot settle inside this loop; a disposal
+				// that dropped the awaited call runs the loop out having settled on its own.
+				for (let tick = 0; tick < 2000 && !disposalSettled; tick++) {
+					await new Promise((wake) => setImmediate(wake))
+				}
+				expect(historySpy).toHaveBeenCalledTimes(2)
+				// dispose() has not resolved while the retry it awaits is still open. Turning the
+				// awaited call into a floating one fails here instead of going unnoticed.
+				expect(disposalSettled).toBe(false)
+			} finally {
+				releaseRetry?.()
+			}
+
+			await disposalFinished
 
 			// dispose() awaited the retry: by the time it resolves the metadata stage has run
 			// again with the recomputed history item for this task.
+			expect(disposalSettled).toBe(true)
 			expect(historySpy).toHaveBeenCalledTimes(2)
 			// The history record is keyed by `id` (the task id), not a taskId field.
 			expect(historySpy.mock.calls[1][0]).toEqual(expect.objectContaining({ id: task.taskId }))
@@ -669,13 +701,32 @@ describe("Task teardown, dispose-time metadata repair and diff-view release", ()
 			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
 			task.diffViewProvider.isEditing = true
 			task.diffViewProvider.editType = "create"
+			// Isolation: disposal's own release trigger is gated on isStreaming, so clearing that flag
+			// on the way into dispose() leaves the stream-abort path as the only one left that can start
+			// a release here. Without the swap the two paths cannot be told apart - abortTaskOnce() voids
+			// dispose(), and the call count below could be reporting either one of them.
+			const disposeReal = task.dispose.bind(task)
+			let disposeCalls = 0
+			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {
+				disposeCalls++
+				task.isStreaming = false
+				return disposeReal.call(task)
+			})
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this stream" }]).catch(() => {})
 
+			// Disposal really ran, so the swap above was exercised rather than vacuous, and every entry
+			// into it had its release trigger disabled: the release counted below is the abort path's own.
+			expect(disposeCalls).toBeGreaterThan(0)
+			const sharedRelease = task["diffReversionPromise"]
+			expect(sharedRelease).toBeDefined()
+			// It had already settled before this line, so disposal never got the chance to start it.
+			await sharedRelease
 			expect(discardSpy).toHaveBeenCalledTimes(1)
 			expect(revertSpy).not.toHaveBeenCalled()
 			revertSpy.mockRestore()
 			discardSpy.mockRestore()
+			disposeSpy.mockRestore()
 		})
 
 		it("reverts a modify preview from the stream abort path, whose restore is the content on disk", async () => {
@@ -703,13 +754,32 @@ describe("Task teardown, dispose-time metadata repair and diff-view release", ()
 			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
 			task.diffViewProvider.isEditing = true
 			task.diffViewProvider.editType = "modify"
+			// Isolation: disposal's own release trigger is gated on isStreaming, so clearing that flag
+			// on the way into dispose() leaves the stream-abort path as the only one left that can start
+			// a release here. Without the swap the two paths cannot be told apart - abortTaskOnce() voids
+			// dispose(), and the call count below could be reporting either one of them.
+			const disposeReal = task.dispose.bind(task)
+			let disposeCalls = 0
+			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {
+				disposeCalls++
+				task.isStreaming = false
+				return disposeReal.call(task)
+			})
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "cancel this stream" }]).catch(() => {})
 
+			// Disposal really ran, so the swap above was exercised rather than vacuous, and every entry
+			// into it had its release trigger disabled: the release counted below is the abort path's own.
+			expect(disposeCalls).toBeGreaterThan(0)
+			const sharedRelease = task["diffReversionPromise"]
+			expect(sharedRelease).toBeDefined()
+			// It had already settled before this line, so disposal never got the chance to start it.
+			await sharedRelease
 			expect(revertSpy).toHaveBeenCalledTimes(1)
 			expect(discardSpy).not.toHaveBeenCalled()
 			revertSpy.mockRestore()
 			discardSpy.mockRestore()
+			disposeSpy.mockRestore()
 		})
 
 		it("starts one release per diff view and hands every later caller the same promise", async () => {
