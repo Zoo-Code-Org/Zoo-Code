@@ -4753,6 +4753,12 @@ describe("ClineProvider", () => {
 					outcome === "profile write fails" ? "id1" : "id3",
 				)
 				await expect(second["getModeConfigId"]("code")).resolves.toBe("id1")
+				if (outcome !== "profile write fails") {
+					await second.setModeConfig("code", "id2")
+					await second.setModeConfig("architect", "id2")
+					await expect(first["getModeConfigId"]("code")).resolves.toBe("id3")
+					await expect(first["getModeConfigId"]("architect")).resolves.toBe("id3")
+				}
 			},
 		)
 	})
