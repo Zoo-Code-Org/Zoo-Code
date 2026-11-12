@@ -769,11 +769,6 @@
 			"count": 1
 		}
 	},
-	"core/tools/CodebaseSearchTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/tools/GenerateImageTool.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
