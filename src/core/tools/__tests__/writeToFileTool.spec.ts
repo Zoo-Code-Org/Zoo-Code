@@ -1033,9 +1033,14 @@ describe("writeToFileTool", () => {
 			// say() throws once the task is aborted, and handleError reports through it. The
 			// rollback and reset still have to run, or the diff view keeps unapproved content.
 			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
-			mockHandleError.mockRejectedValueOnce(new Error("aborted"))
+			// Asserted by identity to the exact rejection the failing report produced, not by a bare
+			// abort substring: a substring also matches a raw SDK error, which is what the
+			// abortSubstringSelector that arrived on main now rejects in every spec lane.
+			const reportFailure = new Error("aborted")
+			mockHandleError.mockRejectedValueOnce(reportFailure)
 
-			await expect(executeWriteFileTool({})).rejects.toThrow("aborted")
+			const surfaced = await executeWriteFileTool({}).catch((error: unknown) => error)
+			expect(surfaced).toBe(reportFailure)
 
 			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
