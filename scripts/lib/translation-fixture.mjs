@@ -56,3 +56,8 @@ export const ru = {
 	files_other: "{{count}} файла",
 }
 export const ja = { files_other: "{{count}} ファイル" }
+
+// nest("chat.time_ago", {...}) -> { chat: { time_ago: {...} } }, like the real locale files
+export function nest(dottedPath, content) {
+	return dottedPath.split(".").reduceRight((inner, key) => ({ [key]: inner }), content)
+}

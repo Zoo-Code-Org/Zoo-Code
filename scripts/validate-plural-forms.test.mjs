@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { commonFiles, en, ja, locales, ru, runScript } from "./lib/translation-fixture.mjs"
+import { commonFiles, en, ja, locales, nest, ru, runScript } from "./lib/translation-fixture.mjs"
 
 const run = (files, args) => runScript("validate-plural-forms.js", files, args)
 const validate = (byLocale, args = []) => run(commonFiles(byLocale), ["--area=core", ...args])
@@ -69,6 +69,15 @@ describe("validate-plural-forms", () => {
 		assert.doesNotMatch(output, /Plural Forms Statistics|To fix the plural form problems/)
 	})
 
+	it("accepts plural keys nested in objects", () => {
+		const { status, output } = validate({
+			en: nest("chat.time_ago", en),
+			ru: nest("chat.time_ago", ru),
+			ja: nest("chat.time_ago", ja),
+		})
+		assert.equal(status, 0, output)
+	})
+
 	it("ignores keys that are not plural", () => {
 		const { status, output } = validate({ en: { ...en, title: "Files" }, ja })
 		assert.equal(status, 0, output)
@@ -82,6 +91,12 @@ describe("validate-plural-forms", () => {
 			/files_few: missing the "few" plural form/,
 		],
 		["a missing many form in fr", { en, fr: en }, "fr", /files_many: missing the "many" plural form/],
+		[
+			"a missing form of a nested plural key",
+			{ en: nest("chat.time_ago", en), ru: nest("chat.time_ago", { ...ru, files_few: undefined }) },
+			"ru",
+			/chat\.time_ago\.files_few: missing the "few" plural form/,
+		],
 		[
 			"a form the locale does not have",
 			{ en, ja: { ...ja, files_one: "1 ファイル" } },

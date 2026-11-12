@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 
-import { commonFiles, en, ja, locales, ru, runScript } from "./lib/translation-fixture.mjs"
+import { commonFiles, en, ja, locales, nest, ru, runScript } from "./lib/translation-fixture.mjs"
 
 const run = (files, args) => runScript("find-missing-translations.js", files, args)
 
@@ -158,6 +158,25 @@ describe("find-missing-translations plural keys", () => {
 		assert.match(output, /common\.json: 1 missing translations/)
 		assert.match(output, /files_\*: "\{\{count\}\} files"/)
 	})
+
+	it("accepts a nested plural key", () => {
+		const { status, output } = checkPlurals({ en: nest("chat.time_ago", en), ru: nest("chat.time_ago", ru) })
+		assert.equal(status, 0, output)
+	})
+
+	it("reports a nested plural key by its full path", () => {
+		const { status, output } = checkPlurals({ en: nest("chat.time_ago", en), ru: nest("chat", {}) })
+		assert.equal(status, 1, output)
+		assert.match(output, /chat\.time_ago\.files_\*: "\{\{count\}\} files"/)
+	})
+
+	// Any single form counts as translated, so the check does not depend on which forms a locale uses
+	for (const form of ["zero", "one", "two", "few", "many", "other"]) {
+		it(`accepts a locale that has only the ${form} form`, () => {
+			const { status, output } = checkPlurals({ en, ru: { [`files_${form}`]: "{{count}} файлов" } })
+			assert.equal(status, 0, output)
+		})
+	}
 
 	it("reports a plural key once, however many forms the locale needs", () => {
 		const { output } = checkPlurals({ en: { ...en, files_zero: "No files" }, ru: {} })
