@@ -6,8 +6,6 @@ import type { ChildProcess } from "child_process"
 import * as path from "path"
 
 import {
-	DaclInspectionError,
-	DaclRestoreError,
 	OrphanedBackupError,
 	PostCommitDurabilityError,
 	resolveLockKey,
@@ -301,7 +299,7 @@ describe("safeWriteText", () => {
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
 		// The DACL save succeeds: the notice this test needs has to come from a warning that
-		// still exists, and the DACL-save notice became a refusal.
+		// still exists, which under the best-effort contract means a leftover, not a capture failure.
 		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 			if (typeof cb === "function") cb(null, "", "")
 			return fakeChild
@@ -772,41 +770,34 @@ describe("safeWriteText", () => {
 			expect(execFile).not.toHaveBeenCalled()
 		})
 
-		it("win32 DACL failure refuses the publish instead of renaming over the target", async () => {
+		it("win32 DACL capture failure warns and lets the commit run", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// icacls dump fails — the callback-based mock must invoke cb with an error.
+			// icacls dump fails - the callback-based mock must invoke cb with an error.
 			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 				if (typeof cb === "function") cb(new Error("icacls error"), "", "")
 				return fakeChild
 			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// Captured once: calling safeWriteText twice here would double-count the single icacls
 			// attempt asserted below.
-			const refusal = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
-				(error: unknown) => error,
-			)
+			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			expect(refusal).toBeInstanceOf(DaclInspectionError)
-			// The class alone does not pin the contract: swapping the phase or dropping the target path
-			// still satisfies toBeInstanceOf, and both are caller-visible - the phase says which check
-			// refused, the path says which file the caller must not assume was saved.
-			expect(refusal).toMatchObject({
-				name: "DaclInspectionError",
-				phase: "save",
-				targetPath,
-				message: expect.stringContaining("its DACL could not be saved"),
-			})
-
-			// Contract change (Security Boundaries row): a target whose DACL could not be saved is
-			// no longer replaced by a file that inherits different rights. Nothing is committed.
-			expect(fs.rename).not.toHaveBeenCalled()
-			// one icacls attempt only: a failed DACL apply must not try to restore
+			// Best-effort DACL (issue #2016): the capture failure is a notice delivered to the default
+			// sink and the commit still runs. The pin that matters is that the notice names the target
+			// and the save that failed, not which class a throw used to carry.
+			const printed = warnSpy.mock.calls.map((call: unknown[]) => String(call[0]))
+			expect(printed.some((m: string) => m.includes("could not save the DACL"))).toBe(true)
+			expect(printed.some((m: string) => m.includes(targetPath))).toBe(true)
+			// one icacls attempt only: a failed save leaves no dump to restore from
 			expect(execFile).toHaveBeenCalledTimes(1)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			warnSpy.mockRestore()
 		})
 
-		it("win32: refuses the publish without an onWarning notice when the DACL cannot be saved", async () => {
+		it("win32: reports the DACL capture failure through the caller's sink and resolves", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -816,17 +807,21 @@ describe("safeWriteText", () => {
 			})
 			const warnings: string[] = []
 
-			await expect(
-				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
-			).rejects.toBeInstanceOf(DaclInspectionError)
+			const result = await safeWriteText(targetPath, "data", {
+				platform: "win32",
+				onWarning: (m) => warnings.push(m),
+			})
 
-			// Contract change: the refusal replaces the warning. There is no replacement whose access
-			// rights could have changed, so no notice is emitted for a write that did not happen.
-			expect(fs.rename).not.toHaveBeenCalled()
-			expect(warnings).toHaveLength(0)
+			// Best-effort DACL (issue #2016): the notice replaces the refusal, so the caller's sink is
+			// how it learns the file at the target may answer to different access rights, and the
+			// publish still resolves with the residue list any other write would return.
+			expect(warnings).toHaveLength(1)
+			expect(warnings[0]).toContain("could not save the DACL")
+			expect(warnings[0]).toContain(targetPath)
+			expect(result).toEqual({ leftoverPaths: [] })
 		})
 
-		it("win32: refuses the publish when the target cannot be checked for DACL preservation", async () => {
+		it("win32: reports unreadable access rights and publishes instead of refusing", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -840,35 +835,27 @@ describe("safeWriteText", () => {
 			const warnings: string[] = []
 
 			// Captured once: a second call would double-count the assertions below.
-			const refusal = await safeWriteText(targetPath, "data", {
+			await safeWriteText(targetPath, "data", {
 				platform: "win32",
 				onWarning: (m) => warnings.push(m),
-			}).catch((error: unknown) => error)
-
-			expect(refusal).toBeInstanceOf(DaclInspectionError)
-			// The class alone does not pin the contract: swapping the phase or dropping the target path
-			// still satisfies toBeInstanceOf, and both are caller-visible - the phase says which check
-			// refused, the path says which file the caller must not assume was saved.
-			expect(refusal).toMatchObject({
-				name: "DaclInspectionError",
-				phase: "inspect",
-				targetPath,
-				message: expect.stringContaining("its access rights could not be checked"),
 			})
 
-			// Contract change: "there but unreadable" is no longer a reason to publish blind. The
-			// publish is refused before any icacls runs, and nothing is warned about a write that did
-			// not happen.
+			// Best-effort DACL (issue #2016): "there but unreadable" is a notice, not a refusal. It has
+			// to name the target, the code, and the rights that may change; no icacls runs because no
+			// dump was ever saved.
+			expect(warnings).toHaveLength(1)
+			expect(warnings[0]).toContain("could not read the access rights")
+			expect(warnings[0]).toContain(targetPath)
+			expect(warnings[0]).toContain("EACCES")
 			expect(execFile).not.toHaveBeenCalled()
-			expect(fs.rename).not.toHaveBeenCalled()
-			expect(warnings).toHaveLength(0)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
-		// The DACL refusals sit inside the try whose catch performs the cleanup, so a refused publish is
-		// cleaned up by that handler and by nothing else. Counted, not matched with toHaveBeenCalledWith:
-		// that matcher passes however many times the same path is passed, so it cannot see a cleanup
-		// that runs twice.
-		it("win32: a refused publish removes its staged file and staging directory exactly once", async () => {
+		// A DACL capture failure is a notice, not a refusal, so the staged file goes by the commit
+		// rename and only this write's staging directory needs removal. Counted, not matched with
+		// toHaveBeenCalledWith: that matcher passes however many times the same path is passed, so
+		// it cannot see a cleanup that runs twice.
+		it("win32: a publish that continues past a failed DACL capture consumes its staged file", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -877,14 +864,15 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toBeInstanceOf(
-				DaclInspectionError,
-			)
+			await safeWriteText(targetPath, "data", { platform: "win32" })
 
 			const unlinkCalls = vi.mocked(fs.unlink).mock.calls.map((call) => String(call[0]))
 			const rmdirCalls = vi.mocked(fs.rmdir).mock.calls.map((call) => String(call[0]))
-			expect(unlinkCalls.filter((p) => p.includes("safeWriteText_"))).toHaveLength(1)
+			// The commit consumed the staged file rather than this write unlinking it, and the
+			// directory it created is still removed exactly once.
+			expect(unlinkCalls.filter((p) => p.includes("safeWriteText_"))).toHaveLength(0)
 			expect(rmdirCalls.filter((p) => p.includes(".file-safety-staging"))).toHaveLength(1)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 		})
 
 		// Warning delivery is advisory: it must not be able to fail the save it is reporting on.
@@ -893,7 +881,8 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			// The DACL save succeeds here: the warning this test exercises has to come from a notice
-			// that still exists, and the DACL-save notice became a refusal.
+			// that still exists, which under the best-effort contract means a leftover rather than a
+			// capture failure, so a throwing sink is exercised against a committed write.
 			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 				if (typeof cb === "function") cb(null, "", "")
 				return fakeChild
@@ -931,17 +920,18 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			const refusal = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
-				(caught: unknown) => caught,
-			)
-			expect(refusal).toBeInstanceOf(DaclInspectionError)
-			expect((refusal as DaclInspectionError).cause).toBeInstanceOf(Error)
-			expect(((refusal as DaclInspectionError).cause as Error).message).toContain("icacls save error")
+			const warnings: string[] = []
+			const result = await safeWriteText(targetPath, "data", {
+				platform: "win32",
+				onWarning: (m) => warnings.push(m),
+			})
 
-			// Contract change: the publish is refused, so nothing is renamed. Only the save was
-			// attempted, and the partial dump is still removed below. The icacls error is the
-			// refusal's cause so a support report can say why icacls failed.
-			expect(fs.rename).not.toHaveBeenCalled()
+			// Best-effort DACL (issue #2016): the capture failure is a notice, so the publish still
+			// commits. Only the save was attempted - there is no dump to restore from - and the
+			// partial dump icacls may have written is removed and named.
+			expect(result).toEqual({ leftoverPaths: [] })
+			expect(warnings.some((m) => m.includes("could not save the DACL"))).toBe(true)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 			expect(execFile).toHaveBeenCalledTimes(1)
 			const saveArgs = vi.mocked(execFile).mock.calls[0]?.[1]
 			expect(saveArgs?.[1]).toBe("/save")
@@ -1000,7 +990,7 @@ describe("safeWriteText", () => {
 			expect(commitRename).toBeLessThan(restoreCall)
 		})
 
-		it("win32 DACL: a failed restore is an error and the dump is kept for manual restore", async () => {
+		it("win32 DACL: a failed restore is a warning and the dump is kept for manual restore", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -1016,23 +1006,20 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			const failure = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
-				(caught: unknown) => caught,
-			)
-			expect(failure).toBeInstanceOf(DaclRestoreError)
-			expect((failure as DaclRestoreError).cause).toBeInstanceOf(Error)
+			// Captured, not caught: the restore is best-effort (issue #2016), so a failed restore is a
+			// notice on a publish that resolved.
+			const result = await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// The content did commit before the restore failed, so the rename happened exactly once
-			// even though the publish reports an error.
+			// The content committed before the restore failed, so the rename happened exactly once.
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 
-			// The changed access rights are an error the caller receives, and the kept dump is
-			// surfaced both on the error and in a warning so it can be restored by hand.
-			expect(warnSpy.mock.calls.flat().join(" ")).toContain("DACL dump is kept")
-			expect(failure).toMatchObject({
-				leftoverPaths: [expect.stringContaining("safeWriteText.acl")],
-			})
+			// The changed access rights reach the default sink, and the kept dump is surfaced both
+			// in the notice and in the result so it can be restored by hand.
+			const printed = warnSpy.mock.calls.map((call: unknown[]) => String(call[0]))
+			expect(printed.some((m: string) => m.includes("could not restore its saved access rights"))).toBe(true)
+			expect(printed.some((m: string) => m.includes("DACL dump is kept"))).toBe(true)
+			expect(result.leftoverPaths).toEqual([expect.stringContaining("safeWriteText.acl")])
 			// The dump must NOT be unlinked: it is the only artifact for a manual icacls /restore.
 			const dumpUnlinks = vi
 				.mocked(fs.unlink)
@@ -1668,7 +1655,7 @@ describe("residue a publish must not lose", () => {
 		expect(result).toEqual({ leftoverPaths: [dumpAttempts[0]] })
 	})
 
-	it("win32 DACL: a partial dump that cannot be removed is reported on the refusal", async () => {
+	it("win32 DACL: a partial dump that cannot be removed is reported and the publish resolves", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -1678,49 +1665,51 @@ describe("residue a publish must not lose", () => {
 			return fakeChild
 		})
 		const dumpAttempts = stuckDumpUnlink()
+		const warnings: string[] = []
 
-		const refusal = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
-			(caught: unknown) => caught,
-		)
-
-		expect(refusal).toBeInstanceOf(DaclInspectionError)
-		expect(fs.rename).not.toHaveBeenCalled()
-
-		// The refusal throws, so the structured result never reaches the caller. Without the residue
-		// on the error the caller holds an error naming no file while a partial DACL dump - a file
-		// whose contents describe access rights - stays on disk with no reference to it anywhere.
-		expect(refusal).toMatchObject({
-			leftoverPaths: [dumpAttempts[0]],
-			cleanupErrors: [expect.objectContaining({ code: "EPERM" })],
+		const result = await safeWriteText(targetPath, "data", {
+			platform: "win32",
+			onWarning: (m) => warnings.push(m),
 		})
+
+		// Best-effort DACL (issue #2016): the capture failure no longer throws, so the structured
+		// result does reach the caller and has to name the partial dump itself - a file whose
+		// contents describe access rights is still on disk and nothing else refers to it.
+		expect(result.leftoverPaths).toEqual([dumpAttempts[0]])
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		// The removal is retried once, so the path is reported once; the notice that reports it
+		// names the dump path and why it survived.
+		expect(dumpAttempts).toHaveLength(2)
+		expect(warnings.some((m) => m.includes("partial DACL dump could not be removed"))).toBe(true)
+		expect(warnings.some((m) => m.includes(dumpAttempts[0]))).toBe(true)
 	})
 
-	it("win32 DACL: a restore failure carries the kept dump for a manual restore", async () => {
+	it("win32 DACL: a restore failure keeps the dump for a manual restore and resolves", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
 		// The save lands, the restore fails: the commit happened, so this is the exit where the
-		// dump's owner is the finally block and the error is DaclRestoreError.
+		// dump's owner is the finally block, and under the best-effort contract it is a notice
+		// rather than a throw - the result has to carry the dump because no error does.
 		let icaclsCalls = 0
 		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 			icaclsCalls++
 			if (typeof cb === "function") cb(icaclsCalls === 1 ? null : new Error("icacls restore error"), "", "")
 			return fakeChild
 		})
-		const failure = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
-			(caught: unknown) => caught,
-		)
+		const warnings: string[] = []
+		const result = await safeWriteText(targetPath, "data", {
+			platform: "win32",
+			onWarning: (m) => warnings.push(m),
+		})
 
-		expect(failure).toBeInstanceOf(DaclRestoreError)
 		expect(fs.rename).toHaveBeenCalledTimes(1)
-		// The original error is preserved, not replaced: its message is what tells the caller that
-		// the committed file answers to different access rights, and its cause is the icacls error.
-		expect((failure as DaclRestoreError).message).toContain("could not be restored")
-		expect((failure as DaclRestoreError).cause).toBeInstanceOf(Error)
-
-		// The dump is kept on a failed restore so an operator can run icacls /restore by hand;
-		// the finally block must not delete it, and the error must name it.
-		expect(failure).toMatchObject({ leftoverPaths: [expect.stringContaining("safeWriteText.acl")] })
+		// The notice is what tells the caller the committed file answers to different access
+		// rights, and it names the dump that can put them back.
+		expect(warnings.some((m) => m.includes("could not restore its saved access rights"))).toBe(true)
+		// The dump is kept so an operator can run `icacls /restore` by hand: the finally block
+		// must not delete it, and the resolved result must name it.
+		expect(result.leftoverPaths).toEqual([expect.stringContaining("safeWriteText.acl")])
 		const aclUnlinks = vi
 			.mocked(fs.unlink)
 			.mock.calls.map((call) => String(call[0]))
@@ -1928,12 +1917,6 @@ describe("assertions ported from the changed-code mutation sweep", () => {
 		dur2()
 		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "linux" }).catch((e: unknown) => e)
 		expect((err as Error).name).toBe("PostCommitDurabilityError")
-	})
-	it("K115 name of DaclRestoreError", async () => {
-		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
-		restoreFailExecFile2()
-		const err = await safeWriteText("/tmp/test-dir/target.txt", "x", { platform: "win32" }).catch((e: unknown) => e)
-		expect((err as Error).name).toBe("DaclRestoreError")
 	})
 	it("K154 name of OrphanedBackupError", async () => {
 		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
@@ -2349,17 +2332,18 @@ describe("assertions ported from the changed-code mutation sweep", () => {
 	it("K402 K572 K692 the default sink gets the warning when no options object exists", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		// The DACL save succeeds and the restore fails, so the post-commit warning at line 703 is the
+		// The DACL save succeeds and the restore fails, so the post-commit restore notice is the
 		// only warning this call can produce, and with no options object its sink is the default
-		// console.warn fallback that line 402 selects through the mutated chain.
+		// console.warn fallback that warn() selects through the mutated chain.
 		restoreFailExecFile2()
 		const spy = vi.spyOn(console, "warn").mockImplementation(() => {})
-		const failure = await withPlatformPinned("win32", () => safeWriteText(targetPath, "x")).catch((e: unknown) => e)
-		expect(failure).toBeInstanceOf(DaclRestoreError)
+		// The restore notice no longer aborts the write, so this resolves; the point of the test is
+		// which sink the warning reaches when there is no options object at all.
+		await withPlatformPinned("win32", () => safeWriteText(targetPath, "x"))
 		const printed = spy.mock.calls.map((c: unknown[]) => String(c[0]))
 		expect(printed.some((m: string) => m.includes("could not restore its saved access rights"))).toBe(true)
-		// Under the line 402 mutant the fallback lookup throws before any sink exists and the warning
-		// arrives only as a report about the callback, so the message text is the discriminating fact.
+		// Under the sink-selection mutant the fallback lookup throws before any sink exists and the
+		// warning arrives only as a report about the callback, so the message text is the discriminating fact.
 		expect(printed.some((m: string) => m.includes("onWarning callback"))).toBe(false)
 		expect(execFile).toHaveBeenCalledTimes(2)
 		spy.mockRestore()

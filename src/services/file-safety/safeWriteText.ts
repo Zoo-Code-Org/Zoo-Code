@@ -28,12 +28,12 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
-	 * Sink for non-fatal safety notices. The notices that still reach it are the leftover ones: a copy
-	 * of the previous content this write could not remove, reported with its path whether the
-	 * publish committed or failed. A Windows DACL that could not be captured is no longer a notice
-	 * here - the publish is refused with DaclInspectionError before anything is committed - and a
-	 * saved DACL that could not be put back after the commit arrives as DaclRestoreError rather
-	 * than a warning, so neither reaches this sink. Defaults to console.warn.
+	 * Sink for non-fatal safety notices. The Windows DACL steps are best-effort, so a capture
+	 * that failed, access rights that could not be read, and a restore that failed after the
+	 * content was committed all arrive here, each naming the target and what went wrong; the
+	 * kept DACL dump from a failed restore is named here too and travels in
+	 * `SafeWriteTextResult.leftoverPaths`, as does any copy of the previous content this write
+	 * could not remove, whether the publish committed or failed. Defaults to console.warn.
 	 */
 	onWarning?: (message: string) => void
 
@@ -78,41 +78,6 @@ export class PostCommitDurabilityError extends Error {
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
-	}
-}
-
-/**
- * The target exists but its access rights could not be inspected or saved, so publishing would
- * replace it with a file that inherits different rights. On Windows the publish fails instead of
- * warning: a successful write that silently widened who can read the file is not a save the user
- * can trust, and the failure happens before the commit, so the target still holds its content.
- */
-export class DaclInspectionError extends Error {
-	constructor(
-		readonly targetPath: string,
-		readonly phase: "inspect" | "save",
-		readonly causeError: unknown,
-	) {
-		const detail = phase === "save" ? "its DACL could not be saved" : "its access rights could not be checked"
-		super(`safeWriteText: refusing to publish over ${targetPath} because ${detail}`, { cause: causeError })
-		this.name = "DaclInspectionError"
-	}
-}
-
-/**
- * The content is committed but the saved DACL could not be put back on it, so the file at the
- * target answers to different access rights than the one it replaced. Reported as an error rather
- * than a warning: the caller has to know that the publish changed who can read the file.
- */
-export class DaclRestoreError extends Error {
-	constructor(
-		readonly targetPath: string,
-		readonly causeError: unknown,
-	) {
-		super(`safeWriteText: content committed at ${targetPath}, but its saved access rights could not be restored`, {
-			cause: causeError,
-		})
-		this.name = "DaclRestoreError"
 	}
 }
 
@@ -576,26 +541,34 @@ export async function safeWriteText(
 					daclDumpPath = dumpPath
 				} else {
 					// A failed icacls may have left a partial dump behind; remove it now so no partial
-					// dump survives and no later step can restore from it. A dump that cannot be removed is
-					// recorded, because the refusal below throws: without the record the caller would hold
-					// an error naming no file while a partial DACL dump stayed on disk.
-					await cleanResidue(dumpPath, fs.unlink)
-					// The target exists and its DACL could not be captured, so the commit rename
-					// would replace it with a file that inherits different access rights. Nothing here
-					// can verify an equivalent restrictive ACL on the replacement, so the publish is
-					// refused instead of warned about: a save that silently changed who can read the
-					// file is not a save the user can trust. Nothing is committed yet, so the target
-					// still holds its content, and this throw lands in the catch at the bottom of this
-					// try - the one place that unlinks the staged file and removes this write's own
-					// staging directory before rethrowing - so a refused publish strands no residue.
-					throw new DaclInspectionError(targetPath, "save", saveDaclError)
+					// dump survives and no later step can restore from it.
+					const stuckDump = await cleanResidue(dumpPath, fs.unlink)
+					// The DACL steps are best-effort (issue #2016): a target whose DACL could not be captured
+					// is still published, and the notice says so, because the replacement file inherits the
+					// directory's rights rather than the ones this call could not read. Nothing is swallowed
+					// here - the caller that passes a sink sees the target and the failure, and the residue
+					// bookkeeping below still reports the partial dump if removing it failed.
+					warn(
+						`safeWriteText: could not save the DACL of ${targetPath} (${errorCode(saveDaclError) ?? "no error code"}); ` +
+							`publishing without it means the file at the target may answer to different access rights.`,
+					)
+					if (stuckDump !== null) {
+						// A partial dump is a file whose contents describe access rights, so a dump this write
+						// could not remove is named here as well as recorded in the residue lists.
+						warn(
+							`safeWriteText: the partial DACL dump could not be removed from ${dumpPath} (${errorCode(stuckDump) ?? "no error code"}).`,
+						)
+					}
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
-				// Not "absent": the target is there but its access rights could not be read (EACCES,
-				// ...), so publishing would replace a file whose rights this call never learned. Same
-				// rule as the save failure above: refuse before anything is committed, and let the
-				// catch at the bottom of this try remove the staged file and the staging directory.
-				throw new DaclInspectionError(targetPath, "inspect", accessError)
+				// Not "absent": the target is there but its access rights could not be read (EACCES, ...).
+				// Best-effort as above, so the publish continues and the notice names the rights the
+				// replacement may inherit: a caller that cares can act on it, and one that does not still
+				// gets the file it asked for.
+				warn(
+					`safeWriteText: could not read the access rights of ${targetPath} (${errorCode(accessError) ?? "no error code"}); ` +
+						`publishing without them means the file at the target may answer to different access rights.`,
+				)
 			}
 		}
 		try {
@@ -691,22 +664,23 @@ export async function safeWriteText(
 				const restoredDir = path.dirname(targetPath)
 				const restoreDaclError = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				if (restoreDaclError !== null) {
-					// The content is committed, but the published file answers to a different
-					// DACL from the one that was saved, and nothing here verified an equivalent
-					// restrictive ACL on the replacement. This is reported as an error rather than a
-					// warning: the caller has to know that the save changed who can read the file.
+					// The content is committed, but the published file answers to a different DACL from the
+					// one that was saved, and nothing here verified an equivalent restrictive ACL on the
+					// replacement. The restore is best-effort (issue #2016), so this is a notice on a publish
+					// that resolved rather than an error thrown after the commit: the caller learns the changed
+					// access rights through onWarning and the artifact that can put them back through the
+					// residue list, and a warning that aborts a committed write is the failure mode the
+					// sink contract above exists to avoid.
 					// Keep the dump: it is the only artifact an operator can use to run
 					// `icacls /restore` by hand, so the finally below must not delete it.
 					const keptDumpPath = daclDumpPath
 					daclDumpPath = null
 					leftoverPaths.push(keptDumpPath)
 					warn(
-						`safeWriteText: committed ${targetPath} but could not restore its saved access rights; ` +
-							`the DACL dump is kept at ${keptDumpPath} so it can be restored manually.`,
+						`safeWriteText: committed ${targetPath} but could not restore its saved access rights ` +
+							`(${errorCode(restoreDaclError) ?? "no error code"}); the DACL dump is kept at ${keptDumpPath} ` +
+							`so it can be restored manually.`,
 					)
-					// Contract change - this used to warn and resolve, which let a publish that
-					// widened access look like an ordinary successful save.
-					throw new DaclRestoreError(targetPath, restoreDaclError)
 				}
 			}
 
