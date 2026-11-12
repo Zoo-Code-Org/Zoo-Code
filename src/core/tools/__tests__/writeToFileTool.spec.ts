@@ -1,3 +1,6 @@
+import * as vscode from "vscode"
+import fs from "fs/promises"
+import os from "os"
 import * as path from "path"
 
 import { RooCodeEventName } from "@roo-code/types"
@@ -8,6 +11,7 @@ import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
+import { DiffViewProvider } from "../../../integrations/editor/DiffViewProvider"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { writeToFileTool } from "../WriteToFileTool"
 
@@ -46,6 +50,10 @@ vi.mock("../../../utils/pathUtils", () => ({
 
 vi.mock("../../../utils/path", () => ({
 	getReadablePath: vi.fn().mockReturnValue("test/path.txt"),
+	// The real DiffViewProvider compares file system paths while closing tabs; the late-open test
+	// below is the only consumer, and a plain case-insensitive compare is all that path matching is
+	// used for there.
+	arePathsEqual: vi.fn((a: string, b: string) => String(a).toLowerCase() === String(b).toLowerCase()),
 }))
 
 vi.mock("../../../utils/text-normalization", () => ({
@@ -67,15 +75,69 @@ vi.mock("../../../integrations/misc/extract-text", () => ({
 	}),
 }))
 
+// The members beyond showWarningMessage/openExternal/Uri.parse exist for the one test below that
+// drives the real DiffViewProvider through open(); no other test in this file reads them, and they
+// are doubles, not a partial extension host.
 vi.mock("vscode", () => ({
 	window: {
 		showWarningMessage: vi.fn().mockResolvedValue(undefined),
+		showTextDocument: vi.fn().mockResolvedValue(undefined),
+		createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
+		visibleTextEditors: [],
+		tabGroups: {
+			all: [],
+			close: vi.fn().mockResolvedValue(true),
+			activeTabGroup: { activeTab: undefined },
+		},
+		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
+		onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: vi.fn() })),
+		onDidChangeTextEditorVisibleRanges: vi.fn(() => ({ dispose: vi.fn() })),
+		onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: vi.fn() })),
+	},
+	workspace: {
+		textDocuments: [],
+		applyEdit: vi.fn().mockResolvedValue(true),
+		openTextDocument: vi.fn().mockResolvedValue({}),
+		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+	},
+	commands: {
+		executeCommand: vi.fn().mockResolvedValue(undefined),
+	},
+	languages: {
+		getDiagnostics: vi.fn(() => []),
 	},
 	env: {
 		openExternal: vi.fn(),
 	},
+	Position: class {
+		constructor(
+			public line: number,
+			public character: number,
+		) {}
+	},
+	Range: class {
+		constructor(
+			public start: unknown,
+			public end: unknown,
+		) {}
+	},
+	Selection: class {
+		constructor(
+			public anchor: unknown,
+			public active: unknown,
+		) {}
+	},
+	WorkspaceEdit: class {
+		replace() {}
+		delete() {}
+	},
+	TextEditorSelectionChangeKind: { Keyboard: 1, Mouse: 2, Command: 3 },
+	TabInputText: class {},
+	TabInputTextDiff: class {},
+	ViewColumn: { One: 1 },
 	Uri: {
 		parse: vi.fn(),
+		file: vi.fn((p: string) => ({ fsPath: p, scheme: "file" })),
 	},
 }))
 
@@ -800,6 +862,81 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
 			expect(mockCline.say).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("leaves no listener, controller or editor behind when a cancelled stream races a real open()", async () => {
+			// The second test the review asks for, at the tool layer. The provider is the real
+			// DiffViewProvider over a real temporary directory, the tool calls the real open(), and the
+			// placeholder is a real file. Only the innermost openDiffEditor() is deferred, because a real
+			// diff document needs the extension host, and the editor handed back afterwards is a structural
+			// double: this is a real call path over doubles, not a real extension host.
+			const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "zoo-late-open-"))
+			const relPath = "late-open.txt"
+			const absolutePath = path.join(tempDir, relPath)
+			try {
+				// The shared setup pins path.resolve to one fixed path; the real provider needs the
+				// temporary directory instead, so restore the plain join behaviour for this test.
+				mockedPathResolve.mockImplementation((...args: string[]) => args.join(path.sep))
+				const provider = new DiffViewProvider(tempDir, mockCline)
+				mockCline.diffViewProvider = provider
+				let editorCallStarted = false
+				let handOverEditor: (editor: vscode.TextEditor) => void = () => {}
+				const pendingEditorCall = new Promise<vscode.TextEditor>((resolve) => {
+					handOverEditor = resolve
+				})
+				// Bracket access rather than a cast: openDiffEditor is private, and deferring it is the
+				// only way to hold open() inside the await the cancellation is racing. The flag is set on
+				// entry: open() has already written the placeholder by then, so the flag - not isEditing,
+				// which open() sets eight lines earlier - is what proves the call is parked.
+				provider["openDiffEditor"] = async () => {
+					editorCallStarted = true
+					return pendingEditorCall
+				}
+
+				const running = executeWriteFileTool({ path: relPath }, { fileExists: false })
+				for (let tick = 0; tick < 200 && !editorCallStarted; tick++) {
+					await new Promise((resolve) => setTimeout(resolve, 0))
+				}
+				expect(editorCallStarted).toBe(true)
+
+				// The tool is inside open() and parked on the deferred editor call. The placeholder is a
+				// real empty file in the real directory, and nothing has been published yet.
+				expect(provider.isEditing).toBe(true)
+				expect(await fs.readFile(absolutePath, "utf-8")).toBe("")
+				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
+
+				// The release the abort path performs while open() is still parked.
+				await provider.discardUnapprovedStream()
+				handOverEditor({
+					document: { uri: { scheme: "file", fsPath: absolutePath }, isDirty: false, lineCount: 0 },
+				} as unknown as vscode.TextEditor)
+				await running
+
+				// Nothing survived the late publish: no listener was registered, no decoration type was
+				// created, the editor reference is gone, and the streaming session is closed.
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
+				expect(vscode.window.createTextEditorDecorationType).not.toHaveBeenCalled()
+				expect(provider["activeDiffEditor"]).toBeUndefined()
+				expect(provider["activeLineController"]).toBeUndefined()
+				expect(provider["fadedOverlayController"]).toBeUndefined()
+				expect(provider["deferredScrollTimer"]).toBeUndefined()
+				expect(provider.isEditing).toBe(false)
+				// The discard removed the real placeholder open() wrote, so nothing of this aborted
+				// session is left on disk either.
+				const placeholderState = await fs.readFile(absolutePath, "utf-8").then(
+					() => "present",
+					// The cast reads the error code off a rejected fs call, the same way the provider reads
+					// it at the unlink site it replaces.
+					(error: unknown) =>
+						(error as NodeJS.ErrnoException)?.code === "ENOENT" ? "removed" : "other error",
+				)
+				expect(placeholderState).toBe("removed")
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				await fs.rm(tempDir, { recursive: true, force: true })
+			}
 		})
 
 		it("does not roll back twice when a released stream is observed a second time", async () => {

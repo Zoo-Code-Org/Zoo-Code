@@ -2101,6 +2101,100 @@ describe("DiffViewProvider", () => {
 				expect(mockWorkspaceEdit.replace.mock.calls[0][2]).toBe("")
 			})
 
+			it("closes a diff editor that open() publishes after a release already ran, and registers nothing behind it", async () => {
+				// The review's late-open scenario, driven through the real open(): the editor call inside
+				// open() is still pending while the abort path releases the view, and only then resolves.
+				// open() itself is the production method; the innermost openDiffEditor() call is deferred
+				// and only vscode and fs are doubles.
+				const relPath = "late-open.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				let handOverEditor: (editor: vscode.TextEditor) => void = () => {}
+				const pendingEditorCall = new Promise<vscode.TextEditor>((resolve) => {
+					handOverEditor = resolve
+				})
+				const lateEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						lineCount: 0,
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					visibleRanges: [],
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: it carries only the members
+				// the late teardown touches.
+				const lateEditorDouble = lateEditor as unknown as vscode.TextEditor
+				const lateDiffTab = makeTab(makeDiffTabInput("cline-diff", fsPath), "diff tab")
+
+				// The shared setup already carries an editor and two decoration controllers, so their
+				// identities are captured: open() would have replaced both controllers and assigned the
+				// editor it awaited, and unchanged identities prove it published neither.
+				const editorBefore = diffViewProvider["activeDiffEditor"]
+				const overlayControllerBefore = diffViewProvider["fadedOverlayController"]
+				const lineControllerBefore = diffViewProvider["activeLineController"]
+
+				// Bracket access rather than a cast: openDiffEditor is private, and deferring it is the
+				// only way to hold open() inside the await the release is racing.
+				diffViewProvider["openDiffEditor"] = async () => pendingEditorCall
+				vi.mocked(fs.readFile).mockResolvedValue("")
+				diffViewProvider.editType = "create"
+
+				const opening = diffViewProvider.open(relPath)
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				// open() is parked on the editor call, so it has published nothing yet: the editor is
+				// still the one the setup installed, and no listener has been registered.
+				expect(diffViewProvider["activeDiffEditor"]).toBe(editorBefore)
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+
+				// The release the abort path performs, while open() is still parked.
+				await diffViewProvider.discardUnapprovedStream()
+				expect(diffViewProvider.isEditing).toBe(false)
+
+				// The diff tab the awaited call put on screen, as the tab group would show it now. This
+				// spec installs tabGroups.all through a getter, so the late tab is installed the same way,
+				// and close() is answered with a promise because closeAllDiffViews() awaits it.
+				Object.defineProperty(vscode.window.tabGroups, "all", {
+					get: (): vscode.TabGroup[] => [
+						{
+							isActive: true,
+							viewColumn: vscode.ViewColumn.One,
+							activeTab: lateDiffTab,
+							tabs: [lateDiffTab],
+						},
+					],
+					configurable: true,
+				})
+				vi.mocked(vscode.window.tabGroups.close).mockResolvedValue(true)
+				handOverEditor(lateEditorDouble)
+				await opening
+
+				// The late editor is closed through the helper the release paths already use, and nothing
+				// was published behind it: no listeners registered, no deferred scroll pending, and the
+				// editor reference dropped so a later update() cannot act on it.
+				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(lateDiffTab)
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
+				expect(diffViewProvider["activeEditorListener"]).toBeUndefined()
+				expect(diffViewProvider["diffEditorSelectionListener"]).toBeUndefined()
+				expect(diffViewProvider["diffScrollListener"]).toBeUndefined()
+				expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				// Same controller objects as before open() ran: the late route returned before creating
+				// the pair open() normally installs, so there was nothing on this path to dispose.
+				expect(diffViewProvider["fadedOverlayController"]).toBe(overlayControllerBefore)
+				expect(diffViewProvider["activeLineController"]).toBe(lineControllerBefore)
+				expect(diffViewProvider.isEditing).toBe(false)
+
+				// Leave the tab-group getter as this spec found it so a later test does not see the tab
+				// this test installed.
+				Object.defineProperty(vscode.window.tabGroups, "all", { value: [], configurable: true })
+			})
 			it("removes the placeholder that a new-file open() wrote, driven through the public methods", async () => {
 				// The ownership lifecycle lives at the public-method layer, so exercise it there:
 				// open() writes the empty placeholder and records it, and the discard of an abandoned
@@ -2132,7 +2226,6 @@ describe("DiffViewProvider", () => {
 				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
 				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
 				diffViewProvider.editType = "create"
-
 				await diffViewProvider.open(relPath)
 
 				// open() created the placeholder, and this edit now owns it.

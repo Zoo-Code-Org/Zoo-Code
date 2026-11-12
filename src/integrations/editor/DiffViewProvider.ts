@@ -183,6 +183,24 @@ export class DiffViewProvider {
 		this.snapshotPreviewTabs = this.captureUnrelatedPreviewTabs(absolutePath)
 
 		this.activeDiffEditor = await this.openDiffEditor()
+		// A release can run while the await above is still in flight: an abort or a denied stream
+		// reaches discardUnapprovedStream() and reset(), and both drop isEditing along with the
+		// artifact fields. Everything published below belongs to a session that is already over,
+		// so the late editor is closed through the same helper the release paths use, the
+		// listeners are never registered, the deferred scroll is cancelled, and open() returns
+		// before creating the decoration controllers - so there are no controllers to dispose on
+		// this path. isEditing is the signal because it is what both release paths clear; it is
+		// not generation-exact. A second open() that legitimately started while this await was
+		// parked sets isEditing again and would let this late editor publish, and telling those
+		// two apart needs the per-session counter the review asks about, which this change
+		// leaves as an open question instead of inventing one here.
+		if (!this.isEditing) {
+			this.activeDiffEditor = undefined
+			this.disposeActiveEditorListener()
+			this.cancelDeferredScroll()
+			await this.closeAllDiffViews()
+			return
+		}
 		this.fadedOverlayController = new DecorationController("fadedOverlay", this.activeDiffEditor)
 		this.activeLineController = new DecorationController("activeLine", this.activeDiffEditor)
 		// Apply faded overlay to all lines initially.
@@ -561,8 +579,8 @@ export class DiffViewProvider {
 		// then the only chance to remove what the abandoned edit left on disk.
 		const createdDirs = this.createdDirs
 		this.createdDirs = []
-		// Same reason for the placeholder: an await below may reject and the caller then runs
-		// reset(), which drops this field too.
+		// Same reason for the placeholder and its recorded content: an await below may reject and
+		// the caller then runs reset(), which drops both fields too.
 		const placeholderPath = this.placeholderPath
 		this.placeholderPath = undefined
 
