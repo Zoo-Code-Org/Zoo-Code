@@ -3162,7 +3162,11 @@ describe("DiffViewProvider", () => {
 		const makeRollbackDocument = (content: string, isDirty: boolean, saved: boolean) => ({
 			uri: makeUri(settleTargetPath),
 			getText: vi.fn().mockReturnValue(content),
-			positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+			// Distinct answers per offset: a fixture that returned (0,0) for every offset could not tell a
+			// full-buffer range from an empty one. The Range double wraps whatever positions it is given.
+			positionAt: vi.fn((offset: number) =>
+				offset === 0 ? { line: 0, character: 0 } : { line: 1, character: offset },
+			),
 			isDirty,
 			save: vi.fn().mockResolvedValue(saved),
 		})
@@ -3220,7 +3224,12 @@ describe("DiffViewProvider", () => {
 
 			await withTabGroupsAll([makeDirtyFileTab()], () => diffViewProvider.revertChanges())
 
-			const [, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			// Distinct positions prove the range spans the buffer: an empty or reversed range would hand
+			// the Range double the same position twice, and the uri is the document being rolled back.
+			const [replacedUri, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			expect(replacedUri).toBe(document.uri)
+			expect(document.positionAt).toHaveBeenNthCalledWith(1, 0)
+			expect(document.positionAt).toHaveBeenNthCalledWith(2, "partial model output".length)
 			expect(replacedText).toBe("the content the file held before this write")
 		})
 
@@ -3238,7 +3247,12 @@ describe("DiffViewProvider", () => {
 
 			await withTabGroupsAll([makeDirtyFileTab()], () => diffViewProvider.revertChanges())
 
-			const [, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			// Distinct positions prove the range spans the buffer: an empty or reversed range would hand
+			// the Range double the same position twice, and the uri is the document being rolled back.
+			const [replacedUri, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			expect(replacedUri).toBe(document.uri)
+			expect(document.positionAt).toHaveBeenNthCalledWith(1, 0)
+			expect(document.positionAt).toHaveBeenNthCalledWith(2, "partial model output".length)
 			expect(replacedText).toBe("")
 		})
 
@@ -3394,6 +3408,43 @@ describe("DiffViewProvider", () => {
 
 			expect(closeFileTab).toHaveBeenCalledWith(settleTargetPath)
 			expect(showEditedFile).not.toHaveBeenCalled()
+		})
+
+		it("lines 902 and 904: keeps the tab on the rollback path when the user touched the document and the after-user-edited setting is off", async () => {
+			// The touched-document branch is the only one where autoCloseZooOpenedFilesAfterUserEdited decides
+			// the outcome on a modify rollback, and it is the only branch where autoCloseZooOpenedNewFiles is
+			// unreadable. Setting the three flags to distinct values here means a wrong forwarded value moves
+			// the outcome: base on + after-user-edited on would close, new-files on alone would close.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			const showEditedFile = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: true,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: true,
+						autoCloseZooOpenedFilesAfterUserEdited: false,
+						autoCloseZooOpenedNewFiles: false,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+			diffViewProvider["showEditedFileWithoutDisruptingFocus"] = showEditedFile
+
+			await diffViewProvider.revertChanges()
+
+			expect(closeFileTab).not.toHaveBeenCalled()
+			expect(showEditedFile).toHaveBeenCalledWith(settleTargetPath)
 		})
 
 		it("lines 1209 and 1211: stops the rollback and reports the refused restore of the file-scheme buffer by name", async () => {
