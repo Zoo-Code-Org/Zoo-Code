@@ -239,7 +239,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// Tests provide explicit opening snapshots when they need saved mode profiles.
+		// These tests stub providerSettingsManager and expect it to be consulted for mode profiles.
 		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock providerSettingsManager
@@ -643,7 +643,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
 		})
 
-		test("waits beyond timeout for a committing model update", async () => {
+		test("finishes activation after the caller timed out instead of leaving a saved but inactive profile", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -664,11 +664,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				})
 
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await update
 				expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
 
 				release()
 				await vi.advanceTimersByTimeAsync(0)
-				await update
 
 				const manager = provider["providerSettingsManager"]
 				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
@@ -680,7 +680,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
-		test("upsertProviderProfile waits beyond timeout for its persistence outcome", async () => {
+		test("upsertProviderProfile finishes activation after the caller timed out", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -696,13 +696,6 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					return realGetState()
 				})
 
-				vi.mocked(provider.providerSettingsManager.saveConfig).mockImplementationOnce(
-					async (_name, _config, _signal, onPersisting) => {
-						onPersisting?.()
-						return "test-id"
-					},
-				)
-
 				const upsert = provider.upsertProviderProfile(
 					"test-config",
 					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "anthropic/claude" },
@@ -710,6 +703,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				)
 
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await expect(upsert).resolves.toBeUndefined()
 
 				const manager = provider["providerSettingsManager"]
 				expect(manager.setModeConfig).not.toHaveBeenCalled()
@@ -717,7 +711,6 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				release()
 				await vi.advanceTimersByTimeAsync(0)
 
-				await expect(upsert).resolves.toBe("test-id")
 				expect(manager.saveConfig).toHaveBeenCalledTimes(1)
 				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
 			} finally {
@@ -725,7 +718,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
-		test("holds the next profile mutation until a committing model update settles", async () => {
+		test("holds the next profile mutation until a timed-out model update settles", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -751,6 +744,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					openRouterModelId: "anthropic/claude",
 				})
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await update
 
 				const next = provider.activateProviderProfile({ name: "other-profile" })
 				await vi.advanceTimersByTimeAsync(0)
@@ -758,7 +752,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				release()
 				await vi.advanceTimersByTimeAsync(0)
-				await Promise.all([update, next])
+				await next
 
 				expect(manager.activateProfile).toHaveBeenCalledTimes(1)
 				// One write set from the model update, one from the queued activation.
@@ -888,7 +882,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out uncommitted mutations abort before writes and advance the queue", async () => {
+		test("timed-out mutations abort before writing state and advance the queue", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -898,9 +892,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			provider["providerSettingsManager"].activateProfile = vi
 				.fn()
-				.mockImplementationOnce(async (_args, signal) => {
+				.mockImplementationOnce(async () => {
 					await firstActivation
-					signal?.throwIfAborted()
 					return {
 						name: "first-profile",
 						id: "first-id",
@@ -921,13 +914,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// An uncommitted timeout releases the queue while its cancelled storage read settles.
+				// Queue advanced immediately on timeout — second enqueues now.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
 				// activateProfile not yet called for second (it runs in the next microtask).
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
-
-				await vi.advanceTimersByTimeAsync(0)
-				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
 				// The aborted signal prevents it from writing any state.
@@ -987,7 +977,6 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				},
 			})
 			await provider.addClineToStack(mockTask)
-			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
@@ -1021,11 +1010,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
 			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
 			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
-			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith(
-				{ name: "ask-profile" },
-				expect.any(AbortSignal),
-				expect.any(Function),
-			)
+			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {

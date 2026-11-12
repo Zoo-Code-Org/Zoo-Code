@@ -329,14 +329,7 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
-	private readonly profileMutationAbortController = new AbortController()
-	private get providerProfileMutationQueue() {
-		return this.modeProfileState.profileMutationQueue
-	}
-
-	private set providerProfileMutationQueue(queue: Promise<void>) {
-		this.modeProfileState.profileMutationQueue = queue
-	}
+	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
@@ -352,103 +345,61 @@ export class ClineProvider
 		fn: (signal: AbortSignal) => Promise<T>,
 		options: { runToCompletion?: boolean } = {},
 	): Promise<T> {
-		if (this.modeProfileState.reset) {
-			return Promise.reject(new Error("Provider profile mutation cancelled by settings reset"))
-		}
 		const controller = new AbortController()
-		let timedOut = false
-		const signal = AbortSignal.any([controller.signal, this.profileMutationAbortController.signal])
-		const invoke = async () => {
-			signal.throwIfAborted()
-			if (this.modeProfileState.reset) throw new Error("Provider profile mutation cancelled by settings reset")
-			this.modeProfileState.activeMutationSignals.add(signal)
-			try {
-				return await fn(signal)
-			} finally {
-				this.modeProfileState.activeMutationSignals.delete(signal)
-			}
-		}
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const previous = this.providerProfileMutationQueue
-		const run = previous.then(invoke, invoke)
-		this.modeProfileState.mutations.add(run)
-		const callerResult = this.withProviderProfileMutationTimeout(
-			run,
-			() => {
-				timedOut = true
-				if (options.runToCompletion || this.modeProfileState.committingMutationSignals.has(signal)) {
-					this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
-					return
-				}
-
-				controller.abort()
-				this.log("Provider profile mutation timed out; aborting in-flight mutation")
-			},
-			this.profileMutationAbortController.signal,
-			signal,
+		const run = this.providerProfileMutationQueue.then(
+			() => fn(controller.signal),
+			() => fn(controller.signal),
 		)
+		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
+			if (options.runToCompletion) {
+				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
+				return
+			}
+
+			controller.abort()
+			this.log("Provider profile mutation timed out; aborting in-flight mutation")
+		})
 
 		void run.then(
 			() => {
-				this.modeProfileState.mutations.delete(run)
-				this.modeProfileState.committingMutationSignals.delete(signal)
-				if (signal.aborted) {
+				if (controller.signal.aborted) {
 					this.log("Provider profile mutation completed after cancellation")
 				}
 			},
-			() => {
-				this.modeProfileState.mutations.delete(run)
-				this.modeProfileState.committingMutationSignals.delete(signal)
-				if (signal.aborted || timedOut) {
+			(error) => {
+				if (controller.signal.aborted) {
 					this.log(
-						"Provider profile mutation failed after cancellation or timeout; settings may be partially persisted",
+						`Provider profile mutation errored after cancellation: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
 					)
 				}
 			},
 		)
 
-		// A cancelled read may release the queue, but a started commit must finish before any tab writes again.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
+		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
+		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
 			() => undefined,
-			async () => {
-				if (options.runToCompletion) {
-					await run.catch(() => {})
-				} else {
-					// Cancelling a queued item must not bypass an earlier committing mutation.
-					await previous.catch(() => {})
-				}
-			},
+			() => undefined,
 		)
 		return callerResult
 	}
 
-	private withProviderProfileMutationTimeout<T>(
-		operation: Promise<T>,
-		onTimeout: () => void,
-		signal: AbortSignal,
-		mutationSignal: AbortSignal,
-	): Promise<T> {
+	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeout = new Promise<never>((_, reject) => {
 			timeoutId = setTimeout(() => {
 				onTimeout()
-				if (!this.modeProfileState.committingMutationSignals.has(mutationSignal)) {
-					reject(new Error("Provider profile mutation timed out"))
-				}
+				reject(new Error("Provider profile mutation timed out"))
 			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 		})
-		let onAbort = () => {}
-		const cancelled = new Promise<never>((_, reject) => {
-			onAbort = () => {
-				if (!this.modeProfileState.committingMutationSignals.has(mutationSignal)) reject(signal.reason)
-			}
-			if (signal.aborted) onAbort()
-			else signal.addEventListener("abort", onAbort, { once: true })
-		})
 
-		return Promise.race([operation, timeout, cancelled]).finally(() => {
-			if (timeoutId) clearTimeout(timeoutId)
-			signal.removeEventListener("abort", onAbort)
+		return Promise.race([operation, timeout]).finally(() => {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
 		})
 	}
 
@@ -474,46 +425,15 @@ export class ClineProvider
 	 * Mode -> profile id choices made by this window. The persisted mode map in
 	 * `providerSettingsManager` is shared by every VS Code window, so reading it
 	 * alone lets another window's profile selection leak into this window's tasks.
-	 * The window's focus tracker is shared by sidebar and tab providers, so it keys their shared choices.
 	 */
-	private static readonly modeProfilesByWindow = new WeakMap<
-		WebviewFocusTracker,
-		{ state: ClineProvider["modeProfileState"]; manager: ProviderSettingsManager }
-	>()
+	private readonly localModeConfigIds = new Map<string, string>()
 
-	private modeProfileState = {
-		localIds: new Map<string, string>(),
-		writeOwners: new Map<string, symbol>(),
-		writes: new Map<Mode, Promise<void>>(),
-		mutations: new Set<Promise<unknown>>(),
-		profileMutationQueue: Promise.resolve(),
-		activeMutationSignals: new Set<AbortSignal>(),
-		committingMutationSignals: new Set<AbortSignal>(),
-		reset: undefined as Promise<void> | undefined,
-		// Capture the shared map once when the window opens; late tabs reuse that snapshot.
-		// Undefined means the opening snapshot failed, rather than an empty mapping.
-		initialIds: Promise.resolve<Record<string, string> | undefined>({}),
-	}
-
-	private get localModeConfigIds() {
-		return this.modeProfileState.localIds
-	}
-
-	private get modeConfigWriteOwners() {
-		return this.modeProfileState.writeOwners
-	}
-
-	private get modeConfigWrites() {
-		return this.modeProfileState.writes
-	}
-
-	private get initialModeConfigIds() {
-		return this.modeProfileState.initialIds
-	}
-
-	private set initialModeConfigIds(ids: Promise<Record<string, string> | undefined>) {
-		this.modeProfileState.initialIds = ids
-	}
+	/**
+	 * The shared mode map as it was when this window opened. Modes this window has not changed
+	 * resolve against it, so another window's later selection cannot reach this window's tasks
+	 * (including delegated subtasks).
+	 */
+	private initialModeConfigIds: Promise<Record<string, string>> = Promise.resolve({})
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -551,18 +471,8 @@ export class ClineProvider
 
 		this._workspaceTracker = new WorkspaceTracker(this)
 
-		const windowModeProfiles = ClineProvider.modeProfilesByWindow.get(webviewFocusTracker)
-		if (windowModeProfiles) {
-			this.modeProfileState = windowModeProfiles.state
-			this.providerSettingsManager = windowModeProfiles.manager
-		} else {
-			this.providerSettingsManager = new ProviderSettingsManager(this.context)
-			ClineProvider.modeProfilesByWindow.set(webviewFocusTracker, {
-				state: this.modeProfileState,
-				manager: this.providerSettingsManager,
-			})
-			this.captureInitialModeConfigIds()
-		}
+		this.providerSettingsManager = new ProviderSettingsManager(this.context)
+		this.captureInitialModeConfigIds()
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
@@ -1056,7 +966,6 @@ export class ClineProvider
 		}
 
 		this._disposed = true
-		this.profileMutationAbortController.abort(new Error("Provider disposed"))
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
@@ -2160,169 +2069,123 @@ export class ClineProvider
 		targetTask: Task | null | undefined,
 		signal?: AbortSignal,
 	): Promise<void> {
-		if (signal?.aborted) return
-		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
-		let profiles: ProviderSettingsEntry[] | undefined
-		let profileName: string | undefined
-		// Resolve the choice before any writes so cancellation during a read leaves no partial switch.
-		if (!lockApiConfigAcrossModes) {
-			const id = await this.getModeConfigId(newMode, signal)
-			if (signal?.aborted) return
-			profiles = await this.providerSettingsManager.listConfig()
-			if (signal?.aborted) return
-			const profile = profiles.find((entry) => entry.id === id)
-			if (profile) {
-				const settings = await this.providerSettingsManager.getProfile({ name: profile.name })
-				if (signal?.aborted) return
-				// Empty CLI profiles must not replace working runtime settings.
-				if (settings.apiProvider) profileName = profile.name
+		const task = targetTask
+
+		if (task) {
+			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
+			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
+
+			try {
+				// Update the task history with the new mode first.
+				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
+
+				if (taskHistoryItem) {
+					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
+				}
+
+				// Only update the task's mode after successful persistence.
+				;(task as any)._taskMode = newMode
+			} catch (error) {
+				// If persistence fails, log the error but don't update the in-memory state.
+				this.log(
+					`Failed to persist mode switch for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+
+				// Optionally, we could emit an event to notify about the failure.
+				// This ensures the in-memory state remains consistent with persisted state.
+				throw error
 			}
 		}
 
-		if (signal?.aborted) return
-		if (signal) this.modeProfileState.committingMutationSignals.add(signal)
-		try {
-			if (targetTask) {
-				TelemetryService.instance.captureModeSwitch(targetTask.taskId, newMode)
-				targetTask.emit(RooCodeEventName.TaskModeSwitched, targetTask.taskId, newMode)
-				const history = this.getTaskHistoryItem(targetTask.taskId)
-				if (history) {
-					// Persist the mode and sticky profile together for consistent restoration after disposal.
-					await this.updateTaskHistory({
-						...history,
-						mode: newMode,
-						...(profileName ? { apiConfigName: profileName } : {}),
-					})
-				}
-				targetTask["_taskMode"] = newMode
-				if (profileName) targetTask.setTaskApiConfigName(profileName)
-			}
-			// Once a write starts, drain the whole persistence sequence before another tab can write.
-			await this.updateGlobalState("mode", newMode)
-			if (profiles) await this.updateGlobalState("listApiConfigMeta", profiles)
-			if (profileName) {
-				await this.activateProviderProfileUnlocked(
-					{ name: profileName },
-					{
-						persistModeConfig: false,
-						persistTaskHistory: false,
-						skipCurrentTaskRebuild: targetTask === null,
-					},
-					signal,
-				)
-			}
-		} catch (error) {
-			throw new Error(
-				`Mode switch may be partially persisted: ${error instanceof Error ? error.message : String(error)}`,
-				{ cause: error },
-			)
-		}
-		if (signal?.aborted) return
+		await this.updateGlobalState("mode", newMode)
+
 		this.emit(RooCodeEventName.ModeChanged, newMode)
-		if (targetTask !== null) await this.postStateToWebview()
+
+		// If workspace lock is on, keep the current API config — don't load mode-specific config
+		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+		if (lockApiConfigAcrossModes) {
+			if (targetTask !== null) {
+				await this.postStateToWebview()
+			}
+			return
+		}
+
+		if (signal?.aborted) return
+
+		// Load the saved API config for the new mode if it exists.
+		const savedConfigId = await this.getModeConfigId(newMode)
+		const listApiConfig = await this.providerSettingsManager.listConfig()
+
+		if (signal?.aborted) return
+
+		// Update listApiConfigMeta first to ensure UI has latest data.
+		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+
+		// If this mode has a saved config, use it.
+		if (savedConfigId) {
+			const profile = listApiConfig.find(({ id }) => id === savedConfigId)
+
+			if (profile?.name) {
+				// Check if the profile has actual API configuration (not just an id).
+				// In CLI mode, the ProviderSettingsManager may return empty default profiles
+				// that only contain 'id' and 'name' fields. Activating such a profile would
+				// overwrite the CLI's working API configuration with empty settings.
+				// Skip activation if the profile has no apiProvider set - this indicates
+				// an unconfigured/empty profile.
+				const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
+				const hasActualSettings = !!fullProfile.apiProvider
+
+				if (hasActualSettings) {
+					await this.activateProviderProfileUnlocked(
+						{ name: profile.name },
+						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+						signal,
+					)
+				} else {
+					// The task will continue with the current/default configuration.
+				}
+			} else {
+				// The task will continue with the current/default configuration.
+			}
+		} else {
+			// If no saved config for this mode, save current config as default.
+			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
+
+			if (currentApiConfigNameAfter) {
+				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
+
+				if (config?.id) {
+					await this.setModeConfig(newMode, config.id)
+				}
+			}
+		}
+
+		if (targetTask !== null) {
+			await this.postStateToWebview()
+		}
 	}
 
 	// Provider Profile Management
 
 	private captureInitialModeConfigIds(): void {
-		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch(() => {
-			this.log("Failed to snapshot mode profile choices")
-			return undefined
+		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch((error) => {
+			this.log(`Failed to snapshot mode profile choices: ${error instanceof Error ? error.message : error}`)
+			return {}
 		})
 	}
 
-	/**
-	 * Resolve the profile id for `mode` from this window's own view: its explicit choices, then the
-	 * shared map as it was when the window opened. Modes absent from both resolve to `undefined`, so
-	 * callers keep this window's current profile instead of one another window saved later. A cached
-	 * id whose profile no longer exists (e.g. after a reset) is dropped in favour of the shared map,
-	 * while an unreadable opening snapshot keeps this window’s current profile.
-	 */
-	private async getModeConfigId(mode: Mode, signal?: AbortSignal): Promise<string | undefined> {
-		if (signal?.aborted) return undefined
-		const localId = this.localModeConfigIds.get(mode)
-		const initialIds = localId === undefined ? await this.initialModeConfigIds : undefined
-		if (signal?.aborted) return undefined
-		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode, signal)
-		const cachedId = localId ?? initialIds?.[mode]
-		if (cachedId === undefined) return undefined
-
-		const profiles = await this.providerSettingsManager.listConfig()
-		if (signal?.aborted) return undefined
-		// A profile selection may have changed while either asynchronous read was pending.
-		if (this.localModeConfigIds.get(mode) !== localId) return this.getModeConfigId(mode, signal)
-		if (profiles.some(({ id }) => id === cachedId)) return cachedId
-
-		if (localId !== undefined) this.localModeConfigIds.delete(mode)
-		return this.providerSettingsManager.getModeConfigId(mode)
+	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
+		return (
+			this.localModeConfigIds.get(mode) ??
+			(await this.initialModeConfigIds)[mode] ??
+			// Modes created after this window opened have no snapshot entry.
+			(await this.providerSettingsManager.getModeConfigId(mode))
+		)
 	}
 
-	/** Adopt imported mappings from the manager's persistence callback, while its storage lock is held. */
-	public adoptModeConfigIds(ids: Record<string, string>): void {
-		for (const [mode, id] of Object.entries(ids)) {
-			this.localModeConfigIds.set(mode, id)
-			this.modeConfigWriteOwners.delete(mode)
-		}
-	}
-
-	public async setModeConfig(mode: Mode, id: string, signal?: AbortSignal): Promise<void> {
-		// An activation that reset is draining must finish all its writes before deletion.
-		const committing = signal !== undefined && this.modeProfileState.committingMutationSignals.has(signal)
-		const completingMutation =
-			committing || (signal !== undefined && this.modeProfileState.activeMutationSignals.has(signal))
-		const writeSignal = committing
-			? new AbortController().signal
-			: signal
-				? AbortSignal.any([signal, this.profileMutationAbortController.signal])
-				: this.profileMutationAbortController.signal
-		writeSignal.throwIfAborted()
-		if (this.modeProfileState.reset && !completingMutation)
-			throw new Error("Mode profile write cancelled by settings reset")
-		const pending = this.modeConfigWrites.get(mode)
-		const write = (async () => {
-			// A failed predecessor must roll back before this operation captures its previous choice.
-			if (pending) await pending.catch(() => {})
-			// Reset invalidates queued selections before their profiles are deleted.
-			writeSignal.throwIfAborted()
-			if (this.modeProfileState.reset && !completingMutation)
-				throw new Error("Mode profile write cancelled by settings reset")
-			await this.writeModeConfig(mode, id, writeSignal)
-		})()
-		this.modeConfigWrites.set(mode, write)
-		try {
-			await write
-		} finally {
-			if (this.modeConfigWrites.get(mode) === write) this.modeConfigWrites.delete(mode)
-		}
-	}
-
-	private async writeModeConfig(mode: Mode, id: string, signal?: AbortSignal): Promise<void> {
-		const previousId = this.localModeConfigIds.get(mode)
-		const owner = Symbol()
-		this.modeConfigWriteOwners.set(mode, owner)
+	private async setModeConfig(mode: Mode, id: string): Promise<void> {
 		this.localModeConfigIds.set(mode, id)
-		let persisted = false
-		const rollback = () => {
-			if (this.modeConfigWriteOwners.get(mode) !== owner) return
-			if (previousId === undefined) this.localModeConfigIds.delete(mode)
-			else this.localModeConfigIds.set(mode, previousId)
-		}
-		const onPersisted = () => {
-			persisted = true
-			// An import may have adopted another choice while this write waited for the storage lock.
-			this.localModeConfigIds.set(mode, id)
-		}
-		try {
-			if (signal) await this.providerSettingsManager.setModeConfig(mode, id, onPersisted, signal)
-			else await this.providerSettingsManager.setModeConfig(mode, id, onPersisted)
-		} catch (error) {
-			// Only roll back our optimistic update; an import may have adopted even the same ID.
-			rollback()
-			throw error
-		} finally {
-			if (signal?.aborted && !persisted) rollback()
-			if (this.modeConfigWriteOwners.get(mode) === owner) this.modeConfigWriteOwners.delete(mode)
-		}
+		await this.providerSettingsManager.setModeConfig(mode, id)
 	}
 
 	/**
@@ -2502,19 +2365,19 @@ export class ClineProvider
 		activate: boolean,
 		signal: AbortSignal,
 	): Promise<string | undefined> {
-		signal.throwIfAborted()
-		const task = this.getCurrentTask()
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
 		// we rely on the `ContextProxy`'s data store and in other cases
 		// we rely on the `ProviderSettingsManager`'s data store. It might
 		// be simpler to unify these two.
-		const id = await this.providerSettingsManager.saveConfig(name, providerSettings, signal, () => {
-			this.modeProfileState.committingMutationSignals.add(signal)
-		})
+		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+
+		if (signal.aborted) return id
 
 		if (activate) {
 			const { mode } = await this.getState()
+
+			if (signal.aborted) return id
 
 			// These promises do the following:
 			// 1. Adds or updates the list of provider profiles.
@@ -2527,11 +2390,10 @@ export class ClineProvider
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
 			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
-			const profiles = await this.providerSettingsManager.listConfig()
 			const activationResults = await Promise.allSettled([
-				this.updateGlobalState("listApiConfigMeta", profiles),
+				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.updateGlobalState("currentApiConfigName", name),
-				this.setModeConfig(mode, id, signal),
+				this.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 			const failedActivation = activationResults.find(
@@ -2539,13 +2401,15 @@ export class ClineProvider
 			)
 
 			if (failedActivation) throw failedActivation.reason
-			if (task) await this.persistStickyProviderProfileToCurrentTask(name, { task, throwOnFailure: true })
 
 			if (signal.aborted) return id
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+
+			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+			await this.persistStickyProviderProfileToCurrentTask(name)
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 		}
@@ -2581,15 +2445,10 @@ export class ClineProvider
 
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: {
-			skipCurrentTaskRebuild?: boolean
-			expectedCurrentTaskId?: string
-			task?: Task
-			throwOnFailure?: boolean
-		} = {},
+		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
-		const task = options.task ?? this.getCurrentTask()
+		const task = this.getCurrentTask()
 		if (!task || (options.expectedCurrentTaskId && task.taskId !== options.expectedCurrentTaskId)) {
 			return
 		}
@@ -2605,13 +2464,12 @@ export class ClineProvider
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
 			}
 		} catch (error) {
-			// Log failures; committed activations also propagate them as partial persistence.
+			// If persistence fails, log the error but don't fail the profile switch.
 			this.log(
 				`Failed to persist provider profile switch for task ${task.taskId}: ${
 					error instanceof Error ? error.message : String(error)
 				}`,
 			)
-			if (options.throwOnFailure) throw error
 		}
 	}
 
@@ -2638,79 +2496,54 @@ export class ClineProvider
 			skipCurrentTaskRebuild?: boolean
 			expectedCurrentTaskId?: string
 		},
-		signal: AbortSignal = this.profileMutationAbortController.signal,
+		signal?: AbortSignal,
 	): Promise<void> {
-		const completingSwitch = this.modeProfileState.committingMutationSignals.has(signal)
-		if (!completingSwitch) signal.throwIfAborted()
-		const persistenceSignal = completingSwitch ? new AbortController().signal : signal
-		const task = this.getCurrentTask()
-		const stickyTask =
-			!options?.skipCurrentTaskRebuild &&
-			(!options?.expectedCurrentTaskId || task?.taskId === options.expectedCurrentTaskId)
-				? task
-				: undefined
-		const tracked = this.modeProfileState.activeMutationSignals.has(signal)
-		let persistenceStarted = false
-		let persistenceFinished = false
-		const startPersistence = () => {
-			persistenceStarted = true
-			this.modeProfileState.committingMutationSignals.add(signal)
+		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
+
+		if (signal?.aborted) return
+
+		const persistModeConfig = options?.persistModeConfig ?? true
+		const persistTaskHistory = options?.persistTaskHistory ?? true
+		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
+
+		if (!skipCurrentTaskRebuild) {
+			// See `upsertProviderProfile` for a description of what this is doing.
+			await Promise.all([
+				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.contextProxy.setValue("currentApiConfigName", name),
+				this.contextProxy.setProviderSettings(providerSettings),
+			])
 		}
-		try {
-			const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(
-				args,
-				persistenceSignal,
-				startPersistence,
-			)
-			// Returning from activateProfile confirms that its active-profile write committed.
-			startPersistence()
-			const persistModeConfig = options?.persistModeConfig ?? true
-			const persistTaskHistory = options?.persistTaskHistory ?? true
-			const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
-			// Once the active profile write starts, finish its matching context and mode writes.
-			// Disposal still cancels queued activations and suppresses task/UI work below.
-			if (!skipCurrentTaskRebuild) {
-				const profiles = await this.providerSettingsManager.listConfig()
-				const writes = await Promise.allSettled([
-					this.contextProxy.setValue("listApiConfigMeta", profiles),
-					this.contextProxy.setValue("currentApiConfigName", name),
-					this.contextProxy.setProviderSettings(providerSettings),
-				])
-				const failed = writes.find((result): result is PromiseRejectedResult => result.status === "rejected")
-				if (failed) throw failed.reason
-			}
+		const { mode } = await this.getState()
 
-			const { mode } = await this.getState()
-			if (id && persistModeConfig) await this.setModeConfig(mode, id, signal)
-			if (persistTaskHistory && stickyTask) {
-				await this.persistStickyProviderProfileToCurrentTask(name, { task: stickyTask, throwOnFailure: true })
-			}
-			persistenceFinished = true
-			if (signal.aborted) return
+		if (id && persistModeConfig) {
+			await this.setModeConfig(mode, id)
+		}
 
-			const expectedCurrentTaskId = options?.expectedCurrentTaskId
-			this.updateTaskApiHandlerIfNeeded(providerSettings, {
-				forceRebuild: true,
+		// Change the provider for the current task.
+		const expectedCurrentTaskId = options?.expectedCurrentTaskId
+		this.updateTaskApiHandlerIfNeeded(providerSettings, {
+			forceRebuild: true,
+			skipCurrentTaskRebuild,
+			expectedCurrentTaskId,
+		})
+
+		// Update the current task's sticky provider profile, unless this activation is
+		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
+		if (persistTaskHistory) {
+			await this.persistStickyProviderProfileToCurrentTask(name, {
 				skipCurrentTaskRebuild,
 				expectedCurrentTaskId,
 			})
-			if (signal.aborted) return
-			if (!skipCurrentTaskRebuild) await this.postStateToWebview()
-			if (signal.aborted) return
-			if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
-				this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
-			}
-		} catch (error) {
-			if (persistenceStarted && !persistenceFinished) {
-				throw new Error(
-					`Profile activation may be partially persisted: ${error instanceof Error ? error.message : String(error)}`,
-					{ cause: error },
-				)
-			}
-			throw error
-		} finally {
-			if (!tracked) this.modeProfileState.committingMutationSignals.delete(signal)
+		}
+
+		if (!skipCurrentTaskRebuild) {
+			await this.postStateToWebview()
+		}
+
+		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
+			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
 		}
 	}
 
@@ -3934,21 +3767,6 @@ export class ClineProvider
 			return
 		}
 
-		if (this.modeProfileState.reset) return this.modeProfileState.reset
-		const reset = this.resetStateAfterProfileMutations()
-		this.modeProfileState.reset = reset
-		try {
-			await reset
-		} finally {
-			this.modeProfileState.reset = undefined
-		}
-	}
-
-	private async resetStateAfterProfileMutations(): Promise<void> {
-		// Drain whole profile mutations, including saves and context updates, before deleting state.
-		// The shared reset promise rejects new/queued mutations in every tab while active ones finish.
-		await Promise.allSettled([...this.modeProfileState.mutations, ...this.modeConfigWrites.values()])
-
 		// Log out from cloud if authenticated
 		if (CloudService.hasInstance()) {
 			try {
@@ -3965,7 +3783,6 @@ export class ClineProvider
 		await this.providerSettingsManager.resetAllConfigs()
 		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
 		this.localModeConfigIds.clear()
-		this.modeConfigWriteOwners.clear()
 		this.captureInitialModeConfigIds()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()

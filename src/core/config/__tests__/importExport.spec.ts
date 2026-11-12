@@ -187,37 +187,12 @@ describe("importExport", () => {
 		beforeEach(() => {
 			;(fs.readFile as Mock).mockResolvedValue(validFileContent)
 			mockProviderSettingsManager.export.mockResolvedValue(previousProviderProfiles)
-			mockProviderSettingsManager.import.mockImplementation(async (_profiles, onPersisted) => {
-				onPersisted?.()
-			})
+			mockProviderSettingsManager.import.mockResolvedValue(undefined)
 			mockProviderSettingsManager.listConfig.mockResolvedValue(profileMetadata)
 			mockContextProxy.setValues.mockResolvedValue(undefined)
 			mockContextProxy.setValue.mockResolvedValue(undefined)
 			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
 		})
-
-		it.each([false, true])(
-			"updates the importing window only after successful persistence (failure: %s)",
-			async (fails) => {
-				const modeApiConfigs = { "new-custom-mode": "test-id" }
-				const file = JSON.parse(validFileContent)
-				file.providerProfiles.modeApiConfigs = modeApiConfigs
-				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(file))
-				const onModeConfigIdsImported = vi.fn()
-				if (fails) mockProviderSettingsManager.import.mockRejectedValueOnce(new Error("write failed"))
-
-				const result = await importSettingsFromPath("/mock/path/settings.json", {
-					providerSettingsManager: mockProviderSettingsManager,
-					contextProxy: mockContextProxy,
-					customModesManager: mockCustomModesManager,
-					onModeConfigIdsImported,
-				})
-
-				expect(result.success).toBe(!fails)
-				if (fails) expect(onModeConfigIdsImported).not.toHaveBeenCalled()
-				else expect(onModeConfigIdsImported).toHaveBeenCalledExactlyOnceWith(modeApiConfigs)
-			},
-		)
 
 		it("waits for each provider-state write before reporting success", async () => {
 			const currentProfileWrite = createDeferred<void>()
@@ -663,7 +638,6 @@ describe("importExport", () => {
 			// Create a mock provider for the test
 			const mockProvider = {
 				settingsImportedAt: 0,
-				adoptModeConfigIds: vi.fn(),
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 			}
@@ -947,7 +921,6 @@ describe("importExport", () => {
 				const seenImportedAt: Array<number | undefined> = []
 				const mockProvider = {
 					settingsImportedAt: undefined as number | undefined,
-					adoptModeConfigIds: vi.fn(),
 					postStateToWebview: vi.fn().mockImplementation(async () => {
 						seenImportedAt.push(mockProvider.settingsImportedAt)
 					}),
@@ -1024,7 +997,6 @@ describe("importExport", () => {
 				const seenImportedAt: Array<number | undefined> = []
 				const mockProvider = {
 					settingsImportedAt: undefined as number | undefined,
-					adoptModeConfigIds: vi.fn(),
 					postStateToWebview: vi.fn().mockImplementation(async () => {
 						seenImportedAt.push(mockProvider.settingsImportedAt)
 					}),
@@ -1296,7 +1268,6 @@ describe("importExport", () => {
 
 				const mockProvider = {
 					settingsImportedAt: 0,
-					adoptModeConfigIds: vi.fn(),
 					postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				}
 
@@ -1566,7 +1537,6 @@ describe("importExport", () => {
 
 				const mockProvider = {
 					settingsImportedAt: 0,
-					adoptModeConfigIds: vi.fn(),
 					postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				}
 

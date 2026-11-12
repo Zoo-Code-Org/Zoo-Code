@@ -416,18 +416,10 @@ export class ProviderSettingsManager {
 	 * Preserves the ID from the input 'config' object if it exists,
 	 * otherwise generates a new one (for creation scenarios).
 	 */
-	public async saveConfig(
-		name: string,
-		config: ProviderSettingsWithId,
-		signal?: AbortSignal,
-		onPersisting?: () => void,
-	): Promise<string> {
-		signal?.throwIfAborted()
+	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
 		try {
 			return await this.lock(async () => {
-				signal?.throwIfAborted()
 				const providerProfiles = await this.load()
-				signal?.throwIfAborted()
 				// Preserve the existing ID if this is an update to an existing config.
 				const existingId = providerProfiles.apiConfigs[name]?.id
 				const id = config.id || existingId || this.generateId()
@@ -443,7 +435,6 @@ export class ProviderSettingsManager {
 						? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
 						: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
 				providerProfiles.apiConfigs[name] = { ...filteredConfig, id }
-				onPersisting?.()
 				await this.store(providerProfiles)
 				return id
 			})
@@ -496,20 +487,13 @@ export class ProviderSettingsManager {
 	 */
 	public async activateProfile(
 		params: { name: string } | { id: string },
-		signal?: AbortSignal,
-		onPersisting?: () => void,
 	): Promise<ProviderSettingsWithId & { name: string }> {
-		signal?.throwIfAborted()
 		const { name, ...providerSettings } = await this.getProfile(params)
-		signal?.throwIfAborted()
 
 		try {
 			return await this.lock(async () => {
-				signal?.throwIfAborted()
 				const providerProfiles = await this.load()
-				signal?.throwIfAborted()
 				providerProfiles.currentApiConfigName = name
-				onPersisting?.()
 				await this.store(providerProfiles)
 				return { name, ...providerSettings }
 			})
@@ -559,12 +543,10 @@ export class ProviderSettingsManager {
 	/**
 	 * Set the API config for a specific mode.
 	 */
-	public async setModeConfig(mode: Mode, configId: string, onPersisted?: () => void, signal?: AbortSignal) {
+	public async setModeConfig(mode: Mode, configId: string) {
 		try {
 			return await this.lock(async () => {
-				signal?.throwIfAborted()
 				const providerProfiles = await this.load()
-				signal?.throwIfAborted()
 				// Ensure the per-mode config map exists
 				if (!providerProfiles.modeApiConfigs) {
 					providerProfiles.modeApiConfigs = {}
@@ -572,7 +554,6 @@ export class ProviderSettingsManager {
 				// Assign the chosen config ID to this mode
 				providerProfiles.modeApiConfigs[mode] = configId
 				await this.store(providerProfiles)
-				onPersisted?.()
 			})
 		} catch (error) {
 			throw new Error(`Failed to set mode config: ${error}`)
@@ -670,13 +651,9 @@ export class ProviderSettingsManager {
 		}
 	}
 
-	public async import(providerProfiles: ProviderProfiles, onPersisted?: () => void) {
+	public async import(providerProfiles: ProviderProfiles) {
 		try {
-			return await this.lock(async () => {
-				await this.store(providerProfiles)
-				// Publish local choices before a later writer can acquire the storage lock.
-				onPersisted?.()
-			})
+			return await this.lock(() => this.store(providerProfiles))
 		} catch (error) {
 			throw new Error(`Failed to import provider profiles: ${error}`)
 		}

@@ -15,7 +15,6 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
-	type HistoryItem,
 	type RooCodeSettings,
 	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
@@ -30,7 +29,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
-import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
@@ -41,17 +39,11 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
-import {
-	makeCompositeDisposable,
-	makeEventEmitter,
-	makeUri,
-	makeWorkspaceConfiguration,
-} from "../../../test-utils/vscode"
+import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
-vi.mock("@roo-code/ipc", () => ({ IpcServer: class {} }))
 vi.mock("../../prompts/sections/custom-instructions")
 
 vi.mock("p-wait-for", () => ({
@@ -567,7 +559,8 @@ describe("ClineProvider", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// Tests provide explicit opening snapshots when they need saved mode profiles.
+		// Most tests stub providerSettingsManager and expect it to be consulted for mode profiles,
+		// so start without the snapshot the real manager would take of the seeded mode map.
 		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		defaultTaskOptions = {
@@ -4621,7 +4614,6 @@ describe("ClineProvider", () => {
 			apiProvider: providerIdentifiers.anthropic,
 		}
 
-		provider["initialModeConfigIds"] = Promise.resolve({ architect: "test-id" })
 		;(provider as any).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
@@ -4634,1075 +4626,38 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "mode", text: "architect" })
 
 		// Should load the saved config for architect mode
-		expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
-		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith(
-			{ name: "test-config" },
-			expect.any(AbortSignal),
-			expect.any(Function),
-		)
+		expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "test-config" })
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
 
-	describe("mode profile choices", () => {
-		const existingProfiles = (...ids: string[]) =>
-			vi
-				.spyOn(provider.providerSettingsManager, "listConfig")
-				.mockResolvedValue(ids.map((id) => ({ name: `${id}-name`, id })))
+	it("prefers this window's mode profile over one another window saved in shared storage", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
 
-		it.each([false, true])("captures opening choices in the constructor (read failure: %s)", async (fails) => {
-			const snapshot = vi.spyOn(ProviderSettingsManager.prototype, "getModeConfigIds")
-			if (fails) snapshot.mockRejectedValueOnce(new Error("unreadable"))
-			else snapshot.mockResolvedValueOnce({ code: "opened-id" })
-			const opened = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-				new WebviewFocusTracker(),
-			)
-			try {
-				expect(snapshot).toHaveBeenCalledOnce()
-				vi.spyOn(opened.providerSettingsManager, "listConfig").mockResolvedValue([
-					{ name: "opened", id: "opened-id" },
-				])
-				const sharedLookup = vi
-					.spyOn(opened.providerSettingsManager, "getModeConfigId")
-					.mockResolvedValue("other-window-id")
-				snapshot.mockResolvedValue({ code: "other-window-id" })
-				await expect(opened["getModeConfigId"]("code")).resolves.toBe(fails ? undefined : "opened-id")
-				expect(sharedLookup).not.toHaveBeenCalled()
-			} finally {
-				await opened.dispose()
-				snapshot.mockRestore()
-			}
-		})
+		const manager = provider.providerSettingsManager
+		vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
+		vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
 
-		it.each([false, true])(
-			"keeps the current profile without seeding a shared default (read failure: %s)",
-			async (fails) => {
-				const manager = provider.providerSettingsManager
-				await manager.import({
-					currentApiConfigName: "current",
-					apiConfigs: { current: { id: "current-id" }, saved: { id: "saved-id" } },
-					modeApiConfigs: fails ? { code: "saved-id" } : {},
-				})
-				await provider.contextProxy.setValue("currentApiConfigName", "current")
-				const snapshot = vi.spyOn(manager, "getModeConfigIds")
-				if (fails) snapshot.mockRejectedValueOnce(new Error("temporarily unreadable"))
-				provider["captureInitialModeConfigIds"]()
-				await provider["initialModeConfigIds"]
+		await provider["setModeConfig"]("code", "this-window-id")
 
-				// Storage has recovered by the time the mode switch reads profiles and could write a default.
-				const write = vi.spyOn(manager, "setModeConfig")
-				await provider["handleModeSwitchUnlocked"]("code", null)
+		expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
+		await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
+		// A mode this window never chose still falls back to the shared value.
+		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("other-window-id")
+	})
 
-				expect(write).not.toHaveBeenCalled()
-				await expect(manager.getModeConfigId("code")).resolves.toBe(fails ? "saved-id" : undefined)
-				expect(provider["getGlobalState"]("currentApiConfigName")).toBe("current")
-			},
-		)
-
-		it.each([false, true])(
-			"preserves shared defaults written after this window opened (shared mapping exists: %s)",
-			async (hasSharedMapping) => {
-				const manager = provider.providerSettingsManager
-				provider["initialModeConfigIds"] = Promise.resolve({})
-				await manager.import({
-					currentApiConfigName: "current",
-					apiConfigs: { current: { id: "current-id" }, other: { id: "other-id" } },
-					modeApiConfigs: hasSharedMapping ? { code: "other-id" } : {},
-				})
-				await provider.contextProxy.setValue("currentApiConfigName", "current")
-				const write = vi.spyOn(manager, "setModeConfig")
-				const activate = vi.spyOn(manager, "activateProfile")
-
-				await provider["handleModeSwitchUnlocked"]("code", null)
-
-				expect(write).not.toHaveBeenCalled()
-				expect(activate).not.toHaveBeenCalled()
-				await expect(manager.getModeConfigId("code")).resolves.toBe(hasSharedMapping ? "other-id" : undefined)
-				expect(provider["getGlobalState"]("currentApiConfigName")).toBe("current")
-			},
-		)
-
-		it.each(["snapshot", "local"])("shares the window's %s choice with late-opening tabs", async (source) => {
-			provider["initialModeConfigIds"] = Promise.resolve({ code: "opened-id" })
-			if (source === "local") provider.adoptModeConfigIds({ code: "local-id" })
-			const snapshot = vi
-				.spyOn(ProviderSettingsManager.prototype, "getModeConfigIds")
-				.mockResolvedValue({ code: "other-window-id" })
-			const tab = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"editor",
-				provider.contextProxy,
-				provider.webviewFocusTracker,
-			)
-			try {
-				expect(snapshot).not.toHaveBeenCalled()
-				vi.spyOn(tab.providerSettingsManager, "listConfig").mockResolvedValue([
-					{ name: "opened", id: "opened-id" },
-					{ name: "local", id: "local-id" },
-				])
-				const expectedName = source === "local" ? "local" : "opened"
-				vi.spyOn(tab.providerSettingsManager, "getProfile").mockResolvedValue({
-					name: expectedName,
-					id: `${expectedName}-id`,
-					apiProvider: providerIdentifiers.anthropic,
-				})
-				const activate = vi.fn<typeof tab.activateProviderProfile>()
-				tab["activateProviderProfileUnlocked"] = activate
-
-				await tab["handleModeSwitchUnlocked"]("code", null)
-
-				expect(activate).toHaveBeenCalledWith(
-					{ name: expectedName },
-					{ persistModeConfig: false, persistTaskHistory: false, skipCurrentTaskRebuild: true },
-					undefined,
-				)
-				await expect(tab["getModeConfigId"]("code")).resolves.toBe(`${expectedName}-id`)
-
-				// The parent double supplies only the execution context and flush methods read during delegation.
-				const parent = {
-					taskId: "tab-parent",
-					apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
-					getTaskMode: vi.fn().mockResolvedValue("architect"),
-					getTaskApiConfigName: vi.fn().mockResolvedValue("parent-profile"),
-					flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
-				} as unknown as Task
-				// The child double supplies the identity and run method consumed by the scheduler.
-				const child = { taskId: "tab-child", run: vi.fn().mockResolvedValue(undefined) } as unknown as Task
-				vi.spyOn(tab, "getCurrentTask").mockReturnValue(parent)
-				vi.spyOn(tab, "removeClineFromStack").mockResolvedValue(undefined)
-				const create = vi.spyOn(tab, "createTask").mockResolvedValue(child)
-				vi.spyOn(tab["taskHistoryStore"], "invalidate").mockResolvedValue(undefined)
-				vi.spyOn(tab["taskHistoryStore"], "get").mockReturnValue(undefined)
-				vi.spyOn(tab["taskHistoryStore"], "atomicReadAndUpdate").mockResolvedValue([])
-				await tab.delegateParentAndOpenChild({
-					parentTaskId: "tab-parent",
-					message: "Child",
-					initialTodos: [],
-					mode: "code",
-				})
-				expect(create).toHaveBeenCalledWith(
-					"Child",
-					undefined,
-					parent,
-					expect.objectContaining({
-						handoffExecutionContext: expect.objectContaining({ mode: "code", apiConfigName: expectedName }),
-					}),
-				)
-
-				// Later explicit choices and imports also belong to the window, in either direction.
-				vi.spyOn(tab.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-				await tab.setModeConfig("code", "local-id")
-				existingProfiles("local-id", "opened-id")
-				await expect(provider["getModeConfigId"]("code")).resolves.toBe("local-id")
-				provider.adoptModeConfigIds({ code: "opened-id" })
-				await expect(tab["getModeConfigId"]("code")).resolves.toBe("opened-id")
-			} finally {
-				await tab.dispose()
-				snapshot.mockRestore()
-			}
-		})
-
-		it("restores a cached mode profile without overwriting another window's shared choice", async () => {
-			const manager = provider.providerSettingsManager
-			await manager.import({
-				currentApiConfigName: "other",
-				apiConfigs: {
-					local: { id: "local-id", apiProvider: providerIdentifiers.anthropic },
-					other: { id: "other-id", apiProvider: providerIdentifiers.openai },
-				},
-				modeApiConfigs: { code: "other-id" },
-			})
-			provider.adoptModeConfigIds({ code: "local-id" })
-			const write = vi.spyOn(manager, "setModeConfig")
-			const activate = vi.spyOn(manager, "activateProfile")
-
-			await provider["handleModeSwitchUnlocked"]("code", null)
-
-			expect(activate).toHaveBeenCalledWith({ name: "local" }, expect.any(AbortSignal), expect.any(Function))
-			expect(write).not.toHaveBeenCalled()
-			await expect(manager.getModeConfigId("code")).resolves.toBe("other-id")
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("local-id")
-		})
-
-		it.each([false, true])(
-			"does not seed an unmapped mode across a delayed read (cancelled: %s)",
-			async (cancel) => {
-				const manager = provider.providerSettingsManager
-				provider["initialModeConfigIds"] = Promise.resolve({})
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const list = vi.spyOn(manager, "listConfig").mockImplementationOnce(async () => {
-					await pending
-					return [{ name: "current-config", id: "current-id" }]
-				})
-				// Seeding no longer reads shared mappings, so there is no check/write gap to race.
-				const lookup = vi.spyOn(manager, "getModeConfigId")
-				const write = vi.spyOn(manager, "setModeConfig")
-				const controller = new AbortController()
-				const switched = provider["handleModeSwitchUnlocked"]("code", null, controller.signal)
-				await vi.waitFor(() => expect(list).toHaveBeenCalledOnce())
-				if (cancel) controller.abort()
-				await manager.import({
-					currentApiConfigName: "other",
-					apiConfigs: { other: { id: "other-id" } },
-					modeApiConfigs: { code: "other-id" },
-				})
-				release()
-				await switched
-
-				expect(lookup).not.toHaveBeenCalled()
-				expect(write).not.toHaveBeenCalled()
-				expect(provider["localModeConfigIds"].has("code")).toBe(false)
-				await expect(manager.getModeConfigId("code")).resolves.toBe("other-id")
-			},
-		)
-
-		it.each([false, true])("handles a mode write waiting for the storage lock (cancelled: %s)", async (cancel) => {
-			const manager = provider.providerSettingsManager
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-			const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-				await pending
-				await originalStore(key, value)
-			})
-			const imported = manager.import({
-				currentApiConfigName: "imported",
-				apiConfigs: { imported: { id: "imported-id" }, selected: { id: "selected-id" } },
-				modeApiConfigs: { code: "imported-id" },
-			})
-			await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-			const controller = new AbortController()
-			const write = provider.setModeConfig("code", "selected-id", controller.signal)
-			expect(provider["localModeConfigIds"].get("code")).toBe("selected-id")
-			if (cancel) controller.abort()
-			release()
-			const result = cancel
-				? expect(write).rejects.toMatchObject({
-						name: "Error",
-						message: "Failed to set mode config: AbortError: This operation was aborted",
-					})
-				: expect(write).resolves.toBeUndefined()
-			await Promise.all([imported, result])
-
-			await expect(manager.getModeConfigId("code")).resolves.toBe(cancel ? "imported-id" : "selected-id")
-			expect(provider["localModeConfigIds"].get("code")).toBe(cancel ? undefined : "selected-id")
-		})
-
-		it.each(["queued", "persisting"])(
-			"finishes committed persistence but skips cancelled activation work when its mode write is %s",
-			async (stage) => {
-				await provider.setValue("mode", "code")
-				const manager = provider.providerSettingsManager
-				vi.spyOn(manager, "activateProfile").mockResolvedValue({
-					name: "selected",
-					id: "selected-id",
-					apiProvider: providerIdentifiers.anthropic,
-				})
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const write = vi
-					.spyOn(manager, "setModeConfig")
-					.mockImplementationOnce(async (_mode, _id, onPersisted) => {
-						await pending
-						onPersisted?.()
-					})
-				const select = vi.spyOn(provider, "setModeConfig")
-				const preceding = stage === "queued" ? provider.setModeConfig("code", "previous-id") : Promise.resolve()
-				const rebuild = vi.fn(provider["updateTaskApiHandlerIfNeeded"].bind(provider))
-				provider["updateTaskApiHandlerIfNeeded"] = rebuild
-				const sticky = vi.fn(provider["persistStickyProviderProfileToCurrentTask"].bind(provider))
-				provider["persistStickyProviderProfileToCurrentTask"] = sticky
-				const controller = new AbortController()
-				const activation = provider["activateProviderProfileUnlocked"](
-					{ name: "selected" },
-					{ skipCurrentTaskRebuild: true },
-					controller.signal,
-				)
-				await vi.waitFor(() => expect(select).toHaveBeenCalledTimes(stage === "queued" ? 2 : 1))
-				controller.abort()
-				release()
-				await Promise.all([preceding, activation])
-
-				expect(write).toHaveBeenCalledTimes(stage === "queued" ? 2 : 1)
-				expect(provider["localModeConfigIds"].get("code")).toBe("selected-id")
-
-				expect(rebuild).not.toHaveBeenCalled()
-				expect(sticky).not.toHaveBeenCalled()
-			},
-		)
-
-		it.each([false, true])(
-			"finishes committed activation persistence after disposal (context failure: %s)",
-			async (fails) => {
-				const manager = provider.providerSettingsManager
-				await provider.setValue("mode", "code")
-				await manager.import({
-					currentApiConfigName: "opened",
-					apiConfigs: {
-						opened: { id: "opened-id", apiProvider: providerIdentifiers.anthropic },
-						closed: { id: "closed-id", apiProvider: providerIdentifiers.anthropic },
-					},
-					modeApiConfigs: { code: "opened-id" },
-				})
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const originalList = manager.listConfig.bind(manager)
-				const list = vi.spyOn(manager, "listConfig").mockImplementationOnce(async () => {
-					await pending
-					return originalList()
-				})
-				const rebuild = vi.fn(provider["updateTaskApiHandlerIfNeeded"].bind(provider))
-				provider["updateTaskApiHandlerIfNeeded"] = rebuild
-				const sticky = vi.fn(provider["persistStickyProviderProfileToCurrentTask"].bind(provider))
-				provider["persistStickyProviderProfileToCurrentTask"] = sticky
-				const activation = provider.activateProviderProfile({ name: "closed" })
-				const result = fails
-					? expect(activation).rejects.toThrow(
-							"Profile activation may be partially persisted: settings failure",
-						)
-					: expect(activation).resolves.toBeUndefined()
-				await vi.waitFor(() => expect(list).toHaveBeenCalledOnce())
-				await expect(manager["load"]()).resolves.toMatchObject({ currentApiConfigName: "closed" })
-				if (fails)
-					vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
-						new Error("settings failure"),
-					)
-				await provider.dispose()
-				release()
-				await result
-
-				if (!fails) {
-					expect(provider.getValue("currentApiConfigName")).toBe("closed")
-					await expect(manager.getModeConfigId("code")).resolves.toBe("closed-id")
-				}
-				expect(rebuild).not.toHaveBeenCalled()
-				expect(sticky).not.toHaveBeenCalled()
-			},
-		)
-
-		it("rejects a delegation profile lookup failure before changing the parent or creating a child", async () => {
-			const parent = new Task(defaultTaskOptions)
-			parent.getTaskMode = vi.fn().mockResolvedValue("code")
-			parent.getTaskApiConfigName = vi.fn().mockResolvedValue("parent-profile")
-			parent.apiConfiguration = { apiProvider: providerIdentifiers.anthropic }
-			vi.spyOn(provider, "getCurrentTask").mockReturnValue(parent)
-			vi.spyOn(provider.taskHistoryStore, "invalidate").mockResolvedValue(undefined)
-			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(undefined)
-			const persist = vi.spyOn(provider.taskHistoryStore, "atomicReadAndUpdate")
-			const create = vi.spyOn(provider, "createTask")
-			const remove = vi.spyOn(provider, "removeClineFromStack")
-			provider["initialModeConfigIds"] = Promise.resolve({ architect: "selected-id" })
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockRejectedValue(
-				new Error("profiles unavailable"),
-			)
-
-			await expect(
-				provider.delegateParentAndOpenChild({
-					parentTaskId: parent.taskId,
-					message: "Child",
-					initialTodos: [],
-					mode: "architect",
-				}),
-			).rejects.toThrow("profiles unavailable")
-			expect(provider.getCurrentTask()).toBe(parent)
-			expect(parent.apiConfiguration).toEqual({ apiProvider: providerIdentifiers.anthropic })
-			expect(persist).not.toHaveBeenCalled()
-			expect(remove).not.toHaveBeenCalled()
-			expect(create).not.toHaveBeenCalled()
-		})
-
-		it.each(["mode switch", "profile activation"] as const)(
-			"restores matching mode and profile after disposal during a committed %s",
-			async (operation) => {
-				const manager = provider.providerSettingsManager
-				await manager.import({
-					currentApiConfigName: "old",
-					apiConfigs: {
-						old: { id: "old-id", apiProvider: providerIdentifiers.anthropic },
-						selected: { id: "selected-id", apiProvider: providerIdentifiers.openai },
-					},
-					modeApiConfigs: {},
-				})
-				await provider.setValue("mode", "code")
-				await provider.setValue("currentApiConfigName", "old")
-				provider.adoptModeConfigIds({ architect: "selected-id" })
-				const tab = new ClineProvider(
-					mockContext,
-					mockOutputChannel,
-					"editor",
-					provider.contextProxy,
-					provider.webviewFocusTracker,
-				)
-				const task = new Task(defaultTaskOptions)
-				task.setTaskApiConfigName = vi.fn()
-				let history: HistoryItem = {
-					id: task.taskId,
-					number: 1,
-					ts: 1,
-					task: "Restore",
-					mode: "code",
-					apiConfigName: "old",
-					tokensIn: 0,
-					tokensOut: 0,
-					totalCost: 0,
-				}
-				const current = vi.spyOn(tab, "getCurrentTask").mockReturnValue(task)
-				tab["getTaskHistoryItem"] = vi.fn(() => history)
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const entered = vi.fn()
-				vi.spyOn(tab, "updateTaskHistory").mockImplementation(async (item) => {
-					if (operation === "mode switch") {
-						entered()
-						await pending
-					}
-					history = item
-					return [history]
-				})
-				if (operation === "profile activation") {
-					const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-					vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-						entered()
-						await pending
-						await originalStore(key, value)
-					})
-				}
-				try {
-					const changing =
-						operation === "mode switch"
-							? tab.handleModeSwitch("architect", task)
-							: tab.activateProviderProfile({ name: "selected" })
-					await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
-					await tab.dispose()
-					current.mockReturnValue(undefined)
-					release()
-					await changing
-					const expectedMode = operation === "mode switch" ? "architect" : "code"
-					expect(history).toMatchObject({ mode: expectedMode, apiConfigName: "selected" })
-					vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-					await provider.createTaskWithHistoryItem(history)
-					expect(provider.getValue("mode")).toBe(expectedMode)
-					expect(provider.getValue("currentApiConfigName")).toBe("selected")
-					expect(Task).toHaveBeenLastCalledWith(
-						expect.objectContaining({
-							historyItem: expect.objectContaining({ mode: expectedMode, apiConfigName: "selected" }),
-							apiConfiguration: expect.objectContaining({ apiProvider: providerIdentifiers.openai }),
-						}),
-					)
-				} finally {
-					release()
-					await tab.dispose()
-				}
-			},
-		)
-
-		it.each(["lock", "load"] as const)(
-			"settles a disposed tab's save before a pending %s finishes",
-			async (stage) => {
-				await provider["initialModeConfigIds"]
-				const tab = new ClineProvider(
-					mockContext,
-					mockOutputChannel,
-					"editor",
-					provider.contextProxy,
-					provider.webviewFocusTracker,
-				)
-				const manager = tab.providerSettingsManager
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const entered = vi.fn()
-				let locked = Promise.resolve()
-				if (stage === "lock") {
-					locked = manager["lock"](async () => {
-						entered()
-						await pending
-					})
-				} else {
-					vi.spyOn(mockContext.secrets, "get").mockImplementationOnce(async () => {
-						entered()
-						await pending
-						return undefined
-					})
-				}
-				const store = vi.spyOn(mockContext.secrets, "store")
-				const save = vi.spyOn(manager, "saveConfig")
-				try {
-					const saving = tab.upsertProviderProfile("cancelled", {}, false)
-					await vi.waitFor(() => {
-						expect(entered).toHaveBeenCalledOnce()
-						expect(save).toHaveBeenCalledOnce()
-					})
-					await tab.dispose()
-					await expect(saving).resolves.toBeUndefined()
-					expect(store).not.toHaveBeenCalled()
-					release()
-					await locked
-					await vi.waitFor(() => expect(tab["modeProfileState"].mutations.size).toBe(0))
-					expect(store).not.toHaveBeenCalled()
-				} finally {
-					release()
-					await tab.dispose()
-				}
-			},
-		)
-
-		it("finishes an inactive profile save after tab disposal and prevents a duplicate API retry", async () => {
-			const { API } = await import("../../../extension/api")
-			const { makeClineProviderFactory } = await import("../../../test-utils/provider")
-			const tab = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"editor",
-				provider.contextProxy,
-				provider.webviewFocusTracker,
-			)
-			const manager = provider.providerSettingsManager
-			await provider["initialModeConfigIds"]
-			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			const save = vi.spyOn(manager, "saveConfig")
-			const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-				await pending
-				await originalStore(key, value)
-			})
-			const post = vi.spyOn(tab, "postStateToWebview").mockResolvedValue(undefined)
-			try {
-				let settled = false
-				const saving = tab
-					.upsertProviderProfile("inactive", { apiProvider: providerIdentifiers.anthropic }, false)
-					.finally(() => {
-						settled = true
-					})
-				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-				await tab.dispose()
-				await new Promise<void>((resolve) => setImmediate(resolve))
-				expect(settled).toBe(false)
-				release()
-				const id = await saving
-				expect(id).toEqual(expect.any(String))
-				expect(provider.getProviderProfileEntry("inactive")).toMatchObject({ id, name: "inactive" })
-				expect(post).not.toHaveBeenCalled()
-				const api = new API(mockOutputChannel, provider, makeClineProviderFactory())
-				await expect(
-					api.createProfile("inactive", { apiProvider: providerIdentifiers.openai }, false),
-				).rejects.toThrow('Profile with name "inactive" already exists')
-				expect(save).toHaveBeenCalledOnce()
-				await expect(manager.getProfile({ name: "inactive" })).resolves.toMatchObject({
-					apiProvider: providerIdentifiers.anthropic,
-				})
-			} finally {
-				release()
-				await tab.dispose()
-			}
-		})
-
-		it("invalidates a closed tab's queued activations while a reopened tab can finish its choice", async () => {
-			await provider.setValue("mode", "code")
-			const manager = provider.providerSettingsManager
-			await manager.import({
-				currentApiConfigName: "opened",
-				apiConfigs: {
-					opened: { id: "opened-id" },
-					closed: { id: "closed-id" },
-					reopened: { id: "reopened-id" },
-				},
-				modeApiConfigs: {},
-			})
-			const makeTab = () =>
-				new ClineProvider(
-					mockContext,
-					mockOutputChannel,
-					"editor",
-					provider.contextProxy,
-					provider.webviewFocusTracker,
-				)
-			const tab = makeTab()
-			let reopened: ClineProvider | undefined
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			try {
-				const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-				const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-					await pending
-					await originalStore(key, value)
-				})
-				const first = provider.setModeConfig("code", "opened-id")
-				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-				const activate = vi.spyOn(tab.providerSettingsManager, "activateProfile").mockResolvedValue({
-					name: "closed",
-					id: "closed-id",
-					apiProvider: providerIdentifiers.anthropic,
-				})
-				const write = vi.spyOn(tab.providerSettingsManager, "setModeConfig")
-				const select = vi.spyOn(tab, "setModeConfig")
-				const rebuild = vi.fn(tab["updateTaskApiHandlerIfNeeded"].bind(tab))
-				tab["updateTaskApiHandlerIfNeeded"] = rebuild
-				const sticky = vi.fn(tab["persistStickyProviderProfileToCurrentTask"].bind(tab))
-				tab["persistStickyProviderProfileToCurrentTask"] = sticky
-				const active = tab.activateProviderProfile({ name: "closed" }, { skipCurrentTaskRebuild: true })
-				await vi.waitFor(() => expect(select).toHaveBeenCalledOnce())
-				const queued = expect(
-					tab.activateProviderProfile({ name: "closed" }, { skipCurrentTaskRebuild: true }),
-				).rejects.toThrow("Provider disposed")
-				await tab.dispose()
-				await queued
-				reopened = makeTab()
-				const freshActivate = vi.spyOn(reopened.providerSettingsManager, "activateProfile").mockResolvedValue({
-					name: "reopened",
-					id: "reopened-id",
-					apiProvider: providerIdentifiers.anthropic,
-				})
-				const fresh = reopened.activateProviderProfile({ name: "reopened" }, { skipCurrentTaskRebuild: true })
-				await new Promise<void>((resolve) => setImmediate(resolve))
-				expect(freshActivate).toHaveBeenCalledOnce()
-				release()
-				await Promise.all([first, active, fresh])
-
-				expect(activate).toHaveBeenCalledTimes(2)
-				expect(write).toHaveBeenCalledTimes(2)
-				expect(rebuild).not.toHaveBeenCalled()
-				expect(sticky).not.toHaveBeenCalled()
-				await expect(manager.getModeConfigId("code")).resolves.toBe("reopened-id")
-				await expect(reopened["getModeConfigId"]("code")).resolves.toBe("reopened-id")
-			} finally {
-				release()
-				await tab.dispose()
-				await reopened?.dispose()
-			}
-		})
-
-		it("serializes a tab import with a sidebar mode write and publishes in persisted order", async () => {
-			const manager = provider.providerSettingsManager
-			await manager.import({
-				currentApiConfigName: "chosen",
-				apiConfigs: { chosen: { id: "chosen-id" }, imported: { id: "imported-id" } },
-				modeApiConfigs: {},
-			})
-			const tab = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"editor",
-				provider.contextProxy,
-				provider.webviewFocusTracker,
-			)
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			try {
-				const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-				const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-					await pending
-					await originalStore(key, value)
-				})
-				const chosen = provider.setModeConfig("code", "chosen-id")
-				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-				const publish = vi.fn(() => tab.adoptModeConfigIds({ code: "imported-id" }))
-				const imported = tab.providerSettingsManager.import(
-					{
-						currentApiConfigName: "imported",
-						apiConfigs: {
-							chosen: { id: "chosen-id" },
-							imported: { id: "imported-id" },
-							added: { id: "added-id" },
-						},
-						modeApiConfigs: { code: "imported-id" },
-					},
-					publish,
-				)
-				await new Promise<void>((resolve) => setImmediate(resolve))
-				expect(publish).not.toHaveBeenCalled()
-				release()
-				await Promise.all([chosen, imported])
-
-				expect(publish).toHaveBeenCalledOnce()
-				await expect(manager.getModeConfigId("code")).resolves.toBe("imported-id")
-				await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
-				await expect(tab["getModeConfigId"]("code")).resolves.toBe("imported-id")
-				expect(await manager.listConfig()).toEqual(
-					expect.arrayContaining([expect.objectContaining({ id: "added-id" })]),
-				)
-			} finally {
-				release()
-				await tab.dispose()
-			}
-		})
-
-		it("does not adopt shared mappings when an import omits modeApiConfigs", async () => {
-			const manager = provider.providerSettingsManager
-			await manager.import({
-				currentApiConfigName: "local",
-				apiConfigs: { local: { id: "local-id" }, shared: { id: "shared-id" } },
-				modeApiConfigs: { code: "shared-id" },
-			})
-			provider.adoptModeConfigIds({ code: "local-id" })
-			const fsPromises = (await import("fs/promises")).default
-			vi.mocked(fsPromises.readFile).mockResolvedValueOnce(
-				JSON.stringify({
-					providerProfiles: {
-						currentApiConfigName: "imported",
-						apiConfigs: { imported: { id: "imported-id", apiProvider: providerIdentifiers.anthropic } },
-					},
-					globalSettings: {},
-				}),
-			)
-			const adopt = vi.spyOn(provider, "adoptModeConfigIds")
-			const { importSettingsFromPath } = await import("../../config/importExport")
-			const result = await importSettingsFromPath("/settings.json", {
-				providerSettingsManager: manager,
-				contextProxy: provider.contextProxy,
-				customModesManager: provider.customModesManager,
-				onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
-			})
-
-			expect(result.success).toBe(true)
-			expect(adopt).toHaveBeenCalledExactlyOnceWith({})
-			await expect(manager.getModeConfigId("code")).resolves.toBe("shared-id")
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("local-id")
-		})
-
-		it("logs a fixed snapshot failure message without secret-storage error content", async () => {
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValueOnce(
-				new Error("api-key-must-not-appear"),
-			)
-			const log = vi.spyOn(provider, "log")
-			provider["captureInitialModeConfigIds"]()
-			await provider["initialModeConfigIds"]
-
-			expect(log).toHaveBeenCalledWith("Failed to snapshot mode profile choices")
-			expect(log.mock.calls.flat().join("\n")).not.toContain("api-key-must-not-appear")
-		})
-
-		it.each([false, true])(
-			"awaits a committing activation beyond timeout and reports its outcome (context failure: %s)",
-			async (fails) => {
-				vi.useFakeTimers()
-				let release = () => {}
-				try {
-					const manager = provider.providerSettingsManager
-					await provider.setValue("mode", "code")
-					await manager.import({
-						currentApiConfigName: "first",
-						apiConfigs: {
-							first: { id: "first-id", apiProvider: providerIdentifiers.anthropic },
-							second: { id: "second-id", apiProvider: providerIdentifiers.anthropic },
-						},
-						modeApiConfigs: {},
-					})
-					const pending = new Promise<void>((resolve) => {
-						release = resolve
-					})
-					const originalList = manager.listConfig.bind(manager)
-					const list = vi.spyOn(manager, "listConfig").mockImplementationOnce(async () => {
-						await pending
-						return originalList()
-					})
-					const activate = vi.spyOn(manager, "activateProfile")
-					let finished = false
-					const first = provider.activateProviderProfile({ name: "first" })
-					const outcome = first.then(
-						() => {
-							finished = true
-							return undefined
-						},
-						(error: unknown) => {
-							finished = true
-							return error
-						},
-					)
-					await vi.advanceTimersByTimeAsync(0)
-					expect(list).toHaveBeenCalledOnce()
-					const firstSignal = activate.mock.calls[0][1]
-					if (!firstSignal) throw new Error("Missing activation signal")
-					await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
-					expect(finished).toBe(false)
-					expect(firstSignal.aborted).toBe(false)
-					const second = provider.activateProviderProfile({ name: "second" })
-					await vi.advanceTimersByTimeAsync(0)
-					expect(activate).toHaveBeenCalledOnce()
-					if (fails)
-						vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
-							new Error("settings failed after timeout"),
-						)
-					release()
-					await vi.advanceTimersByTimeAsync(0)
-					const error = await outcome
-					if (fails)
-						expect(error).toMatchObject({
-							name: "Error",
-							message: "Profile activation may be partially persisted: settings failed after timeout",
-						})
-					else expect(error).toBeUndefined()
-					await second
-
-					expect(activate).toHaveBeenCalledTimes(2)
-					expect(provider["modeProfileState"].committingMutationSignals.has(firstSignal)).toBe(false)
-					expect(provider["modeProfileState"].committingMutationSignals.size).toBe(0)
-				} finally {
-					release()
-					vi.useRealTimers()
-				}
-			},
-		)
-
-		it.each([false, true])(
-			"drains a delayed mode-switch history write before another tab selects a mode (disposed: %s)",
-			async (dispose) => {
-				const task = new Task(defaultTaskOptions)
-				task["_taskMode"] = "code"
-				const history: HistoryItem = {
-					id: task.taskId,
-					number: 1,
-					ts: 1,
-					task: "Mode switch",
-					mode: "code",
-					tokensIn: 0,
-					tokensOut: 0,
-					totalCost: 0,
-				}
-				provider["getTaskHistoryItem"] = vi.fn().mockReturnValue(history)
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const write = vi.spyOn(provider, "updateTaskHistory").mockImplementationOnce(async () => {
-					await pending
-					return [history]
-				})
-				const first = provider.handleModeSwitch("ask", task)
-				const outcome = first.then(
-					() => undefined,
-					(error: unknown) => error,
-				)
-				await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
-				if (dispose) await provider.dispose()
-				const tab = new ClineProvider(
-					mockContext,
-					mockOutputChannel,
-					"editor",
-					provider.contextProxy,
-					provider.webviewFocusTracker,
-				)
-				try {
-					vi.spyOn(tab, "postStateToWebview").mockResolvedValue(undefined)
-					let finished = false
-					const second = tab.handleModeSwitch("architect", null).then(() => {
-						finished = true
-					})
-					await new Promise<void>((resolve) => setImmediate(resolve))
-					expect(finished).toBe(false)
-					release()
-					await second
-
-					expect(await outcome).toBeUndefined()
-					expect(tab.getValue("mode")).toBe("architect")
-					expect(task["_taskMode"]).toBe("ask")
-				} finally {
-					release()
-					await tab.dispose()
-				}
-			},
-		)
-
-		it.each(["snapshot", "profiles"])("stops a cancelled mode switch during %s lookup", async (stage) => {
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			provider["initialModeConfigIds"] =
-				stage === "snapshot"
-					? pending.then(() => ({ code: "opened-id" }))
-					: Promise.resolve({ code: "opened-id" })
-			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(async () => {
-				if (stage === "profiles") await pending
-				return [{ name: "opened", id: "opened-id" }]
-			})
-			const lookup = vi.fn(provider["getModeConfigId"].bind(provider))
-			provider["getModeConfigId"] = lookup
-			const controller = new AbortController()
-			const switched = provider["handleModeSwitchUnlocked"]("code", null, controller.signal)
-			await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce())
-			if (stage === "profiles") await vi.waitFor(() => expect(list).toHaveBeenCalledOnce())
-			controller.abort()
-			release()
-			await switched
-			expect(list).toHaveBeenCalledTimes(stage === "snapshot" ? 0 : 1)
-			expect(provider["localModeConfigIds"].has("code")).toBe(false)
-		})
-
-		it.each(["manual", "automatic", "explicit-path"])(
-			"adopts imported choices through the %s import entry point",
-			async (entry) => {
-				const filePath = "/settings.json"
-				const fsPromises = (await import("fs/promises")).default
-				const originalReadFile = vi.mocked(fsPromises.readFile).getMockImplementation()!
-				vi.mocked(fsPromises.readFile).mockResolvedValue(
-					JSON.stringify({
-						providerProfiles: {
-							currentApiConfigName: "imported",
-							apiConfigs: { imported: { id: "imported-id", apiProvider: providerIdentifiers.anthropic } },
-							modeApiConfigs: { code: "imported-id" },
-						},
-						globalSettings: {},
-					}),
-				)
-				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				const options = {
-					providerSettingsManager: provider.providerSettingsManager,
-					contextProxy: provider.contextProxy,
-					customModesManager: provider.customModesManager,
-					provider,
-				}
-				if (entry === "explicit-path") {
-					vi.spyOn(fsPromises, "access").mockResolvedValueOnce(undefined)
-					const { importSettingsWithFeedback } = await import("../../config/importExport")
-					await importSettingsWithFeedback(options, filePath)
-				} else if (entry === "manual") {
-					vi.mocked(vscode.window.showOpenDialog).mockResolvedValueOnce([makeUri(filePath)])
-					const { importSettingsWithFeedback } = await import("../../config/importExport")
-					await importSettingsWithFeedback(options)
-				} else {
-					const fsUtils = await import("../../../utils/fs")
-					const exists = vi.spyOn(fsUtils, "fileExistsAtPath").mockResolvedValue(true)
-					const originalGetConfiguration = vi
-						.mocked(vscode.workspace.getConfiguration)
-						.getMockImplementation()!
-					vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(
-						makeWorkspaceConfiguration({ autoImportSettingsPath: filePath }),
-					)
-					const { autoImportSettings } = await import("../../../utils/autoImportSettings")
-					await autoImportSettings(mockOutputChannel, {
-						...options,
-						onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
-					})
-					expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-						expect.stringContaining("Successfully imported settings"),
-					)
-					exists.mockRestore()
-					vi.mocked(vscode.workspace.getConfiguration).mockImplementation(originalGetConfiguration)
-				}
-				await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
-				await expect(provider.providerSettingsManager.getModeConfigId("code")).resolves.toBe("imported-id")
-				vi.mocked(fsPromises.readFile).mockImplementation(originalReadFile)
-			},
-		)
-
-		it.each(["import-first", "choice-first"])("keeps local choices in persisted order (%s)", async (order) => {
-			const manager = provider.providerSettingsManager
-			const profiles = {
-				currentApiConfigName: "imported",
-				apiConfigs: { imported: { id: "imported-id" }, chosen: { id: "chosen-id" } },
-				modeApiConfigs: { code: "imported-id" },
-			}
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-			vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-				await pending
-				await originalStore(key, value)
-			})
-			const imported = () => manager.import(profiles, () => provider.adoptModeConfigIds(profiles.modeApiConfigs))
-			const chosen = () => provider.setModeConfig("code", "chosen-id")
-			const first = order === "import-first" ? imported() : chosen()
-			const second = order === "import-first" ? chosen() : imported()
-			release()
-			await Promise.all([first, second])
-			const expected = order === "import-first" ? "chosen-id" : "imported-id"
-			await expect(manager.getModeConfigId("code")).resolves.toBe(expected)
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe(expected)
-		})
-
-		it.each(["imported-id", "other-id"])(
-			"preserves an imported choice when an overlapping write of %s fails",
-			async (chosenId) => {
-				const manager = provider.providerSettingsManager
-				const profiles = {
-					currentApiConfigName: "imported",
-					apiConfigs: { imported: { id: "imported-id" }, previous: { id: "previous-id" } },
-					modeApiConfigs: { code: "imported-id" },
-				}
-				await provider.setModeConfig("code", "previous-id")
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-				const store = vi.spyOn(mockContext.secrets, "store")
-				store
-					.mockImplementationOnce(async (key, value) => {
-						await pending
-						await originalStore(key, value)
-					})
-					.mockRejectedValueOnce(new Error("write failed"))
-				const imported = manager.import(profiles, () => provider.adoptModeConfigIds(profiles.modeApiConfigs))
-				await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-				const failed = expect(provider.setModeConfig("code", chosenId)).rejects.toThrow("write failed")
-				release()
-				await imported
-				await failed
-				await expect(manager.getModeConfigId("code")).resolves.toBe("imported-id")
-				await expect(provider["getModeConfigId"]("code")).resolves.toBe("imported-id")
-			},
-		)
-
-		it("prefers this window's mode profile over one another window saved in shared storage", async () => {
-			const manager = provider.providerSettingsManager
-			existingProfiles("this-window-id", "other-window-id")
-			vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
-			vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
-
-			await provider["setModeConfig"]("code", "this-window-id")
-
-			expect(manager.setModeConfig).toHaveBeenCalledWith(
-				"code",
-				"this-window-id",
-				expect.any(Function),
-				expect.any(AbortSignal),
-			)
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
-		})
-
+	describe("mode profile snapshot", () => {
 		it("keeps the choice this window opened with when another window changes the shared value", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
-			existingProfiles("opened-with-id", "other-window-id")
-			const sharedLookup = vi
-				.spyOn(provider.providerSettingsManager, "getModeConfigId")
-				.mockResolvedValue("other-window-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")
 
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("opened-with-id")
-			// A mode absent when this window opened keeps this window's current profile instead of
-			// one another window saved for it later.
-			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBeUndefined()
-			expect(sharedLookup).not.toHaveBeenCalled()
+			// A mode created after this window opened has no snapshot entry, so the shared value applies.
+			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBe("other-window-id")
 		})
 
 		it("prefers an explicit local choice over the snapshot", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
-			existingProfiles("opened-with-id", "chosen-id")
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 
 			await provider["setModeConfig"]("architect", "chosen-id")
@@ -5710,270 +4665,13 @@ describe("ClineProvider", () => {
 			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
 		})
 
-		it.each(["architect", "new-custom-mode"])(
-			"adopts imported defaults for %s without adopting other windows' writes",
-			async (mode) => {
-				provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
-				existingProfiles("opened-with-id", "imported-id", "other-window-id")
-				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")
-				provider.adoptModeConfigIds({ [mode]: "imported-id" })
-
-				await expect(provider["getModeConfigId"](mode)).resolves.toBe("imported-id")
-				await expect(provider["getModeConfigId"]("unrelated-mode")).resolves.toBeUndefined()
-			},
-		)
-
-		it("keeps the current profile when the snapshot cannot be read", async () => {
+		it("falls back to the shared value when the snapshot cannot be read", async () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValue(new Error("unreadable"))
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
 
 			provider["captureInitialModeConfigIds"]()
 
-			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
-			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
-			existingProfiles("chosen-id")
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-			await provider.setModeConfig("architect", "chosen-id")
-			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
-		})
-
-		it("falls back to the shared mapping when the opening snapshot profile was removed", async () => {
-			provider["initialModeConfigIds"] = Promise.resolve({ code: "removed-id" })
-			existingProfiles("shared-id")
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
-
-			expect(provider["localModeConfigIds"].has("code")).toBe(false)
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("shared-id")
-			expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledExactlyOnceWith("code")
-		})
-
-		it("drops a local choice whose profile was removed and falls back to the shared mapping", async () => {
-			provider["initialModeConfigIds"] = Promise.resolve({})
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
-			await provider["setModeConfig"]("code", "removed-id")
-			// Another window reset or deleted the profile this window chose.
-			existingProfiles("shared-id")
-
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("shared-id")
-			expect(provider["localModeConfigIds"].has("code")).toBe(false)
-		})
-
-		it("preserves a local choice made while the initial snapshot is pending", async () => {
-			let resolveSnapshot = (_ids: Record<string, string>) => {}
-			provider["initialModeConfigIds"] = new Promise<Record<string, string>>((resolve) => {
-				resolveSnapshot = resolve
-			})
-			existingProfiles("new-id")
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-			const sharedLookup = vi
-				.spyOn(provider.providerSettingsManager, "getModeConfigId")
-				.mockResolvedValue("other-window-id")
-
-			const lookup = provider["getModeConfigId"]("code")
-			await provider.setModeConfig("code", "new-id")
-			resolveSnapshot({})
-
-			await expect(lookup).resolves.toBe("new-id")
-			expect(sharedLookup).not.toHaveBeenCalled()
-		})
-
-		it.each(["removed-id", "existing-id"])(
-			"preserves a newer local choice while validating %s",
-			async (previousId) => {
-				provider["initialModeConfigIds"] = Promise.resolve({ code: "opened-with-id" })
-				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-				const sharedLookup = vi
-					.spyOn(provider.providerSettingsManager, "getModeConfigId")
-					.mockResolvedValue("other-window-id")
-				await provider.setModeConfig("code", previousId)
-				let releaseLookup = () => {}
-				const pendingLookup = new Promise<void>((resolve) => {
-					releaseLookup = resolve
-				})
-				const profiles = [
-					{ name: "existing", id: "existing-id" },
-					{ name: "new", id: "new-id" },
-				]
-				const listConfig = vi.spyOn(provider.providerSettingsManager, "listConfig")
-				listConfig
-					.mockImplementationOnce(async () => {
-						await pendingLookup
-						return profiles
-					})
-					.mockResolvedValue(profiles)
-
-				const lookup = provider["getModeConfigId"]("code")
-				expect(listConfig).toHaveBeenCalledOnce()
-				await provider.setModeConfig("code", "new-id")
-				releaseLookup()
-
-				await expect(lookup).resolves.toBe("new-id")
-				await expect(provider["getModeConfigId"]("code")).resolves.toBe("new-id")
-				expect(sharedLookup).not.toHaveBeenCalled()
-			},
-		)
-
-		it("restores the previous local choice when the shared write fails", async () => {
-			provider["initialModeConfigIds"] = Promise.resolve({})
-			existingProfiles("first-id", "second-id")
-			const sharedWrite = vi.spyOn(provider.providerSettingsManager, "setModeConfig")
-			sharedWrite.mockResolvedValueOnce(undefined)
-			await provider["setModeConfig"]("code", "first-id")
-
-			sharedWrite.mockRejectedValueOnce(new Error("write failed"))
-			await expect(provider["setModeConfig"]("code", "second-id")).rejects.toThrow("write failed")
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("first-id")
-
-			sharedWrite.mockRejectedValueOnce(new Error("write failed"))
-			await expect(provider["setModeConfig"]("architect", "second-id")).rejects.toThrow("write failed")
-			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
-		})
-
-		it.each(["first-id", "second-id"])(
-			"preserves a successful overlapping write of %s after the preceding write fails",
-			async (nextId) => {
-				existingProfiles("first-id", "second-id")
-				const sharedWrite = vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue()
-				await provider.setModeConfig("code", "first-id")
-				let rejectWrite = (_error: Error) => {}
-				sharedWrite.mockImplementationOnce(
-					() =>
-						new Promise<void>((_resolve, reject) => {
-							rejectWrite = reject
-						}),
-				)
-				const failed = provider.setModeConfig("code", "second-id")
-				const failure = expect(failed).rejects.toThrow("write failed")
-				const succeeded = provider.setModeConfig("code", nextId)
-				expect(sharedWrite).toHaveBeenCalledTimes(2)
-				rejectWrite(new Error("write failed"))
-				await failure
-				await succeeded
-				expect(sharedWrite).toHaveBeenLastCalledWith(
-					"code",
-					nextId,
-					expect.any(Function),
-					expect.any(AbortSignal),
-				)
-				await expect(provider["getModeConfigId"]("code")).resolves.toBe(nextId)
-			},
-		)
-
-		it.each(["activation", "profile save"])(
-			"drains an active %s before resetting and rejects later mutations",
-			async (operation) => {
-				const { t } = await import("../../../i18n")
-				await provider.setValue("mode", "code")
-				vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
-				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
-				provider.customModesManager.resetCustomModes = vi.fn().mockResolvedValue(undefined)
-				const manager = provider.providerSettingsManager
-				await manager.import({
-					currentApiConfigName: "opened",
-					apiConfigs: {
-						opened: { id: "opened-id", apiProvider: providerIdentifiers.anthropic },
-						selected: { id: "selected-id", apiProvider: providerIdentifiers.anthropic },
-					},
-					modeApiConfigs: {},
-				})
-				let release = () => {}
-				const pending = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				const originalActivate = manager.activateProfile.bind(manager)
-				const originalSave = manager.saveConfig.bind(manager)
-				const activate = vi.spyOn(manager, "activateProfile")
-				const save = vi.spyOn(manager, "saveConfig")
-				if (operation === "activation") {
-					activate.mockImplementationOnce(async (...args) => {
-						await pending
-						return originalActivate(...args)
-					})
-				} else {
-					save.mockImplementationOnce(async (...args) => {
-						await pending
-						return originalSave(...args)
-					})
-				}
-				const active =
-					operation === "activation"
-						? provider.activateProviderProfile({ name: "selected" })
-						: provider.upsertProviderProfile("selected", { apiProvider: providerIdentifiers.anthropic })
-				await vi.waitFor(() => expect(operation === "activation" ? activate : save).toHaveBeenCalledOnce())
-				const queued = expect(provider.activateProviderProfile({ name: "opened" })).rejects.toThrow(
-					"settings reset",
-				)
-				const resetConfigs = vi.spyOn(manager, "resetAllConfigs")
-				const resetContext = vi.spyOn(provider.contextProxy, "resetAllState")
-				const resetting = provider.resetState()
-				await vi.waitFor(() => expect(provider["modeProfileState"].reset).toBeDefined())
-				expect(resetConfigs).not.toHaveBeenCalled()
-				expect(resetContext).not.toHaveBeenCalled()
-				await expect(provider.activateProviderProfile({ name: "opened" })).rejects.toThrow("settings reset")
-				release()
-				const result = await active
-				if (operation === "profile save") expect(result).toBe("selected-id")
-				await Promise.all([queued, resetting])
-
-				expect(resetConfigs).toHaveBeenCalledOnce()
-				expect(await mockContext.secrets.get(manager["secretsKey"])).toBeUndefined()
-				expect(provider["localModeConfigIds"].size).toBe(0)
-				expect(provider["modeProfileState"].mutations.size).toBe(0)
-				expect(activate).toHaveBeenCalledTimes(operation === "activation" ? 1 : 0)
-				expect(save).toHaveBeenCalledTimes(operation === "profile save" ? 1 : 0)
-			},
-		)
-
-		it("does not restore stale mode mappings when reset overlaps two queued same-mode writes", async () => {
-			const { t } = await import("../../../i18n")
-			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
-			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
-			provider.customModesManager.resetCustomModes = vi.fn().mockResolvedValue(undefined)
-			const manager = provider.providerSettingsManager
-			await manager.import({
-				currentApiConfigName: "first",
-				apiConfigs: { first: { id: "first-id" }, second: { id: "second-id" } },
-				modeApiConfigs: {},
-			})
-			let release = () => {}
-			const pending = new Promise<void>((resolve) => {
-				release = resolve
-			})
-			const originalStore = vi.mocked(mockContext.secrets.store).getMockImplementation()!
-			const store = vi.spyOn(mockContext.secrets, "store").mockImplementationOnce(async (key, value) => {
-				await pending
-				await originalStore(key, value)
-			})
-			const first = provider.setModeConfig("code", "first-id")
-			await vi.waitFor(() => expect(store).toHaveBeenCalledOnce())
-			const second = expect(provider.setModeConfig("code", "second-id")).rejects.toThrow("settings reset")
-			const resetConfigs = vi.spyOn(manager, "resetAllConfigs")
-			const resetting = provider.resetState()
-			await vi.waitFor(() => expect(provider["modeProfileState"].reset).toBeDefined())
-			// Deletion waits for the active write; another selection during reset must also be ignored.
-			expect(resetConfigs).not.toHaveBeenCalled()
-			await expect(provider.setModeConfig("code", "second-id")).rejects.toThrow("settings reset")
-			release()
-			await Promise.all([first, second, resetting])
-
-			expect(await mockContext.secrets.get(manager["secretsKey"])).toBeUndefined()
-			const resetId = await manager.getModeConfigId("code")
-			expect(["first-id", "second-id"]).not.toContain(resetId)
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe(resetId)
-			expect(provider["localModeConfigIds"].has("code")).toBe(false)
-
-			// A fresh choice after reset can still be persisted and resolved.
-			await manager.import({
-				currentApiConfigName: "fresh",
-				apiConfigs: { fresh: { id: "fresh-id" } },
-				modeApiConfigs: {},
-			})
-			await provider.setModeConfig("code", "fresh-id")
-			await expect(manager.getModeConfigId("code")).resolves.toBe("fresh-id")
-			await expect(provider["getModeConfigId"]("code")).resolves.toBe("fresh-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("shared-id")
 		})
 
 		it("drops local choices and re-reads the mapping when state is reset", async () => {
@@ -5987,7 +4685,6 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockResolvedValue({ code: "reset-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
-			existingProfiles("removed-profile-id", "reset-id")
 			await provider["setModeConfig"]("code", "removed-profile-id")
 
 			await provider.resetState()
@@ -5996,7 +4693,7 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	it("keeps current config without saving a shared default for an unmapped mode", async () => {
+	it("saves current config when switching to mode without config", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -6015,8 +4712,8 @@ describe("ClineProvider", () => {
 		// Switch to architect mode
 		await messageHandler({ type: "mode", text: "architect" })
 
-		// An implicit mode switch must not seed shared storage.
-		expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
+		// Should save current config as default for architect mode
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
 	})
 
 	it("saves config as default for current mode when loading config", async () => {
@@ -6043,12 +4740,7 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "loadApiConfiguration", text: "new-config" })
 
 		// Should save new config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
-			"architect",
-			"new-id",
-			expect.any(Function),
-			expect.any(AbortSignal),
-		)
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "new-id")
 	})
 
 	it("load API configuration by ID works and updates mode config", async () => {
@@ -6075,19 +4767,10 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "loadApiConfigurationById", text: "config-id-123" })
 
 		// Should save new config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
-			"architect",
-			"config-id-123",
-			expect.any(Function),
-			expect.any(AbortSignal),
-		)
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "config-id-123")
 
 		// Ensure the `activateProfile` method was called with the correct ID
-		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith(
-			{ id: "config-id-123" },
-			expect.any(AbortSignal),
-			expect.any(Function),
-		)
+		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ id: "config-id-123" })
 	})
 
 	test("handles showRooIgnoredFiles setting", async () => {
@@ -6264,12 +4947,7 @@ describe("ClineProvider", () => {
 		})
 
 		// Should save config as default for current mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
-			"code",
-			"test-id",
-			expect.any(Function),
-			expect.any(AbortSignal),
-		)
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "test-id")
 	})
 
 	test("file content includes line numbers", async () => {
@@ -6601,7 +5279,6 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			}
 
-			provider["initialModeConfigIds"] = Promise.resolve({ architect: "saved-config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
@@ -6617,19 +5294,15 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
 			// Verify saved config was loaded
-			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
-			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith(
-				{ name: "saved-config" },
-				expect.any(AbortSignal),
-				expect.any(Function),
-			)
+			expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "saved-config" })
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "saved-config")
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
 
-		test("keeps current config without saving a shared default for an unmapped mode", async () => {
+		test("saves current config when switching to mode without config", async () => {
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -6654,8 +5327,8 @@ describe("ClineProvider", () => {
 			// Verify mode was updated
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
-			// An implicit mode switch must not seed shared storage.
-			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
+			// Verify current config was saved as default for new mode
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
@@ -6756,7 +5429,6 @@ describe("ClineProvider", () => {
 			})
 
 			// Mock provider settings manager
-			provider["initialModeConfigIds"] = Promise.resolve({ "custom-mode": "config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
@@ -6896,7 +5568,6 @@ describe("ClineProvider", () => {
 			})
 
 			// Mock provider settings manager to throw error
-			provider["initialModeConfigIds"] = Promise.resolve({ code: "config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
@@ -7055,12 +5726,7 @@ describe("ClineProvider", () => {
 			})
 
 			// Verify config was saved
-			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
-				"test-config",
-				testApiConfig,
-				expect.any(AbortSignal),
-				expect.any(Function),
-			)
+			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("test-config", testApiConfig)
 
 			// Verify state updates
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [

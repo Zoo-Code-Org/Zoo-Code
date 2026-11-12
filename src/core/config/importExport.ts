@@ -27,7 +27,6 @@ export type ImportOptions = {
 	providerSettingsManager: ProviderSettingsManager
 	contextProxy: ContextProxy
 	customModesManager: CustomModesManager
-	onModeConfigIdsImported?: (ids: Record<string, string>) => void
 }
 
 type ExportOptions = {
@@ -38,7 +37,6 @@ type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
 		postStateToWebview: () => Promise<void>
-		adoptModeConfigIds: (ids: Record<string, string>) => void
 	}
 }
 
@@ -137,7 +135,7 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
  */
 export async function importSettingsFromPath(
 	filePath: string,
-	{ providerSettingsManager, contextProxy, customModesManager, onModeConfigIdsImported }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
 ) {
 	// Use a lenient schema that accepts any apiConfigs, then validate each individually
 	const lenientProviderProfilesSchema = providerProfilesSchema.extend({
@@ -229,13 +227,7 @@ export async function importSettingsFromPath(
 		// OpenAI Compatible settings are now correctly stored in codebaseIndexConfig
 		// They will be imported automatically with the config - no special handling needed
 
-		if (onModeConfigIdsImported) {
-			await providerSettingsManager.import(providerProfiles, () =>
-				onModeConfigIdsImported(rawProviderProfiles.modeApiConfigs ?? {}),
-			)
-		} else {
-			await providerSettingsManager.import(providerProfiles)
-		}
+		await providerSettingsManager.import(providerProfiles)
 		await contextProxy.setValues(sanitizedGlobalSettings)
 
 		// Set the current provider.
@@ -277,12 +269,7 @@ export async function importSettingsFromPath(
  * @param options - Import options containing managers and proxy
  * @returns Promise resolving to import result
  */
-export const importSettings = async ({
-	providerSettingsManager,
-	contextProxy,
-	customModesManager,
-	onModeConfigIdsImported,
-}: ImportOptions) => {
+export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
 	// Use the last export path as a sensible default, falling back to Downloads
 	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
@@ -303,7 +290,6 @@ export const importSettings = async ({
 		providerSettingsManager,
 		contextProxy,
 		customModesManager,
-		onModeConfigIdsImported,
 	})
 }
 
@@ -316,14 +302,13 @@ export const importSettings = async ({
  * @returns Promise resolving to import result
  */
 export const importSettingsFromFile = async (
-	{ providerSettingsManager, contextProxy, customModesManager, onModeConfigIdsImported }: ImportOptions,
+	{ providerSettingsManager, contextProxy, customModesManager }: ImportOptions,
 	fileUri: vscode.Uri,
 ) => {
 	return importSettingsFromPath(fileUri.fsPath, {
 		providerSettingsManager,
 		contextProxy,
 		customModesManager,
-		onModeConfigIdsImported,
 	})
 }
 
@@ -389,7 +374,6 @@ export const importSettingsWithFeedback = async (
 				providerSettingsManager,
 				contextProxy,
 				customModesManager,
-				onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
 			})
 		} catch (error) {
 			result = {
@@ -398,12 +382,7 @@ export const importSettingsWithFeedback = async (
 			}
 		}
 	} else {
-		result = await importSettings({
-			providerSettingsManager,
-			contextProxy,
-			customModesManager,
-			onModeConfigIdsImported: (ids) => provider.adoptModeConfigIds(ids),
-		})
+		result = await importSettings({ providerSettingsManager, contextProxy, customModesManager })
 	}
 
 	if (result.success) {

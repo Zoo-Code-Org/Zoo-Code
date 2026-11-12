@@ -911,7 +911,7 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 7
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {

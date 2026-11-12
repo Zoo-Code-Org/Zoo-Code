@@ -747,15 +747,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			const architectConfigId = provider.getProviderProfileEntry("architect-config")?.id
 
 			// Associate configs with modes
-			await provider.setModeConfig("code", codeConfigId!)
-			await provider.setModeConfig("architect", architectConfigId!)
+			await provider.providerSettingsManager.setModeConfig("code", codeConfigId!)
+			await provider.providerSettingsManager.setModeConfig("architect", architectConfigId!)
 
 			// Start in code mode with code config
 			await provider.handleModeSwitch("code")
-
-			const stateBeforeRestore = await provider.getState()
-			expect(stateBeforeRestore.currentApiConfigName).toBe("code-config")
-			expect(stateBeforeRestore.apiConfiguration.apiProvider).toBe("anthropic")
 
 			// Create a history item with architect mode
 			const historyItem: HistoryItem = {
@@ -771,18 +767,8 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Task was created in architect mode
 			}
 
-			// Another window changes the shared architect default after this window chose its profile.
-			await provider.providerSettingsManager.setModeConfig("architect", codeConfigId!)
-			const activate = vi.spyOn(provider.providerSettingsManager, "activateProfile")
-
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
-			expect(activate).toHaveBeenCalledWith(
-				{ name: "architect-config" },
-				expect.any(AbortSignal),
-				expect.any(Function),
-			)
-			await expect(provider.providerSettingsManager.getModeConfigId("architect")).resolves.toBe(codeConfigId)
 
 			// Verify that the mode was restored
 			const state = await provider.getState()

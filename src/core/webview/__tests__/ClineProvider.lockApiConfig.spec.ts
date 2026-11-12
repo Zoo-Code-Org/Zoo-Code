@@ -331,7 +331,7 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// Tests provide explicit opening snapshots when they need saved mode profiles.
+		// These tests stub providerSettingsManager and expect it to be consulted for mode profiles.
 		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock getMcpHub method
@@ -392,15 +392,10 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			})
 
-			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			await provider.handleModeSwitch("architect")
 
-			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
-			expect(activateProfileSpy).toHaveBeenCalledWith(
-				{ name: "architect-profile" },
-				expect.any(AbortSignal),
-				expect.any(Function),
-			)
+			expect(getModeConfigIdSpy).toHaveBeenCalledWith("architect")
+			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "architect-profile" })
 		})
 	})
 })
