@@ -3652,6 +3652,43 @@ describe("DiffViewProvider", () => {
 			expect(args[3]).toBe(true)
 			expect(args[4]).toBe(false)
 		})
+		it("lines 918 to 921: pins the new-files argument in its own slot on the same unreadable footing", async () => {
+			// The row above sets the two settings the decision cannot read to distinct values only for the
+			// after-user-edited slot; autoCloseZooOpenedNewFiles shares its value with the base setting
+			// there, so dropping its forward would pass. Flipping only that flag here makes the same
+			// assertion catch it, and the two rows together pin all three arguments against being
+			// replaced by their centralized defaults on a path where the outcome cannot tell them apart.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const keepOrClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: false,
+						autoCloseZooOpenedFilesAfterUserEdited: false,
+						autoCloseZooOpenedNewFiles: true,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
+
+			await diffViewProvider.revertChanges()
+
+			const args = keepOrClose.mock.calls[0]
+			expect(args[2]).toBe(false)
+			expect(args[3]).toBe(false)
+			expect(args[4]).toBe(true)
+		})
 
 		it("lines 902 and 904: keeps the tab on the rollback path when the user touched the document and the after-user-edited setting is off", async () => {
 			// The touched-document branch is the only one where autoCloseZooOpenedFilesAfterUserEdited decides
