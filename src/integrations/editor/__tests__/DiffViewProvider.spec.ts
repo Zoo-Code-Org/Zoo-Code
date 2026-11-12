@@ -857,6 +857,24 @@ describe("DiffViewProvider", () => {
 			expect(mockDelay).toHaveBeenCalledWith(0)
 		})
 
+		it("keeps the committed outcome and reports the opening failure separately when the open rejects after publication", async () => {
+			const fsMock = await import("fs/promises")
+			const reason = new Error("TextEditorService refused to show the document")
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValueOnce(reason)
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+			// The write landed before the open failed, so the committed result is still returned
+			// and the opening failure travels as its own field rather than as a failed publish.
+			expect(fsMock.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(result.finalContent).toBe("new content")
+			expect(result.userEdits).toBeUndefined()
+			expect(result.openFailure).toContain("TextEditorService refused to show the document")
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed after its content was committed"))
+			warn.mockRestore()
+		})
+
 		it("should store results for formatFileWriteResponse", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 1000)
 

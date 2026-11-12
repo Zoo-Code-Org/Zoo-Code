@@ -1608,6 +1608,7 @@ export class DiffViewProvider {
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
 		finalContent: string | undefined
+		openFailure: string | undefined
 	}> {
 		const absolutePath = path.resolve(this.cwd, relPath)
 
@@ -1618,27 +1619,38 @@ export class DiffViewProvider {
 		await createDirectoriesForFile(absolutePath)
 		await fs.writeFile(absolutePath, content, "utf-8")
 
+		// The write above is the commit point: an opening failure that follows it is not a
+		// publish failure, so the committed outcome and its bookkeeping are kept and the
+		// opening failure is reported alongside them instead of replacing them.
+		let openFailure: string | undefined
+		const noteOpenFailure = (error: unknown): void => {
+			openFailure = error instanceof Error ? error.message : String(error)
+			console.warn(`Opening ${absolutePath} failed after its content was committed: ${openFailure}`)
+		}
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
-		if (openFile) {
-			// Show the document in the editor
-			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
-				preview: false,
-				preserveFocus: true,
-			})
-		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+		try {
+			if (openFile) {
+				// Show the document in the editor
+				await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+					preview: false,
+					preserveFocus: true,
+				})
+			} else {
+				// Just open the document in memory to trigger diagnostics without showing it
+				const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
+				// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
+				if (doc.isDirty) {
+					await doc.save()
+				}
+
+				// Force a small delay to ensure diagnostics are triggered
+				await new Promise((resolve) => setTimeout(resolve, 100))
 			}
-
-			// Force a small delay to ensure diagnostics are triggered
-			await new Promise((resolve) => setTimeout(resolve, 100))
+		} catch (error) {
+			noteOpenFailure(error)
 		}
-
 		let newProblemsMessage = ""
 
 		if (diagnosticsEnabled) {
@@ -1681,6 +1693,7 @@ export class DiffViewProvider {
 			newProblemsMessage,
 			userEdits: undefined,
 			finalContent: content,
+			openFailure,
 		}
 	}
 }
