@@ -4730,6 +4730,10 @@ describe("ClineProvider", () => {
 			await expect(first.providerSettingsManager.getModeConfigId("new-mode")).resolves.toBe("id2")
 			await expect(first["getModeConfigId"]("new-mode")).resolves.toBeUndefined()
 			await expect(second["getModeConfigId"]("new-mode")).resolves.toBe("id2")
+			await first.contextProxy.setValue("currentApiConfigName", "first")
+			await first.handleModeSwitch("new-mode")
+			await expect(first["getModeConfigId"]("new-mode")).resolves.toBe("id1")
+			await expect(second.providerSettingsManager.getModeConfigId("new-mode")).resolves.toBe("id2")
 			await expect(newProvider()["getModeConfigId"]("new-mode")).resolves.toBe("id2")
 		})
 
@@ -4855,7 +4859,7 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	it("saves current config when switching to mode without config", async () => {
+	it("keeps the current config locally when switching to a mode without a config", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -4874,8 +4878,8 @@ describe("ClineProvider", () => {
 		// Switch to architect mode
 		await messageHandler({ type: "mode", text: "architect" })
 
-		// Should save current config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
+		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("current-id")
+		expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 	})
 
 	it("saves config as default for current mode when loading config", async () => {
@@ -5465,7 +5469,7 @@ describe("ClineProvider", () => {
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
 
-		test("saves current config when switching to mode without config", async () => {
+		test("keeps the current config locally when switching to a mode without a config", async () => {
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -5490,8 +5494,8 @@ describe("ClineProvider", () => {
 			// Verify mode was updated
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
-			// Verify current config was saved as default for new mode
-			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("current-id")
+			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))

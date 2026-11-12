@@ -2152,14 +2152,14 @@ export class ClineProvider
 				// The task will continue with the current/default configuration.
 			}
 		} else {
-			// If no saved config for this mode, save current config as default.
+			// Keep an unmapped mode's default local; another window may already have saved a shared choice.
 			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
 			if (currentApiConfigNameAfter) {
 				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
 				if (config?.id) {
-					await this.setModeConfig(newMode, config.id)
+					this.localModeConfigIds.set(newMode, config.id)
 				}
 			}
 		}
