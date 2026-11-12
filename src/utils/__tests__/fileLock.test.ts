@@ -1335,8 +1335,11 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 		return `coheld-trace-${traceIndex}.txt`
 	}
 
+	// The ceiling handed to a child that waits for this process is the timeout of the row that
+	// launched it, taken from the same const, so the child cannot let go before the row can finish.
+	const volumeAliasTimeoutMs = 30000
 	const itVolumeAlias = (name: string, fn: () => Promise<void>) =>
-		it(name, { timeout: 30000 }, async (context) => {
+		it(name, { timeout: volumeAliasTimeoutMs }, async (context) => {
 			if (!generatesShortNames) {
 				return context.skip()
 			}
@@ -1412,30 +1415,37 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 		fs.writeFileSync(sibling, '{"pre":1}', "utf8")
 		const releaseLeaf = await acquireFileLock(target, { immediate: true })
 		const holder = startLockHolder(sibling, "hold", lockModule, directory, nextTraceName(), false, {
-			holdMs: 6000,
+			holdMs: volumeAliasTimeoutMs,
 			waitForAssertions: true,
 		})
-		await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
-		const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
-		expect(traceOutcome(outcomeLine)).toBe("held")
-		// Armed, and the trace says so: the child holds until this process tells it otherwise.
-		await readHolderTrace(holder.tracePath, "HOLDING", 15000, holder.childOutput)
-		expect(artefactsOf(directory)).toEqual([
-			"state-sidecar-leaf-for-sibling-admission.json.lock",
-			"task-history-leaf-for-sibling-admission.json.lock",
-		])
-		// The release is this process's to start. Everything above ran while the other process still held
-		// the sibling lock, and the trace has to name the signal rather than the six-second ceiling the
-		// child was handed as a backstop: a row that passed because the child timed out would leave
-		// HOLD-EXPIRED in the trace and reddens here.
-		holder.signalRelease()
-		expect(await holder.waitForExit()).toBe(0)
-		const traceLines = fs.readFileSync(holder.tracePath, "utf8").split("\n")
-		expect(traceLines).toContain("RELEASED")
-		expect(traceLines.some((line) => line.startsWith("ASSERTIONS-DONE "))).toBe(true)
-		expect(traceLines.some((line) => line.startsWith("HOLD-EXPIRED "))).toBe(false)
-		await releaseLeaf()
-		expect(artefactsOf(directory)).toEqual([])
+		try {
+			await readHolderTrace(holder.tracePath, "ARTEFACT", 15000, holder.childOutput)
+			const outcomeLine = await readHolderTrace(holder.tracePath, "OUTCOME", 15000, holder.childOutput)
+			expect(traceOutcome(outcomeLine)).toBe("held")
+			// Armed, and the trace says so: the child holds until this process tells it otherwise.
+			await readHolderTrace(holder.tracePath, "HOLDING", 15000, holder.childOutput)
+			expect(artefactsOf(directory)).toEqual([
+				"state-sidecar-leaf-for-sibling-admission.json.lock",
+				"task-history-leaf-for-sibling-admission.json.lock",
+			])
+			// The release is this process's to start. Everything above ran while the other process still held
+			// the sibling lock, and the trace has to name the signal rather than the six-second ceiling the
+			// child was handed as a backstop: a row that passed because the child timed out would leave
+			// HOLD-EXPIRED in the trace and reddens here.
+			holder.signalRelease()
+			expect(await holder.waitForExit()).toBe(0)
+			const traceLines = fs.readFileSync(holder.tracePath, "utf8").split("\n")
+			expect(traceLines).toContain("RELEASED")
+			expect(traceLines.some((line) => line.startsWith("ASSERTIONS-DONE "))).toBe(true)
+			expect(traceLines.some((line) => line.startsWith("HOLD-EXPIRED "))).toBe(false)
+			await releaseLeaf()
+			expect(artefactsOf(directory)).toEqual([])
+		} finally {
+			// Always this process to end it: an assertion failure above must not leave the child
+			// holding until its ceiling, and the process has to be reaped either way.
+			holder.signalRelease()
+			await holder.waitForExit()
+		}
 	})
 
 	itPosixLeaf(
