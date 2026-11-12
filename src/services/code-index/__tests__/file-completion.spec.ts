@@ -568,7 +568,7 @@ describe("FileIndexWriter", () => {
 		store.countPointsForFile.mockResolvedValue({ current: 2, other: 0 })
 		const onComplete = vi.fn()
 		await writer.replace(filePath, "hash", mixed, embedder, attempt.signal, undefined, onComplete)
-		expect(embedder.createEmbeddings.mock.calls.flatMap(([texts]) => texts)).toEqual([" block 0 ", " block 2 "])
+		expect(embedder.createEmbeddings.mock.calls.flatMap(([texts]) => texts)).toEqual(["block 0", "block 2"])
 		const points = store.upsertPoints.mock.calls.flatMap(([batch]) => batch)
 		expect(points.map((point) => point.payload)).toEqual([
 			expect.objectContaining({ codeChunk: " block 0 ", segmentHash: "segment-0" }),

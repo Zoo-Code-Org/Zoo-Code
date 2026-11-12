@@ -396,9 +396,33 @@ describe("CodeIndexOrchestrator lifecycle", () => {
 		expect(state.state).toBe("Indexing")
 		failures.renew("bad.ts", "revision")
 		failures.record("bad.ts", "revision", "read", "read failed", 1, "exhausted")
-		watcher.onDidFinishBatchProcessing.mock.calls[0][0]({ processedFiles: [{ path: "bad.ts", status: "error" }] })
+		watcher.onDidFinishBatchProcessing.mock.calls[0][0]({
+			processedFiles: [{ path: "/workspace/bad.ts", status: "error" }],
+		})
 		expect(state.state).toBe("Standby")
 		expect(vi.mocked(state.setSystemState).mock.calls.some(([next]) => next === "Indexed")).toBe(false)
+	})
+
+	it.each([
+		{
+			name: "recovers Indexed once a registered failed file clears",
+			summary: { processedFiles: [{ path: "/workspace/bad.ts", status: "error" as const }] },
+			expected: "Indexed",
+		},
+		{
+			name: "stays partial after a whole-batch error with no processed files",
+			summary: { processedFiles: [], batchError: new Error("batch failed") },
+			expected: "Standby",
+		},
+	])("watcher batch $name", async ({ summary, expected }) => {
+		await orchestrator.startIndexing()
+		watcher.onDidStartBatchProcessing.mock.calls[0][0](["bad.ts"])
+		failures.renew("bad.ts", "revision")
+		failures.record("bad.ts", "revision", "read", "read failed", 1, "exhausted")
+		watcher.onDidFinishBatchProcessing.mock.calls[0][0](summary)
+		failures.clear("bad.ts", "revision")
+		await drain()
+		expect(state.state).toBe(expected)
 	})
 
 	it("keeps an unregistered watcher failure partial while another file is registered", async () => {
