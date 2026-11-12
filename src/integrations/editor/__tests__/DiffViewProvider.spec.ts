@@ -2899,6 +2899,75 @@ describe("DiffViewProvider", () => {
 				vi.useRealTimers()
 			}
 		})
+		it("reopens a preview tab the diff evicted before reset() drops the snapshot", async () => {
+			// Review row wM62emT7. restorePreviewTabs() is defined at DiffViewProvider.ts:1135 and
+			// called from saveChanges() and revertChanges(), but the discard path never reached it, so a
+			// denied stream left every preview tab VS Code evicted to open the diff gone: reset() clears
+			// snapshotPreviewTabs and nothing reopens what it held.
+			const revealRange = vi.fn()
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor({ revealRange }))
+			// No tab in any group: the captured file is one the diff evicted.
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: (): vscode.TabGroup[] => [],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "modify",
+				createdDirs: [],
+				placeholderPath: undefined,
+				snapshotPreviewTabs: [
+					{
+						uri: makeSnapshotUri(`${mockCwd}/mock-preview-tab.ts`),
+						scrollLine: 7,
+						viewColumn: vscode.ViewColumn.One,
+					},
+				],
+			})
+			await diffViewProvider.discardUnapprovedStream()
+			await diffViewProvider.reset()
+			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
+				{ fsPath: `${mockCwd}/mock-preview-tab.ts`, scheme: "file" },
+				{ preview: true, preserveFocus: true, viewColumn: vscode.ViewColumn.One },
+			)
+			expect(revealRange).toHaveBeenCalledTimes(1)
+			expect(revealRange).toHaveBeenCalledWith(
+				expect.objectContaining({ start: { line: 7, character: 0 } }),
+				vscode.TextEditorRevealType.AtTop,
+			)
+			expect(diffViewProvider["snapshotPreviewTabs"]).toEqual([])
+		})
+
+		it("leaves the snapshot in place when the artifact sweep fails so the retry can finish it", async () => {
+			// The restoration is skipped, not merely ordered late, when the sweep failed: the placeholder
+			// is still on disk and owned, and reopening the evicted tabs would report a restored
+			// workspace on top of a half-removed artifact while the snapshot is the only record the
+			// retry path has of what is left to remove.
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: (): vscode.TabGroup[] => [],
+				configurable: true,
+			})
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: mockTargetPath,
+				snapshotPreviewTabs: [
+					{
+						uri: makeSnapshotUri(`${mockCwd}/mock-preview-tab.ts`),
+						scrollLine: 7,
+						viewColumn: vscode.ViewColumn.One,
+					},
+				],
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("EPERM: operation not permitted"))
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("EPERM")
+			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			expect(diffViewProvider["snapshotPreviewTabs"]).toHaveLength(1)
+		})
 		it("removes the placeholder and created directories even when open() failed before activeDiffEditor was assigned", async () => {
 			// open() creates the directories (line 130) and the empty placeholder (line 134)
 			// BEFORE openDiffEditor() assigns activeDiffEditor (line 173). If that call rejects
