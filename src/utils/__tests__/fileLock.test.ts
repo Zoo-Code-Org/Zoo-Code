@@ -1319,6 +1319,8 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 	let heldLinkSibling: (() => Promise<void>) | null = null
 	let forcedDirectory: string | null = null
 	let forcedTarget: string | null = null
+	let cleanupDirectory: string | null = null
+	let cleanupError: unknown = null
 
 	// The same hole the guard of commit 36ad6819342e covers for the merge rows is here in three
 	// rows, and the
@@ -1327,27 +1329,57 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 	// renewal timer keeps the artefact fresh. Row by row guards would mean three of them, so the guard
 	// goes on the block in the same shape, releasing only what has not been released and clearing the
 	// record before awaiting, so a release that lands late cannot be released twice and the row that
-	// failed still reports its own assertion.
+	// failed still reports its own assertion. A refusal at one release is kept for the row after this
+	// block rather than thrown, because the timer rows of this file already state that a throw out of
+	// a cleanup release replaces whatever the row itself failed at and leaves the runner printing only
+	// the release frame, so every record is attempted and each release sits inside its own try.
 	afterEach(async () => {
 		if (heldAliasLeaf !== null) {
 			const give = heldAliasLeaf
 			heldAliasLeaf = null
-			await give()
+			try {
+				await give()
+			} catch (thrown) {
+				// The library reports a refused release as an error carrying a code on the error object,
+				// which the Error type does not declare, so the guard records whatever came out and the
+				// assertion in the row after this block names the code it carries.
+				if (cleanupError === null) {
+					cleanupError = thrown
+				}
+			}
 		}
 		if (heldAliasSibling !== null) {
 			const give = heldAliasSibling
 			heldAliasSibling = null
-			await give()
+			try {
+				await give()
+			} catch (thrown) {
+				if (cleanupError === null) {
+					cleanupError = thrown
+				}
+			}
 		}
 		if (heldLinkLock !== null) {
 			const give = heldLinkLock
 			heldLinkLock = null
-			await give()
+			try {
+				await give()
+			} catch (thrown) {
+				if (cleanupError === null) {
+					cleanupError = thrown
+				}
+			}
 		}
 		if (heldLinkSibling !== null) {
 			const give = heldLinkSibling
 			heldLinkSibling = null
-			await give()
+			try {
+				await give()
+			} catch (thrown) {
+				if (cleanupError === null) {
+					cleanupError = thrown
+				}
+			}
 		}
 	})
 	beforeAll(async () => {
@@ -1557,6 +1589,48 @@ describe("an unrelated lock and a held leaf coexist while the alias contends", (
 		await heldAliasLeaf()
 		heldAliasLeaf = null
 		expect(artefactsOf(forcedDirectory)).toEqual([])
+	})
+
+	it("gives back every recorded lock when one recorded release is refused", { timeout: 30000 }, async () => {
+		const { directory, target } = scenario("coheld-cleanup-refusal", "task-history-leaf-for-cleanup-refusal.json")
+		const sibling = path.join(directory, "state-sidecar-leaf-for-cleanup-refusal.json")
+		fs.writeFileSync(sibling, '{"pre":1}', "utf8")
+		cleanupDirectory = directory
+		const giveLeaf = await acquireFileLock(target, { immediate: true })
+		heldAliasLeaf = giveLeaf
+		const giveSibling = await acquireFileLock(sibling, { immediate: true })
+		heldAliasSibling = giveSibling
+		expect(artefactsOf(directory)).toEqual([
+			"state-sidecar-leaf-for-cleanup-refusal.json.lock",
+			"task-history-leaf-for-cleanup-refusal.json.lock",
+		])
+		// Both records stay set on purpose. The leaf is let go before the row returns, so the guard
+		// attempt at the leaf is the second release of the same in-process record, which is the
+		// refusal the timer rows of this file already name, and the sibling record is still set when
+		// that refusal lands.
+		await giveLeaf()
+		expect(artefactsOf(directory)).toEqual(["state-sidecar-leaf-for-cleanup-refusal.json.lock"])
+	})
+
+	it("keeps the refusal visible and gives the sibling back anyway", { timeout: 30000 }, async () => {
+		if (cleanupDirectory === null) {
+			throw new Error("the cleanup refusal row recorded no directory to check")
+		}
+		// Running here, after the guard of this block, is the point: what is asserted is what the guard
+		// left. The refusal is kept rather than swallowed, the sibling artefact is gone because its
+		// release was attempted anyway, and nothing under this process holds a lock in that directory.
+		const refusal = cleanupError
+		expect(refusal).toBeInstanceOf(Error)
+		// The library carries the refusal code on the error object and the Error type does not declare
+		// it, so the assertion reads the code through the shape the library documents. The release of
+		// a lock whose in-process record is already gone answers ERELEASED, which is what the run of
+		// this file on windows printed and recorded here; the timer rows of this file meet the other
+		// code the library uses when it cannot honour a release, so both are admitted rather than a
+		// guess about which one a runner sees.
+		expect(["ERELEASED", "ENOTACQUIRED"]).toContain((refusal as NodeJS.ErrnoException).code)
+		expect(artefactsOf(cleanupDirectory)).toEqual([])
+		cleanupError = null
+		cleanupDirectory = null
 	})
 })
 
