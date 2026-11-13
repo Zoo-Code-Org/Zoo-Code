@@ -24,6 +24,13 @@ import {
 } from "../ExtensionStateContext"
 import { StringCache } from "@/utils/stringCache"
 
+vi.mock("@src/utils/vscode", () => ({
+	vscode: {
+		postMessage: vi.fn(),
+		getViewStateId: vi.fn(() => "view-a"),
+	},
+}))
+
 const TestComponent = () => {
 	const {
 		allowedCommands,
@@ -140,8 +147,71 @@ const InitialStateTestComponent = () => {
 	)
 }
 
+const ViewLocalStateTestComponent = () => {
+	const { mode, setMode, currentApiConfigName, setCurrentApiConfigName } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="view-local-mode">{mode}</div>
+			<div data-testid="view-local-api-config">{currentApiConfigName}</div>
+			<button data-testid="set-local-mode" onClick={() => setMode("ask")}>
+				Set Local Mode
+			</button>
+			<button data-testid="set-local-api-config" onClick={() => setCurrentApiConfigName("local-profile")}>
+				Set Local API Config
+			</button>
+		</div>
+	)
+}
+
 describe("ExtensionStateContext", () => {
 	afterEach(() => vi.restoreAllMocks())
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("applies mode and profile from a later state payload after local edits", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<ViewLocalStateTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: { mode: "code", currentApiConfigName: "profile-a", apiConfiguration: {} },
+					},
+				}),
+			)
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("code")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("profile-a")
+
+		act(() => {
+			screen.getByTestId("set-local-mode").click()
+			screen.getByTestId("set-local-api-config").click()
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("ask")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("local-profile")
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: { mode: "architect", currentApiConfigName: "profile-b", apiConfiguration: {} },
+					},
+				}),
+			)
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("architect")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("profile-b")
+	})
+
 	it("interns initial history and current task items and subsequent state pushes", () => {
 		const internSpy = vi.spyOn(StringCache.prototype, "intern")
 		const item = { id: "task-a", number: 1, ts: 1, task: "history", tokensIn: 0, tokensOut: 0, totalCost: 0 }
@@ -1105,6 +1175,36 @@ describe("mergeExtensionState", () => {
 
 			expect(result.clineMessages).toBe(newMessages)
 			expect(result.clineMessagesSeq).toBe(1)
+		})
+
+		it("keeps the displayed task id when a stale push names another task", () => {
+			const prevState: ExtensionState = {
+				...baseState,
+				clineMessages: [makeMessage(1, "hello")],
+				clineMessagesSeq: 5,
+				currentTaskId: "task-a",
+			}
+
+			const result = mergeExtensionState(prevState, {
+				// A push that lost the seq race cannot establish task identity either.
+				clineMessagesSeq: 4,
+				currentTaskId: "old",
+			})
+
+			expect(result.currentTaskId).toBe("task-a")
+		})
+
+		it("keeps the displayed task id when a message-free push names another task", () => {
+			const prevState: ExtensionState = {
+				...baseState,
+				clineMessages: [makeMessage(1, "hello")],
+				clineMessagesSeq: 5,
+				currentTaskId: "task-a",
+			}
+
+			const result = mergeExtensionState(prevState, { currentTaskId: "old" })
+
+			expect(result.currentTaskId).toBe("task-a")
 		})
 	})
 })

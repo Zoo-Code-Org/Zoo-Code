@@ -39,6 +39,7 @@ import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-p
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { defaultModeSlug } from "../../../shared/modes"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 
@@ -60,6 +61,9 @@ type TaskTestAccess = {
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
+	// Private on Task; the provider-owned mode write (ClineProvider.handleModeSwitch)
+	// sets it, and tests mirror that write through this helper.
+	_taskMode: string | undefined
 	buildCleanConversationHistory: (
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
@@ -3662,6 +3666,7 @@ describe("Cline", () => {
 					getMcpHub: vi.fn().mockReturnValue(undefined),
 					getSkillsManager: vi.fn().mockReturnValue(undefined),
 					say: vi.fn(),
+					handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 					postStateToWebview: vi.fn().mockResolvedValue(undefined),
 					postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 					postStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
@@ -4210,8 +4215,19 @@ describe("Cline", () => {
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
-				vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "ask" }))
-				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
+				// The switch applies (the mock below writes _taskMode), so the success
+				// path must not log a not-applied warning.
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),
+				)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
+					// Mirror ClineProvider.handleModeSwitch: after validation and persistence
+					// the provider owns the task's mode write.
+					if (targetTask) {
+						getTaskTestAccess(targetTask)._taskMode = mode
+					}
+				})
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -4220,7 +4236,12 @@ describe("Cline", () => {
 				})
 				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
 
+				// Let the task's initial mode ("ask", from provider state) settle first, so the
+				// mode selected with the user message is the task's final mode write.
+				await task.getTaskMode()
+
 				await task.submitUserMessage("switch modes", undefined, "code")
+				expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("was not applied"))
 				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 				const stream = (async function* () {
 					yield { type: "text", text: "response" } as ApiStreamChunk
@@ -4232,8 +4253,243 @@ describe("Cline", () => {
 
 				await task.attemptApiRequest().next()
 
-				expect(mockProvider.setMode).toHaveBeenCalledWith("code")
+				expect(mockProvider.handleModeSwitch).toHaveBeenCalledWith("code", task)
 				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
+				warnSpy.mockRestore()
+			})
+
+			it("still delivers the user message when the mode switch fails", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const switchError = new Error("task history write failed")
+				vi.spyOn(mockProvider, "handleModeSwitch").mockRejectedValue(switchError)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				// Deferred settlement: the test asserts the in-flight state (nothing delivered
+				// while the queued mutation is still settling) instead of racing a resolved mock.
+				let releaseSettle!: () => void
+				const settlePending = new Promise<void>((resolve) => {
+					releaseSettle = resolve
+				})
+				const settleSpy = vi.fn(() => settlePending)
+				Object.assign(mockProvider, { awaitProfileMutationSettled: settleSpy })
+				const responseOrder: string[] = []
+				handleResponseSpy.mockImplementation(() => {
+					responseOrder.push("delivered")
+				})
+
+				const submitting = task.submitUserMessage("still delivered", undefined, "code")
+				// Flush pending microtasks until the delivery path reaches the deferred settle: the
+				// message must not be delivered while settlement is pending.
+				for (let turn = 0; turn < 50 && settleSpy.mock.calls.length === 0; turn++) {
+					await Promise.resolve()
+				}
+				expect(settleSpy).toHaveBeenCalledOnce()
+				expect(responseOrder).toEqual([])
+
+				releaseSettle()
+				await submitting
+
+				// The mode-switch rejection is caught and logged locally...
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					`[Task#submitUserMessage] Mode switch to code failed (taskId=${task.taskId}):`,
+					switchError,
+				)
+				// ...the queued run-to-completion mutation is awaited before the message is
+				// delivered, so a timed-out switch cannot move the task's mode mid-delivery.
+				expect(settleSpy).toHaveBeenCalledOnce()
+				expect(responseOrder).toEqual(["delivered"])
+				// ...and the pending ask is still answered, so the submitted text is not lost.
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("warns when the mode switch resolves without applying the requested mode", async () => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),
+				)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				// Unknown slug / aborted mutation: the handler resolves without writing
+				// the task's mode (ClineProvider leaves _taskMode untouched in both cases).
+				vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+				await task.submitUserMessage("delivered in old mode", undefined, "architect")
+
+				// The message is still delivered in the previous mode...
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "delivered in old mode", [])
+				// ...and the dropped selection leaves a trace.
+				expect(warnSpy).toHaveBeenCalledWith(
+					`[Task#submitUserMessage] Mode switch to architect was not applied (taskId=${task.taskId})`,
+				)
+				warnSpy.mockRestore()
+			})
+
+			it("keeps the selected mode when the deferred mode initialization settles after the submission", async () => {
+				// The constructor-started initializeTaskMode() is still awaiting the
+				// provider state. submitUserMessage must let that initialization settle
+				// before switching: without the await, the deferred read resolves after
+				// the switch and clobbers the selected mode with the pre-switch value.
+				// One shared pending promise: both the mode and api-config initializers
+				// await provider.getState(), and a per-call promise would leave the mode
+				// initializer's own read pending forever.
+				let releaseState: (state: ProviderState) => void = () => {}
+				const deferredState = new Promise<ProviderState>((resolve) => {
+					releaseState = resolve
+				})
+				vi.spyOn(mockProvider, "getState").mockImplementation(() => deferredState)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
+					if (targetTask) {
+						getTaskTestAccess(targetTask)._taskMode = mode
+					}
+				})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				const submitted = task.submitUserMessage("select while initializing", undefined, "architect")
+
+				// Flush microtasks: the switch must still wait for the pending
+				// initialization. Without the await, the mocked switch would already have
+				// run here and the end-state assertion could not tell the orders apart.
+				for (let i = 0; i < 5; i++) {
+					await Promise.resolve()
+				}
+				expect(mockProvider.handleModeSwitch).not.toHaveBeenCalled()
+
+				// Resolve the pending provider state only after the submission has started,
+				// carrying the provider's pre-switch mode.
+				releaseState(Object.assign({} as ProviderState, { mode: "ask" }))
+
+				await submitted
+
+				expect(mockProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+				// The explicit selection survives: the deferred initialization ran before,
+				// not after, the mode write.
+				expect(await task.getTaskMode()).toBe("architect")
+			})
+
+			it("does not let a pending mode initialization clobber a provider-scoped mode write", async () => {
+				// The constructor-started initializeTaskMode() is still awaiting the provider
+				// state. A provider-scoped switch (e.g. selectTaskFollowupSuggestion) writes
+				// the task's mode without the submitUserMessage wait: when the deferred read
+				// resolves afterwards, initialization must not restore the pre-switch mode.
+				let releaseState: (state: ProviderState) => void = () => {}
+				const deferredState = new Promise<ProviderState>((resolve) => {
+					releaseState = resolve
+				})
+				vi.spyOn(mockProvider, "getState").mockImplementation(() => deferredState)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
+					if (targetTask) {
+						getTaskTestAccess(targetTask)._taskMode = mode
+					}
+				})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				// A provider-scoped switch writes the task mode through the provider-owned write.
+				await mockProvider.handleModeSwitch("architect", task)
+
+				// The deferred initialization settles after the switch, carrying the
+				// provider's pre-switch mode.
+				releaseState({ mode: "ask" } as unknown as ProviderState)
+
+				// The explicit selection survives the late initialization.
+				expect(await task.getTaskMode()).toBe("architect")
+			})
+
+			it("keeps a provider-scoped mode when mode initialization fails", async () => {
+				// The catch path must apply the same guard as the success path: a provider-scoped
+				// switch that landed before the failed initialization must survive it.
+				let failState: (error: Error) => void = () => {}
+				const deferredState = new Promise<ProviderState>((_resolve, reject) => {
+					failState = reject
+				})
+				vi.spyOn(mockProvider, "getState").mockImplementation(() => deferredState)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockImplementation(async (mode, targetTask) => {
+					if (targetTask) {
+						getTaskTestAccess(targetTask)._taskMode = mode
+					}
+				})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				// The pre-write must differ from the default slug (the catch path's fallback)
+				// or the clobber it guards against would be unobservable.
+				const preWriteMode = defaultModeSlug === "code" ? "architect" : "code"
+				// The switch lands while the initialization is still pending...
+				await mockProvider.handleModeSwitch(preWriteMode, task)
+				// ...then the initialization fails.
+				failState(new Error("state lookup failed"))
+				await task.getTaskMode()
+
+				// The failed initialization must not clobber the provider-scoped write.
+				expect(getTaskTestAccess(task)._taskMode).toBe(preWriteMode)
+			})
+
+			it("falls back to the default slug when mode initialization fails before any write", async () => {
+				// The catch path still initializes the default slug when nothing newer exists.
+				let failState: (error: Error) => void = () => {}
+				const deferredState = new Promise<ProviderState>((_resolve, reject) => {
+					failState = reject
+				})
+				vi.spyOn(mockProvider, "getState").mockImplementation(() => deferredState)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				failState(new Error("state lookup failed"))
+				await task.getTaskMode()
+
+				expect(getTaskTestAccess(task)._taskMode).toBe(defaultModeSlug)
+			})
+
+			it("does not log an initialization error when the provider state is merely undefined", async () => {
+				// state?.mode on an undefined state must not throw into the catch path: the catch
+				// is reserved for real getState() failures, which it logs through the provider.
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(undefined as unknown as ProviderState)
+				const logSpy = vi.spyOn(mockProvider, "log")
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				await task.getTaskMode()
+
+				expect(getTaskTestAccess(task)._taskMode).toBe(defaultModeSlug)
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Failed to initialize task mode"))
 			})
 
 			it("stores a provider profile selected through submitUserMessage", async () => {
