@@ -1152,7 +1152,7 @@ describe("safeWriteJson", () => {
 		const root = await fs.readdir(tempDir)
 		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
 	})
-	test("refuses the commit when an ancestor is swapped for a link after the final confinement check", async () => {
+	test("refuses the write when an ancestor is swapped for a link before staging, after the merge read", async () => {
 		const projectDir = path.join(tempDir, "swap-project")
 		const ancestor = path.join(projectDir, "settings")
 		await fs.mkdir(ancestor, { recursive: true })
