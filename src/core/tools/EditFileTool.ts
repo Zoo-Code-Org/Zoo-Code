@@ -451,20 +451,6 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
 
-			// Track file edit operation
-			if (relPath) {
-				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
-			}
-
-			task.didEditFile = true
-
-			// Get the formatted response message
-			const replacementInfo =
-				!isNewFile && expected_replacements > 1 ? ` (${expected_replacements} replacements)` : ""
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
-
-			pushToolResult(message + replacementInfo)
-
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this edit is appended inside
 				// checkpointSave (the hook stays a single call site), keyed by the
@@ -479,6 +465,20 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,
 				}).catch(() => {})
 			}
+
+			// Track file edit operation
+			if (relPath) {
+				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+			}
+
+			task.didEditFile = true
+
+			// Get the formatted response message
+			const replacementInfo =
+				!isNewFile && expected_replacements > 1 ? ` (${expected_replacements} replacements)` : ""
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
+
+			pushToolResult(message + replacementInfo)
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()

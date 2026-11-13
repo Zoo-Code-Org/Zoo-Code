@@ -175,16 +175,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
 
-			if (relPath) {
-				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
-			}
-
-			task.didEditFile = true
-
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
-
-			pushToolResult(message)
-
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this write is appended inside
 				// checkpointSave (the hook stays a single call site), keyed by the
@@ -199,6 +189,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 						: undefined,
 				}).catch(() => {})
 			}
+
+			if (relPath) {
+				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+			}
+
+			task.didEditFile = true
+
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
+
+			pushToolResult(message)
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
