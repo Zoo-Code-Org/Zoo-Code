@@ -1,6 +1,7 @@
 // Structured runner events are the only source of verdict counts.
 export async function summarizeTestEvents(events, expected, file, trusted) {
 	const observed = []
+	let completedNaturally = false
 	let passed = 0
 	let failed = 0
 	let cancelled = 0
@@ -9,19 +10,22 @@ export async function summarizeTestEvents(events, expected, file, trusted) {
 	let importFailed = false
 	const failures = []
 	for await (const event of events) {
-		if (event.type !== "test:pass" && event.type !== "test:fail") continue
 		const data = event.data
+		if (event.type === "test:summary" && data.file === file) completedNaturally = true
+		if (event.type !== "test:pass" && event.type !== "test:fail") continue
 		if (data.name === file) {
 			if (event.type === "test:fail") {
 				fileFailed = true
 				runnerFailed = data.details?.error?.failureType !== "subtestsFailed"
 				// An untrusted visible file can fail before registering tests when
-				// the solution it imports throws. Hidden tests still run independently.
+				// the solution it imports throws. The initialized harness rethrows
+				// uncaught import errors with exit 7; without it Node uses exit 1.
+				// Hidden tests still run independently.
 				importFailed =
 					!trusted &&
 					observed.length === 0 &&
 					data.details?.error?.failureType === "testCodeFailure" &&
-					data.details?.error?.exitCode === 1 &&
+					[1, 7].includes(data.details?.error?.exitCode) &&
 					!data.details?.error?.signal
 			}
 			continue
@@ -45,6 +49,9 @@ export async function summarizeTestEvents(events, expected, file, trusted) {
 		failures.push({ name: "test process failed", file })
 	}
 	const complete =
-		importFailed || (!runnerFailed && observed.length > 0 && expected.every((name) => observed.includes(name)))
+		importFailed ||
+		(!runnerFailed &&
+			(trusted ? observed.length > 0 : completedNaturally) &&
+			expected.every((name) => observed.includes(name)))
 	return { passed, failed, cancelled, failures, complete }
 }

@@ -328,3 +328,31 @@ test('child permission', () => {
 		}
 	})
 }
+
+for (const hiddenPasses of [true, false]) {
+	it(`grades hidden tests when an empty visible file is added (hidden passes: ${hiddenPasses})`, async () => {
+		const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-empty-visible-"))
+		try {
+			const workspace = await writeWorkspace(scratch)
+			await fs.writeFile(path.join(workspace, "test", "aaa-empty.test.mjs"), "// No visible tests\n")
+			const hidden = "test/hidden.acceptance.test.mjs"
+			const source = `import { test } from 'node:test'; test('hidden acceptance', () => { ${hiddenPasses ? "" : "throw new Error('incorrect')"} })`
+			await fs.writeFile(path.join(workspace, hidden), source)
+			const manifest = [{ path: hidden, sha256: createHash("sha256").update(source).digest("hex") }]
+			const out = path.join(scratch, "result.json")
+			assert.equal(await runDriver([out, "test", JSON.stringify(manifest)], workspace), 0)
+			const result = JSON.parse(await fs.readFile(out, "utf8")) as {
+				kind: string
+				passed: boolean
+				passedCount: number
+				failedCount: number
+			}
+			assert.equal(result.kind, "completed")
+			assert.equal(result.passed, hiddenPasses)
+			assert.equal(result.passedCount, hiddenPasses ? 2 : 1)
+			assert.equal(result.failedCount, hiddenPasses ? 0 : 1)
+		} finally {
+			await fs.rm(scratch, { recursive: true, force: true })
+		}
+	})
+}

@@ -102,7 +102,7 @@ ${name === "deep-get" ? "module.exports = { get: () => undefined }" : file.conte
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v9")
+		assert.equal(GRADER_VERSION, "coding-grader-v10")
 		assert.equal(CODING_GRADER_RESOURCES.image, "docker.io/library/node:22-bookworm")
 	})
 })

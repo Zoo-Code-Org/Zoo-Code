@@ -127,6 +127,7 @@ describe("runGrader", () => {
 				reason: "gradingCopyFailed",
 			})
 			assert.equal(await fs.readFile(path.join(scratch, "grading-copy", "owned"), "utf8"), "prior data")
+			assert.deepEqual(await fs.readdir(scratch), ["grading-copy"])
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true })
 		}

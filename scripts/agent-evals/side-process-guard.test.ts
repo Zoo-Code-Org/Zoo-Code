@@ -338,3 +338,70 @@ describe("side interrupt flag", () => {
 		assert.equal(flag.exitCode(), 143)
 	})
 })
+
+for (const disconnectAt of ["before", "during"] as const) {
+	it(
+		`finishes preparation timeout and cleanup when IPC closes ${disconnectAt} preparation`,
+		{ timeout: 10_000 },
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "preparation-closed-ipc-"))
+			const script = path.join(dir, "side.mts")
+			let preparationPid: number | undefined
+			let child: ReturnType<typeof spawn> | undefined
+			try {
+				await fs.writeFile(
+					script,
+					`
+import fs from 'node:fs/promises'
+import { runBoundedPreparation } from ${JSON.stringify(new URL("./coding-compare.ts", import.meta.url).href)}
+import { createSideProcessGuard } from ${JSON.stringify(new URL("./side-process-guard.ts", import.meta.url).href)}
+${disconnectAt === "before" ? "process.disconnect()" : ""}
+try {
+ await runBoundedPreparation(createSideProcessGuard(50), () => false, process.execPath,
+  ['-e', 'setInterval(() => {}, 1000)'], ${JSON.stringify(dir)}, 300)
+ throw new Error('preparation unexpectedly completed')
+} catch (error) {
+ if (!String(error).includes('time bound expired')) throw error
+} finally {
+ await fs.writeFile(${JSON.stringify(path.join(dir, "cleanup"))}, 'done')
+}
+`,
+				)
+				const { NODE_TEST_CONTEXT: _context, ...env } = process.env
+				child = spawn(process.execPath, ["--import", "tsx", script], {
+					cwd: process.cwd(),
+					env,
+					stdio: ["ignore", "ignore", "inherit", "ipc"],
+				})
+				child.on("message", (message: unknown) => {
+					if (
+						typeof message === "object" &&
+						message !== null &&
+						"pid" in message &&
+						typeof message.pid === "number"
+					) {
+						preparationPid = message.pid
+						if (child?.connected) child.disconnect()
+					}
+				})
+				const exited = new Promise<number | null>((resolve, reject) => {
+					child!.once("error", reject)
+					child!.once("exit", resolve)
+				})
+				assert.equal(await exited, 0)
+				assert.equal(await fs.readFile(path.join(dir, "cleanup"), "utf8"), "done")
+				if (preparationPid) assert.equal(groupAlive(preparationPid), false)
+			} finally {
+				child?.kill("SIGKILL")
+				if (preparationPid) {
+					try {
+						process.kill(-preparationPid, "SIGKILL")
+					} catch {
+						/* Already reaped. */
+					}
+				}
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		},
+	)
+}

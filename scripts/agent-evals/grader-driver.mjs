@@ -66,21 +66,23 @@ const discoverTestFiles = (dir) => {
 // child permission policy also prevents solution code writing the result file
 // or launching another process to do so.
 const runOneFile = async (file) => {
-	const trusted =
-		trustedTests.get(path.resolve(file)) === createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+	const source = fs.readFileSync(file)
+	const trusted = trustedTests.get(path.resolve(file)) === createHash("sha256").update(source).digest("hex")
 	// Only frozen, verified acceptance declarations define required test names.
 	// Visible source may contain comments, strings or dynamic declarations.
 	const expected = trusted
-		? [...fs.readFileSync(file, "utf8").matchAll(/\btest\(["']([^"']+)["'],/g)].map((match) => match[1])
+		? [...source.toString("utf8").matchAll(/\btest\(["']([^"']+)["'],/g)].map((match) => match[1])
 		: []
+	// Initialize the runner even for an empty visible file. A natural finish
+	// emits a per-file summary; process.exit before completion does not.
 	const stream = run({
 		files: [path.resolve(file)],
 		execArgv: [
 			process.allowedNodeEnvironmentFlags.has("--permission") ? "--permission" : "--experimental-permission",
 			`--allow-fs-read=${process.cwd()}`,
-			...(trustedTests.get(path.resolve(file)) ===
-			createHash("sha256").update(fs.readFileSync(file)).digest("hex")
-				? ["--allow-child-process"]
+			...(trusted ? ["--allow-child-process"] : []),
+			...(!trusted
+				? ["--import", 'data:text/javascript,import { after } from "node:test"; after(() => {})']
 				: []),
 		],
 	})

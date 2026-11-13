@@ -83,7 +83,7 @@ export const runBoundedPreparation = async (
 				env: buildWorktreeEnvironment(process.env, preparationHome),
 			})
 			guard.track(child.pid)
-			process.send?.({ type: "coding-preparation", pid: child.pid })
+			process.send?.({ type: "coding-preparation", pid: child.pid }, () => {})
 			let stderr = ""
 			child.stderr?.on("data", (chunk: Buffer) => {
 				if (stderr.length >= STDERR_LIMIT_BYTES) return
@@ -101,7 +101,7 @@ export const runBoundedPreparation = async (
 			child.once("error", (error) => {
 				clearTimeout(timer)
 				guard.track(undefined)
-				process.send?.({ type: "coding-preparation", pid: null })
+				process.send?.({ type: "coding-preparation", pid: null }, () => {})
 				reject(error)
 			})
 			child.once("exit", (code, signal) => {
@@ -115,7 +115,7 @@ export const runBoundedPreparation = async (
 					}
 				}
 				guard.track(undefined)
-				process.send?.({ type: "coding-preparation", pid: null })
+				process.send?.({ type: "coding-preparation", pid: null }, () => {})
 				if (code === 0) {
 					resolve()
 					return
