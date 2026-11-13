@@ -219,6 +219,10 @@ const runDriverUntilSignal = async (signal: NodeJS.Signals, options: DriverRunOp
 		await fs.mkdir(shimDir)
 		const gitShim = [
 			"#!/bin/sh",
+			'if [ "$1" = "--git-dir" ] && [ "$3" = "worktree" ] && [ "$4" = "add" ]; then',
+			'  printf \'%s\\n\' "$$" > "$TMPDIR/worktree-add-pid"',
+			"  exec sleep 30",
+			"fi",
 			'if [ "$1" = "worktree" ]; then',
 			'  if [ "$2" = "add" ]; then',
 			'    printf \'%s\\n\' "$$" > "$TMPDIR/worktree-add-pid"',

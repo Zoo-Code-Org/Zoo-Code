@@ -238,6 +238,8 @@ export function buildWorktreeEnvironment(env: NodeJS.ProcessEnv, home?: string):
 		const value = env[name]
 		if (value !== undefined) child[name] = value
 	}
+	child["GIT_CONFIG_NOSYSTEM"] = "1"
+	child["GIT_CONFIG_GLOBAL"] = process.platform === "win32" ? "NUL" : "/dev/null"
 	if (home) {
 		child["HOME"] = home
 		child["USERPROFILE"] = home

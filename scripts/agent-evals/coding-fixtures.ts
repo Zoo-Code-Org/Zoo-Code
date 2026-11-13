@@ -209,24 +209,24 @@ test("pulls values above the range up to max", () => {
 `
 
 // Acceptance assertions never import solution code. Only the restricted child
-// evaluates the module; stdout carries values, never verdicts.
+// evaluates the module; a separate pipe carries values, never verdicts.
 const isolatedCall = (modulePath: string, exportName: string): string => `
 const { spawnSync } = require("node:child_process")
 const { deserialize } = require("node:v8")
 const ${exportName} = (...args) => {
  const program = [
   'const { serialize } = require("node:v8")',
-  'const write = process.stdout.write.bind(process.stdout)',
+  'const write = require("node:fs").writeSync',
   'const fn = require(' + JSON.stringify(require("node:path").resolve(__dirname, ${JSON.stringify(modulePath)})) + ')[' + JSON.stringify(${JSON.stringify(exportName)}) + ']',
-  'write(serialize(fn(...' + JSON.stringify(args) + ')).toString("base64"))',
+  'write(3, serialize(fn(...' + JSON.stringify(args) + ')))',
  ].join(';')
  const child = spawnSync(process.execPath, [
   process.allowedNodeEnvironmentFlags.has("--permission") ? "--permission" : "--experimental-permission",
   "--allow-fs-read=" + process.cwd(), "-e", program,
- ], { encoding: "utf8", timeout: 5000, maxBuffer: 1024 * 1024, env: {} })
+ ], { timeout: 5000, maxBuffer: 1024 * 1024, env: {}, stdio: ["ignore", "pipe", "pipe", "pipe"] })
  assert.ifError(child.error)
- assert.strictEqual(child.status, 0, child.stderr)
- return deserialize(Buffer.from(child.stdout, "base64"))
+ assert.strictEqual(child.status, 0, child.stderr.toString())
+ return deserialize(child.output[3])
 }
 `
 

@@ -40,6 +40,29 @@ describe("coding graders against reference solutions", () => {
 			if (verdict.kind === "passed") assert.ok(verdict.result.failedCount === 0)
 		})
 
+		it(`[${name}] reports an import error as incorrect while preserving hidden failures`, async () => {
+			const verdict = await gradeSolution(
+				bundle.grading.correctSolution.map((file) => ({
+					...file,
+					content: 'throw new Error("solution import failed")',
+				})),
+			)
+			assert.equal(verdict.kind, "failed")
+			if (verdict.kind === "failed")
+				assert.ok(verdict.result.failures.some((failure) => failure.file.includes(".acceptance.")))
+		})
+
+		it(`[${name}] accepts correct solutions that log to stdout`, async () => {
+			const verdict = await gradeSolution(
+				bundle.grading.correctSolution.map((file) => ({
+					...file,
+					content: `console.log("solution diagnostic")
+${file.content}`,
+				})),
+			)
+			assert.equal(verdict.kind, "passed")
+		})
+
 		it(`[${name}] fails the plausible incorrect solution on hidden tests only`, async () => {
 			const verdict = await gradeSolution(bundle.grading.incorrectSolution)
 			assert.equal(verdict.kind, "failed")
@@ -59,7 +82,7 @@ describe("coding graders against reference solutions", () => {
 				...file,
 				content: `const assert = require("node:assert")
 for (const method of ["strictEqual", "deepStrictEqual", "ok", "ifError"]) assert[method] = () => {}
-${file.content}`,
+${name === "deep-get" ? "module.exports = { get: () => undefined }" : file.content}`,
 			}))
 			const verdict = await gradeSolution(overlay)
 			assert.equal(verdict.kind, "failed")
@@ -79,7 +102,7 @@ ${file.content}`,
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v8")
+		assert.equal(GRADER_VERSION, "coding-grader-v9")
 		assert.equal(CODING_GRADER_RESOURCES.image, "docker.io/library/node:22-bookworm")
 	})
 })

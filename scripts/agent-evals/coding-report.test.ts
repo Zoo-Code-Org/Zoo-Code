@@ -113,6 +113,29 @@ describe("comparison report", () => {
 		assert.match(markdown, /sample standard error/)
 	})
 
+	it("pairs outcomes, duration and cost by repetition despite different input order", () => {
+		const baseline = sideResult("baseline", "a".repeat(40), [
+			metrics("clamp-range", 1, "correct", 2),
+			metrics("clamp-range", 0, "incorrect", 1),
+		])
+		const candidate = sideResult("candidate", "b".repeat(40), [
+			{ ...metrics("clamp-range", 0, "incorrect", 4), durationMs: 2000 },
+			{ ...metrics("clamp-range", 1, "correct", 8), durationMs: 3000 },
+		])
+		const row = buildComparisonReport({ baseline, candidate }).fixtures[0]!
+		assert.equal(row.pairedOutcomes.unchanged, 2)
+		assert.equal(row.pairedOutcomes.improved, 0)
+		assert.equal(row.pairedOutcomes.regressed, 0)
+		assert.deepEqual(row.pairedDurations.pairs, [
+			{ baseline: 1000, candidate: 2000, delta: 1000 },
+			{ baseline: 1001, candidate: 3000, delta: 1999 },
+		])
+		assert.deepEqual(row.pairedCosts.pairs, [
+			{ baseline: 1, candidate: 4, delta: 3 },
+			{ baseline: 2, candidate: 8, delta: 6 },
+		])
+	})
+
 	it("flags incompatible pairs when pinned inputs differ", () => {
 		const baseline = sideResult("baseline", "a".repeat(40), [])
 		const candidate = sideResult("candidate", "b".repeat(40), [], { modelIdentifier: "other-model" })

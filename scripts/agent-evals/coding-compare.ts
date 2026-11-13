@@ -83,6 +83,7 @@ export const runBoundedPreparation = async (
 				env: buildWorktreeEnvironment(process.env, preparationHome),
 			})
 			guard.track(child.pid)
+			process.send?.({ type: "coding-preparation", pid: child.pid })
 			let stderr = ""
 			child.stderr?.on("data", (chunk: Buffer) => {
 				if (stderr.length >= STDERR_LIMIT_BYTES) return
@@ -100,6 +101,7 @@ export const runBoundedPreparation = async (
 			child.once("error", (error) => {
 				clearTimeout(timer)
 				guard.track(undefined)
+				process.send?.({ type: "coding-preparation", pid: null })
 				reject(error)
 			})
 			child.once("exit", (code, signal) => {
@@ -113,6 +115,7 @@ export const runBoundedPreparation = async (
 					}
 				}
 				guard.track(undefined)
+				process.send?.({ type: "coding-preparation", pid: null })
 				if (code === 0) {
 					resolve()
 					return
@@ -194,6 +197,7 @@ export const runCompareSide = async (
 	// From this refusal check to the guard track there is no await, so a
 	// signal cannot slip between them and miss the new child.
 	const exit = await new Promise<number>((resolve) => {
+		const preparationGuard = createSideProcessGuard(Math.min(wiring.killGraceMs / 3, 5000))
 		const child = spawn(
 			process.execPath,
 			[
@@ -210,14 +214,29 @@ export const runCompareSide = async (
 				wiring.credentialEnv,
 				"--evaluated-root",
 				worktree,
+				"--scratch-parent",
+				scratchDir,
 			],
 			{
 				cwd: wiring.root,
 				env: buildSideEnvironment(process.env, wiring.credentialEnv, side),
-				stdio: "inherit",
+				stdio: ["inherit", "inherit", "inherit", "ipc"],
 				detached: true,
 			},
 		)
+		child.on("message", (message: unknown) => {
+			if (
+				typeof message !== "object" ||
+				message === null ||
+				!("type" in message) ||
+				message.type !== "coding-preparation" ||
+				!("pid" in message)
+			)
+				return
+			if (message.pid === null) preparationGuard.track(undefined)
+			else if (typeof message.pid === "number" && Number.isSafeInteger(message.pid) && message.pid > 0)
+				preparationGuard.track(message.pid)
+		})
 		wiring.guard.track(child.pid)
 		let timedOut = false
 		const timeoutGuard = createSideProcessGuard(wiring.killGraceMs)
@@ -229,10 +248,12 @@ export const runCompareSide = async (
 		}, wiring.sideTimeoutMs)
 		const finish = (code: number): void => {
 			clearTimeout(timer)
-			void termination.then(() => {
-				wiring.guard.track(undefined)
-				resolve(timedOut ? 1 : code)
-			})
+			void termination
+				.then(() => preparationGuard.interrupt())
+				.then(() => {
+					wiring.guard.track(undefined)
+					resolve(timedOut ? 1 : code)
+				})
 		}
 		child.once("error", () => finish(1))
 		child.once("exit", (code) => finish(code ?? 1))
@@ -259,6 +280,7 @@ export interface ComparisonFlowWiring {
 	interruptedSignal: () => NodeJS.Signals | undefined
 	// The guard's kill escalation, created when the signal arrived. Cleanup
 	// awaits it so no tracked child outlives the removed worktrees.
+	cleanupLockWaitMs?: number
 	interruptKill: () => Promise<unknown>
 }
 
@@ -304,6 +326,7 @@ const executeOwnedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise
 const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise<ComparisonFlowOutcome> => {
 	let completed: ComparisonReport | undefined
 	let failure: unknown
+	const cleanupErrors: unknown[] = []
 	try {
 		await removeComparisonReport(wiring.out)
 		const report = buildComparisonReport({
@@ -326,23 +349,50 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 	} finally {
 		// An interrupt escalation must finish before the worktrees go away,
 		// so no child is still writing while its tree is deleted.
-		await wiring.interruptKill()
+		await wiring.interruptKill().catch((error) => cleanupErrors.push(error))
 		// Acquire both output locks before removing any scratch content. A
 		// standalone side may still own one after the comparison child exits.
 		const releases: (() => void)[] = []
 		try {
 			for (const side of ["baseline", "candidate"])
-				releases.push(await acquireSideOutputLock(path.join(wiring.scratchDir, `${side}-out`)))
-			await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "baseline")], {
-				cwd: wiring.root,
-				timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-				env: buildWorktreeEnvironment(process.env),
-			}).catch(() => {})
-			await execFileAsync("git", ["worktree", "remove", "--force", path.join(wiring.scratchDir, "candidate")], {
-				cwd: wiring.root,
-				timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-				env: buildWorktreeEnvironment(process.env),
-			}).catch(() => {})
+				releases.push(
+					await acquireSideOutputLock(
+						path.join(wiring.scratchDir, `${side}-out`),
+						wiring.cleanupLockWaitMs ?? 35_000,
+					),
+				)
+			await execFileAsync(
+				"git",
+				[
+					"--git-dir",
+					path.join(wiring.scratchDir, "baseline.git-source"),
+					"worktree",
+					"remove",
+					"--force",
+					path.join(wiring.scratchDir, "baseline"),
+				],
+				{
+					cwd: wiring.root,
+					timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+					env: buildWorktreeEnvironment(process.env),
+				},
+			).catch(() => {})
+			await execFileAsync(
+				"git",
+				[
+					"--git-dir",
+					path.join(wiring.scratchDir, "candidate.git-source"),
+					"worktree",
+					"remove",
+					"--force",
+					path.join(wiring.scratchDir, "candidate"),
+				],
+				{
+					cwd: wiring.root,
+					timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+					env: buildWorktreeEnvironment(process.env),
+				},
+			).catch(() => {})
 			// Keep the lock directories in place until their owners release them.
 			// A new writer after release can recreate its output; the final
 			// nonrecursive rmdir then leaves that writer's directory intact.
@@ -351,17 +401,32 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 					await fs.rm(path.join(wiring.scratchDir, entry), { recursive: true, force: true })
 			}
 		} catch (error) {
-			await removeComparisonReport(wiring.out)
-			throw error
+			cleanupErrors.push(error)
+			await removeComparisonReport(wiring.out).catch((error) => cleanupErrors.push(error))
 		} finally {
-			for (const release of releases.reverse()) release()
+			for (const release of releases.reverse()) {
+				try {
+					release()
+				} catch (error) {
+					cleanupErrors.push(error)
+				}
+			}
 		}
 		await fs.rmdir(wiring.scratchDir).catch(() => {})
 	}
 	const signal = wiring.interruptedSignal()
 	if (signal === "SIGINT" || signal === "SIGTERM") {
-		await removeComparisonReport(wiring.out)
+		await removeComparisonReport(wiring.out).catch((error) => cleanupErrors.push(error))
+		if (cleanupErrors.length)
+			console.error("comparison interrupted; cleanup errors:", new AggregateError(cleanupErrors))
 		return { status: "interrupted", signal }
+	}
+	if (cleanupErrors.length) {
+		if (failure !== undefined)
+			throw new AggregateError([failure, ...cleanupErrors], "comparison failed and cleanup failed")
+		throw cleanupErrors.length === 1
+			? cleanupErrors[0]
+			: new AggregateError(cleanupErrors, "comparison cleanup failed")
 	}
 	if (failure !== undefined) {
 		try {
@@ -546,4 +611,39 @@ export async function invalidateSideArtifacts(
 ): Promise<void> {
 	await remove(path.join(outDir, sideResultFileName()), { force: true })
 	await remove(path.join(outDir, "artifacts"), { recursive: true, force: true })
+}
+
+// A private repository borrows approved objects without inheriting the source
+// repository's filters, hooks, attributes configuration or worktree config.
+export async function prepareIsolatedWorktree(
+	guard: SideProcessGuard,
+	isInterrupted: () => boolean,
+	root: string,
+	commit: string,
+	worktree: string,
+	timeoutMs: number,
+): Promise<void> {
+	const repository = `${worktree}.git-source`
+	const { stdout } = await execFileAsync("git", ["rev-parse", "--path-format=absolute", "--git-path", "objects"], {
+		cwd: root,
+		env: buildWorktreeEnvironment(process.env),
+		timeout: timeoutMs,
+	})
+	await runBoundedPreparation(
+		guard,
+		isInterrupted,
+		"git",
+		["init", "--bare", "--template=", repository],
+		root,
+		timeoutMs,
+	)
+	await fs.writeFile(path.join(repository, "objects", "info", "alternates"), `${stdout.trim()}\n`)
+	await runBoundedPreparation(
+		guard,
+		isInterrupted,
+		"git",
+		["--git-dir", repository, "worktree", "add", "--detach", worktree, commit],
+		root,
+		timeoutMs,
+	)
 }

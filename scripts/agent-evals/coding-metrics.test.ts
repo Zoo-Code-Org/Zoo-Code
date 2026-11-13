@@ -244,42 +244,50 @@ describe("run metrics", () => {
 		])
 	})
 
-	it("labels per-request prompt size rows", () => {
-		const metrics = buildRunMetrics({
-			fixtureName: "clamp-range",
-			repIndex: 0,
-			trace: trace({
-				accounting: accounting({
-					requestCount: 2,
-					requests: [
-						{
-							index: 0,
-							ts: 1,
-							apiProtocol: { available: false, reason: "notReported" },
-							tokensIn: { available: true, value: 1_234 },
-							tokensOut: { available: false, reason: "notReported" },
-							cacheWrites: { available: false, reason: "notReported" },
-							cacheReads: { available: false, reason: "notReported" },
-							cost: { available: false, reason: "notReported" },
-							streamingFailed: false,
-							firstObservedMs: 0,
-							lastUpdatedMs: 1,
-							messageCount: 1,
-						},
-					],
+	for (const contextTokensEstimate of [undefined, { available: true, value: 42 } as const]) {
+		it(`labels per-request prompt sizes with context estimate ${contextTokensEstimate?.available ?? false}`, () => {
+			const metrics = buildRunMetrics({
+				fixtureName: "clamp-range",
+				repIndex: 0,
+				trace: trace({
+					accounting: accounting({
+						requestCount: 2,
+						requests: [
+							{
+								contextTokensEstimate,
+								index: 0,
+								ts: 1,
+								apiProtocol: { available: false, reason: "notReported" },
+								tokensIn: { available: true, value: 1_234 },
+								tokensOut: { available: false, reason: "notReported" },
+								cacheWrites: { available: false, reason: "notReported" },
+								cacheReads: { available: false, reason: "notReported" },
+								cost: { available: false, reason: "notReported" },
+								streamingFailed: false,
+								firstObservedMs: 0,
+								lastUpdatedMs: 1,
+								messageCount: 1,
+							},
+						],
+					}),
 				}),
-			}),
-			outcome: correctOutcome,
-			modelIdentifier: { available: true, value: "qwen3.8-27b" },
+				outcome: correctOutcome,
+				modelIdentifier: { available: true, value: "qwen3.8-27b" },
+			})
+			assert.deepEqual(metrics.requests.promptSize, [
+				{
+					index: 0,
+					reportedInputTokens: { available: true, value: 1_234 },
+					label: "providerReportedInputTokens",
+					estimatedContextTokens: contextTokensEstimate ?? {
+						available: false,
+						reason: "perRequestContextNotReported",
+					},
+					estimatedContextLabel: "extensionContextEstimate",
+				},
+			])
 		})
-		assert.deepEqual(metrics.requests.promptSize, [
-			{
-				index: 0,
-				reportedInputTokens: { available: true, value: 1_234 },
-				label: "providerReportedInputTokens",
-			},
-		])
-	})
+	}
 })
 
 const metricsRun = (overrides: Partial<CodingRunMetrics> & { repIndex?: number }): CodingRunMetrics => ({

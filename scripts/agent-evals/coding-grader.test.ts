@@ -78,9 +78,11 @@ describe("runGrader", () => {
 		const scratch = await tmpdir()
 		try {
 			let sawGradingDir = false
+			let createdDir = ""
 			const runtime: GradingRuntime = {
 				isolation: "container",
 				run: async (input) => {
+					createdDir = input.gradingDir
 					sawGradingDir = await fs
 						.access(path.join(input.gradingDir, "marker.txt"))
 						.then(() => true)
@@ -98,7 +100,7 @@ describe("runGrader", () => {
 			assert.equal(verdict.kind, "passed")
 			assert.equal(sawGradingDir, true)
 			const gradingCopyGone = await fs
-				.access(path.join(scratch, "grading-copy"))
+				.access(createdDir)
 				.then(() => false)
 				.catch(() => true)
 			assert.equal(gradingCopyGone, true)
@@ -110,6 +112,8 @@ describe("runGrader", () => {
 	it("reports a failed grading copy as grading failure", async () => {
 		const scratch = await tmpdir()
 		try {
+			await fs.mkdir(path.join(scratch, "grading-copy"))
+			await fs.writeFile(path.join(scratch, "grading-copy", "owned"), "prior data")
 			const verdict = await runGrader({
 				finalFiles: [{ path: "../escape.txt", content: "x" }],
 				hiddenTests: [],
@@ -122,6 +126,7 @@ describe("runGrader", () => {
 				isolation: "container",
 				reason: "gradingCopyFailed",
 			})
+			assert.equal(await fs.readFile(path.join(scratch, "grading-copy", "owned"), "utf8"), "prior data")
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true })
 		}
@@ -150,11 +155,7 @@ describe("runGrader", () => {
 				isolation: "container",
 				reason: "graderRuntimeFailed",
 			})
-			const gradingCopyGone = await fs
-				.access(path.join(scratch, "grading-copy"))
-				.then(() => false)
-				.catch(() => true)
-			assert.equal(gradingCopyGone, true)
+			assert.deepEqual(await fs.readdir(scratch), [])
 		} finally {
 			await fs.rm(scratch, { recursive: true, force: true })
 		}

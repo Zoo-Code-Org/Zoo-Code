@@ -5,6 +5,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
+import { summarizeTestEvents } from "./grader-events.mjs"
 import { driverFilePath } from "./coding-grader.ts"
 
 // Runs the real driver against a real workspace with the real filesystem.
@@ -219,7 +220,11 @@ test('second acceptance', () => {})
 `,
 			)
 			const out = path.join(scratch, "result.json")
-			assert.equal(await runDriver([out, "test"], scratch), 0)
+			const source = await fs.readFile(path.join(scratch, "test", "hidden.test.mjs"))
+			const manifest = [
+				{ path: "test/hidden.test.mjs", sha256: createHash("sha256").update(source).digest("hex") },
+			]
+			assert.equal(await runDriver([out, "test", JSON.stringify(manifest)], scratch), 0)
 			const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string }
 			assert.equal(result.kind, "driver-error")
 		} finally {
@@ -228,23 +233,39 @@ test('second acceptance', () => {})
 	})
 }
 
-it("rejects a nonzero runner exit even after its acceptance test passed", async () => {
-	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-exit-"))
+it("rejects a runner failure after an observed acceptance event", async () => {
+	const result = await summarizeTestEvents(
+		[
+			{ type: "test:pass", data: { name: "acceptance", details: { type: "test" } } },
+			{
+				type: "test:fail",
+				data: { name: "/hidden.test.mjs", details: { error: { failureType: "testCodeFailure", exitCode: 7 } } },
+			},
+		],
+		["acceptance"],
+		"/hidden.test.mjs",
+		true,
+	)
+	assert.equal(result.passed, 1)
+	assert.equal(result.complete, false)
+})
+
+it("ignores comment and string test declarations in visible files", async () => {
+	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "grader-comment-"))
 	try {
-		await fs.mkdir(path.join(scratch, "test"))
-		await fs.writeFile(
-			path.join(scratch, "test", "hidden.test.mjs"),
+		const workspace = await writeWorkspace(scratch)
+		await fs.appendFile(
+			path.join(workspace, "test", "passing.test.mjs"),
 			`
-import { test } from 'node:test'
-await test('acceptance', () => {})
-await new Promise(resolve => setTimeout(resolve, 100))
-process.exit(7)
+// test('comment', () => {})
+const example = "test('string', () => {})"
 `,
 		)
 		const out = path.join(scratch, "result.json")
-		assert.equal(await runDriver([out, "test"], scratch), 0)
-		const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string; passed?: boolean }
-		assert.equal(result.kind, "driver-error")
+		assert.equal(await runDriver([out, "test"], workspace), 0)
+		const result = JSON.parse(await fs.readFile(out, "utf8")) as { kind: string; passed: boolean }
+		assert.equal(result.kind, "completed")
+		assert.equal(result.passed, true)
 	} finally {
 		await fs.rm(scratch, { recursive: true, force: true })
 	}

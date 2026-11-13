@@ -11,7 +11,7 @@ import type { Measured } from "./trace.ts"
 
 // The grader version is a pinned comparison input. Any change to the driver,
 // the image, or the verdict rules must bump it.
-export const GRADER_VERSION = "coding-grader-v8"
+export const GRADER_VERSION = "coding-grader-v9"
 
 export interface GraderResources {
 	timeoutMs: number
@@ -80,9 +80,15 @@ export async function runGrader(inputs: {
 	runtime: GradingRuntime
 	scratchDir: string
 }): Promise<GraderVerdict> {
-	const gradingDir = path.join(inputs.scratchDir, "grading-copy")
+	let gradingRoot: string
+	try {
+		gradingRoot = await fs.mkdtemp(path.join(inputs.scratchDir, "grading-copy-"))
+	} catch {
+		return { kind: "grading-failure", isolation: inputs.runtime.isolation, reason: "gradingCopyFailed" }
+	}
+	const gradingDir = path.join(gradingRoot, "workspace")
 	// Cleanup is best effort. A failed removal must never replace the verdict.
-	const removeCopy = (): Promise<void> => fs.rm(gradingDir, { recursive: true, force: true }).catch(() => {})
+	const removeCopy = (): Promise<void> => fs.rm(gradingRoot, { recursive: true, force: true }).catch(() => {})
 	let verdict: GraderVerdict
 	try {
 		await buildGradingCopy(inputs.finalFiles, inputs.hiddenTests, gradingDir)

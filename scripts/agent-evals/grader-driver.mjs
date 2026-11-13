@@ -3,6 +3,7 @@
 // codes: the driver exits 0 after writing any completed result. A nonzero exit
 // or a missing result file means the grader itself failed, not the solution.
 // The driver receives no credential and needs no network.
+import { summarizeTestEvents } from "./grader-events.mjs"
 import process from "node:process"
 import { run } from "node:test"
 import { createHash, randomUUID } from "node:crypto"
@@ -65,14 +66,13 @@ const discoverTestFiles = (dir) => {
 // child permission policy also prevents solution code writing the result file
 // or launching another process to do so.
 const runOneFile = async (file) => {
-	const expected = [...fs.readFileSync(file, "utf8").matchAll(/\btest\(["']([^"']+)["'],/g)].map((match) => match[1])
-	const observed = []
-	let passed = 0
-	let failed = 0
-	let cancelled = 0
-	let fileFailed = false
-	let runnerFailed = false
-	const failures = []
+	const trusted =
+		trustedTests.get(path.resolve(file)) === createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+	// Only frozen, verified acceptance declarations define required test names.
+	// Visible source may contain comments, strings or dynamic declarations.
+	const expected = trusted
+		? [...fs.readFileSync(file, "utf8").matchAll(/\btest\(["']([^"']+)["'],/g)].map((match) => match[1])
+		: []
 	const stream = run({
 		files: [path.resolve(file)],
 		execArgv: [
@@ -84,40 +84,10 @@ const runOneFile = async (file) => {
 				: []),
 		],
 	})
-	for await (const event of stream) {
-		if (event.type !== "test:pass" && event.type !== "test:fail") continue
-		const data = event.data
-		// File-level success is not evidence that any acceptance test ran.
-		if (data.name === path.resolve(file)) {
-			if (event.type === "test:fail") {
-				fileFailed = true
-				runnerFailed = data.details?.error?.failureType !== "subtestsFailed"
-			}
-			continue
-		}
-		if (data.details?.type !== "test") continue
-		observed.push(data.name)
-		if (event.type === "test:pass" && !data.skip && !data.todo) passed++
-		else if (
-			["cancelledByParent", "testTimeoutFailure"].includes(data.details?.error?.failureType) ||
-			data.skip ||
-			data.todo
-		)
-			cancelled++
-		else {
-			failed++
-			failures.push({ name: data.name, file })
-		}
-	}
-	// Frozen acceptance files use literal, top-level test declarations. Fail
-	// closed if any declaration did not finish, including an import that calls
-	// process.exit(0) before tests register. Visible files must also run tests.
-	if (fileFailed && failed === 0 && cancelled === 0) {
-		failed++
-		failures.push({ name: "test process failed", file })
-	}
-	const complete = !runnerFailed && observed.length > 0 && expected.every((name) => observed.includes(name))
-	return { passed, failed, cancelled, failures, complete }
+	return summarizeTestEvents(stream, expected, path.resolve(file), trusted).then((outcome) => ({
+		...outcome,
+		failures: outcome.failures.map((failure) => ({ ...failure, file })),
+	}))
 }
 
 try {

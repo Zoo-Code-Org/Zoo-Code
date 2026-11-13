@@ -20,7 +20,7 @@ import { executeSideGeneration } from "./coding-side-flow.ts"
 import { acquireSideOutputLock } from "./output-lock.ts"
 import { buildRunMetrics } from "./coding-metrics.ts"
 import type { SidePins } from "./coding-pins.ts"
-import { createInterruptFlag, type InterruptFlag } from "./side-process-guard.ts"
+import { createInterruptFlag, createSideProcessGuard, type InterruptFlag } from "./side-process-guard.ts"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const COMMIT = "b".repeat(40)
@@ -66,6 +66,7 @@ const flowWiring = (inputs: {
 	runSide: inputs.runSide,
 	interruptedSignal: inputs.flag.name,
 	interruptKill: async () => {},
+	cleanupLockWaitMs: 20,
 })
 
 const pins = (side: SidePins["side"], commit: string): SidePins => ({
@@ -774,4 +775,120 @@ for (const boundary of ["output", "lock"] as const) {
 			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})
+}
+
+for (const interrupted of [false, true]) {
+	it(`preserves ${interrupted ? "interruption" : "the original error"} when scratch cleanup fails`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "comparison-cleanup-errors-"))
+		let release: (() => void) | undefined
+		try {
+			const flag = createInterruptFlag()
+			const original = new Error("original side failure")
+			const result = executeComparisonFlow(
+				flowWiring({
+					flag,
+					out: path.join(dir, "out"),
+					scratchDir: path.join(dir, "scratch"),
+					runSide: async () => {
+						release = await acquireSideOutputLock(path.join(dir, "scratch", "baseline-out"))
+						if (interrupted) flag.signal("SIGTERM")
+						throw original
+					},
+				}),
+			)
+			if (interrupted) assert.deepEqual(await result, { status: "interrupted", signal: "SIGTERM" })
+			else
+				await assert.rejects(result, (error: unknown) => {
+					assert.ok(error instanceof AggregateError)
+					assert.equal(error.errors[0], original)
+					assert.match(String(error.errors[1]), /cannot acquire side output lock/)
+					return true
+				})
+		} finally {
+			release?.()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+for (const interruption of ["signal", "timeout"] as const) {
+	it(
+		`reaps a detached SIGTERM-resistant preparation child after side ${interruption}`,
+		{ timeout: 10_000 },
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "comparison-stubborn-preparation-"))
+			const scratchDir = path.join(dir, "scratch")
+			const heartbeat = path.join(dir, "heartbeat")
+			const flag = createInterruptFlag()
+			const guard = createSideProcessGuard(100)
+			let termination: Promise<unknown> = Promise.resolve()
+			let pending: Promise<unknown> | undefined
+			try {
+				await fs.mkdir(scratchDir)
+				const sideScript = path.join(dir, "side.mts")
+				await fs.writeFile(
+					sideScript,
+					`
+import { runBoundedPreparation } from ${JSON.stringify(new URL("./coding-compare.ts", import.meta.url).href)}
+import { createSideProcessGuard } from ${JSON.stringify(new URL("./side-process-guard.ts", import.meta.url).href)}
+// Simulate a side that cannot run its own shutdown handler.
+process.on('SIGTERM', () => {})
+await runBoundedPreparation(createSideProcessGuard(50), () => false, process.execPath, ['-e', ${JSON.stringify(`
+const fs = require('node:fs')
+process.on('SIGTERM', () => {})
+fs.writeFileSync(${JSON.stringify(heartbeat)}, 'ready')
+setInterval(() => fs.appendFileSync(${JSON.stringify(heartbeat)}, '.'), 10)
+`)}], ${JSON.stringify(dir)}, 60000)
+`,
+				)
+				pending = executeComparisonFlow({
+					...flowWiring({
+						flag,
+						out: path.join(dir, "out"),
+						scratchDir,
+						runSide: async (side) =>
+							runCompareSide(side, COMMIT, scratchDir, {
+								...sideWiring({
+									flag,
+									tracked: [],
+									sideScript,
+									createSideOutDir: async (out) => {
+										await fs.mkdir(out, { recursive: true })
+									},
+								}),
+								guard,
+								sideTimeoutMs: interruption === "timeout" ? 1000 : 60000,
+								killGraceMs: 100,
+							}),
+					}),
+					interruptKill: () => termination,
+				})
+				// Handle rejection immediately while waiting for readiness.
+				void pending.catch(() => {})
+				const deadline = Date.now() + 5000
+				while (
+					!(await fs.access(heartbeat).then(
+						() => true,
+						() => false,
+					))
+				) {
+					if (Date.now() > deadline) throw new Error("preparation did not start")
+					await new Promise((resolve) => setTimeout(resolve, 20))
+				}
+				if (interruption === "signal") {
+					flag.signal("SIGTERM")
+					termination = guard.interrupt()
+					assert.deepEqual(await pending, { status: "interrupted", signal: "SIGTERM" })
+				} else await assert.rejects(pending, /baseline side failed/)
+				const stopped = await fs.readFile(heartbeat, "utf8")
+				await new Promise((resolve) => setTimeout(resolve, 100))
+				assert.equal(await fs.readFile(heartbeat, "utf8"), stopped)
+				await assert.rejects(fs.access(scratchDir))
+			} finally {
+				await guard.interrupt()
+				await pending?.catch(() => {})
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		},
+	)
 }
