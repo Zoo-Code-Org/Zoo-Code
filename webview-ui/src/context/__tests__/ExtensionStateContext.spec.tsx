@@ -142,6 +142,39 @@ const InitialStateTestComponent = () => {
 
 describe("ExtensionStateContext", () => {
 	afterEach(() => vi.restoreAllMocks())
+	it.each([
+		["the item matches the pinned task id and no item is loaded yet", "task-a", undefined, "task-a", true],
+		["the item belongs to another task", "task-a", undefined, "task-b", false],
+		["a different current item is already loaded", "task-a", "task-b", "task-a", false],
+	])(
+		"adopts a pushed history item as currentTaskItem when %s",
+		(_label, currentTaskId, loadedId, itemId, adopted) => {
+			const base = { number: 1, ts: 1, task: "t", tokensIn: 0, tokensOut: 0, totalCost: 0 }
+			const loaded = loadedId ? { ...base, id: loadedId } : undefined
+			const item = { ...base, id: itemId, autoTitle: "Generated" }
+			render(
+				<ExtensionStateContextProvider
+					initialState={{ currentTaskId, currentTaskItem: loaded, clineMessages: [] }}>
+					<TestComponent />
+				</ExtensionStateContextProvider>,
+			)
+
+			act(() =>
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "taskHistoryItemUpdated", taskHistoryItem: item } }),
+				),
+			)
+
+			const text = screen.getByTestId("current-task-item").textContent
+			const current = text ? JSON.parse(text) : null
+			if (adopted) {
+				expect(current).toEqual(item)
+			} else {
+				expect(current).toEqual(loaded ?? null)
+			}
+		},
+	)
+
 	it("interns initial history and current task items and subsequent state pushes", () => {
 		const internSpy = vi.spyOn(StringCache.prototype, "intern")
 		const item = { id: "task-a", number: 1, ts: 1, task: "history", tokensIn: 0, tokensOut: 0, totalCost: 0 }

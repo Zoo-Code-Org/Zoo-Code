@@ -340,6 +340,8 @@ export type ExtensionState = Pick<
 	| "imageGenerationProvider"
 	| "openRouterImageGenerationSelectedModel"
 	| "includeTaskHistoryInEnhance"
+	| "taskTitleGenerationEnabled"
+	| "taskTitleApiConfigId"
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
 	| "timeFormat"

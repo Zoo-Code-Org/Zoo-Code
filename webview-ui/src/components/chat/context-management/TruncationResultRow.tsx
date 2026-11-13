@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ScissorsLineDashed } from "lucide-react"
 
 import type { ContextTruncation } from "@roo-code/types"
@@ -17,7 +17,7 @@ interface TruncationResultRowProps {
  * were previously silent, addressing a gap in the context management UI.
  */
 export function TruncationResultRow({ data }: TruncationResultRowProps) {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [isExpanded, setIsExpanded] = useState(false)
 
 	const { messagesRemoved, prevContextTokens, newContextTokens } = data

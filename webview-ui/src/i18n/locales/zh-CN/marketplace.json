@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "按标签筛选：",
 			"clear": "清除标签",
+			"removeFromFilter": "点击从筛选条件中移除'{{tag}}'",
 			"placeholder": "输入搜索和选择标签...",
 			"noResults": "未找到匹配的标签",
 			"selected": "显示包含任何选定标签的项目",

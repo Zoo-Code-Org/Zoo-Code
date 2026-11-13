@@ -172,7 +172,7 @@ export const MarketplaceItemCard: React.FC<MarketplaceItemCardProps> = ({ item, 
 									key={tag}
 									content={
 										filters.tags.includes(tag)
-											? t("marketplace:filters.tags.clear", { count: tag })
+											? t("marketplace:filters.tags.removeFromFilter", { tag })
 											: t("marketplace:filters.tags.clickToFilter")
 									}>
 									<Button

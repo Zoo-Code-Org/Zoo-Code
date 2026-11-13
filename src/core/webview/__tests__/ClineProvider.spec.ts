@@ -4073,6 +4073,29 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test.each([
+		["true", true, true],
+		["false", false, false],
+		["unset", undefined, true],
+	])(
+		"task title generation setting %s round-trips through getState and the webview state",
+		async (_label, saved, expected) => {
+			await provider.contextProxy.setValue("taskTitleGenerationEnabled", saved)
+			await provider.contextProxy.setValue(
+				"taskTitleApiConfigId",
+				saved === undefined ? undefined : "title-profile",
+			)
+
+			const state = await provider.getState()
+			const webviewState = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+
+			expect(state.taskTitleGenerationEnabled).toBe(expected)
+			expect(webviewState.taskTitleGenerationEnabled).toBe(expected)
+			expect(state.taskTitleApiConfigId).toBe(saved === undefined ? undefined : "title-profile")
+			expect(webviewState.taskTitleApiConfigId).toBe(saved === undefined ? undefined : "title-profile")
+		},
+	)
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 
@@ -4306,6 +4329,47 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
+	})
+
+	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when enabled", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("experiments", {
+			...experimentDefault,
+			dynamicThinkingEffort: true,
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: true })
+	})
+
+	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when explicitly disabled", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		// A second experiment is enabled on purpose: a projection that fell back to
+		// experimentDefault whenever the flag was false would still satisfy a
+		// fixture-equals-default assertion, and it would discard this enabled
+		// experiment on the way.
+		await provider.contextProxy.setValue("experiments", {
+			...experimentDefault,
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: false,
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({
+			...experimentDefault,
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: false,
+		})
+	})
+
+	test("getStateToPostToWebview defaults dynamicThinkingEffort to false when experiments are unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: false })
 	})
 
 	test("getStateToPostToWebview returns the saved blanket auto-deny setting", async () => {
@@ -6772,6 +6836,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -6807,6 +6872,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
 			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
+			.mockResolvedValueOnce(mockModels) // friendli (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
 
@@ -6830,6 +6896,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -6936,6 +7003,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})

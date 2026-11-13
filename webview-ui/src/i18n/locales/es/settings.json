@@ -917,6 +917,10 @@
 			"refreshSuccess": "Herramientas actualizadas correctamente",
 			"refreshError": "Error al actualizar las herramientas",
 			"toolParameters": "Parámetros"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Esfuerzo de pensamiento dinámico",
+			"description": "Prepara la herramienta set_thinking_effort para un soporte posterior: esta opción solo guarda la preferencia y el comportamiento por solicitud llegará en trabajo posterior. (experimental)"
 		}
 	},
 	"temperature": {
