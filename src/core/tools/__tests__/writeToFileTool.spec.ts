@@ -947,14 +947,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			mockCline.diffViewProvider.open.mockClear()
 			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
-			// The real discardUnapprovedStream clears createdDirs, placeholderPath and the editor reference as it
-			// goes (DiffViewProvider.discardUnapprovedStream), and that clearing is what leaves a second observation
-			// of the same release with nothing to reclaim. The double has to clear them too, or the gate would see
-			// artifacts a mock discard left behind and the test would describe a provider that does not exist.
+			// Bound to the real cleanup instead of to clearing this test performs by hand. The double keeps its
+			// editor and filesystem boundaries - no editor is installed, so the discard never reaches the buffer
+			// and tab work - and the field clearing a second observation depends on is the clearing
+			// DiffViewProvider.discardUnapprovedStream() itself performs. Take a clear out of that method and
+			// this row stops passing, which is what the double's own clearing could not do.
 			mockCline.diffViewProvider.discardUnapprovedStream.mockImplementation(async () => {
-				mockCline.diffViewProvider["createdDirs"] = []
-				mockCline.diffViewProvider["placeholderPath"] = undefined
-				mockCline.diffViewProvider["activeDiffEditor"] = undefined
+				await DiffViewProvider.prototype.discardUnapprovedStream.call(mockCline.diffViewProvider)
 			})
 			mockCline.diffViewProvider.reset.mockClear()
 			mockCline.say.mockClear()
@@ -967,6 +966,11 @@ describe("writeToFileTool", () => {
 				// and reclaiming them is what leaves nothing for the second observation.
 				mockCline.diffViewProvider["createdDirs"] = ["mock-dir"]
 				mockCline.diffViewProvider["placeholderPath"] = "mock-file"
+				// A real open() also knows which file it opened and in which workspace - the constructor and
+				// open() publish both before any cleanup can run - and the production cleanup resolves the
+				// path it is about to remove from them, so the double carries them for it.
+				mockCline.diffViewProvider["relPath"] = "mock-file"
+				mockCline.diffViewProvider["cwd"] = process.cwd()
 				mockCline.diffViewProvider.isEditing = true
 				writeToFileTool.clearTaskState(mockCline)
 			})
