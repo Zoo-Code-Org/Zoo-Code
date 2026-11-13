@@ -17,7 +17,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
-import { ContextProxy } from "./ContextProxy"
+import { ContextProxy, isNonPortableSettingsKey } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -37,6 +37,7 @@ type ImportWithProviderOptions = ImportOptions & {
 	provider: {
 		settingsImportedAt?: number
 		postStateToWebview: () => Promise<void>
+		broadcastResetToAllInstances?(): Promise<void>
 	}
 }
 
@@ -98,6 +99,15 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
+
+		// Machine-local state is not portable between settings files: it round-trips through
+		// the normal runtime and pruning paths, but importing it would pin the view selections
+		// of another machine onto this one. The shared filter is the list the API surface consults
+		// too, so a key added there is skipped here without a second edit.
+		if (isNonPortableSettingsKey(key)) {
+			continue
+		}
+
 		const schema = globalSettingsShape[key as keyof GlobalSettings]
 
 		if (!schema) {
@@ -387,7 +397,21 @@ export const importSettingsWithFeedback = async (
 
 	if (result.success) {
 		provider.settingsImportedAt = Date.now()
+
+		// Broadcast invalidation to all other live ClineProvider instances first, so the
+		// initiating provider's post below reflects the cleared view state rather than the
+		// stale pre-import per-view mode/profile.
+		try {
+			if (provider.broadcastResetToAllInstances) {
+				await provider.broadcastResetToAllInstances()
+			}
+		} catch (error) {
+			// Log but do not fail the import if broadcast fails — the import itself succeeded.
+			console.warn(`Failed to broadcast reset after settings import: ${error}`)
+		}
+
 		await provider.postStateToWebview()
+
 		provider.settingsImportedAt = undefined
 		const warnings = "warnings" in result ? result.warnings : undefined
 
