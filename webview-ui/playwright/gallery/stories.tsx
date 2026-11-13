@@ -399,6 +399,22 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	...Object.fromEntries(
+		["failed-files", "provider-wait", "amber-badge"].map((variant): [string, Story] => [
+			`code-index-status-${variant}`,
+			async () => {
+				const [{ AppProviders }, { CodeIndexStatusFixture }] = await Promise.all([
+					import("../AppProviders"),
+					import("@/components/chat/__tests__/CodeIndexStatus.visual.fixture"),
+				])
+				return (
+					<AppProviders>
+						<CodeIndexStatusFixture variant={variant} />
+					</AppProviders>
+				)
+			},
+		]),
+	),
 	"theme-token-cleanup": async () => {
 		const [{ Checkbox }, { enabledChatControlClassName }] = await Promise.all([
 			import("@/components/ui/checkbox"),
