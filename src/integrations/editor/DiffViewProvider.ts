@@ -695,6 +695,25 @@ export class DiffViewProvider {
 				// without open() having written it, and it keeps the unconditional behaviour it always had.
 				if (!placeholderAlreadyGone && !placeholderReadFailed) {
 					if (placeholderStillMatches) {
+						// The read that set this flag ran before every await below, so a formatter, an extension or a
+						// later edit that wrote to this path in that window would still see the flag true and be
+						// unlinked. Re-reading immediately before the unlink narrows that window; plain fs calls
+						// cannot make the check and the delete atomic, so it does not close it. A file that is no
+						// longer there is still treated as already removed, and a path with no recorded content
+						// keeps the unconditional behaviour it always had: there is nothing to compare against.
+						if (placeholderContent !== undefined) {
+							const contentNow = await fs.readFile(placeholderPath, "utf-8").catch((error: unknown) => {
+								if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+									return undefined
+								}
+								throw error
+							})
+							if (contentNow !== undefined && contentNow !== placeholderContent) {
+								throw new Error(
+									`Kept ${placeholderPath}: it no longer holds the empty placeholder this edit wrote.`,
+								)
+							}
+						}
 						await fs.unlink(placeholderPath).catch((error: unknown) => {
 							// open() creates the placeholder; if it is already gone there is nothing
 							// left to remove and the discard did its job.
