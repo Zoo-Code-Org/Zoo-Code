@@ -1883,12 +1883,22 @@ describe("DiffViewProvider", () => {
 				// openDiffEditor() registers these listeners before it invokes the diff command, so the
 				// doubles hand the callbacks back instead of being stubbed away.
 				let onDidOpenTextDocument: ((document: vscode.TextDocument) => unknown) | undefined
+				// openDiffEditor() hands back a disposable for each of the two listeners it registers
+				// before the deferred diff command, and the question this row has to answer is whether the
+				// document callback releases them. Both are kept as distinct objects here - the
+				// visible-editors fallback is registered against its own double rather than the module
+				// mock's shared one, so neither assertion can satisfy the other.
+				const documentListenerDisposable = { dispose: vi.fn() }
+				const visibleEditorsListenerDisposable = { dispose: vi.fn() }
 				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
 					onDidOpenTextDocument = callback
-					return { dispose: vi.fn() }
+					return documentListenerDisposable
 				})
-				// The other three listeners stay on the module mock's own disposable double, so
-				// registering them is observable without this row replacing anything.
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockImplementation(
+					() => visibleEditorsListenerDisposable,
+				)
+				// The three listeners open() registers after the editor lands stay on the module mock's
+				// own disposable double, so registering them is still observable from outside.
 				Object.defineProperty(vscode.window.tabGroups, "all", { value: [], configurable: true })
 				vi.mocked(vscode.window).visibleTextEditors = []
 				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(lateEditor)
@@ -1953,6 +1963,11 @@ describe("DiffViewProvider", () => {
 				}
 				await onDidOpenTextDocument(lateDocument)
 				await openPromise
+				// The document callback is what resolves openDiffEditor(), and releasing the two temporary
+				// listeners is part of that resolution: a subscription that survived the race would leave
+				// one of these two dispose calls uncalled.
+				expect(documentListenerDisposable.dispose).toHaveBeenCalledTimes(1)
+				expect(visibleEditorsListenerDisposable.dispose).toHaveBeenCalledTimes(1)
 				// The late editor never published into the released session.
 				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
 				expect(DecorationController).not.toHaveBeenCalled()
