@@ -2282,6 +2282,249 @@ describe("ReadFileTool", () => {
 				expect(pushed).toContain("test content")
 				expect(pushed).not.toContain("Error:")
 			})
+			// The four stat-failure tests above start every registry empty, so a regression that
+			// clears or downgrades an entry the Task already had cannot fail them: on a failed stat
+			// the read skips observe(), and with nothing to skip onto the suite stays green. These
+			// seed a complete observation for the same path before the failing re-read, which is
+			// what pins the policy the source states - a failed stat leaves the prior entry
+			// untouched rather than invalidating it.
+
+			it("keeps a prior complete observation untouched when the pre-read stat fails", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				// Seed a complete observation for the same path the read will look up. path.resolve
+				// is mocked to join with "/", so this is the key the tool builds for the entry.
+				const seededPath = path.resolve(mockTask.cwd, "seeded-native-pre-stat-fail.ts")
+				reg.observe(seededPath, "1:2:3:4:5", true)
+				const seeded = reg.get(seededPath)!
+				expect(seeded.complete).toBe(true)
+
+				// Directory check OK; the pre-read stat fails (caught, nothing observed).
+				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats)
+					.mockRejectedValueOnce(new Error("EACCES"))
+				mockedIsBinaryFile.mockResolvedValue(false)
+				// The fresh bytes and the fresh view: what the model receives on this re-read.
+				mockedFsReadFile.mockResolvedValue(Buffer.from("fresh bytes after the pre-read stat failure"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | fresh view after the pre-read stat failure",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(
+					{ path: "seeded-native-pre-stat-fail.ts" },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				// The read still succeeds with the content this re-read produced: a stat failure never
+				// fails the read. Assert the pushed payload, not just that something was pushed.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: seeded-native-pre-stat-fail.ts")
+				expect(pushed).toContain("1 | fresh view after the pre-read stat failure")
+				expect(pushed).not.toContain("Error:")
+				// And the entry the Task already had is kept: same version token, same completeness,
+				// same timestamp, still the only entry. A failed stat invalidates nothing.
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.has(seededPath)).toBe(true)
+				expect(reg.size).toBe(1)
+				expect(reg.get(seededPath)!.version).toBe("1:2:3:4:5")
+				expect(reg.get(seededPath)!.complete).toBe(true)
+				expect(reg.get(seededPath)!.observedAt).toBe(seeded.observedAt)
+			})
+
+			it("keeps a prior complete observation untouched when the post-read stat fails", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				// Seed a complete observation for the same path the read will look up. path.resolve
+				// is mocked to join with "/", so this is the key the tool builds for the entry.
+				const seededPath = path.resolve(mockTask.cwd, "seeded-native-post-stat-fail.ts")
+				reg.observe(seededPath, "1:2:3:4:5", true)
+				const seeded = reg.get(seededPath)!
+				expect(seeded.complete).toBe(true)
+
+				const okStats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+				}
+				// Directory check and pre-read stat OK; the post-read stat fails.
+				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats)
+					.mockResolvedValueOnce(okStats as unknown as Stats)
+					.mockRejectedValueOnce(new Error("EACCES"))
+				mockedIsBinaryFile.mockResolvedValue(false)
+				// The fresh bytes and the fresh view: what the model receives on this re-read.
+				mockedFsReadFile.mockResolvedValue(Buffer.from("fresh bytes after the post-read stat failure"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | fresh view after the post-read stat failure",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(
+					{ path: "seeded-native-post-stat-fail.ts" },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				// The read still succeeds with the content this re-read produced: a stat failure never
+				// fails the read. Assert the pushed payload, not just that something was pushed.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: seeded-native-post-stat-fail.ts")
+				expect(pushed).toContain("1 | fresh view after the post-read stat failure")
+				expect(pushed).not.toContain("Error:")
+				// And the entry the Task already had is kept: same version token, same completeness,
+				// same timestamp, still the only entry. A failed stat invalidates nothing.
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.has(seededPath)).toBe(true)
+				expect(reg.size).toBe(1)
+				expect(reg.get(seededPath)!.version).toBe("1:2:3:4:5")
+				expect(reg.get(seededPath)!.complete).toBe(true)
+				expect(reg.get(seededPath)!.observedAt).toBe(seeded.observedAt)
+			})
+
+			it("legacy format: keeps a prior complete observation untouched when the pre-read stat fails", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				// Seed a complete observation for the same path the read will look up. path.resolve
+				// is mocked to join with "/", so this is the key the tool builds for the entry.
+				const seededPath = path.resolve(mockTask.cwd, "seeded-legacy-pre-stat-fail.ts")
+				reg.observe(seededPath, "1:2:3:4:5", true)
+				const seeded = reg.get(seededPath)!
+				expect(seeded.complete).toBe(true)
+
+				// Directory check OK; the pre-read stat fails (caught, nothing observed).
+				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats)
+					.mockRejectedValueOnce(new Error("EACCES"))
+				mockedIsBinaryFile.mockResolvedValue(false)
+				// The fresh bytes and the fresh view: what the model receives on this re-read.
+				mockedFsReadFile.mockResolvedValue(Buffer.from("fresh bytes after the pre-read stat failure"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | fresh view after the pre-read stat failure",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "seeded-legacy-pre-stat-fail.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				// The read still succeeds with the content this re-read produced: a stat failure never
+				// fails the read. Assert the pushed payload, not just that something was pushed.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: seeded-legacy-pre-stat-fail.ts")
+				expect(pushed).toContain("1 | fresh view after the pre-read stat failure")
+				expect(pushed).not.toContain("Error:")
+				// And the entry the Task already had is kept: same version token, same completeness,
+				// same timestamp, still the only entry. A failed stat invalidates nothing.
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.has(seededPath)).toBe(true)
+				expect(reg.size).toBe(1)
+				expect(reg.get(seededPath)!.version).toBe("1:2:3:4:5")
+				expect(reg.get(seededPath)!.complete).toBe(true)
+				expect(reg.get(seededPath)!.observedAt).toBe(seeded.observedAt)
+			})
+
+			it("legacy format: keeps a prior complete observation untouched when the post-read stat fails", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				// Seed a complete observation for the same path the read will look up. path.resolve
+				// is mocked to join with "/", so this is the key the tool builds for the entry.
+				const seededPath = path.resolve(mockTask.cwd, "seeded-legacy-post-stat-fail.ts")
+				reg.observe(seededPath, "1:2:3:4:5", true)
+				const seeded = reg.get(seededPath)!
+				expect(seeded.complete).toBe(true)
+
+				const okStats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+				}
+				// Directory check and pre-read stat OK; the post-read stat fails.
+				mockedFsStat
+					.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats)
+					.mockResolvedValueOnce(okStats as unknown as Stats)
+					.mockRejectedValueOnce(new Error("EACCES"))
+				mockedIsBinaryFile.mockResolvedValue(false)
+				// The fresh bytes and the fresh view: what the model receives on this re-read.
+				mockedFsReadFile.mockResolvedValue(Buffer.from("fresh bytes after the post-read stat failure"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | fresh view after the post-read stat failure",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "seeded-legacy-post-stat-fail.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				// The read still succeeds with the content this re-read produced: a stat failure never
+				// fails the read. Assert the pushed payload, not just that something was pushed.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("File: seeded-legacy-post-stat-fail.ts")
+				expect(pushed).toContain("1 | fresh view after the post-read stat failure")
+				expect(pushed).not.toContain("Error:")
+				// And the entry the Task already had is kept: same version token, same completeness,
+				// same timestamp, still the only entry. A failed stat invalidates nothing.
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.has(seededPath)).toBe(true)
+				expect(reg.size).toBe(1)
+				expect(reg.get(seededPath)!.version).toBe("1:2:3:4:5")
+				expect(reg.get(seededPath)!.complete).toBe(true)
+				expect(reg.get(seededPath)!.observedAt).toBe(seeded.observedAt)
+			})
+
 			it("two separate Task-owned registries are independent", async () => {
 				const regA = new ObservationRegistry()
 				const regB = new ObservationRegistry()
