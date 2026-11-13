@@ -353,6 +353,33 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
 	
 	${result.content}`
+			if (result.hasClippedLines) {
+				// The slice cut lines off and also clipped long lines inside it, so both
+				// notices belong to the response.
+				output += `\nNote: Some lines in this view exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`
+			}
+		} else if (result.hasClippedLines) {
+			// Nothing was omitted, so there is no later offset to read: report the clipping
+			// without a next-offset hint, and keep the read incomplete so a full-file
+			// replacement cannot be built from a clipped line. "In full" is only true when the
+			// slice covered the whole file - a slice that started past line 1 and stopped at the
+			// last line is not truncated, but it is not the file either, and saying "read in
+			// full" would hide the lines before the offset from the reader.
+			const covered = result.includedRanges.map(([start, end]) => `${start}-${end}`).join(", ")
+			const coversWholeFile =
+				result.includedRanges.length > 0 &&
+				result.includedRanges[0][0] === 1 &&
+				result.includedRanges[result.includedRanges.length - 1][1] === result.totalLines
+			const scope = coversWholeFile
+				? "The file was read in full, but the clipped lines were not shown in full."
+				: `Lines ${covered} of ${result.totalLines} total lines were shown, and the clipped lines were not shown in full.`
+			// The notice and the read are joined with a single newline: an indented template
+			// continuation here would put the indentation into the response itself, so the first
+			// numbered line would arrive carrying tabs an exact-match edit then has to reproduce.
+			output = [
+				`IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. ${scope}`,
+				result.content,
+			].join("\n")
 		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			output = "Note: File is empty"
 		}
