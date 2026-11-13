@@ -4784,15 +4784,9 @@ describe("Cline", () => {
 			})
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
-			const lifetimeSignal = task.lifecycleSignal
-			expect(lifetimeSignal.aborted).toBe(false)
 			expect(task.cancellationGeneration).toBe(0)
 
 			await task.abortTask()
-			const lifetimeReason: unknown = lifetimeSignal.reason
-			expect(lifetimeSignal.aborted).toBe(true)
-			expect(lifetimeReason).toBeInstanceOf(DOMException)
-			expect(lifetimeReason).toHaveProperty("name", "AbortError")
 			expect(task.abort).toBe(true)
 			expect(task.cancellationGeneration).toBe(1)
 
@@ -4801,14 +4795,10 @@ describe("Cline", () => {
 			// on resume: that is exactly why the generation exists. Only the
 			// generation keeps the cancelled run and the resumed run apart.
 			expect(task.cancellationGeneration).toBe(1)
-			expect(task.lifecycleSignal).toBe(lifetimeSignal)
-			expect(task.lifecycleSignal.aborted).toBe(true)
-			expect(task.lifecycleSignal.reason).toBe(lifetimeReason)
 
 			await task.abortTask()
 			expect(task.abort).toBe(true)
 			expect(task.cancellationGeneration).toBe(2)
-			expect(task.lifecycleSignal.reason).toBe(lifetimeReason)
 		})
 
 		it("advances the cancellation generation on disposal, without any explicit cancel", async () => {
@@ -4822,16 +4812,10 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
-			const lifetimeSignal = task.lifecycleSignal
-			expect(lifetimeSignal.aborted).toBe(false)
 			expect(task.cancellationGeneration).toBe(0)
 
 			await task.dispose()
 
-			expect(task.lifecycleSignal).toBe(lifetimeSignal)
-			expect(lifetimeSignal.aborted).toBe(true)
-			expect(lifetimeSignal.reason).toBeInstanceOf(DOMException)
-			expect(lifetimeSignal.reason).toHaveProperty("name", "AbortError")
 			expect(task.abort).toBe(true)
 			expect(task.cancellationGeneration).toBe(1)
 		})

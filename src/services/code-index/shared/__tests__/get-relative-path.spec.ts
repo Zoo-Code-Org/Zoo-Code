@@ -1,8 +1,34 @@
 import path from "path"
 
-import { generateRelativeFilePath } from "../get-relative-path"
+import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../get-relative-path"
 
 describe("get-relative-path", () => {
+	describe("generateNormalizedAbsolutePath", () => {
+		it("should use provided workspace root", () => {
+			const filePath = "src/file.ts"
+			const workspaceRoot = path.join(path.sep, "custom", "workspace")
+			const result = generateNormalizedAbsolutePath(filePath, workspaceRoot)
+			// On Windows, path.resolve adds the drive letter, so we need to use path.resolve for the expected value
+			expect(result).toBe(path.resolve(workspaceRoot, filePath))
+		})
+
+		it("should handle absolute paths", () => {
+			const filePath = path.join(path.sep, "absolute", "path", "file.ts")
+			const workspaceRoot = path.join(path.sep, "custom", "workspace")
+			const result = generateNormalizedAbsolutePath(filePath, workspaceRoot)
+			// When an absolute path is provided, it should be resolved to include drive letter on Windows
+			expect(result).toBe(path.resolve(filePath))
+		})
+
+		it("should normalize paths with . and .. segments", () => {
+			const filePath = "./src/../src/file.ts"
+			const workspaceRoot = path.join(path.sep, "custom", "workspace")
+			const result = generateNormalizedAbsolutePath(filePath, workspaceRoot)
+			// Use path.resolve to get the expected normalized absolute path
+			expect(result).toBe(path.resolve(workspaceRoot, "src", "file.ts"))
+		})
+	})
+
 	describe("generateRelativeFilePath", () => {
 		it("should use provided workspace root", () => {
 			const workspaceRoot = path.join(path.sep, "custom", "workspace")

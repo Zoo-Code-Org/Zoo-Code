@@ -1,15 +1,31 @@
-import type * as vscode from "vscode"
-import type { PointStruct } from "./vector-store"
-import type { ParserFatalError } from "../parser-errors"
+import * as vscode from "vscode"
+import type { FileFailureActivity } from "../file-failure-registry"
 
-export type { ICodeParser, CodeBlock } from "../parser-types"
+/**
+ * Interface for code file parser
+ */
+export interface ICodeParser {
+	/**
+	 * Parses a code file into code blocks
+	 * @param filePath Path to the file to parse
+	 * @param options Optional parsing options
+	 * @returns Promise resolving to array of code blocks
+	 */
+	parseFile(
+		filePath: string,
+		options?: {
+			minBlockLines?: number
+			maxBlockLines?: number
+			content?: string
+			fileHash?: string
+		},
+	): Promise<CodeBlock[]>
+}
 
 /**
  * Interface for directory scanner
  */
 export interface IDirectoryScanner {
-	readonly hasIncompleteFiles?: boolean
-
 	/**
 	 * Scans a directory for code blocks
 	 * @param directoryPath Path to the directory to scan
@@ -28,7 +44,6 @@ export interface IDirectoryScanner {
 			skipped: number
 		}
 		totalBlockCount: number
-		incompleteFiles?: string[]
 	}>
 }
 
@@ -40,8 +55,6 @@ export interface IFileWatcher extends vscode.Disposable {
 	 * Initializes the file watcher
 	 */
 	initialize(signal?: AbortSignal): Promise<void>
-	readonly onParserFatal?: vscode.Event<ParserFatalError>
-	readonly isProcessing?: boolean
 
 	/**
 	 * Event emitted when a batch of files begins processing.
@@ -81,9 +94,25 @@ export interface BatchProcessingSummary {
 
 export interface FileProcessingResult {
 	path: string
-	status: "success" | "skipped" | "error" | "processed_for_batching" | "local_error"
+	status: "success" | "skipped" | "error" | "processed_for_batching" | "local_error" | "missing"
 	error?: Error
 	reason?: string
 	newHash?: string
-	pointsToUpsert?: PointStruct[]
+	blocks?: CodeBlock[]
+	activity?: FileFailureActivity
+}
+
+/**
+ * Common types used across the code-index service
+ */
+
+export interface CodeBlock {
+	file_path: string
+	identifier: string | null
+	type: string
+	start_line: number
+	end_line: number
+	content: string
+	fileHash: string
+	segmentHash: string
 }

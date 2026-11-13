@@ -388,9 +388,6 @@ describe("extension.ts", () => {
 				workspacePath: "/workspace",
 				workspaceEnabled: true,
 				autoEnableDefault: true,
-				failedFiles: [],
-				failedFileSummary: undefined,
-				providerWaits: [],
 			}
 			scope["statusManager"]!["publishStatus"](status)
 			await Promise.resolve()
@@ -437,9 +434,6 @@ describe("extension.ts", () => {
 					workspacePath: "/workspace",
 					workspaceEnabled: true,
 					autoEnableDefault: true,
-					failedFiles: [],
-					failedFileSummary: undefined,
-					providerWaits: [],
 				}
 				scope["statusManager"]!["publishStatus"](status)
 				await Promise.resolve()
