@@ -7,6 +7,7 @@ import { fileExistsAtPath, createDirectoriesForFile } from "../../../utils/fs"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
+import { DiffViewProvider } from "../../../integrations/editor/DiffViewProvider"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { writeToFileTool } from "../WriteToFileTool"
@@ -70,6 +71,10 @@ vi.mock("../../../integrations/misc/extract-text", () => ({
 vi.mock("vscode", () => ({
 	window: {
 		showWarningMessage: vi.fn().mockResolvedValue(undefined),
+		// The retained-session predicate this spec now drives lives on the real
+		// DiffViewProvider, and loading that module runs DecorationController's
+		// module-init decoration.
+		createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
 	},
 	env: {
 		openExternal: vi.fn(),
@@ -1764,9 +1769,15 @@ describe("writeToFileTool", () => {
 			// path. Writing a different path through that session would update and save
 			// the old document while asking approval for the new one, so the call is
 			// rejected before any cleanup which could reset the retained session.
-			mockCline.diffViewProvider.isEditingDifferentPath = vi.fn(
-				(_relPath: string) => _relPath !== "test/path.txt",
+			// Drive the decision off the production predicate rather than a hand-rolled stub: this is
+			// a real DiffViewProvider carrying the state a refused rollback leaves behind (isEditing
+			// + relPath), so the class under test is what decides whether the session is in the way.
+			const retainedSession: Pick<DiffViewProvider, "isEditingDifferentPath"> = Object.assign(
+				Object.create(DiffViewProvider.prototype),
+				{ isEditing: true, relPath: "test/path.txt" },
 			)
+			mockCline.diffViewProvider.isEditingDifferentPath = (relPath: string) =>
+				retainedSession.isEditingDifferentPath(relPath)
 			mockCline.diffViewProvider.editingRelPath = "test/path.txt"
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
