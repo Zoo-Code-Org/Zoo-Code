@@ -43,6 +43,17 @@ export class DocumentSaveFailedError extends Error {
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
+/**
+ * What one save computed for its own edit: the patch the user typed into the diff view and the
+ * problems that showed up after that save. saveChanges() also parks this pair on the provider, and
+ * a retry or a second write on the same provider can park its own pair before the first save's
+ * report is serialized, so the report is built from the pair that travelled with the call.
+ */
+export interface WriteSaveResults {
+	newProblemsMessage: string | undefined
+	userEdits: string | undefined
+}
+
 // TODO: https://github.com/cline/cline/pull/3354
 export class DiffViewProvider {
 	// Properties to store the results of saveChanges
@@ -539,18 +550,33 @@ export class DiffViewProvider {
 	 * @param isNewFile Whether this is a new file or an existing file being modified
 	 * @returns Formatted message (JSON)
 	 */
-	async pushToolWriteResult(task: Task, cwd: string, isNewFile: boolean): Promise<string> {
+	async pushToolWriteResult(
+		task: Task,
+		cwd: string,
+		isNewFile: boolean,
+		// The results of the save whose call this reports, taken from that save rather than from the
+		// copies it parked on the provider: a retry or a second write on the same provider parks its own
+		// pair before this call runs, and the parked pair then describes a different edit.
+		savedResults?: WriteSaveResults,
+	): Promise<string> {
 		if (!this.relPath) {
 			throw new Error("No file path available in DiffViewProvider")
 		}
 
+		// The pair this report is about. When the caller handed one over, the report is scoped to that
+		// save; when it did not, the report falls back to the pair parked on the provider, which is the
+		// behaviour the tools that have not threaded a result yet depend on.
+		const userEdits = savedResults === undefined ? this.userEdits : savedResults.userEdits
+		const newProblemsMessage =
+			savedResults === undefined ? this.newProblemsMessage : savedResults.newProblemsMessage
+
 		// Only send user_feedback_diff if userEdits exists
-		if (this.userEdits) {
+		if (userEdits) {
 			// Create say object for UI feedback
 			const say: ClineSayTool = {
 				tool: isNewFile ? "newFileCreated" : "editedExistingFile",
 				path: getReadablePath(cwd, this.relPath),
-				diff: this.userEdits,
+				diff: userEdits,
 			}
 
 			// Send the user feedback
@@ -561,7 +587,7 @@ export class DiffViewProvider {
 		const notices = [
 			"You do not need to re-read the file, as you have seen all changes",
 			"Proceed with the task using these changes as the new baseline.",
-			...(this.userEdits
+			...(userEdits
 				? [
 						"If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.",
 					]
@@ -580,12 +606,12 @@ export class DiffViewProvider {
 			notice: notices.join(" "),
 		}
 
-		if (this.userEdits) {
-			result.user_edits = this.userEdits
+		if (userEdits) {
+			result.user_edits = userEdits
 		}
 
-		if (this.newProblemsMessage) {
-			result.problems = this.newProblemsMessage
+		if (newProblemsMessage) {
+			result.problems = newProblemsMessage
 		}
 
 		return JSON.stringify(result)
