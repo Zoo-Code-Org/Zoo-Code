@@ -4,7 +4,13 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { PostCommitDurabilityError, resolveLockKey, safeWriteText, StagingPathError } from "../safeWriteText"
+import {
+	PostCommitDurabilityError,
+	resolveLockKey,
+	safeWriteText,
+	StagingPathError,
+	StagingReplacedError,
+} from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
@@ -70,6 +76,37 @@ function _fileStatsWithIdentity(ino: bigint, dev: bigint): fsSync.BigIntStats {
 	s.ino = ino
 	s.dev = dev
 	return s
+}
+// The same stand-in for a stat that carries no bigint identity: pass numbers or undefined
+// here to model a platform whose lstat answer has no bigint ino or dev to compare.
+function _statsCarrying(ino: unknown, dev: unknown): fsSync.BigIntStats {
+	// Double assertion: the runtime value is the Stats stand-in, the type is the bigint
+	// variant. The fields come from unknown on purpose, so a test can hand over a value
+	// that is not bigint and watch the comparison decline to run.
+	const stats = _fileStats(false) as unknown as fsSync.BigIntStats
+	stats.ino = ino as bigint
+	stats.dev = dev as bigint
+	return stats
+}
+
+// Stands in for fs.lstat and answers only the identity reads - the calls that pass
+// { bigint: true } - from a queue, in the order this write performs them: the
+// staging guard's file, the target that file must not be, the staged entry once this
+// write's content landed, the entry at the commit rename, and the entry that landed on
+// the target. Every other read gets a stat without identity. A dry queue fails the test
+// loudly instead of passing quietly.
+function _lstatIdentityReads(identityReads: fsSync.BigIntStats[]) {
+	return async (readPath: unknown, options?: unknown): Promise<fsSync.BigIntStats> => {
+		const wantsBigint = typeof options === "object" && options !== null && Reflect.get(options, "bigint") === true
+		if (!wantsBigint) {
+			return _statsCarrying(undefined, undefined)
+		}
+		const next = identityReads.shift()
+		if (next === undefined) {
+			throw new Error(`no identity read left in the queue for ${String(readPath)}`)
+		}
+		return next
+	}
 }
 
 function mockDefaults(): void {
@@ -1278,6 +1315,219 @@ describe("caller-supplied staging path", () => {
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
+	it("refuses to publish when the caller's staging entry is replaced before the commit rename", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(43n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(99n, 7n),
+			]),
+		)
+
+		let failure: unknown
+		await safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }).catch(
+			(error: unknown) => {
+				failure = error
+			},
+		)
+		if (!(failure instanceof StagingReplacedError)) {
+			throw new Error(`expected a StagingReplacedError, got ${String(failure)}`)
+		}
+		expect(failure.name).toBe("StagingReplacedError")
+		expect(failure.stage).toBe("before-commit")
+		expect(failure.message).toContain(stagingPath)
+		expect(failure.message).toContain("no longer names")
+
+		// The publish was skipped, not merely reported as a failure: no rename of any kind ran,
+		// so the peer's file was never committed onto the target.
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The write got as far as staging its content, so this is not the early rejection the
+		// staging guard performs before any work.
+		expect(fsSync.openSync).toHaveBeenCalledTimes(1)
+	})
+
+	it("reports a replaced staging entry when the swap lands on the target through the commit rename", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(43n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(99n, 7n),
+			]),
+		)
+
+		let failure: unknown
+		await safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }).catch(
+			(error: unknown) => {
+				failure = error
+			},
+		)
+		if (!(failure instanceof StagingReplacedError)) {
+			throw new Error(`expected a StagingReplacedError, got ${String(failure)}`)
+		}
+		expect(failure.name).toBe("StagingReplacedError")
+		expect(failure.stage).toBe("after-commit")
+		expect(failure.message).toContain(stagingPath)
+		expect(failure.message).toContain("was replaced before the commit rename landed")
+
+		// The swap landed inside the window between the pre-commit comparison and the rename, so
+		// the rename ran and moved a file this write did not stage.
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+	})
+
+	it("publishes when the entry at the commit rename is still the entry this write staged", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(43n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+			]),
+		)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }),
+		).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+	})
+
+	it("refuses to publish when the staged entry and the entry at the commit share an inode but differ in device", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(43n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(42n, 8n),
+			]),
+		)
+
+		let failure: unknown
+		await safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }).catch(
+			(error: unknown) => {
+				failure = error
+			},
+		)
+		if (!(failure instanceof StagingReplacedError)) {
+			throw new Error(`expected a StagingReplacedError, got ${String(failure)}`)
+		}
+		expect(failure.name).toBe("StagingReplacedError")
+		expect(failure.stage).toBe("before-commit")
+		expect(failure.message).toContain(stagingPath)
+		expect(failure.message).toContain("no longer names")
+
+		// Same inode on a different device is a different file: comparing inodes alone would publish it.
+	})
+
+	it("skips the comparison when the staged entry's stats carry no bigint device", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_statsCarrying(42n, 7),
+				_statsCarrying(43n, 7),
+				_statsCarrying(42n, 7),
+				_statsCarrying(42n, 8),
+			]),
+		)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }),
+		).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+
+		// Nothing bigint to compare, so this is the same reading the staging-alias guard already applies.
+	})
+
+	it("skips the comparison when the staged entry's stats carry no bigint inode", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_statsCarrying(42, 7n),
+				_statsCarrying(43, 7n),
+				_statsCarrying(42, 7n),
+				_statsCarrying(43, 7n),
+			]),
+		)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }),
+		).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+	})
+
+	it("publishes when the entry at the commit rename cannot be compared", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_fileStatsWithIdentity(42n, 7n),
+				_fileStatsWithIdentity(43n, 7n),
+				_fileStatsWithIdentity(42n, 7n),
+				_statsCarrying(undefined, undefined),
+				_statsCarrying(undefined, undefined),
+			]),
+		)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }),
+		).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+
+		// The guard declines rather than guessing: an unreadable comparison must not refuse a sound write.
+	})
+
+	it("publishes when the staged entry carries no identity but the entry at the commit does", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/caller-staged.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.lstat).mockImplementation(
+			_lstatIdentityReads([
+				_statsCarrying(undefined, undefined),
+				_statsCarrying(43n, 7n),
+				_statsCarrying(undefined, undefined),
+				_fileStatsWithIdentity(99n, 7n),
+				_fileStatsWithIdentity(99n, 7n),
+			]),
+		)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" }),
+		).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+	})
 	it("rejects a staging path that is a symlink", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)

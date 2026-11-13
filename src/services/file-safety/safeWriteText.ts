@@ -86,7 +86,51 @@ export class PostCommitDurabilityError extends Error {
 		this.backupPath = backupPath
 	}
 }
+/**
+ * The staging entry this write validated, wrote and fsynced was found to name another
+ * file at the commit. The commit rename publishes whatever the staging name holds the
+ * moment it runs, so a peer that replaced the entry between validation and publication
+ * would otherwise have its own content committed onto the target while this write
+ * reported success. Reported as its own error so a failed write cannot claim a publish
+ * it did not make.
+ */
+export class StagingReplacedError extends Error {
+	readonly stagingPath: string
+	/** Where it was noticed: before anything was published, or after the commit rename landed. */
+	readonly stage: "before-commit" | "after-commit"
+
+	constructor(stagingPath: string, stage: "before-commit" | "after-commit") {
+		super(
+			stage === "before-commit"
+				? `Staging entry ${stagingPath} no longer names the file this write staged; the commit rename was skipped and the target was left as it was.`
+				: `Staging entry ${stagingPath} was replaced before the commit rename landed; the target now holds a file this write did not stage.`,
+		)
+		this.name = "StagingReplacedError"
+		this.stagingPath = stagingPath
+		this.stage = stage
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
+
+/**
+ * The device and inode a path names at this moment, or undefined when no comparison can
+ * be made: the read failed, or the platform's stats do not carry bigint identity. The
+ * caller reads undefined as "nothing to compare", the same reading this module already
+ * applies to the staging-alias guard, which rejects only when both stats are bigint.
+ */
+async function _entryIdentity(absolutePath: string): Promise<{ dev: bigint; ino: bigint } | undefined> {
+	const stats = await fs.lstat(absolutePath, { bigint: true }).catch(() => undefined)
+	if (stats === undefined || typeof stats.dev !== "bigint" || typeof stats.ino !== "bigint") {
+		return undefined
+	}
+	return { dev: stats.dev, ino: stats.ino }
+}
+
+/** Both call sites have already refused a comparison when either side is missing, */
+function _sameEntry(a: { dev: bigint; ino: bigint }, b: { dev: bigint; ino: bigint }): boolean {
+	return a.ino === b.ino && a.dev === b.dev
+}
 
 /** Generate a unique temp file name in the given directory. */
 function _tempName(dir: string, prefix: string): string {
@@ -289,6 +333,8 @@ export async function safeWriteText(
 	// with an empty .file-safety-staging directory behind. Track the directory this
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
+	// Identity of the entry this write staged, captured after our own write and fsync landed.
+	let stagedEntryIdentity: { dev: bigint; ino: bigint } | undefined
 	let tempPath: string
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
@@ -422,6 +468,12 @@ export async function safeWriteText(
 			}
 		}
 
+		// Record what the staging name holds now that our content is written and fsynced. The
+		// commit renames by path, so this is the identity the publish is checked against: an
+		// entry swapped out from under this write has to show up here or at the commit, not
+		// pass unreported.
+		stagedEntryIdentity = await _entryIdentity(tempPath)
+
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
 		// Warning delivery must never abort the write: the notices below describe a
@@ -533,8 +585,27 @@ export async function safeWriteText(
 			}
 
 			// -- Step 4: atomic rename temp -> target ---------------------
+			// The name about to be renamed must still hold the file this write staged, by device
+			// and inode: the same identity the staging guard already compares.
+			if (stagedEntryIdentity !== undefined) {
+				const entryAtCommit = await _entryIdentity(tempPath)
+				if (entryAtCommit !== undefined && !_sameEntry(stagedEntryIdentity, entryAtCommit)) {
+					throw new StagingReplacedError(tempPath, "before-commit")
+				}
+			}
 			await fs.rename(tempPath, targetPath)
 			committed = true
+
+			// And the file that landed on the target must be the file this write staged. A
+			// replacement that slipped inside the window above still shows up here, because the
+			// commit moves our own inode: a different device and inode at the target means the
+			// publish carried somebody else's content, and the caller must not be told otherwise.
+			if (stagedEntryIdentity !== undefined) {
+				const landedIdentity = await _entryIdentity(targetPath)
+				if (landedIdentity !== undefined && !_sameEntry(stagedEntryIdentity, landedIdentity)) {
+					throw new StagingReplacedError(tempPath, "after-commit")
+				}
+			}
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
