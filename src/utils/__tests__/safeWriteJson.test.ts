@@ -1078,6 +1078,85 @@ describe("safeWriteJson guarded-publish requirements carried by the guarded-writ
 		consoleErrorSpy.mockRestore()
 	})
 
+	// The flush row asked that the stage be synchronised through the descriptor that wrote it
+	// rather than only through a later reopen. This row measures exactly that hand: the fsync
+	// call carries the descriptor the staging open returned, and it happens before that
+	// descriptor is closed. Until the change the only synchronisation in the module was
+	// _flushFileToDisk reopening the file with r+, which leaves this assertion unmatched.
+	test("synchronises the stage on the descriptor that opened it before closing that descriptor", async () => {
+		spyOnStageOpens(false)
+		const fsyncSpy = vi.spyOn(fsSyncActual, "fsyncSync")
+		const closeSpy = vi.spyOn(fsSyncActual, "closeSync")
+
+		await safeWriteJson(currentTestFilePath, { message: "Synced" })
+
+		const streamCall = vi.mocked(fsSyncActual.createWriteStream).mock.calls.at(-1)
+		const stagedFd = Number((streamCall?.[1] as { fd?: number } | undefined)?.fd)
+		expect(Number.isInteger(stagedFd)).toBe(true)
+		expect(fsyncSpy.mock.calls.map((call) => Number(call[0]))).toContain(stagedFd)
+		const syncOrder = fsyncSpy.mock.invocationCallOrder.at(0)
+		const lastClose = closeSpy.mock.invocationCallOrder.at(-1)
+		expect(syncOrder).toBeDefined()
+		expect(lastClose).toBeDefined()
+		expect(Number(syncOrder)).toBeLessThan(Number(lastClose))
+		expect(await readFileContent(currentTestFilePath)).toEqual({ message: "Synced" })
+	})
+
+	// The row about the error-stream doubles asked that a failing stream not leave the staging
+	// descriptor open. The doubles hand back a Writable that owns no descriptor, so the cleanup
+	// has to come from the writer: the descriptor it opened for the stream is closed when the
+	// stream fails, which is what the assertion below reads.
+	test("closes the staging descriptor when the write stream fails", async () => {
+		const stageOpens = spyOnStageOpens(false)
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const closeSpy = vi.spyOn(fsSyncActual, "closeSync")
+		const openedFds: number[] = []
+		const streamSpy = vi.mocked(fsSyncActual.createWriteStream)
+		streamSpy.mockImplementationOnce((_streamPath, options) => {
+			const fd = (options as { fd?: number } | undefined)?.fd
+			if (typeof fd === "number") {
+				openedFds.push(fd)
+			}
+			return makeErrorWriteStream("Stream failure before commit")
+		})
+
+		await expect(safeWriteJson(currentTestFilePath, { message: "Failed" })).rejects.toThrow(
+			"Stream failure before commit",
+		)
+
+		expect(openedFds).toHaveLength(1)
+		expect(closeSpy.mock.calls.map((call) => Number(call[0]))).toContain(openedFds[0])
+		expect(stageOpens.length).toBeGreaterThan(0)
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+		streamSpy.mockRestore()
+		consoleErrorSpy.mockRestore()
+	})
+
+	// The catch around the staging-mode inspection has to fall back to the creation default only
+	// for a target that is genuinely missing. The same file names ENOENT explicitly at every
+	// other inspection site (the ancestor walk and the publication re-checks), and a permission
+	// or I/O error says nothing about the target's mode, so taking the default would silently
+	// widen or narrow it: the error has to propagate instead.
+	test("propagates a staging-mode inspection error instead of taking the creation default", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const realStatSync = fsSyncActual.statSync
+		// The double must reach the real stat for paths other than the target, and statSync's
+		// overloads are not expressible through a delegate arrow, so the cast is the last resort.
+		const statSpy = vi.spyOn(fsSyncActual, "statSync")
+		statSpy.mockImplementation(((statPath: unknown) => {
+			if (String(statPath) === currentTestFilePath) {
+				throw Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+			}
+			return realStatSync(String(statPath))
+		}) as unknown as typeof fsSyncActual.statSync)
+
+		await expect(safeWriteJson(currentTestFilePath, { message: "New" })).rejects.toThrow("EACCES")
+
+		statSpy.mockRestore()
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+		consoleErrorSpy.mockRestore()
+	})
+
 	test("stages the payload at the mode of the file it replaces", async () => {
 		const targetMode = fsSyncActual.statSync(currentTestFilePath).mode & 0o777
 		const stageOpens = spyOnStageOpens(false)

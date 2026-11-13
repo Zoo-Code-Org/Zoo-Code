@@ -480,7 +480,15 @@ async function _streamDataToFile(
 	let targetExisted = true
 	try {
 		stageMode = fsSync.statSync(preserveModeOf).mode & 0o777
-	} catch {
+	} catch (modeError) {
+		// Only a genuinely missing target may fall back to the creation default. Every other
+		// inspection in this file names ENOENT explicitly - the ancestor walk, the destination
+		// re-checks and the publication hook - and a permission or I/O error says nothing about
+		// the target's mode, so taking 0o644 for it could widen a 0o600 file or narrow a shared
+		// one through the commit rename. Such an error propagates to the caller instead.
+		if (getErrorCode(modeError) !== "ENOENT") {
+			throw modeError
+		}
 		// No target yet: the default below leaves the process umask in charge, as before.
 		targetExisted = false
 	}
@@ -497,13 +505,43 @@ async function _streamDataToFile(
 		}
 	}
 	let fileWriteStream: fsSync.WriteStream
+	let stagingFdClosed = false
+	const closeStagingFd = () => {
+		if (stagingFdClosed) {
+			return
+		}
+		stagingFdClosed = true
+		try {
+			fsSync.closeSync(stagedFd)
+		} catch (closeError) {
+			console.error(`Failed to close the staging descriptor for ${targetPath}:`, closeError)
+		}
+	}
 	try {
-		// The stream owns the descriptor: it closes it on finish and on error.
-		fileWriteStream = fsSync.createWriteStream(targetPath, { fd: stagedFd, encoding: "utf8" })
+		// The stream owns the descriptor but must not close it before the payload that carries
+		// the credentials is synchronised on that same descriptor, so autoClose is turned off
+		// and the finish handler does the hand: fsync first, then close. The flush below still
+		// reopens the stage with r+ as well, but publication no longer depends on that reopen
+		// being the only place the stage reaches storage.
+		fileWriteStream = fsSync.createWriteStream(targetPath, {
+			fd: stagedFd,
+			encoding: "utf8",
+			autoClose: false,
+		})
 	} catch (streamError) {
-		fsSync.closeSync(stagedFd)
+		closeStagingFd()
 		throw streamError
 	}
+	fileWriteStream.on("finish", () => {
+		try {
+			fsSync.fsyncSync(stagedFd)
+		} catch (syncError) {
+			// A filesystem that refuses fsync must not block the write: same rule as the flush.
+			console.error(`Failed to synchronise ${targetPath} on its staging descriptor:`, syncError)
+		}
+		closeStagingFd()
+	})
+	fileWriteStream.on("error", closeStagingFd)
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass
