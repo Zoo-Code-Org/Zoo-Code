@@ -4755,6 +4755,36 @@ describe("DiffViewProvider", () => {
 			expect(reset).not.toHaveBeenCalled()
 			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(false)
 		})
+
+		// A cancellation that arrives while the teardown is still running has to join that run, not
+		// read the claim the teardown itself made and walk away: reset() sets
+		// sessionFinalizationClaimed in its synchronous prefix, and finalizeSession calls the
+		// callback before it stores the promise, so there is a window where the claim is set and the
+		// run is not yet awaited. The joiner below is released inside that window.
+		it("finalizeSession makes a caller that joins a running teardown wait for it", async () => {
+			const events: string[] = []
+			let releaseTeardown: () => void = () => {}
+			const teardownHeld = new Promise<void>((resolve) => {
+				releaseTeardown = resolve
+			})
+			const owner = diffViewProvider["finalizeSession"](async () => {
+				// reset() claims the session before its first await; this callback does the same so
+				// the test exercises the window the finding names rather than a hypothetical one.
+				diffViewProvider["sessionFinalizationClaimed"] = true
+				events.push("teardown-start")
+				await teardownHeld
+				events.push("teardown-end")
+			})
+			const joiner = diffViewProvider["finalizeSession"](async () => {
+				events.push("joiner-ran-its-own-teardown")
+			}).then(() => {
+				events.push("joiner-resolved")
+			})
+			releaseTeardown()
+			await Promise.all([owner, joiner])
+			expect(events).toEqual(["teardown-start", "teardown-end", "joiner-resolved"])
+			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(true)
+		})
 	})
 
 	describe("userTouchedDiffEditor keep/close behavior", () => {

@@ -1352,11 +1352,11 @@ export class DiffViewProvider {
 	 * owns reset()" true regardless of how many cancellations piled onto the same pass.
 	 */
 	private async finalizeSession(finalize: () => Promise<void>): Promise<void> {
-		if (this.sessionFinalizationClaimed) {
-			return
-		}
 		if (this.finalizationInFlight) {
 			await this.finalizationInFlight
+			return
+		}
+		if (this.sessionFinalizationClaimed) {
 			return
 		}
 		const inFlight = finalize()
