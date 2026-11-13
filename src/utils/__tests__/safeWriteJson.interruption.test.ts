@@ -37,7 +37,44 @@ const actualRename = fsPromises.rename
 // replacement protocol the writer uses; exit before performing it.
 let commitAttempts = 0
 fsPromises.rename = async function interruptionRename(oldPath, newPath) {
-	if (path.resolve(String(newPath)) === targetPath) {
+ // Identity is the only comparison that holds on both spellings of one file. The
+ // writer publishes at the path fs.realpath returns, and that call expands an NTFS 8.3
+ // short name and applies the casing stored on disk, while targetPath above holds the
+ // spelling the parent process handed to the writer. On a Windows runner the temp
+ // directory is reported as an alias (C:/Users/RUNNER~1/...), so text equality misses
+ // the commit rename there and hits it on a developer box — which is the exact shape
+ // of the 12 failures this harness produced at 5a8e64a8b275, every one of them
+ // "expected WRITE_COMPLETED to contain EXIT_AT_REPLACEMENT_RENAME".
+ function fileIdentity(candidate) {
+ 	try {
+ 		const stats = fs.statSync(candidate)
+ 		return stats.dev + ":" + stats.ino
+ 	} catch {
+ 		return null
+ 	}
+ }
+ const targetBaseName = path.basename(targetPath).toLowerCase()
+ const targetDirectoryIdentity = fileIdentity(path.dirname(targetPath))
+ function isCommitRename(newPath) {
+ 	const candidate = path.resolve(String(newPath))
+ 	if (candidate === targetPath) {
+ 		return true
+ 	}
+ 	const candidateIdentity = fileIdentity(candidate)
+ 	if (candidateIdentity !== null) {
+ 		return candidateIdentity === fileIdentity(targetPath)
+ 	}
+ 	// The destination is not on disk yet, which is the commit of a first write. Same
+ 	// directory identity plus the same basename then names the same file. Case is folded
+ 	// because it is not significant on Windows; on POSIX the fold could only merge two
+ 	// names this protocol never renames onto each other, and the staging rename carries a
+ 	// different basename anyway.
+ 	return (
+ 		fileIdentity(path.dirname(candidate)) === targetDirectoryIdentity &&
+ 		path.basename(candidate).toLowerCase() === targetBaseName
+ 	)
+ }
+ if (isCommitRename(newPath)) {
 		commitAttempts++
 		if (process.env.INTERRUPTION_MODE === "fallback" && commitAttempts === 1) {
 			return Promise.reject(Object.assign(new Error("Injected EPERM"), { code: "EPERM" }))
