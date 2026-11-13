@@ -102,3 +102,21 @@ export const createSideProcessGuard = (graceMs: number): SideProcessGuard => {
 		},
 	}
 }
+
+// Parent death closes IPC even when no signal reaches the detached side.
+// Recheck at execution boundaries to catch a disconnect before registration.
+export const watchParentConnection = (onDisconnect: () => void): (() => void) => {
+	const hadParent = typeof process.send === "function"
+	let notified = false
+	const check = (): void => {
+		if (hadParent && !process.connected && !notified) {
+			notified = true
+			onDisconnect()
+		}
+	}
+	process.on("disconnect", check)
+	// Observing disconnect must not keep a completed side alive by itself.
+	process.channel?.unref()
+	check()
+	return check
+}

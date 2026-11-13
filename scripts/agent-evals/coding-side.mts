@@ -37,7 +37,7 @@ import {
 	resolveCommit,
 } from "./coding-trust.ts"
 import { executeSideGeneration, executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
-import { createInterruptFlag, createSideProcessGuard } from "./side-process-guard.ts"
+import { createInterruptFlag, createSideProcessGuard, watchParentConnection } from "./side-process-guard.ts"
 
 const execFileAsync = promisify(execFile)
 
@@ -153,6 +153,15 @@ const onSideInterrupt = (signal: NodeJS.Signals): void => {
 }
 process.on("SIGINT", () => onSideInterrupt("SIGINT"))
 process.on("SIGTERM", () => onSideInterrupt("SIGTERM"))
+// Share the signal path with host-runtime teardown listeners as well as the
+// side's preparation guard when the comparison parent disappears.
+const checkParentConnection = watchParentConnection(() => {
+	process.emit("SIGTERM", "SIGTERM")
+})
+const isSideInterrupted = (): boolean => {
+	checkParentConnection()
+	return interrupt.isInterrupted()
+}
 
 // Live sides always grade in the container runtime. The local subprocess
 // runtime stays available to unit tests only.
@@ -172,7 +181,7 @@ let failure: unknown
 let cleanupPreparedTree: () => Promise<void> = async () => {}
 await executeSideGeneration({
 	out,
-	isInterrupted: interrupt.isInterrupted,
+	isInterrupted: isSideInterrupted,
 	cleanup: () => cleanupPreparedTree(),
 	run: async () => {
 		const sideScratch = await fs.mkdtemp(path.join(scratchParent, "coding-evals-side-"))
@@ -240,7 +249,7 @@ await executeSideGeneration({
 		try {
 			await prepareIsolatedWorktree(
 				prepGuard,
-				interrupt.isInterrupted,
+				isSideInterrupted,
 				evaluatedRoot,
 				evaluatedCommit,
 				evaluatedWorktree,
@@ -261,7 +270,7 @@ await executeSideGeneration({
 			// environment, so the credential never reaches them.
 			await runBoundedPreparation(
 				prepGuard,
-				interrupt.isInterrupted,
+				isSideInterrupted,
 				"pnpm",
 				["install", "--frozen-lockfile"],
 				evaluatedWorktree,
@@ -269,7 +278,7 @@ await executeSideGeneration({
 			)
 			await runBoundedPreparation(
 				prepGuard,
-				interrupt.isInterrupted,
+				isSideInterrupted,
 				"pnpm",
 				["build"],
 				evaluatedWorktree,
@@ -279,7 +288,7 @@ await executeSideGeneration({
 			const { runs, completed } = await executeSideFlow({
 				repetitions,
 				out,
-				isInterrupted: interrupt.isInterrupted,
+				isInterrupted: isSideInterrupted,
 				runRepetition: async ({ fixtureName, repIndex }) => {
 					const artifactsDir = path.join(out, "artifacts", `${fixtureName}-rep${repIndex}`)
 					await fs.mkdir(artifactsDir, { recursive: true })
