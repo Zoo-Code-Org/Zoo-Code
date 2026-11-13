@@ -23,6 +23,8 @@ vi.mock("openai", () => ({
 			},
 		}
 	}),
+	// Named export consumed by the provider for abort-error normalization
+	APIUserAbortError: class extends Error {},
 }))
 
 describe("FireworksHandler", () => {

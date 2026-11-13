@@ -4,6 +4,10 @@ import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
+		// The provider normalizes an aborted request out of an APIUserAbortError, so the mock has to
+		// export the class: without it the module under test destructures undefined and every abort
+		// row here would throw before it reaches the handler.
+		APIUserAbortError: class extends Error {},
 		default: vi.fn().mockImplementation(function () {
 			return {
 				chat: {
@@ -38,6 +42,12 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { MimoHandler } from "../mimo"
 import { convertToR1Format } from "../../transform/r1-format"
 import { sanitizeOpenAiCallId } from "../../../utils/tool-id"
+
+// The wrapped error carries the HTTP status that Task.backoffAndAnnounce uses for its retry
+// header. Read it through a shape check rather than widening the error type.
+function preservedStatus(error: unknown): number | undefined {
+	return error instanceof Error && "status" in error ? (error as Error & { status: number }).status : undefined
+}
 
 describe("MimoHandler", () => {
 	let handler: MimoHandler
@@ -891,9 +901,14 @@ describe("MimoHandler", () => {
 		})
 
 		it("should handle API errors with provider prefix", async () => {
-			mockCreate.mockRejectedValueOnce(new Error("401 Unauthorized"))
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("401 Unauthorized"), { status: 401 }))
 
-			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
+			const failure = await handler.completePrompt("Test prompt").catch((error: unknown) => error)
+			// The prefix alone would pass on a wrapper that dropped the reason. Pin the text the SDK
+			// reported as well, and the status that Task.backoffAndAnnounce reads to pick a retry.
+			expect(failure).toBeInstanceOf(Error)
+			expect((failure as Error).message).toContain("OpenAI completion error: 401 Unauthorized")
+			expect(preservedStatus(failure)).toBe(401)
 		})
 
 		it("should return empty string when choices array is empty", async () => {
@@ -915,13 +930,24 @@ describe("MimoHandler", () => {
 		it("should propagate network errors with provider prefix", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("ECONNREFUSED"))
 
-			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
+			const failure = await handler.completePrompt("Test prompt").catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(Error)
+			// Containment for the same reason as the row above: the doubled prefix is real output of this
+			// path and is left as its own question rather than pinned as the expected shape.
+			expect((failure as Error).message).toContain("OpenAI completion error: ECONNREFUSED")
+			// A connection failure carries no HTTP status, and the wrapper must not invent one: a
+			// fabricated status would reach the retry header as a number nobody earned.
+			expect(preservedStatus(failure)).toBeUndefined()
 		})
 
 		it("should propagate rate limit errors with provider prefix", async () => {
-			mockCreate.mockRejectedValueOnce(new Error("429 Too Many Requests"))
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("429 Too Many Requests"), { status: 429 }))
 
-			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
+			const failure = await handler.completePrompt("Test prompt").catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(Error)
+			expect((failure as Error).message).toContain("OpenAI completion error: 429 Too Many Requests")
+			// 429 is the status that decides the backoff, so it has to survive the wrap.
+			expect(preservedStatus(failure)).toBe(429)
 		})
 
 		it("should use correct model ID for mimo-v2.5 variant", async () => {

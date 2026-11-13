@@ -72,7 +72,26 @@ class KimiCodeOAuthError extends Error {
 	}
 }
 
-async function postForm(endpoint: string, values: Record<string, string>, signal?: AbortSignal): Promise<Response> {
+/** The cancellation contract shared with the provider layer: name AbortError. */
+function createOAuthAbortError(): Error {
+	const error = new Error("The Kimi Code OAuth request was aborted")
+	error.name = "AbortError"
+	return error
+}
+
+/** A form POST whose cancellation contract outlives the response headers: `settle` detaches the
+ * caller's abort forwarder once the body is consumed, so an abort during a body read cancels the
+ * underlying response too. An abort detaches the forwarder by itself ({ once: true }). */
+interface CancellingPost {
+	response: Response
+	settle: () => void
+}
+
+async function postForm(
+	endpoint: string,
+	values: Record<string, string>,
+	signal?: AbortSignal,
+): Promise<CancellingPost> {
 	const controller = new AbortController()
 	const forwardAbort = () => controller.abort(signal?.reason)
 	if (signal?.aborted) forwardAbort()
@@ -81,8 +100,11 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 		() => controller.abort(new Error("Kimi Code OAuth request timed out")),
 		OAUTH_REQUEST_TIMEOUT_MS,
 	)
+	const settle = () => {
+		signal?.removeEventListener("abort", forwardAbort)
+	}
 	try {
-		return await fetch(endpoint, {
+		const response = await fetch(endpoint, {
 			method: "POST",
 			headers: {
 				Accept: "application/json",
@@ -91,14 +113,50 @@ async function postForm(endpoint: string, values: Record<string, string>, signal
 			body: new URLSearchParams(values).toString(),
 			signal: controller.signal,
 		})
+		return { response, settle }
+	} catch (error) {
+		// Nothing will read a body from a POST that never produced a response, so the forwarder
+		// is detached on this path and nothing else.
+		settle()
+		// Classify from the CALLER signal: only a rejection that came from the caller's own abort
+		// is normalized. The caller's reason can be an ordinary Error and fetch forwards it
+		// verbatim, and an independent OAuth/network failure that merely races the abort must be
+		// thrown unchanged. The internal timeout is never normalized here: timeout errors are
+		// rethrown as they are so callers can distinguish a stalled POST from a cancellation.
+		const callerAborted = signal?.aborted === true
+		const isCallerAbortRejection =
+			callerAborted && (error === signal?.reason || (error instanceof Error && error.name === "AbortError"))
+		if (isCallerAbortRejection) {
+			throw createOAuthAbortError()
+		}
+		throw error
 	} finally {
 		clearTimeout(timeout)
-		signal?.removeEventListener("abort", forwardAbort)
 	}
 }
+/** Consume a response body under the caller's signal: an abort while the body is still
+ * pending surfaces as this module's cancellation instead of waiting for a stalled read. */
+async function readBodyWithSignal<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+	if (!signal) return read()
+	if (signal.aborted) throw createOAuthAbortError()
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(createOAuthAbortError())
+		signal.addEventListener("abort", onAbort, { once: true })
+		void read().then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}
 
-async function readOAuthError(response: Response): Promise<KimiCodeOAuthError> {
-	const text = await response.text()
+async function readOAuthError(response: Response, signal?: AbortSignal): Promise<KimiCodeOAuthError> {
+	const text = await readBodyWithSignal(() => response.text(), signal)
 	try {
 		const parsed = oauthErrorSchema.parse(JSON.parse(text))
 		return new KimiCodeOAuthError(parsed.error_description ?? parsed.error, parsed.error)
@@ -108,17 +166,21 @@ async function readOAuthError(response: Response): Promise<KimiCodeOAuthError> {
 }
 
 export async function requestDeviceAuthorization(signal?: AbortSignal) {
-	const response = await postForm(
+	const { response, settle } = await postForm(
 		KIMI_CODE_OAUTH_CONFIG.deviceAuthorizationEndpoint,
 		{ client_id: KIMI_CODE_OAUTH_CONFIG.clientId },
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response)
-	return deviceAuthorizationSchema.parse(await response.json())
+	try {
+		if (!response.ok) throw await readOAuthError(response, signal)
+		return deviceAuthorizationSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+	} finally {
+		settle()
+	}
 }
 
 async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Promise<KimiCodeCredentials> {
-	const response = await postForm(
+	const { response, settle } = await postForm(
 		KIMI_CODE_OAUTH_CONFIG.tokenEndpoint,
 		{
 			grant_type: KIMI_CODE_OAUTH_CONFIG.deviceGrantType,
@@ -127,32 +189,49 @@ async function requestDeviceToken(deviceCode: string, signal?: AbortSignal): Pro
 		},
 		signal,
 	)
-	if (!response.ok) throw await readOAuthError(response)
-	const tokens = tokenResponseSchema.parse(await response.json())
-	if (!tokens.refresh_token) throw new Error("Kimi Code OAuth did not return a refresh token")
-	return {
-		type: providerIdentifiers.kimiCode,
-		accessToken: tokens.access_token,
-		refreshToken: tokens.refresh_token,
-		expiresAt: Date.now() + tokens.expires_in * 1000,
-		tokenType: tokens.token_type,
+	try {
+		if (!response.ok) throw await readOAuthError(response, signal)
+		const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+		if (!tokens.refresh_token) throw new Error("Kimi Code OAuth did not return a refresh token")
+		return {
+			type: providerIdentifiers.kimiCode,
+			accessToken: tokens.access_token,
+			refreshToken: tokens.refresh_token,
+			expiresAt: Date.now() + tokens.expires_in * 1000,
+			tokenType: tokens.token_type,
+		}
+	} finally {
+		settle()
 	}
 }
 
-export async function refreshKimiCodeAccessToken(credentials: KimiCodeCredentials): Promise<KimiCodeCredentials> {
-	const response = await postForm(KIMI_CODE_OAUTH_CONFIG.tokenEndpoint, {
-		grant_type: "refresh_token",
-		refresh_token: credentials.refreshToken,
-		client_id: KIMI_CODE_OAUTH_CONFIG.clientId,
-	})
-	if (!response.ok) throw await readOAuthError(response)
-	const tokens = tokenResponseSchema.parse(await response.json())
-	return {
-		type: providerIdentifiers.kimiCode,
-		accessToken: tokens.access_token,
-		refreshToken: tokens.refresh_token ?? credentials.refreshToken,
-		expiresAt: Date.now() + tokens.expires_in * 1000,
-		tokenType: tokens.token_type ?? credentials.tokenType,
+export async function refreshKimiCodeAccessToken(
+	credentials: KimiCodeCredentials,
+	signal?: AbortSignal,
+): Promise<KimiCodeCredentials> {
+	// The caller's signal aborts the token POST itself, not just the caller's wait: a cancelled
+	// task must not keep a refresh request (and its rotated refresh token) in flight.
+	const { response, settle } = await postForm(
+		KIMI_CODE_OAUTH_CONFIG.tokenEndpoint,
+		{
+			grant_type: "refresh_token",
+			refresh_token: credentials.refreshToken,
+			client_id: KIMI_CODE_OAUTH_CONFIG.clientId,
+		},
+		signal,
+	)
+	try {
+		if (!response.ok) throw await readOAuthError(response, signal)
+		const tokens = tokenResponseSchema.parse(await readBodyWithSignal(() => response.json(), signal))
+		return {
+			type: providerIdentifiers.kimiCode,
+			accessToken: tokens.access_token,
+			refreshToken: tokens.refresh_token ?? credentials.refreshToken,
+			expiresAt: Date.now() + tokens.expires_in * 1000,
+			tokenType: tokens.token_type ?? credentials.tokenType,
+		}
+	} finally {
+		settle()
 	}
 }
 
@@ -179,7 +258,15 @@ export class KimiCodeOAuthManager {
 	private context: ExtensionContext | null = null
 	private credentials: KimiCodeCredentials | null = null
 	private state: KimiCodeOAuthState = { status: "idle" }
-	private refreshPromise: Promise<KimiCodeCredentials | null> | null = null
+	// One shared refresh POST with independent waiter cancellation: each caller races the shared
+	// promise against its own signal, and the POST itself is aborted only after every waiter is
+	// gone.
+	private refreshPromise: Promise<string | null> | null = null
+	private refreshController: AbortController | null = null
+	private refreshWaiters: Set<{ signal?: AbortSignal }> | null = null
+	// Sign-out fence: while credentials are being cleared no new refresh may start, so the drain
+	// in clearCredentials() terminates and a caller cannot re-install what its delete removes.
+	private clearingCredentials = false
 	private pollingPromise: Promise<KimiCodeCredentials> | null = null
 	private pollingController: AbortController | null = null
 	private credentialsGeneration = 0
@@ -220,6 +307,9 @@ export class KimiCodeOAuthManager {
 			}
 			return false
 		}
+		// Install under a new generation: a delayed invalid_grant from an older refresh
+		// (whose captured generation is now stale) can no longer clear what this save put in.
+		this.credentialsGeneration++
 		this.credentials = credentials
 		this.state = { status: "authenticated" }
 		return true
@@ -228,49 +318,153 @@ export class KimiCodeOAuthManager {
 	async clearCredentials(): Promise<void> {
 		this.credentialsGeneration++
 		this.cancelAuthorization()
-		const refreshPromise = this.refreshPromise
-		if (refreshPromise) await refreshPromise.catch(() => null)
-		await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
-		this.credentials = null
-		this.state = { status: "idle" }
+		// Sign-out fences the refresh path. The capture-and-await only waited for the refresh that
+		// existed at entry, so a refresh started during that await could still store credentials
+		// after the delete. Holding the fence across the await closes that window instead of
+		// re-polling for a refresh that cannot appear: the only startRefresh() call site is
+		// getAccessToken(), downstream of the fence check below, so while the fence is held no new
+		// refresh can begin and the entry-captured one is the only work the delete has to wait for.
+		this.clearingCredentials = true
+		try {
+			const refreshPromise = this.refreshPromise
+			if (refreshPromise) {
+				await refreshPromise.catch(() => null)
+			}
+			await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
+			this.credentials = null
+			this.state = { status: "idle" }
+		} finally {
+			this.clearingCredentials = false
+		}
 	}
 
 	async isAuthenticated(): Promise<boolean> {
 		return (await this.getAccessToken()) !== null
 	}
 
-	async getAccessToken(forceRefresh = false): Promise<string | null> {
+	async getAccessToken(forceRefresh = false, signal?: AbortSignal): Promise<string | null> {
 		const credentials = await this.loadCredentials()
 		if (!credentials) return null
 		if (!forceRefresh && Date.now() < credentials.expiresAt - TOKEN_EXPIRY_BUFFER_MS) {
 			return credentials.accessToken
 		}
-		if (!this.refreshPromise) {
-			const generation = this.credentialsGeneration
-			this.refreshPromise = refreshKimiCodeAccessToken(credentials)
-				.then(async (next) => {
-					if (!(await this.saveCredentials(next, () => generation === this.credentialsGeneration)))
-						return null
-					return next
-				})
-				.catch(async (error) => {
-					if (error instanceof KimiCodeOAuthError && error.code === "invalid_grant") {
-						this.credentialsGeneration++
-						await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
-						this.credentials = null
-						this.state = { status: "idle" }
-					}
-					return null
-				})
-				.finally(() => {
-					this.refreshPromise = null
-				})
+		// A caller that is already cancelled must not start network work it cannot wait for, and a
+		// caller that arrives mid-sign-out has no token to be served: starting a refresh here would
+		// duplicate the one the sign-out is draining and could re-install what its delete removes.
+		if (signal?.aborted) throw createOAuthAbortError()
+		if (this.clearingCredentials) return null
+		// A pending refresh whose controller was already aborted can never settle successfully:
+		// start a replacement even if the old promise has not run its finally yet.
+		if (!this.refreshPromise || this.refreshController?.signal.aborted) {
+			this.startRefresh(credentials)
 		}
-		return (await this.refreshPromise)?.accessToken ?? null
+		return this.awaitRefresh(signal)
 	}
 
-	async forceRefreshAccessToken(): Promise<string | null> {
-		return this.getAccessToken(true)
+	/** Start the shared refresh POST; callers join it through awaitRefresh(). */
+	private startRefresh(credentials: KimiCodeCredentials): void {
+		const generation = this.credentialsGeneration
+		const controller = new AbortController()
+		this.refreshController = controller
+		this.refreshWaiters = new Set()
+		this.refreshPromise = refreshKimiCodeAccessToken(credentials, controller.signal)
+			.then(async (next) => {
+				if (!(await this.saveCredentials(next, () => generation === this.credentialsGeneration))) return null
+				return next.accessToken
+			})
+			.catch(async (error) => {
+				// A stale refresh must not clear credentials a newer sign-in installed: the
+				// generation only changes when a save lands or credentials are cleared, so a
+				// mismatch here means this POST's verdict belongs to superseded credentials.
+				if (
+					error instanceof KimiCodeOAuthError &&
+					error.code === "invalid_grant" &&
+					generation === this.credentialsGeneration
+				) {
+					this.credentialsGeneration++
+					await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
+					this.credentials = null
+					this.state = { status: "idle" }
+				}
+				// The shared POST aborts only after every waiter detached, which is a cancellation:
+				// reach each caller as one instead of the "not authenticated" null path.
+				if (controller.signal.aborted) throw createOAuthAbortError()
+				return null
+			})
+			.finally(() => {
+				// A replacement refresh may have started while this one was settling: only the
+				// still-current refresh may clear the shared state.
+				if (this.refreshController !== controller) {
+					return
+				}
+				this.refreshPromise = null
+				this.refreshController = null
+				this.refreshWaiters = null
+			})
+		// Callers observe the rejection through awaitRefresh(); this guard keeps a refresh whose
+		// waiters all detached from surfacing as an unhandled rejection in the extension host.
+		void this.refreshPromise.catch(() => {})
+	}
+
+	/**
+	 * Wait for the shared refresh with this caller's own cancellation: an abort detaches only this
+	 * waiter and the shared POST keeps running while another caller still needs it.
+	 */
+	private awaitRefresh(signal?: AbortSignal): Promise<string | null> {
+		const promise = this.refreshPromise
+		const waiters = this.refreshWaiters
+		// Capture the controller with the waiter set: a waiter that joined this refresh must never
+		// abort a replacement refresh it was never enrolled in.
+		const controller = this.refreshController
+		if (!promise) return Promise.resolve(null)
+		if (!waiters) return promise
+
+		const waiter: { signal?: AbortSignal } = { signal }
+		waiters.add(waiter)
+		if (!signal) {
+			// A caller without an AbortSignal cannot detach: keep it registered until the shared
+			// POST settles so an aborting signaled caller cannot cancel a refresh this caller needs.
+			return promise.finally(() => {
+				waiters.delete(waiter)
+			})
+		}
+		if (signal.aborted) {
+			waiters.delete(waiter)
+			if (waiters.size === 0) controller?.abort(signal.reason)
+			return Promise.reject(createOAuthAbortError())
+		}
+		return new Promise<string | null>((resolve, reject) => {
+			let settled = false
+			const cleanup = () => {
+				settled = true
+				waiters.delete(waiter)
+				signal.removeEventListener("abort", onAbort)
+			}
+			const onAbort = () => {
+				if (settled) return
+				cleanup()
+				reject(createOAuthAbortError())
+				// Abort the shared POST only when nobody else is waiting for its result.
+				if (waiters.size === 0) controller?.abort(signal.reason)
+			}
+			signal.addEventListener("abort", onAbort, { once: true })
+			void promise.then(
+				(value) => {
+					if (settled) return
+					cleanup()
+					resolve(value)
+				},
+				(error) => {
+					if (settled) return
+					cleanup()
+					reject(error)
+				},
+			)
+		})
+	}
+
+	async forceRefreshAccessToken(signal?: AbortSignal): Promise<string | null> {
+		return this.getAccessToken(true, signal)
 	}
 
 	async startAuthorization(): Promise<KimiCodeDeviceAuthorization> {

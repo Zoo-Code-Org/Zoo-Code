@@ -98,6 +98,33 @@ describe("Kimi Code model discovery", () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
+	// The handler calls this fetcher from a Task-scoped request path, so the caller's
+	// cancellation - not just the 10s ceiling - has to own the discovery request.
+	it("rejects before the request when the caller signal is already aborted", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch")
+		await expect(getKimiCodeModels("token", { signal: AbortSignal.abort() })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
+	it("aborts the in-flight models request when the caller signal aborts", async () => {
+		vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+			})
+		})
+		const controller = new AbortController()
+		const result = getKimiCodeModels("token", { signal: controller.signal })
+		const reason = new Error("caller cancelled")
+		controller.abort(reason)
+
+		await expect(result).rejects.toBe(reason)
+		// The fetch must observe a signal that follows the caller, proving the caller signal
+		// was merged with the timeout bound rather than dropped.
+		expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true)
+	})
+
 	it("overrides maxTokens from server max_tokens in mapKimiCodeModel", () => {
 		const mapped = mapKimiCodeModel({
 			id: "kimi-for-coding",
