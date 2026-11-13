@@ -84,3 +84,36 @@ export const waitUntilCompleted = async ({
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * The per-view mode pin and the view-local buffer are cleared here because no public
+ * door on RooCodeAPI clears them: `cancelTask()` rehydrates the task from its history
+ * item, which writes both, and a later suite would otherwise resolve the provider that
+ * pin points at instead of the one its own setup configured. The two private clear
+ * helpers are read off the exports object through a widened alias and verified by a
+ * type guard, so a surface change fails loudly instead of silently skipping the clear.
+ */
+type ViewStateClearDoor = {
+	_clearViewLocalState?: () => void
+	clearPersistedViewState?: () => Promise<void>
+	viewStateId?: string
+}
+
+type ViewStateCarryingApi = RooCodeAPI & { sidebarProvider?: ViewStateClearDoor }
+
+const isViewStateClearDoor = (value: unknown): value is ViewStateClearDoor =>
+	typeof value === "object" && value !== null && "_clearViewLocalState" in value && "clearPersistedViewState" in value
+
+export const clearViewStateBetweenSuites = async (api: RooCodeAPI): Promise<void> => {
+	const provider = (api as ViewStateCarryingApi)["sidebarProvider"]
+
+	if (!isViewStateClearDoor(provider)) {
+		console.log("[view-state-teardown] exports object carries no view-state clear door; nothing cleared")
+		return
+	}
+
+	const viewStateId = typeof provider["viewStateId"] === "string" ? provider["viewStateId"] : "unset"
+	await provider["clearPersistedViewState"]?.()
+	provider["_clearViewLocalState"]?.()
+	console.log(`[view-state-teardown] cleared the persisted entry and the view-local buffer for viewId=${viewStateId}`)
+}
