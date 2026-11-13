@@ -2,7 +2,7 @@ import type { Disposable, Event } from "vscode"
 import type { IndexingErrorClassification } from "./shared/indexing-errors"
 import type { RetryBudget, RetryFailure } from "./shared/retry-policy"
 
-export type FileFailureActivity = "read" | "parse" | "embed" | "upsert" | "delete" | "verify"
+export type FileFailureActivity = "read" | "parse" | "embed" | "upsert" | "delete"
 export type FileFailureState = "retrying" | "exhausted"
 export const REMOVAL_REVISION = "removed"
 export const UNKNOWN_REVISION = "unread"

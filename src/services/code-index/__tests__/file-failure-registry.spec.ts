@@ -1,7 +1,7 @@
 import { FileFailureRegistry } from "../file-failure-registry"
 
 describe("FileFailureRegistry", () => {
-	it("shares retry counters only within one path, revision and operation", () => {
+	it("CI-FR-01/02: batches of one revision share a budget; a new revision or reset refills it", () => {
 		const registry = new FileFailureRegistry()
 		registry.renew("a.ts", "one")
 		registry.renew("b.ts", "one")
@@ -52,7 +52,7 @@ describe("FileFailureRegistry", () => {
 		registry.resetAllBudgets()
 		expect(registry.hasRevisionFailure("a.ts", "two")).toBe(false)
 		expect(registry.has("a.ts")).toBe(true)
-		registry.record("a.ts", "two", "verify", "failed again", 1, "exhausted")
+		registry.record("a.ts", "two", "delete", "failed again", 1, "exhausted")
 		registry.clear("a.ts", "two")
 		expect(registry.hasRevisionFailure("a.ts", "two")).toBe(false)
 	})
@@ -78,8 +78,8 @@ describe("FileFailureRegistry", () => {
 		const subscription = registry.onDidRecord(records)
 		registry.onDidChange(changed)
 		registry.renew("a.ts", "hash")
-		registry.record("a.ts", "hash", "verify", "busy", 1, "retrying", "rate-limit")
-		registry.record("a.ts", "hash", "verify", "busy", 2, "retrying", "rate-limit")
+		registry.record("a.ts", "hash", "upsert", "busy", 1, "retrying", "server")
+		registry.record("a.ts", "hash", "upsert", "busy", 2, "retrying", "server")
 		expect(records).toHaveBeenCalledTimes(2)
 		expect(changed).toHaveBeenCalledTimes(2)
 		registry.list()[0].reason = "mutated"
@@ -87,5 +87,14 @@ describe("FileFailureRegistry", () => {
 		subscription.dispose()
 		registry.clear("a.ts")
 		expect(records).toHaveBeenCalledTimes(2)
+	})
+	it("CI-FR-03: a success clears the entry for that path only", () => {
+		const registry = new FileFailureRegistry()
+		registry.renew("a.ts", "one")
+		registry.renew("b.ts", "one")
+		registry.record("a.ts", "one", "read", "denied", 1, "exhausted")
+		registry.record("b.ts", "one", "parse", "bad", 1, "exhausted")
+		registry.clear("a.ts", "one")
+		expect(registry.list().map((failure) => failure.path)).toEqual(["b.ts"])
 	})
 })

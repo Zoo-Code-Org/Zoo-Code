@@ -9,9 +9,34 @@ import {
 	isSourceMissing,
 	readSource,
 	SOURCE_MISSING,
+	isQuotaError,
 } from "../indexing-errors"
 import { formatEmbeddingError } from "../validation-helpers"
 import { IndexingRetryError } from "../indexing-errors"
+
+describe("quota 429 classification", () => {
+	it.each([
+		["code", { status: 429, code: "insufficient_quota" }],
+		["type", { status: 429, type: "insufficient_quota" }],
+		["nested body", { status: 429, error: { code: "insufficient_quota" } }],
+	])("CI-IE-01: insufficient_quota by %s is permanent", (_label, error) => {
+		expect(classifyIndexingError(error)).toBe("permanent")
+		expect(isQuotaError(error)).toBe(true)
+	})
+
+	it.each([
+		["quota wording", { status: 429, message: "You exceeded your current quota per minute" }],
+		["RESOURCE_EXHAUSTED", { status: 429, code: "RESOURCE_EXHAUSTED" }],
+		["unknown body", { status: 429, error: { code: "something_else" } }],
+	])("CI-IE-02: %s stays rate-limit", (_label, error) => {
+		expect(classifyIndexingError(error)).toBe("rate-limit")
+		expect(isQuotaError(error)).toBe(false)
+	})
+
+	it("is not a quota error without a 429 status", () => {
+		expect(isQuotaError({ status: 400, code: "insufficient_quota" })).toBe(false)
+	})
+})
 
 vi.mock("../../../../i18n", () => ({ t: (key: string) => key }))
 

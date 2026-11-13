@@ -13,6 +13,8 @@ type ErrorDetails = {
 type ErrorShape = ErrorDetails & {
 	name?: string
 	code?: string
+	type?: string
+	error?: { code?: string; type?: string }
 	status?: number
 	headers?: RetryAfterHeaders
 	response?: { status?: number }
@@ -131,7 +133,7 @@ export function classifyIndexingError(error: unknown, signal?: AbortSignal): Ind
 	if (chain.some((entry) => entry instanceof APIUserAbortError || entry.name === "AbortError")) return "permanent"
 	const status = getIndexingErrorStatusCode(error)
 	if (status !== undefined) {
-		if (status === 429) return "rate-limit"
+		if (status === 429) return isQuotaExhausted(chain) ? "permanent" : "rate-limit"
 		return status >= 500 && status < 600 ? "server" : "permanent"
 	}
 	const networkCodes = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "EPIPE"])
@@ -152,6 +154,17 @@ export function classifyIndexingError(error: unknown, signal?: AbortSignal): Ind
 		}
 	}
 	return "permanent"
+}
+
+// Only the structured OpenAI-style marker counts: per-minute throttle bodies can also mention "quota".
+function isQuotaExhausted(chain: ErrorShape[]): boolean {
+	return chain.some((entry) =>
+		[entry.code, entry.type, entry.error?.code, entry.error?.type].includes("insufficient_quota"),
+	)
+}
+
+export function isQuotaError(error: unknown): boolean {
+	return getIndexingErrorStatusCode(error) === 429 && isQuotaExhausted(errorChain(error))
 }
 
 class IndexingError extends Error {

@@ -1,4 +1,3 @@
-import "../../__tests__/mock-code-index-log"
 import { ProviderPacer } from "../../provider-pacer"
 import { retryWithPolicy, type RetryFailure } from "../retry-policy"
 import { EmbeddingError, IndexingRetryError } from "../indexing-errors"
@@ -48,7 +47,7 @@ it("paces repeated limits even after both retries were consumed, then preserves 
 })
 
 it.each([undefined, 100, 2000, 60_000, 120_000, NaN, -1])(
-	"rethrows rate limits unchanged before callbacks or budget use: %s",
+	"CI-RP-03: rethrows rate limits unchanged before callbacks or budget use: %s",
 	async (retryAfterMs) => {
 		const original = Object.freeze(new EmbeddingError("limited", { status: 429 }, { retryAfterMs }))
 		const request = vi.fn().mockRejectedValue(original)
@@ -62,7 +61,7 @@ it.each([undefined, 100, 2000, 60_000, 120_000, NaN, -1])(
 	},
 )
 
-it.each([503, { code: "ECONNRESET" }])("retains bounded connection/server waits: %s", async (failure) => {
+it.each([503, { code: "ECONNRESET" }])("CI-RP-01/02: at most 3 requests, waits 500 ms then 1 s: %s", async (failure) => {
 	const cause = typeof failure === "number" ? { status: failure } : failure
 	const request = vi.fn().mockRejectedValue(new EmbeddingError("failed", cause))
 	const failures: RetryFailure[] = []
@@ -79,7 +78,7 @@ it.each([503, { code: "ECONNRESET" }])("retains bounded connection/server waits:
 	expect(request).toHaveBeenCalledTimes(3)
 })
 
-it("aborts a long wait without another request", async () => {
+it("CI-RP-02: abort ends a wait at once without another request", async () => {
 	const controller = new AbortController()
 	const request = vi.fn().mockRejectedValue(new EmbeddingError("unavailable", { status: 503 }))
 	const pending = retryWithPolicy(request, { signal: controller.signal }).catch((error) => error)
@@ -90,7 +89,7 @@ it("aborts a long wait without another request", async () => {
 	expect(request).toHaveBeenCalledOnce()
 })
 
-it.each([401, 408, 409])("does not retry permanent HTTP %s", async (status) => {
+it.each([401, 408, 409])("CI-RP-04: does not retry permanent HTTP %s", async (status) => {
 	const request = vi.fn().mockRejectedValue(new EmbeddingError("failed", { status }))
 	await expect(retryWithPolicy(request)).rejects.toMatchObject({
 		attempts: 1,
@@ -151,14 +150,14 @@ it("T33 keeps independent metadata when one error is reused across operations", 
 	const firstPending = retryWithPolicy(request, { activity: "upsert" }).catch((error) => error)
 	await vi.advanceTimersByTimeAsync(1500)
 	const first = await firstPending
-	const second = await retryWithPolicy(request, { activity: "verify", budget: { retriesUsed: 2 } }).catch(
+	const second = await retryWithPolicy(request, { activity: "delete", budget: { retriesUsed: 2 } }).catch(
 		(error) => error,
 	)
 	expect(first).toBeInstanceOf(IndexingRetryError)
 	expect(second).toBeInstanceOf(IndexingRetryError)
 	expect(first).not.toBe(second)
 	expect(first).toMatchObject({ attempts: 3, activity: "upsert", classification: "server", statusCode: 503 })
-	expect(second).toMatchObject({ attempts: 3, activity: "verify", classification: "server", statusCode: 503 })
+	expect(second).toMatchObject({ attempts: 3, activity: "delete", classification: "server", statusCode: 503 })
 	expect((first as IndexingRetryError).cause).toBe(original)
 	expect((second as IndexingRetryError).cause).toBe(original)
 	expect(Object.getOwnPropertyDescriptors(original)).toEqual(properties)
