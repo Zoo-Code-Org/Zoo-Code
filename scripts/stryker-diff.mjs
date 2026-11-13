@@ -13,6 +13,22 @@ export const MAX_MUTANTS = 400
 
 export const PR_COMMENT_MARKER = "<!-- zoo-code-mutation-report -->"
 export const PR_COMMENT_FILENAME = "pr-comment.md"
+// A rejection is an outcome of the run, so it is recorded where the run records everything else. The
+// artifact step uploads whatever the report root holds, and a rejection that leaves that directory
+// empty leaves the reviewer a red mark and nothing to open.
+export const REJECTION_FILENAME = "mutation-gate-rejection.md"
+// The engine declares its own initial-test-run budget in its schema
+// (node_modules/@stryker-mutator/core/schema/stryker-schema.json, key dryRunTimeoutMinutes) with a
+// default of 5 minutes, and this repository's stryker.config.mjs does not override it. A whole-delta
+// run that stops inside that default budget has not been measured: it has run out of budget. The tool
+// therefore states the budget it passed instead of letting an engine default read as a verdict.
+export const ENGINE_DEFAULT_DRY_RUN_MINUTES = 5
+export const DRY_RUN_TIMEOUT_MINUTES = 20
+// The outer kill stays above the budget handed to the engine, so the engine - not this tool - is the
+// one that decides when an initial test run stops.
+export const SPAWN_GRACE_MINUTES = 5
+export const spawnTimeoutMs = (DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES) * 60 * 1_000
+const dryRunBudgetLabel = `initial-test-run budget ${DRY_RUN_TIMEOUT_MINUTES} min (engine schema default ${ENGINE_DEFAULT_DRY_RUN_MINUTES} min)`
 
 export const PACKAGE_CONFIGS = [
 	{
@@ -351,9 +367,61 @@ export function shouldUseVitestRelated(packageEntry) {
 	return (packageEntry.testFiles?.length ?? 0) === 0 && packageEntry.vitestRelated !== false
 }
 
+// Read the executable entry the package itself declares in its package.json "bin" field, so the file
+// that runs is the one the engine names rather than whichever extensionless shim libuv happens to
+// resolve on this platform. Returns undefined when no such declaration exists, leaving the old shim
+// lookup as the fallback.
+export function resolveDeclaredBinEntry(repoRoot, runRoot, packageName, binName, packageRoot) {
+	for (const root of [
+		...new Set([runRoot, packageRoot, repoRoot].filter((candidate) => typeof candidate === "string")),
+	]) {
+		const packageDir = path.join(root, "node_modules", packageName)
+		const manifestPath = path.join(packageDir, "package.json")
+		if (!fs.existsSync(manifestPath)) {
+			continue
+		}
+		let declared
+		try {
+			declared = JSON.parse(fs.readFileSync(manifestPath, "utf8")).bin
+		} catch {
+			continue
+		}
+		const entry = typeof declared === "string" ? declared : declared?.[binName]
+		if (typeof entry !== "string") {
+			continue
+		}
+		const target = path.join(packageDir, entry.replace(/^\.\//, ""))
+		if (fs.existsSync(target)) {
+			return target
+		}
+	}
+	return undefined
+}
+
+// A bare node_modules/.bin/<name> file is the POSIX shell wrapper; on Windows the runnable files are
+// the .cmd and .ps1 siblings, and picking between them is libuv's extension guess. When the target is
+// already a JavaScript entry, run it with the Node binary that is executing this tool.
+function spawnDeclaredEntry(binary, args, options) {
+	if (/\.[cm]?jsx?$/i.test(binary)) {
+		return spawnSync(process.execPath, [binary, ...args], options)
+	}
+	return spawnSync(binary, args, options)
+}
+
+export function resolveStrykerBinary(repoRoot, runRoot) {
+	return (
+		resolveDeclaredBinEntry(repoRoot, runRoot, "@stryker-mutator/core", "stryker") ??
+		path.join(repoRoot, "node_modules/.bin/stryker")
+	)
+}
+
 export function resolveVitestBinary(repoRoot, packageEntry) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
+	const declared = resolveDeclaredBinEntry(repoRoot, runRoot, "vitest", "vitest", packageRoot)
+	if (declared) {
+		return declared
+	}
 	const candidates = [...new Set([runRoot, packageRoot, repoRoot])].map((root) =>
 		path.join(root, "node_modules/.bin/vitest"),
 	)
@@ -370,7 +438,7 @@ export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory
 	const outputFile = path.join(reportDirectory, "vitest-related.json")
 	const configFile = path.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig)).replaceAll("\\", "/")
 	const sourceFiles = [...new Set(packageEntry.selectors.map(selectorFile))]
-	const result = spawnSync(
+	const result = spawnDeclaredEntry(
 		resolveVitestBinary(repoRoot, packageEntry),
 		["related", ...sourceFiles, "--run", "--config", configFile, "--reporter=json", `--outputFile=${outputFile}`],
 		{
@@ -417,11 +485,17 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 		packageEntry.selectors.join(","),
 	]
 	if (dryRunOnly) args.push("--dryRunOnly", "--reporters", "clear-text", "--logLevel", "info")
+	args.push("--dryRunTimeoutMinutes", String(DRY_RUN_TIMEOUT_MINUTES))
 
-	const result = spawnSync(path.join(repoRoot, "node_modules/.bin/stryker"), args, {
+	const strykerBinary = resolveStrykerBinary(repoRoot, runRoot)
+	console.log(
+		`${packageEntry.id}: Stryker ${dryRunOnly ? "preflight" : "run"} starting via ${path.relative(repoRoot, strykerBinary)} with ${dryRunBudgetLabel}; outer kill ${DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES} min`,
+	)
+
+	const result = spawnDeclaredEntry(strykerBinary, args, {
 		cwd: runRoot,
 		encoding: "utf8",
-		timeout: 12 * 60 * 1_000,
+		timeout: spawnTimeoutMs,
 		maxBuffer: 50 * 1024 * 1024,
 		env: {
 			...process.env,
@@ -439,17 +513,17 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 	const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
 	if (result.error?.code === "ETIMEDOUT") {
 		throw new Error(
-			`${packageEntry.id} mutation run exceeded 12 minutes. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
+			`${packageEntry.id} mutation run exceeded the ${DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES} minute outer kill while running under an ${dryRunBudgetLabel}. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
 		)
 	}
 	if (result.error) {
 		throw new Error(
-			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} could not start: ${result.error.message}`,
+			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} could not start via ${path.relative(repoRoot, strykerBinary)} under an ${dryRunBudgetLabel}: ${result.error.message}`,
 		)
 	}
 	if (result.status !== 0) {
 		throw new Error(
-			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} failed:\n${stripAnsi(output).trim()}`,
+			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} failed via ${path.relative(repoRoot, strykerBinary)} under an ${dryRunBudgetLabel} (exit ${result.status}, which is not a mutant verdict on its own):\n${stripAnsi(output).trim()}`,
 		)
 	}
 
@@ -707,6 +781,39 @@ export function appendSummary(rows, advisories, manifest, commentFile) {
 	}
 }
 
+export function formatRejection(baseSha, headSha, error) {
+	return [
+		"## Changed-code mutation testing",
+
+		"The gate rejected the run before it produced a mutation report.",
+
+		`- Base: \`${baseSha.slice(0, 12)}\``,
+		`- Head: \`${headSha.slice(0, 12)}\``,
+
+		`Mutation gate rejected: ${error.message}`,
+	].join("\n")
+}
+
+export function recordRejection(reportRoot, baseSha, headSha, error) {
+	const body = formatRejection(baseSha, headSha, error)
+	try {
+		fs.mkdirSync(reportRoot, { recursive: true })
+		fs.writeFileSync(path.join(reportRoot, REJECTION_FILENAME), body)
+	} catch (error) {
+		console.warn(
+			`::warning title=Mutation test advisory::Could not write the mutation gate rejection file: ${escapeWorkflowData(error.message)}`,
+		)
+	}
+	if (!process.env.GITHUB_STEP_SUMMARY) return
+	try {
+		fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, body)
+	} catch (error) {
+		console.warn(
+			`::warning title=Mutation test advisory::Could not write the job summary: ${escapeWorkflowData(error.message)}`,
+		)
+	}
+}
+
 export function evaluateReport(report, packageEntry) {
 	const counts = mutantCounts(report)
 	const advisories = []
@@ -844,18 +951,24 @@ function main() {
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
-	const manifest = selectFromGit(repoRoot, baseSha, headSha)
-	if (manifest.packages.length === 0) {
-		appendSummary([], manifest.advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
-		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
-		return
-	}
+	try {
+		const manifest = selectFromGit(repoRoot, baseSha, headSha)
+		if (manifest.packages.length === 0) {
+			appendSummary([], manifest.advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
+			console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
+			return
+		}
 
-	console.log(
-		`Mutation-testing ${manifest.packages.length} package(s) from merge base ${manifest.mergeBase.slice(0, 12)}: ` +
-			manifest.packages.map((entry) => `${entry.id} (${entry.changedExecutableLines} lines)`).join(", "),
-	)
-	runManifest(repoRoot, manifest, reportRoot)
+		console.log(
+			`Mutation-testing ${manifest.packages.length} package(s) from merge base ${manifest.mergeBase.slice(0, 12)}: ` +
+				manifest.packages.map((entry) => `${entry.id} (${entry.changedExecutableLines} lines)`).join(", "),
+		)
+		runManifest(repoRoot, manifest, reportRoot)
+	} catch (error) {
+		// The rejection writer never throws, so the attempt to record cannot replace the rejection.
+		recordRejection(reportRoot, baseSha, headSha, error)
+		throw error
+	}
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
