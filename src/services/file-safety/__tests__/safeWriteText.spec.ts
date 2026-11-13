@@ -55,6 +55,49 @@ vi.mock("child_process", () => ({
 // Minimal stand-in for the ChildProcess that callback-form execFile returns.
 const fakeChild = { kill: () => true } as unknown as ChildProcess
 
+// The writer takes the account name for its Windows grant from os.userInfo(), which on a hosted lane
+// is whichever user that lane runs as. This file mocks os.userInfo() with a plain stand-in - a spy on
+// an ES module namespace is refused at runtime - so the account named in the grant below is named
+// here instead of being inherited from the host, and every row in the file sees the same one.
+const ACL_TEST_ACCOUNT = "acl-test-account"
+let aclAccountName = ACL_TEST_ACCOUNT
+
+vi.mock("os", async () => {
+	const actual = await vi.importActual<typeof import("os")>("os")
+	return {
+		...actual,
+		userInfo: () => ({ uid: 0, gid: 0, username: aclAccountName, homedir: "", shell: "" }),
+	}
+})
+
+function _useAccount(name: string): void {
+	aclAccountName = name
+}
+
+// The icacls verbs one write asked for, in the order it asked for them. A win32 self-staged write
+// asks for "narrow" (the staging directory, before any content goes into it), then "save" and
+// "restore" for the target's DACL, and "reset" only when a narrowing left this process no right to
+// stage into the directory at all.
+function _icaclsVerb(call: readonly unknown[]): string {
+	const parts = call
+		.slice(1)
+		.flatMap((part: unknown) => (Array.isArray(part) ? part.map((item: unknown) => String(item)) : [String(part)]))
+	if (parts.includes("/inheritance:r")) {
+		return "narrow"
+	}
+	if (parts.includes("/save")) {
+		return "save"
+	}
+	if (parts.includes("/restore")) {
+		return "restore"
+	}
+	return parts.includes("/reset") ? "reset" : "other"
+}
+
+function _icaclsVerbs(calls: readonly (readonly unknown[])[]): string[] {
+	return calls.map(_icaclsVerb)
+}
+
 // Helper that mirrors safeWriteText's path resolution exactly
 function _resolvedTarget(filePath: string): string {
 	return path.resolve(filePath)
@@ -233,10 +276,10 @@ describe("safeWriteText", () => {
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 			if (process.platform === "win32") {
-				// default platform is win32: the DACL save + restore still ran
-				// through the default icacls path (options?.execFileRunner must
-				// not throw when options is undefined)
-				expect(vi.mocked(execFile)).toHaveBeenCalledTimes(2)
+				// default platform is win32: the staging narrowing + the DACL save + restore still ran
+				// through the default icacls path (options?.execFileRunner must not throw when options is
+				// undefined)
+				expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save", "restore"])
 				expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 			}
 		})
@@ -698,8 +741,9 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// icacls dump + restore were called (execFile is callback-based mock)
-			expect(execFile).toHaveBeenCalledTimes(2)
+			// the staging directory was narrowed, then the target DACL was dumped and restored onto
+			// the published file (execFile is a callback-based mock)
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save", "restore"])
 		})
 
 		it("non-win32: DACL path is unreachable when platform is not win32", async () => {
@@ -727,8 +771,9 @@ describe("safeWriteText", () => {
 
 			// write succeeded despite icacls failure (fallback to plain rename)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-			// one icacls attempt only: a failed DACL apply must not try to restore
-			expect(execFile).toHaveBeenCalledTimes(1)
+			// the staging narrowing ran, and then the dump failed: a failed DACL apply must not try to
+			// restore, so two calls is the whole story here
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save"])
 		})
 
 		it("win32: reports that access rights may change when the DACL cannot be saved", async () => {
@@ -760,7 +805,7 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
 			const calls = vi.mocked(execFile).mock.calls
-			expect(calls).toHaveLength(2)
+			expect(_icaclsVerbs(calls)).toEqual(["narrow", "save", "restore"])
 			for (const call of calls) {
 				expect(call[0]).toBe("icacls")
 				// An execFile without a timeout waits for its child forever. While it waits,
@@ -792,9 +837,11 @@ describe("safeWriteText", () => {
 				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
 			).resolves.toBeUndefined()
 
-			expect(execFile).toHaveBeenCalledTimes(1)
+			// both attempts timed out, and neither is fatal: two bounded calls and no restore.
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save"])
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
 			expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
+			expect(warnings.filter((m) => m.includes("Could not narrow"))).toHaveLength(1)
 		})
 
 		it("win32: reports when the target cannot be checked for DACL preservation", async () => {
@@ -812,7 +859,9 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
 
-			expect(execFile).not.toHaveBeenCalled()
+			// The target could not be checked, so nothing was dumped and nothing was restored. The
+			// staging narrowing answers a different question and still ran.
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow"])
 			expect(warnings.filter((m) => m.includes("Could not check"))).toHaveLength(1)
 		})
 
@@ -830,11 +879,12 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// write committed; only the save was attempted (no restore from a failed dump)
+			// write committed; only the narrowing and the save were attempted (no restore from a
+			// failed dump)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 			expect(fs.rename).toHaveBeenCalledTimes(1)
-			expect(execFile).toHaveBeenCalledTimes(1)
-			const saveArgs = vi.mocked(execFile).mock.calls[0]?.[1]
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save"])
+			const saveArgs = vi.mocked(execFile).mock.calls[1]?.[1]
 			expect(saveArgs?.[1]).toBe("/save")
 			// the dump path (possibly partially created by icacls) was unlinked
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
@@ -847,18 +897,18 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { backup: true, platform: "win32" })
 
-			// icacls was called twice (save + restore)
-			expect(execFile).toHaveBeenCalledTimes(2)
+			// The staging directory is narrowed first, then the target DACL is dumped and restored
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save", "restore"])
 
-			// First call: save DACL from target before backup rename
-			const firstCall = vi.mocked(execFile).mock.calls[0]
-			expect(firstCall[0]).toBe("icacls")
-			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining("safeWriteText.acl"), "/T"])
+			// The dump: save DACL from the target before the backup rename
+			const dumpCall = vi.mocked(execFile).mock.calls[1]
+			expect(dumpCall[0]).toBe("icacls")
+			expect(dumpCall[1]).toEqual([targetPath, "/save", expect.stringContaining("safeWriteText.acl"), "/T"])
 
-			// Second call: restore DACL onto directory after commit rename
-			const secondCall = vi.mocked(execFile).mock.calls[1]
-			expect(secondCall[0]).toBe("icacls")
-			expect(secondCall[1]).toEqual([
+			// The restore: DACL onto the directory after the commit rename
+			const restoreCall = vi.mocked(execFile).mock.calls[2]
+			expect(restoreCall[0]).toBe("icacls")
+			expect(restoreCall[1]).toEqual([
 				expect.stringContaining("/tmp/test-dir"),
 				"/restore",
 				expect.stringContaining("safeWriteText.acl"),
@@ -879,13 +929,18 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { backup: true, platform: "win32" })
 
 			const callOrder = vi.mocked(execFile).mock.invocationCallOrder
+			const verbs = _icaclsVerbs(vi.mocked(execFile).mock.calls)
 			const copyOrder = vi.mocked(fs.copyFile).mock.invocationCallOrder
 			const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder
-			const saveCall = callOrder[0]
-			const restoreCall = callOrder[1]
+			const narrowCall = callOrder[verbs.indexOf("narrow")]
+			const saveCall = callOrder[verbs.indexOf("save")]
+			const restoreCall = callOrder[verbs.indexOf("restore")]
 			const backupCopy = copyOrder[0]
 			const commitRename = renameOrder[0]
 
+			// The staging directory is narrowed before anything is staged in it, and the dump is taken
+			// before the copy that could race a concurrent publish.
+			expect(narrowCall).toBeLessThan(saveCall)
 			expect(saveCall).toBeLessThan(backupCopy)
 			expect(backupCopy).toBeLessThan(commitRename)
 			expect(commitRename).toBeLessThan(restoreCall)
@@ -897,12 +952,11 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-			// icacls save succeeds, restore fails
-			let callCount = 0
-			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-				callCount++
+			// icacls narrows the staging directory and dumps the target DACL; only the restore fails.
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const failing = String(args).includes("/restore")
 				if (typeof cb === "function") {
-					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+					cb(failing ? new Error("icacls restore error") : null, "", "")
 				}
 				return fakeChild
 			})
@@ -935,11 +989,175 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// icacls was NOT called (target absent → skip DACL entirely)
-			expect(execFile).not.toHaveBeenCalled()
+			// The target was absent, so there was no DACL to save and nothing to restore. Only the
+			// staging narrowing ran.
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow"])
 
 			// no dump file created or unlinked
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+	})
+
+	// ── Test 5b: win32 staging-directory access rights ───────────────────────
+
+	describe("win32 staging DACL", () => {
+		// The platform here is an argument, not the host, so these rows run on every lane and assert
+		// the order the staging narrowing keeps against the staged write. The row that runs the real
+		// icacls against a real NTFS volume lives beside this file as
+		// safeWriteText.stagingDacl.spec.ts.
+		it("win32: narrows the staging directory before any content is staged in it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const narrowCalls: string[] = []
+			const openSyncCallsAtNarrow: number[] = []
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				if (String(args).includes("/inheritance:r")) {
+					// Nothing may have been opened in staging yet: the narrowing has to beat the staged
+					// open, because Windows hands a new file the rights its directory holds at the
+					// moment the file is created.
+					narrowCalls.push(String(args))
+					openSyncCallsAtNarrow.push(vi.mocked(fsSync.openSync).mock.calls.length)
+				}
+				if (typeof cb === "function") {
+					cb(null, "", "")
+				}
+				return fakeChild
+			})
+			const warnings: string[] = []
+			const account = ACL_TEST_ACCOUNT
+
+			await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
+
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save", "restore"])
+			expect(narrowCalls).toHaveLength(1)
+			expect(narrowCalls[0]).toContain(".file-safety-staging")
+			expect(narrowCalls[0]).toContain("/inheritance:r")
+			expect(narrowCalls[0]).toMatch(/:\(OI\)\(CI\)\(F\)$/)
+			expect(narrowCalls[0]).toContain(account)
+			expect(openSyncCallsAtNarrow).toEqual([0])
+			expect(warnings).toEqual([])
+		})
+
+		it("win32: an icacls that cannot map the principal is named by its exit code and does not stop the write", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Measured on this machine: a name that maps to no SID makes icacls exit 1332 with that
+			// message, and an empty principal makes it exit 87 printing its usage text. Neither applies
+			// an access right, so the write proceeds on the rights the directory already had.
+			const unmapped = Object.assign(new Error("No mapping between account names and security IDs was done."), {
+				code: 1332,
+			})
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") {
+					cb(unmapped, "", "")
+				}
+				return fakeChild
+			})
+			const warnings: string[] = []
+
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+			expect(warnings.filter((m) => m.includes("Could not narrow"))).toHaveLength(1)
+			expect(String(warnings[0])).toContain("1332")
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "save"])
+		})
+
+		it("win32: with no account name to grant to, no child is started and the write still commits", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			_useAccount("")
+			const savedUsername = process.env.USERNAME
+			const savedLogname = process.env.LOGNAME
+			process.env.USERNAME = ""
+			process.env.LOGNAME = ""
+			const warnings: string[] = []
+			try {
+				await expect(
+					safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+				).resolves.toBeUndefined()
+			} finally {
+				process.env.USERNAME = savedUsername
+				process.env.LOGNAME = savedLogname
+				_useAccount(ACL_TEST_ACCOUNT)
+			}
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["save", "restore"])
+			expect(warnings.filter((m) => m.includes("no account name"))).toHaveLength(1)
+		})
+
+		it("win32: a narrowing that leaves no right for this process resets the directory and still stages", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const resetCalls: string[] = []
+			// Measured on this machine: with the grant addressed to an account this process does not
+			// carry, listing, opening and writing inside the staging directory each answered EPERM. The
+			// staged open is where that shows up, so the first open fails and the open after the reset
+			// succeeds.
+			let firstOpenFailed = false
+			vi.mocked(fsSync.openSync).mockImplementation((target: unknown) => {
+				if (String(target).includes(".file-safety-staging") && !firstOpenFailed) {
+					firstOpenFailed = true
+					throw Object.assign(new Error("EPERM: operation not permitted, open"), { code: "EPERM" })
+				}
+				return 1
+			})
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				if (String(args).includes("/reset")) {
+					resetCalls.push(String(args))
+				}
+				if (typeof cb === "function") {
+					cb(null, "", "")
+				}
+				return fakeChild
+			})
+			const warnings: string[] = []
+
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
+
+			expect(resetCalls).toHaveLength(1)
+			expect(resetCalls[0]).toContain(".file-safety-staging")
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow", "reset", "save", "restore"])
+			expect(warnings.filter((m) => m.includes("inherited rights were restored"))).toHaveLength(1)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+		})
+
+		it("win32: an EPERM on the staged open still fails the write when this write never narrowed the directory", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const resetCalls: string[] = []
+			vi.mocked(fsSync.openSync).mockImplementation(() => {
+				throw Object.assign(new Error("EPERM: operation not permitted, open"), { code: "EPERM" })
+			})
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				if (String(args).includes("/reset")) {
+					resetCalls.push(String(args))
+				}
+				if (typeof cb === "function") {
+					cb(new Error("icacls error"), "", "")
+				}
+				return fakeChild
+			})
+			const warnings: string[] = []
+
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).rejects.toThrow("EPERM")
+
+			// The narrowing was attempted and failed, so a lockout is not this write's to undo: no
+			// reset, no retry, and the original failure reaches the caller.
+			expect(resetCalls).toEqual([])
+			expect(_icaclsVerbs(vi.mocked(execFile).mock.calls)).toEqual(["narrow"])
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(warnings.filter((m) => m.includes("inherited rights were restored"))).toHaveLength(0)
 		})
 	})
 

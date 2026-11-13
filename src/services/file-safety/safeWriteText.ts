@@ -1,5 +1,6 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
+import * as os from "os"
 import * as path from "path"
 
 import { computeVersionToken } from "../../utils/versionToken"
@@ -145,7 +146,11 @@ function _stagingDir(dir: string): string {
 	const sd = path.join(dir, ".file-safety-staging_" + Date.now() + "_" + Math.random().toString(36).substring(2))
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
-	// existing directory), so staged temp files are never group/world readable.
+	// existing directory), so on POSIX staged temp files are never group/world readable.
+	// On Windows the mode is no restriction at all: icacls on a staging directory created and
+	// chmodSync-d exactly this way still lists inherited read for BUILTIN\Users and inherited
+	// modify for NT AUTHORITY\Authenticated Users, which is why _restrictStagingDaclWindows sets
+	// the DACL before any content goes into the directory.
 	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
 	try {
 		fsSync.chmodSync(sd, 0o700)
@@ -217,6 +222,96 @@ async function _restoreDaclWindows(
 	} catch {
 		return false
 	}
+}
+
+/**
+ * The account name a Windows DACL grant can be addressed to, or null when the host offers none.
+ *
+ * icacls refuses a principal it cannot map and leaves the directory alone: measured with the real
+ * icacls on this machine's own volume, an empty principal makes it exit 87 and print its usage text,
+ * and a name that maps to no SID makes it exit 1332 printing "No mapping between account names and
+ * security IDs was done." os.userInfo reports an account name on a host where USERNAME is empty, so
+ * it is asked first; with no name at all there is nothing to grant to, and a child process that can
+ * only fail is not worth starting.
+ */
+function _windowsGrantPrincipal(): string | null {
+	const candidates: (string | undefined)[] = []
+	try {
+		candidates.push(os.userInfo().username)
+	} catch {
+		// userInfo can fail on a constrained host; the environment spellings are the fallback.
+	}
+	candidates.push(process.env.USERNAME, process.env.LOGNAME)
+	for (const candidate of candidates) {
+		const name = (candidate ?? "").trim()
+		// icacls reads a principal as "<name>:(<rights>)", so a name carrying a colon or a parenthesis
+		// would turn one argument into two different meanings.
+		if (name !== "" && !name.includes(":") && !name.includes("(") && !name.includes(")")) {
+			return name
+		}
+	}
+	return null
+}
+
+/**
+ * Run one icacls command under the same bound the target-DACL steps use, and report its exit code
+ * instead of throwing: everything here treats icacls as advisory, exactly as the steps that save
+ * and restore the target's DACL already do.
+ */
+async function _runIcaclsWindows(
+	args: string[],
+	execFileRunner?: typeof execFile,
+): Promise<{ ok: true } | { ok: false; code: number | string }> {
+	const runner = execFileRunner ?? execFile
+	try {
+		await new Promise<void>((resolve, reject) => {
+			runner("icacls", args, { timeout: DACL_COMMAND_TIMEOUT_MS, windowsHide: true }, (err) =>
+				err ? reject(err) : resolve(),
+			)
+		})
+		return { ok: true }
+	} catch (error: unknown) {
+		const code = (error as { code?: number | string }).code
+		return { ok: false, code: code ?? "unknown" }
+	}
+}
+
+/**
+ * Narrow the access rights of the staging directory this write created, on Windows, before any
+ * content is written into it.
+ *
+ * Windows gives a new file the access rights its directory holds at the moment the file is created,
+ * so the narrowing has to land before Step 1 puts a byte into the directory. Measured on this
+ * machine: a file staged into a directory that was narrowed only afterwards does lose the inherited
+ * rights in the end, but it sat readable to BUILTIN\Users for the whole time it was there, and that
+ * window is what this step closes. Returns the directory the narrowing actually landed on - so the
+ * caller knows that a later lockout is this write's own doing and worth undoing - plus the notice to
+ * report, in the shape this module already uses for a failing icacls on the target: skip the DACL
+ * work, commit the write, tell the caller. A host without icacls, a principal that maps to no SID
+ * and a child that never returns are all non-fatal here.
+ */
+async function _restrictStagingDaclWindows(
+	stagingDir: string,
+	execFileRunner?: typeof execFile,
+): Promise<{ appliedTo: string | null; notice: string | null }> {
+	const principal = _windowsGrantPrincipal()
+	if (principal === null) {
+		return {
+			appliedTo: null,
+			notice: "Could not narrow the access rights of the staging directory: this process offered no account name to grant them to.",
+		}
+	}
+	const restricted = await _runIcaclsWindows(
+		[stagingDir, "/inheritance:r", "/grant:r", `${principal}:(OI)(CI)(F)`],
+		execFileRunner,
+	)
+	if (!restricted.ok) {
+		return {
+			appliedTo: null,
+			notice: `Could not narrow the access rights of ${stagingDir} (icacls exited ${restricted.code}); the directory keeps the rights it inherited.`,
+		}
+	}
+	return { appliedTo: stagingDir, notice: null }
 }
 
 // -- public API ------------------------------------------------------------
@@ -515,6 +610,52 @@ export async function safeWriteText(
 	await fs.mkdir(dirPath, { recursive: true })
 	await fs.access(dirPath)
 
+	const platform = options?.platform ?? process.platform
+	// Warning delivery must never abort the write: the notices below describe a publish that went
+	// ahead imperfectly - some of them land before the commit - and a caller whose callback throws (a UI
+	// sink, a logger that is mid-restart) must not turn that into a failed save.
+	const warn = (message: string) => {
+		const report = (label: string, error: unknown) => {
+			console.warn(
+				`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+		try {
+			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+			const result: unknown = sink(message)
+			// A sink may be async - TypeScript accepts a value-returning callback where
+			// a void one is expected. Awaiting it would let warning delivery delay a
+			// write that has already committed (and hang it if the sink never settles),
+			// while leaving the promise unhandled turns a rejection into an unhandled
+			// rejection, which under Node's default mode can end the process after a
+			// successful write. Attach a handler without awaiting.
+			if (result instanceof Promise) {
+				result.catch((error: unknown) => report("rejected", error))
+			}
+		} catch (error: unknown) {
+			report("failed", error)
+		}
+	}
+
+	// -- Step 0 (win32): narrow the staging directory BEFORE any content is staged in it -----
+	// The 0o700 mode _stagingDir asks for carries no weight on Windows: measured with the real icacls,
+	// a staging directory created with that mode and chmodSync-d to it afterwards still lists
+	// inherited read for BUILTIN\Users and inherited modify for NT AUTHORITY\Authenticated Users, the
+	// same rights the target's parent directory holds, so every byte a save stages is readable to
+	// other logins for as long as it sits there. Narrowing the directory before the staged file is
+	// created hands that file the narrow rights from its first byte. Only the staging directory this
+	// write created is touched (its name is unique per write), and a caller-supplied staging path
+	// lives beside the target rather than in here, so neither the caller's directory nor another
+	// write's staging is narrowed by this call.
+	let stagingDaclAppliedTo: string | null = null
+	if (platform === "win32" && stagingDir !== null) {
+		const stagingDacl = await _restrictStagingDaclWindows(stagingDir, options?.execFileRunner)
+		if (stagingDacl.notice !== null) {
+			warn(stagingDacl.notice)
+		}
+		stagingDaclAppliedTo = stagingDacl.appliedTo
+	}
+
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
 	// Whether the commit rename ran. A failure after it is a durability problem
@@ -550,7 +691,28 @@ export async function safeWriteText(
 			// existing 0o664 target would be published as 0o644 through the
 			// rename. Apply the existing target's exact mode on the fd, as the
 			// caller-staged branch does; a fresh target keeps the default mode.
-			const fd = fsSync.openSync(tempPath, "w", targetMode)
+
+			// The staged open doubles as the rights check for the directory narrowed above. When the grant
+			// names an account this process does not carry, the directory holds no access right for its own
+			// writer, and that surfaces here as EPERM or EACCES on the open: measured on this machine,
+			// listing, opening and writing inside such a directory each answered EPERM. Hand the inherited
+			// rights back and try once - and only when this write was the one that narrowed the directory,
+			// because a path somebody else narrowed is not this write's to widen. Any other failure
+			// propagates unchanged.
+			let fd: number
+			try {
+				fd = fsSync.openSync(tempPath, "w", targetMode)
+			} catch (error: unknown) {
+				const openCode = errorCode(error)
+				if (stagingDaclAppliedTo === null || (openCode !== "EPERM" && openCode !== "EACCES")) {
+					throw error
+				}
+				await _runIcaclsWindows([stagingDaclAppliedTo, "/reset"], options?.execFileRunner)
+				warn(
+					`Restricting ${stagingDaclAppliedTo} left it without an access right for this process (${openCode}); its inherited rights were restored and the content is staged under them.`,
+				)
+				fd = fsSync.openSync(tempPath, "w", targetMode)
+			}
 			try {
 				if (targetExists) {
 					fsSync.fchmodSync(fd, targetMode)
@@ -607,32 +769,6 @@ export async function safeWriteText(
 		}
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
-		const platform = options?.platform ?? process.platform
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
-		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
