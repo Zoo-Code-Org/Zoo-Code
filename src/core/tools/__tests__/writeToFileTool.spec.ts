@@ -749,6 +749,29 @@ describe("writeToFileTool", () => {
 				expect.stringContaining("editedExistingFile"),
 			)
 		})
+
+		it("hands the report the results of its own save instead of leaving it to read the provider", async () => {
+			// The provider parks both results and the report used to read them back from there. A second
+			// write on the same provider parks its own pair in between, and the report then names the
+			// other write's patch and problems. The call now carries its own pair to the report.
+			const userEditsValue = "- old line\n+ new line"
+			mockCline.diffViewProvider.saveChanges.mockResolvedValue({
+				newProblemsMessage: " with warnings",
+				userEdits: userEditsValue,
+				finalContent: "modified content",
+			})
+			mockCline.diffViewProvider.userEdits = "- other old line\n+ other new line"
+			mockCline.diffViewProvider.newProblemsMessage = " warnings from the other write"
+
+			await executeWriteFileTool({}, { fileExists: true })
+
+			expect(mockCline.diffViewProvider.pushToolWriteResult).toHaveBeenCalledWith(
+				mockCline,
+				mockCline.cwd,
+				false,
+				{ newProblemsMessage: " with warnings", userEdits: userEditsValue, finalContent: "modified content" },
+			)
+		})
 	})
 
 	describe("error handling", () => {

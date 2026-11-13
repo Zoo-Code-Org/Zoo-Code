@@ -1067,6 +1067,55 @@ describe("DiffViewProvider", () => {
 		})
 	})
 
+	describe("pushToolWriteResult result scoping", () => {
+		beforeEach(() => {
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider["preDiagnostics"] = []
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+		})
+
+		it("lines 520 and 527: reports the patch of the save whose call it reports, not of the save that parked last", async () => {
+			// Two saves on one provider, which is the interleaving the thread describes: the first
+			// edit's report is serialized only after a second edit has parked its own pair on the
+			// provider. A report that reads the parked pair hands the second edit's patch to the first
+			// edit's caller, under the first edit's path.
+			const say = vi.fn().mockResolvedValue(undefined)
+			// pushToolWriteResult only reaches task.say(), so the double carries only that member.
+			const reportTask = { say } as unknown as Task
+
+			diffViewProvider["newContent"] = "aaa"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({ getText: vi.fn().mockReturnValue("aaa\nuser typed one"), isDirty: false }),
+			})
+			const saveA = await diffViewProvider.saveChanges(false, 0)
+
+			diffViewProvider["newContent"] = "bbb"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({ getText: vi.fn().mockReturnValue("bbb\nuser typed two"), isDirty: false }),
+			})
+			const saveB = await diffViewProvider.saveChanges(false, 0)
+
+			// Both saves typed a patch, and the parked pair now holds save B.
+			expect(saveA.userEdits).toBeTruthy()
+			expect(saveB.userEdits).toBeTruthy()
+			expect(saveA.userEdits).not.toBe(saveB.userEdits)
+			expect(diffViewProvider.userEdits).toBe(saveB.userEdits)
+
+			const reportA: { path: string; user_edits?: string } = JSON.parse(
+				await diffViewProvider.pushToolWriteResult(reportTask, mockCwd, false, saveA),
+			)
+
+			expect(reportA.user_edits).toBe(saveA.userEdits)
+			expect(reportA.path).toBe("test.ts")
+			const card: { tool: string; path: string; diff: string } = JSON.parse(String(say.mock.calls[0]?.[1]))
+
+			expect(card.tool).toBe("editedExistingFile")
+			expect(card.diff).toBe(saveA.userEdits)
+			expect(card.diff).not.toBe(saveB.userEdits)
+		})
+	})
+
 	describe("preEditScrollLine capture and restore", () => {
 		it("should capture scroll line from visible editor at open() time", async () => {
 			const mockEditor = makeTextEditor({

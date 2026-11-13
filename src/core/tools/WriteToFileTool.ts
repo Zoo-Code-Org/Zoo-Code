@@ -14,6 +14,7 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
+import type { WriteSaveResults } from "../../integrations/editor/DiffViewProvider"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
@@ -410,6 +411,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
 			)
 
+			// Whatever this write's own save computed. Both save paths report the pair, and the report
+			// below is built from it rather than from the copies parked on the shared provider, which a
+			// retry or another write can overwrite before the report is serialized.
+			let saveResults: WriteSaveResults | undefined
+
 			if (isPreventFocusDisruptionEnabled) {
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
 				if (fileExists) {
@@ -446,7 +452,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				saveResults = await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+				)
 				// saveDirectly() performs the write itself and reports a failing write, so returning
 				// means the content is on disk: from here the rollback has to stand down.
 				writeCommitted = true
@@ -485,7 +497,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, () => {
+				saveResults = await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, () => {
 					// Signalled by saveChanges() at the document save, not when it returns: the editor
 					// bookkeeping and diagnostics that follow can still reject, and by then the file
 					// has already landed.
@@ -499,7 +511,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			task.didEditFile = true
 
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists, saveResults)
 
 			pushToolResult(message)
 
