@@ -2272,22 +2272,30 @@ describe("created root in the extended-length namespace", () => {
 			typeof args[3] === "number" ? args[3] : 0,
 		)
 	})
-	conditionalIt("refuses to publish when the created UNC directory resolves under nothing the caller pinned", async () => {
-		const pin = _uncScenario(true)
-		const promise = safeWriteText(target, "data", {
-			platform: "linux",
-			expectedAncestorIdentities: pin,
-		})
-		await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
-		await expect(promise).rejects.toThrow(/nothing the caller authorized/)
-		expect(fs.rename).not.toHaveBeenCalled()
-		expect(fs.link).not.toHaveBeenCalled()
-	})
-	conditionalIt("publishes when the created UNC directory resolves inside the location the caller pinned", async () => {
-		const pin = _uncScenario(false)
-		await expect(safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin })).resolves.toBeUndefined()
-		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
-	})
+	conditionalIt(
+		"refuses to publish when the created UNC directory resolves under nothing the caller pinned",
+		async () => {
+			const pin = _uncScenario(true)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: pin,
+			})
+			await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+			await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.link).not.toHaveBeenCalled()
+		},
+	)
+	conditionalIt(
+		"publishes when the created UNC directory resolves inside the location the caller pinned",
+		async () => {
+			const pin = _uncScenario(false)
+			await expect(
+				safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin }),
+			).resolves.toBeUndefined()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		},
+	)
 })
 
 describe("effective parent validated when mkdir created nothing", () => {
@@ -2329,12 +2337,16 @@ describe("effective parent validated when mkdir created nothing", () => {
 	})
 	it("publishes when the parent that already existed resolves inside the location the caller pinned", async () => {
 		const pin = _scenario(false, true)
-		await expect(safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin })).resolves.toBeUndefined()
+		await expect(
+			safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin }),
+		).resolves.toBeUndefined()
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
 	})
 	it("publishes when the parent already existed and the caller pinned no location", async () => {
 		const pin = _scenario(true, false)
-		await expect(safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin })).resolves.toBeUndefined()
+		await expect(
+			safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin }),
+		).resolves.toBeUndefined()
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
 	})
 })
