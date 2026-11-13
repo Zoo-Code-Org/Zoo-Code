@@ -128,6 +128,7 @@
 	"warnings": {
 		"no_terminal_content": "没有选择终端内容",
 		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}",
+		"profile_deleted_activation_failed": "配置文件已删除，但激活替换配置文件 '{{name}}' 失败。",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可从 {{domain}} 导入的 Roo Code 任务历史记录。",
 			"alreadyImported_one": "全部 {{count}} 条 Roo Code 任务历史记录已导入 Zoo Code。",

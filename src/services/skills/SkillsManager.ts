@@ -80,6 +80,12 @@ export class SkillsManager {
 
 	async initialize(): Promise<void> {
 		await this.discoverSkills()
+		// Disposal can land while discovery is awaited. Without this check the watchers below
+		// are created after dispose() has already drained the disposables, so nothing would ever
+		// unregister them.
+		if (this.isDisposed) {
+			return
+		}
 		await this.setupFileWatchers()
 	}
 

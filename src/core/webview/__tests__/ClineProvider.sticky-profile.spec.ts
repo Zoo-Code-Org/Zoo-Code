@@ -332,6 +332,17 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 		}
 	})
 
+	// An instance built inside a test is outside the module-scope teardown, and
+	// resolveWebviewView starts a webview watchdog interval (ClineProvider.ts:6394), so an
+	// undisposed sibling keeps its interval and its instance-registry entry alive for
+	// every later test in the file. Tests that create one push it here.
+	const extraInstances: ClineProvider[] = []
+	afterEach(async () => {
+		for (const instance of extraInstances.splice(0).reverse()) {
+			await instance.dispose()
+		}
+	})
+
 	describe("activateProviderProfile", () => {
 		beforeEach(async () => {
 			await provider.resolveWebviewView(mockWebviewView)
@@ -1108,6 +1119,351 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(logSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Failed to restore API configuration 'failing-profile' for task"),
 			)
+		})
+	})
+
+	describe("deleteProviderProfile", () => {
+		it("removes the stored profile so a dangling mode mapping can no longer re-activate it", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Seed the stored profile settings: the default profile plus a child
+			// profile (mirroring the cross-profile subtasks e2e scenario), with the
+			// "ask" mode mapped to the child profile.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.providerSettingsManager.setModeConfig("ask", childId)
+
+			// The UI-facing list mirrors the store, as maintained by upsert/activate.
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// The deleted profile's settings are gone from the manager store.
+			const remaining = await provider.providerSettingsManager.listConfig()
+			expect(remaining.some((config) => config.name === "subtask-child-profile")).toBe(false)
+			await expect(
+				provider.providerSettingsManager.getProfile({ name: "subtask-child-profile" }),
+			).rejects.toThrow(/subtask-child-profile.*not found/)
+
+			// The mode mapping still points at the deleted id, but it no longer
+			// resolves to a stored profile, so handleModeSwitch falls through to the
+			// current configuration instead of re-activating the deleted profile.
+			const savedConfigId = await provider.providerSettingsManager.getModeConfigId("ask")
+			expect(savedConfigId).toBe(childId)
+			expect(remaining.find(({ id }) => id === savedConfigId)).toBeUndefined()
+
+			// The deletion alone must have repointed the context at the surviving profile. Assert that
+			// before driving any further public path: a later mode switch that happens to repair the
+			// selection would otherwise mask a deletion that left currentApiConfigName on the profile
+			// it just removed.
+			const afterDeletion = provider.contextProxy.getValues()
+			expect(afterDeletion.currentApiConfigName).toBe("default")
+			expect(afterDeletion.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+
+			// Drive the public path the comment above describes instead of asserting only the
+			// mapping: switching to the mode that was pinned to the deleted profile must fall
+			// through to the surviving profile, not re-activate the deleted one.
+			// Start from a different mode and assert the switch landed: the selection
+			// assertions below describe state the deletion already produced, so a
+			// handleModeSwitch that returned before switching would pass them unchanged.
+			await provider.contextProxy.setValue("mode", "code")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			await provider.handleModeSwitch("ask")
+			expect(provider.contextProxy.getValue("mode")).toBe("ask")
+			const afterSwitch = provider.contextProxy.getValues()
+			expect(afterSwitch.currentApiConfigName).toBe("default")
+			expect(afterSwitch.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+
+		it("treats an already-gone secret as success so the stale list entry is still pruned", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Only the default profile exists in the store: the ghost profile's secret
+			// was already gone (e.g. pruned by an earlier run) but its list entry
+			// survived.
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "ghost-profile",
+			})
+
+			// The manager's "not found" rejection must not surface to the caller ...
+			await expect(
+				provider.deleteProviderProfile({
+					name: "ghost-profile",
+					id: "ghost-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).resolves.toBeUndefined()
+
+			// ... it prunes the stale list entry and repoints the selection.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+		})
+
+		it("still refuses to delete the last stored profile when a stale list entry remains", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			// A ghost list entry survives next to the only real profile, so the
+			// provider-level "last profile" guard does not fire: the refusal must come
+			// from the settings store itself.
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "default",
+			})
+
+			await expect(
+				provider.deleteProviderProfile({
+					name: "default",
+					id: defaultId,
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+			).rejects.toThrow("Cannot delete the last remaining configuration")
+
+			// The refusal must leave the stored record alone. The message, the selection, and the
+			// list all stay the same when a regression deletes the record first and then throws
+			// this exact error, so the store has to be read directly.
+			// Identity, not mere presence: a regression that deleted the record and then
+			// re-created it from the payload would also resolve to an object.
+			await expect(provider.providerSettingsManager.getProfile({ name: "default" })).resolves.toMatchObject({
+				id: defaultId,
+				name: "default",
+			})
+			expect((await provider.providerSettingsManager.listConfig()).map(({ name }) => name)).toEqual(["default"])
+
+			// Nothing was repointed or pruned.
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "ghost-profile"])
+		})
+
+		it("re-points the selection when a sibling view activates the deleted profile mid-deletion", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "default",
+			})
+
+			// A second view activates the profile this deletion is about to remove while the deletion is
+			// in flight. Both views share the extension host's ContextProxy, so from the moment the
+			// record is gone the shared selection genuinely names the deleted profile - the deletion has
+			// to notice that instead of trusting what it read at entry.
+			const manager = provider.providerSettingsManager
+			const deleteStoredConfig = manager.deleteConfig.bind(manager)
+			manager.deleteConfig = async (name: string) => {
+				await provider.contextProxy.setValue("currentApiConfigName", "subtask-child-profile")
+				return deleteStoredConfig(name)
+			}
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("default")
+			// The shared provider keys still carried the deleted profile's settings when the selection
+			// moved onto it, so they must be replaced with the profile the selection now names.
+			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4.1")
+		})
+
+		it("follows a selection a sibling view moved onto another survivor mid-deletion", async () => {
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const otherId = await provider.providerSettingsManager.saveConfig("other-survivor", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "other-survivor", id: otherId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// This deletion selects the first survivor at entry, because that is what the shared
+			// selection names then. A sibling view moves the selection onto a different survivor while
+			// the record delete is in flight; that choice is the user's, and the deletion must follow it
+			// instead of pushing the selection back onto its own pick.
+			const manager = provider.providerSettingsManager
+			const deleteStoredConfig = manager.deleteConfig.bind(manager)
+			manager.deleteConfig = async (name: string) => {
+				await provider.contextProxy.setValue("currentApiConfigName", "other-survivor")
+				return deleteStoredConfig(name)
+			}
+
+			await provider.deleteProviderProfile({
+				name: "subtask-child-profile",
+				id: childId,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			const values = provider.contextProxy.getValues()
+			expect(values.currentApiConfigName).toBe("other-survivor")
+			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default", "other-survivor"])
+		})
+
+		it("leaves a sibling view's shared settings on the survivor it activated mid-deletion", async () => {
+			const defaultId = await provider.providerSettingsManager.saveConfig("default", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+			const otherId = await provider.providerSettingsManager.saveConfig("other-survivor", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+			const childId = await provider.providerSettingsManager.saveConfig("subtask-child-profile", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			await provider.contextProxy.setValues({
+				listApiConfigMeta: [
+					{ name: "default", id: defaultId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "other-survivor", id: otherId, apiProvider: providerIdentifiers.openrouter },
+					{ name: "subtask-child-profile", id: childId, apiProvider: providerIdentifiers.openrouter },
+				],
+				currentApiConfigName: "subtask-child-profile",
+			})
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// The cross-view half of this deletion is only observable from another view: the deletion names
+			// the survivor in the shared store, but whether the survivor's settings actually land in a second
+			// view's provider keys is a property of that view. Production builds the tab view on the same
+			// ContextProxy as the sidebar view (activate/registerCommands.ts:449 passes the sidebar's
+			// contextProxy; ClineProvider.ts:3634 documents that the two views share it while their queues
+			// and settings-manager locks stay per instance), so the sibling here shares provider.contextProxy
+			// and keeps its own settings-manager, which is exactly the shape that lets it move the selection
+			// mid-deletion.
+			// resolved webview.
+			const siblingView = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://sibling-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn().mockImplementation(() => {
+					return { dispose: vi.fn() }
+				}),
+				onDidChangeVisibility: vi.fn().mockImplementation(() => {
+					return { dispose: vi.fn() }
+				}),
+			} as unknown as vscode.WebviewView
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				provider.contextProxy,
+				new WebviewFocusTracker(),
+			)
+			extraInstances.push(sibling)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			sibling.getMcpHub = vi.fn().mockReturnValue({
+				listTools: vi.fn().mockResolvedValue([]),
+				callTool: vi.fn().mockResolvedValue({ content: [] }),
+				listResources: vi.fn().mockResolvedValue([]),
+				readResource: vi.fn().mockResolvedValue({ contents: [] }),
+				getAllServers: vi.fn().mockReturnValue([]),
+			})
+			await sibling.resolveWebviewView(siblingView)
+
+			const manager = provider.providerSettingsManager
+			const deleteStoredConfig = manager.deleteConfig.bind(manager)
+			manager.deleteConfig = async (name: string) => {
+				// A sibling view moves the shared selection onto another survivor and activates it there while
+				// the record delete is in flight; the deletion must follow that choice instead of pushing its
+				// own entry-time pick back onto the sibling's provider keys.
+				await provider.contextProxy.setValue("currentApiConfigName", "other-survivor")
+				await sibling.activateProviderProfile({ name: "other-survivor" })
+				return deleteStoredConfig(name)
+			}
+
+			// The sibling is a live entry in ClineProvider's static instance registry, and dispose
+			// is what removes it (ClineProvider.ts:1653-1659), so give it back rather than leave a
+			// later test to find it through getAllInstances.
+			try {
+				await provider.deleteProviderProfile({
+					name: "subtask-child-profile",
+					id: childId,
+					apiProvider: providerIdentifiers.openrouter,
+				})
+			} finally {
+				await sibling.dispose()
+			}
+
+			expect(sibling.contextProxy.getValues().currentApiConfigName).toBe("other-survivor")
+			expect(sibling.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4o")
+			// The same shared store is what the acting view reads: if the deletion pushed its own entry-time
+			// survivor's settings over the sibling's activation, this is where it shows up.
+			expect(provider.contextProxy.getProviderSettings().openRouterModelId).toBe("openai/gpt-4o")
 		})
 	})
 })

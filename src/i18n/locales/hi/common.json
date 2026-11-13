@@ -123,6 +123,7 @@
 	"warnings": {
 		"no_terminal_content": "कोई टर्मिनल सामग्री चयनित नहीं",
 		"auto_import_failed": "ZooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}",
+		"profile_deleted_activation_failed": "प्रोफ़ाइल हटाई गई, लेकिन विकल्पी प्रोफ़ाइल '{{name}}' को सक्रिय नहीं किया जा सका।",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}} से आयात करने के लिए कोई Roo Code कार्य इतिहास नहीं मिला।",
 			"alreadyImported_one": "सभी {{count}} Roo Code कार्य इतिहास पहले से ही Zoo Code में आयात किया जा चुका है।",

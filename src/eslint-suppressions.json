@@ -536,7 +536,7 @@
 	},
 	"core/config/__tests__/ContextProxy.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 2
 		}
 	},
 	"core/config/__tests__/CustomModesManager.exportImportSlugChange.spec.ts": {
@@ -921,12 +921,12 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 195
+			"count": 193
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 27
+			"count": 25
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
