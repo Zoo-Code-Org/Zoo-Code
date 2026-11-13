@@ -224,10 +224,7 @@ describe("ProviderPacer", () => {
 			await vi.advanceTimersByTimeAsync(advanceMs)
 			pacer.reportRateLimit(limited(retryAfterMs), pacer.markIssued())
 			expect(pacer.state().pausedUntil).toBe(pausedUntil)
-			expect(codeIndexLog.info).toHaveBeenCalledWith(
-				"Provider pacing wait",
-				expect.objectContaining({ source }),
-			)
+			expect(codeIndexLog.info).toHaveBeenCalledWith("Provider pacing wait", expect.objectContaining({ source }))
 			expect(new Date(pausedUntil).toISOString()).toEqual(expect.any(String))
 		},
 	)
