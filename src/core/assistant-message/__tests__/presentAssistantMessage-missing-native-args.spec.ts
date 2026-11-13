@@ -194,4 +194,99 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 		expect(mockTeardown).toHaveBeenCalledTimes(1)
 		expect(mockTeardown).toHaveBeenCalledWith(mockTask)
 	})
+
+	it("leaves the stream state alone at the missing-nativeArgs exit for a tool that opened no diff view", async () => {
+		// The release at this bypass is scoped to the one tool whose streamed diff view a skipped
+		// handle() would strand. Applying it to every block name would ask other tools to release
+		// state they never opened, so the guard has to read the name rather than the shape alone.
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				name: "execute_command",
+				params: { cmd: "ls" },
+				partial: false,
+				id: "toolu_4",
+				nativeArgs: undefined,
+			},
+		]
+
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
+
+		expect(mockWriteHandle).not.toHaveBeenCalled()
+		expect(userMessageContent).toEqual([
+			expect.objectContaining({ type: "tool_result", tool_use_id: "toolu_4", is_error: true }),
+		])
+		expect(mockTeardown).not.toHaveBeenCalled()
+	})
+
+	it("leaves the stream state alone at the validation exit for a tool that opened no diff view", async () => {
+		// A refusal lands here whatever the tool. Only write_to_file has a streamed diff view at
+		// this point, so the release stays scoped to it.
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				name: "execute_command",
+				params: { cmd: "ls" },
+				partial: false,
+				id: "toolu_5",
+				nativeArgs: { cmd: "ls" },
+			},
+		]
+		vi.mocked(validateToolUse).mockImplementationOnce(() => {
+			throw new Error("execute_command is not allowed in this mode")
+		})
+
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
+
+		expect(mockWriteHandle).not.toHaveBeenCalled()
+		expect(userMessageContent).toEqual([
+			expect.objectContaining({
+				type: "tool_result",
+				tool_use_id: "toolu_5",
+				is_error: true,
+				content: expect.stringContaining("not allowed"),
+			}),
+		])
+		expect(mockTeardown).not.toHaveBeenCalled()
+	})
+
+	it("leaves the stream state alone at the repetition exit for a tool that opened no diff view", async () => {
+		// The repetition stop bypasses handle() for any tool, and the release is still only owed by
+		// the one that streams a diff view.
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				name: "execute_command",
+				params: { cmd: "ls" },
+				partial: false,
+				id: "toolu_6",
+				nativeArgs: { cmd: "ls" },
+			},
+		]
+		vi.mocked(mockTask.toolRepetitionDetector as unknown as { check: unknown }).check = vi.fn().mockReturnValue({
+			action: "hard_block",
+			askUser: { messageKey: "tool_repetition", messageDetail: "execute_command" },
+		})
+
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
+
+		expect(mockWriteHandle).not.toHaveBeenCalled()
+		expect(userMessageContent).toEqual([
+			expect.objectContaining({
+				type: "tool_result",
+				tool_use_id: "toolu_6",
+				content: expect.stringContaining("repetition limit reached"),
+			}),
+		])
+		expect(mockTeardown).not.toHaveBeenCalled()
+	})
 })
