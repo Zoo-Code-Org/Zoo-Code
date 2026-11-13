@@ -582,9 +582,12 @@ describe("registerCommands handlers", () => {
 	})
 
 	it("focusInput posts to the tab provider when a tab panel is tracked alongside the sidebar", async () => {
-		const sidebarView = {} as vscode.WebviewView
+		const sidebarView = { viewType: "sidebar-view" } as vscode.WebviewView
 		setPanel(sidebarView, "sidebar")
-		const tabPanel = {} as vscode.WebviewPanel
+		const tabPanel = { viewType: "tab-panel" } as vscode.WebviewPanel
+		// The two doubles carry distinct viewType values on purpose: toHaveBeenCalledWith compares
+		// deeply, so two structurally empty objects would make a swapped focusPanel call
+		// indistinguishable from the expected one and the argument assertion at the end of this row could never fail.
 		setPanel(tabPanel, "tab")
 		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
 		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
