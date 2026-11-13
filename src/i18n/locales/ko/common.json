@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "파일을 열 수 없습니다!",
 		"checkpoint_timeout": "체크포인트 복원을 시도하는 중 시간 초과되었습니다.",
 		"checkpoint_failed": "체크포인트 복원에 실패했습니다.",
+		"checkpoint_restore_failed": "체크포인트 복원 중 오류가 발생했어: {{error}}",
+		"checkpoint_missing": "체크포인트 {{commitHash}}을(를) 복원할 수 없어. 이 체크포인트는 체크포인트 저장소에 더 이상 존재하지 않아. 변경된 파일은 없어.",
+		"checkpoint_invalid_hash": "체크포인트를 복원하거나 비교할 수 없어. 이 참조는 이 작업의 유효한 체크포인트가 아니야. 변경된 파일은 없어.",
 		"git_not_installed": "체크포인트 기능을 사용하려면 Git이 필요합니다. 체크포인트를 활성화하려면 Git을 설치하세요.",
 		"checkpoint_no_first": "비교할 첫 번째 체크포인트가 없습니다.",
 		"checkpoint_no_previous": "비교할 이전 체크포인트가 없습니다.",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Roo Code 기록 가져오기 실패: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "체크포인트 복원에 실패해서 작업이 멈췄어. 다시 시작할까?",
+		"restart": "다시 시작"
 	},
 	"warnings": {
 		"no_terminal_content": "선택된 터미널 내용이 없습니다",

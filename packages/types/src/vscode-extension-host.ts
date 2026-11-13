@@ -50,6 +50,7 @@ export interface ExtensionMessage {
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotSignInResult
+		| "settingsSaveResult"
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -339,8 +340,13 @@ export type ExtensionState = Pick<
 	| "imageGenerationProvider"
 	| "openRouterImageGenerationSelectedModel"
 	| "includeTaskHistoryInEnhance"
+	| "taskTitleGenerationEnabled"
+	| "taskTitleApiConfigId"
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
+	| "timeFormat"
+	| "dateFormat"
+	| "showRelativeTimes"
 	| "enterBehavior"
 	| "includeCurrentTime"
 	| "includeCurrentCost"

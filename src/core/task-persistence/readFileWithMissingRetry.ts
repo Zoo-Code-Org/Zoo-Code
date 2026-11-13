@@ -1,17 +1,18 @@
-import * as fs from "fs/promises"
+import { getErrorCode } from "../../utils/errorCode"
+export { getErrorCode } from "../../utils/errorCode"
 
-// safeWriteJson replaces a file in two renames (target to backup, new file to
-// target) because a single rename over an open file fails with EPERM on
-// Windows. A reader can see ENOENT between the two renames, so retry once.
+import * as fs from "fs/promises"
+import { recoverMissingJsonFile } from "../../utils/jsonFileRecovery"
+
+// safeWriteJson commits a replacement with a single atomic rename. Only the
+// Windows EPERM fallback replaces a file in two renames (target to backup,
+// new file to target), because a single rename over an open file fails with
+// EPERM on Windows. A reader can see ENOENT between those two renames, so
+// retry once, then recover under the writer's lock if a process crash left
+// recoverable backups. Recovery may retry lock acquisition for up to 35 seconds.
 const READ_RETRY_MIN_MS = 1
 const READ_RETRY_MAX_MS = 10
 const READ_RETRY_RANGE_MS = READ_RETRY_MAX_MS - READ_RETRY_MIN_MS + 1
-
-export function getErrorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-		? error.code
-		: undefined
-}
 
 /**
  * Formats the actionable detail of an underlying error for inclusion in
@@ -41,6 +42,12 @@ export async function readFileWithMissingRetry(filePath: string): Promise<string
 
 		const retryDelay = READ_RETRY_MIN_MS + Math.floor(Math.random() * READ_RETRY_RANGE_MS)
 		await new Promise((resolve) => setTimeout(resolve, retryDelay))
-		return fs.readFile(filePath, "utf8")
+		try {
+			return await fs.readFile(filePath, "utf8")
+		} catch (retryError) {
+			if (getErrorCode(retryError) !== "ENOENT") throw retryError
+			if (!(await recoverMissingJsonFile(filePath))) throw retryError
+			return fs.readFile(filePath, "utf8")
+		}
 	}
 }

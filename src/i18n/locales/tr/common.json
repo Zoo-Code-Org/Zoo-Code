@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "Dosya açılamadı!",
 		"checkpoint_timeout": "Kontrol noktasını geri yüklemeye çalışırken zaman aşımına uğradı.",
 		"checkpoint_failed": "Kontrol noktası geri yüklenemedi.",
+		"checkpoint_restore_failed": "Kontrol noktası geri yüklenirken hata oluştu: {{error}}",
+		"checkpoint_missing": "{{commitHash}} kontrol noktası geri yüklenemiyor: bu kontrol noktası artık kontrol noktası deposunda mevcut değil. Hiçbir dosya değiştirilmedi.",
+		"checkpoint_invalid_hash": "Kontrol noktası geri yüklenemiyor veya karşılaştırılamıyor: bu başvuru, bu görevin geçerli bir kontrol noktası değil. Hiçbir dosya değiştirilmedi.",
 		"git_not_installed": "Kontrol noktaları özelliği için Git gereklidir. Kontrol noktalarını etkinleştirmek için lütfen Git'i yükleyin.",
 		"checkpoint_no_first": "Karşılaştırılacak ilk kontrol noktası yok.",
 		"checkpoint_no_previous": "Karşılaştırılacak önceki kontrol noktası yok.",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Roo Code geçmişi içe aktarılamadı: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "Kontrol noktası geri yüklenemedi ve görev durduruldu. Yeniden başlatmak ister misin?",
+		"restart": "Yeniden başlat"
 	},
 	"warnings": {
 		"no_terminal_content": "Seçili terminal içeriği yok",

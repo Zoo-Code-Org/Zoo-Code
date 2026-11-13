@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "Anthropic APIキーをX-Api-Keyの代わりにAuthorizationヘッダーとして渡す",
 		"anthropic1MContextBetaLabel": "1Mコンテキストウィンドウを有効にする（ベータ版）",
 		"anthropic1MContextBetaDescription": "Claude Sonnet 4.x / Claude Opus 4.6のコンテキストウィンドウを100万トークンに拡張します",
+		"promptCacheTtlLabel": "プロンプトキャッシュの有効期間",
+		"promptCacheTtl5m": "5分（デフォルト）",
+		"promptCacheTtl1h": "1時間",
+		"promptCacheTtlDescription": "キャッシュされたプロンプトプレフィックスが有効な期間です。1時間の有効期間はキャッシュ書き込みあたりのコストが高くなりますが、リクエスト間の長い間隔に耐えられます。同じ長いコンテキストを繰り返し送信しない限り、5分のままにしてください。",
 		"awsBedrock1MContextBetaLabel": "1Mコンテキストウィンドウを有効にする（ベータ版）",
 		"awsBedrock1MContextBetaDescription": "Claude Sonnet 4.x / Claude Opus 4.6のコンテキストウィンドウを100万トークンに拡張します",
 		"vertex1MContextBetaLabel": "1Mコンテキストウィンドウを有効にする（ベータ版）",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
 			"toolParameters": "パラメーター"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "ダイナミック思考強度",
+			"description": "set_thinking_effort ツールを将来のサポートに備えて準備します。この設定は選好を保存するだけで、リクエストごとの動作は後続の作業で提供されます。（実験的機能）"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "説明は1024文字以内である必要があります"
 		},
 		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。"
+	},
+	"language": {
+		"description": "言語と日付/時刻の表示。",
+		"languageTitle": "言語",
+		"displayLanguage": "表示言語",
+		"displayLanguageDescription": "Zoo Code のインターフェースの言語。",
+		"dateTimeTitle": "日付と時刻",
+		"timeFormat": {
+			"label": "時刻形式",
+			"description": "自動は表示言語に従います。",
+			"options": {
+				"auto": "自動",
+				"12h": "12時間制",
+				"24h": "24時間制"
+			}
+		},
+		"dateFormat": {
+			"label": "日付形式",
+			"example": "例: {{example}}",
+			"options": {
+				"auto": "自動",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "タスク履歴に相対時間(「5分前」)を表示する"
+		},
+		"preview": {
+			"title": "プレビュー",
+			"chat": "チャットメッセージ",
+			"history": "タスク履歴",
+			"relative": "5分前",
+			"hover": "(ホバー: {{value}})"
+		}
 	}
 }

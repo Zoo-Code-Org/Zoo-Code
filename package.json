@@ -20,7 +20,7 @@
 		"test:agent-evals:unit": "node --import tsx --test scripts/agent-evals/*.test.ts",
 		"agent-evals:check-types": "tsc -p scripts/agent-evals/tsconfig.json",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
-		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
+		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts && tsx scripts/check-provider-handoff-scheduler.ts && pnpm cleanup-protocol:model-check && pnpm parser-scope:model-check && tsx scripts/check-completion-persistence.ts && tsx scripts/check-file-replacement-restart.ts && tsx scripts/check-delegated-mode-readers.ts && pnpm tool-turn:model-check",
 		"webview-recovery:model-check": "node --import tsx scripts/check-webview-recovery.ts",
 		"webview-recovery:check-types": "tsc -p scripts/tsconfig.webview-recovery.json",
 		"fanout-protocol:model-check": "tsx scripts/check-task-fanout-protocol.ts",
@@ -116,8 +116,8 @@
 			"vite": "catalog:",
 			"undici": "6.29.1",
 			"@ai-sdk/provider@3": "3.0.19",
-			"@ai-sdk/provider-utils@4": "4.0.62",
-			"@ai-sdk/openai-compatible@2": "2.0.87",
+			"@ai-sdk/provider-utils@4": "4.0.64",
+			"@ai-sdk/openai-compatible@2": "2.0.90",
 			"form-data": ">=4.0.4",
 			"bluebird": ">=3.7.2",
 			"glob": "11.1.0",
@@ -127,7 +127,7 @@
 			"csstype": "3.2.3",
 			"zod": "4.6.7",
 			"@lmstudio/sdk>zod": "3.25.76",
-			"katex": "0.18.2"
+			"katex": "0.19.1"
 		}
 	}
 }

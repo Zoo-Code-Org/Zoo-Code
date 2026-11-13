@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "Przekaż klucz API Anthropic jako nagłówek Authorization zamiast X-Api-Key",
 		"anthropic1MContextBetaLabel": "Włącz okno kontekstowe 1M (Beta)",
 		"anthropic1MContextBetaDescription": "Rozszerza okno kontekstowe do 1 miliona tokenów dla Claude Sonnet 4.x / Claude Opus 4.6",
+		"promptCacheTtlLabel": "Czas życia pamięci podręcznej promptów",
+		"promptCacheTtl5m": "5 minut (domyślnie)",
+		"promptCacheTtl1h": "1 godzina",
+		"promptCacheTtlDescription": "Jak długo buforowane prefiksy promptów pozostają ważne. Czas życia 1 godziny kosztuje więcej za zapis do pamięci podręcznej, ale przetrwa dłuższe przerwy między żądaniami. Pozostaw 5 minut, chyba że wielokrotnie wysyłasz ten sam długi kontekst.",
 		"awsBedrock1MContextBetaLabel": "Włącz okno kontekstowe 1M (Beta)",
 		"awsBedrock1MContextBetaDescription": "Rozszerza okno kontekstowe do 1 miliona tokenów dla Claude Sonnet 4.x / Claude Opus 4.6",
 		"vertex1MContextBetaLabel": "Włącz okno kontekstowe 1M (Beta)",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "Narzędzia odświeżone pomyślnie",
 			"refreshError": "Nie udało się odświeżyć narzędzi",
 			"toolParameters": "Parametry"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamiczny wysiłek myślowy",
+			"description": "Przygotowuje narzędzie set_thinking_effort do późniejszego wsparcia: to ustawienie zapisuje tylko preferencję, zachowanie na żądanie pojawi się w kolejnych pracach. (eksperymentalne)"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "Opis musi mieć maksymalnie 1024 znaki"
 		},
 		"footer": "Twórz własne umiejętności za pomocą trybu Skill Writer, dostępnego w <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Język oraz wyświetlanie daty i godziny.",
+		"languageTitle": "Język",
+		"displayLanguage": "Język wyświetlania",
+		"displayLanguageDescription": "Język interfejsu Zoo Code.",
+		"dateTimeTitle": "Data i godzina",
+		"timeFormat": {
+			"label": "Format godziny",
+			"description": "Automatyczny podąża za językiem wyświetlania.",
+			"options": {
+				"auto": "Automatyczny",
+				"12h": "12-godzinny",
+				"24h": "24-godzinny"
+			}
+		},
+		"dateFormat": {
+			"label": "Format daty",
+			"example": "np. {{example}}",
+			"options": {
+				"auto": "Automatyczny",
+				"mdy": "MM/DD/RRRR",
+				"dmy": "DD/MM/RRRR",
+				"ymd": "RRRR-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Pokazuj czasy względne („5 min temu”) w historii zadań"
+		},
+		"preview": {
+			"title": "Podgląd",
+			"chat": "Wiadomość czatu",
+			"history": "Historia zadań",
+			"relative": "5 min temu",
+			"hover": "(po najechaniu: {{value}})"
+		}
 	}
 }

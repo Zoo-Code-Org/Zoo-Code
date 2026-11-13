@@ -22,21 +22,18 @@ const hasPwsh = isPowerShellCoreAvailable()
 // console.log(`Test environment: ${process.platform} ${process.arch}`)
 // console.log(`PowerShell Core available: ${hasPwsh}`)
 
-// Define interface for global test environment
+// Define the global test environment flag
 declare global {
-	// eslint-disable-next-line @typescript-eslint/no-namespace
-	namespace NodeJS {
-		interface Global {
-			__TEST_ENV__: {
+	var __TEST_ENV__:
+		| {
 				platform: string
 				isPowerShellAvailable: boolean
-			}
-		}
-	}
+		  }
+		| undefined
 }
 
 // Set global flags for tests to use
-;(global as any).__TEST_ENV__ = {
+global.__TEST_ENV__ = {
 	platform: process.platform,
 	isPowerShellAvailable: hasPwsh,
 }

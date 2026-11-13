@@ -5,6 +5,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { BaseProvider } from "../base-provider"
 import type { ApiStream } from "../../transform/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
@@ -595,7 +596,7 @@ describe("BaseProvider", () => {
 			await expect(wait).rejects.toThrow("caller gave up")
 
 			resolveLoad()
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			await flushMacrotasks()
 
 			// The shared load completed, so a later caller is a memoized no-op.
 			await expect(provider.testEnsureCatalogLoaded(load)).resolves.toBeUndefined()

@@ -54,12 +54,13 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		await waitUntilCompleted({ api, taskId })
 		assert.strictEqual(sawMarker, true, `Completion should include ${MARKER}`)
 
-		// TaskCompleted fires before the final saveClineMessages() write is
-		// necessarily durable on disk. Wait until the completion marker is
-		// persisted in ui_messages.json before quitting, so the verify phase
-		// never reads a task directory whose final write has not landed yet.
+		// TaskCompleted and the UI marker do not acknowledge all three files.
+		// Check both persisted histories and the store's published history item.
+		// TaskHistoryStore publishes newly created cache entries only after writing them.
 		const createdTaskId: string = taskId
 		await waitFor(() => api.hasTaskUiMessageText(createdTaskId, MARKER))
+		await waitForMarkedCompletion(api, createdTaskId)
+		await waitFor(async () => (await api.getTaskHistoryItem(createdTaskId)) !== undefined)
 
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,

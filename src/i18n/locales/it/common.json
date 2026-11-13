@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "Impossibile aprire il file!",
 		"checkpoint_timeout": "Timeout durante il tentativo di ripristinare il checkpoint.",
 		"checkpoint_failed": "Impossibile ripristinare il checkpoint.",
+		"checkpoint_restore_failed": "Errore durante il ripristino del checkpoint: {{error}}",
+		"checkpoint_missing": "Impossibile ripristinare il checkpoint {{commitHash}}: questo checkpoint non esiste più nel repository dei checkpoint. Nessun file è stato modificato.",
+		"checkpoint_invalid_hash": "Impossibile ripristinare o confrontare il checkpoint: il riferimento non è un checkpoint valido di questa attività. Nessun file è stato modificato.",
 		"git_not_installed": "Git è richiesto per la funzione di checkpoint. Per favore, installa Git per abilitare i checkpoint.",
 		"checkpoint_no_first": "Nessun primo checkpoint da confrontare.",
 		"checkpoint_no_previous": "Nessun checkpoint precedente da confrontare.",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Impossibile importare la cronologia di Roo Code: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "Il ripristino del checkpoint non è riuscito e l'attività è ferma. Vuoi riavviarla?",
+		"restart": "Riavvia"
 	},
 	"warnings": {
 		"no_terminal_content": "Nessun contenuto del terminale selezionato",

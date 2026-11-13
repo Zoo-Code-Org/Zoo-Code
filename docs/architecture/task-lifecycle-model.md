@@ -206,6 +206,14 @@ CI runs `pnpm lifecycle:model-check` in `.github/workflows/code-qa.yml` after li
 
 ## Gap audit
 
+The independent [file replacement/restart model](./file-replacement-restart-model.md)
+checks the process-crash replacement protocol separately from completion readiness.
+It models three task files, initial publication, one replacement, one crash,
+locked recovery on fresh reads/startup, and successful explicit deletion. Its
+contract, production mapping, old-protocol counterexample, refinement tests, and
+filesystem/lock assumptions are documented there. A passing completion-readiness
+model alone does not establish this file-level contract.
+
 This section is a summary tracker. Issue links are historical provenance rather than specifications. Coverage status uses these evidence classes:
 
 The [Task lifecycle verification GAP report](./task-lifecycle-gap-report.md) is the authoritative register. It holds the exhaustive repository inventory, the ranked stable burn-down register, the source-based methodology, and the follow-up checklist. This page remains the executable model-suite specification.

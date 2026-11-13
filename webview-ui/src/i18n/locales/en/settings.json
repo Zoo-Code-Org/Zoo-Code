@@ -543,6 +543,10 @@
 		"anthropicUseAuthToken": "Pass Anthropic API Key as Authorization header instead of X-Api-Key",
 		"anthropic1MContextBetaLabel": "Enable 1M context window (Beta)",
 		"anthropic1MContextBetaDescription": "Extends context window to 1 million tokens for Claude Sonnet 4.x / Claude Opus 4.6",
+		"promptCacheTtlLabel": "Prompt cache lifetime",
+		"promptCacheTtl5m": "5 minutes (default)",
+		"promptCacheTtl1h": "1 hour",
+		"promptCacheTtlDescription": "How long cached prompt prefixes stay valid. The 1 hour lifetime costs more per cache write but survives longer gaps between requests. Leave it on 5 minutes unless you repeatedly resend the same long context.",
 		"awsBedrock1MContextBetaLabel": "Enable 1M context window (Beta)",
 		"awsBedrock1MContextBetaDescription": "Extends context window to 1 million tokens for Claude Sonnet 4.x / Claude Opus 4.6",
 		"vertex1MContextBetaLabel": "Enable 1M context window (Beta)",
@@ -986,6 +990,10 @@
 			"refreshSuccess": "Tools refreshed successfully",
 			"refreshError": "Failed to refresh tools",
 			"toolParameters": "Parameters"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamic thinking effort",
+			"description": "Prepares the set_thinking_effort tool for later support: this setting stores the preference only, and the tool's per-request behavior arrives in follow-up work. (experimental)"
 		}
 	},
 	"temperature": {
@@ -1113,6 +1121,42 @@
 			"input": "Input",
 			"output": "Output",
 			"cacheReads": "Cache reads"
+		}
+	},
+	"language": {
+		"description": "Language and date/time display.",
+		"languageTitle": "Language",
+		"displayLanguage": "Display language",
+		"displayLanguageDescription": "Language for Zoo Code's interface.",
+		"dateTimeTitle": "Date & time",
+		"timeFormat": {
+			"label": "Time format",
+			"description": "Auto follows your display language.",
+			"options": {
+				"auto": "Auto",
+				"12h": "12-hour",
+				"24h": "24-hour"
+			}
+		},
+		"dateFormat": {
+			"label": "Date format",
+			"example": "e.g. {{example}}",
+			"options": {
+				"auto": "Auto",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Show relative times (\"5 min ago\") in task history"
+		},
+		"preview": {
+			"title": "Preview",
+			"chat": "Chat message",
+			"history": "Task history",
+			"relative": "5 min ago",
+			"hover": "(hover: {{value}})"
 		}
 	}
 }

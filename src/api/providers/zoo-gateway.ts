@@ -19,6 +19,7 @@ import { t } from "../../i18n"
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 
 import type {
 	SingleCompletionHandler,
@@ -208,7 +209,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		// Apply prompt caching for models that support it
 		// Zoo Gateway serves the same models as Vercel AI Gateway, so caching support is identical
 		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
+			addCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, info))
 		}
 
 		// Build request headers with enrichment metadata

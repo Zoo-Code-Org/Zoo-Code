@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "Kon bestand niet openen!",
 		"checkpoint_timeout": "Time-out bij het herstellen van checkpoint.",
 		"checkpoint_failed": "Herstellen van checkpoint mislukt.",
+		"checkpoint_restore_failed": "Fout bij het herstellen van checkpoint: {{error}}",
+		"checkpoint_missing": "Checkpoint {{commitHash}} kan niet worden hersteld: dit checkpoint bestaat niet meer in de checkpoint-repository. Er zijn geen bestanden gewijzigd.",
+		"checkpoint_invalid_hash": "Checkpoint kan niet worden hersteld of vergeleken: de verwijzing is geen geldig checkpoint van deze taak. Er zijn geen bestanden gewijzigd.",
 		"git_not_installed": "Git is vereist voor de checkpoint-functie. Installeer Git om checkpoints in te schakelen.",
 		"checkpoint_no_first": "Geen eerste checkpoint om mee te vergelijken.",
 		"checkpoint_no_previous": "Geen vorig checkpoint om mee te vergelijken.",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Importeren van Roo Code-geschiedenis mislukt: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "Het herstellen van het checkpoint is mislukt en de taak is gestopt. Wil je deze opnieuw starten?",
+		"restart": "Opnieuw starten"
 	},
 	"warnings": {
 		"no_terminal_content": "Geen terminalinhoud geselecteerd",

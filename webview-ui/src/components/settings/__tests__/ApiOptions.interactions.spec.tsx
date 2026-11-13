@@ -37,15 +37,21 @@ type SelectMockProps = ChildrenProps & {
 
 type UseSelectedModelReturn = { provider?: string; id?: string; info: Record<string, never> }
 
-const { modelPickerMock, useOpenRouterModelProvidersMock, useSelectedModelMock } = vi.hoisted(() => ({
-	modelPickerMock: vi.fn((_props: ComponentProps<typeof ModelPicker>) => null),
-	useOpenRouterModelProvidersMock: vi.fn<() => OpenRouterModelProvidersQueryResult>(() => ({ data: undefined })),
-	useSelectedModelMock: vi.fn((configuration: ProviderSettings): UseSelectedModelReturn => ({
-		provider: configuration.apiProvider,
-		id: configuration.apiModelId,
-		info: {},
-	})),
-}))
+const { modelPickerMock, useOpenRouterModelProvidersMock, useRouterModelsMock, useSelectedModelMock } = vi.hoisted(
+	() => ({
+		modelPickerMock: vi.fn((_props: ComponentProps<typeof ModelPicker>) => null),
+		useRouterModelsMock: vi.fn((_opts: { provider?: string; enabled: boolean }) => ({
+			data: {} as Record<string, unknown>,
+			refetch: vi.fn(),
+		})),
+		useOpenRouterModelProvidersMock: vi.fn<() => OpenRouterModelProvidersQueryResult>(() => ({ data: undefined })),
+		useSelectedModelMock: vi.fn((configuration: ProviderSettings): UseSelectedModelReturn => ({
+			provider: configuration.apiProvider,
+			id: configuration.apiModelId,
+			info: {},
+		})),
+	}),
+)
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
@@ -57,7 +63,7 @@ vi.mock("@src/context/ExtensionStateContext", () => ({
 }))
 
 vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
-	useRouterModels: () => ({ data: {}, refetch: vi.fn() }),
+	useRouterModels: useRouterModelsMock,
 }))
 
 vi.mock("@src/components/ui/hooks/useZooGatewayRouterModelsSync", () => ({
@@ -202,6 +208,7 @@ describe("ApiOptions interactions", () => {
 			info: {},
 		}))
 		useOpenRouterModelProvidersMock.mockImplementation(() => ({ data: undefined }))
+		useRouterModelsMock.mockImplementation(() => ({ data: {}, refetch: vi.fn() }))
 	})
 
 	afterEach(() => {
@@ -528,6 +535,18 @@ describe("ApiOptions interactions", () => {
 
 		props?.onModelChange?.(arn)
 		expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", arn)
+	})
+
+	it("passes the fetched Friendli catalog to the settings model picker", () => {
+		const fetched = { "vendor/fetched-only": { contextWindow: 1000, supportsPromptCache: false } }
+		useRouterModelsMock.mockImplementation(() => ({ data: { friendli: fetched }, refetch: vi.fn() }))
+
+		renderApiOptions({
+			apiConfiguration: { apiProvider: providerIdentifiers.friendli, apiModelId: "vendor/fetched-only" },
+		})
+
+		expect(useRouterModelsMock).toHaveBeenCalledWith({ enabled: true, provider: providerIdentifiers.friendli })
+		expect(modelPickerMock.mock.lastCall?.[0].models).toBe(fetched)
 	})
 
 	it("does not transform model IDs for non-Bedrock providers", () => {

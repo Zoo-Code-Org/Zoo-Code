@@ -17,7 +17,9 @@ export default defineConfig({
 		environment: "jsdom",
 		include: ["src/**/*.spec.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
 		onConsoleLog,
-		maxWorkers: isCI ? 1 : undefined,
+		// Four workers match the four vCPUs of the hosted CI runners; the
+		// benchmark in #2288 ran the same inventory roughly 3x faster than one.
+		maxWorkers: isCI ? 4 : undefined,
 		testTimeout: isCI ? 15000 : 5000,
 		server: {
 			deps: {

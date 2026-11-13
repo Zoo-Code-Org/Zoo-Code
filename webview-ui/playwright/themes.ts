@@ -24,5 +24,11 @@ export async function applyVisualTheme(page: Page, theme: VisualTheme) {
 		document.body.className = bodyClass
 		document.body.removeAttribute("style")
 		document.body.dataset.vscodeThemeId = themeId
+
+		for (const animation of document.getAnimations()) {
+			if (animation instanceof CSSTransition) {
+				animation.finish()
+			}
+		}
 	}, theme)
 }

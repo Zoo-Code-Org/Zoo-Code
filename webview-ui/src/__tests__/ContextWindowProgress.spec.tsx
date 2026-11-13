@@ -5,8 +5,9 @@ import { providerIdentifiers } from "@roo-code/types"
 
 import TaskHeader from "@src/components/chat/TaskHeader"
 
-// Mock formatLargeNumber function
-vi.mock("@/utils/format", () => ({
+// Keep the real format helpers (other components in the tree use them) and override only formatLargeNumber.
+vi.mock("@/utils/format", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/utils/format")>()),
 	formatLargeNumber: vi.fn((num) => num.toString()),
 }))
 

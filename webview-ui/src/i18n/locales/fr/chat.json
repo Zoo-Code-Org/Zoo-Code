@@ -322,10 +322,10 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés de Zoo Code v3.94.0",
-			"highlight1": "✨ Prise en charge plus large des modèles et fournisseurs : Utilise Claude Haiku 5.5 via Anthropic, envoie des images aux modèles VS Code LM compatibles, ajuste la température pour les modèles OpenCode Go Responses et annule les requêtes proprement chez plus de fournisseurs.",
-			"highlight2": "🔐 MCP OAuth plus flexible : Configure des paramètres statiques de client OAuth, utilise des chemins de callback personnalisés, découvre les détails d'authentification dans WWW-Authenticate et vois les échecs de callback avant de réessayer.",
-			"highlight3": "🧭 Chats et longues sessions plus fluides : Renomme les tâches dans l'historique, glisse des fichiers dans le chat sans maintenir Shift, réduis la mémoire conservée pendant les longues sessions et garde stables les liens de sous-tâches et les webviews remplacés."
+			"heading": "Nouveautés de Zoo Code v3.96.0",
+			"highlight1": "✨ Nouveaux réglages de chat et diagnostics: Affiche l'horodatage des messages avec des formats d'heure et de date configurables, règle le TTL du cache de prompts pour les profils Anthropic et génère des rapports de diagnostic respectueux de la vie privée.",
+			"highlight2": "💸 Des coûts et un cache fournisseurs plus précis: Garde intacts les résultats d'outils Anthropic, adopte les tokens de sortie cumulés dans les coûts Anthropic et MiniMax, lit les compteurs de cache de prompts de DeepSeek, cible le cache Responses de xAI et facture les lectures de cache Mistral à 0,1x.",
+			"highlight3": "🧭 Des chats plus fiables et plus rapides: Reprends les tâches terminées après un redémarrage, restaure les checkpoints quand le commit enregistré manque, recharge automatiquement un renderer de webview mort, limite les mises à jour de streaming et charge les langues à la demande."
 		}
 	},
 	"costs": {

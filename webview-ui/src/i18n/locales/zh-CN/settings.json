@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "将 Anthropic API 密钥作为 Authorization 标头传递，而不是 X-Api-Key",
 		"anthropic1MContextBetaLabel": "启用 1M 上下文窗口 (Beta)",
 		"anthropic1MContextBetaDescription": "为 Claude Sonnet 4.x / Claude Opus 4.6 将上下文窗口扩展至 100 万个 token",
+		"promptCacheTtlLabel": "提示缓存有效期",
+		"promptCacheTtl5m": "5 分钟（默认）",
+		"promptCacheTtl1h": "1 小时",
+		"promptCacheTtlDescription": "缓存的提示前缀保持有效的时间。1 小时的有效期每次缓存写入费用更高，但能承受请求之间更长的间隔。除非你反复重新发送相同的长上下文，否则请保持 5 分钟。",
 		"awsBedrock1MContextBetaLabel": "启用 1M 上下文窗口 (Beta)",
 		"awsBedrock1MContextBetaDescription": "为 Claude Sonnet 4.x / Claude Opus 4.6 将上下文窗口扩展至 100 万个 token",
 		"vertex1MContextBetaLabel": "启用 1M 上下文窗口 (Beta)",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "工具刷新成功",
 			"refreshError": "工具刷新失败",
 			"toolParameters": "参数"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "动态思考强度",
+			"description": "为后续支持准备 set_thinking_effort 工具：此设置仅保存偏好，按请求的工具行为将在后续工作中提供。（实验性功能）"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "描述不得超过1024个字符"
 		},
 		"footer": "使用技能编写器模式创建您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中获得。"
+	},
+	"language": {
+		"description": "语言和日期/时间显示。",
+		"languageTitle": "语言",
+		"displayLanguage": "显示语言",
+		"displayLanguageDescription": "Zoo Code 界面的语言。",
+		"dateTimeTitle": "日期和时间",
+		"timeFormat": {
+			"label": "时间格式",
+			"description": "自动将跟随显示语言。",
+			"options": {
+				"auto": "自动",
+				"12h": "12 小时制",
+				"24h": "24 小时制"
+			}
+		},
+		"dateFormat": {
+			"label": "日期格式",
+			"example": "例如 {{example}}",
+			"options": {
+				"auto": "自动",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "在任务历史中显示相对时间（“5 分钟前”）"
+		},
+		"preview": {
+			"title": "预览",
+			"chat": "聊天消息",
+			"history": "任务历史",
+			"relative": "5 分钟前",
+			"hover": "（悬停：{{value}}）"
+		}
 	}
 }

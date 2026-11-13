@@ -2,11 +2,20 @@ import * as path from "path"
 
 import type { ClineMessage } from "@roo-code/types"
 
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { safeWriteJson, type SafeWriteJsonTraceStage } from "../../utils/safeWriteJson"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { ensureMessageIdentifiers, mergeClineMessageSnapshots } from "./mergeMessageSnapshots"
 import { formatErrorDetail, getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
+import { tracePersistenceEvent, type PersistenceTraceStage } from "./persistenceTrace"
+
+const uiMessagesTraceStages: Record<SafeWriteJsonTraceStage, PersistenceTraceStage> = {
+	recover: "ui-messages-recovery",
+	"write-start": "ui-messages-write-start",
+	"backup-rename": "ui-messages-backup-rename",
+	"replacement-rename": "ui-messages-replacement-rename",
+	"write-complete": "ui-messages-write-complete",
+}
 
 export type TaskMessagesReadErrorKind = "not_found" | "invalid" | "io_error"
 
@@ -83,17 +92,21 @@ export async function saveTaskMessages({
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
 	let savedMessages = messages
-	await safeWriteJson(
-		filePath,
-		messages,
-		merge
-			? {
-					merge: (existing, incoming) => {
-						savedMessages = mergeClineMessageSnapshots(existing, incoming) as ClineMessage[]
-						return savedMessages
-					},
-				}
-			: undefined,
-	)
+	await safeWriteJson(filePath, messages, {
+		...(merge && {
+			merge: (existing, incoming) => {
+				savedMessages = mergeClineMessageSnapshots(existing, incoming) as ClineMessage[]
+				return savedMessages
+			},
+		}),
+		// Trace the replacement-protocol stages with the task ID so restart
+		// logs can order UI-message writer activity across processes.
+		trace: (event) =>
+			tracePersistenceEvent(uiMessagesTraceStages[event.stage], {
+				taskId,
+				filePath,
+				detail: event.detail,
+			}),
+	})
 	return savedMessages
 }

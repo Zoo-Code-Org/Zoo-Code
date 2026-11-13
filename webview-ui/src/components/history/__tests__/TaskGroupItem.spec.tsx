@@ -18,7 +18,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 
 vi.mock("@/utils/format", () => ({
 	formatTimeAgo: vi.fn(() => "2 hours ago"),
-	formatDate: vi.fn(() => "January 15 at 2:30 PM"),
+	formatDateTime: vi.fn(() => "Jan 15, 2024, 2:30 PM"),
 	formatLargeNumber: vi.fn((num: number) => num.toString()),
 }))
 

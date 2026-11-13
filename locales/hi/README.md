@@ -46,11 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.94.0 में नया क्या है
+## v3.96.0 में नया क्या है
 
-- ✨ **और ज़्यादा models और providers का support:** Anthropic के ज़रिए Claude Haiku 5.5 इस्तेमाल करें, संगत VS Code LM models को images भेजें, OpenCode Go Responses models के लिए temperature tune करें और ज़्यादा providers पर requests को cleanly cancel करें।
-- 🔐 **ज़्यादा लचीला MCP OAuth:** Static OAuth client settings configure करें, custom callback paths इस्तेमाल करें, `WWW-Authenticate` से authentication details जानें और retry करने से पहले callback failures देखें।
-- 🧭 **बेहतर chats और लंबे sessions:** History में tasks का नाम बदलें, बिना Shift दबाए files को chat में drag करें, लंबे sessions में retain होने वाली memory घटाएं और subtask links तथा replaced webviews को stable रखें।
+- ✨ **नई चैट सेटिंग्स और डायग्नोस्टिक्स:** कॉन्फ़िगर करने योग्य समय और तारीख फ़ॉर्मैट के साथ मैसेज टाइमस्टैम्प दिखाएँ, Anthropic प्रोफ़ाइल के लिए prompt-cache TTL सेट करें, और प्राइवेसी-सेफ डायग्नोस्टिक्स रिपोर्ट बनाएँ।
+- 💸 **ज़्यादा सटीक प्रोवाइडर लागत और कैशिंग:** Anthropic टूल रिज़ल्ट को बरकरार रखें, Anthropic और MiniMax लागतों में क्यूमुलेटिव आउटपुट token अपनाएँ, DeepSeek के prompt-cache काउंटर पढ़ें, xAI Responses कैश को टारगेट करें, और Mistral कैश रीड को 0.1x पर बिल करें।
+- 🧭 **ज़्यादा भरोसेमंद और तेज़ चैट:** रीस्टार्ट के बाद पूरी हुई टास्क फिर से शुरू करें, सेव किया गया commit मौजूद न होने पर checkpoint रीस्टोर करें, बंद पड़े webview रेंडरर को अपने आप रीलोड करें, स्ट्रीमिंग अपडेट को थ्रॉटल करें, और भाषाएँ मांग पर लोड करें।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

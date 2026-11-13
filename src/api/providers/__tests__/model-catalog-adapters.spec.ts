@@ -124,6 +124,7 @@ import { RequestyHandler } from "../requesty"
 import { UnboundHandler } from "../unbound"
 import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
 import { ZooGatewayHandler } from "../zoo-gateway"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 const BASE_URL = "https://catalog.example.com/v1"
 const API_KEY = "catalog-key"
@@ -421,7 +422,7 @@ describe("model catalog adapters", () => {
 
 			settle(CATALOG)
 			// Let the shared load's promise chain settle (load -> .then -> .finally).
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			await flushMacrotasks()
 
 			// The load completed despite the detached waiter, so the next call
 			// is a memoized no-op rather than a second fetch.

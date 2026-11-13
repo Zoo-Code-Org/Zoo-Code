@@ -47,11 +47,11 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.94.0
+## Nieuw in v3.96.0
 
-- ✨ **Bredere model- en providerondersteuning:** Gebruik Claude Haiku 5.5 via Anthropic, stuur afbeeldingen naar compatibele VS Code LM-modellen, pas de temperatuur aan voor OpenCode Go Responses-modellen en annuleer verzoeken netjes bij meer providers.
-- 🔐 **Flexibeler MCP OAuth:** Configureer statische OAuth-clientinstellingen, gebruik aangepaste callback-paden, ontdek authenticatiedetails uit `WWW-Authenticate` en zie callback-fouten voordat je het opnieuw probeert.
-- 🧭 **Vloeiendere chats en lange sessies:** Hernoem taken in de geschiedenis, sleep bestanden in de chat zonder Shift ingedrukt te houden, verminder het geheugen dat tijdens lange sessies wordt vastgehouden en houd subtaaklinks en vervangen webviews stabiel.
+- ✨ **Nieuwe chatinstellingen en diagnostiek:** Toon tijdstempels bij berichten met instelbare tijd- en datumformaten, stel de prompt-cache-TTL voor Anthropic-profielen af en genereer privacyvriendelijke diagnostiekrapporten.
+- 💸 **Nauwkeurigere providerkosten en caching:** Houdt Anthropic-toolresultaten intact, neemt cumulatieve outputtokens mee in Anthropic- en MiniMax-kosten, leest DeepSeek-prompt-cache-tellers, richt zich op de xAI Responses-cache en factureert Mistral-cache-leesacties tegen 0,1x.
+- 🧭 **Betrouwbaardere en snellere chats:** Hervat voltooide taken na een herstart, herstel checkpoints wanneer de opgeslagen commit ontbreekt, herlaad een dode webview-renderer automatisch, beperk streamingupdates en laad talen op verzoek.
 
 ## Wat kan Zoo Code voor JOU doen?
 

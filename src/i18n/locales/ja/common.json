@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "ファイルを開けませんでした！",
 		"checkpoint_timeout": "チェックポイントの復元を試みる際にタイムアウトしました。",
 		"checkpoint_failed": "チェックポイントの復元に失敗しました。",
+		"checkpoint_restore_failed": "チェックポイントの復元中にエラーが発生しました: {{error}}",
+		"checkpoint_missing": "チェックポイント {{commitHash}} を復元できません。このチェックポイントはチェックポイントリポジトリに存在しなくなっています。ファイルは変更されていません。",
+		"checkpoint_invalid_hash": "チェックポイントを復元または比較できません。この参照はこのタスクの有効なチェックポイントではありません。ファイルは変更されていません。",
 		"git_not_installed": "チェックポイント機能にはGitが必要です。チェックポイントを有効にするにはGitをインストールしてください。",
 		"checkpoint_no_first": "比較する最初のチェックポイントがありません。",
 		"checkpoint_no_previous": "比較する前のチェックポイントがありません。",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Roo Codeの履歴のインポートに失敗しました: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "チェックポイントの復元に失敗し、タスクが停止しています。再開する？",
+		"restart": "再開"
 	},
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",

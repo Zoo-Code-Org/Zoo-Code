@@ -375,6 +375,38 @@ describe("MiniMaxHandler", () => {
 			expect(firstChunk.value).toEqual({ type: "usage", inputTokens: 10, outputTokens: 20 })
 		})
 
+		it("createMessage should surface the 1h cache-write split from cache_creation", async () => {
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 100_000,
+								cache_creation: {
+									ephemeral_5m_input_tokens: 40_000,
+									ephemeral_1h_input_tokens: 60_000,
+								},
+								cache_read_input_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const firstChunk = await stream.next()
+
+			expect(firstChunk.done).toBe(false)
+			expect(firstChunk.value).toMatchObject({
+				type: "usage",
+				cacheWriteTokens: 100_000,
+				cacheWrite1hTokens: 60_000,
+			})
+		})
+
 		it("createMessage should adopt cumulative message_delta output tokens for the final totalCost", async () => {
 			mockCreate.mockResolvedValueOnce(
 				asyncStreamFrom([

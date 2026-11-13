@@ -32,6 +32,25 @@ export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
  */
 export const openAiCodexModels = {
 	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
+	"gpt-6.1-terra": {
+		maxTokens: 128000,
+		// Use Codex's supported maximum rather than its 500K default compaction budget.
+		contextWindow: 872000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "low",
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description:
+			"GPT-6.1 Terra: Fast, efficient visual reasoning, precise computer use, and natural writing via ChatGPT subscription",
+	},
+	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
 	"gpt-6.1-sol": {
 		maxTokens: 128000,
 		// Use Codex's supported maximum rather than its 272K default compaction budget.

@@ -2,6 +2,8 @@ import * as vscode from "vscode"
 
 import { openFile } from "../open-file"
 
+import { makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+
 // Mock vscode module
 vi.mock("vscode", () => ({
 	Uri: {
@@ -58,7 +60,7 @@ vi.mock("../../utils/path", () => {
 
 // Mock i18n
 vi.mock("../../i18n", () => ({
-	t: vi.fn((key: string, _params?: any) => {
+	t: vi.fn((key: string, _params?: Record<string, unknown>) => {
 		// Return the key without namespace prefix to match actual behavior
 		if (key.startsWith("common:")) {
 			return key.replace("common:", "")
@@ -80,7 +82,7 @@ describe("openFile", () => {
 	describe("decodeURIComponent error handling", () => {
 		it("should handle invalid URI encoding gracefully", async () => {
 			const invalidPath = "test%ZZinvalid.txt" // Invalid percent encoding
-			const mockDocument = { uri: { fsPath: invalidPath } }
+			const mockDocument = makeTextDocument({ uri: makeUri(invalidPath) })
 
 			vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
 				type: vscode.FileType.File,
@@ -88,8 +90,8 @@ describe("openFile", () => {
 				mtime: 0,
 				size: 0,
 			})
-			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument as any)
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
 
 			await openFile(invalidPath)
 
@@ -106,7 +108,7 @@ describe("openFile", () => {
 		it("should successfully decode valid URI-encoded paths", async () => {
 			const encodedPath = "./%5Btest%5D/file.txt" // [test] encoded
 			const decodedPath = "./[test]/file.txt"
-			const mockDocument = { uri: { fsPath: decodedPath } }
+			const mockDocument = makeTextDocument({ uri: makeUri(decodedPath) })
 
 			vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
 				type: vscode.FileType.File,
@@ -114,8 +116,8 @@ describe("openFile", () => {
 				mtime: 0,
 				size: 0,
 			})
-			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument as any)
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
 
 			await openFile(encodedPath)
 
@@ -132,7 +134,7 @@ describe("openFile", () => {
 
 		it("should handle paths with special characters that need encoding", async () => {
 			const pathWithSpecialChars = "./[brackets]/file with spaces.txt"
-			const mockDocument = { uri: { fsPath: pathWithSpecialChars } }
+			const mockDocument = makeTextDocument({ uri: makeUri(pathWithSpecialChars) })
 
 			vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
 				type: vscode.FileType.File,
@@ -140,8 +142,8 @@ describe("openFile", () => {
 				mtime: 0,
 				size: 0,
 			})
-			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument as any)
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
 
 			await openFile(pathWithSpecialChars)
 
@@ -153,7 +155,7 @@ describe("openFile", () => {
 
 		it("should handle already decoded paths without double-decoding", async () => {
 			const normalPath = "./normal/file.txt"
-			const mockDocument = { uri: { fsPath: normalPath } }
+			const mockDocument = makeTextDocument({ uri: makeUri(normalPath) })
 
 			vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
 				type: vscode.FileType.File,
@@ -161,8 +163,8 @@ describe("openFile", () => {
 				mtime: 0,
 				size: 0,
 			})
-			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument as any)
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
 
 			await openFile(normalPath)
 
@@ -223,8 +225,8 @@ describe("openFile", () => {
 			const content = "Hello, world!"
 
 			vi.mocked(vscode.workspace.fs.stat).mockRejectedValue(new Error("File not found"))
-			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue({} as any)
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(makeTextDocument())
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
 
 			await openFile(newFilePath, { create: true, content })
 

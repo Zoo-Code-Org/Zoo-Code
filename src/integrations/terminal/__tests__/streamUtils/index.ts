@@ -10,6 +10,13 @@ import {
 	createChunkedMockStream,
 } from "./mockStream"
 
+// execSync failures include output and exit status in addition to ExecException fields.
+export type SyncExecError = import("child_process").ExecException & {
+	status?: number | null
+	stdout?: string
+	stderr?: string
+}
+
 /**
  * Common interface for all command streams
  */
@@ -23,7 +30,7 @@ export interface CommandStream {
  * @returns Boolean indicating whether pwsh is available
  */
 export function isPowerShellCoreAvailable(): boolean {
-	return (global as any).__TEST_ENV__?.isPowerShellAvailable || false
+	return global.__TEST_ENV__?.isPowerShellAvailable || false
 }
 
 /**
@@ -31,7 +38,7 @@ export function isPowerShellCoreAvailable(): boolean {
  * @returns The current platform: 'win32', 'darwin', 'linux', etc.
  */
 export function getPlatform(): string {
-	return (global as any).__TEST_ENV__?.platform || process.platform
+	return global.__TEST_ENV__?.platform || process.platform
 }
 
 /**

@@ -90,9 +90,10 @@ describe("TerminalProcess.interpretExitCode with real commands", () => {
 			// If we get here, the command succeeded with exit code 0
 			const result = TerminalProcess.interpretExitCode(0)
 			expect(result).toEqual({ exitCode: 0 })
-		} catch (error: any) {
+		} catch (error) {
 			// This should not happen for a successful command
-			throw new Error("Command should have succeeded: " + error.message)
+			const message = error instanceof Error ? error.message : String(error)
+			throw new Error("Command should have succeeded: " + message)
 		}
 	})
 
@@ -101,12 +102,16 @@ describe("TerminalProcess.interpretExitCode with real commands", () => {
 			// Run a command that should fail with exit code 1 or 2
 			execSync("ls /nonexistent_directory", { stdio: "ignore" })
 			throw new Error("Command should have failed")
-		} catch (error: any) {
+		} catch (error) {
+			const { status } = error as NodeJS.ErrnoException & { status?: number | null }
+			if (typeof status !== "number") {
+				throw new Error("Command should have failed with a numeric status")
+			}
 			// Verify the exit code is what we expect (can be 1 or 2 depending on the system)
-			expect(error.status).toBeGreaterThan(0)
-			expect(error.status).toBeLessThan(128) // Not a signal
-			const result = TerminalProcess.interpretExitCode(error.status)
-			expect(result).toEqual({ exitCode: error.status })
+			expect(status).toBeGreaterThan(0)
+			expect(status).toBeLessThan(128) // Not a signal
+			const result = TerminalProcess.interpretExitCode(status)
+			expect(result).toEqual({ exitCode: status })
 		}
 	})
 
@@ -115,9 +120,13 @@ describe("TerminalProcess.interpretExitCode with real commands", () => {
 			// Run a command that exits with a specific code
 			execSync("exit 42", { stdio: "ignore" })
 			throw new Error("Command should have exited with code 42")
-		} catch (error: any) {
-			expect(error.status).toBe(42)
-			const result = TerminalProcess.interpretExitCode(error.status)
+		} catch (error) {
+			const { status } = error as NodeJS.ErrnoException & { status?: number | null }
+			if (typeof status !== "number") {
+				throw new Error("Command should have exited with a numeric status")
+			}
+			expect(status).toBe(42)
+			const result = TerminalProcess.interpretExitCode(status)
 			expect(result).toEqual({ exitCode: 42 })
 		}
 	})

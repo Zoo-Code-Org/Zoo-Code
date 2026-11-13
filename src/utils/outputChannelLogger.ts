@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 
-export type LogFunction = (...args: unknown[]) => void
+export type LogFunction<Args extends unknown[] = unknown[]> = (...args: Args) => void
 
 /**
  * Creates a logging function that writes to a VSCode output channel

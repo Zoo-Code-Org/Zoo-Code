@@ -84,11 +84,6 @@
 			"count": 36
 		}
 	},
-	"api/providers/__tests__/lm-studio-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -324,11 +319,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/qwen-code.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/requesty.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -506,7 +496,7 @@
 	},
 	"core/checkpoints/__tests__/checkpoint.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 3
 		}
 	},
 	"core/checkpoints/index.ts": {
@@ -726,12 +716,12 @@
 	},
 	"core/task/__tests__/ask-clear-approval-buttons.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 18
 		}
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 18
+			"count": 17
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
@@ -949,11 +939,6 @@
 			"count": 12
 		}
 	},
-	"core/webview/__tests__/checkpointRestoreHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/webview/__tests__/diagnosticsHandler.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
@@ -972,11 +957,6 @@
 	"core/webview/__tests__/telemetrySettingsTracking.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.checkpoint.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"core/webview/__tests__/webviewMessageHandler.cloudAuth.spec.ts": {
@@ -1027,121 +1007,6 @@
 	"core/webview/webviewMessageHandler.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
-		}
-	},
-	"integrations/editor/DiffViewProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 310
-		}
-	},
-	"integrations/editor/__tests__/EditorUtils.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"integrations/kimi-code/__tests__/oauth.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/misc/__tests__/export-markdown.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/misc/__tests__/open-file.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 11
-		}
-	},
-	"integrations/misc/__tests__/performance/processCarriageReturns.benchmark.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"integrations/terminal/__tests__/OutputInterceptor.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcess.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcess.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessExec.bash.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessExec.cmd.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessExec.pwsh.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessInterpretExitCode.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProfile.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 34
-		}
-	},
-	"integrations/terminal/__tests__/TerminalRegistry.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 22
-		}
-	},
-	"integrations/terminal/__tests__/setupTerminalTests.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/bashStream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/cmdStream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/pwshStream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/theme/getTheme.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
 		}
 	},
 	"services/__tests__/zoo-code-auth.test.ts": {

@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "Passar la clau API d'Anthropic com a capçalera d'autorització en lloc de X-Api-Key",
 		"anthropic1MContextBetaLabel": "Activa la finestra de context d'1M (Beta)",
 		"anthropic1MContextBetaDescription": "Amplia la finestra de context a 1 milió de tokens per a Claude Sonnet 4.x / Claude Opus 4.6",
+		"promptCacheTtlLabel": "Durada de la memòria cau de prompts",
+		"promptCacheTtl5m": "5 minuts (per defecte)",
+		"promptCacheTtl1h": "1 hora",
+		"promptCacheTtlDescription": "Quant de temps els prefixos de prompt emmagatzemats a la memòria cau romanen vàlids. La durada d'1 hora costa més per escriptura a la memòria cau però sobreviu a intervals més llargs entre sol·licituds. Deixa-ho en 5 minuts tret que tornis a enviar el mateix context llarg repetidament.",
 		"awsBedrock1MContextBetaLabel": "Activa la finestra de context d'1M (Beta)",
 		"awsBedrock1MContextBetaDescription": "Amplia la finestra de context a 1 milió de tokens per a Claude Sonnet 4.x / Claude Opus 4.6",
 		"vertex1MContextBetaLabel": "Activa la finestra de context d'1M (Beta)",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "Eines actualitzades correctament",
 			"refreshError": "Error en actualitzar les eines",
 			"toolParameters": "Paràmetres"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Esforç de pensament dinàmic",
+			"description": "Prepara l'eina set_thinking_effort per a un suport posterior: aquest paràmetre només desa la preferència i el comportament per sol·licitud arribarà en una feina posterior. (experimental)"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "La descripció ha de tenir com a màxim 1024 caràcters"
 		},
 		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Idioma i visualització de data i hora.",
+		"languageTitle": "Idioma",
+		"displayLanguage": "Idioma de visualització",
+		"displayLanguageDescription": "Idioma de la interfície de Zoo Code.",
+		"dateTimeTitle": "Data i hora",
+		"timeFormat": {
+			"label": "Format de l'hora",
+			"description": "Automàtic segueix l'idioma de visualització.",
+			"options": {
+				"auto": "Automàtic",
+				"12h": "12 hores",
+				"24h": "24 hores"
+			}
+		},
+		"dateFormat": {
+			"label": "Format de la data",
+			"example": "p. ex. {{example}}",
+			"options": {
+				"auto": "Automàtic",
+				"mdy": "MM/DD/AAAA",
+				"dmy": "DD/MM/AAAA",
+				"ymd": "AAAA-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Mostra els temps relatius (\"fa 5 min\") a l'historial de tasques"
+		},
+		"preview": {
+			"title": "Previsualització",
+			"chat": "Missatge del xat",
+			"history": "Historial de tasques",
+			"relative": "fa 5 min",
+			"hover": "(en passar el cursor: {{value}})"
+		}
 	}
 }

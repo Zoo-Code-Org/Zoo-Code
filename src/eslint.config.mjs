@@ -1,7 +1,9 @@
 import { config } from "@roo-code/config-eslint/base"
 import {
+	abortSubstringSelector,
 	apiProviderHygieneConfig,
 	apiProviderTestSelectors,
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 } from "@roo-code/config-eslint/api-provider-hygiene"
 import { createI18nDotKeyConfig, getI18nDotKeySelectors } from "@roo-code/config-eslint/i18n-keys"
@@ -66,6 +68,7 @@ export default [
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
 	},
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 	{
 		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
@@ -138,7 +141,21 @@ export default [
 			"**/services/__tests__/workflow-self-listen.test.ts",
 		],
 		rules: {
-			"no-restricted-syntax": ["error", ...testPathTraversalSelectors],
+			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, abortSubstringSelector],
+		},
+	},
+	{
+		// The four workflow tests ignored above are exempt from the path-traversal selectors
+		// because they read root-level config. That exception was never about abort
+		// assertions, so re-apply the abort rule for exactly those files.
+		files: [
+			"**/services/__tests__/pr-review-state-workflow.test.ts",
+			"**/services/__tests__/stale-pr-clock-workflow.test.ts",
+			"**/services/__tests__/fork-review-followup-workflow.test.ts",
+			"**/services/__tests__/workflow-self-listen.test.ts",
+		],
+		rules: {
+			"no-restricted-syntax": ["error", abortSubstringSelector],
 		},
 	},
 	{
@@ -159,7 +176,12 @@ export default [
 			"integrations/terminal/**/__tests__/**/*.ts",
 		],
 		rules: {
-			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, testResetHelperSelector],
+			"no-restricted-syntax": [
+				"error",
+				...testPathTraversalSelectors,
+				abortSubstringSelector,
+				testResetHelperSelector,
+			],
 		},
 	},
 	{

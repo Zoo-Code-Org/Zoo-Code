@@ -1,5 +1,79 @@
 # Zoo Code Changelog
 
+## [3.96.0]
+
+- ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.
+- 💸 **More accurate provider costs and caching:** Keep Anthropic tool results intact, adopt cumulative output tokens in Anthropic and MiniMax costs, read DeepSeek prompt-cache counters, target the xAI Responses cache, and bill Mistral cache reads at 0.1x.
+- 🧭 **More reliable and faster chats:** Resume completed tasks after a restart, restore checkpoints when the saved commit is missing, auto-reload a dead webview renderer, throttle streaming updates, and load locales on demand.
+
+### New Chat Settings and Diagnostics
+
+- Add time and date format settings and message timestamps (#2221 by @KarthickMahalingam, PR #2223 by @KarthickMahalingam)
+- Add a user-facing prompt-cache TTL for Anthropic profiles (PR #2271 by @simurg79)
+- Add privacy-safe diagnostics reports (PR #2292 by @app/zoomote2)
+
+### More Accurate Provider Costs and Caching
+
+- Keep tool_result blocks contiguous in Anthropic requests by grouping image blocks separately (#1307 by @alaskanloosemoose-dotcom, PR #2243 by @myk1yt)
+- Adopt cumulative message_delta output tokens in Anthropic and MiniMax cost (#1727 by @myk1yt, PR #2242 by @myk1yt)
+- Read documented top-level prompt-cache counters for DeepSeek (PR #2252 by @myk1yt)
+- Send body prompt_cache_key for xAI Responses cache affinity (PR #2256 by @myk1yt)
+- Bill Mistral cache reads at 0.1x instead of the full input price (PR #2257 by @myk1yt)
+- Map xAI tool_choice to the Responses API shape with a typed request body (PR #2036 by @easonLiangWorldedtech)
+- Add MiMo V2.6 Flash and Pro model configurations for OpenCode Go (#1997 by @WebMad, PR #2246 by @myk1yt)
+
+### More Reliable and Faster Chats
+
+- Resume completed tasks after a restart when a message write is interrupted (#2130 by @edelauna, PR #2297 by @app/zoomote2)
+- Restore checkpoints when the saved commit is missing (PR #2269 by @simurg79)
+- Detect a dead webview renderer via heartbeat and auto-reload (PR #1715 by @myk1yt)
+- Report emergency condense like the automatic path (PR #1838 by @PierrunoYT)
+- Summarize only the API-visible history when condensing (#1342 by @RemainIndoors1, PR #2300 by @RytisLT)
+- Propagate beyond-EOF read-file errors instead of reporting the file as empty (PR #1734 by @myk1yt)
+- Throttle partial message updates while streaming (PR #2120 by @PierrunoYT)
+- Replace axios with fetch in key-info hooks (PR #2261 by @myk1yt)
+- Load locales on demand instead of eager-globbing all 18 (PR #2267 by @myk1yt)
+- Replace the debounce package with a local leading-edge helper (PR #2268 by @myk1yt)
+
+### New Features and Integrations
+
+- Add a dependency-free BM25 ranker tool (PR #1207 by @edelauna)
+- Add abort-signal wiring for lm-studio and qwen-code (PR #1309 by @easonLiangWorldedtech)
+- Add Keenable to the MCP marketplace (#2312 by @ilya-bogin-keenable, PR #2313 by @ilya-bogin-keenable)
+
+### Testing, CI, and Repository Automation
+
+- Cancel obsolete PR CI runs and remove duplicate builds (#2289 by @edelauna, PR #2294 by @app/zoomote2)
+- Post surviving mutants as a PR comment (#2287 by @edelauna, PR #2293 by @app/zoomote2)
+- Run webview CI tests with four workers (#2288 by @edelauna, PR #2308 by @app/zoomote2)
+- Use plugin-side related-test discovery for the extension package mutation gate (PR #2211 by @easonLiangWorldedtech)
+- Add test-utils guardrails and convert remaining stragglers (PR #2279 by @app/zoomote2)
+- Drop test-only tool-use interfaces from shared/tools (PR #2258 by @myk1yt)
+- Show the Zoo Code panel in the Solheim smoke video and bound the apt step (#2158 by @edelauna, PR #2195 by @app/zoomote2)
+
+### Refactoring and Code Health
+
+- Move default provider ID functionality into the provider definition (PR #2233 by @p12tic)
+- Resolve profile model IDs through provider definitions (PR #2239 by @p12tic)
+- Remove no-explicit-any suppressions in utils (PR #2281 by @app/zoomote2)
+- Remove no-explicit-any suppressions in small directories (PR #2286 by @app/zoomote2)
+- Close lint coverage and knip hygiene gaps (PR #2280 by @app/zoomote2)
+- Sweep dead locale keys behind an AST gate (PR #2263 by @myk1yt)
+- Remove dead CSS classes from the global stylesheet (PR #2251 by @myk1yt)
+
+### Dependencies and Maintenance
+
+- Update @tanstack/react-query to v5.105.0 (PR #2180 by @app/renovate)
+- Update ignore to v7.0.14 (PR #2181 by @app/renovate)
+- Update posthog-js to v1.440.0 (PR #2182 by @app/renovate)
+- Update posthog-node to v5.57.2 (PR #2183 by @app/renovate)
+- Update GitHub Actions (PR #2186 by @app/renovate)
+- Update qs to v6.16.1 [security] (PR #2214 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.94.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.96.0 feature (PR #2272 by @app/zoomote2)
+
 ## [3.94.0]
 
 - ✨ **Broader model and provider support:** Use Claude Haiku 5.5 through Anthropic, send images to compatible VS Code LM models, tune temperature for OpenCode Go Responses models, and cancel requests cleanly across more providers.

@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "Pasar la clave API de Anthropic como encabezado de autorización en lugar de X-Api-Key",
 		"anthropic1MContextBetaLabel": "Habilitar ventana de contexto de 1M (Beta)",
 		"anthropic1MContextBetaDescription": "Amplía la ventana de contexto a 1 millón de tokens para Claude Sonnet 4.x / Claude Opus 4.6",
+		"promptCacheTtlLabel": "Duración de la caché de prompts",
+		"promptCacheTtl5m": "5 minutos (predeterminado)",
+		"promptCacheTtl1h": "1 hora",
+		"promptCacheTtlDescription": "Cuánto tiempo los prefijos de prompt en caché permanecen válidos. La duración de 1 hora cuesta más por escritura en caché pero sobrevive a intervalos más largos entre solicitudes. Déjalo en 5 minutos a menos que reenvíes repetidamente el mismo contexto largo.",
 		"awsBedrock1MContextBetaLabel": "Habilitar ventana de contexto de 1M (Beta)",
 		"awsBedrock1MContextBetaDescription": "Amplía la ventana de contexto a 1 millón de tokens para Claude Sonnet 4.x / Claude Opus 4.6",
 		"vertex1MContextBetaLabel": "Habilitar ventana de contexto de 1M (Beta)",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "Herramientas actualizadas correctamente",
 			"refreshError": "Error al actualizar las herramientas",
 			"toolParameters": "Parámetros"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Esfuerzo de pensamiento dinámico",
+			"description": "Prepara la herramienta set_thinking_effort para un soporte posterior: esta opción solo guarda la preferencia y el comportamiento por solicitud llegará en trabajo posterior. (experimental)"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "La descripción debe tener como máximo 1024 caracteres"
 		},
 		"footer": "Crea tus propias skills con el modo Skill Writer, disponible en el <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Idioma y visualización de fecha y hora.",
+		"languageTitle": "Idioma",
+		"displayLanguage": "Idioma de visualización",
+		"displayLanguageDescription": "Idioma de la interfaz de Zoo Code.",
+		"dateTimeTitle": "Fecha y hora",
+		"timeFormat": {
+			"label": "Formato de hora",
+			"description": "Automático sigue el idioma de visualización.",
+			"options": {
+				"auto": "Automático",
+				"12h": "12 horas",
+				"24h": "24 horas"
+			}
+		},
+		"dateFormat": {
+			"label": "Formato de fecha",
+			"example": "p. ej. {{example}}",
+			"options": {
+				"auto": "Automático",
+				"mdy": "MM/DD/AAAA",
+				"dmy": "DD/MM/AAAA",
+				"ymd": "AAAA-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Mostrar tiempos relativos («hace 5 min») en el historial de tareas"
+		},
+		"preview": {
+			"title": "Vista previa",
+			"chat": "Mensaje del chat",
+			"history": "Historial de tareas",
+			"relative": "hace 5 min",
+			"hover": "(al pasar el cursor: {{value}})"
+		}
 	}
 }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { replaceEqualDeep, useQuery } from "@tanstack/react-query"
 
 import {
 	allRouterModelsProvider,
@@ -77,5 +77,16 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
 		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
+		// Structural sharing copies into `{}`, where an own "__proto__" model ID would swap the
+		// copy's prototype instead of becoming a key, so skip sharing for such catalogs.
+		structuralSharing: (oldData, newData) =>
+			hasOwnProtoModelId(newData) ? newData : replaceEqualDeep(oldData, newData),
 	})
 }
+
+const hasOwnProtoModelId = (data: unknown): boolean =>
+	typeof data === "object" &&
+	data !== null &&
+	Object.values(data).some(
+		(models) => typeof models === "object" && models !== null && Object.hasOwn(models, "__proto__"),
+	)

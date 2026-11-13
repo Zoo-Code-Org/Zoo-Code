@@ -17,6 +17,9 @@
 		"could_not_open_file_generic": "Nie można otworzyć pliku!",
 		"checkpoint_timeout": "Upłynął limit czasu podczas próby przywrócenia punktu kontrolnego.",
 		"checkpoint_failed": "Nie udało się przywrócić punktu kontrolnego.",
+		"checkpoint_restore_failed": "Błąd podczas przywracania punktu kontrolnego: {{error}}",
+		"checkpoint_missing": "Nie można przywrócić punktu kontrolnego {{commitHash}}: ten punkt kontrolny nie istnieje już w repozytorium punktów kontrolnych. Żadne pliki nie zostały zmienione.",
+		"checkpoint_invalid_hash": "Nie można przywrócić ani porównać punktu kontrolnego: odwołanie nie jest prawidłowym punktem kontrolnym tego zadania. Żadne pliki nie zostały zmienione.",
 		"git_not_installed": "Funkcja punktów kontrolnych wymaga oprogramowania Git. Zainstaluj Git, aby włączyć punkty kontrolne.",
 		"checkpoint_no_first": "Brak pierwszego punktu kontrolnego do porównania.",
 		"checkpoint_no_previous": "Brak poprzedniego punktu kontrolnego do porównania.",
@@ -112,6 +115,10 @@
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
 		"rooHistoryImport": "Nie udało się zaimportować historii Roo Code: {{error}}"
+	},
+	"checkpoints": {
+		"restart_after_restore_failure": "Przywracanie punktu kontrolnego nie powiodło się i zadanie jest zatrzymane. Chcesz je uruchomić ponownie?",
+		"restart": "Uruchom ponownie"
 	},
 	"warnings": {
 		"no_terminal_content": "Nie wybrano zawartości terminala",

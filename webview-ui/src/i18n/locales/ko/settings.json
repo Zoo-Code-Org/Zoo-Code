@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "X-Api-Key 대신 Authorization 헤더로 Anthropic API 키 전달",
 		"anthropic1MContextBetaLabel": "1M 컨텍스트 창 활성화 (베타)",
 		"anthropic1MContextBetaDescription": "Claude Sonnet 4.x / Claude Opus 4.6의 컨텍스트 창을 100만 토큰으로 확장",
+		"promptCacheTtlLabel": "프롬프트 캐시 수명",
+		"promptCacheTtl5m": "5분 (기본값)",
+		"promptCacheTtl1h": "1시간",
+		"promptCacheTtlDescription": "캐시된 프롬프트 접두사가 유효하게 유지되는 기간입니다. 1시간 수명은 캐시 쓰기당 비용이 더 높지만 요청 사이의 긴 간격에도 유지됩니다. 동일한 긴 컨텍스트를 반복해서 다시 보내지 않는 한 5분으로 두세요.",
 		"awsBedrock1MContextBetaLabel": "1M 컨텍스트 창 활성화 (베타)",
 		"awsBedrock1MContextBetaDescription": "Claude Sonnet 4.x / Claude Opus 4.6의 컨텍스트 창을 100만 토큰으로 확장",
 		"vertex1MContextBetaLabel": "1M 컨텍스트 창 활성화 (베타)",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "도구가 성공적으로 새로고침되었습니다",
 			"refreshError": "도구 새로고침에 실패했습니다",
 			"toolParameters": "매개변수"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "동적 사고 노력",
+			"description": "set_thinking_effort 도구를 이후 지원을 위해 준비합니다. 이 설정은 선호도만 저장하며, 요청별 동작은 후속 작업에서 제공됩니다. (실험적 기능)"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "설명은 1024자 이하여야 합니다"
 		},
 		"footer": "스킬 작성자 모드로 자신만의 스킬을 만들 수 있습니다. <MarketplaceLink>모드 마켓플레이스</MarketplaceLink>에서 사용 가능합니다."
+	},
+	"language": {
+		"description": "언어 및 날짜/시간 표시.",
+		"languageTitle": "언어",
+		"displayLanguage": "표시 언어",
+		"displayLanguageDescription": "Zoo Code 인터페이스 언어입니다.",
+		"dateTimeTitle": "날짜 및 시간",
+		"timeFormat": {
+			"label": "시간 형식",
+			"description": "자동은 표시 언어를 따릅니다.",
+			"options": {
+				"auto": "자동",
+				"12h": "12시간제",
+				"24h": "24시간제"
+			}
+		},
+		"dateFormat": {
+			"label": "날짜 형식",
+			"example": "예: {{example}}",
+			"options": {
+				"auto": "자동",
+				"mdy": "MM/DD/YYYY",
+				"dmy": "DD/MM/YYYY",
+				"ymd": "YYYY-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "작업 기록에 상대 시간(\"5분 전\") 표시"
+		},
+		"preview": {
+			"title": "미리보기",
+			"chat": "채팅 메시지",
+			"history": "작업 기록",
+			"relative": "5분 전",
+			"hover": "(호버: {{value}})"
+		}
 	}
 }

@@ -2803,7 +2803,7 @@ describe("NativeOllamaHandler", () => {
 			// The external-abort path must be the only abort: the cleared timer must
 			// not fire a second client.abort() afterwards.
 			expect(abortCount).toBe(1)
-			await new Promise((resolve) => setTimeout(resolve, 150))
+			await new Promise((resolve) => nativeSetTimeout(resolve, 150))
 			expect(abortCount).toBe(1)
 			resolveFetch?.()
 		})

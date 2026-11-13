@@ -99,6 +99,7 @@ vi.mock("delay", () => ({
 
 import delay from "delay"
 import pWaitFor from "p-wait-for"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 vi.mock("uuid", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("uuid")>()
@@ -531,6 +532,59 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("cache-write TTL split in telemetry", () => {
+		it("bills a 1h cache write at the 1h rate when usage is captured after a cancelled stream", async () => {
+			// glm P1: the telemetry cost recompute inside captureUsageData must receive
+			// the per-TTL split. Before the fix it passed only the aggregate write count,
+			// so a 1h write was billed at the 5m rate (0.375 instead of 0.6 for 100k
+			// tokens at claude-3-5-sonnet's 3.0 input price).
+			const task = await createTaskWithManualRetries()
+			const captureLlmCompletion = vi.spyOn(TelemetryService.instance, "captureLlmCompletion")
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			// A stream that reports the split but never yields a final cost chunk, which is
+			// the shape a cancelled request leaves behind. The second call throws so the
+			// request loop terminates the way the neighbouring tests do.
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					stream([
+						{
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: 0,
+							cacheWriteTokens: 100_000,
+							cacheWrite1hTokens: 100_000,
+							cacheReadTokens: 0,
+						},
+						{ type: "text", text: "partial response" },
+					]),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after usage capture")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			// The drain is fire-and-forget and reaches `captureLlmCompletion` after several
+			// awaits, some of which touch the filesystem. A fixed sleep races that work on a
+			// loaded worker, so poll for the captured call instead.
+			await vi.waitFor(() =>
+				expect(
+					captureLlmCompletion.mock.calls.some(([, payload]) => payload?.cacheWriteTokens === 100_000),
+				).toBe(true),
+			)
+
+			const call = captureLlmCompletion.mock.calls.find(([, payload]) => payload?.cacheWriteTokens === 100_000)
+			expect(call).toBeDefined()
+
+			// claude-3-5-sonnet-20241022: input 3.0, cacheWritesPrice 3.75, cacheWritesPrice1h 6.0.
+			// 1h writes: (6.0 / 1_000_000) * 100_000 = 0.6
+			// The pre-fix lumped behaviour billed (3.75 / 1_000_000) * 100_000 = 0.375.
+			expect(call![1].cost).toBeCloseTo(0.6, 9)
+			expect(call![1].cost).not.toBeCloseTo(0.375, 9)
 		})
 	})
 
@@ -1018,7 +1072,7 @@ describe("Cline", () => {
 			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
 				const [type, _text, _images, partial] = args
 				if (type === "text" && partial === false) {
-					task.abort = true
+					setAbortLatch(task, true)
 					throw new Error("presenter text failed while aborting")
 				}
 				return say(...args)
@@ -2492,6 +2546,96 @@ describe("Cline", () => {
 			// the model info; the second argument must be the snapshot threaded
 			// into the handler, not a fresh re-read.
 			expect(getSystemPromptSpy).toHaveBeenCalledWith(snapshot, ctxModelInfo)
+		})
+
+		describe("emergency condense reporting (#1769)", () => {
+			const ctxModelInfo: ModelInfo = { contextWindow: 50_000, maxTokens: 1024, supportsPromptCache: false }
+
+			// Overflow the 50k window so the real handler reaches manageContext's condense branch.
+			const createOverflowingTask = async (state: ProviderState) => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.getTaskMode()
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 100_000,
+				})
+				vi.spyOn(task.api, "getModel").mockReturnValue({ id: "ctx-model", info: ctxModelInfo })
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+				task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
+				const say = vi.spyOn(task, "say").mockResolvedValue(undefined)
+				return { task, say }
+			}
+
+			it("emits the summary's condenseId and summarizes with the task's condense settings", async () => {
+				const { task, say } = await createOverflowingTask(
+					providerStateWith({ customSupportPrompts: { CONDENSE: "custom condense prompt" } }),
+				)
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: [{ role: "user", content: [{ type: "text", text: "condensed" }], ts: Date.now() }],
+					summary: "summary",
+					cost: 0,
+					newContextTokens: 1,
+					condenseId: "emergency-condense-id",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				// Rewind cleanup can only remove the summary if the event carries its condenseId.
+				const condenseCall = say.mock.calls.find(([type]) => type === "condense_context")
+				expect(condenseCall?.[7]).toMatchObject({ condenseId: "emergency-condense-id" })
+				const [options] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+				expect(options).toMatchObject({ customCondensingPrompt: "custom condense prompt", cwd: task.cwd })
+			})
+
+			it("surfaces a failed emergency condense as condense_context_error", async () => {
+				const { task, say } = await createOverflowingTask(providerStateWith())
+				// Enough visible messages for the 50% fallback to hide a pair (floor(4 * 0.5) = 2).
+				task.apiConversationHistory = ["a", "b", "c", "d", "e"].map((text, index) => ({
+					role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+					content: [{ type: "text" as const, text }],
+					ts: index + 1,
+				}))
+				const overwrite = vi.mocked(task.overwriteApiConversationHistory)
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: task.apiConversationHistory,
+					summary: "",
+					cost: 0,
+					error: "Condensing failed: rate limited",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				expect(say).toHaveBeenCalledWith("condense_context_error", "Condensing failed: rate limited")
+				// The sliding-window fallback still reports its truncation after the error row.
+				expect(say.mock.calls.map(([type]) => type)).toEqual([
+					"condense_context_error",
+					"sliding_window_truncation",
+				])
+
+				const truncatedHistory = requireDefined(overwrite.mock.calls.at(-1))[0]
+				const marker = requireDefined(truncatedHistory.find((message) => message.isTruncationMarker))
+				const truncationCall = requireDefined(
+					say.mock.calls.find(([type]) => type === "sliding_window_truncation"),
+				)
+				const reported = requireDefined(truncationCall[8])
+				expect(reported.truncationId).toBe(marker.truncationId)
+				expect(reported.messagesRemoved).toBe(2)
+				expect(
+					truncatedHistory.filter((message) => message.truncationParent === reported.truncationId),
+				).toHaveLength(2)
+				expect(reported.prevContextTokens).toBeGreaterThanOrEqual(100_000)
+				expect(reported.newContextTokens).toBeGreaterThan(0)
+				expect(reported.newContextTokens).toBeLessThan(reported.prevContextTokens)
+			})
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {
@@ -4369,6 +4513,172 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("partial message update throttling", () => {
+		function createStreamingTask() {
+			// Task mutates one ClineMessage across deltas and finalization, so snapshot the
+			// fields of each messageUpdated post when it happens instead of keeping the reference.
+			const messageUpdates: Array<Pick<ClineMessage, "ts" | "text" | "partial">> = []
+			vi.mocked(mockProvider.postMessageToWebview).mockImplementation(async (message) => {
+				if (message.type === "messageUpdated" && message.clineMessage) {
+					const { ts, text, partial } = message.clineMessage
+					messageUpdates.push({ ts, text, partial })
+				}
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			return { task, messageUpdates }
+		}
+
+		beforeEach(() => {
+			vi.useFakeTimers()
+		})
+
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		it("coalesces a burst of partial updates and delivers the latest text last", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "chunk 0", undefined, true)
+			for (let i = 1; i <= 50; i++) {
+				await task.say("text", `chunk ${i}`, undefined, true)
+				vi.advanceTimersByTime(5)
+			}
+			await vi.advanceTimersByTimeAsync(500)
+
+			// 50 deltas over ~250ms: far fewer than one post per delta.
+			expect(messageUpdates.length).toBeGreaterThan(0)
+			expect(messageUpdates.length).toBeLessThan(10)
+			expect(messageUpdates.at(-1)).toMatchObject({ text: "chunk 50", partial: true })
+		})
+
+		it("lets the finalized message through and drops the queued partial post", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			await task.say("text", "third", undefined, true)
+			// "third" is queued behind the throttle; finalizing must cancel that queued post.
+			expect(vi.getTimerCount()).toBe(1)
+			await task.say("text", "final text", undefined, false)
+			expect(vi.getTimerCount()).toBe(0)
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(messageUpdates.map(({ text, partial }) => ({ text, partial }))).toEqual([
+				{ text: "second", partial: true },
+				{ text: "final text", partial: false },
+			])
+		})
+
+		it("drops a queued partial ask update when the ask is finalized", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			// Partial asks always reject with AskIgnoredError.
+			await task.ask("tool", "first", true).catch(() => {})
+			await task.ask("tool", "second", true).catch(() => {})
+			await task.ask("tool", "third", true).catch(() => {})
+			expect(task["pendingPartialMessageTimer"]).toBeDefined()
+
+			// A complete ask resolves only after a response, so leave it pending. Step 1ms per check
+			// so the final post lands well before the queued timer would fire on its own.
+			void task.ask("tool", "final", false).catch(() => {})
+			await vi.waitFor(() => expect(messageUpdates.at(-1)?.partial).toBe(false), { interval: 1 })
+			expect(task["pendingPartialMessageTimer"]).toBeUndefined()
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(messageUpdates.map(({ text, partial }) => ({ text, partial }))).toEqual([
+				{ text: "second", partial: true },
+				{ text: "final", partial: false },
+			])
+		})
+
+		it("drops a queued partial update when the task is disposed", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			await task.say("text", "third", undefined, true)
+			expect(task["pendingPartialMessageTimer"]).toBeDefined()
+
+			await task.dispose()
+			expect(task["pendingPartialMessageTimer"]).toBeUndefined()
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+		})
+
+		it("holds a queued update until the 120ms interval elapses", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			await task.say("text", "third", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+
+			await vi.advanceTimersByTimeAsync(119)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second", "third"])
+		})
+
+		it("delivers a queued update for one message before updating a different message", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("reasoning", "r1", undefined, true)
+			await task.say("reasoning", "r2", undefined, true)
+			await task.say("reasoning", "r3", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["r2"])
+
+			// A new message starts, then streams: its update must not replace the queued "r3".
+			// Message timestamps are Date.now(), which fake timers freeze, so step the clock.
+			await vi.advanceTimersByTimeAsync(1)
+			await task.say("text", "t1", undefined, true)
+			await task.say("text", "t2", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["r2", "r3"])
+
+			await vi.advanceTimersByTimeAsync(500)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["r2", "r3", "t2"])
+			// The queued "r3" post keeps the reasoning message's ts; "t2" targets the text message.
+			expect(messageUpdates[1].ts).toBe(messageUpdates[0].ts)
+			expect(messageUpdates[2].ts).not.toBe(messageUpdates[0].ts)
+		})
+
+		it("does not delay the trailing post beyond the interval when the clock steps backward", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "first", undefined, true)
+			await task.say("text", "second", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+
+			vi.setSystemTime(Date.now() - 10_000)
+			await task.say("text", "third", undefined, true)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second"])
+
+			await vi.advanceTimersByTimeAsync(120)
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["second", "third"])
+		})
+
+		it("posts updates that are far enough apart immediately", async () => {
+			const { task, messageUpdates } = createStreamingTask()
+
+			await task.say("text", "one", undefined, true)
+			await task.say("text", "two", undefined, true)
+			await vi.advanceTimersByTimeAsync(1000)
+			await task.say("text", "three", undefined, true)
+
+			// "one" creates the message; "two" and "three" are each the first update in their window.
+			expect(messageUpdates.map(({ text }) => text)).toEqual(["two", "three"])
+		})
+	})
+
 	describe("abortTask", () => {
 		it("should set abort flag and emit TaskAborted event", async () => {
 			const task = new Task({
@@ -4457,6 +4767,57 @@ describe("Cline", () => {
 			expect(
 				(emitSpy.mock.calls as unknown[][]).filter(([event]) => event === RooCodeEventName.TaskAborted),
 			).toHaveLength(1)
+		})
+
+		it("advances the cancellation generation on each cancellation and keeps it advanced across a resume", async () => {
+			// The S4a write guard compares the cancellation generation a queued write
+			// captured against the generation at publish time. The abort FLAG cannot do
+			// that on its own: it is set on cancellation and no resume path clears it,
+			// so on a resumed task it says only that some cancellation happened, not
+			// which run a queued write belongs to. Only the generation keeps the two
+			// runs apart, so it must never go backwards.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.resumeAfterDelegation()
+			// The run-state model (RSK-06) no longer clears the legacy `abort` flag
+			// on resume: that is exactly why the generation exists. Only the
+			// generation keeps the cancelled run and the resumed run apart.
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(2)
+		})
+
+		it("advances the cancellation generation on disposal, without any explicit cancel", async () => {
+			// A task torn down by the host never sees abortTask(). Disposal has to raise the
+			// same generation, or a write still parked on its path chain publishes after the
+			// task is gone.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.dispose()
+
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
 		})
 
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
@@ -4613,7 +4974,7 @@ describe("Cline", () => {
 				const abortTaskSpy = vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
 
 				// Test Case 1: Stream failure should NOT abort task
-				task.abort = false
+				setAbortLatch(task, false)
 				task.abandoned = false
 
 				// Simulate the catch block behavior for stream failure
@@ -4634,7 +4995,7 @@ describe("Cline", () => {
 				expect(abortTaskSpy).not.toHaveBeenCalled()
 
 				// Test Case 2: User cancellation SHOULD abort task
-				task.abort = true
+				setAbortLatch(task, true)
 
 				// For user cancellation, abortTask SHOULD be called
 				if (task.abort) {
@@ -7035,7 +7396,7 @@ describe("Cline", () => {
 			await flushMicrotasks()
 			consoleErrorSpy.mockClear()
 
-			task.abort = true
+			setAbortLatch(task, true)
 			getTaskTestAccess(task).presentAssistantMessageSafe()
 			await flushMicrotasks()
 
@@ -7089,7 +7450,7 @@ describe("Cline", () => {
 			consoleErrorSpy.mockClear()
 
 			// Simulate the TOCTOU race: abort flips between throw and catch.
-			task.abort = true
+			setAbortLatch(task, true)
 			getTaskTestAccess(task).presentAssistantMessageSafe()
 			await flushMicrotasks()
 
@@ -7452,6 +7813,9 @@ describe("Cline", () => {
 			// task directory to exist (uuid v7 is mocked to the fixed id below).
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Earlier tests in this file can leave a ui_messages.json for the fixed task id;
+			// merge=true would read it here and fail the first save stage for an unrelated reason.
+			fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
 			// Declared outside the try so the finally block can restore them.
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")

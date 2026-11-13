@@ -322,10 +322,10 @@
 		"title": "Zoo Code {{version}} wydany",
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nowości w Zoo Code v3.94.0",
-			"highlight1": "✨ Szersza obsługa modeli i dostawców: Używaj Claude Haiku 5.5 przez Anthropic, wysyłaj obrazy do zgodnych modeli VS Code LM, dostrajaj temperaturę dla modeli OpenCode Go Responses i anuluj żądania w czysty sposób u większej liczby dostawców.",
-			"highlight2": "🔐 Bardziej elastyczne MCP OAuth: Skonfiguruj statyczne ustawienia klienta OAuth, użyj niestandardowych ścieżek callback, odkrywaj szczegóły uwierzytelniania z nagłówka WWW-Authenticate i zobacz błędy callback przed ponowną próbą.",
-			"highlight3": "🧭 Płynniejsze czaty i długie sesje: Zmieniaj nazwy zadań w historii, przeciągaj pliki do czatu bez przytrzymywania Shift, zmniejszaj ilość pamięci zachowywanej podczas długich sesji i utrzymuj stabilne linki podzadań oraz zastąpione widoki webview."
+			"heading": "Co nowego w Zoo Code v3.96.0",
+			"highlight1": "✨ Nowe ustawienia czatu i diagnostyka: Pokaż znaczniki czasu wiadomości z konfigurowalnymi formatami godziny i daty, dostosuj TTL prompt-cache dla profili Anthropic i generuj raporty diagnostyczne chroniące prywatność.",
+			"highlight2": "💸 Dokładniejsze koszty dostawców i cache: Zachowuje wyniki narzędzi Anthropic w nienaruszonym stanie, uwzględnia skumulowane tokeny wyjściowe w kosztach Anthropic i MiniMax, odczytuje liczniki prompt-cache DeepSeek, celuje w cache Responses xAI i rozlicza odczyty cache Mistral po 0,1x.",
+			"highlight3": "🧭 Bardziej niezawodne i szybsze czaty: Wznów ukończone zadania po restarcie, przywróć checkpointy, gdy zapisany commit brakuje, automatycznie załaduj ponownie martwy renderer webview, ogranicz aktualizacje strumieniowania i ładuj języki na żądanie."
 		}
 	},
 	"costs": {

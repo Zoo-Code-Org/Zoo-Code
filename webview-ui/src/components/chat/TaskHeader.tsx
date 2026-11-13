@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useMemo } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import {
 	ChevronUp,
 	ChevronDown,
@@ -25,6 +25,7 @@ import { vscode } from "@src/utils/vscode"
 import Thumbnails from "../common/Thumbnails"
 import { TaskTitleEditor } from "../history/TaskTitleEditor"
 import { TaskActions } from "./TaskActions"
+import { isShowableTimestamp, MessageTimestamp } from "./MessageTimestamp"
 import { ContextWindowProgress } from "./ContextWindowProgress"
 import { Mention } from "./Mention"
 import { TodoListDisplay } from "./TodoListDisplay"
@@ -63,12 +64,12 @@ const TaskHeader = ({
 	handleCondenseContext,
 	todos,
 }: TaskHeaderProps) => {
-	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const { t } = useAppTranslation()
+	const { apiConfiguration, currentTaskItem, timeFormat, dateFormat } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 	const [isRenaming, setIsRenaming] = useState(false)
-	const customTitle = currentTaskItem?.title
+	const customTitle = currentTaskItem?.title || currentTaskItem?.autoTitle
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
@@ -234,8 +235,8 @@ const TaskHeader = ({
 														{t("chat:tokenProgress.tokensUsedLabel")}
 													</TableCell>
 													<TableCell className="text-right text-[0.9em] font-mono">
-														{formatLargeNumber(contextTokens || 0)} /{" "}
-														{formatLargeNumber(contextWindow)}
+														{formatLargeNumber(contextTokens || 0, t)} /{" "}
+														{formatLargeNumber(contextWindow, t)}
 													</TableCell>
 												</TableRow>
 												{reservedForOutput > 0 && (
@@ -244,7 +245,7 @@ const TaskHeader = ({
 															{t("chat:tokenProgress.reservedForResponseLabel")}
 														</TableCell>
 														<TableCell className="text-right text-[0.9em] font-mono">
-															{formatLargeNumber(reservedForOutput)}
+															{formatLargeNumber(reservedForOutput, t)}
 														</TableCell>
 													</TableRow>
 												)}
@@ -254,7 +255,7 @@ const TaskHeader = ({
 															{t("chat:tokenProgress.availableSpaceLabel")}
 														</TableCell>
 														<TableCell className="text-right text-[0.9em] font-mono">
-															{formatLargeNumber(availableSpace)}
+															{formatLargeNumber(availableSpace, t)}
 														</TableCell>
 													</TableRow>
 												)}
@@ -351,6 +352,13 @@ const TaskHeader = ({
 						</div>
 						{task.images && task.images.length > 0 && <Thumbnails images={task.images} />}
 
+						{/* When the task's first message was sent (follows the Time/Date format settings). */}
+						{isShowableTimestamp(task.ts) && (
+							<div onClick={(e) => e.stopPropagation()}>
+								<MessageTimestamp ts={task.ts} timeFormat={timeFormat} dateFormat={dateFormat} />
+							</div>
+						)}
+
 						<div onClick={(e) => e.stopPropagation()}>
 							<TaskActions
 								item={currentTaskItem}
@@ -389,10 +397,10 @@ const TaskHeader = ({
 										<td className="font-light align-top">
 											<div className="flex items-center gap-1 flex-wrap">
 												{typeof tokensIn === "number" && tokensIn > 0 && (
-													<span>↑ {formatLargeNumber(tokensIn)}</span>
+													<span>↑ {formatLargeNumber(tokensIn, t)}</span>
 												)}
 												{typeof tokensOut === "number" && tokensOut > 0 && (
-													<span>↓ {formatLargeNumber(tokensOut)}</span>
+													<span>↓ {formatLargeNumber(tokensOut, t)}</span>
 												)}
 											</div>
 										</td>
@@ -409,13 +417,13 @@ const TaskHeader = ({
 													{typeof cacheWrites === "number" && cacheWrites > 0 && (
 														<>
 															<HardDriveDownload className="size-2.5" />
-															<span>{formatLargeNumber(cacheWrites)}</span>
+															<span>{formatLargeNumber(cacheWrites, t)}</span>
 														</>
 													)}
 													{typeof cacheReads === "number" && cacheReads > 0 && (
 														<>
 															<HardDriveUpload className="size-2.5" />
-															<span>{formatLargeNumber(cacheReads)}</span>
+															<span>{formatLargeNumber(cacheReads, t)}</span>
 														</>
 													)}
 												</div>

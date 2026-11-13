@@ -26,6 +26,10 @@ vi.mock("../../../utils/path", () => ({
 	getReadablePath: vi.fn().mockReturnValue("test/file.txt"),
 }))
 
+vi.mock("../../../utils/pathUtils", () => ({
+	isPathOutsideWorkspace: vi.fn().mockReturnValue(false),
+}))
+
 vi.mock("../../prompts/responses", () => ({
 	formatResponse: {
 		toolError: vi.fn((message: string) => `Error: ${message}`),

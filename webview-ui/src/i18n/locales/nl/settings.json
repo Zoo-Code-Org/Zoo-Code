@@ -470,6 +470,10 @@
 		"anthropicUseAuthToken": "Anthropic API-sleutel als Authorization-header doorgeven in plaats van X-Api-Key",
 		"anthropic1MContextBetaLabel": "1M contextvenster inschakelen (bèta)",
 		"anthropic1MContextBetaDescription": "Breidt het contextvenster uit tot 1 miljoen tokens voor Claude Sonnet 4.x / Claude Opus 4.6",
+		"promptCacheTtlLabel": "Levensduur van promptcache",
+		"promptCacheTtl5m": "5 minuten (standaard)",
+		"promptCacheTtl1h": "1 uur",
+		"promptCacheTtlDescription": "Hoe lang gecachte promptprefixen geldig blijven. De levensduur van 1 uur kost meer per cacheschrijfactie maar overleeft langere tussenpozen tussen verzoeken. Laat het op 5 minuten staan tenzij je herhaaldelijk dezelfde lange context opnieuw verstuurt.",
 		"awsBedrock1MContextBetaLabel": "1M contextvenster inschakelen (bèta)",
 		"awsBedrock1MContextBetaDescription": "Breidt het contextvenster uit tot 1 miljoen tokens voor Claude Sonnet 4.x / Claude Opus 4.6",
 		"vertex1MContextBetaLabel": "1M contextvenster inschakelen (bèta)",
@@ -913,6 +917,10 @@
 			"refreshSuccess": "Tools succesvol vernieuwd",
 			"refreshError": "Fout bij vernieuwen van tools",
 			"toolParameters": "Parameters"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamisch denkwerk",
+			"description": "Bereidt het set_thinking_effort-gereedschap voor op latere ondersteuning: deze instelling slaat alleen de voorkeur op, het gedrag per verzoek volgt in later werk. (experimenteel)"
 		}
 	},
 	"temperature": {
@@ -1114,5 +1122,41 @@
 			"descriptionTooLong": "Beschrijving moet maximaal 1024 tekens zijn"
 		},
 		"footer": "Maak je eigen skills met de Skill Writer modus, beschikbaar in de <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"language": {
+		"description": "Taal en weergave van datum en tijd.",
+		"languageTitle": "Taal",
+		"displayLanguage": "Weergavetaal",
+		"displayLanguageDescription": "Taal van de Zoo Code-interface.",
+		"dateTimeTitle": "Datum en tijd",
+		"timeFormat": {
+			"label": "Tijdnotatie",
+			"description": "Automatisch volgt je weergavetaal.",
+			"options": {
+				"auto": "Automatisch",
+				"12h": "12-uurs",
+				"24h": "24-uurs"
+			}
+		},
+		"dateFormat": {
+			"label": "Datumnotatie",
+			"example": "bijv. {{example}}",
+			"options": {
+				"auto": "Automatisch",
+				"mdy": "MM/DD/JJJJ",
+				"dmy": "DD/MM/JJJJ",
+				"ymd": "JJJJ-MM-DD"
+			}
+		},
+		"relativeTimes": {
+			"label": "Relatieve tijden (\"5 min geleden\") tonen in de takengeschiedenis"
+		},
+		"preview": {
+			"title": "Voorbeeld",
+			"chat": "Chatbericht",
+			"history": "Takengeschiedenis",
+			"relative": "5 min geleden",
+			"hover": "(bij aanwijzen: {{value}})"
+		}
 	}
 }

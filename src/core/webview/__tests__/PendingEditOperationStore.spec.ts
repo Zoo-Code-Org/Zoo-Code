@@ -48,6 +48,16 @@ describe("PendingEditOperationStore", () => {
 		expect(store.get("op")).toBeUndefined()
 	})
 
+	it("owner-scoped clear removes only the entry that owner staged", () => {
+		const staleOwner = store.set("op", editData)
+		const currentOwner = store.set("op", { ...editData, editedContent: "newer" })
+
+		expect(store.clear("op", staleOwner)).toBe(false)
+		expect(store.get("op")?.editedContent).toBe("newer")
+		expect(store.clear("op", currentOwner)).toBe(true)
+		expect(store.get("op")).toBeUndefined()
+	})
+
 	it("hides timer metadata from get results", () => {
 		store.set("op", editData)
 
