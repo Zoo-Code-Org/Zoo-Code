@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.96.0
+## Neu in v3.98.0
 
-- ✨ **Neue Chat-Einstellungen und Diagnose:** Zeige Nachrichten-Zeitstempel mit konfigurierbaren Zeit- und Datumsformaten, stimme die Prompt-Cache-TTL für Anthropic-Profile ab und erstelle datenschutzfreundliche Diagnoseberichte.
-- 💸 **Genauere Anbieterkosten und Caching:** Anthropic-Ergebnisse bleiben intakt, kumulative Output-Tokens fließen in Anthropic- und MiniMax-Kosten ein, DeepSeek-Prompt-Cache-Zähler werden ausgelesen, der xAI-Responses-Cache wird gezielt angesprochen und Mistral-Cache-Lesungen werden mit 0,1x abgerechnet.
-- 🧭 **Zuverlässigere und schnellere Chats:** Setze abgeschlossene Aufgaben nach einem Neustart fort, stelle Checkpoints wieder her, wenn der gespeicherte Commit fehlt, lade einen toten Webview-Renderer automatisch neu, drossle Streaming-Updates und lade Sprachen bei Bedarf.
+- **Automatische Aufgabentitel und feinere Modellsteuerung:** Erstelle Titel für neue Root-Aufgaben automatisch und probiere die experimentelle Einstellung für dynamischen Reasoning-Aufwand aus.
+- **Erweiterte Modell- und Anbieterunterstützung:** Nutze GPT-6.1 Terra, rufe die aktuelle Friendli-Modellliste ab und behalte Zoo Gateway in den Anbietereinstellungen an erster Stelle.
+- **Sicherere, reaktionsschnellere Chats und Bearbeitungen:** Breche OpenAI-Native- und Requesty-Anfragen sauber ab, schütze Diffs außerhalb des Workspace vor versehentlicher Auto-Genehmigung, wechsle UI-Sprachen konsistent und vermeide mehrdeutige JSON-Backup-Wiederherstellungen.
 
 ## Was kann Zoo Code für DICH tun?
 

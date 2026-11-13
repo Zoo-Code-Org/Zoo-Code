@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.96.0'daki Yenilikler
+## v3.98.0'daki Yenilikler
 
-- ✨ **Yeni sohbet ayarları ve tanılama:** Yapılandırılabilir saat ve tarih biçimleriyle mesaj zaman damgalarını göster, Anthropic profilleri için prompt-cache TTL'sini ayarla ve gizliliği koruyan tanılama raporları oluştur.
-- 💸 **Daha doğru sağlayıcı maliyetleri ve önbellekleme:** Anthropic araç sonuçlarını olduğu gibi korur, Anthropic ve MiniMax maliyetlerine kümülatif çıktı token'larını dahil eder, DeepSeek prompt-cache sayaçlarını okur, xAI Responses önbelleğini hedefler ve Mistral önbellek okumalarını 0,1x ile faturalandırır.
-- 🧭 **Daha güvenilir ve hızlı sohbetler:** Yeniden başlatmanın ardından tamamlanan görevleri sürdür, kaydedilen commit eksikse checkpoint'i geri yükle, yanıt vermeyen webview oluşturucusunu otomatik olarak yeniden yükle, akış güncellemelerini kısıtla ve dilleri talep üzerine yükle.
+- **Otomatik görev başlıkları ve daha hassas model kontrolü:** Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.
+- **Genişletilmiş model ve sağlayıcı desteği:** GPT-6.1 Terra'yı kullan, en güncel Friendli model listesini getir ve sağlayıcı ayarlarında Zoo Gateway'i ilk sırada tut.
+- **Daha güvenli ve duyarlı sohbetler ile düzenlemeler:** OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

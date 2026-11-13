@@ -322,10 +322,10 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.96.0 の新機能",
-			"highlight1": "✨ チャット設定と診断の新機能: 設定可能な時刻・日付形式でメッセージのタイムスタンプを表示し、Anthropic プロファイルの prompt-cache TTL を調整し、プライバシーに配慮した診断レポートを生成できます。",
-			"highlight2": "💸 より正確なプロバイダーコストとキャッシュ: Anthropic のツール結果を壊さずそのまま維持し、Anthropic と MiniMax のコストに累積 output token を採用し、DeepSeek の prompt-cache カウンターを読み取り、xAI Responses のキャッシュをターゲットにし、Mistral のキャッシュ読み取りを 0.1 倍で計上します。",
-			"highlight3": "🧭 より信頼性が高く高速なチャット: 再起動後に完了済みタスクを再開し、保存された commit がない場合でも checkpoint を復元し、応答しなくなった webview レンダラーを自動リロードし、ストリーミング更新を間引き、ロケールを必要なときに読み込みます。"
+			"heading": "Zoo Code v3.98.0 の新機能",
+			"highlight1": "自動タスクタイトルと細かなモデル制御: 新しいルートタスクのタイトルを自動生成し、動的な思考量の試験的設定を試せます。",
+			"highlight2": "モデルとプロバイダーのサポートを拡大: GPT-6.1 Terra を利用し、Friendli の最新モデル一覧を取得し、プロバイダー設定で Zoo Gateway を先頭に保持できます。",
+			"highlight3": "より安全で応答性の高いチャットと編集: OpenAI Native と Requesty のリクエストを正常にキャンセルし、ワークスペース外の diff が誤って自動承認されるのを防ぎ、UI 言語を一貫して切り替え、曖昧な JSON バックアップ復旧を回避します。"
 		}
 	},
 	"costs": {

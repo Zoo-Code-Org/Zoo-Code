@@ -47,11 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.96.0
+## Nouveautés de la v3.98.0
 
-- ✨ **Nouveaux réglages de chat et diagnostics:** Affiche l'horodatage des messages avec des formats d'heure et de date configurables, règle le TTL du cache de prompts pour les profils Anthropic et génère des rapports de diagnostic respectueux de la vie privée.
-- 💸 **Des coûts et un cache fournisseurs plus précis:** Garde intacts les résultats d'outils Anthropic, adopte les tokens de sortie cumulés dans les coûts Anthropic et MiniMax, lit les compteurs de cache de prompts de DeepSeek, cible le cache Responses de xAI et facture les lectures de cache Mistral à 0,1x.
-- 🧭 **Des chats plus fiables et plus rapides:** Reprends les tâches terminées après un redémarrage, restaure les checkpoints quand le commit enregistré manque, recharge automatiquement un renderer de webview mort, limite les mises à jour de streaming et charge les langues à la demande.
+- **Titres de tâches automatiques et contrôle plus précis des modèles :** Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.
+- **Prise en charge étendue des modèles et fournisseurs :** Utilise GPT-6.1 Terra, récupère la liste de modèles Friendli la plus récente et garde Zoo Gateway en premier dans les réglages des fournisseurs.
+- **Chats et modifications plus sûrs et réactifs :** Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON.
 
 ## Que peut faire Zoo Code pour VOUS ?
 
