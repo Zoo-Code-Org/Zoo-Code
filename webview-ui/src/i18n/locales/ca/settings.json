@@ -698,7 +698,7 @@
 		},
 		"perWrite": {
 			"label": "Punt de control després de cada escriptura de fitxer",
-			"description": "Registra un punt de verificació després de cada escriptura correcta de les eines write_to_file, edit_file o apply_patch de l'agent; un pegat de diversos fitxers produeix un únic punt de verificació. Desarxivar un fitxer des de l'editor no en registra cap."
+			"description": "Registra un punt de verificació després de cada escriptura correcta de les eines write_to_file, edit_file o apply_patch de l'agent; un pegat de diversos fitxers produeix un únic punt de verificació. Desar un fitxer des de l'editor no en registra cap."
 		}
 	},
 	"notifications": {
