@@ -25,6 +25,7 @@ import { Package } from "../../../shared/package"
 import { FileFailureRegistry, UNKNOWN_REVISION, type FileFailureActivity } from "../file-failure-registry"
 import { codeIndexLog } from "../code-index-log"
 import { ProviderPacerRegistry } from "../provider-pacer"
+import { readSource, SOURCE_MISSING } from "../shared/indexing-errors"
 
 type FileEvent = { uri: vscode.Uri; type: "create" | "change" | "delete" }
 
@@ -269,6 +270,13 @@ export class FileWatcher implements IFileWatcher {
 		}
 	}
 
+	private removeMissingFile(filePath: string, signal: AbortSignal): Promise<FileProcessingResult> {
+		codeIndexLog.debug("Source missing at read; treating as removed", {
+			path: generateRelativeFilePath(filePath, this.workspacePath),
+		})
+		return this.removeFile(filePath, signal)
+	}
+
 	async processFile(filePath: string): Promise<FileProcessingResult> {
 		this.checkActive()
 		this.activeFiles++
@@ -289,11 +297,13 @@ export class FileWatcher implements IFileWatcher {
 			) {
 				return await this.removeFile(filePath, signal)
 			}
-			const fileStat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath))
+			const fileStat = await readSource(vscode.workspace.fs.stat(vscode.Uri.file(filePath)))
 			this.checkActive(signal)
+			if (fileStat === SOURCE_MISSING) return await this.removeMissingFile(filePath, signal)
 			if (fileStat.size > MAX_FILE_SIZE_BYTES) return await this.removeFile(filePath, signal)
-			const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))
+			const fileContent = await readSource(vscode.workspace.fs.readFile(vscode.Uri.file(filePath)))
 			this.checkActive(signal)
+			if (fileContent === SOURCE_MISSING) return await this.removeMissingFile(filePath, signal)
 			const content = Buffer.from(fileContent).toString("utf8")
 			const newHash = createHash("sha256").update(content).digest("hex")
 			revision = newHash

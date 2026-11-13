@@ -17,6 +17,7 @@ import { generateRelativeFilePath } from "../../shared/get-relative-path"
 import { PARSING_CONCURRENCY, BATCH_PROCESSING_CONCURRENCY, MAX_FILE_SIZE_BYTES } from "../../constants"
 
 import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 
 vi.mock("fs/promises", () => ({ stat: vi.fn() }))
 
@@ -41,6 +42,8 @@ vi.mock("../../code-index-log", () => ({
 		redact: (message: string) => message,
 		createFailureBatch: vi.fn(() => ({ record: vi.fn(), flush: vi.fn() })),
 		info: vi.fn(),
+		debug: vi.fn(),
+		warn: vi.fn(),
 	},
 }))
 
@@ -151,6 +154,7 @@ function setup() {
 	const cacheManager = cache as unknown as CacheManager
 	const generations = new GenerationAllocator(cacheManager)
 	const ignored = ignore()
+	const pacers = new ProviderPacerRegistry()
 	let currentAttempt = true
 	const createScanner = () =>
 		new DirectoryScanner(
@@ -165,6 +169,7 @@ function setup() {
 			failures,
 			workspacePath,
 			() => currentAttempt,
+			pacers,
 		)
 	return {
 		cache,
@@ -177,6 +182,7 @@ function setup() {
 		failures,
 		gate,
 		ignored,
+		pacers,
 		createScanner,
 		scanner: createScanner(),
 		supersede: () => {
@@ -560,5 +566,227 @@ describe("DirectoryScanner", () => {
 		])
 		await scanner.scanDirectory(workspacePath)
 		expect(parser.parseFile.mock.calls.map(([filePath]) => filePath)).toEqual(selected)
+	})
+})
+
+describe("T42 source missing at read is a removal", () => {
+	const contentHash = hash("current content")
+	const errorWithCode = (code: string) => Object.assign(new Error("gone"), { code })
+	const failAt = (stage: "stat" | "read", error: Error) => {
+		if (stage === "stat") vi.mocked(stat).mockRejectedValueOnce(error)
+		else vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(error)
+	}
+	const listPaths = (paths: string[]) => vi.mocked(listFiles).mockResolvedValue([paths, false])
+	const filePoints = (points: Map<string, PointStruct>, filePath: string) =>
+		[...points.values()].filter((point) => {
+			const payload: Record<string, unknown> = point.payload
+			return payload.filePath === generateRelativeFilePath(filePath, workspacePath)
+		})
+	const seed = (points: Map<string, PointStruct>, filePath: string) =>
+		points.set(`seed:${filePath}`, {
+			id: `seed:${filePath}`,
+			vector: [0],
+			payload: { filePath: generateRelativeFilePath(filePath, workspacePath), generation: 0 },
+		})
+
+	it.each(
+		(["stat", "read", "oversized"] as const).flatMap((source) =>
+			(["new", "indexed", "failed"] as const).map((history) => ({ source, history })),
+		),
+	)("preserves bookkeeping and logs for $history $source source", async ({ source, history }) => {
+		const { scanner, parser, cache, points, failures, store } = setup()
+		listPaths([fileA, fileB])
+		if (history === "indexed") cache.completeFile(fileA, contentHash)
+		if (history !== "new") seed(points, fileA)
+		if (history === "failed") {
+			failures.renew("a.ts", "old")
+			failures.record("a.ts", "old", "read", "read failed", 1, "exhausted")
+		}
+		if (source === "oversized")
+			vi.mocked(stat).mockImplementation(async (filePath) =>
+				statsOfSize(filePath === fileA ? MAX_FILE_SIZE_BYTES + 1 : 100),
+			)
+		else failAt(source, errorWithCode(source === "stat" ? "ENOENT" : "FileNotFound"))
+		const held = deferred<CodeBlock[]>()
+		parser.parseFile.mockReturnValue(held.promise)
+		const onError = vi.fn()
+		const pending = scanner.scanDirectory(workspacePath, onError)
+		await vi.advanceTimersByTimeAsync(0)
+		try {
+			expect(parser.parseFile).toHaveBeenCalledExactlyOnceWith(fileB, expect.anything())
+			expect(scanner["incompleteFiles"]).toEqual(new Set(history === "new" ? [fileB] : [fileA, fileB]))
+			expect(store.deletePointsByFilePath).not.toHaveBeenCalled()
+			if (source === "oversized") expect(codeIndexLog.debug).not.toHaveBeenCalled()
+			else
+				expect(codeIndexLog.debug).toHaveBeenCalledExactlyOnceWith(
+					"Source missing at read; treating as removed",
+					{ path: "a.ts" },
+				)
+			expect(codeIndexLog.warn).not.toHaveBeenCalled()
+			const batch = vi.mocked(codeIndexLog.createFailureBatch).mock.results.at(-1)!.value
+			expect(batch.record).not.toHaveBeenCalled()
+		} finally {
+			held.resolve(blocks(fileB))
+			await pending
+		}
+		const result = await pending
+		expect(result.stats).toEqual({ processed: 1, skipped: source === "oversized" ? 1 : 0 })
+		expect(result.incompleteFiles).toEqual([])
+		expect(scanner.hasIncompleteFiles).toBe(false)
+		expect(filePoints(points, fileA)).toEqual([])
+		expect(cache.getHash(fileA)).toBeUndefined()
+		expect(cache.getHash(fileB)).toBe(contentHash)
+		expect(onError).not.toHaveBeenCalled()
+		expect(failures.list()).toEqual([])
+		if (history === "new") expect(store.deletePointsByFilePath).not.toHaveBeenCalledWith(fileA, expect.anything())
+		else expect(store.deletePointsByFilePath).toHaveBeenCalledWith(fileA, expect.any(Number))
+	})
+
+	it.each([
+		["stat", "ENOENT"],
+		["read", "FileNotFound"],
+	] as const)("never-indexed file missing at %s needs no recovery", async (stage, code) => {
+		const { scanner, cache, store, failures } = setup()
+		listPaths([fileA, fileB])
+		failAt(stage, errorWithCode(code))
+		const onError = vi.fn()
+		const result = await scanner.scanDirectory(workspacePath, onError)
+		expect(result.incompleteFiles).toEqual([])
+		expect(result.stats).toEqual({ processed: 1, skipped: 0 })
+		expect(cache.getHash(fileB)).toBe(contentHash)
+		expect(onError).not.toHaveBeenCalled()
+		expect(store.deletePointsByFilePath).not.toHaveBeenCalledWith(fileA, expect.anything())
+		expect(failures.list()).toEqual([])
+	})
+
+	it.each(["stat", "read"] as const)(
+		"previously indexed file missing at %s is removed in the same scan",
+		async (stage) => {
+			const { scanner, points, cache, failures } = setup()
+			await scanner.scanDirectory(workspacePath)
+			expect(filePoints(points, fileA)).toHaveLength(1)
+			failAt(stage, errorWithCode(stage === "stat" ? "ENOENT" : "FileNotFound"))
+			const onError = vi.fn()
+			const result = await scanner.scanDirectory(workspacePath, onError)
+			expect(result.incompleteFiles).toEqual([])
+			expect(filePoints(points, fileA)).toEqual([])
+			expect(cache.getHash(fileA)).toBeUndefined()
+			expect(onError).not.toHaveBeenCalled()
+			expect(failures.list()).toEqual([])
+		},
+	)
+
+	it.each(
+		(["stat", "read"] as const).flatMap((stage) =>
+			(["new", "indexed", "failed"] as const).flatMap((history) =>
+				(["during", "after"] as const).map((timing) => ({ stage, history, timing })),
+			),
+		),
+	)(
+		"removes $history source missing at $stage $timing a concurrent provider wait",
+		async ({ stage, history, timing }) => {
+			const { scanner, points, cache, store, embedder, failures, pacers } = setup()
+			if (history === "indexed") await scanner.scanDirectory(workspacePath)
+			if (history === "failed") {
+				seed(points, fileA)
+				failures.renew("a.ts", "old")
+				failures.record("a.ts", "old", "read", "read failed", 1, "exhausted")
+			}
+			listPaths([fileA, fileB])
+			const metadata = deferred<Stats>()
+			vi.mocked(stat).mockImplementation(async (filePath) =>
+				filePath === fileA ? metadata.promise : statsOfSize(100),
+			)
+			const readFile = vi.mocked(vscode.workspace.fs.readFile).getMockImplementation()!
+			const missingRead = vi.fn()
+			vi.mocked(vscode.workspace.fs.readFile).mockImplementation(async (uri) => {
+				if (uri.fsPath === fileA) {
+					missingRead()
+					throw errorWithCode("FileNotFound")
+				}
+				return readFile(uri)
+			})
+			embedder.createEmbeddings
+				.mockClear()
+				.mockRejectedValueOnce(Object.assign(new Error("limited"), { status: 429, retryAfterMs: 30_000 }))
+			const onError = vi.fn()
+			const pending = scanner.scanDirectory(workspacePath, onError)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(pacers.waitingPaths()).toContain("b.ts")
+			expect(embedder.createEmbeddings).toHaveBeenCalledOnce()
+			expect(missingRead).not.toHaveBeenCalled()
+			await vi.advanceTimersByTimeAsync(timing === "during" ? 29_999 : 30_000)
+			if (stage === "stat") metadata.reject(errorWithCode("ENOENT"))
+			else metadata.resolve(statsOfSize(100))
+			await vi.advanceTimersByTimeAsync(0)
+			expect(missingRead).toHaveBeenCalledTimes(stage === "read" ? 1 : 0)
+			if (timing === "during") {
+				expect(pacers.waitingPaths()).toContain("b.ts")
+				expect(embedder.createEmbeddings).toHaveBeenCalledOnce()
+				await vi.advanceTimersByTimeAsync(1)
+			}
+			const result = await pending
+			expect(result.stats).toEqual({ processed: 1, skipped: 0 })
+			expect(result.incompleteFiles).toEqual([])
+			expect(scanner.hasIncompleteFiles).toBe(false)
+			expect(filePoints(points, fileA)).toEqual([])
+			expect(cache.getHash(fileA)).toBeUndefined()
+			expect(filePoints(points, fileB)).toHaveLength(1)
+			expect(cache.getHash(fileB)).toBe(contentHash)
+			expect(onError).not.toHaveBeenCalled()
+			expect(failures.list()).toEqual([])
+			expect(pacers.waitingPaths()).toEqual([])
+			if (history === "new")
+				expect(store.deletePointsByFilePath).not.toHaveBeenCalledWith(fileA, expect.anything())
+			else expect(store.deletePointsByFilePath).toHaveBeenCalledWith(fileA, expect.any(Number))
+		},
+	)
+
+	it("clears a prior failure for a path found missing", async () => {
+		const { scanner, parser, failures } = setup()
+		parser.parseFile.mockRejectedValueOnce(new Error("parse failed"))
+		await scanner.scanDirectory(workspacePath, vi.fn())
+		expect(failures.list()).toHaveLength(1)
+		failAt("read", errorWithCode("FileNotFound"))
+		const result = await scanner.scanDirectory(workspacePath, vi.fn())
+		expect(result.incompleteFiles).toEqual([])
+		expect(failures.list()).toEqual([])
+	})
+
+	it("keeps a cleanup failure as a delete failure, not a read failure", async () => {
+		const { scanner, store, failures } = setup()
+		await scanner.scanDirectory(workspacePath)
+		failAt("stat", errorWithCode("ENOENT"))
+		store.deletePointsByFilePath.mockRejectedValueOnce(new Error("delete failed"))
+		const result = await scanner.scanDirectory(workspacePath, vi.fn())
+		expect(result.incompleteFiles).toEqual([fileA])
+		expect(failures.list()).toEqual([expect.objectContaining({ path: "a.ts", activity: "delete" })])
+	})
+
+	it.each([
+		["stat", "EACCES"],
+		["read", "NoPermissions"],
+		["read", "EISDIR"],
+	] as const)("keeps denied access at %s (%s) as a read failure", async (stage, code) => {
+		const { scanner, failures } = setup()
+		failAt(stage, errorWithCode(code))
+		const onError = vi.fn()
+		const result = await scanner.scanDirectory(workspacePath, onError)
+		expect(result.incompleteFiles).toEqual([fileA])
+		expect(onError).toHaveBeenCalledOnce()
+		expect(failures.list()).toEqual([
+			expect.objectContaining({ path: "a.ts", activity: "read", state: "exhausted" }),
+		])
+	})
+
+	it("indexes a recreated file normally on the next scan", async () => {
+		const { scanner, points, cache } = setup()
+		await scanner.scanDirectory(workspacePath)
+		failAt("read", errorWithCode("FileNotFound"))
+		await scanner.scanDirectory(workspacePath)
+		expect(filePoints(points, fileA)).toEqual([])
+		await scanner.scanDirectory(workspacePath)
+		expect(filePoints(points, fileA)).toHaveLength(1)
+		expect(cache.getHash(fileA)).toBe(contentHash)
 	})
 })

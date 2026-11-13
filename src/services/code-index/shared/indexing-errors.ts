@@ -22,6 +22,24 @@ type ErrorShape = ErrorDetails & {
 
 type RetryAfterHeaders = Headers | Record<string, unknown>
 
+// ENOENT: Node fs/promises; FileNotFound: vscode.FileSystemError. Other codes stay read failures.
+export function isSourceMissing(error: unknown): boolean {
+	const code = (error as ErrorShape | undefined)?.code
+	return code === "ENOENT" || code === "FileNotFound"
+}
+
+export const SOURCE_MISSING = Symbol("source-missing")
+
+/** Applies missing-source detection only to the file's own stat or read call. */
+export async function readSource<T>(read: PromiseLike<T>): Promise<T | typeof SOURCE_MISSING> {
+	try {
+		return await read
+	} catch (error) {
+		if (isSourceMissing(error)) return SOURCE_MISSING
+		throw error
+	}
+}
+
 function nonnegativeNumber(value: unknown): number | undefined {
 	if (typeof value !== "number" && typeof value !== "string") return undefined
 	if (typeof value === "string" && !value.trim()) return undefined

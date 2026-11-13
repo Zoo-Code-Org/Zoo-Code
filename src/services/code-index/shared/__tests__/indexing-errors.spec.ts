@@ -6,11 +6,45 @@ import {
 	EmbeddingError,
 	VectorStoreError,
 	parseRetryAfterMs,
+	isSourceMissing,
+	readSource,
+	SOURCE_MISSING,
 } from "../indexing-errors"
 import { formatEmbeddingError } from "../validation-helpers"
 import { IndexingRetryError } from "../indexing-errors"
 
 vi.mock("../../../../i18n", () => ({ t: (key: string) => key }))
+
+describe("T44 isSourceMissing and readSource", () => {
+	const withCode = (code?: string) => Object.assign(new Error("x"), code ? { code } : {})
+
+	it.each([
+		["ENOENT", true],
+		["FileNotFound", true],
+		["EACCES", false],
+		["EPERM", false],
+		["NoPermissions", false],
+		["Unknown", false],
+		["EISDIR", false],
+		["ENOTDIR", false],
+		[undefined, false],
+	])("code %s -> %s", (code, expected) => {
+		expect(isSourceMissing(withCode(code))).toBe(expected)
+	})
+
+	it("ignores message text and non-error values", () => {
+		expect(isSourceMissing(new Error("ENOENT: no such file"))).toBe(false)
+		expect(isSourceMissing(undefined)).toBe(false)
+		expect(isSourceMissing("ENOENT")).toBe(false)
+	})
+
+	it("maps only a missing source to the sentinel and rethrows anything else unchanged", async () => {
+		expect(await readSource(Promise.resolve(5))).toBe(5)
+		expect(await readSource(Promise.reject(withCode("FileNotFound")))).toBe(SOURCE_MISSING)
+		const denied = withCode("EACCES")
+		await expect(readSource(Promise.reject(denied))).rejects.toBe(denied)
+	})
+})
 
 describe("indexing error classification", () => {
 	it.each([

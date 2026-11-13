@@ -22,6 +22,7 @@ import { MAX_FILE_SIZE_BYTES } from "../../constants"
 import { RooIgnoreController } from "../../../../core/ignore/RooIgnoreController"
 import { makeExtensionContext, makeUri } from "../../../../test-utils/vscode"
 import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 
 vi.mock("vscode", async () => {
 	const { makeEventEmitter, makeUri } = await import("../../../../test-utils/vscode")
@@ -49,6 +50,8 @@ vi.mock("../../../../core/ignore/RooIgnoreController", () => ({
 vi.mock("../../code-index-log", () => ({
 	codeIndexLog: {
 		info: vi.fn(),
+		debug: vi.fn(),
+		warn: vi.fn(),
 		redact: (message: string) => message,
 		createFailureBatch: vi.fn(() => ({ record: vi.fn(), flush: vi.fn() })),
 	},
@@ -166,6 +169,7 @@ function setup() {
 	const generations = new GenerationAllocator(cacheManager)
 	const ignored = ignore()
 	const access = new RooIgnoreController(workspacePath)
+	const pacers = new ProviderPacerRegistry()
 	let currentAttempt = true
 	const createWatcher = () => {
 		const created = new FileWatcher(
@@ -182,6 +186,7 @@ function setup() {
 			generations,
 			failures,
 			() => currentAttempt,
+			pacers,
 		)
 		watchers.push(created)
 		return created
@@ -198,6 +203,7 @@ function setup() {
 		failures,
 		gate,
 		ignored,
+		pacers,
 		createWatcher,
 		watcher: createWatcher(),
 		supersede: () => {
@@ -721,5 +727,168 @@ describe("FileWatcher reliability", () => {
 		held.resolve([])
 		await drain()
 		expect(parser.parseFile).toHaveBeenCalledTimes(11)
+	})
+})
+
+describe("T43 watcher source missing at read is a removal", () => {
+	const errorWithCode = (code: string) => Object.assign(new Error("gone"), { code })
+	const failAt = (stage: "stat" | "read", error: Error) => {
+		if (stage === "stat") vi.mocked(vscode.workspace.fs.stat).mockRejectedValueOnce(error)
+		else vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(error)
+	}
+	const pointsFor = (points: Map<string, PointStruct>, filePath: string) =>
+		[...points.values()].filter((point) => {
+			const payload: Record<string, unknown> = point.payload
+			return payload.filePath === path.relative(workspacePath, filePath)
+		})
+	const fileStat = (size: number): vscode.FileStat => ({ size, type: 1, ctime: 0, mtime: 0 })
+
+	it.each(["stat", "read"] as const)("never-indexed file missing at %s is skipped", async (stage) => {
+		const { watcher, store, failures } = setup()
+		failAt(stage, errorWithCode("FileNotFound"))
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "skipped" })
+		expect(store.deletePointsByFilePath).not.toHaveBeenCalled()
+		expect(failures.list()).toEqual([])
+	})
+
+	it.each(["stat", "read"] as const)("previously indexed file missing at %s is removed", async (stage) => {
+		const { watcher, points, hashes, failures } = setup()
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "success" })
+		expect(pointsFor(points, fileA)).not.toEqual([])
+		failAt(stage, errorWithCode(stage === "stat" ? "FileNotFound" : "ENOENT"))
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "success" })
+		expect(pointsFor(points, fileA)).toEqual([])
+		expect(hashes.get(fileA)).toBeUndefined()
+		expect(failures.list()).toEqual([])
+	})
+
+	it("clears a prior failure for a path found missing", async () => {
+		const { watcher, parser, failures } = setup()
+		parser.parseFile.mockRejectedValueOnce(new Error("parse failed"))
+		await watcher.processFile(fileA)
+		expect(failures.list()).toHaveLength(1)
+		failAt("stat", errorWithCode("FileNotFound"))
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "success" })
+		expect(failures.list()).toEqual([])
+	})
+
+	it("keeps a cleanup failure as a delete failure", async () => {
+		const { watcher, store, failures } = setup()
+		await watcher.processFile(fileA)
+		failAt("read", errorWithCode("FileNotFound"))
+		store.deletePointsByFilePath.mockRejectedValueOnce(new Error("delete failed"))
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "local_error" })
+		expect(failures.list()).toEqual([expect.objectContaining({ path: "a.ts", activity: "delete" })])
+	})
+
+	it.each([
+		["stat", "NoPermissions"],
+		["read", "EACCES"],
+		["read", "Unknown"],
+	] as const)("keeps denied access at %s (%s) as a read failure", async (stage, code) => {
+		const { watcher, failures } = setup()
+		failAt(stage, errorWithCode(code))
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "local_error" })
+		expect(failures.list()).toEqual([
+			expect.objectContaining({ path: "a.ts", activity: "read", state: "exhausted" }),
+		])
+	})
+
+	it("keeps a not-found error from setup, outside stat and read, as a failure", async () => {
+		const { watcher, access, failures } = setup()
+		vi.mocked(access.validateAccess).mockImplementationOnce(() => {
+			throw errorWithCode("ENOENT")
+		})
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "local_error" })
+		expect(failures.list()).toEqual([expect.objectContaining({ path: "a.ts", activity: "read" })])
+	})
+
+	it.each(
+		(["stat", "read"] as const).flatMap((stage) =>
+			(["new", "indexed", "failed"] as const).flatMap((history) =>
+				(["during", "after"] as const).map((timing) => ({ stage, history, timing })),
+			),
+		),
+	)(
+		"removes $history source missing at $stage $timing a concurrent provider wait",
+		async ({ stage, history, timing }) => {
+			const { watcher, points, hashes, store, embedder, failures, pacers } = setup()
+			const finished = vi.fn<(summary: BatchProcessingSummary) => void>()
+			watcher.onDidFinishBatchProcessing(finished)
+			await watcher.initialize()
+			if (history === "indexed") await queue()
+			if (history === "failed") {
+				points.set("obsolete", { id: "obsolete", vector: [0], payload: { filePath: "a.ts", generation: 0 } })
+				failures.renew("a.ts", "old")
+				failures.record("a.ts", "old", "read", "read failed", 1, "exhausted")
+			}
+			const metadata = deferred<vscode.FileStat>()
+			vi.mocked(vscode.workspace.fs.stat).mockImplementation(async (uri) =>
+				uri.fsPath === fileA ? metadata.promise : fileStat(100),
+			)
+			const readFile = vi.mocked(vscode.workspace.fs.readFile).getMockImplementation()!
+			const missingRead = vi.fn()
+			vi.mocked(vscode.workspace.fs.readFile).mockImplementation(async (uri) => {
+				if (uri.fsPath === fileA) {
+					missingRead()
+					throw errorWithCode("FileNotFound")
+				}
+				return readFile(uri)
+			})
+			embedder.createEmbeddings
+				.mockClear()
+				.mockRejectedValueOnce(Object.assign(new Error("limited"), { status: 429, retryAfterMs: 30_000 }))
+			finished.mockClear()
+			await queue([fileA, fileB])
+			expect(pacers.waitingPaths()).toContain("b.ts")
+			expect(embedder.createEmbeddings).toHaveBeenCalledOnce()
+			expect(missingRead).not.toHaveBeenCalled()
+			expect(finished).not.toHaveBeenCalled()
+			const resumeAt = pacers.providerWaits()[0].resumeAt!
+			await vi.advanceTimersByTimeAsync(resumeAt - Date.now() - (timing === "during" ? 1 : 0))
+			if (stage === "stat") metadata.reject(errorWithCode("FileNotFound"))
+			else metadata.resolve(fileStat(100))
+			await drain()
+			expect(missingRead).toHaveBeenCalledTimes(stage === "read" ? 1 : 0)
+			if (timing === "during") {
+				expect(pacers.waitingPaths()).toContain("b.ts")
+				expect(embedder.createEmbeddings).toHaveBeenCalledOnce()
+				expect(finished).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(1)
+			}
+			await drain()
+			expect(finished).toHaveBeenCalledExactlyOnceWith({
+				processedFiles: expect.arrayContaining([
+					{
+						path: fileA,
+						status: history === "new" ? "skipped" : "success",
+						...(history === "new" ? { reason: "File is not tracked" } : {}),
+					},
+					{ path: fileB, status: "success" },
+				]),
+				batchError: undefined,
+			})
+			expect(pointsFor(points, fileA)).toEqual([])
+			expect(hashes.get(fileA)).toBeUndefined()
+			expect(pointsFor(points, fileB)).toHaveLength(1)
+			expect(hashes.get(fileB)).toBe(hash("current content"))
+			expect(failures.list()).toEqual([])
+			expect(pacers.waitingPaths()).toEqual([])
+			expect(watcher.isProcessing).toBe(false)
+			if (history === "new")
+				expect(store.deletePointsByFilePath).not.toHaveBeenCalledWith(fileA, expect.anything())
+			else expect(store.deletePointsByFilePath).toHaveBeenCalledWith(fileA, expect.any(Number))
+		},
+	)
+
+	it("indexes a recreated file normally", async () => {
+		const { watcher, points, hashes } = setup()
+		await watcher.processFile(fileA)
+		failAt("read", errorWithCode("FileNotFound"))
+		await watcher.processFile(fileA)
+		expect(pointsFor(points, fileA)).toEqual([])
+		expect(await watcher.processFile(fileA)).toMatchObject({ status: "success" })
+		expect(pointsFor(points, fileA)).not.toEqual([])
+		expect(hashes.get(fileA)).toBe(hash("current content"))
 	})
 })
