@@ -1293,6 +1293,52 @@ describe("safeWriteJson", () => {
 		).rejects.toThrow(ConfinedPathEscapeError)
 	})
 
+	test("keeps the file that already sits in the swapped-in directory when the commit path escapes", async () => {
+		const projectDir = path.join(tempDir, "swap-project-held")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		await fs.writeFile(target, JSON.stringify({ inside: true }))
+		// The other half of the window: the swapped-in directory already holds a file at the
+		// target name, so a commit rename would replace bytes this write never read before
+		// any re-check could see the escape.
+		const swappedIn = path.join(tempDir, "elsewhere-held", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+		const heldFile = path.join(swappedIn, "mcp.json")
+		fsSyncActual.writeFileSync(heldFile, JSON.stringify({ outside: "peer bytes" }))
+
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					merge: () => {
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+
+		// The commit never ran, so the file that already sat at the escaped name keeps its
+		// own bytes: the ask is that the rename not replace them.
+		expect(JSON.parse(fsSyncActual.readFileSync(heldFile, "utf8"))).toEqual({ outside: "peer bytes" })
+		// The file inside the scope keeps its pre-write bytes under the moved-aside name.
+		expect(JSON.parse(fsSyncActual.readFileSync(path.join(ancestor + "-moved-aside", "mcp.json"), "utf8"))).toEqual(
+			{ inside: true },
+		)
+		// Nothing this write staged is left in the directory that was moved aside.
+		expect(fsSyncActual.readdirSync(ancestor + "-moved-aside").filter((name) => name.includes(".new_"))).toEqual([])
+		// What it does leave in the directory that was swapped in is its own staged file: the
+		// escape branch of the teardown rethrows before the staged cleanup that sits below it,
+		// so refusing the commit leaves the staging name behind. That leftover is the gap the
+		// sibling thread on this pull carries, and this row pins it rather than hiding it.
+		const leftovers = fsSyncActual.readdirSync(swappedIn).filter((name) => name !== "mcp.json")
+		expect(leftovers).toHaveLength(1)
+		expect(String(leftovers[0])).toMatch(/^\.mcp\.json\.new_\d+_[a-z0-9]+\.tmp$/)
+	})
+
 	test("undoes an escaped publish only when the bytes on disk are still this write's bytes", async () => {
 		const outside = path.join(tempDir, "undo-escaped")
 		await fs.mkdir(outside, { recursive: true })

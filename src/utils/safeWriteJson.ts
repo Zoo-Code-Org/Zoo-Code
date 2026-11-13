@@ -398,6 +398,17 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 
 		await _flushFileToDisk(actualTempNewFilePath)
 
+		// A peer can replace an ancestor directory between the check above and the commit
+		// rename, and the rename takes a path: it replaces whatever file sits where it lands.
+		// Re-verify the destination here, as late as the publish allows, so an escaped commit
+		// is refused before it can overwrite bytes this write never read. The teardown below
+		// removes the staged file, so both files keep their own content. A swap that lands
+		// between this check and the rename is still caught fail-closed by the re-check after
+		// the commit.
+		if (confinementRoot !== undefined) {
+			const commitScopeRoot = await _resolveScopeRoot(confinementRoot)
+			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), commitScopeRoot)
+		}
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a
 		// process exit before or during the commit can no longer leave the
