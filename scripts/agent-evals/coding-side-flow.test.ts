@@ -579,3 +579,82 @@ process.exit(interrupt.exitCode())
 		},
 	)
 }
+
+for (const disconnectAt of ["before", "during"] as const) {
+	it(
+		`stops side repetitions and cleans up after parent disconnect ${disconnectAt} execution`,
+		{ timeout: 10_000 },
+		async () => {
+			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-parent-disconnect-"))
+			const out = path.join(dir, "out")
+			const script = path.join(dir, "side.mts")
+			let child: ReturnType<typeof spawn> | undefined
+			let closed: Promise<number | null> | undefined
+			try {
+				await fs.writeFile(
+					script,
+					`
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { executeSideGeneration, executeSideFlow } from ${JSON.stringify(new URL("./coding-side-flow.ts", import.meta.url).href)}
+import { createInterruptFlag, watchParentConnection } from ${JSON.stringify(new URL("./side-process-guard.ts", import.meta.url).href)}
+const out = ${JSON.stringify(out)}
+const interrupt = createInterruptFlag()
+let finish
+const stopped = new Promise(resolve => { finish = resolve })
+process.on('SIGTERM', () => { interrupt.signal('SIGTERM'); finish() })
+${disconnectAt === "before" ? "process.disconnect()" : ""}
+const checkParent = watchParentConnection(() => { process.emit('SIGTERM', 'SIGTERM') })
+const isInterrupted = () => { checkParent(); return interrupt.isInterrupted() }
+let started = 0
+await executeSideGeneration({
+ out, isInterrupted,
+ run: async () => {
+  await executeSideFlow({
+   out, isInterrupted, repetitions: ${JSON.stringify(plan(2))},
+   runRepetition: async () => {
+    started++
+    const keepAlive = setInterval(() => {}, 1000)
+    process.send?.({ ready: true }, () => {})
+    try { await stopped } finally { clearInterval(keepAlive) }
+    return ${JSON.stringify(record(plan(1)[0]!))}
+   },
+   buildResult: runs => ({ pins: ${JSON.stringify(pins())}, runs }),
+  })
+ },
+ cleanup: async () => { await fs.writeFile(${JSON.stringify(path.join(dir, "cleanup"))}, String(started)) },
+})
+process.exit(interrupt.exitCode())
+`,
+				)
+				const { NODE_TEST_CONTEXT: _context, ...env } = process.env
+				child = spawn(process.execPath, ["--import", "tsx", script], {
+					env,
+					stdio: ["ignore", "ignore", "inherit", "ipc"],
+				})
+				child.on("message", () => {
+					if (child?.connected) child.disconnect()
+				})
+				closed = new Promise((resolve, reject) => {
+					child!.once("error", reject)
+					child!.once("exit", resolve)
+				})
+				const timer = setTimeout(() => child?.kill("SIGKILL"), 5000)
+				try {
+					assert.equal(await closed, 143)
+				} finally {
+					clearTimeout(timer)
+				}
+				assert.equal(
+					await fs.readFile(path.join(dir, "cleanup"), "utf8"),
+					disconnectAt === "before" ? "0" : "1",
+				)
+				assert.deepEqual(await fs.readdir(out), [])
+			} finally {
+				child?.kill("SIGKILL")
+				await closed?.catch(() => {})
+				await fs.rm(dir, { recursive: true, force: true })
+			}
+		},
+	)
+}

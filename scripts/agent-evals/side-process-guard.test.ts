@@ -346,6 +346,7 @@ for (const disconnectAt of ["before", "during"] as const) {
 		async () => {
 			const dir = await fs.mkdtemp(path.join(os.tmpdir(), "preparation-closed-ipc-"))
 			const script = path.join(dir, "side.mts")
+			const pidFile = path.join(dir, "preparation-pid")
 			let preparationPid: number | undefined
 			let child: ReturnType<typeof spawn> | undefined
 			try {
@@ -358,7 +359,7 @@ import { createSideProcessGuard } from ${JSON.stringify(new URL("./side-process-
 ${disconnectAt === "before" ? "process.disconnect()" : ""}
 try {
  await runBoundedPreparation(createSideProcessGuard(50), () => false, process.execPath,
-  ['-e', 'setInterval(() => {}, 1000)'], ${JSON.stringify(dir)}, 300)
+  ['-e', 'require("node:fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)', ${JSON.stringify(pidFile)}], ${JSON.stringify(dir)}, 300)
  throw new Error('preparation unexpectedly completed')
 } catch (error) {
  if (!String(error).includes('time bound expired')) throw error
@@ -388,12 +389,23 @@ try {
 					child!.once("error", reject)
 					child!.once("exit", resolve)
 				})
-				assert.equal(await exited, 0)
+				const timer = setTimeout(() => child?.kill("SIGKILL"), 5000)
+				try {
+					assert.equal(await exited, 0)
+				} finally {
+					clearTimeout(timer)
+				}
+				preparationPid = Number(await fs.readFile(pidFile, "utf8"))
+				assert.ok(Number.isSafeInteger(preparationPid) && preparationPid > 1)
+				const deadline = Date.now() + 2000
+				while (groupAlive(preparationPid) && Date.now() < deadline)
+					await new Promise((resolve) => setTimeout(resolve, 20))
+				assert.equal(groupAlive(preparationPid), false)
 				assert.equal(await fs.readFile(path.join(dir, "cleanup"), "utf8"), "done")
-				if (preparationPid) assert.equal(groupAlive(preparationPid), false)
 			} finally {
 				child?.kill("SIGKILL")
-				if (preparationPid) {
+				preparationPid ??= Number(await fs.readFile(pidFile, "utf8").catch(() => ""))
+				if (Number.isSafeInteger(preparationPid) && preparationPid > 1) {
 					try {
 						process.kill(-preparationPid, "SIGKILL")
 					} catch {
