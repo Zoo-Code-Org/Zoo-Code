@@ -204,6 +204,10 @@ export class DiffViewProvider {
 		// two apart needs the per-session counter the review asks about, which this change
 		// leaves as an open question instead of inventing one here.
 		if (!this.isEditing) {
+			// The plain text tab openDiffEditor() pre-opened through showTextDocument() is not a
+			// diff tab, so standing down from the diff tabs alone would leave it behind on a file this
+			// session has already given up owning: close it before the editor reference is dropped.
+			await this.closeFileTab(absolutePath)
 			this.activeDiffEditor = undefined
 			this.disposeActiveEditorListener()
 			this.cancelDeferredScroll()
