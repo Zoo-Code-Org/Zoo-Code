@@ -4376,7 +4376,10 @@ export class ClineProvider
 		// display and start tasks with a profile it never picked. Return this view's pair, and fall back
 		// to the shared pair when this view holds no pin - the rule the mode line below already follows
 		// for mode.
-		const viewApiConfiguration: ProviderSettings = this.viewLocalState.apiConfiguration ?? providerSettings
+		// The pin is this view's pair, but it must not mask a shared value the view never carried:
+		// layer it over the store's current settings rather than replacing them, so a mutation that
+		// moved the shared settings after the pin is still visible to every consumer of getState.
+		const viewApiConfiguration: ProviderSettings = { ...providerSettings, ...this.viewLocalState.apiConfiguration }
 		const viewApiConfigName =
 			this.viewLocalState.currentApiConfigName ?? stateValues.currentApiConfigName ?? "default"
 
