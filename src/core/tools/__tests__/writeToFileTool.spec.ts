@@ -643,6 +643,17 @@ describe("writeToFileTool", () => {
 					nativeArgs: undefined,
 					partial: false,
 				}
+				// Record the relative order of revertChanges() and reset() (vitest mocks expose
+				// no invocationCallOrder). This is the only teardown in the test, so nothing else
+				// can move these two entries.
+				const diffViewCallOrder: string[] = []
+				mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+					diffViewCallOrder.push("revert")
+				})
+				mockCline.diffViewProvider.reset.mockImplementation(async () => {
+					diffViewCallOrder.push("reset")
+				})
+
 				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
 					askApproval: mockAskApproval,
 					toolCallId: "test-tool-call-id",
@@ -657,6 +668,10 @@ describe("writeToFileTool", () => {
 				// failure happened, so this is the only revert + reset in the test).
 				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// The counts above pass when the two are swapped. A teardown that resets first
+				// leaves the streamed content in the document, because reset() clears the state
+				// revertChanges() reads, so the order is the invariant worth asserting.
+				expect(diffViewCallOrder).toEqual(["revert", "reset"])
 				// Per-task state torn down: guard cleared, exact listener detached.
 				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 				expect(abortListener).toBeTypeOf("function")
