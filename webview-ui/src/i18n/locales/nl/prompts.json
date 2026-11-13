@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Taakgeschiedenis als context opnemen",
 			"includeTaskHistoryDescription": "Wanneer ingeschakeld, worden de laatste 10 berichten van het huidige gesprek opgenomen als context bij het verbeteren van prompts, wat helpt bij het genereren van meer relevante en contextbewuste suggesties."
 		},
+		"taskTitle": {
+			"enabled": "Taaktitels automatisch genereren",
+			"enabledDescription": "Vat op de achtergrond de eerste prompt van elke nieuwe taak samen tot een korte titel. Titelverzoeken zijn niet opgenomen in de taakkosten. GitHub Copilot- en VS Code LM-profielen gebruiken je quotum.",
+			"apiConfiguration": "API-configuratie",
+			"useTaskConfig": "API-configuratie van de taak gebruiken",
+			"apiConfigDescription": "Een lichtgewicht profiel zonder redenering wordt aanbevolen. Als je een ander profiel kiest, wordt het begin van je prompt naar die provider gestuurd."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Prompt verbeteren",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Nieuwe taak starten",
 				"description": "Start een nieuwe taak met gebruikersinvoer. Beschikbaar via de Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Taaktitel",
+				"description": "Genereert op de achtergrond een korte titel voor nieuwe taken. Wordt getoond in de geschiedenis en de taakkop. Stel het hieronder in."
 			}
 		}
 	},

@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Incluir historial de tareas como contexto",
 			"includeTaskHistoryDescription": "Cuando está habilitado, los últimos 10 mensajes de la conversación actual se incluirán como contexto al mejorar solicitudes, ayudando a generar sugerencias más relevantes y conscientes del contexto."
 		},
+		"taskTitle": {
+			"enabled": "Generar títulos de tareas automáticamente",
+			"enabledDescription": "Resume en segundo plano el primer mensaje de cada tarea nueva en un título corto. Las solicitudes de título no se incluyen en el coste de la tarea. Los perfiles de GitHub Copilot y VS Code LM consumen tu cuota.",
+			"apiConfiguration": "Configuración de API",
+			"useTaskConfig": "Usar la configuración de API de la tarea",
+			"apiConfigDescription": "Se recomienda un perfil ligero sin razonamiento. Si eliges otro perfil, el comienzo de tu mensaje se enviará a ese proveedor."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Mejorar solicitud",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar nueva tarea",
 				"description": "Inicia una nueva tarea con entrada del usuario. Disponible en la Paleta de comandos."
+			},
+			"TASK_TITLE": {
+				"label": "Título de la tarea",
+				"description": "Genera en segundo plano un título corto para las tareas nuevas. Se muestra en el historial y en el encabezado de la tarea. Configúralo abajo."
 			}
 		}
 	},

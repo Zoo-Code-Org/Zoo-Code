@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Includi cronologia attività come contesto",
 			"includeTaskHistoryDescription": "Quando abilitato, gli ultimi 10 messaggi della conversazione corrente verranno inclusi come contesto durante il miglioramento dei prompt, aiutando a generare suggerimenti più rilevanti e consapevoli del contesto."
 		},
+		"taskTitle": {
+			"enabled": "Genera automaticamente i titoli delle attività",
+			"enabledDescription": "Riassume in background il primo prompt di ogni nuova attività in un titolo breve. Le richieste di titolo non sono incluse nel costo dell'attività. I profili GitHub Copilot e VS Code LM consumano la tua quota.",
+			"apiConfiguration": "Configurazione API",
+			"useTaskConfig": "Usa la configurazione API dell'attività",
+			"apiConfigDescription": "Si consiglia un profilo leggero senza ragionamento. Se scegli un altro profilo, l'inizio del prompt viene inviato a quel provider."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Migliora prompt",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Avvia nuova attività",
 				"description": "Avvia una nuova attività con il tuo input. Disponibile nella palette dei comandi."
+			},
+			"TASK_TITLE": {
+				"label": "Titolo dell'attività",
+				"description": "Genera in background un titolo breve per le nuove attività. Viene mostrato nella cronologia e nell'intestazione dell'attività. Configuralo qui sotto."
 			}
 		}
 	},

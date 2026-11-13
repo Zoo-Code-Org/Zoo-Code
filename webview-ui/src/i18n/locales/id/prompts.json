@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Sertakan riwayat tugas sebagai konteks",
 			"includeTaskHistoryDescription": "Ketika diaktifkan, 10 pesan terakhir dari percakapan saat ini akan disertakan sebagai konteks saat meningkatkan prompt, membantu menghasilkan saran yang lebih relevan dan sadar konteks."
 		},
+		"taskTitle": {
+			"enabled": "Buat judul tugas secara otomatis",
+			"enabledDescription": "Meringkas prompt pertama setiap tugas baru menjadi judul singkat di latar belakang. Permintaan judul tidak termasuk dalam biaya tugas. Profil GitHub Copilot dan VS Code LM menggunakan kuota Anda.",
+			"apiConfiguration": "Konfigurasi API",
+			"useTaskConfig": "Gunakan konfigurasi API tugas",
+			"apiConfigDescription": "Disarankan profil ringan tanpa penalaran. Jika Anda memilih profil lain, bagian awal prompt Anda dikirim ke penyedia tersebut."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Tingkatkan Prompt",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Mulai Tugas Baru",
 				"description": "Mulai tugas baru dengan input pengguna. Tersedia di Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Judul Tugas",
+				"description": "Membuat judul singkat untuk tugas baru di latar belakang. Ditampilkan di riwayat dan header tugas. Atur di bawah."
 			}
 		}
 	},

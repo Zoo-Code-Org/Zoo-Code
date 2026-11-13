@@ -71,6 +71,8 @@ interface DelegationRepairIntent {
 /**
  * Options for TaskHistoryStore constructor.
  */
+type AutoTitleDiskRead = { kind: "found"; item: HistoryItem } | { kind: "missing" } | { kind: "unreadable" }
+
 export interface TaskHistoryStoreOptions {
 	/**
 	 * Optional callback invoked inside the write lock after each mutation
@@ -1022,6 +1024,112 @@ export class TaskHistoryStore {
 			}
 			return this.upsertCore(updated)
 		})
+	}
+
+	/**
+	 * Record a generated title unless the task already has one. The persisted record is re-checked
+	 * under the per-file lock, so a task deleted by another host is never resurrected and a title
+	 * written by another host is never overwritten. Only a confirmed missing file evicts the cache:
+	 * a read or parse failure leaves it intact so a later save still merges against a known record.
+	 */
+	public setAutoTitleIfAbsent(taskId: string, autoTitle: string): Promise<{ applied: boolean; item?: HistoryItem }> {
+		return this.withLock(async () => {
+			const title = autoTitle.trim()
+			const disk = await this.readTaskFileForAutoTitle(taskId)
+			if (disk.kind !== "found") {
+				return this.settleSkippedAutoTitle(taskId, disk)
+			}
+			if (disk.item.autoTitle || !title) {
+				return this.settleSkippedAutoTitle(taskId, disk)
+			}
+
+			const skipped = Symbol("auto-title-skipped")
+			let persisted: HistoryItem | undefined
+			try {
+				const filePath = await this.getTaskFilePath(taskId)
+				await safeWriteJson(
+					filePath,
+					{ ...disk.item, autoTitle: title },
+					{
+						merge: (existing) => {
+							const current = existing as Partial<HistoryItem> | null
+							if (!current || current.id !== taskId || current.autoTitle) {
+								throw Object.assign(new Error("auto title skipped"), { [skipped]: true })
+							}
+							persisted = { ...(current as HistoryItem), autoTitle: title }
+							return persisted
+						},
+					},
+				)
+			} catch (error) {
+				if (!(error instanceof Error) || !(skipped in error)) {
+					throw error
+				}
+				// safeWriteJson reports both a missing and an unparsable file as `null`, so re-read to tell them apart.
+				return this.settleSkippedAutoTitle(taskId, await this.readTaskFileForAutoTitle(taskId))
+			}
+
+			if (!persisted) {
+				return { applied: false }
+			}
+			this.cacheAutoTitle(persisted)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return { applied: true, item: persisted }
+		})
+	}
+
+	/**
+	 * Copy only `autoTitle` from the disk record onto the cached one. The cache is the baseline that
+	 * later saves diff against, so taking the peer's other fields here would let a stale snapshot
+	 * from this host write its old values back over them. Callers still return the full disk record
+	 * for display.
+	 */
+	private cacheAutoTitle(disk: HistoryItem): void {
+		const cached = this.cache.get(disk.id)
+		this.cache.set(disk.id, cached ? { ...cached, autoTitle: disk.autoTitle } : disk)
+	}
+
+	private settleSkippedAutoTitle(taskId: string, disk: AutoTitleDiskRead): { applied: false; item?: HistoryItem } {
+		switch (disk.kind) {
+			case "found":
+				this.cacheAutoTitle(disk.item)
+				return { applied: false, item: disk.item }
+			case "missing":
+				this.cache.delete(taskId)
+				return { applied: false }
+			case "unreadable":
+				return { applied: false, item: this.cache.get(taskId) }
+		}
+	}
+
+	private async readTaskFileForAutoTitle(taskId: string): Promise<AutoTitleDiskRead> {
+		let raw: string
+		try {
+			raw = await readFileWithMissingRetry(await this.getTaskFilePath(taskId))
+		} catch (error) {
+			if (getErrorCode(error) === "ENOENT") {
+				return { kind: "missing" }
+			}
+			return this.unreadableForAutoTitle(taskId, error)
+		}
+		try {
+			const item: unknown = JSON.parse(raw)
+			const id = typeof item === "object" && item !== null ? (item as { id?: unknown }).id : undefined
+			if (id !== taskId) {
+				return this.unreadableForAutoTitle(taskId, `task file has id ${JSON.stringify(id)}`)
+			}
+			return { kind: "found", item: item as HistoryItem }
+		} catch (error) {
+			return this.unreadableForAutoTitle(taskId, error)
+		}
+	}
+
+	/** The caller only sees `applied: false`, so the reason is logged here. */
+	private unreadableForAutoTitle(taskId: string, reason: unknown): AutoTitleDiskRead {
+		console.warn(`[TaskHistoryStore] Failed to read task ${taskId} for auto title:`, reason)
+		return { kind: "unreadable" }
 	}
 
 	/**
