@@ -50,6 +50,7 @@ type SupportPromptType =
 	| "TERMINAL_FIX"
 	| "TERMINAL_EXPLAIN"
 	| "NEW_TASK"
+	| "TASK_TITLE"
 
 const supportPromptConfigs: Record<SupportPromptType, SupportPromptConfig> = {
 	ENHANCE: {
@@ -245,6 +246,12 @@ Please provide:
 	},
 	NEW_TASK: {
 		template: `\${userInput}`,
+	},
+	TASK_TITLE: {
+		template: `Write a short title (5-10 words) for the task described in the user prompt below. Use the same language as the user prompt. Reply with only the title - no quotes, no trailing punctuation, no explanations.
+
+User prompt:
+\${userInput}`,
 	},
 } as const
 
