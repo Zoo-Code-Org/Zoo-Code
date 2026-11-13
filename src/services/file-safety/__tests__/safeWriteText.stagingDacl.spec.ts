@@ -223,7 +223,14 @@ describe("staging directory access rights on a real NTFS volume", () => {
 			// own staging directory with a full-control grant to the account the process runs as.
 			expect(observation.calls[0]).toContain("/inheritance:r")
 			expect(observation.calls[0]).toContain(".file-safety-staging")
-			expect(path.dirname(observation.stagingDirAtNarrow)).toBe(fixture.parent)
+			// The staging directory is the one the writer resolved, and the writer resolves the name it
+			// was given: on a hosted windows runner the temporary root arrives in its 8.3 short form
+			// (a log there reads `C:\Users\RUNNER~1\...` where the resolved path reads
+			// `C:\Users\runneradmin\...`), and a locally constructed root can differ in case alone. The
+			// row is about which directory holds the staging directory, so it compares the two through
+			// the same OS-level resolution the writer's canonicalization reports (realpathSync.native),
+			// which is one directory on a machine where the two spellings name the same directory.
+			expect(path.dirname(observation.stagingDirAtNarrow)).toBe(fsSync.realpathSync.native(fixture.parent))
 			expect(observation.calls[0]).toMatch(/:\(OI\)\(CI\)\(F\)$/)
 			expect(observation.calls[0]).toContain(account)
 
