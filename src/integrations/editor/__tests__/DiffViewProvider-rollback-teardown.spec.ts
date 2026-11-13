@@ -924,6 +924,87 @@ describe("DiffViewProvider", () => {
 			)
 		})
 
+		it("revertChanges() closes every matching target tab in a mixed tab set before unlinking the created file", async () => {
+			// The mixed set the single-tab fixtures cannot express: an unrelated dirty tab for another
+			// file, the composite diff tab for the target, and a plain tab for the target, interleaved
+			// across two groups. A sweep that stopped at the first match would close one of the two
+			// target tabs and unlink the file underneath the other, and each single-tab row passes on
+			// its own either way.
+			const editor = buildActiveDiffEditor({ isDirty: true })
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			// tabGroups.close() is declared to take a tab, a tab group, or a group list. The sweep under
+			// test hands it tabs; the collector takes the type close() itself declares, so the recorded
+			// objects need no cast before the assertions below name them.
+			const closedTargets: (vscode.Tab | vscode.TabGroup | readonly vscode.TabGroup[])[] = []
+			const closeSpy = vi.spyOn(vscode.window.tabGroups, "close").mockImplementation(async (target) => {
+				closedTargets.push(target)
+				return true
+			})
+			// Both target tabs are dirty, which is what keeps closeAllDiffViews() out of the way: it
+			// skips dirty tabs, so the only sweep that can close them is this one.
+			const diffTab = {
+				input: makeDiffTabInput(DIFF_VIEW_URI_SCHEME, mockTargetPath),
+				isDirty: true,
+				label: "mock-target-file.ts (Changes)",
+			}
+			const targetPlainTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const unrelatedDirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(`${mockCwd}/unrelated-dirty.ts`)), {
+					uri: makeUri(`${mockCwd}/unrelated-dirty.ts`),
+				}),
+				isDirty: true,
+				label: "unrelated-dirty.ts",
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [unrelatedDirtyTab, diffTab] }, { tabs: [targetPlainTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+				writeCommitted: false,
+			})
+			try {
+				await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+			// The complete closed set: both target tabs, in either order, and nothing else.
+			expect(closedTargets.length).toBe(2)
+			expect(closedTargets).toContainEqual(diffTab)
+			expect(closedTargets).toContainEqual(targetPlainTab)
+			expect(closedTargets).not.toContainEqual(unrelatedDirtyTab)
+			expect(closeSpy).toHaveBeenCalledTimes(2)
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(2)
+			expect(fs.unlink).toHaveBeenCalledTimes(1)
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+			// Both closes, not merely one of them, precede the unlink.
+			expect(Math.max(...closeSpy.mock.invocationCallOrder)).toBeLessThan(
+				(fs.unlink as unknown as Mock).mock.invocationCallOrder[0],
+			)
+		})
+
 		it("revertChanges() keeps the created file when the dirty diff tab refuses to close", async () => {
 			// Fail closed: a refused close means unapproved content is still on screen, so the
 			// unlink must not run. Deleting the file under a tab the user has not dismissed loses
