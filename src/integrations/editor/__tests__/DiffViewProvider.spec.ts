@@ -1,3 +1,4 @@
+import type { Stats } from "fs"
 import * as fs from "fs/promises"
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import { DecorationController } from "../DecorationController"
@@ -1813,6 +1814,69 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
 		})
 
+		it("revertChanges() stops the rollback when the file buffer restore is the refused one", async () => {
+			// The row above refuses the first applyEdit, which is the diff-editor restore, so the
+			// file-scheme buffer's own restore - the guard in front of the tab close - is never the
+			// one under test. Here the diff-side restore and its save both confirm, so the rollback
+			// reaches the file-scheme buffer and THAT restore is the refusal: the class has to stop
+			// before closing a tab whose buffer still holds the streamed content.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.save = vi.fn().mockResolvedValue(true)
+			const streamedBuffer = {
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("streamed content"),
+				isDirty: true,
+				positionAt: vi.fn((offset: number) => ({ line: 0, character: offset })),
+				save: vi.fn().mockResolvedValue(true),
+			}
+			const fileTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocuments = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [fileTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				value: [streamedBuffer],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+			// The first applyEdit is the diff-editor restore and it lands; the second is the
+			// file-scheme buffer's restore, and that is the one VS Code refuses.
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow(/could not restore the buffer/i)
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocuments) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocuments)
+				}
+			}
+
+			// Both restores were attempted, so the refusal that stopped the rollback is the second one;
+			// the diff-side save confirmed and the file-scheme buffer was neither saved nor closed.
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(2)
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			expect(streamedBuffer.save).not.toHaveBeenCalled()
+			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+		})
+
 		it("revertChanges() stops the rollback without closing when the clean save is not confirmed", async () => {
 			// document.save() resolving false leaves the buffer's clean state unconfirmed. Closing
 			// then would prompt the user over a possibly-dirty tab, and answering yes can write
@@ -2590,7 +2654,7 @@ describe("DiffViewProvider", () => {
 			const document = makeAbandonedDocument(callOrder)
 			openAbandonedView(document, [], callOrder)
 			// 42 bytes on disk: not the empty placeholder this edit created.
-			vi.mocked(fs.stat).mockResolvedValueOnce({ size: 42 } as unknown as fs.Stats)
+			vi.mocked(fs.stat).mockResolvedValueOnce({ size: 42 } as unknown as Stats)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(true)
 
 			await diffViewProvider.discardUnapprovedStream()
