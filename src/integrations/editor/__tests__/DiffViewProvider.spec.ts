@@ -1970,13 +1970,21 @@ describe("DiffViewProvider", () => {
 				})
 				Object.assign(diffViewProvider, {
 					editType: "create" as const,
-					// The two tab helpers are recorded so the order below names the closings rather than
-					// re-testing what each of them does.
+					// Every step the released-session stand-down reaches for is recorded, so the order below
+					// names the whole of it rather than re-testing what each helper does: the plain tab close,
+					// the listener release, the deferred-scroll cancel and the diff-tab close are four separate
+					// calls, and dropping any one of them changes this array.
 					closeAllDiffViews: vi.fn(async () => {
 						callOrder.push("closeDiffViews")
 					}),
 					closeFileTab: vi.fn(async () => {
 						callOrder.push("closeFileTab")
+					}),
+					disposeActiveEditorListener: vi.fn(() => {
+						callOrder.push("disposeActiveEditorListener")
+					}),
+					cancelDeferredScroll: vi.fn(() => {
+						callOrder.push("cancelDeferredScroll")
 					}),
 				})
 				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -2035,7 +2043,14 @@ describe("DiffViewProvider", () => {
 				// tabs. The two helpers are doubles above, so this row names the order of the closings and
 				// the parked-open row below is the one that names the tab types. The diff command settling
 				// is recorded before either, and the release that already ran must not run again.
-				expect(callOrder).toEqual(["vscode.diff", "diffCommandSettled", "closeFileTab", "closeDiffViews"])
+				expect(callOrder).toEqual([
+					"vscode.diff",
+					"diffCommandSettled",
+					"closeFileTab",
+					"disposeActiveEditorListener",
+					"cancelDeferredScroll",
+					"closeDiffViews",
+				])
 				// Leave the document-open double as the module mock defined it, for the rows after
 				// this one, since a mockImplementation here outlives the test that set it.
 				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation(() => ({ dispose: vi.fn() }))
