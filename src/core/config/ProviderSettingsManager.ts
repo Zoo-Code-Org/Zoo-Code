@@ -55,6 +55,19 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+/**
+ * Signals that a profile's configuration no longer exists. Callers that treat an
+ * already-deleted profile as an idempotent no-op branch on this type instead of
+ * matching error message text, which a profile name containing the phrase could
+ * otherwise spoof.
+ */
+export class ProviderSettingsNotFoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProviderSettingsNotFoundError"
+	}
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -97,6 +110,36 @@ export class ProviderSettingsManager {
 		const next = this._lock.then(cb)
 		this._lock = next.catch(() => {}) as Promise<void>
 		return next
+	}
+
+	// Lock shared by every manager bound to the same secrets key. The sidebar and
+	// each editor tab construct their own `ProviderSettingsManager` over the same
+	// `context.secrets`, so the per-instance `_lock` above cannot serialize a
+	// check-then-write pair issued through two instances: a same-name create from
+	// the other view fits between `hasConfig` and `saveConfig`.
+	private static sharedLocks = new Map<string, Promise<void>>()
+
+	/**
+	 * Run `cb` inside the critical section shared by every manager using this
+	 * instance's secrets key, so a check-then-write pair - and the compensation
+	 * that undoes it - cannot interleave with another view's. The per-instance
+	 * lock still guards each individual read/write; this outer lock is taken
+	 * first and released last, so the two cannot deadlock.
+	 */
+	public runExclusiveAcrossInstances<T>(cb: () => Promise<T>): Promise<T> {
+		const key = this.secretsKey
+		const previous = ProviderSettingsManager.sharedLocks.get(key) ?? Promise.resolve()
+		const run = previous.then(cb)
+		// Store a settled-clean owner so one failed critical section cannot poison
+		// the queue for the next caller.
+		ProviderSettingsManager.sharedLocks.set(
+			key,
+			run.then(
+				() => {},
+				() => {},
+			),
+		)
+		return run
 	}
 
 	/**
@@ -511,7 +554,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 
 				if (!providerProfiles.apiConfigs[name]) {
-					throw new Error(`Config '${name}' not found`)
+					throw new ProviderSettingsNotFoundError(`Config '${name}' not found`)
 				}
 
 				if (Object.keys(providerProfiles.apiConfigs).length === 1) {
@@ -522,6 +565,11 @@ export class ProviderSettingsManager {
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
+			// A missing config is a caller-meaningful signal, not a failure: rethrow it
+			// unwrapped so callers can branch on the type instead of message text.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to delete config: ${error}`)
 		}
 	}
