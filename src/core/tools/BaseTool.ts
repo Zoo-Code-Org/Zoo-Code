@@ -190,17 +190,18 @@ export abstract class BaseTool<TName extends ToolName> {
 	 * that state down and, when a streaming delta already failed, to report the
 	 * captured streaming error instead of the generic parse error.
 	 *
+	 * The method is public on purpose: presentAssistantMessage() drops a complete known-tool
+	 * block whose nativeArgs never parsed before the call reaches handle(), and it routes the
+	 * failure through this same boundary so the teardown still runs for that call. The only
+	 * override already declares the method without a visibility modifier.
+	 *
 	 * @param _task - Task instance
 	 * @param _callbacks - Tool execution callbacks
 	 * @param _parseError - The native-argument parse error
 	 * @returns true when the override already reported the failure to the user,
 	 *   so handle() suppresses the generic parse error
 	 */
-	protected async onParameterParseFailure(
-		_task: Task,
-		_callbacks: ToolCallbacks,
-		_parseError: Error,
-	): Promise<boolean> {
+	async onParameterParseFailure(_task: Task, _callbacks: ToolCallbacks, _parseError: Error): Promise<boolean> {
 		return false
 	}
 }
