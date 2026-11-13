@@ -23,6 +23,10 @@ vi.mock("fs/promises", () => ({
 	// directories the edit created.
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rmdir: vi.fn().mockResolvedValue(undefined),
+	// The abandoned-stream cleanup stats the placeholder before unlinking it: only the
+	// file open() created empty is its own to delete. The default double reports exactly
+	// that zero-byte placeholder; rows that mean a filled file override it once.
+	stat: vi.fn(async () => ({ size: 0 })),
 }))
 
 // Mock utils
@@ -2574,6 +2578,31 @@ describe("DiffViewProvider", () => {
 			expect(mockWorkspaceEdit.delete).not.toHaveBeenCalled()
 			// The placeholder for THIS relPath is what gets removed.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+		})
+
+		it("releases the placeholder instead of unlinking a path another writer filled", async () => {
+			// The field only names the path open() created empty - it does not prove this edit still
+			// owns the file. A second provider working the same path can write and save approved
+			// content into that file while this abandoned session still carries the field, and the
+			// unlink the cleanup used to run unconditionally deletes that approved write. The bytes
+			// are somebody else's now, so only the ownership is released here.
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			openAbandonedView(document, [], callOrder)
+			// 42 bytes on disk: not the empty placeholder this edit created.
+			vi.mocked(fs.stat).mockResolvedValueOnce({ size: 42 } as unknown as fs.Stats)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(true)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			// The buffer work still happened (the restore is mocked to resolve, so it is not
+			// recorded in the order list):
+			expect(callOrder).toEqual(["save", "closeDiffViews", "closeFileTab"])
+			// ...but the file with content in it is not unlinked, and the ownership is released so
+			// the caller can reset the session without a later cleanup deleting the write again.
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+			expect(diffViewProvider["ownsPlaceholder"]).toBe(false)
 		})
 
 		it("restores a modify buffer in memory and never saves the target file", async () => {

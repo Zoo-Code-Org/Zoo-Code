@@ -757,12 +757,17 @@ export class DiffViewProvider {
 			// Only a placeholder THIS edit created may be removed. relPath survives reset(), and
 			// saveDirectly() sets it for a file that was written with approval, so unlinking
 			// absolutePath unconditionally can delete content the user approved.
-			if (placeholderPath) {
-				// The helpers carry the ENOENT tolerance: open() creates the placeholder,
-				// and if it is already gone there is nothing left to remove.
+			// The field names the path open() created empty; it is not proof that this edit
+			// still owns the file. Another provider working the same path can write and save
+			// approved content there while this abandoned session still carries the field, and
+			// unlinking on the field alone deletes that write. The placeholder open() created is
+			// zero bytes, so only a file that is still zero bytes is this edit's to remove - the
+			// ENOENT case and any file with content in it release the ownership and leave the
+			// bytes alone, which is what a later writer's approved write needs.
+			if (placeholderPath && (await fs.stat(placeholderPath).catch(() => null))?.size === 0) {
 				await this.removeCreatedFile(placeholderPath)
-				this.placeholderPath = undefined
 			}
+			this.placeholderPath = undefined
 
 			// Remove only the directories this edit created, in reverse order.
 			for (let i = createdDirs.length - 1; i >= 0; i--) {
