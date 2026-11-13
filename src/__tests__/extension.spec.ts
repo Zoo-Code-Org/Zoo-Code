@@ -338,6 +338,7 @@ describe("extension.ts", () => {
 			context: mockContext,
 			outputChannel,
 			webviewFocusTracker: tracker,
+			forceNew: true,
 		})
 		tracker?.dispose()
 	})
