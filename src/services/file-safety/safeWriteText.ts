@@ -263,6 +263,12 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+/**
+ * @internal Intentional direct-test seam: no production file calls this write path
+ * yet, and this unit's own specs exercise it directly, which is the case
+ * `docs/development-quality-checks.md` line 36 tells authors to declare here rather
+ * than in configuration. Knip still follows the test imports in default mode.
+ */
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
