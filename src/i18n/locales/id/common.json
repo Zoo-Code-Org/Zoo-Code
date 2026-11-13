@@ -72,6 +72,8 @@
 		"command_template_content": "---\ndescription: \"Deskripsi singkat tentang fungsi perintah ini\"\n---\n\nIni adalah perintah slash baru. Edit file ini untuk menyesuaikan perilaku perintah.",
 		"message": {
 			"no_active_task_to_delete": "Tidak ada tugas aktif untuk menghapus pesan",
+			"no_active_task_to_roll_back": "Tidak ada tugas aktif untuk di-rollback",
+			"no_active_task_to_restore": "Tidak ada tugas aktif untuk dipulihkan",
 			"invalid_timestamp_for_deletion": "Timestamp pesan tidak valid untuk penghapusan",
 			"cannot_delete_missing_timestamp": "Tidak dapat menghapus pesan: timestamp tidak ada",
 			"cannot_delete_invalid_timestamp": "Tidak dapat menghapus pesan: timestamp tidak valid",
