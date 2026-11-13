@@ -1,4 +1,4 @@
-import { handleProviderError, handleOpenAIError } from "../error-handler"
+import { getNumericHttpStatus, handleOpenAIError, handleProviderError, hasNumericHttpStatus } from "../error-handler"
 
 describe("handleProviderError", () => {
 	const providerName = "TestProvider"
@@ -354,5 +354,73 @@ describe("handleOpenAIError (backward compatibility)", () => {
 
 		expect(result.message).toBe("Roo Code Cloud completion error: Authentication failed")
 		expect((result as any).status).toBe(401)
+	})
+})
+
+describe("hasNumericHttpStatus", () => {
+	it("recognizes a numeric status or statusCode", () => {
+		expect(hasNumericHttpStatus(Object.assign(new Error("401"), { status: 401 }))).toBe(true)
+		expect(hasNumericHttpStatus(Object.assign(new Error("429"), { statusCode: 429 }))).toBe(true)
+	})
+
+	it("rejects non-numeric, non-finite, and non-object values", () => {
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: "429" }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: Number.NaN }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: Infinity }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { statusCode: Infinity }))).toBe(false)
+		expect(hasNumericHttpStatus(new Error("plain"))).toBe(false)
+		expect(hasNumericHttpStatus(undefined)).toBe(false)
+		expect(hasNumericHttpStatus(null)).toBe(false)
+		expect(hasNumericHttpStatus("429")).toBe(false)
+		expect(hasNumericHttpStatus(429)).toBe(false)
+		// A callable is not an HTTP error carrier, even when a numeric status is
+		// attached: the object guard must reject it (kills the surviving mutant on
+		// that guard).
+		expect(hasNumericHttpStatus(Object.assign(() => undefined, { status: 429 }))).toBe(false)
+	})
+
+	it("falls through to a numeric statusCode when status is not numeric", () => {
+		expect(hasNumericHttpStatus({ status: "429", statusCode: 429 })).toBe(true)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: "500", statusCode: 503 }))).toBe(true)
+	})
+})
+
+describe("getNumericHttpStatus", () => {
+	it("returns the numeric status, preferring status over statusCode", () => {
+		expect(getNumericHttpStatus(Object.assign(new Error("401"), { status: 401 }))).toBe(401)
+		expect(getNumericHttpStatus(Object.assign(new Error("429"), { statusCode: 429 }))).toBe(429)
+		// Field order is the contract: status first, exactly as hasNumericHttpStatus reads it.
+		expect(getNumericHttpStatus({ status: 401, statusCode: 429 })).toBe(401)
+		expect(getNumericHttpStatus({ status: 401, statusCode: "nope" })).toBe(401)
+	})
+
+	it("falls back to a numeric statusCode when status is absent or not numeric", () => {
+		// The fallback exists for the AI SDK's APICallError shape, which carries statusCode only.
+		expect(getNumericHttpStatus({ statusCode: 429 })).toBe(429)
+		expect(getNumericHttpStatus({ status: "429", statusCode: 429 })).toBe(429)
+		expect(getNumericHttpStatus(Object.assign(new Error("x"), { status: Number.NaN, statusCode: 503 }))).toBe(503)
+		expect(getNumericHttpStatus(Object.assign(new Error("x"), { status: "500", statusCode: 503 }))).toBe(503)
+	})
+
+	it("returns undefined when no field carries a finite number", () => {
+		expect(getNumericHttpStatus(new Error("plain"))).toBeUndefined()
+		expect(getNumericHttpStatus({ status: "429" })).toBeUndefined()
+		expect(getNumericHttpStatus({ status: Number.NaN })).toBeUndefined()
+		expect(getNumericHttpStatus({ status: Infinity })).toBeUndefined()
+		expect(getNumericHttpStatus({ statusCode: Infinity })).toBeUndefined()
+		expect(getNumericHttpStatus({ status: null, statusCode: null })).toBeUndefined()
+		expect(getNumericHttpStatus({})).toBeUndefined()
+	})
+
+	it("returns undefined for values that are not error-carrying objects", () => {
+		// The object guard runs before any field read: without it these inputs would either
+		// throw on a property access or report a status from a non-carrier.
+		expect(getNumericHttpStatus(null)).toBeUndefined()
+		expect(getNumericHttpStatus(undefined)).toBeUndefined()
+		expect(getNumericHttpStatus("429")).toBeUndefined()
+		expect(getNumericHttpStatus(429)).toBeUndefined()
+		// A callable is not an HTTP error carrier even when a numeric status is attached.
+		expect(getNumericHttpStatus(Object.assign(() => undefined, { status: 429 }))).toBeUndefined()
+		expect(getNumericHttpStatus(Object.assign(() => undefined, { statusCode: 429 }))).toBeUndefined()
 	})
 })

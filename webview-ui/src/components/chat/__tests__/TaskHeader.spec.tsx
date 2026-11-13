@@ -9,10 +9,13 @@ import type { ProviderSettings } from "@roo-code/types"
 import TaskHeader, { TaskHeaderProps } from "../TaskHeader"
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key, // Simple mock that returns the key
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	// Mock initReactI18next to prevent initialization errors in tests
 	initReactI18next: {
 		type: "3rdParty",

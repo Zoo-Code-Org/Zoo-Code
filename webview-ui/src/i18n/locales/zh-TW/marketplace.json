@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "依標籤篩選：",
 			"clear": "清除標籤",
+			"removeFromFilter": "點選以從篩選條件中移除「{{tag}}」",
 			"placeholder": "輸入以搜尋並選擇標籤...",
 			"noResults": "找不到符合的標籤",
 			"selected": "顯示包含任何已選標籤的項目",
