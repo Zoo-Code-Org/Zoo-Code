@@ -262,6 +262,13 @@ describe("writeToFileTool", () => {
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
 
 		toolResult = undefined
+		// Assigned here rather than inside executeWriteFileTool(): the rows in this file call execute()
+		// directly and bypass that helper, so a callback created only there is undefined for them and
+		// the tool dies on "pushToolResult is not a function" before it reaches the state release the
+		// row is about. Fresh per test, so the call count below is this test's own.
+		mockPushToolResult = vi.fn((result: ToolResponse) => {
+			toolResult = result
+		})
 	})
 
 	/**
@@ -298,10 +305,6 @@ describe("writeToFileTool", () => {
 			},
 			partial: isPartial,
 		}
-
-		mockPushToolResult = vi.fn((result: ToolResponse) => {
-			toolResult = result
-		})
 
 		// The double above mirrors only the members these tests exercise; the tool reads the
 		// full Task at runtime.
@@ -457,6 +460,11 @@ describe("writeToFileTool", () => {
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// The early return reports the missing parameter through the callback it was handed, and only
+			// then reaches the release the two rows above pin. Asserting the report keeps the row from
+			// passing on a call that skipped both.
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
 		})
 
 		it("stops before the filesystem probe when the state is released while provider state is in flight", async () => {
