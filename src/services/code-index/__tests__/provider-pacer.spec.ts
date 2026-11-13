@@ -204,11 +204,31 @@ describe("ProviderPacer", () => {
 	})
 
 	it.each([0, -1, NaN, Infinity, "invalid", 1e300, 8.64e15 + 1])(
-		"uses fallback for invalid or elapsed provider delay %s",
+		"uses fallback for invalid, elapsed, or out-of-range provider delay %s",
 		(retryAfterMs) => {
 			const pacer = new ProviderPacer("openai:test")
 			pacer.reportRateLimit({ status: 429, retryAfterMs }, pacer.markIssued())
 			expect(pacer.state().pausedUntil).toBe(500)
+		},
+	)
+
+	// The deadline limit is 8.64e15 ms (max Date), so the same delay flips from valid to invalid as time advances.
+	it.each([
+		{ advanceMs: 0, retryAfterMs: 8.64e15, pausedUntil: 8.64e15, source: "provider" },
+		{ advanceMs: 0, retryAfterMs: 8.64e15 - 500, pausedUntil: 8.64e15 - 500, source: "provider" },
+		{ advanceMs: 1000, retryAfterMs: 8.64e15 - 500, pausedUntil: 1500, source: "backoff" },
+	])(
+		"validates the provider deadline at report time (advance $advanceMs ms, delay $retryAfterMs)",
+		async ({ advanceMs, retryAfterMs, pausedUntil, source }) => {
+			const pacer = new ProviderPacer("openai:test")
+			await vi.advanceTimersByTimeAsync(advanceMs)
+			pacer.reportRateLimit(limited(retryAfterMs), pacer.markIssued())
+			expect(pacer.state().pausedUntil).toBe(pausedUntil)
+			expect(codeIndexLog.info).toHaveBeenCalledWith(
+				"Provider pacing wait",
+				expect.objectContaining({ source }),
+			)
+			expect(new Date(pausedUntil).toISOString()).toEqual(expect.any(String))
 		},
 	)
 
