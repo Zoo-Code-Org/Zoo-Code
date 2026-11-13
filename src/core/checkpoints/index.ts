@@ -302,10 +302,23 @@ function enqueueCheckpointWork<T>(
 	// smuggle an expired or canceled operation past it.
 	// attempt may return the operation's promise or nothing at all; Promise.then flattens the
 	// former and resolves the latter, which is exactly the two outcomes callers need.
+	// Whether the deadline arm below already let this caller go. attempt reads it, because the
+	// expiry test in the gate asks whether the clock is past the deadline, and a predecessor that
+	// settles in the very millisecond the deadline falls in has not passed it: without this record
+	// the released caller would hold the answer the release gave it and the operation would start
+	// anyway. Releasing a wait only means the wait is over if the released work cannot start.
+	let releasedByDeadline = false
 	const attempt = (): T | Promise<T> | undefined => {
 		const expired = options.expiresAt !== undefined && Date.now() > options.expiresAt
-		if (expired || options.isCanceled?.()) {
-			const reason = expired ? "expired behind a slower checkpoint" : "task canceled"
+		let reason: string | undefined
+		if (expired) {
+			reason = "expired behind a slower checkpoint"
+		} else if (releasedByDeadline) {
+			reason = "released at its deadline while a slower checkpoint was still running"
+		} else if (options.isCanceled?.()) {
+			reason = "task canceled"
+		}
+		if (reason !== undefined) {
 			console.warn(
 				`[checkpoints] skipping ${options.label} for task ${taskId}: ${reason}; it never reached the shadow git`,
 			)
@@ -343,10 +356,12 @@ function enqueueCheckpointWork<T>(
 	// while its predecessor is still running is released now, the way it is released when its
 	// turn arrives: no work ran and the caller resolves with no commit, which is how a dropped
 	// save and a missing service are already reported. The queue itself keeps waiting on the
-	// predecessor, so the lock is not handed to the operation behind this one early, and
-	// attempt re-checks the deadline when that predecessor settles, so a released operation
-	// never starts late either. A user-initiated restore carries no expiry and keeps waiting
-	// for its turn, which is what dropping one would mean the loss of.
+	// predecessor, so the lock is not handed to the operation behind this one early, and the
+	// release is recorded for attempt to honour when that predecessor settles, so a released
+	// operation never starts late - not even in the millisecond the deadline falls in, which is
+	// the one reading the expiry test alone cannot tell apart from a turn arriving on time. A
+	// user-initiated restore carries no expiry and keeps waiting for its turn, which is what
+	// dropping one would mean the loss of.
 	const waitMs = Math.max(0, options.expiresAt - Date.now())
 	let stopWaitTimer = (): void => {}
 	const releasedAtDeadline = new Promise<undefined>((resolve) => {
@@ -359,6 +374,11 @@ function enqueueCheckpointWork<T>(
 			console.warn(
 				`[checkpoints] releasing the wait for ${options.label} for task ${taskId}: its window closed while a slower checkpoint was still running; the queue keeps the lock and this operation will not start late`,
 			)
+			// Latched before the caller is released, so the gate at the top of this function sees the
+			// release even when the clock has not moved past the deadline by the time the predecessor
+			// settles. Order matters: setting it after resolve would let a settled predecessor start
+			// the work in between.
+			releasedByDeadline = true
 			resolve(undefined)
 		}, waitMs)
 		stopWaitTimer = (): void => {

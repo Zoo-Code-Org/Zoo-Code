@@ -245,6 +245,68 @@ describe("Checkpoint functionality", () => {
 			warnSpy.mockRestore()
 		})
 
+		it("does not start a released save when the predecessor settles in the same millisecond as the deadline", async () => {
+			// The rows above release the stalled predecessor only after the caller was already released, so
+			// the millisecond the deadline itself falls in is never the millisecond a predecessor settles.
+			// That millisecond is the one the start gate cannot tell apart from a turn arriving on time: it
+			// asks whether the clock is past the deadline, and a reading equal to the deadline is not past
+			// it. Date.now is pinned here so the release and the settle are the same reading of the clock,
+			// which makes this row about the release rather than about how long anyone was willing to wait.
+			const deadline = 1_700_000_000_000
+			let now = deadline - 20
+			const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now)
+			mockTask.checkpointTimeout = 0.02
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementationOnce(async () => {
+					order.push("started-after-release")
+					return { commit: "late-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const queued = checkpointSave(mockTask, false, true)
+			// Move the pinned clock onto the deadline while the predecessor is still running, so the window
+			// closing and any later start read one and the same value.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			now = deadline
+			const released = await Promise.race([
+				queued,
+				new Promise<string>((resolve) => {
+					setTimeout(() => resolve("still waiting behind the stalled predecessor"), 500)
+				}),
+			])
+			expect(released).toBeUndefined()
+			expect(order).toEqual(["stalled:start"])
+
+			// The predecessor finally settles with the clock still reading exactly the deadline.
+			resolveFirst({ commit: "stalled-commit" })
+			const settled = await stalled
+			await new Promise((resolve) => setTimeout(resolve, 25))
+
+			expect(now).toBe(deadline)
+			expect(settled).toEqual({ commit: "stalled-commit" })
+			// A released wait must not turn into a late save: nothing but the stalled predecessor reached
+			// the service, and both ends of the release are reported.
+			expect(order).toEqual(["stalled:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(1)
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("releasing the wait for queued per-write checkpoint save"),
+			)
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("released at its deadline while a slower checkpoint was still running"),
+			)
+			nowSpy.mockRestore()
+			warnSpy.mockRestore()
+		})
+
 		it("drops a queued save for a task that was canceled while it waited", async () => {
 			mockTask.checkpointTimeout = 15
 			const order: string[] = []
