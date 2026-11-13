@@ -75,7 +75,9 @@ describe("lock-key alignment between withFileLock and safeWriteJson", () => {
 
 	it("keeps one key for a plain path and hands the operation its own path", async () => {
 		let seenByOperation = ""
-		await withFileLock(referent, async (absoluteFilePath) => { seenByOperation = absoluteFilePath })
+		await withFileLock(referent, async (absoluteFilePath) => {
+			seenByOperation = absoluteFilePath
+		})
 		const plainKey = mockedLock.mock.calls[0][0]
 		await safeWriteJson(referent, { pinned: 2 })
 		const plainWriteKeys = mockedLock.mock.calls.map((call) => call[0])
