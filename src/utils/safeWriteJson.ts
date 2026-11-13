@@ -479,13 +479,29 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// peer's file at the same name - including a backup this rollback just restored -
 		// is left alone. Errors that are not an escape keep their own type.
 		if (confinementRoot !== undefined && resolvedTargetPath !== undefined) {
-			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
-			const scopeRoot = await _resolveScopeRoot(confinementRoot)
+			// This re-check runs while the write is already failing, so it must not decide what the
+			// teardown does. Both locals stay undefined until their resolution lands, which is what
+			// separates a scope that cannot be canonicalized from a target that escaped the scope.
+			let publishedPath: string | undefined
+			let scopeRoot: string | undefined
 			try {
+				publishedPath = await _resolveScopeRoot(resolvedTargetPath)
+				scopeRoot = await _resolveScopeRoot(confinementRoot)
 				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
-			} catch (escapeError) {
-				await undoEscapedPublish(publishedPath, stagedBytes)
-				throw escapeError
+			} catch (checkError) {
+				if (publishedPath !== undefined && scopeRoot !== undefined) {
+					// The check ran and said escape: undo exactly this write's bytes and report the
+					// escape, as before.
+					await undoEscapedPublish(publishedPath, stagedBytes)
+					throw checkError
+				}
+				// The scope could not be canonicalized at all. Report it and keep going, so the
+				// rollback and the staged cleanup below still run and the failure the caller sees
+				// stays the one this catch block was entered with.
+				console.error(
+					`Confinement re-check for ${absoluteFilePath} could not run during the teardown:`,
+					checkError,
+				)
 			}
 		}
 

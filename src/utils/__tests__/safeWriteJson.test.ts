@@ -1316,6 +1316,71 @@ describe("safeWriteJson", () => {
 		await undoEscapedPublish(path.join(outside, "absent.json"), undefined)
 	})
 
+	// The confinement re-check inside the failure path at lines 481 to 490 of safeWriteJson.ts runs
+	// while the write is already failing, and the review says a rejection there must not decide
+	// what the teardown does: the backup rollback at lines 496 to 511 and the staged cleanup at
+	// lines 514 to 529 are what keep the committed copy and the staged bytes from being left
+	// behind. This row drives the same EPERM fallback the row at line 192 drives, so a backup
+	// exists and the canonical path is absent when the catch block runs, and it breaks fs.realpath
+	// only from the moment that backup rename lands, which is the state the catch block then reads.
+	test("restores the committed file and drops the staged file when the failure-path confinement check cannot run", async () => {
+		const initialData = { message: "Initial content, must survive a broken teardown check" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		let teardownCheckBroken = false
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+			if (teardownCheckBroken) {
+				throw Object.assign(new Error("EPERM: operation not permitted, realpath"), { code: "EPERM" })
+			}
+			return String(target)
+		})
+		let renameCallCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 1) {
+				// The single-rename commit fails with EPERM, which starts the two-step fallback.
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+			if (renameCallCount === 2) {
+				// The backup lands here. From this point the failing write is what the catch block
+				// sees, and the confinement re-check inside it is the thing under test.
+				teardownCheckBroken = true
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			}
+			if (renameCallCount === 3) {
+				throw new Error("Fallback replacement rename failed")
+			}
+			// The rollback rename, which is what this row is about.
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		try {
+			// The write rejects with the failure that started the teardown, not with the realpath
+			// rejection of a scope root that could not be canonicalized.
+			await expect(safeWriteJson(currentTestFilePath, newData, { confineTo: tempDir })).rejects.toThrow(
+				"Fallback replacement rename failed",
+			)
+			// The rollback ran: the committed copy is back at the canonical path.
+			expect(await fileExists(currentTestFilePath)).toBe(true)
+			expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
+			// Neither a backup nor a staged file outlives the failed write.
+			const leftovers = (await fs.readdir(tempDir)).filter(
+				(entry) => entry.includes(".bak_") || entry.includes(".new_"),
+			)
+			expect(leftovers).toEqual([])
+			// A re-check that could not run is reported rather than silently skipped.
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("could not run during the teardown"),
+				expect.objectContaining({ code: "EPERM" }),
+			)
+		} finally {
+			realpathSpy.mockRestore()
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
 	// Line 343 is the recovery call, and this pull changed its argument from the caller's
 	// spelling to the resolved publish target. The two spellings only differ when the
 	// orphaned replacement files sit beside the referent rather than beside the alias, which
