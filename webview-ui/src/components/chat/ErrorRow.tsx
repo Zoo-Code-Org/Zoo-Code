@@ -1,5 +1,5 @@
 import React, { useState, useCallback, memo, useMemo } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import { BookOpenText, MessageCircleWarning, Copy, Check, Microscope, Info } from "lucide-react"
 
@@ -89,7 +89,7 @@ const ErrorRow = memo(
 		code,
 		errorDetails,
 	}: ErrorRowProps) => {
-		const { t } = useTranslation()
+		const { t } = useAppTranslation()
 		const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 		const [showCopySuccess, setShowCopySuccess] = useState(false)
 		const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false)

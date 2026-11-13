@@ -710,7 +710,7 @@ const ModesView = () => {
 					</div>
 
 					<div className="text-sm text-vscode-descriptionForeground mb-3">
-						<Trans i18nKey="prompts:modes.createModeHelpText">
+						<Trans t={t} i18nKey="prompts:modes.createModeHelpText">
 							<VSCodeLink
 								href={buildDocLink("basic-usage/using-modes", "prompts_view_modes")}
 								style={{ display: "inline" }}
@@ -1302,6 +1302,7 @@ const ModesView = () => {
 					/>
 					<div className="text-xs text-vscode-descriptionForeground mt-1.5">
 						<Trans
+							t={t}
 							i18nKey="prompts:customInstructions.loadFromFile"
 							values={{
 								mode: getCurrentMode()?.name || "Code",
@@ -1382,7 +1383,7 @@ const ModesView = () => {
 					<h3 className="text-vscode-foreground mb-3">{t("prompts:globalCustomInstructions.title")}</h3>
 
 					<div className="text-sm text-vscode-descriptionForeground mb-2">
-						<Trans i18nKey="prompts:globalCustomInstructions.description">
+						<Trans t={t} i18nKey="prompts:globalCustomInstructions.description">
 							<VSCodeLink
 								href={buildDocLink(
 									"features/custom-instructions#setting-up-global-rules",
@@ -1411,6 +1412,7 @@ const ModesView = () => {
 					/>
 					<div className="text-xs text-vscode-descriptionForeground mt-1.5">
 						<Trans
+							t={t}
 							i18nKey="prompts:globalCustomInstructions.loadFromFile"
 							components={{
 								span: (
