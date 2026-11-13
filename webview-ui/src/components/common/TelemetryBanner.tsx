@@ -31,6 +31,7 @@ const TelemetryBanner = () => {
 			<div className="mb-0.5 font-bold">{t("welcome:telemetry.helpImprove")}</div>
 			<div className="mb-2">
 				<Trans
+					t={t}
 					i18nKey="welcome:telemetry.helpImproveMessage"
 					components={{
 						settingsLink: <VSCodeLink href="#" onClick={handleOpenSettings} />,

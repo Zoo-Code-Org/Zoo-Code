@@ -3,7 +3,6 @@ import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
-
 import type { Language } from "@roo-code/types"
 
 import { LANGUAGES } from "@roo/language"
@@ -45,9 +44,9 @@ export const LanguageSettings = ({
 	// Three short Intl calls, computed on every render. They use the language selected above, not the
 	// saved one, so "auto" previews the new language before Save.
 	const preview = {
-		chatTime: formatTimeOnly(SAMPLE_TS, timeFormat, language),
-		dateExample: formatDateOnly(SAMPLE_TS, dateFormat, language),
-		hover: formatDateTime(SAMPLE_TS, timeFormat, dateFormat, language),
+		chatTime: formatTimeOnly(SAMPLE_TS, language, timeFormat),
+		dateExample: formatDateOnly(SAMPLE_TS, language, dateFormat),
+		hover: formatDateTime(SAMPLE_TS, language, timeFormat, dateFormat),
 	}
 
 	return (

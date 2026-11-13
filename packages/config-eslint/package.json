@@ -8,11 +8,12 @@
 		"./next-js": "./next.js",
 		"./provider-identifiers": "./provider-identifiers.js",
 		"./api-provider-hygiene": "./api-provider-hygiene.js",
-		"./i18n-keys": "./i18n-keys.js"
+		"./i18n-keys": "./i18n-keys.js",
+		"./i18n-language-switch": "./i18n-language-switch.js"
 	},
 	"scripts": {
 		"lint": "eslint . --max-warnings=0",
-		"test": "node --test provider-identifiers.test.js api-provider-hygiene.test.js i18n-keys.test.js"
+		"test": "node --test *.test.js"
 	},
 	"devDependencies": {
 		"@eslint/js": "9.39.5",
