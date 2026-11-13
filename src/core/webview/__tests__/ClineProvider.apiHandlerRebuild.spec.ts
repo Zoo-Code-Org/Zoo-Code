@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type ProviderSettings } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -145,6 +145,11 @@ vi.mock("@roo-code/cloud", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
+// A same-name profile save joins the manager's cross-instance critical section, so a
+// double that stubs the manager must still run the callback inline: the real lock does
+// that whenever no other view holds the section.
+const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
+
 describe("ClineProvider - API Handler Rebuild Guard", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
@@ -240,9 +245,16 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new WebviewFocusTracker(),
 		)
 
-		// Mock providerSettingsManager
+		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
+		// the record it wrote: the real manager reads back the stored record, and
+		// persistProviderProfile builds its activation writes from that read-back.
+		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			}),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -851,7 +863,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
+			// The activation now takes a sibling-overlay snapshot before it asks the manager to
+			// write, so flush past that pre-flight await rather than a single microtask: the
+			// assertions below still prove only the first mutation had started.
+			await new Promise((resolve) => setImmediate(resolve))
 			expect(events).toEqual(["first:start"])
 
 			resolveFirst()
@@ -1009,6 +1024,117 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
 			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
 			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
+		})
+
+		test("rebuilds the task API handler when the shared write fails after activation", async () => {
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+			})
+			await provider.addClineToStack(mockTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			// The manager has already written the activated profile when the shared provider-settings
+			// write rejects, so the switch stands and the caller delivers its pending message now.
+			const emitSpy = vi.spyOn(provider, "emit")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			const saveViewStateSpy = vi.spyOn(provider, "saveViewState")
+			// The mode the shared store held before this switch. The reconcile path writes it back,
+			// so the absence of that write is what separates "the switch stands" from a mode-only
+			// rollback - without pinning it, a regression that reconciled here would still pass the
+			// rebuild assertions below, because the rebuild runs before the failure surfaces.
+			const modeBeforeSwitch = provider.getValue("mode")
+			expect(modeBeforeSwitch).not.toBe("ask")
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+				new Error("shared write failed"),
+			)
+
+			await expect(provider.handleModeSwitch("ask" as Mode, undefined)).rejects.toThrow("shared write failed")
+
+			// The task must run the profile the activation committed rather than the one it started on:
+			// the rebuild happens before the failure surfaces instead of being skipped by it.
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4.1-mini" }),
+			)
+
+			// And the switch itself stays committed. Once the activation has written the profile, a
+			// mode-only rollback would pair the old mode with the new profile, which is the outcome
+			// the keep-the-switch branch exists to prevent.
+			expect(provider.getValues().mode).toBe("ask")
+			expect(provider["viewLocalState"].mode).toBe("ask")
+			expect(mockTask["_taskMode"]).toBe("ask")
+			expect(setValueSpy).toHaveBeenCalledWith("mode", "ask")
+			expect(setValueSpy).not.toHaveBeenCalledWith("mode", modeBeforeSwitch)
+			expect(saveViewStateSpy).toHaveBeenCalledWith("mode", "ask")
+			expect(saveViewStateSpy).not.toHaveBeenCalledWith("mode", modeBeforeSwitch)
+			// Listeners must learn the committed mode before the error is rethrown.
+			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
+		})
+
+		test("rebuilds the task handler on a failed shared write when provider and model are unchanged", async () => {
+			// The rebuild guard keys on provider/model equality, so a switch to a profile that carries
+			// the same provider and model rebuilds only because the failure path forces it. The test
+			// above changes the model, so it would still pass if that force were dropped; this case is
+			// the one that would notice, because the values that differ here are credentials.
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+					openRouterApiKey: "task-key",
+				},
+			})
+			await provider.addClineToStack(mockTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
+			const activatedProfile = {
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "activated-key",
+				rateLimitSeconds: 7,
+			}
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(activatedProfile)
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue(activatedProfile)
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+				new Error("shared write failed"),
+			)
+
+			await expect(provider.handleModeSwitch("ask" as Mode, undefined)).rejects.toThrow("shared write failed")
+
+			// Same provider, same model id: only the credentials differ. The handler still has to be
+			// rebuilt or the task keeps sending on the profile the switch replaced, with the old key.
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+					openRouterApiKey: "activated-key",
+					rateLimitSeconds: 7,
+				}),
+			)
+			expect((mockTask as { apiConfiguration?: ProviderSettings }).apiConfiguration?.openRouterApiKey).toBe(
+				"activated-key",
+			)
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
