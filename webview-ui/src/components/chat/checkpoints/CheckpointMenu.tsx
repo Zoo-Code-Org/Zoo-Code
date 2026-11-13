@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react"
 import { CheckIcon, Cross2Icon } from "@radix-ui/react-icons"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { Button, Popover, PopoverContent, PopoverTrigger, StandardTooltip } from "@/components/ui"
 import { useRooPortal } from "@/components/ui/hooks"
@@ -29,7 +29,7 @@ export const CheckpointMenu = ({
 	onOpenChange,
 	onJumpToPreviousCheckpoint,
 }: CheckpointMenuProps) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [internalRestoreOpen, setInternalRestoreOpen] = useState(false)
 	const [restoreConfirming, setRestoreConfirming] = useState(false)
 	const [internalMoreOpen, setInternalMoreOpen] = useState(false)

@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Inclure l'historique des tâches comme contexte",
 			"includeTaskHistoryDescription": "Lorsque activé, les 10 derniers messages de la conversation actuelle seront inclus comme contexte lors de l'amélioration des prompts, aidant à générer des suggestions plus pertinentes et conscientes du contexte."
 		},
+		"taskTitle": {
+			"enabled": "Générer automatiquement les titres de tâche",
+			"enabledDescription": "Résume en arrière-plan le premier prompt de chaque nouvelle tâche en un titre court. Les requêtes de titre ne sont pas incluses dans le coût de la tâche. Les profils GitHub Copilot et VS Code LM consomment votre quota.",
+			"apiConfiguration": "Configuration d'API",
+			"useTaskConfig": "Utiliser la configuration d'API de la tâche",
+			"apiConfigDescription": "Un profil léger sans raisonnement est recommandé. Si vous choisissez un autre profil, le début de votre prompt est envoyé à ce fournisseur."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Améliorer le prompt",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Démarrer une nouvelle tâche",
 				"description": "Démarre une nouvelle tâche avec ton entrée. Disponible dans la palette de commandes."
+			},
+			"TASK_TITLE": {
+				"label": "Titre de la tâche",
+				"description": "Génère en arrière-plan un titre court pour les nouvelles tâches. Il apparaît dans l'historique et l'en-tête de la tâche. Configurez-le ci-dessous."
 			}
 		}
 	},

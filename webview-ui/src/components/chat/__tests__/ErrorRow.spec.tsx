@@ -29,8 +29,8 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 }))
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => {
 			const map: Record<string, string> = {
 				"chat:error": "Error",
@@ -42,10 +42,6 @@ vi.mock("react-i18next", () => ({
 			return map[key] ?? key
 		},
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: vi.fn(),
-	},
 }))
 
 describe("ErrorRow diagnostics download", () => {

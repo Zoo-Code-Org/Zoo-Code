@@ -1,3 +1,4 @@
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Clock } from "lucide-react"
 
 import { cn } from "@src/lib/utils"
@@ -31,11 +32,13 @@ export const isShowableTimestamp = (ts: number) =>
  * gives assistive tech and copy/paste the exact value.
  */
 export const MessageTimestamp = ({ ts, timeFormat, dateFormat, className }: MessageTimestampProps) => {
+	const { language } = useAppTranslation()
+
 	if (!isShowableTimestamp(ts)) return null
 	const date = new Date(ts)
 
 	return (
-		<StandardTooltip content={formatDateTime(ts, timeFormat, dateFormat)}>
+		<StandardTooltip content={formatDateTime(ts, language, timeFormat, dateFormat)}>
 			<time
 				dateTime={date.toISOString()}
 				className={cn(
@@ -44,7 +47,7 @@ export const MessageTimestamp = ({ ts, timeFormat, dateFormat, className }: Mess
 				)}
 				data-testid="message-timestamp">
 				<Clock className="size-3.5 shrink-0" aria-hidden="true" />
-				{formatMessageTime(ts, { timeFormat, dateFormat })}
+				{formatMessageTime(ts, language, { timeFormat, dateFormat })}
 			</time>
 		</StandardTooltip>
 	)

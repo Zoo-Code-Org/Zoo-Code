@@ -55,7 +55,7 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 						marginBottom: "10px",
 						marginTop: "5px",
 					}}>
-					<Trans i18nKey="mcp:description">
+					<Trans t={t} i18nKey="mcp:description">
 						<VSCodeLink
 							href={buildDocLink("features/mcp/using-mcp-in-roo", "mcp_settings")}
 							style={{ display: "inline" }}>

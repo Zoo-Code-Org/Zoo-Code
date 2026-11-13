@@ -32,8 +32,10 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 
 	const validation = useMemo(() => {
 		const { awsCustomArn, awsRegion } = apiConfiguration
-		return awsCustomArn ? validateBedrockArn(awsCustomArn, awsRegion) : { isValid: true, errorMessage: undefined }
-	}, [apiConfiguration])
+		return awsCustomArn
+			? validateBedrockArn(awsCustomArn, t, awsRegion)
+			: { isValid: true, errorMessage: undefined }
+	}, [apiConfiguration, t])
 
 	const baseModelId =
 		resolveBedrockCustomArnBaseModelId(apiConfiguration.awsCustomArn, apiConfiguration.awsCustomArnBaseModelId) ??

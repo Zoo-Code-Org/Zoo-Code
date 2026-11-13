@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Inclou l'historial de tasques com a context",
 			"includeTaskHistoryDescription": "Quan està activat, els últims 10 missatges de la conversa actual s'inclouran com a context en millorar els prompts, ajudant a generar suggeriments més rellevants i conscients del context."
 		},
+		"taskTitle": {
+			"enabled": "Genera automàticament els títols de les tasques",
+			"enabledDescription": "Resumeix en segon pla el primer missatge de cada tasca nova en un títol curt. Les sol·licituds de títol no s'inclouen al cost de la tasca. Els perfils de GitHub Copilot i VS Code LM consumeixen la teva quota.",
+			"apiConfiguration": "Configuració de l'API",
+			"useTaskConfig": "Utilitza la configuració de l'API de la tasca",
+			"apiConfigDescription": "Es recomana un perfil lleuger sense raonament. Si tries un altre perfil, l'inici del teu missatge s'enviarà a aquest proveïdor."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Millorar prompt",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar nova tasca",
 				"description": "Inicieu una nova tasca amb l'entrada proporcionada. Disponible a la paleta de comandes."
+			},
+			"TASK_TITLE": {
+				"label": "Títol de la tasca",
+				"description": "Genera en segon pla un títol curt per a les tasques noves. Es mostra a l'historial i a la capçalera de la tasca. Configura-ho a sota."
 			}
 		}
 	},
