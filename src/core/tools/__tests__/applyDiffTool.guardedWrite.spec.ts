@@ -196,6 +196,51 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
+	it("refuses the direct save when the read produced no token and an earlier observation would authorize it", async () => {
+		// The reviewer's scenario: an earlier read left this path observed, so the guarded
+		// publish would find a token to compare against, while the read that built *this*
+		// diff straddled a write and produced no token of its own. Saving now publishes
+		// content this tool never observed at a version it can verify, authorized by an
+		// observation that belongs to a different read.
+		const absolutePath = path.resolve("/workspace/project", "src/thing.ts")
+		const earlierToken = "7:4242:1234:1700000000123456789:1700000000789999999"
+		mockTask.observationRegistry.observe(absolutePath, earlierToken)
+
+		const statMock = vi.mocked((await import("fs/promises")).default.stat)
+		statMock
+			.mockResolvedValueOnce({
+				dev: 7n,
+				ino: 4242n,
+				size: 1234n,
+				mtimeNs: 1n,
+				ctimeNs: 2n,
+			} as unknown as BigIntStats)
+			.mockResolvedValueOnce({
+				dev: 7n,
+				ino: 4242n,
+				size: 9999n,
+				mtimeNs: 3n,
+				ctimeNs: 4n,
+			} as unknown as BigIntStats)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		const [reportedWhere, reportedError] = mockHandleError.mock.calls[0] ?? []
+		expect(reportedWhere).toBe("applying diff")
+		expect(reportedError instanceof Error ? reportedError.message : "").toContain("changed while it was being read")
+		expect(vi.mocked(mockTask.diffViewProvider.reset)).toHaveBeenCalled()
+		expect(mockTask.didEditFile).toBe(false)
+		expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
+		// The earlier read's observation is left alone: this row is about not publishing on
+		// its authority, not about retiring it.
+		expect(mockTask.observationRegistry.get(absolutePath)?.version).toBe(earlierToken)
+	})
 	it("does not observe when the file changes underneath the read", async () => {
 		// Only the fields versionTokenOfStat reads; a full BigIntStats cannot be built
 		// against the mocked fs, so the double assertion is the narrowest option.

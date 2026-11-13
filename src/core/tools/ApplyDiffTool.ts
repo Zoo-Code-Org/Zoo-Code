@@ -203,6 +203,18 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				// the task-wide registry.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
+				if (readVersionToken === undefined && task.observationRegistry.has(absolutePath)) {
+					// This read straddled a write (or one of its stats failed), so it produced no token
+					// of its own, yet an earlier read left this path observed. Publishing now would let
+					// that other read's token authorize an overwrite of content this tool never
+					// verified - the failure the unobserved-edit guard exists to stop, reached through a
+					// registry entry the guard has no reason to distrust. Fail closed. When nothing is
+					// observed the read still continues and the guard's own remediation answers, which
+					// is the behavior the stat-failure rows in applyDiffTool.guardedWrite.spec.ts lock.
+					throw new Error(
+						`The file ${relPath} changed while it was being read for this diff, so nothing was saved. Read the file again and reapply the diff against the current content.`,
+					)
+				}
 				if (readVersionToken !== undefined) {
 					task.observationRegistry.observe(absolutePath, readVersionToken)
 				}
