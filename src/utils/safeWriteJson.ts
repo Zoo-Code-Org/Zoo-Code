@@ -59,21 +59,23 @@ export interface SafeWriteJsonOptions {
 	 * is DEFINED: a declared root that is empty or whitespace-only is rejected
 	 * rather than silently disabling the checks.
 	 *
-	 * What it does NOT cover: an ancestor DIRECTORY of the target that is replaced
-	 * by a link in the window between the last check and the commit rename. Both
-	 * checks decide from the final component as it resolves at their own instant,
-	 * and publication is path based - the parent-directory creation and the commit
-	 * rename both take a path - so an ancestor swapped after the check redirects the
-	 * publish. What happens then depends on what sits at the swapped-in path: if it
-	 * already has a file at the target name the publish fails in the staging
-	 * identity guard (StagingPathError) and nothing is written; if it does not, the
-	 * write follows the swapped ancestor and lands OUTSIDE the declared scope. This
-	 * option claims neither outcome: it confines the target it resolved, not the
-	 * directory tree above it. Making the claim cover that window needs a publish
-	 * that walks from an already-open directory handle with no-follow semantics
-	 * (openat/renameat over a directory fd); this runtime exposes neither, so the
-	 * claim is narrowed here instead of being made true. A caller that needs
-	 * containment across that window cannot get it from this option.
+	 * Three checks run: before the advisory lock is taken, on the resolved publish
+	 * target inside the lock, and immediately before the commit rename. Each decides
+	 * the final component as it resolves at its own instant, and publication is path
+	 * based - the parent-directory creation and the commit rename both take a path -
+	 * so an ancestor DIRECTORY swapped for a link after a check redirects whatever
+	 * that check did not refuse. What remains uncovered is the sliver between the
+	 * re-check before the rename and the rename itself: a swap that lands there
+	 * publishes outside the declared scope, and because the rename takes a path it
+	 * replaces whatever file sits where it lands, including a file this write never
+	 * read. The re-check after the commit sees that escape and removes exactly the
+	 * bytes this write published there, but it cannot give back content the rename
+	 * already replaced. This option claims no containment across that sliver. Making
+	 * the claim cover it needs a publish that walks from an already-open directory
+	 * handle with no-follow semantics (openat/renameat over a directory fd); this
+	 * runtime exposes neither, so the claim is narrowed here instead of being made
+	 * true. A caller that needs containment across that sliver cannot get it from
+	 * this option.
 	 */
 	confineTo?: string
 }
@@ -326,12 +328,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// same way: the publish target is resolved through symlinks, and a target that
 		// does not exist yet still carries the alias components of the path it was
 		// given. This runs before the merge read and before anything is staged, so a
-		// rejected write leaves nothing behind. It is also the LAST confinement
-		// decision of this write: it decides the final component as it resolves here,
-		// and an ancestor directory replaced by a link between this point and the
-		// commit rename below is outside its reach, because the rename takes a path and
-		// re-resolves the tree at rename time. See the confineTo option doc for what the
-		// two outcomes of that window are and why neither is claimed by this option.
+		// rejected write leaves nothing behind. It decides the final component as it
+		// resolves here, so an ancestor directory replaced by a link after this point is
+		// outside its reach. The re-check below the staging flush, taken immediately
+		// before the commit rename, is what narrows that window, and the re-check after
+		// the commit is the backstop for a swap that lands inside what is left of it.
+		// See the confineTo option doc for what each of the three checks claims.
 		if (confinementRoot !== undefined) {
 			const scopeRoot = await _resolveScopeRoot(confinementRoot)
 			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
@@ -447,10 +449,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// commit: if the bytes landed outside, undo by removing exactly the file
 		// this write published at the escaped location (never a same-named file a peer
 		// placed there after the commit) and report the escape. The peer's swap itself is
-		// left as the peer made it. (A swapped-in directory
-		// that already carried a target file is not stopped earlier here: the commit rename
-		// replaces the file it lands on, so the undo below is what keeps the escaped publish
-		// from leaving our bytes in place of somebody else's.)
+		// left as the peer made it. The re-check above, taken before the commit rename,
+		// refuses a swapped ancestor as soon as the write reaches it, so this one is the
+		// backstop for the sliver that is left: a swap that lands between that check and
+		// the rename still publishes outside the scope, the rename still replaces whatever
+		// file sits where it lands, and the undo below removes our bytes without being
+		// able to give back a peer's content the rename already consumed.
 		if (confinementRoot !== undefined) {
 			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
 			const scopeRoot = await _resolveScopeRoot(confinementRoot)

@@ -1233,11 +1233,12 @@ describe("safeWriteJson", () => {
 	})
 
 	// The confinement option decides from the resolved publish target and stops at its final
-	// component. An ancestor DIRECTORY replaced by a link in the window between that
-	// decision and the commit rename is caught fail-closed: publication takes a path and
-	// re-resolves the tree at rename time, so the confinement option re-resolves the
-	// published path after the commit and undoes an escaped write. These two tests are
-	// that contract as an executable pair - one per outcome of the window. The swap is driven from the merge
+	// component. An ancestor DIRECTORY replaced by a link is caught fail-closed by a re-check
+	// taken immediately before the commit rename, and a swap that lands inside the sliver between
+	// that check and the rename is caught by the re-check after the commit, which undoes an
+	// escaped write. These tests are that contract as an executable set - one for the
+	// swapped ancestor, one for the directory that already holds a file at the target name,
+	// one for the undo itself. The swap is driven from the merge
 	// callback, which safeWriteJson invokes after the in-lock confinement check and before
 	// anything is staged, so the ancestor moves inside the window rather than hopefully so.
 	// A directory link needs no privilege on win32 as a junction; "dir" is the POSIX
@@ -1255,15 +1256,15 @@ describe("safeWriteJson", () => {
 		await fs.mkdir(ancestor, { recursive: true })
 		const target = path.join(ancestor, "mcp.json")
 		await fs.writeFile(target, JSON.stringify({ inside: true }))
-		// The swapped-in directory has no file at the target name yet: this is the half of the
-		// window in which the commit itself succeeds and only the post-commit re-check sees
-		// the escape.
+		// The swapped-in directory has no file at the target name yet, so the shape under test is
+		// the swapped ancestor itself: the re-check before the commit rename sees the escape and
+		// the write never publishes.
 		const swappedIn = path.join(tempDir, "elsewhere", "settings")
 		await fs.mkdir(swappedIn, { recursive: true })
 
-		// The confinement option now fails closed on the swapped ancestor: the
-		// post-commit re-check re-resolves the published path, sees it outside the
-		// declared scope, removes the escaped file, and reports the escape.
+		// The confinement option fails closed on the swapped ancestor: the re-check taken
+		// before the commit rename re-resolves the publish target, sees it outside the
+		// declared scope, and reports the escape before any rename can land.
 		await expect(
 			safeWriteJson(
 				target,
@@ -1278,7 +1279,8 @@ describe("safeWriteJson", () => {
 			),
 		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
 
-		// The escaped publication was undone: nothing remains outside the scope...
+		// Nothing was published outside the scope: the commit never ran, so the directory
+		// that was swapped in is still empty...
 		expect(fsSyncActual.existsSync(path.join(swappedIn, "mcp.json"))).toBe(false)
 		// ...and the file that was inside the scope keeps its pre-write bytes - the
 		// publish did not reach it under the moved-aside name either.
@@ -1362,10 +1364,10 @@ describe("safeWriteJson", () => {
 		await undoEscapedPublish(path.join(outside, "absent.json"), undefined)
 	})
 
-	// The confinement re-check inside the failure path at lines 481 to 490 of safeWriteJson.ts runs
+	// The confinement re-check inside the failure path at lines 492 to 517 of safeWriteJson.ts runs
 	// while the write is already failing, and the review says a rejection there must not decide
-	// what the teardown does: the backup rollback at lines 496 to 511 and the staged cleanup at
-	// lines 514 to 529 are what keep the committed copy and the staged bytes from being left
+	// what the teardown does: the backup rollback at lines 522 to 538 and the staged cleanup at
+	// lines 540 to 556 are what keep the committed copy and the staged bytes from being left
 	// behind. This row drives the same EPERM fallback the row at line 192 drives, so a backup
 	// exists and the canonical path is absent when the catch block runs, and it breaks fs.realpath
 	// only from the moment that backup rename lands, which is the state the catch block then reads.
