@@ -35,9 +35,31 @@ const actualRename = fsPromises.rename
 // Fault injection: hard-kill before the replacement lands. Any rename
 // whose destination is the canonical path is the commit step, whatever
 // replacement protocol the writer uses; exit before performing it.
+// "the canonical path" is the one the OS reports for the file, not the
+// spelling the test happened to be handed: on a hosted windows runner the
+// temporary root arrives in its 8.3 short form, so the handed spelling and
+// the resolved one name the same directory differently, and a seam that
+// compares the two lexically misses the commit rename and never fires.
+// Both sides are therefore resolved with the same call the writer's
+// canonicalization is answered by, falling back to the handed spelling
+// where the path is not there yet and has no resolution to report.
+// The resolution mirrors what the writer does to its own destination: the parent
+// directory is canonicalized and the basename is re-joined, so a spelling
+// difference in the directory is normalized and a difference in the name is
+// not. A directory that is not there yet has no resolution to report and
+// keeps the spelling it was handed.
+const resolveSeamPath = function (candidate) {
+	const asPath = path.resolve(String(candidate))
+	try {
+		return path.join(fs.realpathSync.native(path.dirname(asPath)), path.basename(asPath))
+	} catch {
+		return asPath
+	}
+}
+let canonicalTarget = resolveSeamPath(targetPath)
 let commitAttempts = 0
 fsPromises.rename = async function interruptionRename(oldPath, newPath) {
-	if (path.resolve(String(newPath)) === targetPath) {
+	if (resolveSeamPath(String(newPath)) === canonicalTarget) {
 		commitAttempts++
 		if (process.env.INTERRUPTION_MODE === "fallback" && commitAttempts === 1) {
 			return Promise.reject(Object.assign(new Error("Injected EPERM"), { code: "EPERM" }))
