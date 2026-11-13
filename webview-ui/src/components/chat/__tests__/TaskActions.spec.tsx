@@ -26,8 +26,8 @@ vi.mock("@/utils/clipboard", () => ({
 	useCopyToClipboard: vi.fn(),
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"chat:task.export": "Export task history",
@@ -40,10 +40,6 @@ vi.mock("react-i18next", () => ({
 			return translations[key] || key
 		},
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: vi.fn(),
-	},
 }))
 
 vi.mock("pretty-bytes", () => ({

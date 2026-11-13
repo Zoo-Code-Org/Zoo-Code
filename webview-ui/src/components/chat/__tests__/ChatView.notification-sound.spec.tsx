@@ -124,8 +124,8 @@ vi.mock("../common/TelemetryBanner", () => ({
 }))
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string, options?: any) => {
 			if (key === "chat:versionIndicator.ariaLabel" && options?.version) {
 				return `Version ${options.version}`
@@ -133,10 +133,9 @@ vi.mock("react-i18next", () => ({
 			return key
 		},
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: { i18nKey: string; children?: React.ReactNode }) => {
 		return <>{children || i18nKey}</>
 	},
