@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, useCallback, useRef } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ChevronDown, ChevronRight, FileDiff } from "lucide-react"
 import { createTwoFilesPatch } from "diff"
 
@@ -22,7 +22,7 @@ interface FileChangesPanelProps {
 const originalKey = (entry: { messageId?: string; ts: number }) => entry.messageId ?? `ts:${entry.ts}`
 
 const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChangesPanelProps) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [panelExpanded, setPanelExpanded] = useState(false)
 	const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 	const [finalContentByPath, setFinalContentByPath] = useState<Record<string, string | null>>({})

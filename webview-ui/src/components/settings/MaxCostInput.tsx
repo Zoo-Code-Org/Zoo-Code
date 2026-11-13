@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { FormattedTextField, unlimitedDecimalFormatter } from "../common/FormattedTextField"
 
@@ -8,7 +8,7 @@ interface MaxCostInputProps {
 }
 
 export function MaxCostInput({ allowedMaxCost, onValueChange }: MaxCostInputProps) {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	return (
 		<>

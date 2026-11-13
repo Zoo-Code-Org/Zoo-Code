@@ -1,5 +1,5 @@
 import React from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { MaxRequestsInput } from "./MaxRequestsInput"
 import { MaxCostInput } from "./MaxCostInput"
 
@@ -16,7 +16,7 @@ export const MaxLimitInputs: React.FC<MaxLimitInputsProps> = ({
 	onMaxRequestsChange,
 	onMaxCostChange,
 }) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	return (
 		<div className="space-y-2">
