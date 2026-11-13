@@ -18,7 +18,7 @@ import { simpleGit } from "simple-git"
 import { RepoPerTaskCheckpointService } from "../../../services/checkpoints"
 import { BLOCKED_ENV_KEYS } from "../../../services/checkpoints/ShadowCheckpointService"
 
-import { checkpointSave, getCheckpointService } from "../index"
+import { checkpointRestore, checkpointSave, getCheckpointService } from "../index"
 import type { Task } from "../../task/Task"
 
 vi.mock("@roo-code/telemetry", () => ({
@@ -126,6 +126,7 @@ async function setupCheckpointTask(taskId: string) {
 				context: { globalStorageUri: { fsPath: shadowDir } },
 				log: () => {},
 				postMessageToWebview: vi.fn(),
+				cancelTask: vi.fn(),
 			}),
 		},
 	} as unknown as Task
@@ -223,5 +224,85 @@ describe("checkpointSave in-flight and retry against a real shadow git", () => {
 		expect(retryRecord.count).toBe(1)
 		expect(retryRecord.after).toBe("bytes the retry records")
 		expect(afterRetry - afterDrop).toBe(1)
+	}, 60_000)
+
+	// 4509635555 asks for the order these cases do not cover: not a save queued behind other work, but a
+	// restore requested while a save is still in flight. The save has to finish first, because a restore
+	// resets the workspace through the same shadow git, and a save that staged after it would record
+	// the restored bytes instead of the write's own (src/core/checkpoints/index.ts:411-415 is the claim).
+	it("a restore requested while a save is in flight waits for that save, so the save records the write and the restore lands after it", async () => {
+		const { task, service, shadowDir } = await setupCheckpointTask("restore-queued-behind-in-flight-save")
+		const checkpointedFile = path.join(service.workspaceDir, CHECKPOINTED_FILE)
+		const order: string[] = []
+
+		// The target the restore is asked to return to: a save that settles before any hold exists, so its
+		// commit is a known state and the base of the diff assertions below.
+		await fs.writeFile(checkpointedFile, "the state the restore returns to")
+		const target = await checkpointSave(task, true, true)
+
+		if (!target || typeof target !== "object" || !("commit" in target) || typeof target.commit !== "string") {
+			throw new Error("the target save resolved with no commit, so there is nothing to restore to")
+		}
+		const targetCommit = target.commit
+
+		// assertRecordedCheckpoint reads recorded hashes out of the conversation, and these cases drive the
+		// service directly with suppressMessage, so the record is stated here rather than assumed.
+		task.clineMessages.push({ say: "checkpoint_saved", text: targetCommit, ts: 1001 } as never)
+
+		// The write whose checkpoint is at stake, then the save that must record it, held before it reaches
+		// the shadow git so it is genuinely in flight when the restore is requested.
+		await fs.writeFile(checkpointedFile, "bytes the in-flight save must record")
+		const { calls, release } = holdNextSave(service, "in-flight save")
+
+		const realRestore = service.restoreCheckpoint.bind(service)
+		service.restoreCheckpoint = async (...args: Parameters<RepoPerTaskCheckpointService["restoreCheckpoint"]>) => {
+			order.push("restore reached the shadow git")
+			return realRestore(...args)
+		}
+
+		const inFlight = checkpointSave(task, false, true)
+
+		// Wait on the observation rather than on a wall clock: the save is in flight once it has entered
+		// saveCheckpoint and is standing in the hold, which makes it the queue's running entry.
+		for (let waited = 0; waited < 5000 && calls.length === 0; waited += 20) {
+			await new Promise((resolve) => setTimeout(resolve, 20))
+		}
+		expect(calls).toEqual([{ stage: "requested", tag: "in-flight save" }])
+
+		const restore = checkpointRestore(task, { ts: 1001, commitHash: targetCommit, mode: "preview" })
+		await new Promise((resolve) => setTimeout(resolve, 200))
+
+		// While the save is held the restore has reached nothing: it is queued behind the save rather than
+		// racing it through the same shadow git, and the workspace still holds the write's bytes.
+		expect(order).toEqual([])
+		expect(await fs.readFile(checkpointedFile, "utf8")).toBe("bytes the in-flight save must record")
+
+		release()
+		const saved = await inFlight
+		await restore
+
+		if (!saved || typeof saved !== "object" || !("commit" in saved) || typeof saved.commit !== "string") {
+			throw new Error("the save behind the restore resolved with no commit, so it recorded nothing")
+		}
+
+		// The order the ask names, read from both sides: the save ran and recorded the write bytes, and the
+		// restore only reached the shadow git after it.
+		expect(order).toEqual(["restore reached the shadow git"])
+		expect(calls).toEqual([
+			{ stage: "requested", tag: "in-flight save" },
+			{ stage: "running", tag: "in-flight save" },
+		])
+		const saveRecord = await recorded(service, targetCommit, saved.commit)
+		expect(saveRecord.count).toBe(1)
+		expect(saveRecord.after).toBe("bytes the in-flight save must record")
+		expect(await fs.readFile(checkpointedFile, "utf8")).toBe("the state the restore returns to")
+		// A restore resets the workspace by moving the shadow git's HEAD back to the commit it restores to,
+		// so the save's own commit stops being reachable from HEAD even though it still exists by hash: HEAD
+		// is named here because counting commits from HEAD would read the restore's reset as the save having
+		// added nothing.
+		const headAfterRestore = (
+			await simpleGit(path.join(shadowDir, "tasks", task.taskId, "checkpoints")).log({ maxCount: 1 })
+		).latest?.hash
+		expect(headAfterRestore).toBe(targetCommit)
 	}, 60_000)
 })
