@@ -46,7 +46,13 @@ export async function readFileWithMissingRetry(filePath: string): Promise<string
 			return await fs.readFile(filePath, "utf8")
 		} catch (retryError) {
 			if (getErrorCode(retryError) !== "ENOENT") throw retryError
-			if (!(await recoverMissingJsonFile(filePath))) throw retryError
+			// A recovery that rejects failed for its own reasons - a readdir error, a lock it could
+			// not take - and jsonFileRecovery traces that failure with its code before throwing.
+			// It is not the reader's failure: the caller can only classify the read it asked for,
+			// so an unreachable recovery counts as "nothing recovered" and the ENOENT read above
+			// is what the caller receives.
+			const recovered = await recoverMissingJsonFile(filePath).catch(() => false)
+			if (!recovered) throw retryError
 			return fs.readFile(filePath, "utf8")
 		}
 	}
