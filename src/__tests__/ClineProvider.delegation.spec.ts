@@ -1205,6 +1205,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			// The real deletion path: the store swallows a per-file history
 			// lock failure, so deleteMany resolves and cleanup continues.
 			deleteTaskWithId: ClineProvider.prototype.deleteTaskWithId,
+			taskTitleService: { cancel: vi.fn() },
 			createTaskWithHistoryItem,
 			log: vi.fn(),
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),

@@ -29,7 +29,8 @@ export function highlightFzfMatch(
 	positions: number[],
 	highlightClassName: string = "history-item-highlight",
 ) {
-	if (!positions.length) return text
+	// The result is rendered as HTML, so unmatched text must be escaped too.
+	if (!positions.length) return escapeHtml(text)
 
 	const parts: { text: string; highlight: boolean }[] = []
 	let lastIndex = 0
