@@ -2456,6 +2456,66 @@ describe("DiffViewProvider", () => {
 				)
 			})
 
+			it("does not save the emptied buffer when the guard read proved the placeholder is gone", async () => {
+				// The same ENOENT the unlink block already tolerates. A placeholder that is not there has
+				// nothing to save onto, and dropping the emptied create buffer onto that path recreates the
+				// empty file the discard just declined to remove. The buffer is still blanked, because the
+				// unapproved bytes must not survive in the editor either.
+				const relPath = "gone-before-save-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial model output"),
+						positionAt: (offset: number) => ({ line: 0, character: offset }),
+						isDirty: true,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the row above uses.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Somebody else removed the file before the discard ran: the guard read reports ENOENT and
+				// leaves the recorded match untouched, which is what the save gate now has to notice.
+				const missing: NodeJS.ErrnoException = new Error("ENOENT: no such file, already removed")
+				missing.code = "ENOENT"
+				vi.mocked(fs.readFile).mockRejectedValue(missing)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Blanked, not written: the replace ran, the save did not, and the only write to that path
+				// is still the empty placeholder open() made. Nothing was removed and nothing was reported.
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				expect(editor.document.save).not.toHaveBeenCalled()
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+			})
+
 			it("keeps the placeholder when the guard's read fails for a reason that does not say it is gone", async () => {
 				// The read that guards the unlink can fail for reasons that say nothing about the file being
 				// gone - a permission refusal, for example. Only ENOENT means there was nothing left to
