@@ -801,13 +801,28 @@ describe("ZooGatewayHandler", () => {
 			expect(removeListener).toHaveBeenCalledWith("abort", abortListeners[0][1])
 		})
 
-		it("returns an empty string when the model returns no content", async () => {
+		it.each([
+			["no content", [{ message: { role: "assistant", content: null } }]],
+			["no choices", []],
+		])("returns an empty string when the model returns %s", async (_label, choices: unknown[]) => {
 			const handler = new ZooGatewayHandler(mockOptions)
-			mockCreate.mockImplementation(async () => ({
-				choices: [{ message: { role: "assistant", content: null } }],
-			}))
+			mockCreate.mockImplementation(async () => ({ choices }))
 
 			await expect(handler.completePrompt("Test")).resolves.toBe("")
+		})
+
+		it.each([
+			["with a live caller signal", { abortSignal: new AbortController().signal }],
+			["without a caller signal", undefined],
+		])("requires a session before the model lookup, %s", async (_label, options) => {
+			const { getModels } = await import("../fetchers/modelCache")
+			const handler = new ZooGatewayHandler({ zooGatewayModelId: "anthropic/claude-sonnet-4" })
+
+			await expect(handler.completePrompt("Test", options)).rejects.toThrow(
+				"Zoo Gateway requires authentication. Please sign in to Zoo Code first.",
+			)
+			expect(getModels).not.toHaveBeenCalled()
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 	})
 
