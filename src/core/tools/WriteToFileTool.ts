@@ -267,12 +267,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 */
 	private async cleanupFailedPartialStream(task: Task): Promise<void> {
 		const reverted = await this.discardUnapprovedStreamBeforeReset(task)
-		// A failed rollback that still owns the placeholder must keep the session:
-		// reset() would forget that ownership and strand the empty file unowned, so it
-		// is skipped and the hazard reported instead - the same discipline execute()
-		// uses on its error path.
+		// A restore that failed leaves the buffer holding content this task never approved,
+		// and the open diff session (isEditing + relPath) is what tells a later call that
+		// this path still owes a rollback. reset() would clear that session and leave the
+		// unapproved content one save away from disk with nobody left to roll it back, and
+		// when the failed restore also still owns the placeholder, reset() would forget that
+		// ownership and strand the empty file unowned. So the view is reset only once the
+		// restore actually landed; otherwise the hazard is reported instead - the same
+		// discipline execute() uses on its error path.
 		const strandedPlaceholder = !reverted && task.diffViewProvider.ownsPlaceholder
-		if (!strandedPlaceholder) {
+		if (reverted) {
 			await this.resetDiffViewAfterWrite(task)
 		}
 		if (!reverted) {
@@ -325,13 +329,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// document can still hold that unapproved content, and the recovery state has
 		// to exist while the outcome is decided and reported.
 		const reverted = await this.discardUnapprovedStreamBeforeReset(task)
-		this.resetTaskPartialState(task)
+		// The same rule as the failed-stream cleanup: tear the recovery state down only
+		// once the restore landed. When it failed, the buffer can still hold unapproved
+		// content, and this stream's entry (with its abort listener) together with the open
+		// diff session are what let a later write for the same path, or an approval, finish
+		// the teardown instead of leaving the content with no owner.
+		if (reverted) {
+			this.resetTaskPartialState(task)
+			await this.resetDiffViewAfterWrite(task)
+		}
 		// The same ownership guard as execute(): a rollback that could not remove the
 		// placeholder leaves it owned, and reset() would strand it unowned.
 		const strandedPlaceholder = !reverted && task.diffViewProvider.ownsPlaceholder
-		if (!strandedPlaceholder) {
-			await this.resetDiffViewAfterWrite(task)
-		}
 		if (!reverted) {
 			// Do not report a completed teardown: the editor may still show content this
 			// task never approved, and saving it would land a write the user never

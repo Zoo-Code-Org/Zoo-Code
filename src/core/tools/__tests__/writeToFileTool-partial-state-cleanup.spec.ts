@@ -18,6 +18,8 @@ interface CleanupTask {
 		reset: MockedFunction<() => Promise<void>>
 		discardUnapprovedStream: MockedFunction<() => Promise<void>>
 		revertChanges: MockedFunction<() => Promise<void>>
+		/** Whether this edit still owns the empty placeholder open() created for a new file. */
+		ownsPlaceholder: boolean
 	}
 	finalizePartialToolAsk: MockedFunction<() => Promise<void>>
 	say: MockedFunction<(...args: unknown[]) => Promise<void>>
@@ -33,6 +35,10 @@ function buildTask(taskId: string, instanceId: string): Task {
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+			// The default scenario is a delta over an EXISTING file: no placeholder ownership is
+			// at stake, so the only reason a failed restore has to keep a session is the
+			// unapproved content still sitting in the buffer.
+			ownsPlaceholder: false,
 		},
 		finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 		say: vi.fn().mockResolvedValue(undefined),
@@ -107,7 +113,8 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		// Seed the per-task stream state so this teardown boundary is taken at all, and mark it as a
 		// stream that reached the diff view: that is the preview the hook below owes a rollback, and
 		// ownsPreview is the flag it checks before touching the view.
-		writeToFileTool["getTaskPartialStreamState"](task).ownsPreview = true
+		const seededState = writeToFileTool["getTaskPartialStreamState"](task)
+		seededState.ownsPreview = true
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
 
 		const handled = await writeToFileTool["onParameterParseFailure"](
@@ -124,10 +131,18 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		// still hold content the task never approved.
 		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("unapproved"))
 		expect(stateSizeDuringRevert).toBe(1)
-		// The teardown still finished.
-		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-		expect(t.diffViewProvider.reset).toHaveBeenCalled()
+		// The restore failed over an existing file, so the buffer can still hold that
+		// unapproved content: the recovery state AND the diff session have to survive, or
+		// nothing is left that knows this path still owes a rollback.
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+		expect(t.diffViewProvider.reset).not.toHaveBeenCalled()
+		expect(t.off).not.toHaveBeenCalled()
 		expect(handled).toBe(false)
+		// The retained entry is still tearable: clearing the task state releases the
+		// bookkeeping and deregisters the abort listener it registered.
+		writeToFileTool.clearTaskState(task)
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		expect(t.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, seededState.abortCleanup)
 		errorSpy.mockRestore()
 	})
 
@@ -198,7 +213,9 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 
 		// Same contract as the parse-failure teardown: a failed restore is reported.
 		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("unapproved"))
-		expect(t.diffViewProvider.reset).toHaveBeenCalled()
+		// The restore failed over an existing file, so the diff session survives with it:
+		// resetting here would forget that this path still owes a rollback.
+		expect(t.diffViewProvider.reset).not.toHaveBeenCalled()
 		errorSpy.mockRestore()
 	})
 
@@ -299,5 +316,23 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		await writeToFileTool["finalizePartialToolAskAfterFailure"](task, "partial text")
 
 		expect(errorSpy).toHaveBeenCalledWith("Error finalizing write_to_file partial tool ask:", expect.any(Error))
+	})
+
+	it("keeps the diff session when the cleanup could not restore an existing file", async () => {
+		// The class the review named, pinned on its own: the restore refused, the file is an
+		// existing one, so ownsPlaceholder is false and the old code reset the view anyway.
+		// That reset cleared isEditing and relPath - the only thing telling a later call that
+		// this path still owes a rollback - while the buffer went on holding content the task
+		// never approved, one save away from landing on disk.
+		const task = buildTask("failed-stream-existing-file", "inst-14")
+		const t = task as unknown as CleanupTask
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("revert failed"))
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await writeToFileTool["cleanupFailedPartialStream"](task)
+
+		expect(t.diffViewProvider.reset).not.toHaveBeenCalled()
+		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("unapproved"))
+		errorSpy.mockRestore()
 	})
 })
