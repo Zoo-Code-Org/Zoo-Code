@@ -330,7 +330,7 @@ export const OpenAICompatible = ({
 						}}
 						modelInfo={{
 							...(apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults),
-							supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+							supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 						}}
 					/>
 				)}

@@ -1,6 +1,6 @@
 import React from "react"
 
-import { renderWithExtensionState, screen } from "@/utils/test-utils"
+import { fireEvent, renderWithExtensionState, screen, within } from "@/utils/test-utils"
 import { ChatRowContent } from "../ChatRow"
 
 // Mock i18n
@@ -14,6 +14,8 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 				"chat:apiRequest.errorMessage.401": "Couldn't authenticate with provider.",
 				"chat:apiRequest.errorMessage.unknown": "Unknown API error. Please report this on GitHub.",
 				"chat:apiRequest.errorMessage.docs": "Docs",
+				"chat:errorDetails.title": "Error Details",
+				"chat:errorDetails.link": "Details",
 			}
 			return map[key] ?? options?.defaultValue ?? key
 		},
@@ -41,6 +43,31 @@ function renderChatRow(message: any) {
 }
 
 describe("ChatRow - rate limit wait", () => {
+	it("shows details for a failed API request before any response content was streamed", () => {
+		const errorMessage = "OpenAI API error: invalid request (code=invalid_request, param=model)"
+
+		renderWithExtensionState(
+			<ChatRowContent
+				message={{ type: "say", say: "api_req_started", ts: 1, text: "{}" } as any}
+				lastModifiedMessage={{ type: "ask", ask: "api_req_failed", ts: 2, text: errorMessage } as any}
+				isExpanded={false}
+				isLast={true}
+				isStreaming={false}
+				onToggleExpand={() => {}}
+				onSuggestionClick={() => {}}
+				onBatchFileResponse={() => {}}
+				onFollowUpUnmount={() => {}}
+				isFollowUpAnswered={false}
+			/>,
+		)
+
+		fireEvent.click(screen.getByRole("button", { name: "Error Details" }))
+
+		const dialog = screen.getByRole("dialog")
+		expect(within(dialog).getByText(/Date\/time:/)).toBeInTheDocument()
+		expect(within(dialog).getByText((content) => content.includes(errorMessage))).toBeInTheDocument()
+	})
+
 	it("renders a non-error progress row for api_req_rate_limit_wait", () => {
 		const message: any = {
 			type: "say",

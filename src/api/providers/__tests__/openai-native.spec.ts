@@ -426,6 +426,26 @@ describe("OpenAiNativeHandler", () => {
 				}
 			}).rejects.toThrow("OpenAI service error")
 		})
+
+		it("uses a versioned custom base URL once and explains 404 model/endpoint failures", async () => {
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: false,
+				status: 404,
+				text: async () => JSON.stringify({ error: { message: "Resource not found" } }),
+			})
+			global.fetch = mockFetch as typeof fetch
+			mockResponsesCreate.mockRejectedValue(new Error("SDK unavailable"))
+			handler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-6-luna",
+				openAiNativeBaseUrl: "https://custom-openai.example.com/v1/",
+			})
+
+			await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toThrow(
+				'Responses API returned 404. Verify that the configured base URL exposes /v1/responses and that model "gpt-6-luna" is available to your API account.',
+			)
+			expect(mockFetch).toHaveBeenCalledWith("https://custom-openai.example.com/v1/responses", expect.any(Object))
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -1595,7 +1615,7 @@ describe("OpenAiNativeHandler", () => {
 				{ status: 400, expectedMessage: "Invalid request to Responses API" },
 				{ status: 401, expectedMessage: "Authentication failed" },
 				{ status: 403, expectedMessage: "Access denied" },
-				{ status: 404, expectedMessage: "Responses API endpoint not found" },
+				{ status: 404, expectedMessage: "Responses API returned 404" },
 				{ status: 429, expectedMessage: "Rate limit exceeded" },
 				{ status: 500, expectedMessage: "OpenAI service error" },
 			]
@@ -1629,6 +1649,23 @@ describe("OpenAiNativeHandler", () => {
 				// Clean up
 				delete (global as any).fetch
 			}
+		})
+
+		it("preserves Retry-After metadata from an HTTP 429 response", async () => {
+			global.fetch = vi.fn<typeof fetch>().mockResolvedValue(
+				new Response(JSON.stringify({ error: { message: "Token rate limit exceeded" } }), {
+					status: 429,
+					headers: { "retry-after-ms": "12500" },
+				}),
+			)
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			handler = new OpenAiNativeHandler({ ...mockOptions, apiModelId: "gpt-6-luna" })
+			await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toMatchObject({
+				status: 429,
+				retryAfterSeconds: 13,
+				message: expect.stringContaining("Token rate limit exceeded"),
+			})
 		})
 	})
 
@@ -2164,7 +2201,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 						)
 						controller.enqueue(
 							new TextEncoder().encode(
-								'data: {"type":"response.error","error":{"message":"Model overloaded"}}\n\n',
+								'data: {"type":"response.error","error":{"message":"Model overloaded","code":"server_overloaded","type":"server_error","param":"model"}}\n\n',
 							),
 						)
 						// The error handler will throw, but we still need to close the stream
@@ -2190,7 +2227,35 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			// Should throw an error when encountering error event
 			await expect(async () => {
 				await collectStream(stream)
-			}).rejects.toThrow("Responses API error: Model overloaded")
+			}).rejects.toThrow(
+				"Responses API error: Model overloaded (code=server_overloaded, type=server_error, param=model)",
+			)
+		})
+
+		it("preserves rate-limit classification for in-band Responses API errors", async () => {
+			const mockFetch = vi
+				.fn<typeof fetch>()
+				.mockResolvedValue(
+					new Response(
+						'data: {"type":"response.error","error":{"message":"Your requests to gpt-6-luna have exceeded token rate limit.","retry_after_ms":12500}}\n\n',
+						{ status: 200, headers: { "Content-Type": "text/event-stream" } },
+					),
+				)
+			global.fetch = mockFetch
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			handler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-6-luna",
+			})
+
+			const stream = handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }])
+
+			await expect(collectStream(stream)).rejects.toMatchObject({
+				status: 429,
+				retryAfterSeconds: 13,
+				message: expect.stringContaining("exceeded token rate limit"),
+			})
 		})
 
 		// New tests: ensure text.verbosity is omitted for models without supportsVerbosity
