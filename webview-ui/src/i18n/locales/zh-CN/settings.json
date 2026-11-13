@@ -187,8 +187,7 @@
 			"parse": "解析文件",
 			"embed": "创建嵌入向量",
 			"upsert": "保存已索引的代码块",
-			"delete": "移除已索引的代码块",
-			"verify": "验证索引结果"
+			"delete": "移除已索引的代码块"
 		},
 		"enableLabel": "启用代码库索引",
 		"enableDescription": "启用代码索引以改进搜索和上下文理解",

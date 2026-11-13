@@ -4,6 +4,7 @@ import { t } from "../../../i18n"
 import type { CodeIndexConfig } from "../interfaces/config"
 import type { IEmbedder } from "../interfaces"
 import type { IEmbedderFactory } from "../interfaces/embedder-factory"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 import { OpenAiEmbedderFactory } from "./factories/openai-embedder-factory"
 import { OllamaEmbedderFactory } from "./factories/ollama-embedder-factory"
 import { OpenAICompatibleEmbedderFactory } from "./factories/openai-compatible-embedder-factory"
@@ -31,7 +32,7 @@ export class EmbedderFactory implements IEmbedderFactory {
 		[providerIdentifiers.openrouter]: new OpenRouterEmbedderFactory(),
 	}
 
-	public create(config: CodeIndexConfig): IEmbedder {
+	public create(config: CodeIndexConfig, pacers?: ProviderPacerRegistry): IEmbedder {
 		const provider = config.embedderProvider
 
 		// Semble is a self-contained search binary, not a vector embedder.
@@ -46,6 +47,6 @@ export class EmbedderFactory implements IEmbedderFactory {
 			throw new Error(t("embeddings:serviceFactory.invalidEmbedderType", { embedderProvider: provider }))
 		}
 
-		return this.embedderFactories[provider].create(config)
+		return this.embedderFactories[provider].create(config, pacers)
 	}
 }

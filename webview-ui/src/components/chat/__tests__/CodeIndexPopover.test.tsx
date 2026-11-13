@@ -422,8 +422,8 @@ describe("CodeIndexPopover indexing reliability", () => {
 		).toBeInTheDocument()
 	})
 
-	it("renders all six failure activities and both retry states", () => {
-		const activities: FailedFileStatus["activity"][] = ["read", "parse", "embed", "upsert", "delete", "verify"]
+	it("renders all five failure activities and both retry states", () => {
+		const activities: FailedFileStatus["activity"][] = ["read", "parse", "embed", "upsert", "delete"]
 		const failedFiles: FailedFileStatus[] = activities.map((activity, index) => ({
 			path: `src/${activity}.ts`,
 			activity,

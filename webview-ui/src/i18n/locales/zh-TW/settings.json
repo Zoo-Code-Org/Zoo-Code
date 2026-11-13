@@ -214,8 +214,7 @@
 			"parse": "剖析檔案",
 			"embed": "建立嵌入向量",
 			"upsert": "儲存已索引的區塊",
-			"delete": "移除已索引的區塊",
-			"verify": "驗證索引結果"
+			"delete": "移除已索引的區塊"
 		},
 		"enableLabel": "啟用程式碼庫索引",
 		"enableDescription": "啟用程式碼索引以改進搜尋和上下文理解",

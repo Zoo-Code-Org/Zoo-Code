@@ -11,15 +11,6 @@ import { clearAllMocks } from "../../../../test-utils/reset"
 vitest.mock("@qdrant/js-client-rest")
 vitest.mock("crypto")
 vitest.mock("../../../../utils/path")
-// The store logs through codeIndexLog; forward to console so the existing console spies observe it.
-vitest.mock("../../code-index-log", () => ({
-	codeIndexLog: {
-		info: (...values: unknown[]) => console.log(...values),
-		warn: (...values: unknown[]) => console.warn(...values),
-		error: (...values: unknown[]) => console.error(...values),
-		debug: () => {},
-	},
-}))
 vitest.mock("../../../../i18n", () => ({
 	t: (key: string, params?: any) => {
 		// Mock translation function that includes parameters for testing
@@ -559,16 +550,14 @@ describe("QdrantVectorStore", () => {
 			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledWith(expectedCollectionName, {
 				field_name: "type",
 				field_schema: "keyword",
-				wait: true,
 			})
 			for (let i = 0; i <= 4; i++) {
 				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledWith(expectedCollectionName, {
 					field_name: `pathSegments.${i}`,
 					field_schema: "keyword",
-					wait: true,
 				})
 			}
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
+			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
 		})
 		it("should not create a new collection if one exists with matching vectorSize and return false", async () => {
 			// Mock getCollection to return existing collection info with matching vector size
@@ -595,16 +584,14 @@ describe("QdrantVectorStore", () => {
 			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledWith(expectedCollectionName, {
 				field_name: "type",
 				field_schema: "keyword",
-				wait: true,
 			})
 			for (let i = 0; i <= 4; i++) {
 				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledWith(expectedCollectionName, {
 					field_name: `pathSegments.${i}`,
 					field_schema: "keyword",
-					wait: true,
 				})
 			}
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
+			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
 		})
 		it("should recreate collection if it exists but vectorSize mismatches and return true", async () => {
 			const differentVectorSize = 768
@@ -654,16 +641,14 @@ describe("QdrantVectorStore", () => {
 			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledWith(expectedCollectionName, {
 				field_name: "type",
 				field_schema: "keyword",
-				wait: true,
 			})
 			for (let i = 0; i <= 4; i++) {
 				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledWith(expectedCollectionName, {
 					field_name: `pathSegments.${i}`,
 					field_schema: "keyword",
-					wait: true,
 				})
 			}
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
+			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
 			;(console.warn as any).mockRestore() // Restore console.warn
 		})
 		it("should log warning for non-404 errors but still create collection", async () => {
@@ -677,7 +662,7 @@ describe("QdrantVectorStore", () => {
 			expect(mockQdrantClientInstance.getCollection).toHaveBeenCalledTimes(1)
 			expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
 			expect(mockQdrantClientInstance.deleteCollection).not.toHaveBeenCalled()
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
+			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
 			expect(console.warn).toHaveBeenCalledWith(
 				expect.stringContaining(`Warning during getCollectionInfo for "${expectedCollectionName}"`),
 				genericError.message,
@@ -705,48 +690,48 @@ describe("QdrantVectorStore", () => {
 			expect(console.error).toHaveBeenCalledTimes(1) // Only the outer try/catch
 			;(console.error as any).mockRestore()
 		})
-		it("should log but not fail if payload index creation errors occur", async () => {
-			// Mock successful collection creation
-			mockQdrantClientInstance.getCollection.mockRejectedValue({
-				response: { status: 404 },
-				message: "Not found",
-			})
-			mockQdrantClientInstance.createCollection.mockResolvedValue(true as any)
+		describe("CI-QD-01: collection and payload index creation", () => {
+			const serverError = () => Object.assign(new Error("unavailable"), { status: 503 })
 
-			// Required verification indexes succeed; only the optional indexes fail.
-			const indexError = new Error("Index creation failed")
-			mockQdrantClientInstance.createPayloadIndex.mockImplementation(
-				async (_collection: string, options: { field_name: string }) => {
-					if (options.field_name === "filePath" || options.field_name === "generation") return {}
-					throw indexError
+			beforeEach(() => {
+				vitest.useFakeTimers()
+				mockQdrantClientInstance.getCollection.mockRejectedValue({ response: { status: 404 }, message: "Not found" })
+				mockQdrantClientInstance.createCollection.mockResolvedValue(true)
+				vitest.spyOn(console, "error").mockImplementation(function () {})
+			})
+			afterEach(() => vitest.useRealTimers())
+
+			it.each(["createCollection", "createPayloadIndex"] as const)(
+				"recovers when %s fails twice with a server error",
+				async (method) => {
+					mockQdrantClientInstance[method].mockRejectedValueOnce(serverError()).mockRejectedValueOnce(serverError())
+					const pending = vectorStore.initialize()
+					await vitest.advanceTimersByTimeAsync(1500)
+					await expect(pending).resolves.toBe(true)
 				},
 			)
-			vitest.spyOn(console, "warn").mockImplementation(function () {}) // Suppress console.warn
 
-			const result = await vectorStore.initialize()
+			it("rejects when payload index creation exhausts its retries", async () => {
+				mockQdrantClientInstance.createPayloadIndex.mockRejectedValue(serverError())
+				const pending = vectorStore.initialize().catch((error: unknown) => error)
+				await vitest.advanceTimersByTimeAsync(1500)
+				expect(await pending).toBeInstanceOf(Error)
+				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(3)
+			})
 
-			// Should still return true since main collection setup succeeded
-			expect(result).toBe(true)
-			expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
-
-			// Verify all payload index creations were attempted (2 required + type + 5 pathSegments)
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
-
-			// Verify warnings were logged for each failed index (now 6)
-			expect(console.warn).toHaveBeenCalledTimes(6)
-			// Verify warning for 'type' index
-			expect(console.warn).toHaveBeenCalledWith(
-				expect.stringContaining(`Could not create payload index for type`),
-				indexError.message,
-			)
-			for (let i = 0; i <= 4; i++) {
-				expect(console.warn).toHaveBeenCalledWith(
-					expect.stringContaining(`Could not create payload index for pathSegments.${i}`),
-					indexError.message,
+			it("does not retry a permanent creation failure", async () => {
+				mockQdrantClientInstance.createCollection.mockRejectedValue(
+					Object.assign(new Error("bad request"), { status: 400 }),
 				)
-			}
+				await expect(vectorStore.initialize()).rejects.toThrow()
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
+			})
 
-			;(console.warn as any).mockRestore()
+			it("treats an existing payload index as success", async () => {
+				mockQdrantClientInstance.createPayloadIndex.mockRejectedValue(new Error("index already exists"))
+				await expect(vectorStore.initialize()).resolves.toBe(true)
+				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
+			})
 		})
 
 		it("should throw vectorDimensionMismatch error when deleteCollection fails during recreation", async () => {
@@ -867,7 +852,7 @@ describe("QdrantVectorStore", () => {
 			expect(mockQdrantClientInstance.getCollection).toHaveBeenCalledTimes(2)
 			expect(mockQdrantClientInstance.deleteCollection).toHaveBeenCalledTimes(1)
 			expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
+			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
 			;(console.warn as any).mockRestore()
 		})
 
@@ -964,7 +949,7 @@ describe("QdrantVectorStore", () => {
 					on_disk: true,
 				},
 			})
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(8)
+			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
 			;(console.warn as any).mockRestore()
 		})
 
@@ -1256,10 +1241,7 @@ describe("QdrantVectorStore", () => {
 			mockQdrantClientInstance.upsert.mockRejectedValue(upsertError)
 			vitest.spyOn(console, "error").mockImplementation(function () {})
 
-			await expect(vectorStore.upsertPoints(mockPoints)).rejects.toMatchObject({
-				message: "Upsert failed",
-				cause: upsertError,
-			})
+			await expect(vectorStore.upsertPoints(mockPoints)).rejects.toThrow(upsertError)
 
 			expect(mockQdrantClientInstance.upsert).toHaveBeenCalledTimes(1)
 			expect(console.error).toHaveBeenCalledWith("Failed to upsert points:", upsertError)

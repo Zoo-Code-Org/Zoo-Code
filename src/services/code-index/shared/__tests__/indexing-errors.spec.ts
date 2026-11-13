@@ -11,7 +11,7 @@ import {
 	SOURCE_MISSING,
 	isQuotaError,
 } from "../indexing-errors"
-import { formatEmbeddingError } from "../validation-helpers"
+import { toEmbeddingError } from "../validation-helpers"
 import { IndexingRetryError } from "../indexing-errors"
 
 describe("quota 429 classification", () => {
@@ -136,7 +136,7 @@ describe("indexing error classification", () => {
 
 	it("classifies raw errors before translated formatting", () => {
 		const cause = new APIConnectionTimeoutError()
-		const error = formatEmbeddingError(cause)
+		const error = toEmbeddingError(cause)
 		expect(error).toBeInstanceOf(EmbeddingError)
 		expect(error.message).toBe("embeddings:failedWithError")
 		expect(error.cause).toBe(cause)
@@ -180,7 +180,7 @@ it.each(["2", "invalid", undefined])(
 	(value) => {
 		const get = vi.fn((name: string) => (name === "retry-after" ? value : undefined))
 		const original = { status: 429, headers: { get } }
-		const formatted = formatEmbeddingError(original)
+		const formatted = toEmbeddingError(original)
 		const retried = new IndexingRetryError(formatted, 3, "rate-limit", "embed")
 		expect(retried.retryAfterMs).toBe(value === "2" ? 2000 : undefined)
 		expect(formatted.retryAfterMs).toBe(retried.retryAfterMs)

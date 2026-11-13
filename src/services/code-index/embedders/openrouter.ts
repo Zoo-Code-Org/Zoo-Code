@@ -1,20 +1,20 @@
-import { codeIndexLog } from "../code-index-log"
-import { makeRateLimitScope } from "../provider-pacer"
 import { OpenAI } from "openai"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../constants"
 import { getDefaultModelId, getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { t } from "../../../i18n"
-import { withValidationErrorHandling, formatEmbeddingError } from "../shared/validation-helpers"
+import { withValidationErrorHandling, toEmbeddingError } from "../shared/validation-helpers"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
+import { makeRateLimitScope } from "../provider-pacer"
 
 // Default provider name when no specific provider is selected
 export const OPENROUTER_DEFAULT_PROVIDER_NAME = "[default]"
 
 interface EmbeddingItem {
 	embedding: string | number[]
+	[key: string]: any
 }
 
 interface OpenRouterEmbeddingResponse {
@@ -26,17 +26,17 @@ interface OpenRouterEmbeddingResponse {
 }
 
 /**
- * OpenRouter implementation of the embedder interface with batching.
+ * OpenRouter implementation of the embedder interface with batching and rate limiting.
  * OpenRouter provides an OpenAI-compatible API that gives access to hundreds of models
  * through a single endpoint, automatically handling fallbacks and cost optimization.
  */
 export class OpenRouterEmbedder implements IEmbedder {
-	readonly rateLimitScope: string
 	private embeddingsClient: OpenAI
 	private readonly defaultModelId: string
 	private readonly maxItemTokens: number
 	private readonly baseUrl: string = "https://openrouter.ai/api/v1"
 	private readonly specificProvider?: string
+	readonly rateLimitScope: string
 
 	/**
 	 * Creates a new OpenRouter embedder
@@ -50,8 +50,6 @@ export class OpenRouterEmbedder implements IEmbedder {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
 
-		this.rateLimitScope = makeRateLimitScope("openrouter", this.baseUrl, apiKey)
-
 		// Only set specificProvider if it's not the default value
 		this.specificProvider =
 			specificProvider && specificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME ? specificProvider : undefined
@@ -60,8 +58,9 @@ export class OpenRouterEmbedder implements IEmbedder {
 		try {
 			this.embeddingsClient = new OpenAI({
 				baseURL: this.baseUrl,
-				maxRetries: 0,
 				apiKey: apiKey,
+				// Retries are owned by the indexing retry policy; SDK retries would multiply its allowance.
+				maxRetries: 0,
 				defaultHeaders: {
 					"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
 					"X-Title": "Zoo Code",
@@ -74,16 +73,16 @@ export class OpenRouterEmbedder implements IEmbedder {
 
 		this.defaultModelId = modelId || getDefaultModelId("openrouter")
 		this.maxItemTokens = maxItemTokens || MAX_ITEM_TOKENS
+		this.rateLimitScope = makeRateLimitScope("openrouter", this.baseUrl, apiKey)
 	}
 
 	/**
-	 * Creates embeddings for the given texts with batching
+	 * Creates embeddings for the given texts with batching and rate limiting
 	 * @param texts Array of text strings to embed
 	 * @param model Optional model identifier
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
-		signal?.throwIfAborted()
+	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
 		const modelToUse = model || this.defaultModelId
 
 		// Apply model-specific query prefix if required
@@ -97,7 +96,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 					const prefixedText = `${queryPrefix}${text}`
 					const estimatedTokens = Math.ceil(prefixedText.length / 4)
 					if (estimatedTokens > MAX_ITEM_TOKENS) {
-						codeIndexLog.warn(
+						console.warn(
 							t("embeddings:textWithPrefixExceedsTokenLimit", {
 								index,
 								estimatedTokens,
@@ -116,7 +115,6 @@ export class OpenRouterEmbedder implements IEmbedder {
 		const remainingTexts = [...processedTexts]
 
 		while (remainingTexts.length > 0) {
-			signal?.throwIfAborted()
 			const currentBatch: string[] = []
 			let currentBatchTokens = 0
 			const processedIndices: number[] = []
@@ -126,7 +124,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 				const itemTokens = Math.ceil(text.length / 4)
 
 				if (itemTokens > this.maxItemTokens) {
-					codeIndexLog.warn(
+					console.warn(
 						t("embeddings:textExceedsTokenLimit", {
 							index: i,
 							itemTokens,
@@ -152,7 +150,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
-				const batchResult = await this._embedBatch(currentBatch, modelToUse, signal)
+				const batchResult = await this._embedBatch(currentBatch, modelToUse)
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
@@ -162,23 +160,20 @@ export class OpenRouterEmbedder implements IEmbedder {
 		return { embeddings: allEmbeddings, usage }
 	}
 
+	/** Sends one request; retries and rate-limit waits belong to the caller's retry policy and pacer. */
 	private async _embedBatch(
 		batchTexts: string[],
 		model: string,
-		signal?: AbortSignal,
 	): Promise<{ embeddings: number[][]; usage: { promptTokens: number; totalTokens: number } }> {
 		try {
-			signal?.throwIfAborted()
-			const requestParams: OpenAI.EmbeddingCreateParams & {
-				provider?: { order: string[]; only: string[]; allow_fallbacks: boolean }
-			} = {
+			const requestParams: OpenAI.EmbeddingCreateParams & { provider?: unknown } = {
 				input: batchTexts,
 				model: model,
-				// Base64 with local decoding bypasses the OpenAI v4.78.1 numeric-array parser's
-				// 256-dimension truncation, which breaks larger models.
+				// OpenAI package (as of v4.78.1) has a parsing issue that truncates embedding dimensions to 256
+				// when processing numeric arrays, which breaks compatibility with models using larger dimensions.
+				// By requesting base64 encoding, we bypass the package's parser and handle decoding ourselves.
 				encoding_format: "base64",
 			}
-
 			if (this.specificProvider) {
 				requestParams.provider = {
 					order: [this.specificProvider],
@@ -189,46 +184,32 @@ export class OpenRouterEmbedder implements IEmbedder {
 
 			const response = (await this.embeddingsClient.embeddings.create(
 				requestParams,
-				...(signal ? [{ signal }] : []),
-			)) as OpenRouterEmbeddingResponse
+			)) as unknown as OpenRouterEmbeddingResponse
 
-			signal?.throwIfAborted()
-			const processedEmbeddings = response.data.map((item: EmbeddingItem) => {
-				if (typeof item.embedding === "string") {
-					const buffer = Buffer.from(item.embedding, "base64")
-
-					const float32Array = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
-
-					return {
-						...item,
-						embedding: Array.from(float32Array),
-					}
-				}
-				return item
+			const embeddings = response.data.map((item: EmbeddingItem) => {
+				if (typeof item.embedding !== "string") return item.embedding
+				const buffer = Buffer.from(item.embedding, "base64")
+				return Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4))
 			})
 
-			response.data = processedEmbeddings
-
-			const embeddings = response.data.map((item) => item.embedding as number[])
-
 			return {
-				embeddings: embeddings,
+				embeddings,
 				usage: {
 					promptTokens: response.usage?.prompt_tokens || 0,
 					totalTokens: response.usage?.total_tokens || 0,
 				},
 			}
 		} catch (error) {
-			signal?.throwIfAborted()
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,
 				location: "OpenRouterEmbedder:_embedBatch",
 			})
-			codeIndexLog.error("OpenRouter embedder error:", error)
-			throw formatEmbeddingError(error)
+			console.error("OpenRouter embedder error:", error)
+			throw toEmbeddingError(error)
 		}
 	}
+
 
 	/**
 	 * Validates the OpenRouter embedder configuration by testing API connectivity
@@ -242,9 +223,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 				const modelToUse = this.defaultModelId
 
 				// Build the request parameters
-				const requestParams: OpenAI.EmbeddingCreateParams & {
-					provider?: { order: string[]; only: string[]; allow_fallbacks: boolean }
-				} = {
+				const requestParams: any = {
 					input: testTexts,
 					model: modelToUse,
 					encoding_format: "base64",
@@ -292,4 +271,5 @@ export class OpenRouterEmbedder implements IEmbedder {
 			name: "openrouter",
 		}
 	}
+
 }

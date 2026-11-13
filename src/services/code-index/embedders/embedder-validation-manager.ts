@@ -2,14 +2,12 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { t } from "../../../i18n"
 import type { IEmbedder } from "../interfaces"
-import { classifyIndexingError } from "../shared/indexing-errors"
 
 export class EmbedderValidationManager {
 	public async validateEmbedder(embedder: IEmbedder): Promise<{ valid: boolean; error?: string }> {
 		try {
 			return await embedder.validateConfiguration()
 		} catch (error) {
-			if (classifyIndexingError(error) === "rate-limit") throw error
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,

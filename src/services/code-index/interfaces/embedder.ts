@@ -3,15 +3,13 @@
  * This interface is implemented by both OpenAI and Ollama embedders.
  */
 export interface IEmbedder {
-	readonly rateLimitScope: string
-
 	/**
 	 * Creates embeddings for the given texts.
 	 * @param texts Array of text strings to create embeddings for
 	 * @param model Optional model ID to use for embeddings
 	 * @returns Promise resolving to an EmbeddingResponse
 	 */
-	createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse>
+	createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse>
 
 	/**
 	 * Validates the embedder configuration by testing connectivity and credentials.
@@ -20,6 +18,9 @@ export interface IEmbedder {
 	validateConfiguration(): Promise<{ valid: boolean; error?: string }>
 
 	get embedderInfo(): EmbedderInfo
+
+	/** Requests with the same scope share one provider allowance and its rate-limit wait. */
+	readonly rateLimitScope: string
 }
 
 export interface EmbeddingResponse {

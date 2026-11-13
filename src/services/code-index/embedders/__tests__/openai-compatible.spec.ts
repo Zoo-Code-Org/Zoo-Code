@@ -1,5 +1,3 @@
-import { codeIndexLog } from "../../code-index-log"
-vi.mock("../../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), warn: vi.fn() } }))
 import type { MockedClass, MockedFunction } from "vitest"
 import { OpenAI } from "openai"
 import { OpenAICompatibleEmbedder } from "../openai-compatible"
@@ -66,8 +64,8 @@ describe("OpenAICompatibleEmbedder", () => {
 
 	beforeEach(() => {
 		clearAllMocks()
-		vitest.spyOn(codeIndexLog, "warn").mockImplementation(function () {})
-		vitest.spyOn(codeIndexLog, "error").mockImplementation(function () {})
+		vitest.spyOn(console, "warn").mockImplementation(function () {})
+		vitest.spyOn(console, "error").mockImplementation(function () {})
 
 		// Setup mock OpenAI instance
 		mockEmbeddingsCreate = vitest.fn()
@@ -371,7 +369,7 @@ describe("OpenAICompatibleEmbedder", () => {
 				await embedder.createEmbeddings(testTexts)
 
 				// Should warn about oversized text
-				expect(codeIndexLog.warn).toHaveBeenCalledWith(expect.stringContaining("exceeds maximum token limit"))
+				expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("exceeds maximum token limit"))
 
 				// Should only process normal texts (1 call for 2 normal texts batched together)
 				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
@@ -430,7 +428,7 @@ describe("OpenAICompatibleEmbedder", () => {
 				)
 
 				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
-				expect(codeIndexLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
+				expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
 			})
 
 			it("should throw error immediately on non-retryable errors", async () => {
@@ -462,7 +460,7 @@ describe("OpenAICompatibleEmbedder", () => {
 					"Failed to create embeddings: API connection failed",
 				)
 
-				expect(codeIndexLog.error).toHaveBeenCalledWith(
+				expect(console.error).toHaveBeenCalledWith(
 					expect.stringContaining("OpenAI Compatible embedder error"),
 					apiError,
 				)
@@ -478,7 +476,7 @@ describe("OpenAICompatibleEmbedder", () => {
 					"Failed to create embeddings: Batch processing failed",
 				)
 
-				expect(codeIndexLog.error).toHaveBeenCalledWith(
+				expect(console.error).toHaveBeenCalledWith(
 					expect.stringContaining("OpenAI Compatible embedder error"),
 					expect.any(Error),
 				)

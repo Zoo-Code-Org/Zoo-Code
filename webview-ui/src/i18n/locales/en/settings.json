@@ -260,8 +260,7 @@
 			"parse": "Parse file",
 			"embed": "Create embeddings",
 			"upsert": "Save indexed blocks",
-			"delete": "Remove indexed blocks",
-			"verify": "Verify indexed result"
+			"delete": "Remove indexed blocks"
 		},
 		"enableLabel": "Enable Codebase Indexing",
 		"enableDescription": "Enable code indexing for improved search and context understanding",

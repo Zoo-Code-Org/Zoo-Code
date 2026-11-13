@@ -82,7 +82,7 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 				incomplete,
 				failedPaths,
 				waitingPaths,
-			} = await manager.searchIndex(query, directoryPrefix, task.lifecycleSignal)
+			} = await manager.searchIndex(query, directoryPrefix)
 			const incompleteNotice = incomplete
 				? [
 						"Partial index: results may be incomplete.",

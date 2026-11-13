@@ -228,8 +228,7 @@
 			"parse": "Dosya ayrıştırma",
 			"embed": "Gömme oluşturma",
 			"upsert": "İndekslenen blokları kaydetme",
-			"delete": "İndekslenen blokları kaldırma",
-			"verify": "İndekslenen sonucu doğrulama"
+			"delete": "İndekslenen blokları kaldırma"
 		},
 		"embedderProviderLabel": "Gömücü Sağlayıcı",
 		"modelPlaceholder": "Model adını girin",

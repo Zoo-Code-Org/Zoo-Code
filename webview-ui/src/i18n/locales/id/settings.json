@@ -228,8 +228,7 @@
 			"parse": "Urai file",
 			"embed": "Buat embedding",
 			"upsert": "Simpan blok yang diindeks",
-			"delete": "Hapus blok yang diindeks",
-			"verify": "Verifikasi hasil yang diindeks"
+			"delete": "Hapus blok yang diindeks"
 		},
 		"embedderProviderLabel": "Provider Embedder",
 		"modelPlaceholder": "Masukkan nama model",

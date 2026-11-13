@@ -228,8 +228,7 @@
 			"parse": "Analitzar el fitxer",
 			"embed": "Crear embeddings",
 			"upsert": "Desar els blocs indexats",
-			"delete": "Eliminar els blocs indexats",
-			"verify": "Verificar el resultat indexat"
+			"delete": "Eliminar els blocs indexats"
 		},
 		"embedderProviderLabel": "Proveïdor d'embeddings",
 		"modelPlaceholder": "Introduïu el nom del model",

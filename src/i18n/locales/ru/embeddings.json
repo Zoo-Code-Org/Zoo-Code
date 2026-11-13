@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Ожидание {{service}}; индексация возобновится автоматически",
 		"providerWaitingUntil": "Ожидание {{service}}; индексация возобновится автоматически в {{time}}",
-		"parserFailed": "Индексация кода остановлена при разборе {{filePath}} ({{category}}). Исправь файл и явно запусти индексацию для повторной попытки или отключи её. Это не ошибка модели или провайдера.",
-		"indexingFilesRetrying": "Повторные попытки для файлов с ошибками. Доступен частичный индекс.",
 		"indexingFilesFailed": "Остались ошибки файлов. Автоматических повторных попыток не ожидается. Доступен частичный индекс.",
 		"indexingStopping": "Остановка индексации...",
 		"indexingFailedNoBlocks": "Индексация не удалась: Ни один блок кода не был успешно проиндексирован. Это обычно указывает на проблему конфигурации эмбеддера.",
@@ -71,7 +69,8 @@
 		"unknownError": "Неизвестная ошибка",
 		"indexingRequiresWorkspace": "Для индексации требуется открытая папка рабочего пространства",
 		"indexingStopped": "Индексация остановлена пользователем.",
-		"indexingStoppedPartial": "Индексация остановлена. Частичные данные индекса сохранены."
+		"indexingStoppedPartial": "Индексация остановлена. Частичные данные индекса сохранены.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Загрузка бинарного файла semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Не удалось загрузить semble: {{errorMessage}}",
 		"checkFailed": "Проверка semble не удалась: {{errorMessage}}",
 		"providerReset": "Провайдер Semble сброшен. Дисковый кеш сохраняется до следующей пересборки."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

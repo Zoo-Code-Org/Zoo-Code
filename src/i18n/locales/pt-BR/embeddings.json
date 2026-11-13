@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Aguardando {{service}}; a indexação é retomada automaticamente",
 		"providerWaitingUntil": "Aguardando {{service}}; a indexação é retomada automaticamente às {{time}}",
-		"parserFailed": "A indexação do código parou durante a análise de {{filePath}} ({{category}}). Corrige o arquivo e inicia explicitamente a indexação para tentar de novo, ou desativa a indexação. Não é um erro do modelo nem do provedor.",
-		"indexingFilesRetrying": "Tentando novamente os arquivos com falhas. Um índice parcial está disponível.",
 		"indexingFilesFailed": "Ainda há falhas em arquivos. Nenhuma nova tentativa automática pendente. Um índice parcial está disponível.",
 		"indexingStopping": "Parando a indexação...",
 		"indexingFailedNoBlocks": "Indexação falhou: Nenhum bloco de código foi indexado com sucesso. Isso geralmente indica um problema de configuração do embedder.",
@@ -71,7 +69,8 @@
 		"unknownError": "Erro desconhecido",
 		"indexingRequiresWorkspace": "A indexação requer uma pasta de workspace aberta",
 		"indexingStopped": "Indexação interrompida pelo usuário.",
-		"indexingStoppedPartial": "Indexação interrompida. Dados de índice parciais preservados."
+		"indexingStoppedPartial": "Indexação interrompida. Dados de índice parciais preservados.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Baixando o binário do semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Falha ao baixar semble: {{errorMessage}}",
 		"checkFailed": "Verificação do semble falhou: {{errorMessage}}",
 		"providerReset": "Provedor Semble redefinido. O cache em disco permanece até a próxima reconstrução."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

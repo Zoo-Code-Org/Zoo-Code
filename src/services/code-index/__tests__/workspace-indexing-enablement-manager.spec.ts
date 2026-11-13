@@ -10,7 +10,7 @@ describe("WorkspaceIndexingEnablementManager", () => {
 			isFeatureEnabled: true,
 			isFeatureConfigured: true,
 			initialize: vi.fn().mockResolvedValue({ requiresRestart: false }),
-			startIndexing: vi.fn<(contextProxy?: ContextProxy) => Promise<void>>().mockResolvedValue(undefined),
+			startIndexing: vi.fn().mockResolvedValue(undefined),
 			stopIndexing: vi.fn(),
 			getCurrentStatus: vi.fn<CodeIndexManager["getCurrentStatus"]>().mockReturnValue({
 				systemStatus: "Standby",
@@ -21,9 +21,6 @@ describe("WorkspaceIndexingEnablementManager", () => {
 				workspacePath: "/workspace",
 				workspaceEnabled: true,
 				autoEnableDefault: false,
-				failedFiles: [],
-				failedFileSummary: undefined,
-				providerWaits: [],
 			}),
 		}
 		return {
@@ -37,21 +34,15 @@ describe("WorkspaceIndexingEnablementManager", () => {
 		}
 	}
 
-	it("persists enablement and awaits one start before publishing", async () => {
+	it("persists enablement, initializes and starts in order without awaiting indexing", async () => {
 		const { manager, indexing, provider } = setup()
-		let resolveStart: () => void = () => {}
-		manager.startIndexing.mockReturnValue(new Promise<void>((resolve) => (resolveStart = resolve)))
-		const pending = indexing.setEnabled(true, provider)
-		await Promise.resolve()
+		manager.startIndexing.mockReturnValue(new Promise<void>(() => {}))
+		await indexing.setEnabled(true, provider)
 		expect(manager.setWorkspaceEnabled).toHaveBeenCalledWith(true)
-		expect(manager.startIndexing).toHaveBeenCalledExactlyOnceWith(provider.contextProxy)
-		expect(manager.setWorkspaceEnabled).toHaveBeenCalledBefore(manager.startIndexing)
-		expect(manager.initialize).not.toHaveBeenCalled()
+		expect(manager.initialize).toHaveBeenCalledWith(provider.contextProxy)
+		expect(manager.setWorkspaceEnabled).toHaveBeenCalledBefore(manager.initialize)
+		expect(manager.initialize).toHaveBeenCalledBefore(manager.startIndexing)
 		expect(manager.stopIndexing).not.toHaveBeenCalled()
-		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
-		resolveStart()
-		await pending
-		expect(provider.postMessageToWebview).toHaveBeenCalledOnce()
 	})
 
 	it("persists disablement before stopping", async () => {
@@ -74,14 +65,11 @@ describe("WorkspaceIndexingEnablementManager", () => {
 		expect(manager.stopIndexing).not.toHaveBeenCalled()
 	})
 
-	it("propagates start failures without publishing success", async () => {
+	it("logs background indexing failures", async () => {
 		const { manager, indexing, provider } = setup()
-		const error = new Error("failed")
-		manager.startIndexing.mockRejectedValue(error)
-		await expect(indexing.setEnabled(true, provider)).rejects.toBe(error)
-		expect(manager.startIndexing).toHaveBeenCalledOnce()
-		expect(manager.initialize).not.toHaveBeenCalled()
-		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		manager.startIndexing.mockRejectedValue(new Error("failed"))
+		await expect(indexing.setEnabled(true, provider)).resolves.toBeUndefined()
+		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: failed")
 	})
 
 	it.each([true, false])("publishes the current status after setting enabled=%s", async (enabled) => {
@@ -101,12 +89,15 @@ describe("WorkspaceIndexingEnablementManager", () => {
 		await expect(indexing.setEnabled(false, provider)).rejects.toBe(error)
 	})
 
-	it("propagates persistence failures without starting", async () => {
-		const { manager, indexing, provider } = setup()
-		const error = new Error("failed")
-		manager.setWorkspaceEnabled.mockRejectedValue(error)
-		await expect(indexing.setEnabled(true, provider)).rejects.toBe(error)
-		expect(manager.startIndexing).not.toHaveBeenCalled()
-		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
-	})
+	it.each(["setWorkspaceEnabled", "initialize"] as const)(
+		"propagates %s failures without starting",
+		async (method) => {
+			const { manager, indexing, provider } = setup()
+			const error = new Error("failed")
+			manager[method].mockRejectedValue(error)
+			await expect(indexing.setEnabled(true, provider)).rejects.toBe(error)
+			expect(manager.startIndexing).not.toHaveBeenCalled()
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		},
+	)
 })

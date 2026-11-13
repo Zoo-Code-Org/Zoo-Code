@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Esperando a {{service}}; la indexación se reanuda automáticamente",
 		"providerWaitingUntil": "Esperando a {{service}}; la indexación se reanuda automáticamente a las {{time}}",
-		"parserFailed": "La indexación del código se detuvo al analizar {{filePath}} ({{category}}). Corrige el archivo e inicia explícitamente la indexación para reintentarlo, o desactívala. No es un error del modelo ni del proveedor.",
-		"indexingFilesRetrying": "Reintentando los archivos con errores. Hay un índice parcial disponible.",
 		"indexingFilesFailed": "Siguen existiendo errores en archivos. No hay reintentos automáticos pendientes. Hay un índice parcial disponible.",
 		"indexingStopping": "Deteniendo la indexación...",
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
@@ -71,7 +69,8 @@
 		"unknownError": "Error desconocido",
 		"indexingRequiresWorkspace": "La indexación requiere una carpeta de workspace abierta",
 		"indexingStopped": "Indexación detenida por el usuario.",
-		"indexingStoppedPartial": "Indexación detenida. Datos de índice parciales conservados."
+		"indexingStoppedPartial": "Indexación detenida. Datos de índice parciales conservados.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Descargando el binario de semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Error al descargar semble: {{errorMessage}}",
 		"checkFailed": "Verificación de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveedor de Semble restablecido. La caché en disco se conserva hasta la próxima reconstrucción."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

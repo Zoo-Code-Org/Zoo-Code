@@ -1,5 +1,4 @@
 import { OpenAICompatibleEmbedder } from "./openai-compatible"
-import { makeRateLimitScope } from "../provider-pacer"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import { MAX_ITEM_TOKENS } from "../constants"
 import { t } from "../../../i18n"
@@ -23,12 +22,14 @@ import { TelemetryService } from "@roo-code/telemetry"
  * - mistral/mistral-embed (dimension: 1024)
  */
 export class VercelAiGatewayEmbedder implements IEmbedder {
-	readonly rateLimitScope: string
-
 	private readonly openAICompatibleEmbedder: OpenAICompatibleEmbedder
 	private static readonly VERCEL_AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1"
 	private static readonly DEFAULT_MODEL = "openai/text-embedding-3-large"
 	private readonly modelId: string
+
+	get rateLimitScope(): string {
+		return this.openAICompatibleEmbedder.rateLimitScope
+	}
 
 	/**
 	 * Creates a new Vercel AI Gateway embedder
@@ -39,12 +40,6 @@ export class VercelAiGatewayEmbedder implements IEmbedder {
 		if (!apiKey) {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
-
-		this.rateLimitScope = makeRateLimitScope(
-			"vercel-ai-gateway",
-			VercelAiGatewayEmbedder.VERCEL_AI_GATEWAY_BASE_URL,
-			apiKey,
-		)
 
 		// Use provided model or default
 		this.modelId = modelId || VercelAiGatewayEmbedder.DEFAULT_MODEL
@@ -64,14 +59,12 @@ export class VercelAiGatewayEmbedder implements IEmbedder {
 	 * @param model Optional model identifier (uses constructor model if not provided)
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
-		signal?.throwIfAborted()
+	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
 		try {
 			// Use the provided model or fall back to the instance's model
 			const modelToUse = model || this.modelId
-			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse, ...(signal ? [signal] : []))
+			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse)
 		} catch (error) {
-			signal?.throwIfAborted()
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,

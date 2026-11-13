@@ -29,15 +29,6 @@ describe("EmbedderValidationManager", () => {
 		},
 	)
 
-	it("rethrows rate limits unchanged without permanent-error telemetry", async () => {
-		const embedder = new OpenAiEmbedder({ openAiNativeApiKey: "test-key" })
-		const error = Object.assign(new Error("limited"), { status: 429, headers: { "retry-after": "120" } })
-		vi.mocked(embedder.validateConfiguration).mockRejectedValue(error)
-
-		await expect(manager.validateEmbedder(embedder)).rejects.toBe(error)
-		expect(TelemetryService.instance.captureEvent).not.toHaveBeenCalled()
-	})
-
 	it("preserves an exception's message and reports its stack", async () => {
 		const embedder = new OpenAiEmbedder({ openAiNativeApiKey: "test-key" })
 		const error = new Error("Connection failed")

@@ -228,8 +228,7 @@
 			"parse": "ファイルの解析",
 			"embed": "埋め込みの作成",
 			"upsert": "インデックス化したブロックの保存",
-			"delete": "インデックス化したブロックの削除",
-			"verify": "インデックス化した結果の検証"
+			"delete": "インデックス化したブロックの削除"
 		},
 		"embedderProviderLabel": "エンベッダープロバイダー",
 		"modelPlaceholder": "モデル名を入力",

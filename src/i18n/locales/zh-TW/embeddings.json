@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "正在等待 {{service}}；索引將自動恢復",
 		"providerWaitingUntil": "正在等待 {{service}}；索引將於 {{time}} 自動恢復",
-		"parserFailed": "剖析 {{filePath}} 時，程式碼索引已停止（{{category}}）。修正檔案後，手動啟動索引以重試，或停用索引。這不是模型或供應商錯誤。",
-		"indexingFilesRetrying": "正在重試失敗的檔案。部分索引可供使用。",
 		"indexingFilesFailed": "仍有檔案失敗。沒有待執行的自動重試。部分索引可供使用。",
 		"indexingStopping": "正在停止索引...",
 		"indexingFailedNoBlocks": "索引失敗：沒有程式碼區塊被成功索引。這通常表示 Embedder 設定問題。",
@@ -71,7 +69,8 @@
 		"unknownError": "未知錯誤",
 		"indexingRequiresWorkspace": "索引需要開啟的工作區資料夾",
 		"indexingStopped": "使用者已停止索引。",
-		"indexingStoppedPartial": "索引已停止。部分索引資料已保留。"
+		"indexingStoppedPartial": "索引已停止。部分索引資料已保留。",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "正在下載 semble 二進位檔...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "下載 semble 失敗：{{errorMessage}}",
 		"checkFailed": "Semble 檢查失敗：{{errorMessage}}",
 		"providerReset": "Semble 提供者已重設。磁碟快取將保留至下次重建。"
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

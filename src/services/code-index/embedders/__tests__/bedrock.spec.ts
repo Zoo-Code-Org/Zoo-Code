@@ -1,8 +1,9 @@
-import { codeIndexLog } from "../../code-index-log"
-vi.mock("../../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), warn: vi.fn() } }))
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime"
 
 import { BedrockEmbedder } from "../bedrock"
+import { ProviderPacerRegistry } from "../../provider-pacer"
+
+const pacers = new ProviderPacerRegistry()
 import { MAX_ITEM_TOKENS } from "../../constants"
 import { createProxyRoutingRequestHandler } from "../../../../utils/networkProxy"
 
@@ -67,8 +68,8 @@ vitest.mock("../../../../i18n", () => ({
 
 // Mock console methods
 const consoleMocks = {
-	error: vitest.spyOn(codeIndexLog, "error").mockImplementation(function () {}),
-	warn: vitest.spyOn(codeIndexLog, "warn").mockImplementation(function () {}),
+	error: vitest.spyOn(console, "error").mockImplementation(function () {}),
+	warn: vitest.spyOn(console, "warn").mockImplementation(function () {}),
 }
 
 describe("BedrockEmbedder", () => {
@@ -89,7 +90,7 @@ describe("BedrockEmbedder", () => {
 			return { send: mockSend } as unknown as BedrockRuntimeClient
 		})
 
-		embedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0")
+		embedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0", pacers)
 	})
 
 	afterEach(() => {
@@ -107,13 +108,13 @@ describe("BedrockEmbedder", () => {
 		})
 
 		it("should require region", () => {
-			expect(() => new BedrockEmbedder("", "profile", "model")).toThrow(
+			expect(() => new BedrockEmbedder("", "profile", "model", pacers)).toThrow(
 				"Region is required for AWS Bedrock embedder",
 			)
 		})
 
 		it("should use profile for credentials", () => {
-			const profileEmbedder = new BedrockEmbedder("us-west-2", "dev-profile")
+			const profileEmbedder = new BedrockEmbedder("us-west-2", "dev-profile", undefined, pacers)
 			expect(profileEmbedder).toBeDefined()
 		})
 
@@ -134,7 +135,7 @@ describe("BedrockEmbedder", () => {
 			}
 			vitest.mocked(createProxyRoutingRequestHandler).mockReturnValue(handler)
 
-			new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0")
+			new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0", pacers)
 
 			const clientConfig = vitest.mocked(BedrockRuntimeClient).mock.calls.at(-1)?.[0]
 			expect(clientConfig?.requestHandler).toBe(handler)
@@ -146,7 +147,7 @@ describe("BedrockEmbedder", () => {
 		it("should keep the client default handler when no proxy is configured", () => {
 			vitest.mocked(createProxyRoutingRequestHandler).mockReturnValue(undefined)
 
-			new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0")
+			new BedrockEmbedder("us-east-1", "test-profile", "amazon.titan-embed-text-v2:0", pacers)
 
 			expect(BedrockRuntimeClient).toHaveBeenLastCalledWith(
 				expect.not.objectContaining({ requestHandler: expect.anything() }),
@@ -224,7 +225,7 @@ describe("BedrockEmbedder", () => {
 		})
 
 		it("should handle Cohere model format", async () => {
-			const cohereEmbedder = new BedrockEmbedder("us-east-1", "test-profile", "cohere.embed-english-v3")
+			const cohereEmbedder = new BedrockEmbedder("us-east-1", "test-profile", "cohere.embed-english-v3", pacers)
 			const testTexts = ["Hello world"]
 			const mockResponse = {
 				body: new TextEncoder().encode(
@@ -254,11 +255,7 @@ describe("BedrockEmbedder", () => {
 		})
 
 		it("should create embeddings with Nova multimodal model", async () => {
-			const novaMultimodalEmbedder = new BedrockEmbedder(
-				"us-east-1",
-				"test-profile",
-				"amazon.nova-2-multimodal-embeddings-v1:0",
-			)
+			const novaMultimodalEmbedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.nova-2-multimodal-embeddings-v1:0", pacers)
 			const testTexts = ["Hello world"]
 			const mockResponse = {
 				body: new TextEncoder().encode(
@@ -303,11 +300,7 @@ describe("BedrockEmbedder", () => {
 		})
 
 		it("should handle Nova multimodal model with multiple texts", async () => {
-			const novaMultimodalEmbedder = new BedrockEmbedder(
-				"us-east-1",
-				"test-profile",
-				"amazon.nova-2-multimodal-embeddings-v1:0",
-			)
+			const novaMultimodalEmbedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.nova-2-multimodal-embeddings-v1:0", pacers)
 			const testTexts = ["Hello world", "Another text"]
 			const mockResponses = [
 				{
@@ -459,7 +452,7 @@ describe("BedrockEmbedder", () => {
 				const result = await embedder.createEmbeddings(testTexts)
 
 				// Verify warning was logged
-				expect(codeIndexLog.warn).toHaveBeenCalledWith(expect.stringContaining("exceeds maximum token limit"))
+				expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("exceeds maximum token limit"))
 
 				// Verify only normal texts were processed
 				expect(mockSend).toHaveBeenCalledTimes(2)
@@ -472,7 +465,7 @@ describe("BedrockEmbedder", () => {
 
 				const result = await embedder.createEmbeddings(testTexts)
 
-				expect(codeIndexLog.warn).toHaveBeenCalledTimes(2)
+				expect(console.warn).toHaveBeenCalledTimes(2)
 				expect(mockSend).not.toHaveBeenCalled()
 				expect(result).toEqual({
 					embeddings: [],
@@ -517,7 +510,7 @@ describe("BedrockEmbedder", () => {
 				)
 
 				expect(mockSend).toHaveBeenCalledTimes(1)
-				expect(codeIndexLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
+				expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
 			})
 		})
 
@@ -535,7 +528,7 @@ describe("BedrockEmbedder", () => {
 					"Failed to create embeddings: API connection failed",
 				)
 
-				expect(codeIndexLog.error).toHaveBeenCalledWith(
+				expect(console.error).toHaveBeenCalledWith(
 					expect.stringContaining("Bedrock embedder error"),
 					expect.any(Error),
 				)
@@ -674,6 +667,42 @@ describe("BedrockEmbedder", () => {
 
 			expect(result.valid).toBe(false)
 			expect(result.error).toBe("Connection failed")
+		})
+
+		describe("CI-EM-02: temporary failures", () => {
+			const okResponse = { body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })) }
+			const serverError = () => Object.assign(new Error("Service unavailable"), { $metadata: { httpStatusCode: 503 } })
+			const throttle = () => Object.assign(new Error("Slow down"), { name: "ThrottlingException" })
+
+			beforeEach(() => vitest.useFakeTimers())
+			afterEach(() => vitest.useRealTimers())
+
+			it.each([
+				["two server failures", [serverError(), serverError()], 1500],
+				["a throttle", [throttle()], 1000],
+			])("recovers after %s and reports success", async (_label, failures, waitMs) => {
+				for (const failure of failures) mockSend.mockRejectedValueOnce(failure)
+				mockSend.mockResolvedValueOnce(okResponse)
+				const pending = embedder.validateConfiguration()
+				await vitest.advanceTimersByTimeAsync(waitMs)
+				await expect(pending).resolves.toEqual({ valid: true })
+				expect(mockSend).toHaveBeenCalledTimes(failures.length + 1)
+			})
+
+			it("stops after three requests and returns a validation failure", async () => {
+				mockSend.mockRejectedValue(serverError())
+				const pending = embedder.validateConfiguration()
+				await vitest.advanceTimersByTimeAsync(1500)
+				const result = await pending
+				expect(result.valid).toBe(false)
+				expect(mockSend).toHaveBeenCalledTimes(3)
+			})
+
+			it("does not retry a permanent failure", async () => {
+				mockSend.mockRejectedValue(Object.assign(new Error("Denied"), { name: "AccessDeniedException" }))
+				await expect(embedder.validateConfiguration()).resolves.toMatchObject({ valid: false })
+				expect(mockSend).toHaveBeenCalledTimes(1)
+			})
 		})
 
 		it("should fail validation with generic error", async () => {

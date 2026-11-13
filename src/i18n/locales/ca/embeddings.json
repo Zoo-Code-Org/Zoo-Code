@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Esperant {{service}}; la indexació es reprèn automàticament",
 		"providerWaitingUntil": "Esperant {{service}}; la indexació es reprèn automàticament a les {{time}}",
-		"parserFailed": "La indexació del codi s'ha aturat en analitzar {{filePath}} ({{category}}). Corregeix el fitxer i inicia explícitament la indexació per tornar-ho a provar, o desactiva-la. No és un error del model ni del proveïdor.",
-		"indexingFilesRetrying": "S'estan reintentant els fitxers amb errors. Hi ha un índex parcial disponible.",
 		"indexingFilesFailed": "Encara hi ha errors en fitxers. No hi ha reintents automàtics pendents. Hi ha un índex parcial disponible.",
 		"indexingStopping": "S'està aturant la indexació...",
 		"indexingFailedNoBlocks": "Indexació fallida: No s'ha indexat cap bloc de codi amb èxit. Això normalment indica un problema de configuració de l'embedder.",
@@ -71,7 +69,8 @@
 		"unknownError": "Error desconegut",
 		"indexingRequiresWorkspace": "Indexació requereix una carpeta de workspace oberta",
 		"indexingStopped": "Indexació aturada per l'usuari.",
-		"indexingStoppedPartial": "Indexació aturada. Dades d'índex parcials conservades."
+		"indexingStoppedPartial": "Indexació aturada. Dades d'índex parcials conservades.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Descarregant el binari de semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Error en descarregar semble: {{errorMessage}}",
 		"checkFailed": "Comprovació de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveïdor de Semble restablert. La memòria cau al disc es conserva fins a la propera reconstrucció."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

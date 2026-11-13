@@ -187,8 +187,7 @@
 			"parse": "Analyser le fichier",
 			"embed": "Créer les embeddings",
 			"upsert": "Enregistrer les blocs indexés",
-			"delete": "Supprimer les blocs indexés",
-			"verify": "Vérifier le résultat indexé"
+			"delete": "Supprimer les blocs indexés"
 		},
 		"enableLabel": "Activer l'indexation de la base de code",
 		"enableDescription": "Activer l'indexation du code pour une recherche et une compréhension du contexte améliorées",

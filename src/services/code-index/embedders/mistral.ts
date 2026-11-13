@@ -1,5 +1,4 @@
 import { OpenAICompatibleEmbedder } from "./openai-compatible"
-import { makeRateLimitScope } from "../provider-pacer"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import { MAX_ITEM_TOKENS } from "../constants"
 import { t } from "../../../i18n"
@@ -14,12 +13,14 @@ import { TelemetryService } from "@roo-code/telemetry"
  * - codestral-embed-2505 (dimension: 1536)
  */
 export class MistralEmbedder implements IEmbedder {
-	readonly rateLimitScope: string
-
 	private readonly openAICompatibleEmbedder: OpenAICompatibleEmbedder
 	private static readonly MISTRAL_BASE_URL = "https://api.mistral.ai/v1"
 	private static readonly DEFAULT_MODEL = "codestral-embed-2505"
 	private readonly modelId: string
+
+	get rateLimitScope(): string {
+		return this.openAICompatibleEmbedder.rateLimitScope
+	}
 
 	/**
 	 * Creates a new Mistral embedder
@@ -30,8 +31,6 @@ export class MistralEmbedder implements IEmbedder {
 		if (!apiKey) {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
-
-		this.rateLimitScope = makeRateLimitScope("mistral", MistralEmbedder.MISTRAL_BASE_URL, apiKey)
 
 		// Use provided model or default
 		this.modelId = modelId || MistralEmbedder.DEFAULT_MODEL
@@ -51,14 +50,12 @@ export class MistralEmbedder implements IEmbedder {
 	 * @param model Optional model identifier (uses constructor model if not provided)
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
-		signal?.throwIfAborted()
+	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
 		try {
 			// Use the provided model or fall back to the instance's model
 			const modelToUse = model || this.modelId
-			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse, ...(signal ? [signal] : []))
+			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse)
 		} catch (error) {
-			signal?.throwIfAborted()
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,

@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "In attesa di {{service}}; l’indicizzazione riprende automaticamente",
 		"providerWaitingUntil": "In attesa di {{service}}; l’indicizzazione riprende automaticamente alle {{time}}",
-		"parserFailed": "L'indicizzazione del codice si è fermata durante l'analisi di {{filePath}} ({{category}}). Correggi il file e avvia esplicitamente l'indicizzazione per riprovare, oppure disattivala. Non è un errore del modello o del provider.",
-		"indexingFilesRetrying": "Nuovo tentativo per i file non riusciti. È disponibile un indice parziale.",
 		"indexingFilesFailed": "Persistono errori nei file. Nessun nuovo tentativo automatico in attesa. È disponibile un indice parziale.",
 		"indexingStopping": "Arresto dell'indicizzazione in corso...",
 		"indexingFailedNoBlocks": "Indicizzazione fallita: Nessun blocco di codice è stato indicizzato con successo. Questo di solito indica un problema di configurazione dell'embedder.",
@@ -71,7 +69,8 @@
 		"unknownError": "Errore sconosciuto",
 		"indexingRequiresWorkspace": "L'indicizzazione richiede una cartella di workspace aperta",
 		"indexingStopped": "Indicizzazione interrotta dall'utente.",
-		"indexingStoppedPartial": "Indicizzazione interrotta. Dati di indice parziali conservati."
+		"indexingStoppedPartial": "Indicizzazione interrotta. Dati di indice parziali conservati.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Download del binario semble in corso...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Download di semble fallito: {{errorMessage}}",
 		"checkFailed": "Verifica di semble fallita: {{errorMessage}}",
 		"providerReset": "Provider Semble ripristinato. La cache su disco rimane fino alla prossima ricostruzione."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

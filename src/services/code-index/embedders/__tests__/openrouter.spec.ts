@@ -1,5 +1,3 @@
-import { codeIndexLog } from "../../code-index-log"
-vi.mock("../../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), warn: vi.fn() } }))
 import type { MockedClass } from "vitest"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { OpenAI } from "openai"
@@ -47,8 +45,8 @@ describe("OpenRouterEmbedder", () => {
 
 	beforeEach(() => {
 		clearAllMocks()
-		vi.spyOn(codeIndexLog, "warn").mockImplementation(function () {})
-		vi.spyOn(codeIndexLog, "error").mockImplementation(function () {})
+		vi.spyOn(console, "warn").mockImplementation(function () {})
+		vi.spyOn(console, "error").mockImplementation(function () {})
 
 		// Setup mock OpenAI instance
 		mockEmbeddingsCreate = vi.fn()

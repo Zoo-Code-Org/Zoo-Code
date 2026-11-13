@@ -367,6 +367,8 @@ export class CodeIndexManager {
 			reason: failure.reason,
 			state: failure.state,
 		}))
+		const representative = failedFiles.find((failure) => failure.state === "retrying") ?? failedFiles[0]
+		const failedFileSummary = representative && { ...representative, count: failedFiles.length }
 		const providerWaits = this.pacers.providerWaits()
 		let systemStatus: IndexingState = status.systemStatus
 		let message = status.message
@@ -386,6 +388,7 @@ export class CodeIndexManager {
 			systemStatus,
 			message,
 			failedFiles,
+			failedFileSummary,
 			providerWaits,
 			workspacePath: this.workspacePath,
 			workspaceEnabled: this.isWorkspaceEnabled,

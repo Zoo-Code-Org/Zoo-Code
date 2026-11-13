@@ -228,8 +228,7 @@
 			"parse": "Analizzare il file",
 			"embed": "Creare gli embedding",
 			"upsert": "Salvare i blocchi indicizzati",
-			"delete": "Rimuovere i blocchi indicizzati",
-			"verify": "Verificare il risultato indicizzato"
+			"delete": "Rimuovere i blocchi indicizzati"
 		},
 		"embedderProviderLabel": "Provider Embedder",
 		"modelPlaceholder": "Inserisci il nome del modello",

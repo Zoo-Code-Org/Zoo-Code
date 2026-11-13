@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "{{service}} की प्रतीक्षा है; इंडेक्सिंग अपने आप फिर शुरू होगी",
 		"providerWaitingUntil": "{{service}} की प्रतीक्षा है; इंडेक्सिंग {{time}} पर अपने आप फिर शुरू होगी",
-		"parserFailed": "{{filePath}} को पार्स करते समय कोड इंडेक्सिंग रुक गई ({{category}})। फ़ाइल ठीक करो और फिर से कोशिश करने के लिए खुद इंडेक्सिंग शुरू करो, या इंडेक्सिंग बंद कर दो। यह मॉडल या प्रदाता की त्रुटि नहीं है।",
-		"indexingFilesRetrying": "विफल फ़ाइलों के लिए फिर से कोशिश की जा रही है। आंशिक इंडेक्स उपलब्ध है।",
 		"indexingFilesFailed": "फ़ाइलों में विफलताएँ अभी भी हैं। कोई स्वचालित पुनः प्रयास लंबित नहीं है। आंशिक इंडेक्स उपलब्ध है।",
 		"indexingStopping": "इंडेक्सिंग रोकी जा रही है...",
 		"indexingFailedNoBlocks": "इंडेक्सिंग असफल: कोई भी कोड ब्लॉक सफलतापूर्वक इंडेक्स नहीं हुआ। यह आमतौर पर एम्बेडर कॉन्फ़िगरेशन समस्या को दर्शाता है।",
@@ -71,7 +69,8 @@
 		"unknownError": "अज्ञात त्रुटि",
 		"indexingRequiresWorkspace": "इंडेक्सिंग के लिए एक खुला वर्कस्पेस फ़ोल्डर आवश्यक है",
 		"indexingStopped": "उपयोगकर्ता द्वारा इंडेक्सिंग रोकी गई।",
-		"indexingStoppedPartial": "इंडेक्सिंग रोकी गई। आंशिक इंडेक्स डेटा संरक्षित।"
+		"indexingStoppedPartial": "इंडेक्सिंग रोकी गई। आंशिक इंडेक्स डेटा संरक्षित।",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "semble बाइनरी डाउनलोड हो रहा है...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "semble डाउनलोड करने में विफल: {{errorMessage}}",
 		"checkFailed": "Semble जाँच विफल: {{errorMessage}}",
 		"providerReset": "Semble प्रदाता रीसेट किया गया। डिस्क कैश अगले रीबिल्ड तक बना रहता है।"
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

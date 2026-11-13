@@ -228,8 +228,7 @@
 			"parse": "Parsowanie pliku",
 			"embed": "Tworzenie embeddingów",
 			"upsert": "Zapisywanie zaindeksowanych bloków",
-			"delete": "Usuwanie zaindeksowanych bloków",
-			"verify": "Weryfikacja zaindeksowanego wyniku"
+			"delete": "Usuwanie zaindeksowanych bloków"
 		},
 		"embedderProviderLabel": "Dostawca Embeddera",
 		"modelPlaceholder": "Wprowadź nazwę modelu",

@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis",
 		"providerWaitingUntil": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis pada {{time}}",
-		"parserFailed": "Pengindeksan kode berhenti saat mengurai {{filePath}} ({{category}}). Perbaiki file dan mulai pengindeksan secara manual untuk mencoba lagi, atau nonaktifkan pengindeksan. Ini bukan kesalahan model atau provider.",
-		"indexingFilesRetrying": "Mencoba ulang file yang gagal. Indeks parsial tersedia.",
 		"indexingFilesFailed": "Masih ada kegagalan file. Tidak ada percobaan ulang otomatis yang tertunda. Indeks parsial tersedia.",
 		"indexingStopping": "Menghentikan pengindeksan...",
 		"indexingFailedNoBlocks": "Pengindeksan gagal: Tidak ada blok kode yang berhasil diindeks. Ini biasanya menunjukkan masalah konfigurasi embedder.",
@@ -71,7 +69,8 @@
 		"unknownError": "Kesalahan tidak diketahui",
 		"indexingRequiresWorkspace": "Pengindeksan memerlukan folder workspace yang terbuka",
 		"indexingStopped": "Pengindeksan dihentikan oleh pengguna.",
-		"indexingStoppedPartial": "Pengindeksan dihentikan. Data indeks parsial dipertahankan."
+		"indexingStoppedPartial": "Pengindeksan dihentikan. Data indeks parsial dipertahankan.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Mengunduh biner semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Gagal mengunduh semble: {{errorMessage}}",
 		"checkFailed": "Pemeriksaan semble gagal: {{errorMessage}}",
 		"providerReset": "Penyedia Semble direset. Cache di disk tetap ada hingga pembangunan ulang berikutnya."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

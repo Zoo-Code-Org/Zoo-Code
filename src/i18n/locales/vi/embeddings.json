@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục",
 		"providerWaitingUntil": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục lúc {{time}}",
-		"parserFailed": "Đã dừng lập chỉ mục mã khi phân tích {{filePath}} ({{category}}). Sửa tệp rồi chủ động bắt đầu lập chỉ mục để thử lại, hoặc tắt lập chỉ mục. Đây không phải lỗi mô hình hay nhà cung cấp.",
-		"indexingFilesRetrying": "Đang thử lại các tệp bị lỗi. Có thể dùng chỉ mục một phần.",
 		"indexingFilesFailed": "Vẫn còn tệp bị lỗi. Không có lần thử lại tự động nào đang chờ. Có thể dùng chỉ mục một phần.",
 		"indexingStopping": "Đang dừng lập chỉ mục...",
 		"indexingFailedNoBlocks": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công. Điều này thường cho thấy vấn đề cấu hình embedder.",
@@ -71,7 +69,8 @@
 		"unknownError": "Lỗi không xác định",
 		"indexingRequiresWorkspace": "Lập chỉ mục yêu cầu một thư mục workspace đang mở",
 		"indexingStopped": "Lập chỉ mục đã bị dừng bởi người dùng.",
-		"indexingStoppedPartial": "Lập chỉ mục đã dừng. Dữ liệu chỉ mục một phần được bảo toàn."
+		"indexingStoppedPartial": "Lập chỉ mục đã dừng. Dữ liệu chỉ mục một phần được bảo toàn.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Đang tải xuống tệp nhị phân semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Tải xuống semble thất bại: {{errorMessage}}",
 		"checkFailed": "Kiểm tra semble thất bại: {{errorMessage}}",
 		"providerReset": "Nhà cung cấp Semble đã đặt lại. Bộ nhớ đệm trên đĩa vẫn còn cho đến lần xây dựng lại tiếp theo."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

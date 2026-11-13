@@ -228,8 +228,7 @@
 			"parse": "파일 파싱",
 			"embed": "임베딩 생성",
 			"upsert": "인덱싱된 블록 저장",
-			"delete": "인덱싱된 블록 제거",
-			"verify": "인덱싱된 결과 검증"
+			"delete": "인덱싱된 블록 제거"
 		},
 		"embedderProviderLabel": "임베더 제공자",
 		"modelPlaceholder": "모델 이름을 입력하세요",

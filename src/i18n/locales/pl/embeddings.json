@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione",
 		"providerWaitingUntil": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione o {{time}}",
-		"parserFailed": "Indeksowanie kodu zatrzymało się podczas parsowania {{filePath}} ({{category}}). Popraw plik i ręcznie uruchom indeksowanie, aby spróbować ponownie, lub wyłącz indeksowanie. To nie jest błąd modelu ani dostawcy.",
-		"indexingFilesRetrying": "Ponawianie prób dla plików z błędami. Dostępny jest częściowy indeks.",
 		"indexingFilesFailed": "Nadal występują błędy plików. Brak oczekujących automatycznych ponowień. Dostępny jest częściowy indeks.",
 		"indexingStopping": "Zatrzymywanie indeksowania...",
 		"indexingFailedNoBlocks": "Indeksowanie nie powiodło się: Żadne bloki kodu nie zostały pomyślnie zaindeksowane. To zwykle wskazuje na problem z konfiguracją embeddera.",
@@ -71,7 +69,8 @@
 		"unknownError": "Nieznany błąd",
 		"indexingRequiresWorkspace": "Indeksowanie wymaga otwartego folderu workspace",
 		"indexingStopped": "Indeksowanie zatrzymane przez użytkownika.",
-		"indexingStoppedPartial": "Indeksowanie zatrzymane. Częściowe dane indeksu zachowane."
+		"indexingStoppedPartial": "Indeksowanie zatrzymane. Częściowe dane indeksu zachowane.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Pobieranie binariów semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Nie udało się pobrać semble: {{errorMessage}}",
 		"checkFailed": "Sprawdzenie semble nie powiodło się: {{errorMessage}}",
 		"providerReset": "Dostawca Semble zresetowany. Pamięć podręczna na dysku pozostaje do kolejnej przebudowy."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

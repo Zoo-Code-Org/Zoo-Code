@@ -1,58 +1,4 @@
-import * as fs from "fs"
-import * as path from "path"
-import { formatEmbeddingError, sanitizeErrorMessage } from "../validation-helpers"
-import { EmbeddingError } from "../indexing-errors"
-import { t } from "../../../../i18n"
-
-vi.mock("../../../../i18n", () => ({ t: vi.fn((key: string) => key) }))
-
-describe("formatEmbeddingError", () => {
-	it.each([
-		[401, "permanent", "embeddings:authenticationFailed"],
-		[429, "rate-limit", "embeddings:failedWithStatus"],
-		[503, "server", "embeddings:failedWithStatus"],
-	] as const)("keeps classification and delay for HTTP %s as a single attempt", (status, classification, key) => {
-		const cause = Object.assign(new Error("failure"), { status, headers: new Headers({ "retry-after": "2" }) })
-		const error = formatEmbeddingError(cause)
-		expect(error).toBeInstanceOf(EmbeddingError)
-		expect(error).toMatchObject({ classification, statusCode: status, retryAfterMs: 2000, cause })
-		expect(error.message).toBe(key)
-		if (status !== 401) {
-			expect(t).toHaveBeenLastCalledWith(key, { attempts: 1, statusCode: status, errorMessage: "failure" })
-		}
-	})
-
-	it("preserves connection errors with no headers", () => {
-		const cause = new TypeError("fetch failed", { cause: new Error("network") })
-		const error = formatEmbeddingError(cause)
-		expect(error).toMatchObject({ classification: "connection", cause })
-		expect(error.retryAfterMs).toBeUndefined()
-		expect(t).toHaveBeenLastCalledWith("embeddings:failedWithError", { attempts: 1, errorMessage: "fetch failed" })
-	})
-
-	it("supplies every placeholder used by the failure messages in all locales", () => {
-		formatEmbeddingError(Object.assign(new Error("failure"), { status: 503 }))
-		const statusArgs = vi.mocked(t).mock.lastCall?.[1] ?? {}
-		formatEmbeddingError(new TypeError("fetch failed"))
-		const errorArgs = vi.mocked(t).mock.lastCall?.[1] ?? {}
-		const localesRoot = path.resolve(__dirname, "../../../../i18n/locales")
-		const locales = fs.readdirSync(localesRoot)
-		expect(locales).toHaveLength(18)
-		for (const locale of locales) {
-			const messages: Record<string, unknown> = JSON.parse(
-				fs.readFileSync(path.join(localesRoot, locale, "embeddings.json"), "utf8"),
-			)
-			for (const [key, args] of [
-				["failedWithStatus", statusArgs],
-				["failedWithError", errorArgs],
-			] as const) {
-				const placeholders = [...String(messages[key]).matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1])
-				expect(placeholders.length, `${locale} ${key}`).toBeGreaterThan(0)
-				for (const placeholder of placeholders) expect(args, `${locale} ${key}`).toHaveProperty(placeholder)
-			}
-		}
-	})
-})
+import { sanitizeErrorMessage } from "../validation-helpers"
 
 describe("sanitizeErrorMessage", () => {
 	it("should sanitize Unix-style file paths", () => {
@@ -117,15 +63,11 @@ describe("sanitizeErrorMessage", () => {
 		expect(sanitizeErrorMessage(input)).toBe(expected)
 	})
 
-	it.each([
-		[null, "null"],
-		[undefined, "undefined"],
-		[123, "123"],
-		[{}, "[object Object]"],
-	])("handles runtime non-string input %o", (input, expected) => {
-		// Exercise untyped callers without weakening the production string contract.
-		const sanitizeRuntimeInput = sanitizeErrorMessage as unknown as (value: unknown) => string
-		expect(sanitizeRuntimeInput(input)).toBe(expected)
+	it("should handle non-string inputs gracefully", () => {
+		expect(sanitizeErrorMessage(null as any)).toBe("null")
+		expect(sanitizeErrorMessage(undefined as any)).toBe("undefined")
+		expect(sanitizeErrorMessage(123 as any)).toBe("123")
+		expect(sanitizeErrorMessage({} as any)).toBe("[object Object]")
 	})
 
 	it("should preserve non-sensitive error messages", () => {
@@ -146,36 +88,5 @@ describe("sanitizeErrorMessage", () => {
 		const input = "Copy from /src/file1.js to /dest/file2.js failed"
 		const expected = "Copy from [REDACTED_PATH] to [REDACTED_PATH] failed"
 		expect(sanitizeErrorMessage(input)).toBe(expected)
-	})
-})
-
-describe("validation rate limits", () => {
-	it("rethrows the original 429 before custom handling", async () => {
-		const { withValidationErrorHandling } = await import("../validation-helpers")
-		const error = new EmbeddingError("limited", { status: 429 }, { retryAfterMs: 61_000 })
-		const handler = vi.fn()
-		await expect(
-			withValidationErrorHandling(
-				async () => {
-					throw error
-				},
-				"openai",
-				{
-					beforeStandardHandling: handler,
-				},
-			),
-		).rejects.toBe(error)
-		expect(handler).not.toHaveBeenCalled()
-	})
-	it("still accepts valid configuration and converts permanent failure", async () => {
-		const { withValidationErrorHandling } = await import("../validation-helpers")
-		await expect(withValidationErrorHandling(async () => ({ valid: true }), "openai")).resolves.toEqual({
-			valid: true,
-		})
-		await expect(
-			withValidationErrorHandling(async () => {
-				throw new Error("bad key")
-			}, "openai"),
-		).resolves.toEqual({ valid: false, error: "bad key" })
 	})
 })

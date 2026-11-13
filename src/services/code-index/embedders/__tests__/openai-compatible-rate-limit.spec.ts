@@ -1,4 +1,3 @@
-vi.mock("../../code-index-log", () => ({ codeIndexLog: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }))
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: { instance: { captureEvent: vi.fn() } },
 }))

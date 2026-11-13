@@ -1,17 +1,17 @@
-import { codeIndexLog } from "../code-index-log"
-import { makeRateLimitScope } from "../provider-pacer"
 import { OpenAI } from "openai"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../constants"
 import { getDefaultModelId, getModelQueryPrefix } from "../../../shared/embeddingModels"
 import { t } from "../../../i18n"
-import { withValidationErrorHandling, HttpError, formatEmbeddingError } from "../shared/validation-helpers"
+import { withValidationErrorHandling, HttpError, toEmbeddingError } from "../shared/validation-helpers"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
+import { makeRateLimitScope } from "../provider-pacer"
 
 interface EmbeddingItem {
 	embedding: string | number[]
+	[key: string]: any
 }
 
 interface OpenAIEmbeddingResponse {
@@ -23,18 +23,18 @@ interface OpenAIEmbeddingResponse {
 }
 
 /**
- * OpenAI Compatible implementation of the embedder interface with batching.
+ * OpenAI Compatible implementation of the embedder interface with batching and rate limiting.
  * This embedder allows using any OpenAI-compatible API endpoint by specifying a custom baseURL.
  */
 
 export class OpenAICompatibleEmbedder implements IEmbedder {
-	readonly rateLimitScope: string
 	private embeddingsClient: OpenAI
 	private readonly defaultModelId: string
 	private readonly baseUrl: string
 	private readonly apiKey: string
 	private readonly isFullUrl: boolean
 	private readonly maxItemTokens: number
+	readonly rateLimitScope: string
 
 	/**
 	 * Creates a new OpenAI Compatible embedder
@@ -53,14 +53,14 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 
 		this.baseUrl = baseUrl
 		this.apiKey = apiKey
-		this.rateLimitScope = makeRateLimitScope("openai-compatible", baseUrl, apiKey)
 
 		// Wrap OpenAI client creation to handle invalid API key characters
 		try {
+			// Retries are owned by the indexing retry policy; SDK retries would multiply its allowance.
 			this.embeddingsClient = new OpenAI({
 				baseURL: baseUrl,
-				maxRetries: 0,
 				apiKey: apiKey,
+				maxRetries: 0,
 			})
 		} catch (error) {
 			// Use the error handler to transform ByteString conversion errors
@@ -71,16 +71,16 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		// Cache the URL type check for performance
 		this.isFullUrl = this.isFullEndpointUrl(baseUrl)
 		this.maxItemTokens = maxItemTokens || MAX_ITEM_TOKENS
+		this.rateLimitScope = makeRateLimitScope("openai-compatible", baseUrl, apiKey)
 	}
 
 	/**
-	 * Creates embeddings for the given texts with batching
+	 * Creates embeddings for the given texts with batching and rate limiting
 	 * @param texts Array of text strings to embed
 	 * @param model Optional model identifier
 	 * @returns Promise resolving to embedding response
 	 */
-	async createEmbeddings(texts: string[], model?: string, signal?: AbortSignal): Promise<EmbeddingResponse> {
-		signal?.throwIfAborted()
+	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
 		const modelToUse = model || this.defaultModelId
 
 		// Apply model-specific query prefix if required
@@ -94,7 +94,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 					const prefixedText = `${queryPrefix}${text}`
 					const estimatedTokens = Math.ceil(prefixedText.length / 4)
 					if (estimatedTokens > MAX_ITEM_TOKENS) {
-						codeIndexLog.warn(
+						console.warn(
 							t("embeddings:textWithPrefixExceedsTokenLimit", {
 								index,
 								estimatedTokens,
@@ -113,7 +113,6 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		const remainingTexts = [...processedTexts]
 
 		while (remainingTexts.length > 0) {
-			signal?.throwIfAborted()
 			const currentBatch: string[] = []
 			let currentBatchTokens = 0
 			const processedIndices: number[] = []
@@ -123,7 +122,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				const itemTokens = Math.ceil(text.length / 4)
 
 				if (itemTokens > this.maxItemTokens) {
-					codeIndexLog.warn(
+					console.warn(
 						t("embeddings:textExceedsTokenLimit", {
 							index: i,
 							itemTokens,
@@ -149,7 +148,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
-				const batchResult = await this._embedBatch(currentBatch, modelToUse, signal)
+				const batchResult = await this._embedBatch(currentBatch, modelToUse)
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
@@ -193,11 +192,9 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		url: string,
 		batchTexts: string[],
 		model: string,
-		signal?: AbortSignal,
 	): Promise<OpenAIEmbeddingResponse> {
 		const response = await fetch(url, {
 			method: "POST",
-			...(signal ? { signal } : {}),
 			headers: {
 				"Content-Type": "application/json",
 				// Azure OpenAI uses 'api-key' header, while OpenAI uses 'Authorization'
@@ -225,10 +222,11 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				// Ignore text parsing errors
 				errorText = `Error ${status}`
 			}
-			const error = new Error(`HTTP ${status}: ${errorText}`) as HttpError
-			error.status = status || response?.status || 0
-			error.headers = response?.headers
-			throw error
+			// Headers carry Retry-After for the shared rate-limit wait.
+			throw Object.assign(new Error(`HTTP ${status}: ${errorText}`), {
+				status: status || response?.status || 0,
+				headers: response?.headers,
+			})
 		}
 
 		try {
@@ -240,68 +238,45 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		}
 	}
 
+	/**
+	/** Sends one request; retries and rate-limit waits belong to the caller's retry policy and pacer. */
 	private async _embedBatch(
 		batchTexts: string[],
 		model: string,
-		signal?: AbortSignal,
 	): Promise<{ embeddings: number[][]; usage: { promptTokens: number; totalTokens: number } }> {
-		// Use cached value for performance
-		const isFullUrl = this.isFullUrl
-
 		try {
-			signal?.throwIfAborted()
-			let response: OpenAIEmbeddingResponse
-
-			if (isFullUrl) {
-				response = await this.makeDirectEmbeddingRequest(this.baseUrl, batchTexts, model, signal)
-			} else {
-				response = (await this.embeddingsClient.embeddings.create(
-					{
+			const response: OpenAIEmbeddingResponse = this.isFullUrl
+				? await this.makeDirectEmbeddingRequest(this.baseUrl, batchTexts, model)
+				: ((await this.embeddingsClient.embeddings.create({
 						input: batchTexts,
 						model: model,
-						// Base64 with local decoding bypasses the OpenAI v4.78.1 numeric-array parser's
-						// 256-dimension truncation, which breaks larger models.
+						// OpenAI package (as of v4.78.1) has a parsing issue that truncates embedding dimensions to 256
+						// when processing numeric arrays, which breaks compatibility with models using larger dimensions.
+						// By requesting base64 encoding, we bypass the package's parser and handle decoding ourselves.
 						encoding_format: "base64",
-					},
-					...(signal ? [{ signal }] : []),
-				)) as OpenAIEmbeddingResponse
-			}
+					})) as OpenAIEmbeddingResponse)
 
-			signal?.throwIfAborted()
-			const processedEmbeddings = response.data.map((item: EmbeddingItem) => {
-				if (typeof item.embedding === "string") {
-					const buffer = Buffer.from(item.embedding, "base64")
-
-					const float32Array = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
-
-					return {
-						...item,
-						embedding: Array.from(float32Array),
-					}
-				}
-				return item
+			const embeddings = response.data.map((item: EmbeddingItem) => {
+				if (typeof item.embedding !== "string") return item.embedding
+				const buffer = Buffer.from(item.embedding, "base64")
+				return Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4))
 			})
 
-			response.data = processedEmbeddings
-
-			const embeddings = response.data.map((item) => item.embedding as number[])
-
 			return {
-				embeddings: embeddings,
+				embeddings,
 				usage: {
 					promptTokens: response.usage?.prompt_tokens || 0,
 					totalTokens: response.usage?.total_tokens || 0,
 				},
 			}
 		} catch (error) {
-			signal?.throwIfAborted()
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,
 				location: "OpenAICompatibleEmbedder:_embedBatch",
 			})
-			codeIndexLog.error("OpenAI Compatible embedder error:", error)
-			throw formatEmbeddingError(error)
+			console.error("OpenAI Compatible embedder error:", error)
+			throw toEmbeddingError(error)
 		}
 	}
 
@@ -359,4 +334,5 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 			name: "openai-compatible",
 		}
 	}
+
 }

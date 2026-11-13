@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
 		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
-		"parserFailed": "Die Code-Indexierung wurde beim Parsen von {{filePath}} ({{category}}) gestoppt. Behebe den Fehler in der Datei und starte die Indexierung ausdrücklich erneut, oder deaktiviere sie. Dies ist kein Modell- oder Anbieterfehler.",
-		"indexingFilesRetrying": "Fehlgeschlagene Dateien werden erneut versucht. Ein Teilindex ist verfügbar.",
 		"indexingFilesFailed": "Es bestehen weiterhin Dateifehler. Keine automatischen Wiederholungen ausstehend. Ein Teilindex ist verfügbar.",
 		"indexingStopping": "Indexierung wird gestoppt...",
 		"indexingFailedNoBlocks": "Indizierung fehlgeschlagen: Keine Code-Blöcke wurden erfolgreich indiziert. Dies deutet normalerweise auf ein Embedder-Konfigurationsproblem hin.",
@@ -71,7 +69,8 @@
 		"unknownError": "Unbekannter Fehler",
 		"indexingRequiresWorkspace": "Indexierung erfordert einen offenen Workspace-Ordner",
 		"indexingStopped": "Indexierung vom Benutzer gestoppt.",
-		"indexingStoppedPartial": "Indexierung gestoppt. Teilweise Indexdaten beibehalten."
+		"indexingStoppedPartial": "Indexierung gestoppt. Teilweise Indexdaten beibehalten.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Semble-Binary wird heruntergeladen...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Fehler beim Herunterladen von Semble: {{errorMessage}}",
 		"checkFailed": "Semble-Überprüfung fehlgeschlagen: {{errorMessage}}",
 		"providerReset": "Semble-Anbieter zurückgesetzt. Der Cache auf der Festplatte bleibt bis zum nächsten Neuaufbau erhalten."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

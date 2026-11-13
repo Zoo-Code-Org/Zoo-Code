@@ -187,8 +187,7 @@
 			"parse": "Datei parsen",
 			"embed": "Embeddings erstellen",
 			"upsert": "Indexierte Blöcke speichern",
-			"delete": "Indexierte Blöcke entfernen",
-			"verify": "Indexiertes Ergebnis überprüfen"
+			"delete": "Indexierte Blöcke entfernen"
 		},
 		"enableLabel": "Codebase-Indexierung aktivieren",
 		"enableDescription": "Aktiviere die Code-Indizierung für eine verbesserte Suche und ein besseres Kontextverständnis",

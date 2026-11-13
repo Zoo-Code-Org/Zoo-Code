@@ -46,7 +46,6 @@ describe("CodebaseSearchTool", () => {
 			Task,
 			| "cwd"
 			| "providerRef"
-			| "lifecycleSignal"
 			| "consecutiveMistakeCount"
 			| "didToolFailInCurrentTurn"
 			| "sayAndCreateMissingParamError"
@@ -55,7 +54,6 @@ describe("CodebaseSearchTool", () => {
 		> = {
 			cwd: "/task",
 			providerRef: { deref, [Symbol.toStringTag]: "WeakRef" },
-			lifecycleSignal: new AbortController().signal,
 			consecutiveMistakeCount: 3,
 			didToolFailInCurrentTurn: false,
 			sayAndCreateMissingParamError: vi
@@ -279,7 +277,7 @@ describe("CodebaseSearchTool", () => {
 			})
 			await tool.execute({ query, path }, task, callbacks)
 			expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
-			expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, path, task.lifecycleSignal)
+			expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, path)
 			expect(callbacks.pushToolResult).toHaveBeenCalledExactlyOnceWith(
 				`No relevant code snippets found for the query: "${query}"`,
 			)
@@ -305,7 +303,7 @@ describe("CodebaseSearchTool", () => {
 
 		await tool.execute({ query, path: "src" }, task, callbacks)
 
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src", task.lifecycleSignal)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src")
 		expect(task.say).toHaveBeenCalledExactlyOnceWith(
 			"codebase_search_result",
 			JSON.stringify({
@@ -356,7 +354,7 @@ describe("CodebaseSearchTool", () => {
 			.mockReturnValueOnce("lib/other.ts")
 		await tool.execute({ query }, task, callbacks)
 		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined, task.lifecycleSignal)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined)
 		expect(vscode.workspace.asRelativePath).toHaveBeenCalledTimes(2)
 		expect(vscode.workspace.asRelativePath).toHaveBeenNthCalledWith(1, "/task/src/result.ts", false)
 		expect(vscode.workspace.asRelativePath).toHaveBeenNthCalledWith(2, "/task/lib/other.ts", false)
@@ -469,43 +467,9 @@ describe("CodebaseSearchTool", () => {
 
 		await tool.execute({ query }, task, callbacks)
 
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined, task.lifecycleSignal)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, undefined)
 		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(toolNamesSchema.enum.codebase_search, error)
 		expect(vi.mocked(callbacks.handleError).mock.calls[0][1]).toBe(error)
-		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
-		expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
-		expect(task.say).not.toHaveBeenCalled()
-	})
-
-	it.each(["already aborted", "midflight"] as const)("preserves the exact %s cancellation reason", async (timing) => {
-		const controller = new AbortController()
-		const reason = Object.freeze({ cancelled: timing })
-		Object.defineProperty(task, "lifecycleSignal", { value: controller.signal })
-		if (timing === "already aborted") controller.abort(reason)
-		vi.mocked(manager.searchIndex).mockImplementation(async (_query, _path, signal) => {
-			expect(signal).toBe(controller.signal)
-			if (!signal) throw new Error("Missing lifecycle signal")
-			signal.throwIfAborted()
-			return new Promise<Awaited<ReturnType<CodeIndexManager["searchIndex"]>>>((_resolve, reject) => {
-				const onAbort = () => {
-					clearTimeout(deadline)
-					reject(signal.reason)
-				}
-				const deadline = setTimeout(() => {
-					signal.removeEventListener("abort", onAbort)
-					reject(new Error("Search cancellation was not observed"))
-				}, 1_000)
-				signal.addEventListener("abort", onAbort, { once: true })
-				queueMicrotask(() => controller.abort(reason))
-			})
-		})
-
-		await tool.execute({ query, path: "src" }, task, callbacks)
-
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src", controller.signal)
-		expect(controller.signal.reason).toBe(reason)
-		expect(callbacks.handleError).toHaveBeenCalledExactlyOnceWith(toolNamesSchema.enum.codebase_search, reason)
-		expect(vi.mocked(callbacks.handleError).mock.calls[0][1]).toBe(reason)
 		expect(callbacks.pushToolResult).not.toHaveBeenCalled()
 		expect(vscode.workspace.asRelativePath).not.toHaveBeenCalled()
 		expect(task.say).not.toHaveBeenCalled()
@@ -550,7 +514,7 @@ describe("CodebaseSearchTool", () => {
 		}
 
 		expect(CodeIndexManagerRegistry.getOrCreate).toHaveBeenCalledExactlyOnceWith(context, "/task")
-		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src", task.lifecycleSignal)
+		expect(manager.searchIndex).toHaveBeenCalledExactlyOnceWith(query, "src")
 		expect(task.consecutiveMistakeCount).toBe(0)
 		expect(callbacks.handleError).not.toHaveBeenCalled()
 	})

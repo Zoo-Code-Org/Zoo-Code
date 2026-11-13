@@ -228,8 +228,7 @@
 			"parse": "Phân tích tệp",
 			"embed": "Tạo embedding",
 			"upsert": "Lưu các khối đã lập chỉ mục",
-			"delete": "Xóa các khối đã lập chỉ mục",
-			"verify": "Xác minh kết quả đã lập chỉ mục"
+			"delete": "Xóa các khối đã lập chỉ mục"
 		},
 		"embedderProviderLabel": "Nhà cung cấp Embedder",
 		"modelPlaceholder": "Nhập tên mô hình",

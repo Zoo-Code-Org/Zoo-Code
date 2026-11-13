@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
 		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
-		"parserFailed": "Code indexing stopped while parsing {{filePath}} ({{category}}). Fix the file and explicitly start indexing to retry, or disable indexing. This is not a model/provider error.",
-		"indexingFilesRetrying": "Retrying failed files. Partial index available.",
 		"indexingFilesFailed": "File failures remain. No automatic retries pending. Partial index available.",
 		"indexingStopping": "Stopping indexing...",
 		"indexingFailedNoBlocks": "Indexing failed: No code blocks were successfully indexed. This usually indicates an embedder configuration issue.",
@@ -71,7 +69,8 @@
 		"unknownError": "Unknown error",
 		"indexingRequiresWorkspace": "Indexing requires an open workspace folder",
 		"indexingStopped": "Indexing stopped by user.",
-		"indexingStoppedPartial": "Indexing stopped. Partial index data preserved."
+		"indexingStoppedPartial": "Indexing stopped. Partial index data preserved.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Downloading semble binary...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Failed to download semble: {{errorMessage}}",
 		"checkFailed": "Semble check failed: {{errorMessage}}",
 		"providerReset": "Semble provider reset. On-disk cache remains until next rebuild."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

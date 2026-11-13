@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "En attente de {{service}} ; l’indexation reprend automatiquement",
 		"providerWaitingUntil": "En attente de {{service}} ; l’indexation reprend automatiquement à {{time}}",
-		"parserFailed": "L'indexation du code s'est arrêtée pendant l'analyse de {{filePath}} ({{category}}). Corrige le fichier et lance explicitement l'indexation pour réessayer, ou désactive-la. Ce n'est pas une erreur du modèle ni du fournisseur.",
-		"indexingFilesRetrying": "Nouvelle tentative pour les fichiers en échec. Un index partiel est disponible.",
 		"indexingFilesFailed": "Des fichiers restent en échec. Aucune nouvelle tentative automatique en attente. Un index partiel est disponible.",
 		"indexingStopping": "Arrêt de l'indexation en cours...",
 		"indexingFailedNoBlocks": "Échec de l'indexation : Aucun bloc de code n'a été indexé avec succès. Cela indique généralement un problème de configuration de l'embedder.",
@@ -71,7 +69,8 @@
 		"unknownError": "Erreur inconnue",
 		"indexingRequiresWorkspace": "L'indexation nécessite l'ouverture d'un dossier workspace",
 		"indexingStopped": "Indexation arrêtée par l'utilisateur.",
-		"indexingStoppedPartial": "Indexation arrêtée. Données d'index partielles conservées."
+		"indexingStoppedPartial": "Indexation arrêtée. Données d'index partielles conservées.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Téléchargement du binaire semble...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Échec du téléchargement de semble : {{errorMessage}}",
 		"checkFailed": "Vérification de semble échouée : {{errorMessage}}",
 		"providerReset": "Fournisseur Semble réinitialisé. Le cache sur disque reste jusqu'à la prochaine reconstruction."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

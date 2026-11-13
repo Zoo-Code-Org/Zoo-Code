@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "{{service}} を待機中です。インデックス作成は自動的に再開されます",
 		"providerWaitingUntil": "{{service}} を待機中です。インデックス作成は {{time}} に自動的に再開されます",
-		"parserFailed": "{{filePath}} の解析中にコードのインデックス作成が停止しました（{{category}}）。ファイルを修正し、インデックス作成を明示的に開始して再試行するか、インデックス作成を無効にしてください。モデルやプロバイダーのエラーではありません。",
-		"indexingFilesRetrying": "失敗したファイルを再試行しています。部分的なインデックスを利用できます。",
 		"indexingFilesFailed": "ファイルのエラーが残っています。自動再試行の予定はありません。部分的なインデックスを利用できます。",
 		"indexingStopping": "インデックス作成を停止中...",
 		"indexingFailedNoBlocks": "インデックス作成に失敗しました：コードブロックが正常にインデックス化されませんでした。これは通常、エンベッダーの設定問題を示しています。",
@@ -71,7 +69,8 @@
 		"unknownError": "不明なエラー",
 		"indexingRequiresWorkspace": "インデックス作成には、開かれたワークスペースフォルダーが必要です",
 		"indexingStopped": "ユーザーによりインデックス作成が停止されました。",
-		"indexingStoppedPartial": "インデックス作成が停止されました。部分的なインデックスデータは保持されています。"
+		"indexingStoppedPartial": "インデックス作成が停止されました。部分的なインデックスデータは保持されています。",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "sembleバイナリをダウンロード中...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "sembleのダウンロードに失敗しました: {{errorMessage}}",
 		"checkFailed": "Sembleの確認に失敗しました: {{errorMessage}}",
 		"providerReset": "Sembleプロバイダーをリセットしました。次回の再構築までディスクキャッシュは残ります。"
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

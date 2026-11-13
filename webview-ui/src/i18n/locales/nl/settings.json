@@ -228,8 +228,7 @@
 			"parse": "Bestand parseren",
 			"embed": "Embeddings maken",
 			"upsert": "Geïndexeerde blokken opslaan",
-			"delete": "Geïndexeerde blokken verwijderen",
-			"verify": "Geïndexeerd resultaat controleren"
+			"delete": "Geïndexeerde blokken verwijderen"
 		},
 		"embedderProviderLabel": "Embedder Provider",
 		"modelPlaceholder": "Voer modelnaam in",

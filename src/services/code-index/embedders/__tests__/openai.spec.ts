@@ -1,5 +1,3 @@
-import { codeIndexLog } from "../../code-index-log"
-vi.mock("../../code-index-log", () => ({ codeIndexLog: { error: vi.fn(), warn: vi.fn() } }))
 import type { MockedClass } from "vitest"
 import { OpenAI } from "openai"
 
@@ -37,8 +35,8 @@ vitest.mock("../../../../i18n", () => ({
 
 // Mock console methods
 const consoleMocks = {
-	error: vitest.spyOn(codeIndexLog, "error").mockImplementation(function () {}),
-	warn: vitest.spyOn(codeIndexLog, "warn").mockImplementation(function () {}),
+	error: vitest.spyOn(console, "error").mockImplementation(function () {}),
+	warn: vitest.spyOn(console, "warn").mockImplementation(function () {}),
 }
 
 describe("OpenAiEmbedder", () => {
@@ -214,7 +212,7 @@ describe("OpenAiEmbedder", () => {
 				const result = await embedder.createEmbeddings(testTexts)
 
 				// Verify warning was logged
-				expect(codeIndexLog.warn).toHaveBeenCalledWith(expect.stringContaining(`exceeds maximum token limit`))
+				expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`exceeds maximum token limit`))
 
 				// Verify only normal texts were processed
 				expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
@@ -268,7 +266,7 @@ describe("OpenAiEmbedder", () => {
 
 				const result = await embedder.createEmbeddings(testTexts)
 
-				expect(codeIndexLog.warn).toHaveBeenCalledTimes(2)
+				expect(console.warn).toHaveBeenCalledTimes(2)
 				expect(mockEmbeddingsCreate).not.toHaveBeenCalled()
 				expect(result).toEqual({
 					embeddings: [],
@@ -313,7 +311,7 @@ describe("OpenAiEmbedder", () => {
 				)
 
 				expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
-				expect(codeIndexLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
+				expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining("Rate limit hit"))
 			})
 
 			it("should throw error immediately on non-retryable errors", async () => {
@@ -345,7 +343,7 @@ describe("OpenAiEmbedder", () => {
 					"Failed to create embeddings: API connection failed",
 				)
 
-				expect(codeIndexLog.error).toHaveBeenCalledWith(
+				expect(console.error).toHaveBeenCalledWith(
 					expect.stringContaining("OpenAI embedder error"),
 					expect.any(Error),
 				)

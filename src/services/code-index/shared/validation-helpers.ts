@@ -1,6 +1,7 @@
 import { t } from "../../../i18n"
 import { serializeError } from "serialize-error"
-import { classifyIndexingError, EmbeddingError, getIndexingErrorStatusCode } from "./indexing-errors"
+import { EmbeddingError, isQuotaError } from "./indexing-errors"
+import { FILE_RETRY_ATTEMPTS } from "../constants"
 
 /**
  * Sanitizes error messages by removing sensitive information like file paths and URLs
@@ -49,7 +50,6 @@ export function sanitizeErrorMessage(errorMessage: string): string {
  */
 export interface HttpError extends Error {
 	status?: number
-	headers?: Headers
 	response?: {
 		status?: number
 	}
@@ -200,7 +200,6 @@ export async function withValidationErrorHandling<T extends { valid: boolean; er
 	try {
 		return await validationFn()
 	} catch (error) {
-		if (classifyIndexingError(error) === "rate-limit") throw error
 		return handleValidationError(error, embedderType, customHandlers)
 	}
 }
@@ -208,23 +207,25 @@ export async function withValidationErrorHandling<T extends { valid: boolean; er
 /**
  * Formats an embedding error message based on the error type and context
  */
-export function formatEmbeddingError(error: unknown): EmbeddingError {
-	const classification = classifyIndexingError(error)
-	const statusCode = getIndexingErrorStatusCode(error)
-	const errorMessage = extractErrorMessage(error)
-	const details = { classification, statusCode }
+/**
+ * Formats a single-attempt embedding failure; the raw error stays in `cause` so retry classification can read
+ * its status and Retry-After headers.
+ */
+export function toEmbeddingError(error: unknown): EmbeddingError {
+	if (error instanceof EmbeddingError) return error
+	if (isQuotaError(error)) return new EmbeddingError(t("embeddings:quotaExceeded"), error, { classification: "permanent" })
+	return new EmbeddingError(formatEmbeddingError(error, FILE_RETRY_ATTEMPTS).message, error)
+}
 
-	// Retries are owned by the shared policy, so each formatted error describes one attempt.
-	const attempts = 1
+export function formatEmbeddingError(error: any, maxRetries: number): Error {
+	const errorMessage = extractErrorMessage(error)
+	const statusCode = extractStatusCode(error)
+
 	if (statusCode === 401) {
-		return new EmbeddingError(t("embeddings:authenticationFailed"), error, details)
+		return new Error(t("embeddings:authenticationFailed"))
 	} else if (statusCode) {
-		return new EmbeddingError(
-			t("embeddings:failedWithStatus", { attempts, statusCode, errorMessage }),
-			error,
-			details,
-		)
+		return new Error(t("embeddings:failedWithStatus", { attempts: maxRetries, statusCode, errorMessage }))
 	} else {
-		return new EmbeddingError(t("embeddings:failedWithError", { attempts, errorMessage }), error, details)
+		return new Error(t("embeddings:failedWithError", { attempts: maxRetries, errorMessage }))
 	}
 }

@@ -60,8 +60,6 @@
 	"orchestrator": {
 		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
 		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
-		"parserFailed": "Code-indexering is gestopt tijdens het parseren van {{filePath}} ({{category}}). Herstel het bestand en start de indexering expliciet om het opnieuw te proberen, of schakel indexering uit. Dit is geen model- of providerfout.",
-		"indexingFilesRetrying": "Mislukte bestanden worden opnieuw geprobeerd. Een gedeeltelijke index is beschikbaar.",
 		"indexingFilesFailed": "Er zijn nog bestandsfouten. Geen automatische nieuwe pogingen in afwachting. Een gedeeltelijke index is beschikbaar.",
 		"indexingStopping": "Indexering wordt gestopt...",
 		"indexingFailedNoBlocks": "Indexering mislukt: Geen codeblokken werden succesvol geïndexeerd. Dit duidt meestal op een embedder configuratieprobleem.",
@@ -71,7 +69,8 @@
 		"unknownError": "Onbekende fout",
 		"indexingRequiresWorkspace": "Indexering vereist een geopende workspace map",
 		"indexingStopped": "Indexering gestopt door gebruiker.",
-		"indexingStoppedPartial": "Indexering gestopt. Gedeeltelijke indexgegevens bewaard."
+		"indexingStoppedPartial": "Indexering gestopt. Gedeeltelijke indexgegevens bewaard.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Semble-binary downloaden...",
@@ -80,5 +79,6 @@
 		"downloadFailed": "Downloaden van semble mislukt: {{errorMessage}}",
 		"checkFailed": "Semble-controle mislukt: {{errorMessage}}",
 		"providerReset": "Semble-provider gereset. Schijfcache blijft behouden tot de volgende heropbouw."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }
