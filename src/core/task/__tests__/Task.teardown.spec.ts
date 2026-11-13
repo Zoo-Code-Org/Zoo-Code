@@ -558,6 +558,33 @@ describe("Task teardown, dispose-time metadata repair and diff-view release", ()
 			historySpy.mockRestore()
 		})
 
+		it("clears the repair flag and reports success when the metadata stage writes the history entry", async () => {
+			// The success side of the stage the row above covers the failure of. The history write
+			// lands, the flag disposeOnce() keys off is cleared rather than left alone, and the stage
+			// reports success for itself - deliberately separate from the message write's own result,
+			// which saveClineMessages() reports on its own.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockResolvedValue([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			// Bracket access for the private field: set the flag first so the assertion below proves
+			// the stage CLEARED it rather than merely never having set it.
+			await task["taskApiConfigReady"]
+			task["pendingTaskMetadataRepair"] = true
+
+			const persisted = await task["persistTaskMetadata"]()
+
+			expect(persisted).toBe(true)
+			expect(historySpy).toHaveBeenCalledTimes(1)
+			expect(task["pendingTaskMetadataRepair"]).toBe(false)
+			historySpy.mockRestore()
+		})
+
 		it("finishes the synchronous teardown before the dispose-time metadata retry", async () => {
 			// The retry has to sit after disposeOnce()'s synchronous section, not in front of it:
 			// abortTaskOnce() awaits diffReversionPromise right after void dispose(), an abandoned
