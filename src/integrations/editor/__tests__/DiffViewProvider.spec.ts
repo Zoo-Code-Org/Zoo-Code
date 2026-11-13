@@ -1960,9 +1960,12 @@ describe("DiffViewProvider", () => {
 				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
 				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
 				expect(fs.unlink).not.toHaveBeenCalled()
-				// The only closing after the release is the one open() performs on the late editor through
-				// the same helper the release paths use; the diff command settling is recorded first.
-				expect(callOrder).toEqual(["vscode.diff", "diffCommandSettled", "closeDiffViews"])
+				// Two closings follow the release and both belong to open(), reached through the same
+				// helpers the release paths use: first the plain text tab open() pre-opened, then the diff
+				// tabs. The two helpers are doubles above, so this row names the order of the closings and
+				// the parked-open row below is the one that names the tab types. The diff command settling
+				// is recorded before either, and the release that already ran must not run again.
+				expect(callOrder).toEqual(["vscode.diff", "diffCommandSettled", "closeFileTab", "closeDiffViews"])
 				// Leave the document-open double as the module mock defined it, for the rows after
 				// this one, since a mockImplementation here outlives the test that set it.
 				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation(() => ({ dispose: vi.fn() }))
@@ -2278,6 +2281,10 @@ describe("DiffViewProvider", () => {
 				// the late teardown touches.
 				const lateEditorDouble = lateEditor as unknown as vscode.TextEditor
 				const lateDiffTab = makeTab(makeDiffTabInput("cline-diff", fsPath), "diff tab")
+				// The other tab the awaited call puts on screen: openDiffEditor() pre-opens the file as a
+				// plain text document before it runs the diff command, and a plain text tab is not a
+				// diff tab, so closeAllDiffViews() cannot reach it and only closeFileTab() can.
+				const latePlainTab = makeTab(makeTextTab(fsPath), "plain tab")
 
 				// The shared setup already carries an editor and two decoration controllers, so their
 				// identities are captured: open() would have replaced both controllers and assigned the
@@ -2313,7 +2320,7 @@ describe("DiffViewProvider", () => {
 							isActive: true,
 							viewColumn: vscode.ViewColumn.One,
 							activeTab: lateDiffTab,
-							tabs: [lateDiffTab],
+							tabs: [latePlainTab, lateDiffTab],
 						},
 					],
 					configurable: true,
@@ -2326,6 +2333,10 @@ describe("DiffViewProvider", () => {
 				// was published behind it: no listeners registered, no deferred scroll pending, and the
 				// editor reference dropped so a later update() cannot act on it.
 				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(lateDiffTab)
+				// Both tab types are closed before ownership of the file is dropped, and only two
+				// helpers can close them: the diff tab is closeAllDiffViews() and the plain text tab is
+				// closeFileTab(), so this assertion is the one that answers a guard without the close.
+				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(latePlainTab)
 				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
 				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
 				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
