@@ -1861,6 +1861,61 @@ describe("DiffViewProvider", () => {
 				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
 			})
 
+			it("blanks, saves and removes a dirty create whose placeholder still holds what open() wrote", async () => {
+				// The accept path of the save gate with a dirty buffer. The row above reaches the gate only
+				// with a clean buffer, which never enters the restore branch at all, and the rows below
+				// cover a placeholder somebody else rewrote or removed, so nothing covered the ordinary
+				// case: a dirty create whose placeholder still holds the empty content open() wrote. The
+				// guard agrees, so the emptied buffer is saved onto the file this edit owns and the file is
+				// then removed.
+				const relPath = "dirty-matching-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial model output"),
+						positionAt: (offset: number) => ({ line: 0, character: offset }),
+						isDirty: true,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Emptied with one replacement, saved once onto the path this edit owns, and then removed:
+				// the guard read agreed twice, so neither the keep branch nor the failure branch ran.
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				expect(editor.document.save).toHaveBeenCalledTimes(1)
+				expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+			})
+
 			it("keeps an editor that arrives after the deferred diff command from publishing into a released session", async () => {
 				// The reviewer named this ordering: a release can reach the provider while open() is still
 				// parked inside openDiffEditor(), before the vscode.diff command settles. This row drives the
