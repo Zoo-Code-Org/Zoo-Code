@@ -4818,6 +4818,40 @@ describe("DiffViewProvider", () => {
 			expect(events).toEqual(["teardown-start", "teardown-end", "joiner-resolved"])
 			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(true)
 		})
+
+		// The finding's own interleaving, run through the real reset() rather than a stand-in callback:
+		// reset() sets sessionFinalizationClaimed in its synchronous prefix and then awaits the tab
+		// closure (closeOwnDiffView below). A second caller that arrives inside that window has to wait
+		// for the closure the first caller started, and it must not run a second tab close of its own.
+		it("keeps a caller that joined the claim window waiting for reset's own tab closure", async () => {
+			const events: string[] = []
+			let releaseTabClose: () => void = () => {}
+			const tabCloseHeld = new Promise<void>((resolve) => {
+				releaseTabClose = resolve
+			})
+
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["closeOwnDiffView"] = vi.fn(async () => {
+				events.push("tab-close-start")
+				await tabCloseHeld
+				events.push("tab-close-end")
+			})
+
+			const owner = diffViewProvider["finalizeSession"](() => diffViewProvider.reset())
+			const joiner = diffViewProvider["finalizeSession"](() => {
+				events.push("joiner-ran-reset")
+				return diffViewProvider.reset()
+			}).then(() => {
+				events.push("joiner-resolved")
+			})
+
+			releaseTabClose()
+			await Promise.all([owner, joiner])
+
+			expect(events).toEqual(["tab-close-start", "tab-close-end", "joiner-resolved"])
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(true)
+		})
 	})
 
 	describe("userTouchedDiffEditor keep/close behavior", () => {
