@@ -210,7 +210,6 @@ export class OpenRouterEmbedder implements IEmbedder {
 		}
 	}
 
-
 	/**
 	 * Validates the OpenRouter embedder configuration by testing API connectivity
 	 * @returns Promise resolving to validation result with success status and optional error message
@@ -271,5 +270,4 @@ export class OpenRouterEmbedder implements IEmbedder {
 			name: "openrouter",
 		}
 	}
-
 }

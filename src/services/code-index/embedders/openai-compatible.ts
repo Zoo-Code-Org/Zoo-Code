@@ -334,5 +334,4 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 			name: "openai-compatible",
 		}
 	}
-
 }

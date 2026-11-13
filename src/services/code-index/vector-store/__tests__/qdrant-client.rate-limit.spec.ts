@@ -18,7 +18,9 @@ function respondToUpsert(retryAfter: string | undefined) {
 			const limited = /\/points\?/.test(url)
 			return new Response(
 				JSON.stringify(
-					limited ? { status: { error: "limited" }, time: 0 } : { result: { status: "completed" }, status: "ok" },
+					limited
+						? { status: { error: "limited" }, time: 0 }
+						: { result: { status: "completed" }, status: "ok" },
 				),
 				{
 					status: limited ? 429 : 200,

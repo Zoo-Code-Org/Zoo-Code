@@ -213,7 +213,8 @@ export async function withValidationErrorHandling<T extends { valid: boolean; er
  */
 export function toEmbeddingError(error: unknown): EmbeddingError {
 	if (error instanceof EmbeddingError) return error
-	if (isQuotaError(error)) return new EmbeddingError(t("embeddings:quotaExceeded"), error, { classification: "permanent" })
+	if (isQuotaError(error))
+		return new EmbeddingError(t("embeddings:quotaExceeded"), error, { classification: "permanent" })
 	return new EmbeddingError(formatEmbeddingError(error, FILE_RETRY_ATTEMPTS).message, error)
 }
 

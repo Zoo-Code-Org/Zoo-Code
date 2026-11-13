@@ -29,10 +29,10 @@ export class BedrockEmbedder implements IEmbedder {
 	 * @param pacers Shared rate-limit waits; validation requests honor the same pause as indexing
 	 */
 	constructor(
-	 private readonly region: string,
-	 private readonly profile: string | undefined,
-	 modelId: string | undefined,
-	 private readonly pacers: ProviderPacerRegistry,
+		private readonly region: string,
+		private readonly profile: string | undefined,
+		modelId: string | undefined,
+		private readonly pacers: ProviderPacerRegistry,
 	) {
 		if (!region) {
 			throw new Error("Region is required for AWS Bedrock embedder")

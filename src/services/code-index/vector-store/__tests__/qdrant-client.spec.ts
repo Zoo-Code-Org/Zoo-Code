@@ -695,7 +695,10 @@ describe("QdrantVectorStore", () => {
 
 			beforeEach(() => {
 				vitest.useFakeTimers()
-				mockQdrantClientInstance.getCollection.mockRejectedValue({ response: { status: 404 }, message: "Not found" })
+				mockQdrantClientInstance.getCollection.mockRejectedValue({
+					response: { status: 404 },
+					message: "Not found",
+				})
 				mockQdrantClientInstance.createCollection.mockResolvedValue(true)
 				vitest.spyOn(console, "error").mockImplementation(function () {})
 			})
@@ -704,7 +707,9 @@ describe("QdrantVectorStore", () => {
 			it.each(["createCollection", "createPayloadIndex"] as const)(
 				"recovers when %s fails twice with a server error",
 				async (method) => {
-					mockQdrantClientInstance[method].mockRejectedValueOnce(serverError()).mockRejectedValueOnce(serverError())
+					mockQdrantClientInstance[method]
+						.mockRejectedValueOnce(serverError())
+						.mockRejectedValueOnce(serverError())
 					const pending = vectorStore.initialize()
 					await vitest.advanceTimersByTimeAsync(1500)
 					await expect(pending).resolves.toBe(true)

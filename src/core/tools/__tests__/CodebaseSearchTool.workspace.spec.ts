@@ -190,16 +190,8 @@ describe("CodebaseSearchTool workspace selection", () => {
 		await tool.execute({ query: "without an editor" }, task, callbacks)
 
 		expect(taskManager.searchIndex).toHaveBeenCalledTimes(3)
-		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(
-			1,
-			"before editor switch",
-			undefined
-		)
-		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(
-			2,
-			"after editor switch",
-			undefined
-		)
+		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(1, "before editor switch", undefined)
+		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(2, "after editor switch", undefined)
 		expect(taskManager.searchIndex).toHaveBeenNthCalledWith(3, "without an editor", undefined)
 		expect(editorManager.searchIndex).not.toHaveBeenCalled()
 		expect(getWorkspacePath).not.toHaveBeenCalled()

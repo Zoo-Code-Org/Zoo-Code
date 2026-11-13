@@ -255,7 +255,12 @@ describe("BedrockEmbedder", () => {
 		})
 
 		it("should create embeddings with Nova multimodal model", async () => {
-			const novaMultimodalEmbedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.nova-2-multimodal-embeddings-v1:0", pacers)
+			const novaMultimodalEmbedder = new BedrockEmbedder(
+				"us-east-1",
+				"test-profile",
+				"amazon.nova-2-multimodal-embeddings-v1:0",
+				pacers,
+			)
 			const testTexts = ["Hello world"]
 			const mockResponse = {
 				body: new TextEncoder().encode(
@@ -300,7 +305,12 @@ describe("BedrockEmbedder", () => {
 		})
 
 		it("should handle Nova multimodal model with multiple texts", async () => {
-			const novaMultimodalEmbedder = new BedrockEmbedder("us-east-1", "test-profile", "amazon.nova-2-multimodal-embeddings-v1:0", pacers)
+			const novaMultimodalEmbedder = new BedrockEmbedder(
+				"us-east-1",
+				"test-profile",
+				"amazon.nova-2-multimodal-embeddings-v1:0",
+				pacers,
+			)
 			const testTexts = ["Hello world", "Another text"]
 			const mockResponses = [
 				{
@@ -671,7 +681,8 @@ describe("BedrockEmbedder", () => {
 
 		describe("CI-EM-02: temporary failures", () => {
 			const okResponse = { body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })) }
-			const serverError = () => Object.assign(new Error("Service unavailable"), { $metadata: { httpStatusCode: 503 } })
+			const serverError = () =>
+				Object.assign(new Error("Service unavailable"), { $metadata: { httpStatusCode: 503 } })
 			const throttle = () => Object.assign(new Error("Slow down"), { name: "ThrottlingException" })
 
 			beforeEach(() => vitest.useFakeTimers())

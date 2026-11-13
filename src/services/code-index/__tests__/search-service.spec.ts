@@ -67,13 +67,16 @@ describe("CodeIndexSearchService (CI-SS-01)", () => {
 		{ state: "Indexed", failed: true, incomplete: true },
 		{ state: "Indexing", failed: false, incomplete: true },
 		{ state: "Standby", failed: true, incomplete: true },
-	] as const)("$state with failures=$failed reports incomplete=$incomplete", async ({ state, failed, incomplete }) => {
-		const { service } = prepare(state, { failed })
-		const response = await service.searchIndex("query")
-		expect(response.incomplete).toBe(incomplete)
-		expect(response.failedPaths).toEqual(failed ? ["src/a.ts", "other/b.ts"] : [])
-		expect(response.waitingPaths).toEqual([])
-	})
+	] as const)(
+		"$state with failures=$failed reports incomplete=$incomplete",
+		async ({ state, failed, incomplete }) => {
+			const { service } = prepare(state, { failed })
+			const response = await service.searchIndex("query")
+			expect(response.incomplete).toBe(incomplete)
+			expect(response.failedPaths).toEqual(failed ? ["src/a.ts", "other/b.ts"] : [])
+			expect(response.waitingPaths).toEqual([])
+		},
+	)
 
 	it("reports waiting paths separately and deduplicated, for matches and empty results", async () => {
 		const { service, pacers, store } = prepare("Indexing", { failed: true })
@@ -105,11 +108,14 @@ describe("CodeIndexSearchService (CI-SS-01)", () => {
 		{ state: "Stopping", failed: true, exists: true },
 		{ state: "Standby", failed: false, exists: true },
 		{ state: "Standby", failed: true, exists: false },
-	] as const)("rejects search in $state (failures=$failed, collection=$exists)", async ({ state, failed, exists }) => {
-		const { service, embedder } = prepare(state, { failed, exists })
-		await expect(service.searchIndex("query")).rejects.toThrow(`Current state: ${state}`)
-		expect(embedder.createEmbeddings).not.toHaveBeenCalled()
-	})
+	] as const)(
+		"rejects search in $state (failures=$failed, collection=$exists)",
+		async ({ state, failed, exists }) => {
+			const { service, embedder } = prepare(state, { failed, exists })
+			await expect(service.searchIndex("query")).rejects.toThrow(`Current state: ${state}`)
+			expect(embedder.createEmbeddings).not.toHaveBeenCalled()
+		},
+	)
 
 	it("does not set Error when a query fails", async () => {
 		const { service, embedder, setSystemState } = prepare("Indexed")
