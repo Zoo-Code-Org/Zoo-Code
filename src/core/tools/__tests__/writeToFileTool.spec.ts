@@ -662,6 +662,51 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
+		it("releases what the late open() completed when the task aborts during it", async () => {
+			// The cancellation teardown runs while open() is still pending, so it can only release
+			// what existed at that instant. open() then finishes its side effects: it creates the
+			// directories and the empty placeholder and sets isEditing + relPath on the provider.
+			// This stream's entry is already gone by then, so nothing owns those artifacts any
+			// more - a later write to the same path would find a session this task never opened.
+			// The cleanup below is therefore the only one that can cover what open() completed.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.isEditing = false
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockReset().mockResolvedValue(undefined)
+			mockCline.diffViewProvider.reset.mockClear()
+			let releasesAtOpenReturn = -1
+			let resetsAtOpenReturn = -1
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// The cancellation lands mid-open, so the teardown releases this entry and rolls
+				// back whatever the provider held at that instant. The timed flush lets every
+				// microtask that release queued run before the counts are sampled, so the sample is
+				// the whole of what the mid-open teardown did - anything after it is the release of
+				// what open() itself completed.
+				writeToFileTool.clearTaskState(mockCline)
+				await new Promise((resolve) => {
+					setTimeout(resolve, 0)
+				})
+				releasesAtOpenReturn = mockCline.diffViewProvider.discardUnapprovedStream.mock.calls.length
+				resetsAtOpenReturn = mockCline.diffViewProvider.reset.mock.calls.length
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			// Nothing is streamed into the cancelled task's view.
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// And the artifacts the late open() created are cleaned AFTER open() returned: both
+			// counts grew past what the mid-open teardown left behind, which is what tells the two
+			// releases apart.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.calls.length).toBeGreaterThan(
+				releasesAtOpenReturn,
+			)
+			expect(mockCline.diffViewProvider.reset.mock.calls.length).toBeGreaterThan(resetsAtOpenReturn)
+		})
+
 		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
 			// provider.getState() looks like a read and is an await into the extension host. It runs
 			// after this task's entry and its TaskAborted listener were registered, and a rejection

@@ -802,6 +802,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// Cancelled while open() was in flight: do not stream partial content into a
 				// cancelled task's view.
 				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					// The cancellation teardown ran while open() was still pending, so it could only
+					// release what existed at that moment. open() then finished: it created the
+					// directories and the empty placeholder and set isEditing + relPath on the
+					// provider. This entry is already gone, so nothing else owns those artifacts -
+					// they would sit there until a later write to the same path found a session this
+					// task never opened. Release what the late open completed before returning.
+					await this.cleanupFailedPartialStream(task)
 					return
 				}
 
