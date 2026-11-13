@@ -23,12 +23,17 @@ describe("safeWriteText against a real filesystem", () => {
 		await fs.writeFile(targetPath, "old bytes")
 
 		// No platform override: the real platform's own durability and ACL steps run, and this
-		// case is the successful restore. A failed restore now throws DaclRestoreError after
-		// the commit rename has already happened (the focused unit test "win32 DACL: a failed
-		// restore is an error and the dump is still unlinked" covers that path), so on a
-		// machine where icacls cannot put a saved ACL back into a throwaway temp directory
-		// this publish reports that error instead of resolving, and the residue assertions
-		// below are reached only where the restore worked.
+		// case is the successful restore. Windows DACL restoration is best-effort after the
+		// commit rename: step 5 runs icacls /restore only once fs.rename has already put the
+		// staged file in the target's place, and _restoreDaclWindows swallows a failing
+		// restore, so the publish still resolves and only the .acl dump is unlinked. That is
+		// the contract asserted by "win32 DACL: dump is unlinked even when restore fails" at
+		// src/services/file-safety/__tests__/safeWriteText.spec.ts:829. The save side is a
+		// different contract: a failed icacls /save throws DaclInspectionError with phase
+		// "save" before any rename, which is what "win32 DACL: a partial dump left by a failed
+		// save is removed and the publish is refused" at safeWriteText.spec.ts:741 asserts. So
+		// on a machine where icacls cannot put a saved ACL back into a throwaway temp
+		// directory this publish still resolves and the residue assertions below are reached.
 		await safeWriteText(targetPath, "new bytes", { backup: true })
 
 		expect(await fs.readFile(targetPath, "utf8")).toBe("new bytes")
