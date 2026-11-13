@@ -28,7 +28,17 @@ export interface FileLockOptions {
  * while holding it.
  */
 export async function acquireFileLock(filePath: string, options?: FileLockOptions): Promise<() => Promise<void>> {
-	const absoluteFilePath = path.resolve(filePath)
+	// Lock the canonical key - the referent of a symlink alias - so an alias and its
+	// referent take ONE lock. Every caller of this protocol, safeWriteJson included,
+	// gets the key computed here: a caller that passed the raw spelling would watch a
+	// different lock file than the write it means to serialize with, which is how a
+	// deletion through withFileLock could run beside a safeWriteJson read-modify-write
+	// on the referent and break the compound atomicity the deletion contract promises.
+	// withFileLock still hands its operation the caller's resolved path, because the
+	// operation's own file operations (the task-history unlink) must keep the caller's
+	// alias semantics - unlinking the referent instead of the alias would delete a
+	// different directory entry.
+	const absoluteFilePath = await resolveLockKey(path.resolve(filePath))
 	if (options?.waitForStaleLock) tracePersistenceEvent("json-lock-wait", { filePath: absoluteFilePath })
 	try {
 		return await lockfile.lock(absoluteFilePath, {
@@ -74,17 +84,7 @@ export async function withFileLock<T>(
 	options?: FileLockOptions,
 ): Promise<T> {
 	const absoluteFilePath = path.resolve(filePath)
-	// Lock the canonical key - the same one safeWriteJson computes - so a symlink
-	// alias and its referent take ONE lock. Locking the raw path here would let a
-	// deletion through this helper run concurrently with a safeWriteJson
-	// read-modify-write on the referent (the two would watch different lock
-	// files), breaking the compound atomicity the deletion contract promises.
-	// The operation still receives the caller's resolved path: its own file
-	// operations (e.g. the task-history unlink) must keep the caller's alias
-	// semantics - unlinking the referent instead of the alias would delete a
-	// different directory entry.
-	const lockKey = await resolveLockKey(absoluteFilePath)
-	const releaseLock = await acquireFileLock(lockKey, options)
+	const releaseLock = await acquireFileLock(absoluteFilePath, options)
 
 	let result: T
 	try {
