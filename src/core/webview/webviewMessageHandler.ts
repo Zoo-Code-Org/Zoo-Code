@@ -839,8 +839,10 @@ export const webviewMessageHandler = async (
 						let inspection: CommandListInspection | undefined
 						// The same save-start snapshot keeps its global layer: the
 						// rollback below distinguishes an absent Global layer from an
-						// empty one, and re-reading here would give the rollback a
-						// configuration state the scope read never saw.
+						// empty one and computes this save's delta against it — the
+						// layer the write below actually targets — and re-reading here
+						// would give the rollback a configuration state the scope read
+						// never saw.
 						let globalLayerAtSaveStart: string[] | undefined
 						let inspectionFailure: string | undefined
 						try {
@@ -864,6 +866,19 @@ export const webviewMessageHandler = async (
 						}
 
 						const currentScopes = readCommandListScopes(key, getGlobalState(key), inspection)
+
+						// The compensation's delta baseline: the global layer of the same
+						// save-start snapshot — the configuration the global write below
+						// targets — sanitized the way every command-list read sanitizes it.
+						// The extension state copy (`currentScopes.global`) is a separate
+						// cache that can hold a different list, and a delta computed
+						// against it would restore that stale list over the entries a
+						// rolled-back save actually wrote over in the configuration.
+						const configGlobalAtSaveStart = readCommandListScopes(
+							key,
+							globalLayerAtSaveStart,
+							inspection,
+						).global
 
 						// Shadowing is cross-directional, so the hidden-entry set
 						// needs the opposite key's global layer as input. It comes
@@ -975,9 +990,9 @@ export const webviewMessageHandler = async (
 							// compare-and-set to make that safe.
 							if (globalWriteApplied) {
 								const addedByThisSave = globalWrite.filter(
-									(entry) => !currentScopes.global.includes(entry),
+									(entry) => !configGlobalAtSaveStart.includes(entry),
 								)
-								const removedByThisSave = currentScopes.global.filter(
+								const removedByThisSave = configGlobalAtSaveStart.filter(
 									(entry) => !globalWrite.includes(entry),
 								)
 								// The re-read is guarded: when even the read fails there

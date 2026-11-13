@@ -2301,7 +2301,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["npm docker", "docker"] }, undefined, { globalValue: ["aws", "mid-save"] }],
+			[
+				{ globalValue: ["keep", "drop"], workspaceValue: ["npm docker", "docker"] },
+				undefined,
+				{ globalValue: ["aws", "mid-save"] },
+			],
 			true,
 		)
 
@@ -2326,6 +2330,46 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
 	})
 
+	it("computes the undo delta against the configuration layer when the extension-state copy is stale", async () => {
+		// The global write targets the configuration layer, not the extension
+		// state cache, so that layer's save-start value is the compensation's
+		// delta baseline. Here the state copy is stale ("old" where the
+		// configuration holds "manual"): a delta computed against the cache
+		// would restore the stale list over the value the failed save replaced,
+		// permanently dropping "manual". The undo follows the configuration
+		// layer instead.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["old"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ globalValue: ["manual"], workspaceValue: ["docker"] }, undefined, { globalValue: ["aws", "mid-save"] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		// The save wrote ["aws"] over the configuration's ["manual"].
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The undo removes this save's addition, keeps the mid-save addition, and
+		// restores the configuration-layer entry the save dropped — not the stale
+		// state copy's "old".
+		expect(update).toHaveBeenNthCalledWith(
+			3,
+			"deniedCommands",
+			["mid-save", "manual"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).toHaveBeenCalledTimes(3)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
 	it("rolls the global layer back on a folder-target save and still persists the payload's other keys", async () => {
 		// update() call order: global write succeeds, the folder-target
 		// workspace write rejects, the undo restores the global deletions at
@@ -2338,7 +2382,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			{},
 			[undefined, Promise.reject(new Error("disk on fire")), undefined],
 			[
-				{ workspaceValue: ["npm"], workspaceFolderValue: ["pnpm docker", "docker"] },
+				{ globalValue: ["drop"], workspaceValue: ["npm"], workspaceFolderValue: ["pnpm docker", "docker"] },
 				undefined,
 				{
 					globalValue: [],
@@ -2715,7 +2759,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, { globalValue: ["keep", "aws", "mid-save"] }],
+			[
+				{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] },
+				undefined,
+				{ globalValue: ["keep", "aws", "mid-save"] },
+			],
 			true,
 		)
 
@@ -2746,7 +2794,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, { globalValue: ["aws", "mid-save"] }],
+			[
+				{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] },
+				undefined,
+				{ globalValue: ["aws", "mid-save"] },
+			],
 			true,
 		)
 
@@ -2774,7 +2826,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, undefined],
+			[{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] }, undefined, undefined],
 			true,
 		)
 

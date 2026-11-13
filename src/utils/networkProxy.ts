@@ -186,10 +186,15 @@ export async function initializeNetworkProxy(
 				if (newConfig.enabled) {
 					applyTlsVerificationOverride(newConfig)
 					configureGlobalProxy(newConfig, isDisposed)
-					configureUndiciProxy(newConfig, context, isDisposed)
+					// The aggregate owns whatever this enables: without registering the created
+					// agent resource here, a proxy toggled on mid-session would survive every
+					// teardown path the returned disposable covers.
+					configureUndiciProxy(newConfig, context, isDisposed, (resource) => resources.push(resource))
 				} else {
-					// Proxy disabled - but we can't easily un-bootstrap global-agent or reset undici dispatcher safely.
-					// We *can* restore any global fetch patch immediately.
+					// Proxy disabled mid-session: global-agent can't be un-bootstrapped, and the
+					// dispatcher stays installed until the resources below are disposed (re-pointing
+					// live traffic mid-session is not safe). Any global fetch patch *can* be
+					// restored immediately.
 					restoreGlobalFetchPatch()
 					restoreTlsVerificationOverride()
 					log("Debug proxy disabled. Restart VS Code to fully disable proxy routing.")
@@ -216,10 +221,7 @@ export async function initializeNetworkProxy(
 	if (config.enabled) {
 		applyTlsVerificationOverride(config)
 		await configureGlobalProxy(config, isDisposed)
-		const undiciResource = await configureUndiciProxy(config, context, isDisposed)
-		if (undiciResource) {
-			resources.push(undiciResource)
-		}
+		await configureUndiciProxy(config, context, isDisposed, (resource) => resources.push(resource))
 	} else {
 		log(`Debug proxy not enabled.`)
 	}
@@ -323,32 +325,36 @@ async function configureGlobalProxy(config: ProxyConfig, isDisposed: () => boole
  * Configure undici's global dispatcher so Node's built-in `fetch()` and any undici-based
  * clients route through the proxy.
  *
- * @param context The extension context whose subscriptions register the returned resource.
+ * The dispatcher active before the install is captured and restored when the created resource
+ * is disposed — but only while the global slot still holds the agent installed here; a slot a
+ * third party has since replaced belongs to that installer, not to this teardown.
+ *
+ * @param context The extension context whose subscriptions register the created resource.
  * @param isDisposed Teardown latch checked after the dynamic import below; a late import
  * completion closes the freshly built agent instead of installing it.
- * @returns A disposable that closes the created agent, or undefined when no agent was created
- * (nothing to close). Also registered on `context.subscriptions`.
+ * @param registerResource Called with the created resource synchronously after the last await,
+ * so a teardown that starts while this function is in flight cannot miss it.
  */
 async function configureUndiciProxy(
 	config: ProxyConfig,
 	context: vscode.ExtensionContext,
 	isDisposed: () => boolean,
-): Promise<vscode.Disposable | undefined> {
+	registerResource: (resource: vscode.Disposable) => void,
+): Promise<void> {
 	if (!config.enabled || !config.serverUrl) {
-		return undefined
+		return
 	}
 
 	if (undiciProxyInitialized) {
 		log(`undici global dispatcher already configured; restart VS Code to change proxy safely`)
-		return undefined
+		return
 	}
-
-	let undiciResource: vscode.Disposable | undefined
 
 	try {
 		const {
 			ProxyAgent,
 			setGlobalDispatcher,
+			getGlobalDispatcher,
 			fetch: undiciFetch,
 		} = (await import("undici")) as typeof import("undici")
 
@@ -369,9 +375,21 @@ async function configureUndiciProxy(
 		if (isDisposed()) {
 			log("undici import completed after disposal; closing the late proxy agent without installing it")
 			closeProxyAgentBestEffort(proxyAgent)
-			return undefined
+			return
 		}
 
+		// A concurrent call can pass the already-configured check above while this import is
+		// pending. Installing after another call has set the dispatcher would capture that
+		// agent as the previous dispatcher, and its teardown would then restore a closed
+		// agent globally; the first install owns the slot, so this agent is closed instead.
+		if (undiciProxyInitialized) {
+			closeProxyAgentBestEffort(proxyAgent)
+			return
+		}
+
+		// undici exposes a getter for its global dispatcher slot, so the dispatcher that
+		// predates this install can be captured here and put back by the resource below.
+		const previousDispatcher = getGlobalDispatcher()
 		setGlobalDispatcher(proxyAgent)
 		undiciProxyInitialized = true
 		log(`undici global dispatcher configured for proxy: ${redactProxyUrl(config.serverUrl)}`)
@@ -392,25 +410,29 @@ async function configureUndiciProxy(
 		}
 
 		// The agent owns sockets, so teardown must close it; restoring the fetch patch is owned
-		// by the override-cleanup resource, which every disposal path also disposes. Disposal
-		// reaches this resource from two owners (context.subscriptions and the aggregate
-		// returned by initializeNetworkProxy), so the once-guard keeps a double dispose to a
-		// single close of the same agent.
+		// by the override-cleanup resource, which every disposal path also disposes. The
+		// dispatcher is restored before the close so traffic started after teardown cannot land
+		// on the closed agent, and only while the slot still holds this agent — a dispatcher
+		// installed by someone else afterwards is theirs to manage. Disposal reaches this
+		// resource from two owners (context.subscriptions and the aggregate returned by
+		// initializeNetworkProxy), so the once-guard keeps a double dispose to a single close.
 		let agentClosed = false
-		undiciResource = {
+		const undiciResource: vscode.Disposable = {
 			dispose: () => {
 				if (!agentClosed) {
 					agentClosed = true
+					if (getGlobalDispatcher() === proxyAgent) {
+						setGlobalDispatcher(previousDispatcher)
+					}
 					closeProxyAgentBestEffort(proxyAgent)
 				}
 			},
 		}
+		registerResource(undiciResource)
 		context.subscriptions.push(undiciResource)
 	} catch (error) {
 		log(`Failed to configure undici proxy dispatcher: ${error instanceof Error ? error.message : String(error)}`)
 	}
-
-	return undiciResource
 }
 /**
  * Update environment variables for proxy configuration.

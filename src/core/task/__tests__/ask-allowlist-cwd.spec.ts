@@ -314,6 +314,68 @@ describe("Task.ask judges command asks by the command's working directory", () =
 		errorSpy.mockRestore()
 	})
 
+	it("re-checks an entry-drained queued command against the task folder's policy once blanket deny engages", async () => {
+		// Same entry drain as the no-context test above, but blanket deny is
+		// engaged on the drain read, so the re-check reaches directory
+		// selection instead of consuming the queued message as a legitimate
+		// approval. The task's folder is made the SECOND workspace folder
+		// (folder order swapped) while it allows "echo": a re-check that fell
+		// back to the first workspace folder — which denies it — would deny,
+		// so the approval names the task folder's directory.
+		openTwoFolders()
+		workspaceState.workspaceFolders = [
+			{ fsPath: FOLDER_B, uri: { fsPath: FOLDER_B } },
+			{ fsPath: FOLDER_A, uri: { fsPath: FOLDER_A } },
+		]
+		const provider: ProviderStub = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			cwd: PROVIDER_CWD,
+			// First read (ask time): blanket deny off, so the entry claim gate
+			// opens. Second read (entry-drain re-check): blanket deny engaged,
+			// so the queued message must re-earn its approval.
+			getState: vi
+				.fn()
+				.mockResolvedValueOnce(commandState({ alwaysDenyUnapprovedCommands: false }))
+				.mockResolvedValue(commandState({ alwaysDenyUnapprovedCommands: true })),
+		}
+		const task = buildTask(provider, FOLDER_A)
+		await attachQueue(task)
+		task.messageQueueService.addMessage("run it")
+
+		// No approval context: the re-check falls back to the task's own
+		// directory, where folder A's entry grants the queued approval.
+		const result = await task.ask("command", "echo hi", false)
+
+		expect(result.response).toBe("yesButtonClicked")
+		expect(result.autoDenyDetail).toBeUndefined()
+	})
+
+	it("denies an entry-drained queued command whose task folder denies it, although the first workspace folder allows it", async () => {
+		// The paired reject path: the task is rooted in folder B (which denies
+		// "echo") and folder B is NOT the first workspace folder. With blanket
+		// deny engaged on the drain read, the re-check selects the task
+		// folder's directory; a fallback to the first workspace folder (which
+		// allows "echo") would approve, so the denial names the folder the
+		// task actually runs in.
+		openTwoFolders()
+		const provider: ProviderStub = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			cwd: PROVIDER_CWD,
+			getState: vi
+				.fn()
+				.mockResolvedValueOnce(commandState({ alwaysDenyUnapprovedCommands: false }))
+				.mockResolvedValue(commandState({ alwaysDenyUnapprovedCommands: true })),
+		}
+		const task = buildTask(provider, FOLDER_B)
+		await attachQueue(task)
+		task.messageQueueService.addMessage("run it")
+
+		const result = await task.ask("command", "echo hi", false)
+
+		expect(result.response).toBe("noButtonClicked")
+		expect(result.autoDenyDetail?.kind).toBe("denylist")
+	})
+
 	it("denies a drained queued command whose working directory the policy denies, although the blanket path would accept it", async () => {
 		openTwoFolders()
 		const provider: ProviderStub = {

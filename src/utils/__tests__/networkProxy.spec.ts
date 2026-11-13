@@ -16,6 +16,11 @@ import {
 // process-global state every later test would inherit, and the real ProxyAgent owns sockets.
 const mocks = vi.hoisted(() => {
 	const closeSpy = vi.fn().mockResolvedValue(undefined)
+	// undici's global dispatcher slot always holds a dispatcher (it lazily creates the
+	// default one), so the double's slot starts with a sentinel object rather than
+	// undefined: a captured "previous dispatcher" must be a real object, as in undici.
+	const defaultDispatcher = { close: vi.fn().mockResolvedValue(undefined) }
+	const dispatcherSlot: { current: unknown } = { current: defaultDispatcher }
 	return {
 		bootstrap: vi.fn(),
 		// mockImplementation with a plain function keeps the double constructible: the
@@ -24,7 +29,15 @@ const mocks = vi.hoisted(() => {
 			return { close: closeSpy }
 		}),
 		proxyAgentClose: closeSpy,
-		setGlobalDispatcher: vi.fn(),
+		// A scriptable slot mirrors undici's global dispatcher state: get returns what set
+		// last wrote, so a test can install a third-party dispatcher between install and
+		// teardown and observe which dispatcher survives.
+		setGlobalDispatcher: vi.fn((dispatcher: unknown) => {
+			dispatcherSlot.current = dispatcher
+		}),
+		getGlobalDispatcher: vi.fn(() => dispatcherSlot.current),
+		dispatcherSlot,
+		defaultDispatcher,
 		undiciFetch: vi.fn(),
 	}
 })
@@ -34,6 +47,7 @@ vi.mock("global-agent", () => ({ bootstrap: mocks.bootstrap }))
 vi.mock("undici", () => ({
 	ProxyAgent: mocks.proxyAgent,
 	setGlobalDispatcher: mocks.setGlobalDispatcher,
+	getGlobalDispatcher: mocks.getGlobalDispatcher,
 	fetch: mocks.undiciFetch,
 }))
 
@@ -107,6 +121,9 @@ describe("networkProxy", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Dispatcher-slot state is process-lifetime in undici; reset it per test so each
+		// run captures the same "previous dispatcher".
+		mocks.dispatcherSlot.current = mocks.defaultDispatcher
 
 		// Reset environment variables
 		delete process.env.GLOBAL_AGENT_HTTP_PROXY
@@ -420,7 +437,73 @@ describe("networkProxy", () => {
 					context.subscriptions.forEach((subscription) => subscription.dispose())
 
 					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
-					expect(mocks.setGlobalDispatcher).toHaveBeenCalledOnce()
+					// Install plus the single conditional restore from the first dispose; the
+					// once-guard keeps the repeated disposals from restoring or closing again.
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledTimes(2)
+					expect(mocks.dispatcherSlot.current).toBe(mocks.defaultDispatcher)
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			// The dispatcher that predates the install must be back in undici's global slot
+			// after teardown, or every later fetch in a surviving extension host routes
+			// through the closed proxy agent.
+			it("restores the dispatcher captured at install time when the returned disposable is disposed", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+					const installed = mocks.dispatcherSlot.current
+					expect(installed).not.toBe(mocks.defaultDispatcher)
+
+					returned.dispose()
+
+					// The captured pre-install dispatcher is back, not a fresh default or an
+					// unset slot: this is dispatcher restoration, not fetch-function identity.
+					expect(mocks.dispatcherSlot.current).toBe(mocks.defaultDispatcher)
+					expect(mocks.setGlobalDispatcher).toHaveBeenLastCalledWith(mocks.defaultDispatcher)
+					// Restore happens before the close, so no fetch started after teardown can
+					// land on the closing agent.
+					expect(mocks.setGlobalDispatcher.mock.invocationCallOrder[1]).toBeLessThan(
+						mocks.proxyAgentClose.mock.invocationCallOrder[0],
+					)
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			it("leaves a third-party dispatcher installed after ours untouched when disposal runs", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+					// Another component replaces the global slot after our install; that slot
+					// belongs to its installer, so our teardown must leave it alone.
+					const thirdPartyDispatcher = { close: vi.fn().mockResolvedValue(undefined) }
+					mocks.setGlobalDispatcher(thirdPartyDispatcher)
+
+					returned.dispose()
+
+					expect(mocks.dispatcherSlot.current).toBe(thirdPartyDispatcher)
+					// Install + third-party swap only: no restore call on this branch.
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledTimes(2)
+					expect(mocks.setGlobalDispatcher).toHaveBeenLastCalledWith(thirdPartyDispatcher)
+					// The conditional restore does not skip closing the agent we own.
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
 					expect(globalThis.fetch).toBe(fetchSentinel)
 				} finally {
 					globalThis.fetch = fetchBefore
@@ -474,6 +557,213 @@ describe("networkProxy", () => {
 					)
 					expect(globalThis.fetch).toBe(fetchSentinel)
 				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+		})
+
+		// When the proxy is disabled at activation, only the configuration-change listener
+		// can build the dispatcher agent later; the aggregate disposable must own that
+		// listener-created resource too, or a mid-session enable survives the teardown a
+		// failed activation performs. Each test runs on a reset module instance so the
+		// shared latches start untripped, as in the disposal tests.
+		describe("listener-path agent ownership", () => {
+			// Fresh module instance whose activation starts with the proxy disabled; the
+			// configuration record is mutable so a test can flip debugProxy.enabled before
+			// firing the captured configuration-change listener.
+			async function freshToggledRunContext(): Promise<{
+				freshModule: typeof import("../networkProxy")
+				context: vscode.ExtensionContext
+				configValues: Record<string, unknown>
+				fireConfigChange: () => void
+			}> {
+				vi.clearAllMocks()
+				const configValues: Record<string, unknown> = {
+					"debugProxy.enabled": false,
+					"debugProxy.serverUrl": "http://localhost:8080",
+					"debugProxy.tlsInsecure": false,
+				}
+				const freshModule = await import("../networkProxy")
+				const freshVscode = await import("vscode")
+				vi.mocked(freshVscode.workspace.getConfiguration).mockReturnValue(
+					makeWorkspaceConfiguration(configValues),
+				)
+				let configListener:
+					((event: { affectsConfiguration: (section: string) => boolean }) => void) | undefined
+				vi.mocked(freshVscode.workspace.onDidChangeConfiguration).mockImplementation((listener) => {
+					configListener = listener as typeof configListener
+					return { dispose: vi.fn() }
+				})
+				const context = createMockContext(vscode.ExtensionMode.Development)
+				return {
+					freshModule,
+					context,
+					configValues,
+					fireConfigChange: () => configListener?.({ affectsConfiguration: () => true }),
+				}
+			}
+
+			it("closes the listener-created agent exactly once when the aggregate disposable is disposed", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context, configValues, fireConfigChange } = await freshToggledRunContext()
+
+					const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+
+					// Activation with the proxy disabled registers only the listener and the
+					// override cleanup; no agent is built yet.
+					expect(context.subscriptions).toHaveLength(2)
+					expect(mocks.proxyAgent).not.toHaveBeenCalled()
+
+					configValues["debugProxy.enabled"] = true
+					fireConfigChange()
+					// The listener's configure* calls resolve on their own microtasks.
+					await vi.waitFor(() => expect(mocks.proxyAgent).toHaveBeenCalledOnce())
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledOnce()
+					expect(mocks.dispatcherSlot.current).not.toBe(mocks.defaultDispatcher)
+					expect(globalThis.fetch).not.toBe(fetchSentinel)
+
+					returned.dispose()
+
+					// The aggregate owns the agent the listener created: its close and the
+					// dispatcher restore run here, not at toggle time.
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(mocks.dispatcherSlot.current).toBe(mocks.defaultDispatcher)
+					expect(globalThis.fetch).toBe(fetchSentinel)
+
+					// Re-disposal through the same owner must not close a second time.
+					returned.dispose()
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			it("closes an agent created by a post-dispose listener event without installing it", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context, configValues, fireConfigChange } = await freshToggledRunContext()
+
+					await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+					configValues["debugProxy.enabled"] = true
+
+					// Disposing first, then toggling, is the interleaving that a settings
+					// event can still deliver after a failed activation tore everything down.
+					context.subscriptions.forEach((subscription) => subscription.dispose())
+					fireConfigChange()
+
+					// The disposal latch rejects the late continuation: the agent is closed
+					// without ever being installed, so no new agent leaks into the process.
+					await vi.waitFor(() => expect(mocks.proxyAgent).toHaveBeenCalledOnce())
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(mocks.setGlobalDispatcher).not.toHaveBeenCalled()
+					expect(mocks.dispatcherSlot.current).toBe(mocks.defaultDispatcher)
+					expect(mocks.bootstrap).not.toHaveBeenCalled()
+					expect(vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")).toContain(
+						"undici import completed after disposal; closing the late proxy agent without installing it",
+					)
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			// Two debugProxy config events fired inside the `await import("undici")` window both
+			// pass the already-configured check ahead of the import. Only the first may install:
+			// a second install would capture the first agent as its "previous dispatcher", and
+			// that teardown would then restore a closed agent into undici's global slot.
+			// doMock keeps the undici factory pending so the first event is verifiably parked
+			// at its import while the second event passes the latch check; the file-level static
+			// mock cannot provide that window because its module is already resolved in every
+			// later test.
+			it("closes the second of two config events fired inside the undici import window", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				let releaseImport: () => void = () => {}
+				const importPending = new Promise<void>((resolve) => {
+					releaseImport = resolve
+				})
+				vi.doMock("undici", () =>
+					importPending.then(() => ({
+						ProxyAgent: mocks.proxyAgent,
+						setGlobalDispatcher: mocks.setGlobalDispatcher,
+						getGlobalDispatcher: mocks.getGlobalDispatcher,
+						fetch: mocks.undiciFetch,
+					})),
+				)
+				try {
+					const { freshModule, context, configValues, fireConfigChange } = await freshToggledRunContext()
+					// Once-implementations so the per-agent close spies do not leak past this
+					// test: the shared file-level spy cannot say *which* of the two agents a
+					// close came from, and this witness turns on that distinction. Exactly two
+					// constructions occur, consuming both queued implementations.
+					const agents: Array<{ close: ReturnType<typeof vi.fn> }> = []
+					const recordAgent = function (this: unknown) {
+						const close = vi.fn().mockResolvedValue(undefined)
+						const agent = { close }
+						agents.push(agent)
+						return agent
+					}
+					mocks.proxyAgent.mockImplementationOnce(recordAgent).mockImplementationOnce(recordAgent)
+
+					const returned = await freshModule.initializeNetworkProxy(context, mockOutputChannel)
+					configValues["debugProxy.enabled"] = true
+
+					fireConfigChange()
+					// The first event is now parked in configureUndiciProxy's import: the pending
+					// factory keeps it suspended while the module registration settles, so the
+					// second event demonstrably passes the latch check mid-flight.
+					await new Promise((resolve) => setTimeout(resolve, 10))
+					expect(mocks.proxyAgent).not.toHaveBeenCalled()
+					fireConfigChange()
+					releaseImport()
+
+					await vi.waitFor(() => expect(mocks.proxyAgent).toHaveBeenCalledTimes(2))
+					expect(agents).toHaveLength(2)
+
+					// Accept path: the first event installs and owns the global slot.
+					expect(mocks.dispatcherSlot.current).toBe(agents[0])
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledOnce()
+					expect(mocks.setGlobalDispatcher).toHaveBeenCalledWith(agents[0])
+
+					// Reject path: the second event aborts at the post-import latch re-check —
+					// it never reaches the previous-dispatcher capture (one getGlobalDispatcher
+					// call: the first capture; dispose below adds the restore check), and its
+					// agent is closed without ever entering the dispatcher slot.
+					expect(mocks.getGlobalDispatcher).toHaveBeenCalledTimes(1)
+					expect(agents[1].close).toHaveBeenCalledOnce()
+					// The aborted call registers no resource, so the first install's disposable
+					// remains the only teardown path for the slot.
+					expect(context.subscriptions).toHaveLength(3)
+
+					returned.dispose()
+
+					// The owning disposable restores the dispatcher it captured (the default),
+					// not the closed agent a double install would have recorded.
+					expect(agents[0].close).toHaveBeenCalledOnce()
+					expect(mocks.dispatcherSlot.current).toBe(mocks.defaultDispatcher)
+					expect(mocks.setGlobalDispatcher).toHaveBeenLastCalledWith(mocks.defaultDispatcher)
+				} finally {
+					// Re-register a synchronous factory with the same spies and drop the cached
+					// module: tests running after this one then resolve undici exactly as they
+					// do through the file-level mock (unmocking instead would expose the real
+					// package to those tests, and the pending-import factory above is now
+					// permanently bypassed).
+					vi.doMock("undici", () => ({
+						ProxyAgent: mocks.proxyAgent,
+						setGlobalDispatcher: mocks.setGlobalDispatcher,
+						getGlobalDispatcher: mocks.getGlobalDispatcher,
+						fetch: mocks.undiciFetch,
+					}))
+					vi.resetModules()
 					globalThis.fetch = fetchBefore
 				}
 			})

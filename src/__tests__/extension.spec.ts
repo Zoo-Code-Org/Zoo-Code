@@ -3,7 +3,12 @@
 import type * as vscode from "vscode"
 import type { WebviewMessage } from "@roo-code/types"
 
-import { makeCompositeDisposable, makeEventEmitter, makeExtensionContext } from "../test-utils/vscode"
+import {
+	makeCompositeDisposable,
+	makeEventEmitter,
+	makeExtensionContext,
+	makeWorkspaceConfiguration,
+} from "../test-utils/vscode"
 
 vi.mock("vscode", () => ({
 	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
@@ -24,6 +29,7 @@ vi.mock("vscode", () => ({
 			get: vi.fn().mockReturnValue([]),
 			inspect: vi.fn(),
 		}),
+		onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
 		createFileSystemWatcher: vi.fn().mockReturnValue({
 			onDidCreate: vi.fn(),
 			onDidChange: vi.fn(),
@@ -801,6 +807,99 @@ describe("extension.ts", () => {
 				vi.doUnmock("../utils/seedAllowedCommands")
 				vi.doUnmock("../services/zoo-code-auth")
 				vi.doUnmock("../utils/networkProxy")
+			}
+		})
+
+		// When activation starts with the debug proxy disabled, only the configuration
+		// listener can build the undici dispatcher agent, so the failed-activation
+		// teardown must own that listener-created resource. This runs the real
+		// initializer with undici/global-agent doubles swapped in and gates the seed
+		// rejection until the listener-path install has settled, so the close is
+		// observed through the aggregate dispose rather than the late-import guard.
+		test("closes the listener-created proxy agent when seeding rejects after a mid-session enable", async () => {
+			let rejectSeed: () => void = () => {}
+			vi.doMock("../utils/seedAllowedCommands", () => ({
+				seedCommandList: vi.fn(
+					() =>
+						new Promise<void>((_resolve, reject) => {
+							rejectSeed = () => reject(new Error("seed state write failed"))
+						}),
+				),
+			}))
+			const closeSpy = vi.fn().mockResolvedValue(undefined)
+			const proxyAgentCtor = vi.fn().mockImplementation(function () {
+				return { close: closeSpy }
+			})
+			// The slot double mirrors undici's global dispatcher state so the conditional
+			// restore is observable on this teardown path.
+			const defaultDispatcher = { close: vi.fn().mockResolvedValue(undefined) }
+			const dispatcherSlot: { current: unknown } = { current: defaultDispatcher }
+			const setGlobalDispatcher = vi.fn((dispatcher: unknown) => {
+				dispatcherSlot.current = dispatcher
+			})
+			const getGlobalDispatcher = vi.fn(() => dispatcherSlot.current)
+			vi.doMock("undici", () => ({
+				ProxyAgent: proxyAgentCtor,
+				setGlobalDispatcher,
+				getGlobalDispatcher,
+				fetch: vi.fn(),
+			}))
+			vi.doMock("global-agent", () => ({ bootstrap: vi.fn() }))
+			try {
+				const vscode = await import("vscode")
+				const { Package } = await import("../shared/package")
+				let configListener:
+					((event: { affectsConfiguration: (section: string) => boolean }) => void) | undefined
+				vi.mocked(vscode.workspace.onDidChangeConfiguration).mockImplementation((listener) => {
+					configListener = listener as typeof configListener
+					return { dispose: vi.fn() }
+				})
+				// Mutable so flipping enabled=true re-reads exactly like a live settings
+				// toggle: the helper's get() reads the record at call time.
+				const debugProxyValues: Record<string, unknown> = {
+					"debugProxy.enabled": false,
+					"debugProxy.serverUrl": "http://localhost:8080",
+					"debugProxy.tlsInsecure": false,
+				}
+				const otherSections = makeWorkspaceConfiguration()
+				vi.mocked(vscode.workspace.getConfiguration).mockImplementation((section?: string) =>
+					section === Package.name ? makeWorkspaceConfiguration(debugProxyValues) : otherSections,
+				)
+				const fetchBefore = globalThis.fetch
+				try {
+					const devContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
+					const { activate } = await import("../extension")
+					const activation = activate(devContext)
+
+					// Activation has registered the configuration listener and reached the
+					// gated seed: flip the toggle on, as a mid-session settings change would.
+					await vi.waitFor(() => expect(configListener).toBeTypeOf("function"))
+					debugProxyValues["debugProxy.enabled"] = true
+					configListener?.({ affectsConfiguration: () => true })
+					// The listener-path agent is installed before the seed failure arrives, so
+					// the teardown below closes an installed agent, not a late-import one.
+					await vi.waitFor(() => expect(setGlobalDispatcher).toHaveBeenCalledOnce())
+
+					rejectSeed()
+					await expect(activation).rejects.toThrow("seed state write failed")
+
+					// The aggregate owned the listener-created agent: the dispatcher captured
+					// at install is back in the slot and the agent closed exactly once.
+					expect(dispatcherSlot.current).toBe(defaultDispatcher)
+					expect(setGlobalDispatcher).toHaveBeenLastCalledWith(defaultDispatcher)
+					expect(closeSpy).toHaveBeenCalledOnce()
+					// The fetch patch the listener applied is restored by the same teardown.
+					expect(globalThis.fetch).toBe(fetchBefore)
+				} finally {
+					globalThis.fetch = fetchBefore
+					delete process.env.GLOBAL_AGENT_HTTP_PROXY
+					delete process.env.GLOBAL_AGENT_HTTPS_PROXY
+					delete process.env.GLOBAL_AGENT_NO_PROXY
+				}
+			} finally {
+				vi.doUnmock("../utils/seedAllowedCommands")
+				vi.doUnmock("undici")
+				vi.doUnmock("global-agent")
 			}
 		})
 
