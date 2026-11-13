@@ -34,18 +34,25 @@ export async function prepareOutputDirectory(out: string, kind: "side" | "compar
 // The lock lives beside the output tree and keys its real path, so aliases
 // cannot run two writers. Release synchronously after the last cleanup check
 // to avoid an interrupt arriving in an unprotected final await.
-export async function acquireSideOutputLock(out: string): Promise<() => void> {
+export async function acquireSideOutputLock(out: string, waitMs = 0): Promise<() => void> {
 	const canonical = await prepareOutputDirectory(out, "side")
 	const key = createHash("sha256").update(canonical).digest("hex")
 	const lock = path.join(path.dirname(canonical), `.coding-side-${key}.lock`)
-	try {
-		return lockSync(canonical, { lockfilePath: lock, stale: 30_000, update: 10_000, retries: 0 })
-	} catch (error) {
-		throw new Error(
-			`cannot acquire side output lock for ${canonical}; another side may be running; abandoned locks expire after 30 seconds (${lock})`,
-			{
-				cause: error,
-			},
-		)
+	const deadline = Date.now() + waitMs
+	while (true) {
+		try {
+			return lockSync(canonical, { lockfilePath: lock, stale: 30_000, update: 10_000, retries: 0 })
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "ELOCKED" && Date.now() < deadline) {
+				await new Promise((resolve) => setTimeout(resolve, Math.min(250, deadline - Date.now())))
+				continue
+			}
+			throw new Error(
+				`cannot acquire side output lock for ${canonical}; another side may be running; abandoned locks expire after 30 seconds (${lock})`,
+				{
+					cause: error,
+				},
+			)
+		}
 	}
 }

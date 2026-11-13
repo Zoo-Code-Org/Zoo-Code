@@ -207,6 +207,8 @@ export function buildContainerArgs(job: GraderJob, outDir: string, containerName
 		`${outDir}:/out:rw`,
 		"-v",
 		`${job.driverPath}:/driver/grader-driver.mjs:ro`,
+		"-v",
+		`${path.join(path.dirname(job.driverPath), "grader-events.mjs")}:/driver/grader-events.mjs:ro`,
 		"-w",
 		"/work",
 		job.resources.image,

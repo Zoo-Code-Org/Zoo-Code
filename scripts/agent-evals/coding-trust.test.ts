@@ -1,6 +1,8 @@
 import assert from "node:assert/strict"
 import { execFile } from "node:child_process"
 import fs from "node:fs/promises"
+import { prepareIsolatedWorktree } from "./coding-compare.ts"
+import { createSideProcessGuard } from "./side-process-guard.ts"
 import os from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
@@ -20,6 +22,7 @@ import {
 } from "./coding-trust.ts"
 
 const execFileAsync = promisify(execFile)
+const isolatedGit = { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null" }
 const sha = (c: string): string => c.repeat(40)
 
 // One throwaway repository with one empty commit. It stands in for an
@@ -411,7 +414,7 @@ describe("worktree process environment", () => {
 			OTHER_SECRET: "leak-me-too",
 			NODE_OPTIONS: "--require /tmp/never",
 		})
-		assert.deepEqual(child, { PATH: "/usr/bin" })
+		assert.deepEqual(child, { ...isolatedGit, PATH: "/usr/bin" })
 	})
 
 	it("never carries the provider credential into install or build", () => {
@@ -469,13 +472,13 @@ describe("container endpoint environment", () => {
 			"baseline",
 		)
 		assert.equal(side["SOLHEIM_API_KEY"], "provider-secret")
-		const expected = { ...endpoints, HOME: "/home/operator", PATH: "/usr/bin" }
+		const expected = { ...isolatedGit, ...endpoints, HOME: "/home/operator", PATH: "/usr/bin" }
 		assert.deepEqual(buildContainerCliEnvironment(side), expected)
 		for (const [name, value] of Object.entries(endpoints)) assert.equal(side[name], value)
 		assert.equal(side["OTHER_SECRET"], undefined)
 	})
 	it("does not invent missing endpoint settings or a home", () => {
-		assert.deepEqual(buildContainerCliEnvironment({ PATH: "/usr/bin" }), { PATH: "/usr/bin" })
+		assert.deepEqual(buildContainerCliEnvironment({ PATH: "/usr/bin" }), { ...isolatedGit, PATH: "/usr/bin" })
 	})
 })
 
@@ -495,5 +498,37 @@ it("preserves downloader network configuration across both boundaries without fo
 	}
 	assert.equal(child.SOLHEIM_API_KEY, undefined)
 	assert.equal(child.UNRELATED_SECRET, undefined)
-	assert.deepEqual(child, network)
+	assert.deepEqual(child, { ...isolatedGit, ...network })
 })
+
+for (const attack of ["filter", "hook"] as const) {
+	it(`does not execute source repository ${attack} configuration during checkout`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "isolated-worktree-"))
+		try {
+			const root = await makeRepo(dir)
+			await fs.writeFile(path.join(root, ".gitattributes"), "payload filter=planted\n")
+			await fs.writeFile(path.join(root, "payload"), "approved bytes")
+			await commitAll(root, "payload")
+			const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root })
+			const marker = path.join(dir, "executed")
+			const script = path.join(dir, "attack.sh")
+			await fs.writeFile(script, `#!/bin/sh\ntouch '${marker}'\ncat\n`, { mode: 0o700 })
+			if (attack === "filter") {
+				await execFileAsync("git", ["config", "filter.planted.smudge", script], { cwd: root })
+				await execFileAsync("git", ["config", "filter.planted.required", "true"], { cwd: root })
+			} else {
+				const hooks = path.join(dir, "hooks")
+				await fs.mkdir(hooks)
+				await fs.copyFile(script, path.join(hooks, "post-checkout"))
+				await execFileAsync("git", ["config", "core.hooksPath", hooks], { cwd: root })
+			}
+			const worktree = path.join(dir, "fresh")
+			await prepareIsolatedWorktree(createSideProcessGuard(100), () => false, root, stdout.trim(), worktree, 5000)
+			assert.equal(await fs.readFile(path.join(worktree, "payload"), "utf8"), "approved bytes")
+			await assert.rejects(fs.access(marker))
+			await assertEvaluatedTreeClean(worktree)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}

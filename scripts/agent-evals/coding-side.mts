@@ -27,7 +27,7 @@ import { CODING_SUITE_ID, codingSuiteDigest, ensureCodingSuiteRegistered } from 
 import { GRADER_VERSION } from "./coding-grader.ts"
 import { digestValue } from "./coding-digest.ts"
 import { sideGraderImageDigest, type SidePins } from "./coding-pins.ts"
-import { runBoundedPreparation } from "./coding-compare.ts"
+import { prepareIsolatedWorktree, runBoundedPreparation } from "./coding-compare.ts"
 import {
 	assertCommitsApproved,
 	buildWorktreeEnvironment,
@@ -50,7 +50,8 @@ const WORKTREE_TIMEOUT_MS = 120_000
 const INSTALL_TIMEOUT_MS = 10 * 60_000
 const BUILD_TIMEOUT_MS = 30 * 60_000
 const WORKTREE_REMOVE_TIMEOUT_MS = 30_000
-const SIDE_KILL_GRACE_MS = 30_000
+// Leave time for side cleanup before the comparison escalates at 30 seconds.
+const SIDE_KILL_GRACE_MS = 5_000
 
 const readArgs = (): {
 	reps: number
@@ -58,6 +59,7 @@ const readArgs = (): {
 	credentialEnv: string
 	evaluatedRoot: string
 	trustFile: string
+	scratchParent: string
 } => {
 	const args = process.argv.slice(2)
 	// The local subprocess runtime has no container isolation: agent-written
@@ -87,6 +89,7 @@ const readArgs = (): {
 		// fresh worktree this side builds from the approved commit.
 		evaluatedRoot: path.resolve(read("evaluated-root") ?? thisRoot),
 		trustFile: path.resolve(trustFile),
+		scratchParent: path.resolve(read("scratch-parent") ?? os.tmpdir()),
 	}
 }
 
@@ -113,7 +116,7 @@ const readVscodeTarget = async (root: string): Promise<string> => {
 	}
 }
 
-const { reps, out, credentialEnv, evaluatedRoot, trustFile } = readArgs()
+const { reps, out, credentialEnv, evaluatedRoot, trustFile, scratchParent } = readArgs()
 if (!Number.isInteger(reps) || reps < 1) throw new Error("--reps must be a positive integer")
 const sideLabel = readSideLabel()
 // Trust gate. The evaluated root names the repository whose HEAD commit this
@@ -172,7 +175,7 @@ await executeSideGeneration({
 	isInterrupted: interrupt.isInterrupted,
 	cleanup: () => cleanupPreparedTree(),
 	run: async () => {
-		const sideScratch = await fs.mkdtemp(path.join(os.tmpdir(), "coding-evals-side-"))
+		const sideScratch = await fs.mkdtemp(path.join(scratchParent, "coding-evals-side-"))
 		const evaluatedWorktree = path.join(sideScratch, "worktree")
 		const downloadVSCode = createPrivateVSCodeDownloader(path.join(sideScratch, "vscode-cache"))
 
@@ -181,11 +184,15 @@ await executeSideGeneration({
 		// removed, so no child is still writing while its tree is deleted.
 		cleanupPreparedTree = async (): Promise<void> => {
 			await prepSettled
-			await execFileAsync("git", ["worktree", "remove", "--force", evaluatedWorktree], {
-				cwd: evaluatedRoot,
-				timeout: WORKTREE_REMOVE_TIMEOUT_MS,
-				env: buildWorktreeEnvironment(process.env),
-			}).catch((error: unknown) => {
+			await execFileAsync(
+				"git",
+				["--git-dir", `${evaluatedWorktree}.git-source`, "worktree", "remove", "--force", evaluatedWorktree],
+				{
+					cwd: evaluatedRoot,
+					timeout: WORKTREE_REMOVE_TIMEOUT_MS,
+					env: buildWorktreeEnvironment(process.env),
+				},
+			).catch((error: unknown) => {
 				console.error(`coding-evals side: failed to remove worktree ${evaluatedWorktree}: ${String(error)}`)
 			})
 			await fs.rm(sideScratch, { recursive: true, force: true }).catch((error: unknown) => {
@@ -231,12 +238,12 @@ await executeSideGeneration({
 		// removal. A thrown failure is deferred until the removal finished, so no
 		// error path leaks the worktree.
 		try {
-			await runBoundedPreparation(
+			await prepareIsolatedWorktree(
 				prepGuard,
 				interrupt.isInterrupted,
-				"git",
-				["worktree", "add", "--detach", evaluatedWorktree, evaluatedCommit],
 				evaluatedRoot,
+				evaluatedCommit,
+				evaluatedWorktree,
 				WORKTREE_TIMEOUT_MS,
 			)
 			// The approval names one commit, so the constructed tree must resolve to

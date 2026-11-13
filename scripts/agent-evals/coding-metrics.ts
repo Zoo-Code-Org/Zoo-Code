@@ -10,6 +10,8 @@ export interface PromptSizeRow {
 	// Provider-reported input tokens for the request.
 	reportedInputTokens: Measured<number>
 	label: "providerReportedInputTokens"
+	estimatedContextTokens: Measured<number>
+	estimatedContextLabel: "extensionContextEstimate"
 }
 
 export interface ToolCallSummary {
@@ -124,6 +126,11 @@ export function buildRunMetrics(input: {
 				index: row.index,
 				reportedInputTokens: row.tokensIn,
 				label: "providerReportedInputTokens",
+				estimatedContextTokens: row.contextTokensEstimate ?? {
+					available: false,
+					reason: "perRequestContextNotReported",
+				},
+				estimatedContextLabel: "extensionContextEstimate",
 			})),
 			requestsMissingUsage: accounting?.requestsMissingUsage ?? 0,
 		},

@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url"
 import {
 	createComparisonScratchDirectory,
 	executeComparisonFlow,
-	runBoundedPreparation,
+	prepareIsolatedWorktree,
 	runCompareSide,
 } from "./coding-compare.ts"
 import { assertCommitsApproved, assertCredentialEnvAllowed, loadTrustPolicy, resolveCommit } from "./coding-trust.ts"
@@ -112,14 +112,7 @@ const readArgs = (): {
 // executed build output is always the side's own product of the approved
 // commit.
 const prepareSideWorktree = async (commit: string, worktree: string): Promise<void> => {
-	await runBoundedPreparation(
-		sideGuard,
-		interruptFlag.isInterrupted,
-		"git",
-		["worktree", "add", "--detach", worktree, commit],
-		root,
-		WORKTREE_TIMEOUT_MS,
-	)
+	await prepareIsolatedWorktree(sideGuard, interruptFlag.isInterrupted, root, commit, worktree, WORKTREE_TIMEOUT_MS)
 }
 
 const inputs = readArgs()

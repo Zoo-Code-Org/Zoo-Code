@@ -98,3 +98,27 @@ setInterval(() => {}, 1000)
 		await fs.rm(dir, { recursive: true, force: true })
 	}
 })
+
+it("waits through a fresh abandoned lock before cleanup acquires it", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-wait-lock-"))
+	const key = createHash("sha256")
+		.update(await fs.realpath(dir))
+		.digest("hex")
+	const lock = path.join(path.dirname(dir), `.coding-side-${key}.lock`)
+	try {
+		await fs.mkdir(lock)
+		const pending = acquireSideOutputLock(dir, 1000)
+		const timer = setTimeout(() => {
+			void fs.utimes(lock, new Date(0), new Date(0))
+		}, 100)
+		try {
+			const release = await pending
+			release()
+		} finally {
+			clearTimeout(timer)
+		}
+	} finally {
+		await fs.rm(lock, { recursive: true, force: true })
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})

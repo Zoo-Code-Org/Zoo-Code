@@ -66,6 +66,8 @@ export interface TraceRequestRow {
 	ts: number
 	apiProtocol: MeasuredString
 	tokensIn: Measured<number>
+	// Optional per-request extension estimate; cumulative usage cannot supply this.
+	contextTokensEstimate?: Measured<number>
 	tokensOut: Measured<number>
 	cacheWrites: Measured<number>
 	cacheReads: Measured<number>
