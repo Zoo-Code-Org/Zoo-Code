@@ -4,6 +4,7 @@ import * as os from "os"
 import * as fs from "fs/promises"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import pWaitFor from "p-wait-for"
+import deepEqual from "fast-deep-equal"
 import * as vscode from "vscode"
 
 import {
@@ -80,6 +81,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { playTts, setTtsEnabled, setTtsSpeed, stopTts } from "../../utils/tts"
 import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
+import { ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
 import { getGitHubCopilotViewState } from "../../services/language-models/copilotViewState"
@@ -777,6 +779,18 @@ export const webviewMessageHandler = async (
 					// An invalid display value is ignored, before anything is done for it.
 					if (isInvalidDisplayValue(key, value)) {
 						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
+					// The registered viewStates map is host-owned. ClineProvider.setValues drops a caller-supplied
+					// map because the provider rewrites that map from a full read of it; this loop writes through
+					// ContextProxy directly, so the same key has to be dropped here too - a webview-supplied map
+					// would replace every view's durable selection, not just this view's, and an unset would erase
+					// the map. The key is dropped before any side effect is run for it.
+					if (key === "viewStates") {
+						provider.log(
+							"[updateSettings] Ignored a webview-supplied viewStates map; the registered map is written by the extension host.",
+						)
 						continue
 					}
 
@@ -2517,18 +2531,160 @@ export const webviewMessageHandler = async (
 						break
 					}
 
-					// Load the old configuration to get its ID.
-					const { id } = await provider.providerSettingsManager.getProfile({ name: oldName })
+					// The webview's name validation treats a case-only difference from the
+					// current profile as the current profile, so a case-only collision reaches
+					// here as a rename onto an existing record. Reject it instead of
+					// overwriting that profile: the rollback below would otherwise delete a
+					// record the rename never owned.
+					if (await provider.providerSettingsManager.hasConfig(newName)) {
+						throw new Error(`A profile named '${newName}' already exists`)
+					}
 
+					// Load the old configuration to get its ID, and keep its full stored
+					// record: a rollback must re-point views to the settings oldName actually
+					// persists, not to the payload the rename attempted.
+					const { name: _previousName, ...previousRecord } =
+						await provider.providerSettingsManager.getProfile({ name: oldName })
+					const { id } = previousRecord
+
+					// Only remove a record this rename actually wrote. Two renames in the same extension
+					// host use different ProviderSettingsManager instances, so one rename's existence check
+					// and save are not ordered against the other's: both can see newName as absent, and a
+					// compensation here would then delete the record the other rename stored. The id is the
+					// record's identity, and every rename carries the id it loaded from oldName.
+					//
+					// Identity alone is not enough: saveConfig keeps a profile's id, so a save of newName
+					// that lands after this rename's write - another view editing the same profile - stores
+					// different settings under the same id, and an id-only check would let compensation
+					// delete that newer save. Compensation therefore also requires that the stored settings
+					// are still the ones this rename wrote. Before the read-back succeeds there is no such
+					// copy to compare against, and this rename had only its own write to newName, so the id
+					// check stays the rule there.
+					let writtenByThisRename: typeof previousRecord | undefined
+					const removeOwnRenameRecord = async (): Promise<void> => {
+						let stored: typeof previousRecord | undefined
+						try {
+							const { name: _storedName, ...storedRecord } =
+								await provider.providerSettingsManager.getProfile({ name: newName })
+							stored = storedRecord
+						} catch (readError) {
+							if (readError instanceof ProviderSettingsNotFoundError) {
+								// The record is gone: there is nothing of this rename left to undo, and a
+								// blind delete here would target whatever stored newName next.
+								return
+							}
+							// Any other read failure leaves the previous behaviour: this rename did store
+							// newName, so its compensation still removes it.
+						}
+						if (stored !== undefined && stored.id !== id) {
+							provider.log(
+								`Rename compensation skipped for '${newName}': the stored record (id ${stored.id}) is not the one this rename wrote (id ${id}).`,
+							)
+							return
+						}
+						if (stored !== undefined && writtenByThisRename && !deepEqual(stored, writtenByThisRename)) {
+							provider.log(
+								`Rename compensation skipped for '${newName}': the stored record still carries this rename's id (${id}) but no longer holds the settings this rename wrote.`,
+							)
+							return
+						}
+						await provider.providerSettingsManager.deleteConfig(newName)
+					}
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
 
-					// Delete the old configuration.
-					await provider.providerSettingsManager.deleteConfig(oldName)
+					// saveConfig normalizes the record (legacy downgrades, schema parse): hand
+					// the stored copy to the views and task handlers instead of the raw
+					// webview payload, so unvalidated fields cannot bypass the profile-schema
+					// normalization on the way into view state. When the read-back fails the
+					// rename cannot proceed on a trustworthy record: remove the new record
+					// before reporting so the failed rename cannot leave both names resolving
+					// to the same id.
+					let normalizedRenamed: typeof previousRecord
+					try {
+						const { name: _renamedName, ...renamedRecord } =
+							await provider.providerSettingsManager.getProfile({ name: newName })
+						normalizedRenamed = renamedRecord
+						writtenByThisRename = renamedRecord
+					} catch (error) {
+						try {
+							await removeOwnRenameRecord()
+						} catch (cleanupError) {
+							provider.log(
+								`Rename rollback failed to remove '${newName}': ${JSON.stringify(cleanupError, Object.getOwnPropertyNames(cleanupError), 2)}`,
+							)
+						}
+						throw error
+					}
+
+					// Re-point live views pinned to the old name before it stops
+					// resolving: the rename keeps the id, so their pins should follow the
+					// record instead of dangling, and their overlays must serve the
+					// renamed settings rather than the pre-rename copy. A failed re-point can
+					// leave views already following newName, so undo this rename's own
+					// durable write before reporting: the reverse re-point returns the views
+					// that moved (the others never left oldName) and the new record goes
+					// away, leaving the pre-rename state intact.
+					try {
+						await provider.repointViewLocalStateAfterProfileRename(oldName, newName, normalizedRenamed)
+					} catch (error) {
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+							await removeOwnRenameRecord()
+						} catch (compensationError) {
+							provider.log(
+								`Rename compensation failed after re-point rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+							)
+						}
+						throw error
+					}
+
+					// Delete the old configuration. A failure here would leave both names
+					// resolving and every live view pinned to the new name: undo the re-point
+					// with the previously stored record - not the attempted payload, which was
+					// never persisted under the old name - and drop the new record so the
+					// pre-rename state survives intact. A failed compensation is logged: both
+					// names can then remain stored, and the log is the only trace of that
+					// inconsistency.
+					try {
+						await provider.providerSettingsManager.deleteConfig(oldName)
+					} catch (error) {
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+							await removeOwnRenameRecord()
+						} catch (compensationError) {
+							provider.log(
+								`Rename compensation failed after delete rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+							)
+						}
+						throw error
+					}
 
 					// Re-activate to update the global settings related to the
-					// currently activated provider profile.
-					await provider.activateProviderProfile({ name: newName })
+					// currently activated provider profile. The rename has already committed by
+					// now (the new record is stored, the old name is deleted, and every live
+					// view was re-pointed). If that activation fails its own rollback puts the
+					// shared selection, the shared settings, this view's pin and this view's
+					// overlay back on oldName - the record this rename just deleted. Re-pointing
+					// the selection at newName would pair that name with settings that still
+					// belong to another profile, so the failure completes the rollback instead:
+					// restore the record this rename deleted, re-point the views at it with the
+					// record they were pinned to, and drop the record this rename authored. Every
+					// pair stays a pair, and nothing points at a name that does not resolve.
+					try {
+						await provider.activateProviderProfile({ name: newName })
+					} catch (error) {
+						try {
+							await provider.providerSettingsManager.saveConfig(oldName, previousRecord)
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+							await removeOwnRenameRecord()
+						} catch (rollbackError) {
+							provider.log(
+								`Rename activation failed and the pre-rename state could not be restored: ${JSON.stringify(rollbackError, Object.getOwnPropertyNames(rollbackError), 2)}`,
+							)
+						}
+						throw error
+					}
 				} catch (error) {
 					provider.log(
 						`Error rename api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -2576,18 +2732,24 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const newName = (await provider.providerSettingsManager.listConfig()).filter(
-					(c) => c.name !== oldName,
-				)[0]?.name
+				const profileToDelete = (await provider.providerSettingsManager.listConfig()).find(
+					(c) => c.name === oldName,
+				)
 
-				if (!newName) {
+				if (!profileToDelete) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
 					return
 				}
 
+				// Route the deletion through ClineProvider.deleteProviderProfile. That is where
+				// the profile list, the live views' pins and overlays, the closed views'
+				// persisted pins, the last-profile guard, and the compensation for a
+				// half-finished deletion live. Deleting the manager record here and activating
+				// a survivor afterwards leaves every one of those surfaces naming a profile
+				// that no longer exists, and the survivor's settings are never written to the
+				// shared store.
 				try {
-					await provider.providerSettingsManager.deleteConfig(oldName)
-					await provider.activateProviderProfile({ name: newName })
+					await provider.deleteProviderProfile(profileToDelete)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -2758,9 +2920,37 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Switch back to default mode after deletion
-				await updateGlobalState("mode", defaultModeSlug)
+				// Switch back to default mode after deletion. Route through provider.setValue so
+				// the per-view mutation path mirrors the shared write: a view that pinned the
+				// deleted mode would otherwise keep it in its own buffer (getState() and any new
+				// task created there) while the shared store says default.
+				try {
+					await provider.setValue("mode", defaultModeSlug)
+				} catch (error) {
+					// provider.setValue rolled the shared store back to the value it captured before
+					// the write, and here that value is the slug deleteCustomMode just removed: a failed
+					// per-view write leaves the shared mode naming a mode that no longer exists. Rethrow
+					// from here and the post and the sibling fan-out below are both skipped, so the web
+					// keeps showing a deleted mode. Put the shared store back on a slug that does exist
+					// - the shared layer only, because the per-view record is what failed - and continue.
+					provider.log(
+						`[deleteCustomMode] Failed to write the default mode after deleting ${message.slug}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+					try {
+						await provider.contextProxy.setValue("mode", defaultModeSlug)
+					} catch (compensationError) {
+						provider.log(
+							`[deleteCustomMode] Compensation to the default mode ${defaultModeSlug} failed too: ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`,
+						)
+					}
+				}
 				await provider.postStateToWebview()
+
+				// Sibling views are not covered by the write above: a view that pinned the deleted
+				// slug still holds it in its own per-view state, so its getState() reports a mode
+				// that no longer exists and any task created there stores it. Clear only the
+				// overrides that name the deleted slug, with the same fan-out resetState() uses.
+				await provider.clearViewLocalModeForDeletedSlug(message.slug)
 			}
 			break
 		case "exportMode":
