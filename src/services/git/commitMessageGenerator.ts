@@ -1,8 +1,8 @@
 import * as path from "path"
 import * as vscode from "vscode"
 import type { ProviderSettings } from "@roo-code/types"
-import { redactSensitiveInformation } from "@roo-code/core"
 
+import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { truncateOutput } from "../../integrations/misc/extract-text"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
@@ -84,6 +84,14 @@ export const DIFF_TRUNCATED_MESSAGE =
 
 // vscode.git Status.UNTRACKED
 const UNTRACKED_STATUS = 7
+
+// The first line of each file in a diff, also of a combined diff during a merge conflict.
+const DIFF_HEADER = /^diff --(?:git|cc|combined) /
+// A line before the first hunk that names one path of the file. A renamed or copied file has two.
+// Git adds a tab after a `---` or `+++` path that contains a space.
+const DIFF_PATH_LINE = /^(?:--- |\+\+\+ |rename from |rename to |copy from |copy to )([^\t\r\n]+)/
+const GIT_PATH_ESCAPES: Record<string, string> = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v" }
+export const IGNORED_FILE_NOTE = "(Content left out: the file is in .rooignore.)"
 
 /**
  * Accesses the VS Code Git extension API.
@@ -227,6 +235,77 @@ export async function getRepositoryDiff(repository: GitRepository, signal?: Abor
 }
 
 /**
+ * Reads a path as Git writes it. A path with special characters is quoted, and its special and
+ * non-ASCII characters are C escapes (`"b/.env.pr\303\266d"` is `b/.env.pröd`).
+ */
+function unquoteGitPath(value: string): string {
+	if (!value.startsWith('"') || !value.endsWith('"')) {
+		return value
+	}
+	const quoted = value.slice(1, -1)
+	const bytes: Buffer[] = []
+	let copiedUpTo = 0
+	for (const escape of quoted.matchAll(/\\([0-7]{3}|.)/g)) {
+		const [sequence, code = ""] = escape
+		bytes.push(Buffer.from(quoted.slice(copiedUpTo, escape.index), "utf8"))
+		const isOctal = code.length === 3
+		bytes.push(isOctal ? Buffer.from([parseInt(code, 8)]) : Buffer.from(GIT_PATH_ESCAPES[code] ?? code, "utf8"))
+		copiedUpTo = escape.index + sequence.length
+	}
+	bytes.push(Buffer.from(quoted.slice(copiedUpTo), "utf8"))
+	return Buffer.concat(bytes).toString("utf8")
+}
+
+/** True when `.rooignore` blocks a path of the diff section (paths are read before its first hunk). */
+function isSectionBlocked(section: string[], isAllowed: (relativePath: string) => boolean): boolean {
+	const firstHunk = section.findIndex((line) => line.startsWith("@@"))
+	return section.slice(0, firstHunk === -1 ? section.length : firstHunk).some((line) => {
+		const [, written] = DIFF_PATH_LINE.exec(line) ?? []
+		if (written === undefined || written === "/dev/null") {
+			return false
+		}
+		// The `a/` and `b/` prefixes (or `i/`, `w/`, `c/`, `o/` with diff.mnemonicPrefix) are not part of the
+		// path. With diff.noPrefix there is no prefix, so the path is also checked as written.
+		const gitPath = unquoteGitPath(written)
+		return [gitPath, gitPath.replace(/^[abciow]\//, "")].some((candidate) => !isAllowed(candidate))
+	})
+}
+
+/**
+ * Leaves out the content of each file in the diff that `.rooignore` blocks, the same rule that keeps
+ * these files out of the chat. The first line of the file stays, so the commit message can name it.
+ * The list of untracked files has no path lines, so it is kept as it is.
+ */
+export function omitIgnoredFiles(diff: string, isAllowed: (relativePath: string) => boolean): string {
+	const kept: string[] = []
+	let section: string[] = []
+	const closeSection = () => {
+		const [header = ""] = section
+		kept.push(...(isSectionBlocked(section, isAllowed) ? [header, IGNORED_FILE_NOTE] : section))
+		section = []
+	}
+	for (const line of diff.split("\n")) {
+		if (DIFF_HEADER.test(line)) {
+			closeSection()
+		}
+		section.push(line)
+	}
+	closeSection()
+	return kept.join("\n")
+}
+
+/** The diff without the content of files that `.rooignore` in the repository root blocks. */
+async function withoutIgnoredFiles(repository: GitRepository, diff: string): Promise<string> {
+	const rooIgnore = new RooIgnoreController(repository.rootUri.fsPath)
+	try {
+		await rooIgnore.initialize()
+		return omitIgnoredFiles(diff, (relativePath) => rooIgnore.validateAccess(relativePath))
+	} finally {
+		rooIgnore.dispose()
+	}
+}
+
+/**
  * Cleans the commit message output from LLM completions.
  */
 export function cleanCommitMessage(message: string): string {
@@ -247,11 +326,10 @@ export function cleanCommitMessage(message: string): string {
  * `truncated` is true when the diff exceeded the line or character limit and was shortened.
  */
 export function buildCommitMessagePrompt(diff: string): CommitMessagePrompt {
-	const sanitizedDiff = redactSensitiveInformation(diff)
-	const truncatedDiff = truncateOutput(sanitizedDiff, DIFF_LINE_LIMIT, DIFF_CHARACTER_LIMIT)
+	const truncatedDiff = truncateOutput(diff, DIFF_LINE_LIMIT, DIFF_CHARACTER_LIMIT)
 	return {
 		prompt: `${COMMIT_MESSAGE_SYSTEM_PROMPT}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\`\n\nCommit Message:`,
-		truncated: truncatedDiff !== sanitizedDiff,
+		truncated: truncatedDiff !== diff,
 	}
 }
 
@@ -386,6 +464,11 @@ async function runGeneration(
 			vscode.window.showInformationMessage(NO_CHANGES_MESSAGE)
 			return
 		}
+		// The filter step never resolves to undefined, so undefined means the user cancelled.
+		const visibleDiff = await untilCancelled(withoutIgnoredFiles(repository, diff))
+		if (visibleDiff === undefined) {
+			return
+		}
 
 		const state = await untilCancelled(provider.getState())
 		if (isCancelled()) {
@@ -426,7 +509,7 @@ async function runGeneration(
 			}
 		}
 
-		const { prompt, truncated } = buildCommitMessagePrompt(diff)
+		const { prompt, truncated } = buildCommitMessagePrompt(visibleDiff)
 		const completion = singleCompletionHandler(apiConfiguration as ProviderSettings, prompt, {
 			abortSignal: abortController.signal,
 		})

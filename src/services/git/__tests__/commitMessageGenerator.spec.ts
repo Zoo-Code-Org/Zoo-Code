@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "fs/promises"
+import { tmpdir } from "os"
+import * as path from "path"
 import * as vscode from "vscode"
 import type { Mock } from "vitest"
 import { providerIdentifiers } from "@roo-code/types"
@@ -14,7 +17,9 @@ import {
 	generateCommitMessage,
 	getGitApi,
 	getRepositoryDiff,
+	IGNORED_FILE_NOTE,
 	NO_CHANGES_MESSAGE,
+	omitIgnoredFiles,
 	resetCommitMessageRequestState,
 	resolveGitRepository,
 	PREVIOUS_REQUEST_WAIT_MS,
@@ -27,9 +32,30 @@ import { ClineProvider } from "../../../core/webview/ClineProvider"
 import { singleCompletionHandler } from "../../../utils/single-completion-handler"
 import { makeUri } from "../../../test-utils/vscode"
 
+// RooIgnoreController watches `.rooignore`. The watcher double provides the three events and dispose.
+const { watcherDispose, makeWatcher } = vi.hoisted(() => {
+	const watcherDispose = vi.fn()
+	const makeWatcher = () => ({
+		onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
+		onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
+		onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
+		dispose: watcherDispose,
+	})
+	return { watcherDispose, makeWatcher }
+})
+
 vi.mock("vscode", () => ({
 	ProgressLocation: {
 		Notification: 15,
+	},
+	RelativePattern: class {
+		constructor(
+			readonly base: string,
+			readonly pattern: string,
+		) {}
+	},
+	workspace: {
+		createFileSystemWatcher: vi.fn(makeWatcher),
 	},
 	extensions: {
 		getExtension: vi.fn(),
@@ -51,9 +77,6 @@ vi.mock("../../../utils/single-completion-handler", () => ({
 	singleCompletionHandler: vi.fn(),
 }))
 
-// A fake npm token: "npm_" followed by 36 letters and digits.
-const FAKE_NPM_TOKEN = `npm_${"a1B2c3D4e5".repeat(3)}f6G7h8`
-
 function makeRepo(root: string, overrides: Partial<GitRepository> = {}): GitRepository {
 	return {
 		rootUri: makeUri(root),
@@ -61,6 +84,12 @@ function makeRepo(root: string, overrides: Partial<GitRepository> = {}): GitRepo
 		diff: vi.fn().mockResolvedValue("diff content"),
 		...overrides,
 	}
+}
+
+/** Makes `repository` the only repository of the Git API that the generator reads. */
+function useOnlyRepository(repository: GitRepository): void {
+	const gitApi: GitAPI = { repositories: [repository] }
+	;(vscode.extensions.getExtension as Mock).mockReturnValue({ isActive: true, exports: { getAPI: () => gitApi } })
 }
 
 function deferred<T>() {
@@ -136,12 +165,6 @@ describe("commitMessageGenerator", () => {
 			expect(truncated).toBe(false)
 		})
 
-		it("redacts sensitive information in the prompt", () => {
-			const { prompt } = buildCommitMessagePrompt("apiKey: 'secret_token_12345678'")
-			expect(prompt).not.toContain("secret_token_12345678")
-			expect(prompt).toContain("[REDACTED]")
-		})
-
 		it.each([
 			["character", "x".repeat(DIFF_CHARACTER_LIMIT + 1)],
 			["line", Array.from({ length: DIFF_LINE_LIMIT + 1 }, (_, i) => `+line ${i}`).join("\n")],
@@ -155,6 +178,132 @@ describe("commitMessageGenerator", () => {
 		it("does not report truncation at exactly the character limit", () => {
 			const { truncated } = buildCommitMessagePrompt("x".repeat(DIFF_CHARACTER_LIMIT))
 			expect(truncated).toBe(false)
+		})
+	})
+
+	describe("omitIgnoredFiles", () => {
+		const blocked = new Set([".env", "keys/a b.pem", "conf/.env.pröd", 'conf/a"b.env', "conf/a\tb.env"])
+		const isAllowed = (relativePath: string) => !blocked.has(relativePath)
+		const section = (header: string, ...rest: string[]) => [header, ...rest].join("\n")
+		const app = section("diff --git a/app.ts b/app.ts", "--- a/app.ts", "+++ b/app.ts", "@@ -1 +1 @@", "+x = 1")
+
+		it.each([
+			["a changed file", section("diff --git a/.env b/.env", "--- a/.env", "+++ b/.env", "@@ -1 +1 @@", "+A=1")],
+			[
+				"an added file",
+				section("diff --git a/.env b/.env", "--- /dev/null", "+++ b/.env", "@@ -0,0 +1 @@", "+A=1"),
+			],
+			[
+				"a deleted file",
+				section("diff --git a/.env b/.env", "--- a/.env", "+++ /dev/null", "@@ -1 +0,0 @@", "-A=1"),
+			],
+			[
+				"a file renamed from a blocked path",
+				section(
+					"diff --git a/.env b/x",
+					"rename from .env",
+					"rename to x",
+					"--- a/.env",
+					"+++ b/x",
+					"@@ -1 +1 @@",
+					"-A=1",
+				),
+			],
+			[
+				"a pure rename",
+				section("diff --git a/x b/.env", "similarity index 100%", "rename from x", "rename to .env"),
+			],
+			["a copy", section("diff --git a/.env b/y", "copy from .env", "copy to y")],
+			[
+				"a path with a space (Git adds a tab)",
+				section(
+					"diff --git a/keys/a b.pem b/keys/a b.pem",
+					"--- a/keys/a b.pem\t",
+					"+++ b/keys/a b.pem\t",
+					"@@ -1 +1 @@",
+					"+k",
+				),
+			],
+			[
+				"a quoted path with octal escapes",
+				section(
+					'diff --git "a/conf/.env.pr\\303\\266d" "b/conf/.env.pr\\303\\266d"',
+					'--- "a/conf/.env.pr\\303\\266d"',
+					'+++ "b/conf/.env.pr\\303\\266d"',
+					"@@ -1 +1 @@",
+					"+A=1",
+				),
+			],
+			[
+				"a quoted path with an escaped quote",
+				section(
+					'diff --git "a/conf/a\\"b.env" "b/conf/a\\"b.env"',
+					'--- "a/conf/a\\"b.env"',
+					'+++ "b/conf/a\\"b.env"',
+					"@@ -1 +1 @@",
+					"+A=1",
+				),
+			],
+			[
+				"a quoted path with a C escape",
+				section(
+					'diff --git "a/conf/a\\tb.env" "b/conf/a\\tb.env"',
+					'--- "a/conf/a\\tb.env"',
+					'+++ "b/conf/a\\tb.env"',
+					"@@ -1 +1 @@",
+					"+A=1",
+				),
+			],
+			[
+				"mnemonic prefixes",
+				section("diff --git i/.env w/.env", "--- i/.env", "+++ w/.env", "@@ -1 +1 @@", "+A=1"),
+			],
+			["no prefixes", section("diff --git .env .env", "--- .env", "+++ .env", "@@ -1 +1 @@", "+A=1")],
+			[
+				"a CRLF diff",
+				section("diff --git a/.env b/.env\r", "--- a/.env\r", "+++ b/.env\r", "@@ -1 +1 @@\r", "+A=1\r"),
+			],
+			[
+				"a combined diff of a merge conflict",
+				section(
+					"diff --cc .env",
+					"index 1,2..3",
+					"--- a/.env",
+					"+++ b/.env",
+					"@@@ -1,1 -1,1 +1,1 @@@",
+					"++A=1",
+				),
+			],
+		])("leaves out the content of %s and keeps its first line", (_label, ignored) => {
+			const [header = ""] = ignored.split("\n")
+			expect(omitIgnoredFiles(`${app}\n${ignored}\n${app}`, isAllowed)).toBe(
+				`${app}\n${header}\n${IGNORED_FILE_NOTE}\n${app}`,
+			)
+		})
+
+		it.each([
+			["a diff without blocked files", app],
+			// The removed line `-- a/.env` and the added line `++ b/.env` look like path lines.
+			["a file whose content has path lines after its first hunk", section(app, "--- a/.env", "+++ b/.env")],
+			["the list of untracked files", "Untracked files:\n.env\nsrc/app.ts"],
+			["an empty diff", ""],
+		])("keeps %s unchanged", (_label, diff) => {
+			expect(omitIgnoredFiles(diff, isAllowed)).toBe(diff)
+		})
+
+		it.each([
+			["a changed file", ["--- a/x", "+++ b/y"], ["a/x", "x", "b/y", "y"]],
+			["an added file", ["--- /dev/null", "+++ b/y"], ["b/y", "y"]],
+		])("checks each path of %s with and without its prefix", (_label, pathLines, expected) => {
+			const checked: string[] = []
+			omitIgnoredFiles(
+				section("diff --git a/x b/y", ...pathLines, "@@ -0,0 +1 @@", "--- a/z"),
+				(relativePath) => {
+					checked.push(relativePath)
+					return true
+				},
+			)
+			expect(checked).toEqual(expected)
 		})
 	})
 
@@ -1004,184 +1153,80 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["a staged diff", true],
 			["a working-tree diff", false],
-		])("keeps tokens in %s out of the prompt", async (_label, staged) => {
-			const tokenDiff = [
-				`+NPM_TOKEN=${FAKE_NPM_TOKEN}`,
-				`+//registry.npmjs.org/:_authToken=${FAKE_NPM_TOKEN}`,
-				"+TOKEN=abcdef1234567890",
-				'+  "token": "abcdef1234567890",',
-				"+  token: abcdefghijklmnopqrstuvwxyz",
-				'+const npmToken = "opaque12345678"',
-				"+  token: abcdefghijklmnop.qrstuvwxyzabcdefgh",
-				"+token: Abcdefghijklmnop",
-				"+PASSWORD=string=MySecurePass123",
-				"+passphrase: correct horse battery staple",
-				'+const header = "Bearer abcdefghijklmnopqrstuvwx"',
-				'+const short = "Bearer hunter2"',
-				"+<password>",
-				"+  multilinehunter2",
-				"+</password>",
-				'+<apiKey env="prod">attrhunter2</apiKey>',
-				"+<secret><![CDATA[cdatahunter2]]></secret>",
-				" <password>",
-				"-  removedhunter2</password>",
-				"+  addedhunter2</password>",
-				"+<password><![CDATA[</password>cdataclosehunter2]]></password>",
-				"+<password",
-				'+  encoding="plain">splittaghunter2</password>',
-				"+yamlkey: | # note",
-				"+password: | # note",
-				"+  yamlcommenthunter2",
-				"+  - name: DB_PASSWORD",
-				"+    value: k8shunter2",
-				`+SLACK_URL=${["https://Hooks.Slack.Com/services", "T000", "B000", "WEBHOOKSECRET"].join("/")}`,
-				"+  token: string",
-			].join("\n")
-			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? tokenDiff : ""))
-			;(singleCompletionHandler as Mock).mockResolvedValue("chore: configure npm publishing")
+		])("leaves files in .rooignore out of the prompt for %s", async (_label, staged) => {
+			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
+			try {
+				await writeFile(path.join(root, ".rooignore"), ".env\nconfig/private/\n")
+				mockRepo = makeRepo(root)
+				useOnlyRepository(mockRepo)
+				const diff = [
+					"diff --git a/.env b/.env",
+					"--- a/.env",
+					"+++ b/.env",
+					"@@ -1 +1 @@",
+					"-DB=old",
+					"+DB=hunter2",
+					"diff --git a/config/private/keys.json b/config/private/keys.json",
+					"new file mode 100644",
+					"--- /dev/null",
+					"+++ b/config/private/keys.json",
+					"@@ -0,0 +1 @@",
+					'+{"key":"hunter3"}',
+					"diff --git a/src/app.ts b/src/app.ts",
+					"--- a/src/app.ts",
+					"+++ b/src/app.ts",
+					"@@ -1 +1 @@",
+					"+export const port = 8080",
+				].join("\n")
+				mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
+				;(singleCompletionHandler as Mock).mockResolvedValue("chore: update config")
 
-			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+				await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 
-			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
-			// Each credential line keeps its diff prefix and indentation.
-			expect(prompt).toContain("+[REDACTED]\n+[REDACTED]\n+[REDACTED]\n+  [REDACTED]")
-			expect(prompt).not.toContain("npm_")
-			expect(prompt).not.toContain("abcdef1234567890")
-			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwxyz")
-			expect(prompt).not.toContain("opaque12345678")
-			expect(prompt).not.toContain("qrstuvwxyz")
-			expect(prompt).not.toContain("Abcdefghijklmnop")
-			expect(prompt).not.toContain("MySecurePass123")
-			expect(prompt).not.toContain("battery staple")
-			expect(prompt).not.toContain("WEBHOOKSECRET")
-			expect(prompt).not.toContain("abcdefghijklmnopqrstuvwx")
-			expect(prompt).not.toContain("hunter2")
-			expect(prompt).not.toContain("multilinehunter2")
-			for (const secret of [
-				"attrhunter2",
-				"cdatahunter2",
-				"removedhunter2",
-				"addedhunter2",
-				"cdataclosehunter2",
-				"splittaghunter2",
-				"yamlcommenthunter2",
-				"k8shunter2",
-			]) {
-				expect(prompt).not.toContain(secret)
+				const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
+				expect(prompt).not.toContain("hunter2")
+				expect(prompt).not.toContain("hunter3")
+				expect(prompt).toContain(`diff --git a/.env b/.env\n${IGNORED_FILE_NOTE}`)
+				expect(prompt).toContain(
+					`diff --git a/config/private/keys.json b/config/private/keys.json\n${IGNORED_FILE_NOTE}`,
+				)
+				expect(prompt).toContain("+export const port = 8080")
+				// The controller watches `.rooignore` only for this run.
+				expect(watcherDispose).toHaveBeenCalledTimes(1)
+			} finally {
+				await rm(root, { recursive: true, force: true })
 			}
-			expect(mockRepo.diff).toHaveBeenCalledWith(staged)
 		})
 
-		it.each([
-			["a staged diff", true],
-			["a working-tree diff", false],
-		])("keeps secrets in files behind real diff headers out of the prompt (%s)", async (_label, staged) => {
-			const diff = [
-				"diff --git a/settings.xml.template b/settings.xml.template",
-				"@@ -0,0 +1,3 @@",
-				"+<password><![CDATA[</password>templatehunter2]]></password>",
-				`+<apiKey note="${"a".repeat(600)}">longattrhunter2</apiKey>`,
-				'+<secret note="/>">quotedgthunter2</secret>',
-				"diff --git a/diagram.svg b/diagram.svg",
-				"@@ -0,0 +1 @@",
-				'+<password encoding="plain">svghunter2</password>',
-				"diff --git a/auth.ts b/auth.ts",
-				"@@ -0,0 +1,2 @@",
-				"+type Loader = Promise<Credentials>",
-				'+const xml = "<token>tshunter2</token>"',
-				"+type Other = Promise<Credentials>",
-				'+const generic = "<Credentials>generichunter2</Credentials>"',
-				"diff --git a/deploy.yaml b/deploy.yaml",
-				"@@ -0,0 +1,9 @@",
-				"+  - name: DB_PASSWORD",
-				"+    # Deployment credential",
-				"+    value: commenthunter2",
-				"+  - value: reversedhunter2",
-				"+    name: API_TOKEN",
-				"+  - name: SIGNING_KEY_PASSWORD",
-				"+    value: |-",
-				"+      blockhunter2",
-				'+  extra: {"value":"jsonhunter2","name":"API_TOKEN"}',
-				"+  - value: |-",
-				"+      reversedblockhunter2",
-				"+    name: API_TOKEN",
-				"+  - name: DB_PASSWORD",
-				"+    value: |-",
-				"+      #commentblockhunter2",
-				"+  - name: DB_PASSWORD",
-				"+    value:",
-				"+      nextlinehunter2",
-				`+  far: {"value":"farhunter2","note":"${"x".repeat(400)}","name":"API_TOKEN"}`,
-				"+  nested:",
-				"+    password:",
-				"+      value: nestedyamlhunter2",
-				"+      description: kept",
-				"diff --git a/config.json b/config.json",
-				"@@ -0,0 +1,8 @@",
-				'+{"value":"nestedjsonhunter2","options":{},"name":"API_TOKEN"}',
-				'+{"name":"API_TOKEN","note":"a}b","value":"bracehunter2"}',
-				'+[{"name":"API_TOKEN","value":"separatehunter2"},{"name":"LOG_LEVEL","value":"debug"}]',
-				'+<password value="attrvaluehunter2"/>',
-				"+<add",
-				'+  key="DbPassword"',
-				'+  value="multilinexmlhunter2" />',
-				"diff --git a/b.ts b/b.ts",
-				"@@ -0,0 +1 @@",
-				"+let b = 1",
-				'diff --git "a/my settings.xml" "b/my settings.xml"',
-				"@@ -0,0 +1 @@",
-				"+<password>quotedpathhunter2",
-				'diff --git "a/.env.pr\\303\\266d" "b/.env.pr\\303\\266d"',
-				"@@ -0,0 +1 @@",
-				"+SESSION=escapedpathhunter2",
-				"diff --git a/config.ts b/config.ts",
-				"@@ -1,4 +1,5 @@",
-				" const entry = {",
-				'   name: "API_TOKEN",',
-				"-}",
-				'+  value: "mixedsidehunter2",',
-				"+};",
-				"diff --git a/.env b/settings.txt",
-				"similarity index 80%",
-				"rename from .env",
-				"rename to settings.txt",
-				"--- a/.env",
-				"+++ b/settings.txt",
-				"@@ -1,2 +1,2 @@",
-				"-SESSION=renamedhunter2",
-				"+HOST=example.org",
-				"diff --git a/fixture.ts b/fixture.ts",
-				"@@ -0,0 +1,6 @@",
-				"+const fixture = {",
-				"+  auth: {",
-				'+    token: "a",',
-				"+  },",
-				'+  value: "nestedouterhunter2",',
-				"+}",
-			].join("\n")
-			mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
-			;(singleCompletionHandler as Mock).mockResolvedValue("chore: update settings")
+		it("stops before reading the provider settings when the user cancels while .rooignore is read", async () => {
+			const { cancel } = useCancellableProgress()
+			;(vscode.workspace.createFileSystemWatcher as Mock).mockImplementationOnce(() => {
+				cancel()
+				return makeWatcher()
+			})
 
 			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 
-			const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
-			const secrets = ["templatehunter2", "longattrhunter2", "quotedgthunter2", "svghunter2", "tshunter2"]
-			secrets.push("commenthunter2", "reversedhunter2", "blockhunter2", "jsonhunter2", "generichunter2")
-			secrets.push("reversedblockhunter2", "commentblockhunter2", "nextlinehunter2", "farhunter2")
-			secrets.push(
-				"nestedyamlhunter2",
-				"nestedjsonhunter2",
-				"bracehunter2",
-				"separatehunter2",
-				"attrvaluehunter2",
-			)
-			secrets.push("multilinexmlhunter2", "quotedpathhunter2", "escapedpathhunter2", "mixedsidehunter2")
-			secrets.push("renamedhunter2", "nestedouterhunter2")
-			for (const secret of secrets) {
-				expect(prompt).not.toContain(secret)
+			expect(mockProvider.getState).not.toHaveBeenCalled()
+			expect(singleCompletionHandler).not.toHaveBeenCalled()
+			await vi.waitFor(() => expect(watcherDispose).toHaveBeenCalledTimes(1))
+		})
+
+		it("sends the diff unchanged when the repository has no .rooignore", async () => {
+			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
+			try {
+				mockRepo = makeRepo(root)
+				useOnlyRepository(mockRepo)
+				const diff = "diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n+DB=example"
+				mockRepo.diff = vi.fn().mockResolvedValue(diff)
+				;(singleCompletionHandler as Mock).mockResolvedValue("chore: update config")
+
+				await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+				expect((singleCompletionHandler as Mock).mock.calls[0][1]).toContain(diff)
+			} finally {
+				await rm(root, { recursive: true, force: true })
 			}
-			expect(prompt).toContain("diff --git a/deploy.yaml b/deploy.yaml")
-			expect(prompt).toContain("+let b = 1")
 		})
 
 		it("does not read the working tree when cancelled while the staged diff is pending", async () => {
