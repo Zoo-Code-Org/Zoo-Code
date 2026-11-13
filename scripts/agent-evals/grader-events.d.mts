@@ -1,7 +1,8 @@
 export interface TestResultEvent {
 	type: string
 	data: {
-		name: string
+		name?: string
+		file?: string
 		skip?: boolean
 		todo?: boolean
 		details?: { type?: string; error?: { failureType?: string; exitCode?: number; signal?: string } }

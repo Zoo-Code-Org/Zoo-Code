@@ -107,15 +107,19 @@ it("waits through a fresh abandoned lock before cleanup acquires it", async () =
 	const lock = path.join(path.dirname(dir), `.coding-side-${key}.lock`)
 	try {
 		await fs.mkdir(lock)
-		const pending = acquireSideOutputLock(dir, 1000)
-		const timer = setTimeout(() => {
-			void fs.utimes(lock, new Date(0), new Date(0))
-		}, 100)
+		let acquired = false
+		const pending = acquireSideOutputLock(dir, 1000).then((release) => {
+			acquired = true
+			return release
+		})
+		await new Promise((resolve) => setTimeout(resolve, 100))
+		assert.equal(acquired, false, "a fresh lock must still exclude cleanup")
+		await fs.utimes(lock, new Date(0), new Date(0))
+		const release = await pending
 		try {
-			const release = await pending
-			release()
+			assert.equal(acquired, true)
 		} finally {
-			clearTimeout(timer)
+			release()
 		}
 	} finally {
 		await fs.rm(lock, { recursive: true, force: true })
