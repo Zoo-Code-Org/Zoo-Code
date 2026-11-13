@@ -15,6 +15,7 @@ import {
 	UnsupportedFilesystemError,
 	TargetMovedError,
 	AncestorReplacedError,
+	PublishCancelledError,
 	OrphanedBackupAfterFailedWriteError,
 	OrphanedBackupError,
 	OrphanedPublishedBackupError,
@@ -48,6 +49,7 @@ vi.mock("fs", () => ({
 	fsyncSync: vi.fn(),
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
+	fchownSync: vi.fn(),
 	statSync: vi.fn(),
 	Stats: class Stats {},
 }))
@@ -2079,5 +2081,163 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 		})
 
 		await expect(resolveLockKey(target)).rejects.toThrow("EACCES")
+	})
+})
+
+// -- asks landed at the refreshed 2357 footing --------------------------------
+//
+// Rows for the review asks on this file's own footing. Each row needs the line it describes:
+// the round's negative control makes that line inert and these are the rows that fail.
+
+describe("asks landed at the refreshed 2357 footing", () => {
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
+	})
+	describe("created directories validated against the authorized location", () => {
+		// The created chain is sampled AFTER the mkdir, so it records where the created directory ended
+		// up, not where the caller authorized it to be. A directory that was not there when the caller
+		// authorized can be a link by the time mkdir reaches it, and the created parent then sits
+		// outside the chain the caller walked.
+		function _scenario(linkPlantedDuringMkdir: boolean) {
+			const pinned = path.resolve("/ws/a")
+			const created = path.join(pinned, "new")
+			const escaped = path.resolve("/outside/new")
+			const target = path.join(created, "target.txt")
+			let linkPlanted = false
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === target || (s === created && !linkPlanted)) throw enoent()
+				// The link is planted between the canonicalization and the mkdir answer, so the same name
+				// resolves elsewhere by the time the created chain is used.
+				return s === created ? escaped : s
+			})
+			// Node reports the outermost directory mkdir created, in the caller's spelling.
+			vi.mocked(fs.mkdir).mockImplementation(async () => {
+				linkPlanted = linkPlantedDuringMkdir
+				return created
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			return { pinned, created, target }
+		}
+		const pin = (dir: string) => [{ dir, dev: 1n, ino: 100n, resolvedPath: dir }]
+		it("refuses to publish when the directory mkdir created resolves outside the location the caller authorized", async () => {
+			const { pinned, target } = _scenario(true)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: pin(pinned),
+			})
+			await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+			await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.link).not.toHaveBeenCalled()
+		})
+		it("publishes when the created directory resolves inside the location the caller authorized", async () => {
+			const { pinned, target } = _scenario(false)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: pin(pinned),
+			})
+			await expect(promise).resolves.toBeUndefined()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		})
+		it("leaves the created chain alone when the caller pinned no location", async () => {
+			const { target } = _scenario(true)
+			const promise = safeWriteText(target, "data", { platform: "linux" })
+			await expect(promise).resolves.toBeUndefined()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		})
+	})
+	describe("target group carried onto the staging descriptor before publication", () => {
+		// The commit publishes the staging inode, so the group the published file ends up in is whatever
+		// the staging descriptor carried when it closed. The mode was re-applied with fchmodSync; the
+		// group was not carried at all.
+		const GID = 4321
+		function _targetWithGroup(target: string, fd: number): void {
+			vi.mocked(fs.realpath).mockResolvedValue(target)
+			vi.mocked(fsSync.openSync).mockReturnValue(fd)
+			// A Stats stand-in that reports a group, the way a POSIX target does.
+			vi.mocked(fsSync.statSync).mockReturnValue(Object.assign(_stats(0o600), { gid: GID }))
+		}
+		it("carries the existing target's group onto the staging descriptor before the commit", async () => {
+			const target = path.resolve("/ws/b/target.txt")
+			_targetWithGroup(target, 1)
+			await safeWriteText(target, "data", { platform: "linux" })
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(1, 0o600)
+			expect(fsSync.fchownSync).toHaveBeenCalledWith(1, -1, GID)
+			// Before the close and the rename: after the commit the name belongs to the published file and
+			// the window to carry anything onto that descriptor is gone.
+			expect(vi.mocked(fsSync.fchownSync).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(fsSync.closeSync).mock.invocationCallOrder[0],
+			)
+		})
+		it("carries the group onto a caller-supplied staging descriptor as well", async () => {
+			const target = path.resolve("/ws/c/target.txt")
+			const staged = path.join(path.dirname(target), "x.tmp")
+			_targetWithGroup(target, 7)
+			await safeWriteText(target, "data", { tempPath: staged, platform: "linux" })
+			expect(fsSync.openSync).toHaveBeenCalledWith(staged, "r+")
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(7, 0o600)
+			expect(fsSync.fchownSync).toHaveBeenCalledWith(7, -1, GID)
+		})
+		it("asks for no group when the target is not there yet", async () => {
+			const target = path.resolve("/ws/b/fresh.txt")
+			vi.mocked(fs.realpath).mockResolvedValue(target)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw Object.assign(new Error("ENOENT: no such file or directory, stat"), { code: "ENOENT" })
+			})
+			await safeWriteText(target, "data", { platform: "linux" })
+			expect(fsSync.fchownSync).not.toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+		})
+	})
+	describe("cancellation honoured at the commit gate", () => {
+		// Publish was one awaited submission with nothing a caller could cancel. Every step before the
+		// commit is awaited, so the commit gate is the last point where publishing can still be refused.
+		it("publishes nothing when the caller cancels before the commit", async () => {
+			const target = path.resolve("/ws/d/target.txt")
+			vi.mocked(fs.realpath).mockResolvedValue(target)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const controller = new AbortController()
+			controller.abort()
+			const promise = safeWriteText(target, "data", { platform: "linux", signal: controller.signal })
+			await expect(promise).rejects.toBeInstanceOf(PublishCancelledError)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.link).not.toHaveBeenCalled()
+			// The staged file this write made is removed by the failure cleanup.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+		it("publishes nothing when the caller cancels while the backup copy is in flight", async () => {
+			const target = path.resolve("/ws/e/target.txt")
+			vi.mocked(fs.realpath).mockResolvedValue(target)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const controller = new AbortController()
+			vi.mocked(fs.copyFile).mockImplementation(async () => {
+				controller.abort()
+			})
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				backup: true,
+				signal: controller.signal,
+			})
+			await expect(promise).rejects.toBeInstanceOf(PublishCancelledError)
+			expect(fs.rename).not.toHaveBeenCalled()
+			// Both files this write made go: the staged file and the copy of the previous content.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+		it("commits when the caller hands a signal that never fires", async () => {
+			const target = path.resolve("/ws/f/target.txt")
+			vi.mocked(fs.realpath).mockResolvedValue(target)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const controller = new AbortController()
+			const promise = safeWriteText(target, "data", { platform: "linux", signal: controller.signal })
+			await expect(promise).resolves.toBeUndefined()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		})
 	})
 })

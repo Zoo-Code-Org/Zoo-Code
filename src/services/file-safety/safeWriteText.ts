@@ -83,6 +83,18 @@ export interface SafeWriteTextOptions {
 	 * when it recorded a plain spelling - not merely to the same inode.
 	 */
 	expectedAncestorIdentities?: DirectoryIdentity[]
+
+	/**
+	 * Cancellation of an in-flight write.
+	 *
+	 * Every step before the commit is awaited, so a caller that loses interest - a document closed,
+	 * a task abandoned - has one point where the publish can still be refused: the commit gate, after
+	 * the staging file and any backup copy exist and before the target name is moved. An aborted
+	 * signal refuses, the failure cleanup removes this write's staging file, and the target keeps the
+	 * content it had. An abort arriving after this gate cannot be observed - there is no await left
+	 * between here and the rename - so that commit completes.
+	 */
+	signal?: AbortSignal
 }
 
 /** One directory's on-disk identity, read with bigint stats so NTFS 64-bit values survive. */
@@ -319,6 +331,21 @@ export class AncestorReplacedError extends Error {
 		this.directory = directory
 	}
 }
+/**
+ * The caller cancelled this write at the commit gate. Nothing was published: the target holds what it
+ * held before the call, and this write's staging file is removed by the same cleanup that handles every
+ * other failure.
+ */
+export class PublishCancelledError extends Error {
+	readonly targetPath: string
+
+	constructor(targetPath: string) {
+		super(`The write to ${targetPath} was cancelled before the commit -- nothing was published.`)
+		this.name = "PublishCancelledError"
+		this.targetPath = targetPath
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
 
 /** fsync one directory so the entry it holds (a rename, or a newly created child) is durable. */
@@ -328,6 +355,63 @@ function _syncDirectory(dir: string): void {
 		fsSync.fsyncSync(dirFd)
 	} finally {
 		fsSync.closeSync(dirFd)
+	}
+}
+
+/** Where the caller said a directory was, taken from the pins it handed in. */
+type AuthorizedLocation = { dir: string; location: string }
+
+function _authorizedAncestorLocations(options?: SafeWriteTextOptions): AuthorizedLocation[] {
+	const locations: AuthorizedLocation[] = []
+	for (const identity of options?.expectedAncestorIdentities ?? []) {
+		locations.push({
+			dir: path.resolve(identity.dir),
+			location: path.resolve(identity.resolvedPath ?? identity.dir),
+		})
+	}
+	if (options?.expectedResolvedPath) {
+		const pinnedDir = path.dirname(path.resolve(options.expectedResolvedPath))
+		locations.push({ dir: pinnedDir, location: pinnedDir })
+	}
+	return locations
+}
+
+/** True when *target* is *dir* itself or under it on the same spelling. */
+function _isInside(dir: string, target: string): boolean {
+	const rel = path.relative(dir, target)
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
+}
+
+/** The deepest pinned location that contains *target*, if the caller pinned one. */
+function _deepestAuthorizedLocation(locations: AuthorizedLocation[], target: string): AuthorizedLocation | undefined {
+	let deepest: AuthorizedLocation | undefined
+	for (const candidate of locations) {
+		if (
+			_isInside(candidate.location, target) &&
+			(!deepest || candidate.location.length > deepest.location.length)
+		) {
+			deepest = candidate
+		}
+	}
+	return deepest
+}
+
+/** Re-apply the target's group to the staging descriptor before publication.
+ *
+ * The commit publishes this inode, so whatever the staging file carries when the descriptor closes is
+ * what the target gets afterwards. The mode is re-applied with fchmodSync above; the group is the other
+ * half of what a shared workspace's read access lives on, and nothing carried it. -1 leaves the owner
+ * alone.
+ *
+ * Best-effort on purpose. Measured on Windows the call reports success and changes nothing (the gid
+ * stays 0 after asking for another group), and on POSIX a caller allowed to write a file is not always
+ * a caller allowed to change its group, so failing here would refuse writes this user may make. The
+ * attempt is the contract; the effect is platform-owned. */
+function _preserveGroup(fd: number, gid: number): void {
+	try {
+		fsSync.fchownSync(fd, -1, gid)
+	} catch {
+		// A group this user cannot take is carried by the mode copy and the ACL path, not by failing the write.
 	}
 }
 
@@ -567,6 +651,40 @@ export async function safeWriteText(
 	const createdAncestors = _createdAncestorChain(await fs.mkdir(dirPath, { recursive: true }), dirPath)
 	await fs.access(dirPath)
 
+	// What mkdir reports it created is a fact about the filesystem, not about the decision the
+	// caller made: the chain above is sampled from that report, after the fact. A directory the
+	// caller never walked - because it was not there when the caller authorized - can be a link
+	// by the time mkdir reaches it, so the parent this write created sits outside the authorized
+	// chain while still being reported as this write's parent, and the fsync chain alone would
+	// then sync and publish through it. Compare each created directory with the deepest location
+	// the caller pinned; a created directory under nothing the caller pinned has left the
+	// authorized chain by construction. A caller that pinned no location has nothing to compare
+	// against and keeps its current behaviour.
+	if (createdAncestors.length > 0) {
+		const authorized = _authorizedAncestorLocations(options)
+		if (authorized.length > 0) {
+			for (const created of createdAncestors) {
+				const createdReal = await fs.realpath(created).catch((error: unknown) => {
+					const code = getErrorCode(error)
+					// A name that vanished since the mkdir is reported by the ancestry recheck below, which
+					// also knows whether the caller authorized that name; only a real inspection failure is
+					// this write's to report here.
+					if (code === "ENOENT" || code === "ENOTDIR") {
+						return undefined
+					}
+					throw error
+				})
+				const pinned = _deepestAuthorizedLocation(authorized, createdReal ?? created)
+				if (pinned === undefined) {
+					throw new AncestorReplacedError(created, "was created under nothing the caller authorized")
+				}
+				if (createdReal !== undefined && !_isInside(pinned.location, createdReal)) {
+					throw new AncestorReplacedError(created, "was created outside the authorized location")
+				}
+			}
+		}
+	}
+
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
 	// with an empty .file-safety-staging directory behind. Track the directory this
@@ -657,9 +775,15 @@ export async function safeWriteText(
 			// unchanged.
 			const buffer = Buffer.from(content)
 			let targetMode = 0o644 // default for a fresh target
+			let targetGid: number | undefined
 			let targetExists = false
 			try {
-				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				const targetStats = fsSync.statSync(targetPath)
+				targetMode = targetStats.mode & 0o777
+				// The commit publishes this inode, so the group the target belongs to has to be carried onto
+				// the staging descriptor or the published file lands in whichever group this process runs in.
+				// A double that reports no gid reports no group to carry.
+				targetGid = typeof targetStats.gid === "number" ? targetStats.gid : undefined
 				targetExists = true
 			} catch (error: unknown) {
 				if (getErrorCode(error) !== "ENOENT") throw error
@@ -673,6 +797,9 @@ export async function safeWriteText(
 			try {
 				if (targetExists) {
 					fsSync.fchmodSync(fd, targetMode)
+					if (targetGid !== undefined) {
+						_preserveGroup(fd, targetGid)
+					}
 				}
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
@@ -705,8 +832,11 @@ export async function safeWriteText(
 			// chmodSync on the path before the open would make a read-only target
 			// (0o400/0o444) fail openSync(tempPath, "r+") with EACCES.
 			let targetMode: number | null = null
+			let targetGid: number | undefined
 			try {
-				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				const targetStats = fsSync.statSync(targetPath)
+				targetMode = targetStats.mode & 0o777
+				targetGid = typeof targetStats.gid === "number" ? targetStats.gid : undefined
 			} catch (error: unknown) {
 				if (getErrorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the temp's default mode
@@ -715,6 +845,9 @@ export async function safeWriteText(
 			try {
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
+					if (targetGid !== undefined) {
+						_preserveGroup(fd, targetGid)
+					}
 				}
 				fsSync.fsyncSync(fd)
 			} finally {
@@ -892,6 +1025,14 @@ export async function safeWriteText(
 				} catch (err: unknown) {
 					if (getErrorCode(err) !== "ENOENT") throw err
 				}
+			}
+
+			// -- Commit gate: a cancelled write publishes nothing -------------------
+			// Every step above is awaited, so an abort that arrived at any of them is visible here, and
+			// this is the last point where publishing can still be refused: the commit below is a
+			// synchronous rename with no await left between here and it.
+			if (options?.signal?.aborted) {
+				throw new PublishCancelledError(targetPath)
 			}
 
 			// -- Step 4: atomic commit temp -> target ---------------------
