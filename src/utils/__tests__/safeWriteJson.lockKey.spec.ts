@@ -166,11 +166,14 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// After the lock: the strict publish resolution, the key/publish-target agreement check
-		// (resolve of the publish target plus canonicalization of its directory), the re-resolution of
-		// the staging directory twice - the approval and the re-verification before anything is staged -
-		// then safeWriteText's two
-		// staging-path lstat checks. None of them changes which lock the caller queued behind.
+		// Before the lock the key walk fails once (the peer has the referent renamed away), reports the
+		// link by lstat and canonicalizes the parent, and the caller queues on the referent. After the
+		// lock the publish target is resolved strictly, the agreement check resolves it and canonicalizes
+		// its directory, and the staging directory is resolved twice - the approval and the
+		// re-verification. The two staging-path lstat checks this row used to count are not reached:
+		// with the key spelled as the resolved target, the approved directory and the target's parent are
+		// one canonical directory from the first reading, so safeWriteText has no divergence to measure.
+		// None of these readings changes which lock the caller queued behind.
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
@@ -182,9 +185,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"resolve",
 			"resolve",
 			"resolve",
-			"resolve",
-			"lstat",
-			"lstat",
 		])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})

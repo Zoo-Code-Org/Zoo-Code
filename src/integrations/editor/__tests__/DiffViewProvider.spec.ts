@@ -1686,6 +1686,12 @@ describe("DiffViewProvider", () => {
 		}
 
 		beforeEach(() => {
+			// The guarded publish these rows run through looks the target up in the task's
+			// observation registry before writing it, so the fixture has to record the read and
+			// the version token the guard recomputes. These rows are about the decisions around
+			// the publish - tabs, focus, scroll, finalization - not about the guard refusing it.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
 			// Private members are set via bracket notation (spec convention).
 			// Reset the focus the revert helper reads: a test that sets it must not leak
 			// into the next one, where cleanup could restore a stale editor.
@@ -3446,6 +3452,15 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("preEditScrollLine capture and restore", () => {
+		beforeEach(() => {
+			// The guarded publish these rows run through looks the target up in the task's
+			// observation registry before writing it, so the fixture has to record the read and
+			// the version token the guard recomputes. These rows are about the decisions around
+			// the publish - tabs, focus, scroll, finalization - not about the guard refusing it.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+		})
+
 		it("should capture scroll line from visible editor at open() time", async () => {
 			const mockEditor = makeTextEditor({
 				document: makeTextDocument({ uri: makeUri(`${mockCwd}/scroll.ts`) }),
@@ -3598,6 +3613,16 @@ describe("DiffViewProvider", () => {
 
 	describe("userTouchedDocument close/keep behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
+
+		beforeEach(() => {
+			// The guarded publish these rows run through looks the target up in the task's
+			// observation registry before writing it, so the fixture has to record the read and
+			// the version token the guard recomputes. These rows are about the decisions around
+			// the publish - tabs, focus, scroll, finalization - not about the guard refusing it.
+			mockTask.observationRegistry.observe(`${mockCwd}/mock-target-file.ts`, "v1")
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+		})
 
 		const buildActiveDiffEditor = () =>
 			makeTextEditor({
@@ -4796,6 +4821,16 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("userTouchedDiffEditor keep/close behavior", () => {
+		beforeEach(() => {
+			// The guarded publish these rows run through looks the target up in the task's
+			// observation registry before writing it, so the fixture has to record the read and
+			// the version token the guard recomputes. These rows are about the decisions around
+			// the publish - tabs, focus, scroll, finalization - not about the guard refusing it.
+			mockTask.observationRegistry.observe(`${mockCwd}/mock-target-file.ts`, "v1")
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+		})
+
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
 		const buildActiveDiffEditor = () =>

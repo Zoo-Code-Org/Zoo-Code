@@ -572,9 +572,11 @@ describe("safeWriteJson", () => {
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(newData)
 
-		// The orphaned backup is still on disk because its deletion failed.
+		// The orphaned backup is still on disk because its deletion failed. It is named from the
+		// target's basename, which is the prefix the leftover scan reads.
 		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
+		const backupPrefix = `.${path.basename(currentTestFilePath)}.bak_`
+		expect(entries.some((entry) => entry.startsWith(backupPrefix))).toBe(true)
 
 		vi.mocked(fs.unlink).mockRestore()
 	})
@@ -621,7 +623,10 @@ describe("safeWriteJson", () => {
 
 		// Clean up
 		await fs.unlink(lockTestFilePath).catch(() => {}) // Ignore errors if file doesn't exist
-		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
+		// vi.unmock is hoisted above the imports, so it would run before the doMock above and
+		// leave the wrapper installed for every later import; doUnmock runs here, in order, the
+		// way this file's other capture/undo pairs spell it.
+		vi.doUnmock("proper-lockfile") // Ensure the mock is removed after this test
 	})
 	test("should release lock even if an error occurs mid-operation", async () => {
 		const data = { message: "test lock release on error" }
@@ -695,22 +700,32 @@ describe("safeWriteJson", () => {
 		const backups = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
 		expect(backups).toHaveLength(1)
 		expect(await readFileContent(path.join(tempDir, backups[0]))).toEqual(initialData)
+		// The counter belongs to the test, not to the write: the failed write above already spent
+		// its four branches, so the merge write is measured as the difference it makes, and read
+		// against the stage list the guard itself reports. The commit rename is the one rename the
+		// write attempts on its own account; the failed write above left the committed content in a
+		// backup with the canonical path gone, so the recovery pass at the start of this write is
+		// allowed one more rename, the restore the guard reports as the recover stage.
+		const mergeStages: string[] = []
+		const renamesBeforeMerge = renameCallCount
 		await safeWriteJson(currentTestFilePath, newData, {
 			merge: (existing) => {
 				expect(existing).toEqual(initialData)
 				return newData
 			},
+			trace: ({ stage }) => mergeStages.push(stage),
 		})
 
-		// Exactly one rename was attempted, and it was the commit.
-		expect(renameCallCount).toBe(1)
+		// Exactly one rename was attempted on the write's own account, and it was the commit.
+		expect(renameCallCount - renamesBeforeMerge).toBe(mergeStages.includes("recover") ? 2 : 1)
 
-		// The target never left its path, so the previous content is still what a
-		// reader sees, and no orphaned backup copy is left behind either.
+		// The recovery pass put the committed content back on the target before this write
+		// merged onto it - that is what the merge callback saw - so the reader now sees the merged
+		// value, and the recovered backup that made it possible is gone from the directory.
 		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(initialData)
+		expect(content).toEqual(newData)
 		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(false)
+		expect(entries.some((entry) => entry.includes(".bak_"))).toBe(false)
 
 		consoleErrorSpy.mockRestore()
 	})
@@ -1043,10 +1058,12 @@ describe("safeWriteJson", () => {
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(newData)
 	})
-	// (dropped with the retired spelling: "acquires the lock on the resolved referent, not the caller
-	// alias" and "resolves the real proper-lockfile after the capture above is undone", the pair that
-	// pinned the lock key as the symlink referent. The chain now takes the lock on the path the caller
-	// gives, as trunk spells it, so those two rows describe a spelling this tree no longer carries.)
+	// (A re-land above dropped "acquires the lock on the resolved referent, not the caller alias" and
+	// "resolves the real proper-lockfile after the capture above is undone" as rows about a retired
+	// spelling, while the lock key was being taken from the path the caller gave. The key is resolved
+	// before the lock again (safeWriteJson.ts:327), so the referent question is live: it is answered in
+	// safeWriteJson.lockKey.spec.ts, and the proper-lockfile row below stayed in this file and passes on
+	// its own terms now that the undo runs in order rather than being hoisted above the imports.)
 
 	// The undo in the case above has to be visible from the other side of the file: a later
 	// test that imports proper-lockfile fresh must resolve the real module, not the wrapper

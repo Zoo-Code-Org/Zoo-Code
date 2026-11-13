@@ -316,11 +316,15 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		throw dirError
 	}
 
-	// The lock is taken on the path the caller gave, which is the spelling the trunk carries and this
-	// chain keeps - see the comment at the acquisition below. The guards further down still resolve the
-	// publish target under the lock and still measure it against this path, so the drift check and the
-	// pre-lock confinement check keep their meaning with the key spelled this way.
-	const lockKey = absoluteFilePath
+	// The lock is taken on the key that resolveLockKey establishes for the file - the canonical
+	// spelling, which is the key every other writer to this file takes it on (see the acquisition
+	// comment in core/tools/guardedWrite.ts at lines 190 to 192, and the note on the publish
+	// primitive at lines 233 to 236, both of which state that safeWriteJson holds the resolved key).
+	// Spelled from the caller's pathname instead, a writer whose path runs through an alias directory
+	// and a writer that resolved that directory hold two locks for one file, and this function's own
+	// drift check below then refuses an alias write it was never meant to refuse, because the lock it
+	// holds and the target it measures were then spelled from two different questions.
+	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Confinement is checked here as well as under the lock. The lock file lives NEXT
 	// TO the key, so a planted symlink that points outside the declared scope would
@@ -344,7 +348,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// remains a no-op, so the finally block in the main file operations
 	// try-catch-finally won't try to release an unacquired lock if this
 	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	releaseLock = await acquireFileLock(lockKey)
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
@@ -370,7 +374,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// advisory lock held until the stale timeout for every other writer.
 		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 
-		// The lock above was chosen from the path as it looked before the lock was taken, and the
+		// The lock above was chosen from the key this write resolved before taking it, and the
 		// publish target is resolved under the lock - after a peer committed, and after the alias
 		// itself may have been repointed. If the two no longer name the same file, this writer is
 		// holding the lock of a path it is not about to publish while some other writer can hold
@@ -480,7 +484,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// canonical path absent.
 		try {
 			options?.trace?.({ stage: "replacement-rename" })
-			await fs.rename(actualTempNewFilePath, absoluteFilePath)
+			await fs.rename(actualTempNewFilePath, resolvedTargetPath ?? absoluteFilePath)
 		} catch (renameError: unknown) {
 			if (getErrorCode(renameError) !== "EPERM") {
 				throw renameError
