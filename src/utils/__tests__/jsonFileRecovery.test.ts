@@ -6,6 +6,7 @@ import * as fsSync from "fs"
 import { acquireFileLock } from "../fileLock"
 import { setPersistenceTraceSink } from "../../core/task-persistence/persistenceTrace"
 import { recoverInterruptedReplacement, deleteJsonFile, recoverMissingJsonFile } from "../jsonFileRecovery"
+import { LockKeyWalkIncompleteError, resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { readFileWithMissingRetry } from "../../core/task-persistence/readFileWithMissingRetry"
 
 vi.mock("fs/promises", async () => {

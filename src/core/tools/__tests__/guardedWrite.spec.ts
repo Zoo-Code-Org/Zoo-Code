@@ -1305,7 +1305,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// is already gone.
 		const task = createMockTask()
 		mockedWithFileLock.mockImplementation(function (filePath, operation) {
-			task.abort = true
+			;(task as { abort: boolean }).abort = true // Task.abort is a getter; the double holds a plain field
 			return operation(path.resolve(filePath))
 		})
 		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
@@ -1321,7 +1321,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// The abort lands while the version token is being computed. The guard has to
 		// refuse on the way to the publish, not write for a task that is already gone.
 		mockedComputeVersionToken.mockImplementation(async () => {
-			task.abort = true
+			;(task as { abort: boolean }).abort = true // Task.abort is a getter; the double holds a plain field
 			return "v1"
 		})
 		const reg = new ObservationRegistry()

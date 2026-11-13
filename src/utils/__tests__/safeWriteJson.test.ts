@@ -1043,4 +1043,275 @@ describe("safeWriteJson", () => {
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(newData)
 	})
+	// (dropped with the retired spelling: "acquires the lock on the resolved referent, not the caller
+	// alias" and "resolves the real proper-lockfile after the capture above is undone", the pair that
+	// pinned the lock key as the symlink referent. The chain now takes the lock on the path the caller
+	// gives, as trunk spells it, so those two rows describe a spelling this tree no longer carries.)
+
+	// The undo in the case above has to be visible from the other side of the file: a later
+	// test that imports proper-lockfile fresh must resolve the real module, not the wrapper
+	// that case installed for its own import graph. This is the case that reddens when the
+	// undo is written as vi.unmock -- Vitest hoists that call above the imports, so it is
+	// registered before the vi.doMock above runs, the wrapper is never removed, and it is
+	// what a later import resolves.
+	test("resolves the real proper-lockfile after the capture above is undone", async () => {
+		vi.resetModules()
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const imported = await import("proper-lockfile")
+
+		expect(imported.lock).toBe(realLockfile.lock)
+		expect(vi.isMockFunction(imported.lock)).toBe(false)
+	})
+
+	test("rejects a confined write whose target is outside the confined directory", async () => {
+		const scope = path.join(tempDir, "project")
+		await fs.mkdir(scope)
+		const outside = path.join(tempDir, "elsewhere.json")
+
+		// No symlink needed: the check runs on the resolved publish target, so an
+		// out-of-scope path is rejected on every platform, and it is rejected before the
+		// lock is taken and before anything is staged.
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		const left = await fs.readdir(tempDir)
+		expect(left).not.toContain("elsewhere.json")
+		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+
+	test("treats an empty confineTo as a declared scope rather than as no scope", async () => {
+		const cwd = process.cwd()
+		// An empty string is a scope declaration: _resolveScopeRoot runs it through
+		// path.resolve, which yields the process working directory. The temp target has
+		// to sit outside that directory for this test to be about the scope rather than
+		// about where the temp files happen to live, so the precondition is asserted.
+		const outside = path.join(tempDir, "empty-scope.json")
+		expect(path.resolve(outside).startsWith(cwd + path.sep)).toBe(false)
+		expect(path.resolve(outside)).not.toBe(cwd)
+
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: "" })).rejects.toBeInstanceOf(
+			ConfinedPathEscapeError,
+		)
+
+		// Rejected the way every other confinement rejection is: nothing written.
+		expect(await fs.readdir(tempDir)).not.toContain("empty-scope.json")
+	})
+
+	test("rejects an in-scope dangling symlink to an outside referent before the advisory lock", async () => {
+		// The fixture needs a dangling link, and the two platforms build that shape
+		// differently: an unprivileged Windows cannot create a file or directory symlink
+		// at all (EPERM), while a junction needs no privilege, resolves through Node's
+		// reparse handling and reports as a symbolic link to a path that does not exist -
+		// the same lstat/realpath pair the POSIX file symlink produces. lstat of the
+		// junction here reports isSymbolicLink true and realpath reports ENOENT, which is
+		// the branch resolvePublishTarget and the lock-key walk take on either platform,
+		// so the row runs everywhere instead of only where a file link is permitted.
+		const projectDir = path.join(tempDir, "dangling-scope")
+		await fs.mkdir(projectDir)
+		const outsideDir = path.join(tempDir, "dangling-outside")
+		await fs.mkdir(outsideDir)
+		const link = path.join(projectDir, "link.json")
+		// junction on win32, file symlink elsewhere; the type is what makes the same
+		// dangling-link shape buildable on both lanes.
+		const linkType: "junction" | "file" = process.platform === "win32" ? "junction" : "file"
+		await fs.symlink(path.join(outsideDir, "gone.json"), link, linkType)
+
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockCalls: string[] = []
+		const lockMock = vi.fn(async (file: unknown, options?: unknown) => {
+			lockCalls.push(String(file))
+			return realLockfile.lock(file as never, options as never)
+		})
+		vi.doMock("proper-lockfile", () => ({
+			...realLockfile,
+			lock: lockMock as unknown as typeof realLockfile.lock,
+		}))
+
+		vi.resetModules()
+		const { safeWriteJson: reimported, ConfinedPathEscapeError: ReimportedError } = await import("../safeWriteJson")
+
+		try {
+			const outcome = await reimported(link, { mcpServers: {} }, { confineTo: projectDir }).then(
+				function (value: unknown) {
+					return { ok: true as const, value: value, error: undefined as unknown }
+				},
+				function (error: unknown) {
+					return { ok: false as const, value: undefined as unknown, error: error }
+				},
+			)
+			// A dangling link resolves to its referent for the lock key, and the referent
+			// is outside the declared scope, so the second confinement check rejects
+			// before the lock file - which proper-lockfile writes NEXT TO the key - is
+			// ever attempted. Asserted first, because the point of the row is the
+			// ordering: a rejection that arrives after a lock is a rejection that already
+			// wrote outside the scope.
+			expect(lockCalls).toEqual([])
+			expect(outcome.ok).toBe(false)
+			expect(outcome.error).toBeInstanceOf(ReimportedError)
+			expect(
+				(await fs.readdir(outsideDir)).filter(function (entry: string) {
+					return entry.endsWith(".lock")
+				}),
+			).toEqual([])
+			expect(
+				(await fs.readdir(projectDir)).filter(function (entry: string) {
+					return entry.endsWith(".lock")
+				}),
+			).toEqual([])
+			expect((await fs.readdir(projectDir)).sort()).toEqual(["link.json"])
+		} finally {
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
+
+	test("rejects an out-of-scope target before the advisory lock is taken", async () => {
+		const projectDir = path.join(tempDir, "scope")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "elsewhere.json")
+
+		// Capture every lock attempt without changing how locking works. The lock file
+		// lives NEXT TO the key, so taking the lock on an out-of-scope referent already
+		// writes outside the scope the caller declared - and an unwritable directory
+		// there would surface a lock error instead of the confinement verdict.
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockCalls: string[] = []
+		const lockMock = vi.fn(async (file: unknown, options?: unknown) => {
+			lockCalls.push(String(file))
+			return realLockfile.lock(file as never, options as never)
+		})
+		vi.doMock("proper-lockfile", () => ({
+			...realLockfile,
+			lock: lockMock as unknown as typeof realLockfile.lock,
+		}))
+
+		// Re-import the whole graph so the SUT AND its fileLock dependency pick up the
+		// wrapped lock; without the reset, fileLock keeps the already-loaded real
+		// proper-lockfile and the capture never sees a call. The error class is taken from
+		// the same module instance the SUT came from.
+		vi.resetModules()
+		const { safeWriteJson: reimported, ConfinedPathEscapeError: ReimportedError } = await import("../safeWriteJson")
+
+		try {
+			await expect(reimported(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ReimportedError,
+			)
+
+			// The confinement verdict came first: no lock was ever attempted.
+			expect(lockCalls).toEqual([])
+			expect(
+				(await fs.readdir(tempDir)).filter(function (entry: string) {
+					return entry.endsWith(".lock")
+				}),
+			).toEqual([])
+		} finally {
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
+
+	test("rejects an out-of-scope target before creating any directory", async () => {
+		const projectDir = path.join(tempDir, "scope")
+		await fs.mkdir(projectDir)
+		// The target lives in a directory that does not exist. A confinement check that runs
+		// after the mkdir -p would create that directory OUTSIDE the declared scope first -
+		// the same side effect the pre-lock check exists to prevent, reached through a
+		// symlinked ancestor in the reported case - and an unwritable referent would surface
+		// the mkdir error instead of the confinement verdict.
+		const missingParent = path.join(tempDir, "no-such-dir")
+		const outside = path.join(missingParent, "elsewhere.json")
+
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		// Nothing was created outside the scope, and no lock was attempted there.
+		expect(fsSyncActual.existsSync(missingParent)).toBe(false)
+		expect(
+			(await fs.readdir(tempDir)).filter(function (entry: string) {
+				return entry.endsWith(".lock")
+			}),
+		).toEqual([])
+	})
+
+	test.skipIf(process.platform === "win32")(
+		"rejects a confined write whose symlink resolves outside the confined directory",
+		async () => {
+			const projectDir = path.join(tempDir, "project")
+			await fs.mkdir(projectDir)
+			const outside = path.join(tempDir, "outside.json")
+			await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+			// A repository that plants its project settings file as a link to somewhere else
+			// must not receive the settings write at the linked path. The caller picked
+			// projectDir/mcp.json from the workspace, so it declares that scope.
+			const projectConfig = path.join(projectDir, "mcp.json")
+			await fs.symlink(outside, projectConfig)
+
+			await expect(safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ConfinedPathEscapeError,
+			)
+
+			// The linked file is untouched and nothing was staged beside it.
+			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
+			const entries = await fs.readdir(tempDir)
+			expect(entries).toContain("outside.json")
+			expect(
+				entries.filter(
+					(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+				),
+			).toEqual([])
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"publishes over a symlink referent that stays inside the confined directory",
+		async () => {
+			const projectDir = path.join(tempDir, "project-in")
+			await fs.mkdir(projectDir)
+			const referent = path.join(projectDir, "real-mcp.json")
+			await fsSyncActual.promises.writeFile(referent, JSON.stringify({ mcpServers: {} }), "utf8")
+			const alias = path.join(projectDir, "mcp.json")
+			await fs.symlink(referent, alias)
+
+			// Confining is about the scope, not about forbidding links: the write lands at
+			// the path the caller named. Main's body renames to that path and replaces the
+			// link node in place -- the alias becomes a regular file holding the payload and
+			// the old referent keeps the seed, matching the lock-referent test's contract.
+			await safeWriteJson(
+				alias,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{ confineTo: projectDir },
+			)
+
+			expect(JSON.parse(await fsSyncActual.promises.readFile(alias, "utf8"))).toEqual({
+				mcpServers: { local: { url: "http://localhost" } },
+			})
+			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({ mcpServers: {} })
+			expect(fsSyncActual.lstatSync(alias).isFile()).toBe(true)
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"confines a scope path that itself runs through a symlink and does not exist yet",
+		async () => {
+			const real = path.join(tempDir, "real-project")
+			await fs.mkdir(real)
+			const alias = path.join(tempDir, "alias-project")
+			await fs.symlink(real, alias)
+			// The scope is declared through the alias, and the directory it names does not
+			// exist yet. Resolving it lexically would compare an unresolved scope against a
+			// fully resolved target and reject a write that is in fact inside the project -
+			// the macOS /var -> /private/var shape. The nearest existing ancestor is resolved
+			// and the remainder re-joined instead.
+			const nested = path.join(alias, "nested")
+			const target = path.join(nested, "mcp.json")
+
+			await safeWriteJson(target, { mcpServers: {} }, { confineTo: nested })
+
+			expect(
+				JSON.parse(await fsSyncActual.promises.readFile(path.join(real, "nested", "mcp.json"), "utf8")),
+			).toEqual({ mcpServers: {} })
+		},
+	)
 })

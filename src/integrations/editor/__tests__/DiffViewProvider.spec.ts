@@ -1,6 +1,10 @@
-import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
+import {
+	CommittedWriteBufferConflictError,
+	DiffViewProvider,
+	DIFF_VIEW_URI_SCHEME,
+	DIFF_VIEW_LABEL_CHANGES,
+} from "../DiffViewProvider"
 import { DecorationController } from "../DecorationController"
-import type { Task } from "../../../core/task/Task"
 import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import * as path from "path"
@@ -285,13 +289,17 @@ describe("DiffViewProvider", () => {
 
 		// Create a mock Task instance; the double provides providerRef.deref() ->
 		// getState() with provider settings (see makeTaskDouble below).
-		mockTask = makeTaskDouble({
-			// Auto-closing edited tabs is opt-in by default; the legacy
-			// "close/keep behavior" suite below asserts the close path, so
-			// enable it here. The opt-in default itself is covered by the
-			// dedicated "auto-close settings decision table" suite.
-			autoCloseZooOpenedFiles: true,
-		})
+		mockTask = {
+			...makeTaskDouble({
+				// Auto-closing edited tabs is opt-in by default; the legacy
+				// "close/keep behavior" suite below asserts the close path, so
+				// enable it here. The opt-in default itself is covered by the
+				// dedicated "auto-close settings decision table" suite.
+				autoCloseZooOpenedFiles: true,
+			}),
+			cwd: mockCwd,
+			observationRegistry: new ObservationRegistry(),
+		} as unknown as Task // the double is partial; cast matches makeTaskDouble's own
 
 		diffViewProvider = new DiffViewProvider(mockCwd, mockTask)
 		// Mock the necessary properties and methods
@@ -5182,7 +5190,19 @@ describe("DiffViewProvider", () => {
 			})
 
 		const setupProvider = (stateOverrides: Record<string, unknown> = {}) => {
-			const provider = new DiffViewProvider(mockCwd, makeTaskDouble(stateOverrides))
+			const task = {
+				...makeTaskDouble(stateOverrides),
+				cwd: mockCwd,
+				// S4b follow-up (#44): saveChanges publishes through the guarded write,
+				// which resolves the path against task.cwd and consults the task's
+				// observation registry - both must be present on this suite's mock task.
+				observationRegistry: new ObservationRegistry(),
+			} as unknown as Task // the double is partial; cast matches makeTaskDouble's own
+			const provider = new DiffViewProvider(mockCwd, task)
+			// The preview observation + matching version token let the guarded save
+			// proceed so these tests stay focused on the auto-close decision table.
+			task.observationRegistry.observe(`${mockTargetPath}`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
 			provider["relPath"] = "auto-close-test.ts"
 			provider["newContent"] = "content"
 			provider["activeDiffEditor"] = buildActiveDiffEditor()

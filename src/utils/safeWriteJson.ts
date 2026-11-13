@@ -4,7 +4,8 @@ import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
 import { getErrorCode } from "./errorCode"
-import { acquireFileLock } from "./fileLock"
+import { acquireFileLock, lockPathFor } from "./fileLock"
+import { resolveLockKey, resolvePublishTarget } from "../services/file-safety/safeWriteText"
 import { recoverInterruptedReplacement } from "./jsonFileRecovery"
 
 /**
@@ -41,11 +42,194 @@ export interface SafeWriteJsonOptions {
 	merge?: (existing: unknown, incoming: unknown) => unknown
 
 	/**
+	 * Restrict the write to a directory. The publish target is resolved through
+	 * symlinks before this check runs, so a caller that picked the path from a
+	 * known scope (a workspace, a project settings directory) can refuse a write
+	 * that a planted symlink would land somewhere else. The check runs before the
+	 * advisory lock is taken and before anything is staged.
+	 */
+	confineTo?: string
+
+	/**
 	 * When provided, receives one event per replacement-protocol step (see
 	 * SafeWriteJsonTraceStage). Callers such as the task-message save use it
 	 * to emit diagnostic trace lines; it never influences the write itself.
 	 */
 	trace?: SafeWriteJsonTrace
+}
+
+/**
+ * Thrown when a write declared with `confineTo` resolves outside that directory.
+ */
+export class ConfinedPathEscapeError extends Error {
+	constructor(
+		readonly requestedPath: string,
+		readonly resolvedPath: string,
+		readonly confineTo: string,
+	) {
+		super(
+			`Refusing to write ${resolvedPath}: it resolves outside the confined directory ${confineTo} (requested ${requestedPath}).`,
+		)
+		this.name = "ConfinedPathEscapeError"
+	}
+}
+
+/**
+ * Thrown when the advisory lock this write holds no longer names the path it is about to
+ * publish. The lock key is resolved before the lock is taken and the publish target is
+ * resolved under it, so an alias repointed in between would otherwise let this writer commit
+ * onto a file whose lock belongs to another writer. Nothing is staged when this rejects.
+ */
+class LockKeyDriftError extends Error {
+	constructor(requestedPath: string, lockKey: string, publishTarget: string) {
+		super(
+			`Refusing to publish ${publishTarget}: the advisory lock was taken for ${lockKey}, which is no longer the file this write resolves to (requested ${requestedPath}). Retry the write.`,
+		)
+		this.name = "LockKeyDriftError"
+	}
+}
+/**
+ * Whether two lock keys denote one lock.
+ *
+ * The drift guard further down exists because two writers holding two different locks can
+ * commit onto one file, each believing it owned it. That is a claim about the locks, and the
+ * lock for a key is the artefact at lockPathFor(key). On a case-folding filesystem (NTFS,
+ * APFS) `SETTINGS.JSON.lock` and `settings.json.lock` ARE one artefact, so a writer that
+ * computed its key from a name that did not exist yet and then meets that file's true name
+ * under the lock is holding the very lock the other spelling would take: nothing about its
+ * lock changed, and comparing the two spellings refuses a write that never needed refusing.
+ *
+ * The question is put to the filesystem through fs.stat with bigint: true, for the same
+ * reason safeWriteText.ts puts its staging-containment question that way: on NTFS and ReFS a
+ * file identity can exceed Number.MAX_SAFE_INTEGER, and a rounded number makes two artefacts
+ * look different from each other or two different artefacts look alike. The spelling
+ * comparison stays in front of this as the fast path, so a stat is only asked when the
+ * spellings already differ. A missing artefact is the one failure that carries no information
+ * about identity, so the keys are then treated as different locks and the original rejection
+ * stands. Any other stat failure propagates: a guard that answered "different locks" from an
+ * EACCES would be refusing for a reason it never measured.
+ */
+async function _locksAreOneLock(firstKey: string, secondKey: string): Promise<boolean> {
+	// A divergence in another directory is not this question. A key whose parent was
+	// re-keyed under the writer can resolve its own artefact spelling onto some other
+	// writer's artefact, and an identity match there says nothing about the lock this
+	// writer took. Only a name that differs from its counterpart by case, within the
+	// same directory, can be one lock under two spellings - and even then the
+	// filesystem, not the spelling, is what answers.
+	if (path.dirname(firstKey) !== path.dirname(secondKey)) {
+		return false
+	}
+	if (path.basename(firstKey).toLowerCase() !== path.basename(secondKey).toLowerCase()) {
+		return false
+	}
+	const first = await _statLockArtefact(lockPathFor(firstKey))
+	if (first === undefined) {
+		return false
+	}
+	const second = await _statLockArtefact(lockPathFor(secondKey))
+	if (second === undefined) {
+		return false
+	}
+	return first.dev === second.dev && first.ino === second.ino
+}
+
+/**
+ * Stat one lock artefact. undefined means the artefact is not there - the only failure that
+ * says something about this comparison. Anything else is the guard losing its ability to
+ * decide, and it propagates rather than being read as "not the same lock".
+ */
+async function _statLockArtefact(lockPath: string): Promise<fsSync.BigIntStats | undefined> {
+	try {
+		return await fs.stat(lockPath, { bigint: true })
+	} catch (error: unknown) {
+		if (getErrorCode(error) === "ENOENT") {
+			return undefined
+		}
+		throw error
+	}
+}
+
+/**
+ * Thrown when the directory this write was approved to stage into no longer names that
+ * directory. The publish target and the staging location are resolved under the lock, but
+ * a resolved path is a pathname, not a bound identity: if the target's parent is replaced
+ * with a link pointing elsewhere before the staged file is written, the staged JSON is
+ * created outside the directory this write was approved for, and the commit rename that
+ * follows would then move that stray file onto the target. Rejecting here leaves nothing
+ * on disk.
+ */
+class StagingDirectoryDriftError extends Error {
+	constructor(requestedPath: string, approvedDirectory: string, actualDirectory: string) {
+		super(
+			`Refusing to stage ${requestedPath}: the directory this write was approved for (${approvedDirectory}) now resolves to ${actualDirectory}. Retry the write.`,
+		)
+		this.name = "StagingDirectoryDriftError"
+	}
+}
+
+/**
+ * Whether two paths name the same directory. `realpath` reports the on-disk spelling,
+ * which can differ in case on Windows, so the identity being compared here is the
+ * directory, not the spelling of it.
+ */
+function _sameDirectory(approved: string, actual: string): boolean {
+	return process.platform === "win32" ? approved.toLowerCase() === actual.toLowerCase() : approved === actual
+}
+
+/**
+ * Canonicalize a directory a write is confined to or approved to stage into. The publish
+ * resolved through symlinks, so the scope has to be resolved the same way or a
+ * scope path that itself runs through a symlink (macOS /var -> /private/var is the
+ * common case) would compare lexically against a resolved target and reject every
+ * legitimate in-scope write. When the scope does not exist yet, the nearest
+ * existing ancestor is resolved and the remainder re-appended.
+ */
+async function _resolveScopeRoot(confineTo: string): Promise<string> {
+	const lexical = path.resolve(confineTo)
+	try {
+		return await fs.realpath(lexical)
+	} catch (error: unknown) {
+		// Only a missing path means "walk up and re-join". EACCES or ELOOP means the
+		// scope cannot be canonicalized at all, and continuing would build a partly
+		// lexical root that can disagree with the canonical target - the failure has to
+		// surface rather than decide the scope from a guess.
+		if (_scopeErrorCode(error) !== "ENOENT") {
+			throw error
+		}
+		const missing: string[] = []
+		let ancestor = lexical
+		while (true) {
+			const parent = path.dirname(ancestor)
+			if (parent === ancestor) {
+				return lexical
+			}
+			missing.push(path.basename(ancestor))
+			ancestor = parent
+			try {
+				const real = await fs.realpath(ancestor)
+				return path.join(real, ...missing.reverse())
+			} catch (innerError: unknown) {
+				if (_scopeErrorCode(innerError) !== "ENOENT") {
+					throw innerError
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Whether `candidate` sits outside `scopeRoot`. The scope root itself counts as
+ * outside: a file write cannot land on the directory that declares the scope.
+ */
+function _escapesScope(scopeRoot: string, candidate: string): boolean {
+	const relative = path.relative(scopeRoot, candidate)
+	return relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
+}
+
+function _scopeErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? (error as { code?: string }).code
+		: undefined
 }
 
 function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): string {
@@ -132,14 +316,11 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		throw dirError
 	}
 
-	// Lock key: the symlink referent when the path is an existing symlink, so a
-	// symlink alias and its referent share one lock. The key must stay computable while
-	// a peer writer is mid-commit - the commit rename briefly leaves the path without
-	// the referent it had when the walk started - so the walk tolerates a dangling link
-	// instead of rejecting it here. (The backup itself is a copy: the target is never
-	// renamed away, so a dangling link here means a peer's commit or an external
-	// unlink, not a backup rename.)
-	const lockKey = await resolveLockKey(absoluteFilePath)
+	// The lock is taken on the path the caller gave, which is the spelling the trunk carries and this
+	// chain keeps - see the comment at the acquisition below. The guards further down still resolve the
+	// publish target under the lock and still measure it against this path, so the drift check and the
+	// pre-lock confinement check keep their meaning with the key spelled this way.
+	const lockKey = absoluteFilePath
 
 	// Confinement is checked here as well as under the lock. The lock file lives NEXT
 	// TO the key, so a planted symlink that points outside the declared scope would
@@ -156,13 +337,19 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		}
 	}
 
-	// Acquire the lock before any file operations. If acquisition fails it throws
-	// immediately, and releaseLock stays a no-op so the finally block does not try
-	// to release an unacquired lock.
-	releaseLock = await acquireFileLock(lockKey)
+	// Acquire the lock before any file operations. `acquireFileLock` owns the
+	// shared advisory lock protocol, so callers that lock the same path with
+	// it (for example task-history deletion) serialize with this write.
+	// If lock acquisition fails, it throws immediately. The releaseLock
+	// remains a no-op, so the finally block in the main file operations
+	// try-catch-finally won't try to release an unacquired lock if this
+	// path is taken.
+	releaseLock = await acquireFileLock(absoluteFilePath)
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
+	// Present only while the EPERM fallback holds the target renamed aside as a backup.
+	let actualTempBackupFilePath: string | null = null
 
 	try {
 		// Heal any state an interrupted previous write left behind: an absent
@@ -176,6 +363,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		if (recovery.foundLeftovers) {
 			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
 		}
+
+		// Resolve the publish target under the lock: the peer has committed by now, so
+		// the strict dangling-link rejection still applies to a real dangling link. It
+		// must stay inside the protected block, otherwise a rejection here leaves the
+		// advisory lock held until the stale timeout for every other writer.
+		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 
 		// The lock above was chosen from the path as it looked before the lock was taken, and the
 		// publish target is resolved under the lock - after a peer committed, and after the alias
@@ -333,6 +526,23 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
+
+		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
+
+		// Attempt rollback if a backup was made
+		if (backupFileToRollbackOrCleanupWithinCatch) {
+			try {
+				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
+				// Mark as handled, prevent later unlink of this path
+				actualTempBackupFilePath = null
+			} catch (rollbackError) {
+				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
+				console.error(
+					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
+					rollbackError,
+				)
+			}
+		}
 
 		// A pre-commit failure leaves the target untouched, and safeWriteText has
 		// already removed its own backup copy and temp file (a POST-commit failure
