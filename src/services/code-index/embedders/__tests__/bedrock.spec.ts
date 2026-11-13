@@ -685,7 +685,16 @@ describe("BedrockEmbedder", () => {
 				Object.assign(new Error("Service unavailable"), { $metadata: { httpStatusCode: 503 } })
 			const throttle = () => Object.assign(new Error("Slow down"), { name: "ThrottlingException" })
 
-			beforeEach(() => vitest.useFakeTimers())
+			beforeEach(() => {
+				vitest.useFakeTimers()
+				// A shared registry would carry the throttle case's pause into the next case.
+				embedder = new BedrockEmbedder(
+					"us-east-1",
+					"test-profile",
+					"amazon.titan-embed-text-v2:0",
+					new ProviderPacerRegistry(),
+				)
+			})
 			afterEach(() => vitest.useRealTimers())
 
 			it.each([

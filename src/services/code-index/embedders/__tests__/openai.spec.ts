@@ -103,13 +103,10 @@ describe("OpenAiEmbedder", () => {
 
 			const result = await embedder.createEmbeddings(testTexts)
 
-			expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
-				{
-					input: testTexts,
-					model: testModelId,
-				},
-				undefined,
-			)
+			expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+				input: testTexts,
+				model: testModelId,
+			})
 			expect(result).toEqual({
 				embeddings: [[0.1, 0.2, 0.3]],
 				usage: { promptTokens: 10, totalTokens: 15 },
@@ -126,13 +123,10 @@ describe("OpenAiEmbedder", () => {
 
 			const result = await embedder.createEmbeddings(testTexts)
 
-			expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
-				{
-					input: testTexts,
-					model: testModelId,
-				},
-				undefined,
-			)
+			expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+				input: testTexts,
+				model: testModelId,
+			})
 			expect(result).toEqual({
 				embeddings: [
 					[0.1, 0.2, 0.3],
@@ -153,13 +147,10 @@ describe("OpenAiEmbedder", () => {
 
 			await embedder.createEmbeddings(testTexts, customModel)
 
-			expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
-				{
-					input: testTexts,
-					model: customModel,
-				},
-				undefined,
-			)
+			expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+				input: testTexts,
+				model: customModel,
+			})
 		})
 
 		it("should handle missing usage data gracefully", async () => {
@@ -215,13 +206,10 @@ describe("OpenAiEmbedder", () => {
 				expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`exceeds maximum token limit`))
 
 				// Verify only normal texts were processed
-				expect(mockEmbeddingsCreate).toHaveBeenCalledWith(
-					{
-						input: [normalText, "another normal"],
-						model: testModelId,
-					},
-					undefined,
-				)
+				expect(mockEmbeddingsCreate).toHaveBeenCalledWith({
+					input: [normalText, "another normal"],
+					model: testModelId,
+				})
 				expect(result.embeddings).toHaveLength(2)
 			})
 
@@ -509,7 +497,9 @@ describe("OpenAiEmbedder", () => {
 			Object.assign(rateLimitError, { status: 429 })
 			mockEmbeddingsCreate.mockRejectedValue(rateLimitError)
 
-			await expect(embedder.validateConfiguration()).rejects.toBe(rateLimitError)
+			const result = await embedder.validateConfiguration()
+
+			expect(result).toEqual({ valid: false, error: "embeddings:validation.serviceUnavailable" })
 		})
 
 		it("should fail validation with connection error", async () => {

@@ -6,7 +6,7 @@ import { IVectorStore } from "../interfaces/vector-store"
 import { Payload, VectorStoreSearchResult } from "../interfaces"
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_SEARCH_MIN_SCORE, QDRANT_CODE_BLOCK_NAMESPACE } from "../constants"
 import { t } from "../../../i18n"
-import { VectorStoreError } from "../shared/indexing-errors"
+import { IndexingRetryError, VectorStoreError } from "../shared/indexing-errors"
 import { type ProviderPacerRegistry, makeRateLimitScope } from "../provider-pacer"
 import { retryWithPolicy } from "../shared/retry-policy"
 
@@ -111,11 +111,16 @@ export class QdrantVectorStore implements IVectorStore {
 	}
 
 	/** Runs one creation request with bounded server/connection retries and the shared rate-limit wait. */
-	private create<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-		return retryWithPolicy(() => this.pacers.get(this.rateLimitScope).run(undefined, signal, request), {
-			signal,
-			budget: { retriesUsed: 0 },
-		})
+	private async create<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		try {
+			return await retryWithPolicy(() => this.pacers.get(this.rateLimitScope).run(undefined, signal, request), {
+				signal,
+				budget: { retriesUsed: 0 },
+			})
+		} catch (error) {
+			// The original error keeps initialize()'s existing connection and dimension-mismatch messages.
+			throw error instanceof IndexingRetryError ? error.cause : error
+		}
 	}
 
 	/**

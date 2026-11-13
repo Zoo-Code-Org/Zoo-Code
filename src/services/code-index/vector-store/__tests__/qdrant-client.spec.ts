@@ -784,6 +784,7 @@ describe("QdrantVectorStore", () => {
 
 			beforeEach(() => {
 				vitest.useFakeTimers()
+				mockQdrantClientInstance.createPayloadIndex.mockResolvedValue(undefined)
 				mockQdrantClientInstance.getCollection.mockRejectedValue({
 					response: { status: 404 },
 					message: "Not found",
@@ -791,7 +792,11 @@ describe("QdrantVectorStore", () => {
 				mockQdrantClientInstance.createCollection.mockResolvedValue(true)
 				vitest.spyOn(console, "error").mockImplementation(function () {})
 			})
-			afterEach(() => vitest.useRealTimers())
+			afterEach(() => {
+				vitest.useRealTimers()
+				// clearAllMocks keeps implementations; a persistent rejection here would leak into later tests.
+				mockQdrantClientInstance.createPayloadIndex.mockReset()
+			})
 
 			it.each(["createCollection", "createPayloadIndex"] as const)(
 				"recovers when %s fails twice with a server error",
@@ -1354,7 +1359,11 @@ describe("QdrantVectorStore", () => {
 			mockQdrantClientInstance.upsert.mockRejectedValue(upsertError)
 			vitest.spyOn(console, "error").mockImplementation(function () {})
 
-			await expect(vectorStore.upsertPoints(mockPoints)).rejects.toThrow(upsertError)
+			// The wrapper adds the classification the writer's retry policy reads; message and cause are unchanged.
+			await expect(vectorStore.upsertPoints(mockPoints)).rejects.toMatchObject({
+				message: "Upsert failed",
+				cause: upsertError,
+			})
 
 			expect(mockQdrantClientInstance.upsert).toHaveBeenCalledTimes(1)
 			expect(console.error).toHaveBeenCalledWith("Failed to upsert points:", upsertError)

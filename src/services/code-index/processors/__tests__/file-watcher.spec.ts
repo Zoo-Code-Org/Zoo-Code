@@ -156,10 +156,12 @@ describe("FileWatcher", () => {
 		}
 
 		mockEmbedder = {
+			rateLimitScope: "openai:1",
 			createEmbeddings: vi.fn().mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] }),
 		}
 
 		mockVectorStore = {
+			rateLimitScope: "qdrant:1",
 			upsertPoints: vi.fn().mockResolvedValue(undefined),
 			deletePointsByFilePath: vi.fn().mockResolvedValue(undefined),
 			deletePointsByMultipleFilePaths: vi.fn().mockResolvedValue(undefined),

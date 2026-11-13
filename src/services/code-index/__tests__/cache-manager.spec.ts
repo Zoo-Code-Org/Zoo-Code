@@ -99,7 +99,10 @@ describe("CacheManager", () => {
 
 		it.each([
 			["missing (ENOENT)", () => Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }))],
-			["missing (FileNotFound)", () => Promise.reject(Object.assign(new Error("gone"), { code: "FileNotFound" }))],
+			[
+				"missing (FileNotFound)",
+				() => Promise.reject(Object.assign(new Error("gone"), { code: "FileNotFound" })),
+			],
 			["invalid JSON", () => Promise.resolve(Buffer.from("{not json"))],
 			["a non-object", () => Promise.resolve(Buffer.from("[1, 2]"))],
 			["non-string hashes", () => Promise.resolve(Buffer.from('{"a.ts": 3}'))],

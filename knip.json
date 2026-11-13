@@ -32,6 +32,7 @@
 			],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
+				"async-mutex",
 				"@types/node-cache",
 				"@types/vscode",
 				"@vscode/ripgrep",

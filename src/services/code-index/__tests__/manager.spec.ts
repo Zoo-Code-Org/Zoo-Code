@@ -3,6 +3,7 @@ import { makeExtensionContext } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
+import { CacheManager } from "../cache-manager"
 import { CodeIndexOrchestrator } from "../orchestrator"
 import { CodeIndexSearchService } from "../search-service"
 import type { MockedClass } from "vitest"
@@ -243,11 +244,13 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			})
 
 			manager["startIndexingInBackground"]()
-			await Promise.resolve()
 
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[CodeIndexManager] Background indexing failed:",
-				indexingError,
+			// The start-promise join (R13) adds microtask hops before the catch runs.
+			await vi.waitFor(() =>
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[CodeIndexManager] Background indexing failed:",
+					indexingError,
+				),
 			)
 			consoleErrorSpy.mockRestore()
 		})
@@ -639,6 +642,9 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 					codebaseIndexSearchMinScore: 0.4,
 				}),
 			}
+
+			// The vscode mock has no fs; a missing cache is the only empty-cache case under D8.
+			vi.spyOn(CacheManager.prototype, "initialize").mockResolvedValue(undefined)
 
 			// Enable workspace indexing before re-initialization
 			await manager.setWorkspaceEnabled(true)

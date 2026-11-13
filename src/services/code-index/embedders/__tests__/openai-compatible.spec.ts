@@ -938,7 +938,9 @@ describe("OpenAICompatibleEmbedder", () => {
 			Object.assign(rateLimitError, { status: 429 })
 			mockEmbeddingsCreate.mockRejectedValue(rateLimitError)
 
-			await expect(embedder.validateConfiguration()).rejects.toBe(rateLimitError)
+			const result = await embedder.validateConfiguration()
+
+			expect(result).toEqual({ valid: false, error: "embeddings:validation.serviceUnavailable" })
 		})
 
 		it("should fail validation with generic error", async () => {
