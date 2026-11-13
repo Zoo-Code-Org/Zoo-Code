@@ -1861,6 +1861,113 @@ describe("DiffViewProvider", () => {
 				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
 			})
 
+			it("keeps an editor that arrives after the deferred diff command from publishing into a released session", async () => {
+				// The reviewer named this ordering: a release can reach the provider while open() is still
+				// parked inside openDiffEditor(), before the vscode.diff command settles. This row drives the
+				// real open() against a mocked executeCommand("vscode.diff") that resolves only when the
+				// test releases it, and leaves openDiffEditor() itself alone because it is private. What it
+				// pins is open() reacting to a session that was released before that command settled, on the
+				// create path where open() wrote an empty placeholder - not the extension host that would
+				// really raise these events.
+				const callOrder: string[] = []
+				const lateDocument = makeTextDocument({
+					uri: makeUri(`${mockCwd}/test.txt`),
+					isDirty: true,
+					getText: () => "partial model output",
+				})
+				const lateEditor = makeTextEditor({ document: lateDocument })
+				let resolveDiffCommand: () => void = () => {}
+				const diffCommandSettled = new Promise<void>((resolve) => {
+					resolveDiffCommand = resolve
+				})
+				// openDiffEditor() registers these listeners before it invokes the diff command, so the
+				// doubles hand the callbacks back instead of being stubbed away.
+				let onDidOpenTextDocument: ((document: vscode.TextDocument) => unknown) | undefined
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					onDidOpenTextDocument = callback
+					return { dispose: vi.fn() }
+				})
+				// The other three listeners stay on the module mock's own disposable double, so
+				// registering them is observable without this row replacing anything.
+				Object.defineProperty(vscode.window.tabGroups, "all", { value: [], configurable: true })
+				vi.mocked(vscode.window).visibleTextEditors = []
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(lateEditor)
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					callOrder.push(String(command))
+					// Only this test lets the diff command settle, which is what defers the diff editor.
+					await diffCommandSettled
+					callOrder.push("diffCommandSettled")
+				})
+				// A denied write_to_file empties the buffer; the replace is what would be saved.
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+					callOrder.push("applyEdit")
+					return true
+				})
+				Object.assign(diffViewProvider, {
+					editType: "create" as const,
+					// The two tab helpers are recorded so the order below names the closings rather than
+					// re-testing what each of them does.
+					closeAllDiffViews: vi.fn(async () => {
+						callOrder.push("closeDiffViews")
+					}),
+					closeFileTab: vi.fn(async () => {
+						callOrder.push("closeFileTab")
+					}),
+				})
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				vi.mocked(fs.readFile).mockResolvedValue("content the user saved after open()")
+				vi.mocked(fs.unlink).mockResolvedValue(undefined)
+				const openPromise = diffViewProvider.open("test.txt")
+				// The streamed text is what the deny discards; open() owns the placeholder it wrote.
+				diffViewProvider["streamedLines"] = ["partial model output"]
+				// Let open() run up to the point where it invokes the diff command and stop it there:
+				// this macrotask queues behind every already-pending microtask, and the command
+				// double stays unresolved, so open() is parked exactly where the reviewer named.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				// open() publishes its editor only when the await below it resolves, so the field
+				// starts empty for this scenario rather than carrying the double the beforeEach installs.
+				diffViewProvider["activeDiffEditor"] = undefined
+				// open() is parked on the diff command, so it has published no editor yet.
+				expect(callOrder).toEqual(["vscode.diff"])
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+					"vscode.diff",
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+					{ preserveFocus: true },
+				)
+				// The release runs while open() is still awaiting that command.
+				const released = diffViewProvider.discardUnapprovedStream()
+				await expect(released).rejects.toThrow(/no longer holds the empty placeholder/)
+				// The release refused before any closing: with no editor published it has nothing to work
+				// from, so it neither empties the buffer nor removes the placeholder it no longer owns.
+				expect(callOrder).toEqual(["vscode.diff"])
+				expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+				expect(lateDocument.save).not.toHaveBeenCalled()
+				// Then the host catches up: the command settles and the editor finally appears.
+				resolveDiffCommand()
+				vi.mocked(vscode.window).visibleTextEditors = [lateEditor]
+				if (typeof onDidOpenTextDocument !== "function") {
+					throw new Error("open() never registered the document listener it uses to await the diff editor")
+				}
+				await onDidOpenTextDocument(lateDocument)
+				await openPromise
+				// The late editor never published into the released session.
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				expect(DecorationController).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
+				expect(fs.unlink).not.toHaveBeenCalled()
+				// The only closing after the release is the one open() performs on the late editor through
+				// the same helper the release paths use; the diff command settling is recorded first.
+				expect(callOrder).toEqual(["vscode.diff", "diffCommandSettled", "closeDiffViews"])
+				// Leave the document-open double as the module mock defined it, for the rows after
+				// this one, since a mockImplementation here outlives the test that set it.
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation(() => ({ dispose: vi.fn() }))
+				errorSpy.mockRestore()
+			})
 			it("does not save the emptied buffer over content that arrived in the placeholder after open()", async () => {
 				// The reviewer's ordering ask, at the layer that would have caught it. The tests above all
 				// run with a dirty buffer and no recorded placeholder content, so open() wrote nothing this
