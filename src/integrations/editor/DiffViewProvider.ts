@@ -1200,27 +1200,40 @@ export class DiffViewProvider {
 			}
 		}
 
-		// Open the document to ensure diagnostics are loaded
-		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
 		if (openFile) {
-			// Show the document in the editor
-			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
-				preview: false,
-				preserveFocus: true,
-			})
+			try {
+				// Show the document in the editor
+				await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+					preview: false,
+					preserveFocus: true,
+				})
+			} catch (error: unknown) {
+				// The commit rename already put the content on disk and the publish cannot be undone
+				// from here. Failing the save would leave the tool holding stale state and re-writing
+				// content that is already published, so the open failure is reported as its own
+				// condition while the save stays successful.
+				console.warn(`saveDirectly: content committed, the editor could not open it: ${String(error)}`)
+			}
 		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+			try {
+				// Just open the document in memory to trigger diagnostics without showing it
+				const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
+				// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
+				if (doc.isDirty) {
+					await doc.save()
+				}
+			} catch (error: unknown) {
+				// The same condition on the focus-disruption path: the content is committed and only
+				// the editor-side preparation failed.
+				console.warn(
+					`saveDirectly: content committed, the in-memory document could not be prepared: ${String(error)}`,
+				)
 			}
 
 			// Force a small delay to ensure diagnostics are triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))
 		}
-
 		let newProblemsMessage = ""
 
 		if (diagnosticsEnabled) {

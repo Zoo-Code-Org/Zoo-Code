@@ -896,6 +896,54 @@ describe("DiffViewProvider", () => {
 			warn.mockRestore()
 		})
 
+		it("keeps the save successful when the editor cannot open the file after the publish landed", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// The commit rename already put the content on disk by the time this call fails, so a
+			// rejection here reports a save that cannot be undone as a save that never happened.
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValueOnce(new Error("cannot open the text editor"))
+
+			await expect(
+				diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200),
+			).resolves.toMatchObject({ finalContent: "new content" })
+
+			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
+				return call[0] === `${mockCwd}/test.ts`
+			})
+			expect(publishCalls).toHaveLength(1)
+			// The warning has to name which condition it is reporting: an editor that could not open
+			// a committed file is not the same condition as a lost DACL or an unconfirmed durability.
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("content committed, the editor could not open it"),
+			)
+			expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+		it("keeps the save successful when the in-memory document cannot be prepared after the publish landed", async () => {
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			// openFile false is the PREVENT_FOCUS_DISRUPTION path: same publish, different open.
+			vi.mocked(vscode.workspace.openTextDocument).mockRejectedValueOnce(
+				new Error("cannot open the document in memory"),
+			)
+
+			await expect(
+				diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0),
+			).resolves.toMatchObject({ finalContent: "new content" })
+
+			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
+				return call[0] === `${mockCwd}/test.ts`
+			})
+			expect(publishCalls).toHaveLength(1)
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("content committed, the in-memory document could not be prepared"),
+			)
+			expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("content committed with a warning"))
+			warn.mockRestore()
+		})
+
 		it("reports an unconfirmed-durability publish as a warning instead of a failed save", async () => {
 			const { PublishNotDurableError, safeWriteText } =
 				await import("../../../services/file-safety/safeWriteText")
