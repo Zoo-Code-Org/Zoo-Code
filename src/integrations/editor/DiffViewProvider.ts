@@ -654,12 +654,18 @@ export class DiffViewProvider {
 						editorFailure = new Error(
 							`Could not restore the diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
 						)
-					} else if (this.editType !== "modify" && placeholderStillMatches && !placeholderReadFailed) {
+					} else if (
+						this.editType !== "modify" &&
+						placeholderStillMatches &&
+						!placeholderAlreadyGone &&
+						!placeholderReadFailed
+					) {
 						// Only the emptied placeholder is ever saved: this edit created that file, and closing
 						// a dirty tab would prompt. A modify is never saved here - a modify's restore is an
 						// in-memory revert, and saving it would write to a file the user never approved (see the
 						// method comment). The placeholder is not saved once something else has written to it,
-						// or once a read proved nothing about it either: dropping the empty buffer onto that
+						// or once a read proved nothing about it either, or once a read proved the file is gone:
+						// dropping the empty buffer onto that
 						// path would overwrite bytes nobody approved, which is the very reason the unlink below
 						// is guarded, and checking it after the save would be too late - the save would already
 						// have written over the content the read was looking for.
