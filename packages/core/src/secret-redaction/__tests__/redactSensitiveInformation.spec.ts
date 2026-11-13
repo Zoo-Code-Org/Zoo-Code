@@ -22,9 +22,39 @@ describe("redactSensitiveInformation", () => {
 			["credentials.json"],
 			[".npmrc"],
 			["infra/prod.tfvars"],
+			[".envrc"],
+			["config/prod.env"],
+			["config/.env.d/prod"],
+			[".vault-token"],
+			["keys/service_account_prod.json"],
+			["infra/terraform.tfstate.backup"],
 		])("hides every content line of %s, also without a credential word", (path) => {
 			const diff = fileDiff(path, "+HOST=example.org", "-PORT=1", " hunter2")
 			expect(redactSensitiveInformation(diff)).toBe(fileDiff(path, "+[REDACTED]", "-[REDACTED]", " [REDACTED]"))
+		})
+
+		it.each([["src/env.ts"], ["docs/envoy.yaml"], ["docs/service_account.md"], ["config/.environment"]])(
+			"keeps the lines of %s, which is not a sensitive file",
+			(path) => {
+				const diff = fileDiff(path, "+HOST=example.org")
+				expect(redactSensitiveInformation(diff)).toBe(diff)
+			},
+		)
+
+		it("hides a sensitive file in a combined diff of a merge conflict", () => {
+			const combined = [
+				"diff --cc .env",
+				"index 1111111,2222222..3333333",
+				"--- a/.env",
+				"+++ b/.env",
+				"@@@ -1,1 -1,1 +1,2 @@@",
+				"++DB=hunter2xyz",
+				" +HOST=example.org",
+			].join("\n")
+			const diff = `${fileDiff("a.ts", "+let a = 1")}\n${combined}`
+			expect(redactSensitiveInformation(diff)).toBe(
+				`${fileDiff("a.ts", "+let a = 1")}\n${combined.replace("++DB=hunter2xyz", "++[REDACTED]").replace(" +HOST=example.org", " +[REDACTED]")}`,
+			)
 		})
 
 		it.each([
@@ -192,6 +222,32 @@ describe("redactSensitiveInformation", () => {
 					"+  [REDACTED]",
 					"+}",
 				),
+			)
+		})
+
+		it("reads the prefix columns and the hunk header of a combined diff", () => {
+			const diff = [
+				"diff --combined app.ts",
+				'@@@ -1,2 -1,2 +1,3 @@@ const API_KEY = "abc"',
+				"++const token = load(",
+				"++  hunter2xyz,",
+				" +const other = 1",
+			].join("\n")
+			expect(redactSensitiveInformation(diff)).toBe(
+				[
+					"diff --combined app.ts",
+					"@@@ -1,2 -1,2 +1,3 @@@",
+					"++[REDACTED]",
+					"++  [REDACTED]",
+					" +const other = 1",
+				].join("\n"),
+			)
+		})
+
+		it("does not hide the lines before a credential line at column 0", () => {
+			const diff = fileDiff("app.py", "+def run():", "+    return 1", "+API_TOKEN = load()")
+			expect(redactSensitiveInformation(diff)).toBe(
+				fileDiff("app.py", "+def run():", "+    return 1", "+[REDACTED]"),
 			)
 		})
 

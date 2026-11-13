@@ -1246,6 +1246,9 @@ describe("commitMessageGenerator", () => {
 
 			expect(singleCompletionHandler).toHaveBeenCalledTimes(1)
 			expect(mockRepo.inputBox.value).toBe("")
+			// A user cancel ends the wait quietly, without the "previous request is still running" warning.
+			expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 			cancelledRequest.resolve("feat: cancelled")
 		})
 
@@ -1319,6 +1322,23 @@ describe("commitMessageGenerator", () => {
 
 			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
 
+			await vi.waitFor(() => expect(commitMessageRequestStateSize()).toBe(0))
+		})
+
+		it("removes the request state after runs that stop before they find a repository", async () => {
+			const noRepositories: GitAPI = { repositories: [] }
+			;(vscode.extensions.getExtension as Mock)
+				.mockReturnValueOnce(undefined)
+				.mockReturnValueOnce({ isActive: true, exports: { getAPI: () => noRepositories } })
+			;(singleCompletionHandler as Mock).mockResolvedValue("feat: done")
+
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+			expect(vscode.window.showErrorMessage).toHaveBeenNthCalledWith(1, "Git extension not found or not enabled.")
+			expect(vscode.window.showErrorMessage).toHaveBeenNthCalledWith(2, "No Git repository found.")
+			await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+			expect(mockRepo.inputBox.value).toBe("feat: done")
 			await vi.waitFor(() => expect(commitMessageRequestStateSize()).toBe(0))
 		})
 
