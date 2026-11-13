@@ -2241,3 +2241,100 @@ describe("asks landed at the refreshed 2357 footing", () => {
 		})
 	})
 })
+
+describe("created root in the extended-length namespace", () => {
+	// Node reports the directory mkdir created through the Windows extended-length namespace, and
+	// only Windows spells a UNC root that way: the marker plus the "UNC" label stands for the
+	// leading backslash pair. These rows run where that marker can appear and are skipped where it
+	// cannot, so the spelling the fix answers is tested rather than assumed.
+	const markerVisibleHere = process.platform === "win32"
+	const conditionalIt = markerVisibleHere ? it : it.skip
+	const serverRoot = "\\\\server\\share\\ws"
+	const created = "\\\\server\\share\\ws\\new"
+	const target = "\\\\server\\share\\ws\\new\\target.txt"
+	const escaped = "\\\\outside\\share\\new"
+	// The answer mkdir gives for a UNC target on Node 22, in the namespace spelling.
+	const mkdirAnswer = "\\\\?\\UNC\\server\\share\\ws\\new"
+	function _uncScenario(redirectCreatedDirectory: boolean) {
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			const s = String(p)
+			// The planted redirect makes the created directory resolve under a host nothing pinned.
+			if (redirectCreatedDirectory && s === created) return escaped
+			return s
+		})
+		vi.mocked(fs.mkdir).mockResolvedValue(mkdirAnswer)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		return [{ dir: serverRoot, dev: 1n, ino: 100n, resolvedPath: serverRoot }]
+	}
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
+	})
+	conditionalIt("refuses to publish when the created UNC directory resolves under nothing the caller pinned", async () => {
+		const pin = _uncScenario(true)
+		const promise = safeWriteText(target, "data", {
+			platform: "linux",
+			expectedAncestorIdentities: pin,
+		})
+		await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+		await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+	})
+	conditionalIt("publishes when the created UNC directory resolves inside the location the caller pinned", async () => {
+		const pin = _uncScenario(false)
+		await expect(safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin })).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+	})
+})
+
+describe("effective parent validated when mkdir created nothing", () => {
+	// mkdir names no first created directory when the final directory was already there, and a
+	// name that is a link to a directory answers the same way because the stat after the create
+	// succeeds. Nothing was created, so no created chain exists for the authorization loop, yet
+	// the parent this write publishes into can have become a link after the caller authorized it.
+	const pinned = path.resolve("/ws/a")
+	const parent = path.join(pinned, "new")
+	const escapedParent = path.resolve("/outside/new")
+	const target = path.join(parent, "target.txt")
+	function _scenario(parentResolvesElsewhere: boolean, pinGiven: boolean) {
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			const s = String(p)
+			if (parentResolvesElsewhere && s === parent) return escapedParent
+			return s
+		})
+		// Node 22 reports undefined for a recursive mkdir whose final directory already exists.
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		return pinGiven ? [{ dir: pinned, dev: 1n, ino: 100n, resolvedPath: pinned }] : undefined
+	}
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
+	})
+	it("refuses to publish when the parent that already existed resolves under nothing the caller pinned", async () => {
+		const pin = _scenario(true, true)
+		const promise = safeWriteText(target, "data", {
+			platform: "linux",
+			expectedAncestorIdentities: pin,
+		})
+		await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+		await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+	})
+	it("publishes when the parent that already existed resolves inside the location the caller pinned", async () => {
+		const pin = _scenario(false, true)
+		await expect(safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin })).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+	})
+	it("publishes when the parent already existed and the caller pinned no location", async () => {
+		const pin = _scenario(true, false)
+		await expect(safeWriteText(target, "data", { platform: "linux", expectedAncestorIdentities: pin })).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+	})
+})

@@ -426,13 +426,29 @@ function _preserveGroup(fd: number, gid: number): void {
  * otherwise a crash can drop an ancestor and with it the published file.
  *
  * On Windows the reported path carries the extended-length namespace marker, which is stripped
- * so the chain compares in the spelling the write itself works in. An answer that is not on
- * this path yields nothing, rather than syncing directories this write cannot place.
+ * so the chain compares in the spelling the write itself works in. The marker has two shapes: the
+ * drive shape \\\?C:\... and the UNC shape \\\?UNC\server\share\...,
+ * whose root is spelled \\server\share\... once the marker is gone. Removing only the marker
+ * characters from the UNC shape leaves \UNC\server\share\..., which reads as a path relative
+ * to the current drive, so the walk below finds no root and yields nothing: the created-directory
+ * authorization that reads this answer is skipped with it, and a directory this write created
+ * under a planted link goes unchecked. The UNC shape is therefore converted as its own case. An
+ * answer that is not on this path yields nothing, rather than syncing directories this write
+ * cannot place.
  */
 function _createdAncestorChain(createdRoot: string | undefined, dirPath: string): string[] {
 	if (typeof createdRoot !== "string") return []
 	const namespacePrefix = "\\\\?\\"
-	const unprefixed = createdRoot.startsWith(namespacePrefix) ? createdRoot.slice(namespacePrefix.length) : createdRoot
+	const uncNamespacePrefix = "\\\\?\\UNC\\"
+	let unprefixed = createdRoot
+	if (createdRoot.startsWith(uncNamespacePrefix)) {
+		// The marker and the "UNC" label together stand for the leading \\, so the
+		// converted spelling restores that root instead of leaving the label as a relative
+		// first segment.
+		unprefixed = "\\\\" + createdRoot.slice(uncNamespacePrefix.length)
+	} else if (createdRoot.startsWith(namespacePrefix)) {
+		unprefixed = createdRoot.slice(namespacePrefix.length)
+	}
 	const root = path.resolve(unprefixed)
 	const chain: string[] = []
 	let cursor = dirPath
@@ -681,6 +697,41 @@ export async function safeWriteText(
 				if (createdReal !== undefined && !_isInside(pinned.location, createdReal)) {
 					throw new AncestorReplacedError(created, "was created outside the authorized location")
 				}
+			}
+		}
+	} else {
+		// Nothing was created, which is what Node 22 reports when the final directory was already
+		// there -- including when it is a symbolic link to a directory, because the stat that follows
+		// the create succeeds and names no first created path. No chain means the loop above never
+		// ran, yet the parent this write publishes into can still have become a link after the caller
+		// authorized it: /ws/a pinned, /ws/a/new absent while the target was resolved, the name
+		// planted as a link to /outside before the mkdir, and the access check above follows that link
+		// and passes. The effective parent is checked the way the created chain is checked, so a
+		// parent that resolves under nothing the caller pinned is refused before anything is staged.
+		const authorized = _authorizedAncestorLocations(options)
+		// A parent the caller named itself belongs to the ancestry recheck below: that check holds the
+		// identity and the resolution the caller authorized against, and it reports a moved or re-pointed
+		// pin in those terms. Only a parent no pin names -- the case the loop above would have judged had
+		// anything been created -- is this branch's to judge.
+		const resolvedParent = path.resolve(dirPath)
+		const namedByCaller = authorized.some((pin) => pin.dir === resolvedParent)
+		if (authorized.length > 0 && !namedByCaller) {
+			const parentReal = await fs.realpath(dirPath).catch((error: unknown) => {
+				const code = getErrorCode(error)
+				// A parent that vanished since the mkdir is reported by the ancestry recheck below, which
+				// knows whether the caller authorized that name; only a real inspection failure is this
+				// write's to report here.
+				if (code === "ENOENT" || code === "ENOTDIR") {
+					return undefined
+				}
+				throw error
+			})
+			const pinned = _deepestAuthorizedLocation(authorized, parentReal ?? dirPath)
+			if (pinned === undefined) {
+				throw new AncestorReplacedError(dirPath, "resolves under nothing the caller authorized")
+			}
+			if (parentReal !== undefined && !_isInside(pinned.location, parentReal)) {
+				throw new AncestorReplacedError(dirPath, "resolves outside the authorized location")
 			}
 		}
 	}

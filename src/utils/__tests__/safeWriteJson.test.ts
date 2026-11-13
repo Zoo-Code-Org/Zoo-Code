@@ -923,7 +923,7 @@ describe("safeWriteJson", () => {
 				}
 			},
 		)
-		const lockMock = lockMockFn as unknown as typeof realLockfile.lock
+		const lockMock: typeof realLockfile.lock = lockMockFn
 		vi.doMock("proper-lockfile", () => ({
 			...realLockfile,
 			lock: lockMock,
