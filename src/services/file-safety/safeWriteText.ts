@@ -479,6 +479,10 @@ export async function safeWriteText(
 	// published. The success path already knows this; the catch is the side that needs the flag.
 	let committed = false
 	let tempPath: string
+	// The identity the staging check validated below, kept so the mode copy further down can
+	// prove the descriptor it is about to chmod is that same file and not a name swapped after
+	// the check. Null when this write stages the file itself.
+	let validatedStagingIdentity: { dev: bigint; ino: bigint } | null = null
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
 		// write is staging, not an arbitrary path. Two properties are checked:
@@ -572,6 +576,7 @@ export async function safeWriteText(
 		}
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
+		validatedStagingIdentity = { dev: stagingStat.dev, ino: stagingStat.ino }
 	} else {
 		stagingDir = _stagingDir(dirPath)
 		tempPath = _tempName(stagingDir, "safeWriteText")
@@ -688,6 +693,23 @@ export async function safeWriteText(
 				if (!opened.isFile() || opened.nlink !== 1) {
 					throw new StagingPathError(
 						`Staging file changed between the check and the open: ${tempPath}`,
+						tempPath,
+					)
+				}
+				// The check above proves the name was a regular file when it was lstat'd, not that this
+				// descriptor is that file. A writer of this directory can name the path for a symlink to a
+				// single-link regular file between the lstat and the open: the open follows it, fstat then
+				// reports a regular file with nlink 1 so the guard above passes, and the chmod below would
+				// change that other file's mode. The pre-commit name check further down refuses the publish
+				// but does not undo a mode already changed, so compare against the validated identity here.
+				const openedIdentity = fsSync.fstatSync(fd, { bigint: true })
+				if (
+					validatedStagingIdentity !== null &&
+					(openedIdentity.dev !== validatedStagingIdentity.dev ||
+						openedIdentity.ino !== validatedStagingIdentity.ino)
+				) {
+					throw new StagingPathError(
+						`Staging file changed between the check and the mode copy: ${tempPath}`,
 						tempPath,
 					)
 				}
