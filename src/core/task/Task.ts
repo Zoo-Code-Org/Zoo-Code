@@ -401,6 +401,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// this fence, and the guarded-write path compares the value it captured when the
 	// write was queued with the value at publish time, so a queued write cannot publish
 	// after the task was cancelled or disposed.
+	//
+	// It is monotonic and never reset because the kernel owns the flag: `abort` reads
+	// `state.latches.abort`, both `abortRequested` and `disposeRequested` set that latch,
+	// and nothing in the kernel clears it, while `resumeAfterDelegation()` resets the asks,
+	// the streaming flags and the first-chunk flag but leaves the latch set. The flag
+	// therefore says only that some cancellation happened, not which run a queued write
+	// belongs to, so only the generation keeps the two runs apart.
 	cancellationGeneration: number = 0
 	currentRequestAbortController?: AbortController
 	/**
