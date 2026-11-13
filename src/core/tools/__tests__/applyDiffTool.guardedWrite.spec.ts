@@ -441,4 +441,51 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			expect.stringContaining("changed after it was read for this diff"),
 		)
 	})
+	it("retires the diff view observation for this path when it rejects a stale diff", async () => {
+		// open() re-reads the file and records that newer version as the save baseline
+		// (src/integrations/editor/DiffViewProvider.ts:149-157). When the tool then rejects
+		// the diff as stale, the rollback retires the buffer but leaves that observation
+		// current, and a later write_to_file - focus-disruption save enabled - can spend it
+		// on an overwrite the model never read. Retiring it must not retire other paths.
+		const absolutePath = path.resolve("/workspace/project", "src/thing.ts")
+		const otherPath = path.resolve("/workspace/project", "src/other.ts")
+		mockTask.observationRegistry.observe(otherPath, "7:4242:1234:1700000000123456789:1700000000789999999")
+
+		const diffViewStub = mockTask.diffViewProvider as unknown as Record<string, unknown>
+		diffViewStub.open = vi.fn().mockImplementation(async () => {
+			diffViewStub.originalContent = "written by another process\n"
+			// What production open() does after re-reading the file: observe the newer token.
+			mockTask.observationRegistry.observe(absolutePath, "7:4242:1234:1700000000123456799:1700000000789000001")
+		})
+		diffViewStub.update = vi.fn().mockResolvedValue(undefined)
+		diffViewStub.scrollToFirstDiff = vi.fn()
+		diffViewStub.revertChanges = vi.fn().mockResolvedValue(undefined)
+		diffViewStub.saveChanges = vi.fn().mockResolvedValue({
+			newProblemsMessage: "",
+			userEdits: undefined,
+			finalContent: "new content",
+		})
+		mockTask.providerRef = {
+			deref: vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+				}),
+			}),
+		} as unknown as Task["providerRef"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(diffViewStub.update).not.toHaveBeenCalled()
+		expect(diffViewStub.saveChanges).not.toHaveBeenCalled()
+		expect(diffViewStub.revertChanges).toHaveBeenCalled()
+		expect(mockTask.observationRegistry.has(absolutePath)).toBe(false)
+		expect(mockTask.observationRegistry.has(otherPath)).toBe(true)
+	})
 })

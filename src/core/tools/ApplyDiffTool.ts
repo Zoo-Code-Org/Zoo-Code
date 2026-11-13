@@ -244,6 +244,12 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					await task.say("error", staleError)
 					task.didToolFailInCurrentTurn = true
 					await task.diffViewProvider.revertChanges()
+					// The rollback retires the editor buffer, but open() had already recorded the
+					// newer on-disk version as this flow's observation (DiffViewProvider.ts:149-157).
+					// Leaving it current would let a later write - write_to_file with the
+					// focus-disruption save - publish on a read this tool abandoned, so retire that
+					// path only; other files keep what their own reads recorded.
+					task.observationRegistry.forget(absolutePath)
 					task.processQueuedMessages()
 					pushToolResult(staleError)
 					return
