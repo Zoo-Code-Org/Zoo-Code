@@ -330,6 +330,67 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			mockedFsPromises.default.readlink.mockResolvedValue("")
 		})
 
+		it("refuses a move onto a destination link chain longer than the walk limit", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The walk stops after 8 hops. A chain one link longer leaves the entry it stopped on still
+			// a link, and the renames below act on the entry they are given: writing there would
+			// replace a link with a regular file and leave the links beyond it pointing at an entry
+			// that is no longer a link, which is the loss the walk exists to prevent. Nine lstat
+			// answers: the destination plus the eight links the walk reaches. Eight readlink answers:
+			// the destination plus the first seven links.
+			const linkShape = { isSymbolicLink: (): boolean => true }
+			mockedFsPromises.default.lstat
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+				.mockResolvedValueOnce(linkShape)
+			mockedFsPromises.default.readlink
+				.mockResolvedValueOnce("link1.ts")
+				.mockResolvedValueOnce("link2.ts")
+				.mockResolvedValueOnce("link3.ts")
+				.mockResolvedValueOnce("link4.ts")
+				.mockResolvedValueOnce("link5.ts")
+				.mockResolvedValueOnce("link6.ts")
+				.mockResolvedValueOnce("link7.ts")
+				.mockResolvedValueOnce("link8.ts")
+				.mockResolvedValue("")
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The refusal is the answer, and it names the limit and what writing there would have done.
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("link chain longer than 8 links"))
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("replaced by a regular file"))
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
+			// Nothing was staged and no path was moved: the walk refuses before the staging write,
+			// the two renames and the source unlink.
+			expect(mockedFsPromises.default.writeFile).not.toHaveBeenCalled()
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalled()
+			expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// Restore the lstat and readlink defaults the chain consumed, the way the chain row
+			// above does, so the link answers cannot leak into the rows that follow.
+			mockedFsPromises.default.lstat.mockImplementation(async () => {
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			})
+			mockedFsPromises.default.readlink.mockResolvedValue("")
+		})
+
 		it("keeps a destination symlink and writes the moved content through its target", async () => {
 			const patch = `*** Begin Patch
 *** Update File: src/old.ts
@@ -613,6 +674,60 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockTask.processQueuedMessages).toHaveBeenCalledOnce()
 			// Restore the default mock behavior for later tests.
 			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
+			mockedFsPromises.default.rename.mockResolvedValue(undefined)
+		})
+
+		it("reports no backup location when the staging write fails before the backup rename lands", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The destination has its own content, so the write-catch below would normally put it back
+			// by renaming the on-disk backup over it. Here the staging write fails first: no backup
+			// entry exists yet, so the rename the catch attempts has nothing behind it, which a real
+			// filesystem answers with ENOENT, and the location that would then be reported is a name
+			// that no bytes ever landed at.
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("new.ts")) {
+					return "existing destination content"
+				}
+				return "original file content\n"
+			})
+			mockedFsPromises.default.writeFile.mockImplementationOnce(async () => {
+				throw Object.assign(new Error("EACCES: permission denied, open"), { code: "EACCES" })
+			})
+			mockedFsPromises.default.rename.mockImplementation(async (from: unknown) => {
+				// Nothing was ever renamed onto the backup name, so the restore rename answers
+				// the way a filesystem answers a rename whose source is missing.
+				if (String(from).includes(".backup")) {
+					throw Object.assign(new Error("ENOENT: no such file or directory, rename"), { code: "ENOENT" })
+				}
+				return undefined
+			})
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Failed to write move destination"))
+			// The report may not name a backup location: nothing was moved to that name, so the path
+			// it would print points at an entry that does not exist.
+			expect(mockPushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("preserved at"))
+			// The destination still holds its own bytes: nothing was renamed away from it and no
+			// restore was attempted over a backup entry that was never created.
+			expect(mockedFsPromises.default.rename).not.toHaveBeenCalled()
+			// And the workspace did not change, so the failure records no partial-state checkpoint:
+			// a destination that was never moved is not a mutation.
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// Restore what this row consumed so a regression cannot leak into the rows that follow.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
+			mockedFsPromises.default.writeFile.mockResolvedValue(undefined)
 			mockedFsPromises.default.rename.mockResolvedValue(undefined)
 		})
 

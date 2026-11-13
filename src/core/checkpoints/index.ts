@@ -313,6 +313,18 @@ function enqueueCheckpointWork<T>(
 		}
 		return operation()
 	}
+	// Whether the operation ahead of this caller has released the queue. The deadline below
+	// releases a wait, so it must stop being able to once the caller's own turn has arrived:
+	// from that point the caller is either running or already dropped by the gate above.
+	let predecessorSettled = false
+	void previous.then(
+		() => {
+			predecessorSettled = true
+		},
+		() => {
+			predecessorSettled = true
+		},
+	)
 	const next = previous.then(attempt, attempt)
 	const tail = next.then(
 		() => undefined,
@@ -324,7 +336,40 @@ function enqueueCheckpointWork<T>(
 			checkpointWorkQueues.delete(taskId)
 		}
 	})
-	return next
+	if (options.expiresAt === undefined) {
+		return next
+	}
+	// The deadline below bounds the wait as well as the start. A caller whose window closes
+	// while its predecessor is still running is released now, the way it is released when its
+	// turn arrives: no work ran and the caller resolves with no commit, which is how a dropped
+	// save and a missing service are already reported. The queue itself keeps waiting on the
+	// predecessor, so the lock is not handed to the operation behind this one early, and
+	// attempt re-checks the deadline when that predecessor settles, so a released operation
+	// never starts late either. A user-initiated restore carries no expiry and keeps waiting
+	// for its turn, which is what dropping one would mean the loss of.
+	const waitMs = Math.max(0, options.expiresAt - Date.now())
+	let stopWaitTimer = (): void => {}
+	const releasedAtDeadline = new Promise<undefined>((resolve) => {
+		const timer = setTimeout(() => {
+			if (predecessorSettled) {
+				// Its turn arrived, so there is no wait left to release. The operation either ran
+				// or the gate above dropped it, and next carries whichever answer that was.
+				return
+			}
+			console.warn(
+				`[checkpoints] releasing the wait for ${options.label} for task ${taskId}: its window closed while a slower checkpoint was still running; the queue keeps the lock and this operation will not start late`,
+			)
+			resolve(undefined)
+		}, waitMs)
+		stopWaitTimer = (): void => {
+			clearTimeout(timer)
+			resolve(undefined)
+		}
+	})
+	// Whichever arm settles first ends the caller's wait, so the timer is cancelled on the
+	// normal path and the caller keeps the result it already had on the released path.
+	void next.then(stopWaitTimer, stopWaitTimer)
+	return Promise.race([next, releasedAtDeadline])
 }
 
 export async function checkpointSave(task: Task, force = false, suppressMessage = false) {
