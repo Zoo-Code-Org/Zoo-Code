@@ -1291,10 +1291,10 @@ describe("safeWriteJson", () => {
 			const alias = path.join(projectDir, "mcp.json")
 			await fs.symlink(referent, alias)
 
-			// Confining is about the scope, not about forbidding links: the write lands at
-			// the path the caller named. Main's body renames to that path and replaces the
-			// link node in place -- the alias becomes a regular file holding the payload and
-			// the old referent keeps the seed, matching the lock-referent test's contract.
+			// Confining is about the scope, not about forbidding links: the write lands on the
+			// target the under-lock resolution named -- the referent -- and not on the link node.
+			// The alias therefore stays a link and reads through to the payload, while the referent
+			// that holds the shared lock carries this writer's content in place of its seed.
 			await safeWriteJson(
 				alias,
 				{ mcpServers: { local: { url: "http://localhost" } } },
@@ -1304,8 +1304,10 @@ describe("safeWriteJson", () => {
 			expect(JSON.parse(await fsSyncActual.promises.readFile(alias, "utf8"))).toEqual({
 				mcpServers: { local: { url: "http://localhost" } },
 			})
-			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({ mcpServers: {} })
-			expect(fsSyncActual.lstatSync(alias).isFile()).toBe(true)
+			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
+				mcpServers: { local: { url: "http://localhost" } },
+			})
+			expect(fsSyncActual.lstatSync(alias).isSymbolicLink()).toBe(true)
 		},
 	)
 

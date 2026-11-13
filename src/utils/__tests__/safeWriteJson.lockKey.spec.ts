@@ -326,13 +326,15 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"the writer's spelling never appeared during acquisition, so the under-lock resolution had nothing to restate",
 		).toEqual([true])
 		expect(String(error && error.name)).toBe("undefined")
-		expect(JSON.parse(await fs.readFile(upper, "utf8"))).toEqual({ mcpServers: { mine: true } })
+		// The commit rename lands on the target the under-lock resolution named, which is the name
+		// the filesystem reported during acquisition. On the case-folding filesystem the two
+		// spellings are one entry, so reading either reports this writer's content. On the
+		// case-sensitive one the rename replaces only that reported name: the other entry keeps the
+		// peer's content under the spelling the caller was given, exactly as the hard-link pair was
+		// laid out.
+		expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { mine: true } })
 		if (!foldsCase) {
-			// The commit rename lands on the path the caller was given (safeWriteJson.ts:483), and on
-			// a case-sensitive filesystem that names the other entry: the referent keeps the peer's
-			// content and the writer's own spelling becomes a regular file. That is what the shipped
-			// order does, so the row states it instead of asserting a result the platform never gives.
-			expect(JSON.parse(await fs.readFile(lower, "utf8"))).toEqual({ mcpServers: { peer: true } })
+			expect(JSON.parse(await fs.readFile(upper, "utf8"))).toEqual({ mcpServers: { peer: true } })
 		}
 		const entries = await fs.readdir(dir)
 		// A case-folding filesystem holds one file and one artefact under the two spellings, so it
