@@ -469,6 +469,46 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(3)
 		})
 
+		it("keeps a third write queued behind a blocked second write on the same path", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("queue.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			// Settle one write first so its chain entry is evicted with it: the three writes
+			// below are submitted to a chain that was just emptied, which is the state the ask
+			// is about - links enqueued while a publish is already in flight, not links queued
+			// behind an idle tail.
+			await guardedWrite(task, "queue.txt", "first", "update")
+
+			const order: string[] = []
+			let releaseSecond: () => void = () => {}
+			const secondHeld = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockedSafeWriteText.mockImplementation(async (_path: string, content: string) => {
+				order.push("start:" + content)
+				if (content === "second") {
+					// Hold only the second publication: the third write must not reach
+					// safeWriteText until this one settles.
+					await secondHeld
+				}
+				order.push("end:" + content)
+			})
+
+			const p2 = guardedWrite(task, "queue.txt", "second", "update")
+			const p3 = guardedWrite(task, "queue.txt", "third", "update")
+
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(order).toEqual(["start:second"])
+
+			releaseSecond()
+			await Promise.all([p2, p3])
+
+			expect(order).toEqual(["start:second", "end:second", "start:third", "end:third"])
+			// Three publishes: the settled first write plus the two queued behind it.
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(3)
+		})
 		it("writes on different paths are independent (no cross-path serialization)", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("a.txt"), "v1")
@@ -476,10 +516,37 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedComputeVersionToken.mockResolvedValue("v1")
 			const task = createMockTask({ observationRegistry: reg })
 
+			const order: string[] = []
+			let releaseFirst: () => void = () => {}
+			const firstHeld = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			mockedSafeWriteText.mockImplementation(async (_path: string, content: string) => {
+				order.push("start:" + content)
+				if (content === "a") {
+					// Hold only the first path publish open. The chains are keyed per absolute
+					// path, so the second path must reach its publish anyway; a single global
+					// queue would leave b.txt waiting here and the await below would time out.
+					await firstHeld
+				}
+				order.push("end:" + content)
+			})
+
 			const p1 = guardedWrite(task, "a.txt", "a", "update")
 			const p2 = guardedWrite(task, "b.txt", "b", "update")
-			await Promise.all([p1, p2])
 
+			try {
+				// The second path settles while the first is still inside safeWriteText.
+				await p2
+				expect(order).toEqual(["start:a", "start:b", "end:b"])
+			} finally {
+				// Release the held gate on every exit path, including an assertion failure
+				// above, so a failing row cannot leave the chain blocked for the next one.
+				releaseFirst()
+				await p1
+			}
+
+			expect(order).toEqual(["start:a", "start:b", "end:b", "end:a"])
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 		})
 	})
@@ -635,6 +702,47 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b", {
 				preCommitVerify: expect.any(Function),
 			})
+		})
+		it("detaches a pending link so a later write runs while the blocked one is still held", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("pending.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			const order: string[] = []
+			let releaseFirst: () => void = () => {}
+			const firstHeld = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			mockedSafeWriteText.mockImplementation(async (_path: string, content: string) => {
+				order.push("start:" + content)
+				if (content === "held") {
+					await firstHeld
+				}
+				order.push("end:" + content)
+			})
+
+			// A publish is in flight on this path's chain at the moment resetChain() runs.
+			const p1 = guardedWrite(task, "pending.txt", "held", "update")
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(order).toEqual(["start:held"])
+
+			resetChain()
+
+			try {
+				// Detachment is the assertion: the abandoned tail may not hold the new write,
+				// so the fresh write must reach its publish and settle while the held link is
+				// still inside safeWriteText. A resetChain() that did nothing would leave this
+				// await behind the held link and time out.
+				await guardedWrite(task, "pending.txt", "fresh", "update")
+				expect(order).toEqual(["start:held", "start:fresh", "end:fresh"])
+			} finally {
+				releaseFirst()
+				await p1
+			}
+
+			expect(order).toEqual(["start:held", "start:fresh", "end:fresh", "end:held"])
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 		})
 	})
 
