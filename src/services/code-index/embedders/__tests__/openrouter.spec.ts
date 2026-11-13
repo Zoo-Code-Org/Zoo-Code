@@ -379,6 +379,19 @@ describe("OpenRouterEmbedder", () => {
 		})
 	})
 
+	describe("CI-EM-01: single attempt with classified errors", () => {
+		it.each([
+			[503, {}, "server", undefined],
+			[429, { "retry-after": "7" }, "rate-limit", 7000],
+		])("sends one request on HTTP %s and classifies it", async (status, headers, classification, delay) => {
+			mockEmbeddingsCreate.mockRejectedValue(Object.assign(new Error("failed"), { status, headers }))
+			const embedder = new OpenRouterEmbedder(mockApiKey)
+			const error = await embedder.createEmbeddings(["text"]).catch((caught: unknown) => caught)
+			expect(mockEmbeddingsCreate).toHaveBeenCalledTimes(1)
+			expect(error).toMatchObject({ classification, statusCode: status, retryAfterMs: delay })
+		})
+	})
+
 	describe("integration with shared models", () => {
 		it("should work with defined OpenRouter models", () => {
 			const openRouterModels = [

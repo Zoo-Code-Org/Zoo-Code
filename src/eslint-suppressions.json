@@ -1019,6 +1019,11 @@
 			"count": 1
 		}
 	},
+	"services/code-index/__tests__/manager.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 84
+		}
+	},
 	"services/code-index/__tests__/service-factory.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 43
@@ -1054,14 +1059,39 @@
 			"count": 4
 		}
 	},
+	"services/code-index/embedders/openai-compatible.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/openrouter.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 2
+		}
+	},
 	"services/code-index/interfaces/vector-store.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
 		}
 	},
+	"services/code-index/orchestrator.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 2
+		}
+	},
+	"services/code-index/processors/__tests__/file-watcher.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 25
+		}
+	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 22
+		}
+	},
+	"services/code-index/processors/__tests__/scanner.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 26
 		}
 	},
 	"services/code-index/semble/__tests__/provider.spec.ts": {
@@ -1089,9 +1119,14 @@
 			"count": 3
 		}
 	},
-	"services/code-index/shared/validation-helpers.ts": {
+	"services/code-index/shared/__tests__/validation-helpers.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
+		}
+	},
+	"services/code-index/shared/validation-helpers.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 5
 		}
 	},
 	"services/code-index/vector-store/__tests__/qdrant-client.spec.ts": {

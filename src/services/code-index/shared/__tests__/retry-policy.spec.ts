@@ -61,22 +61,27 @@ it.each([undefined, 100, 2000, 60_000, 120_000, NaN, -1])(
 	},
 )
 
-it.each([503, { code: "ECONNRESET" }])("CI-RP-01/02: at most 3 requests, waits 500 ms then 1 s: %s", async (failure) => {
-	const cause = typeof failure === "number" ? { status: failure } : failure
-	const request = vi.fn().mockRejectedValue(new EmbeddingError("failed", cause))
-	const failures: RetryFailure[] = []
-	const pending = retryWithPolicy(request, { onFailure: (failure) => failures.push(failure) }).catch((error) => error)
-	for (const [index, delay] of [500, 1000].entries()) {
-		await vi.advanceTimersByTimeAsync(0)
-		expect(request).toHaveBeenCalledTimes(index + 1)
-		expect(failures[index]).toMatchObject({ delayMs: delay, delaySource: "default", willRetry: true })
-		await vi.advanceTimersByTimeAsync(delay - 1)
-		expect(request).toHaveBeenCalledTimes(index + 1)
-		await vi.advanceTimersByTimeAsync(1)
-	}
-	expect(await pending).toMatchObject({ attempts: 3 })
-	expect(request).toHaveBeenCalledTimes(3)
-})
+it.each([503, { code: "ECONNRESET" }])(
+	"CI-RP-01/02: at most 3 requests, waits 500 ms then 1 s: %s",
+	async (failure) => {
+		const cause = typeof failure === "number" ? { status: failure } : failure
+		const request = vi.fn().mockRejectedValue(new EmbeddingError("failed", cause))
+		const failures: RetryFailure[] = []
+		const pending = retryWithPolicy(request, { onFailure: (failure) => failures.push(failure) }).catch(
+			(error) => error,
+		)
+		for (const [index, delay] of [500, 1000].entries()) {
+			await vi.advanceTimersByTimeAsync(0)
+			expect(request).toHaveBeenCalledTimes(index + 1)
+			expect(failures[index]).toMatchObject({ delayMs: delay, delaySource: "default", willRetry: true })
+			await vi.advanceTimersByTimeAsync(delay - 1)
+			expect(request).toHaveBeenCalledTimes(index + 1)
+			await vi.advanceTimersByTimeAsync(1)
+		}
+		expect(await pending).toMatchObject({ attempts: 3 })
+		expect(request).toHaveBeenCalledTimes(3)
+	},
+)
 
 it("CI-RP-02: abort ends a wait at once without another request", async () => {
 	const controller = new AbortController()
@@ -122,7 +127,7 @@ it("shares two retries across successful batches without charging their first ca
 	expect(request).toHaveBeenCalledTimes(6)
 })
 
-it("T33 wraps a frozen error without changing its metadata", async () => {
+it("wraps a frozen error without changing its metadata", async () => {
 	const original = Object.freeze(new EmbeddingError("unavailable", { status: 503 }, { retryAfterMs: 2000 }))
 	const properties = Object.getOwnPropertyDescriptors(original)
 	const request = vi.fn().mockRejectedValue(original)
@@ -143,7 +148,7 @@ it("T33 wraps a frozen error without changing its metadata", async () => {
 	expect(request).toHaveBeenCalledTimes(3)
 })
 
-it("T33 keeps independent metadata when one error is reused across operations", async () => {
+it("keeps independent metadata when one error is reused across operations", async () => {
 	const original = Object.assign(new Error("unavailable"), { status: 503 })
 	const properties = Object.getOwnPropertyDescriptors(original)
 	const request = vi.fn().mockRejectedValue(original)
@@ -169,7 +174,7 @@ it.each([
 	new DOMException("cancelled", "AbortError"),
 	new APIUserAbortError(),
 	Object.freeze(Object.assign(new Error("cancelled"), { name: "APIUserAbortError" })),
-])("T33 preserves live-signal cancellation identity: %s", async (original) => {
+])("preserves live-signal cancellation identity: %s", async (original) => {
 	const properties = Object.getOwnPropertyDescriptors(original)
 	const request = vi.fn().mockRejectedValue(original)
 	const onFailure = vi.fn()
@@ -183,7 +188,7 @@ it.each([
 	expect(request).toHaveBeenCalledOnce()
 })
 
-it("T33 rethrows signal.reason rather than an operation rejection after abort", async () => {
+it("rethrows signal.reason rather than an operation rejection after abort", async () => {
 	const controller = new AbortController()
 	const reason = Object.freeze(new DOMException("stopped", "AbortError"))
 	const rejection = new Error("operation rejected")

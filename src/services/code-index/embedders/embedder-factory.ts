@@ -32,7 +32,7 @@ export class EmbedderFactory implements IEmbedderFactory {
 		[providerIdentifiers.openrouter]: new OpenRouterEmbedderFactory(),
 	}
 
-	public create(config: CodeIndexConfig, pacers?: ProviderPacerRegistry): IEmbedder {
+	public create(config: CodeIndexConfig, pacers: ProviderPacerRegistry): IEmbedder {
 		const provider = config.embedderProvider
 
 		// Semble is a self-contained search binary, not a vector embedder.

@@ -5,6 +5,7 @@ import * as vscode from "vscode"
 import { FileWatcher } from "../file-watcher"
 import { FilePreparation } from "../file-preparation"
 import { FileFailureRegistry } from "../../file-failure-registry"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
@@ -175,6 +176,10 @@ describe("FileWatcher", () => {
 			mockEmbedder,
 			mockVectorStore,
 			mockIgnoreInstance,
+			undefined,
+			undefined,
+			new FileFailureRegistry(),
+			new ProviderPacerRegistry(),
 		)
 	})
 
@@ -376,6 +381,7 @@ describe("FileWatcher", () => {
 				undefined,
 				undefined,
 				failures,
+				new ProviderPacerRegistry(),
 			)
 			return failures
 		}
@@ -409,7 +415,9 @@ describe("FileWatcher", () => {
 					error: new Error("bad"),
 				})
 				await runChange()
-				expect(failures.list()).toEqual([expect.objectContaining({ path: "src/file.ts", activity, reason: "bad" })])
+				expect(failures.list()).toEqual([
+					expect.objectContaining({ path: "src/file.ts", activity, reason: "bad" }),
+				])
 				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
 			},
 		)

@@ -1,7 +1,6 @@
 import { t } from "../../../i18n"
 import { serializeError } from "serialize-error"
 import { EmbeddingError, isQuotaError } from "./indexing-errors"
-import { FILE_RETRY_ATTEMPTS } from "../constants"
 
 /**
  * Sanitizes error messages by removing sensitive information like file paths and URLs
@@ -215,7 +214,7 @@ export function toEmbeddingError(error: unknown): EmbeddingError {
 	if (error instanceof EmbeddingError) return error
 	if (isQuotaError(error))
 		return new EmbeddingError(t("embeddings:quotaExceeded"), error, { classification: "permanent" })
-	return new EmbeddingError(formatEmbeddingError(error, FILE_RETRY_ATTEMPTS).message, error)
+	return new EmbeddingError(formatEmbeddingError(error, 1).message, error)
 }
 
 export function formatEmbeddingError(error: any, maxRetries: number): Error {

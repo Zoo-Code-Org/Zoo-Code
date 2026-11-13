@@ -7,7 +7,7 @@ import { QdrantVectorStore } from "./qdrant-client"
 import type { ProviderPacerRegistry } from "../provider-pacer"
 
 export class VectorStoreFactory implements IVectorStoreFactory {
-	public create(config: CodeIndexConfig, workspacePath: string, pacers?: ProviderPacerRegistry): IVectorStore {
+	public create(config: CodeIndexConfig, workspacePath: string, pacers: ProviderPacerRegistry): IVectorStore {
 		if (config.embedderProvider === "semble") {
 			throw new Error(
 				"Semble provider handles its own vector storage. Do not call createVectorStore() for semble — use SembleProvider instead.",

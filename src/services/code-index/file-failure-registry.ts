@@ -30,7 +30,6 @@ export class FileFailureRegistry {
 	private readonly entries = new Map<string, FailedFile>()
 	private readonly revisions = new Map<string, Revision>()
 	private readonly changes = new Set<() => void>()
-	private readonly records = new Set<(failure: FailedFile) => void>()
 
 	readonly onDidChange: Event<void> = (listener, thisArgument, disposables) => {
 		const callback = () => listener.call(thisArgument, undefined)
@@ -44,45 +43,7 @@ export class FileFailureRegistry {
 		return disposable
 	}
 
-	readonly onDidRecord: Event<FailedFile> = (listener, thisArgument, disposables) => {
-		const callback = (failure: FailedFile) => listener.call(thisArgument, { ...failure })
-		this.records.add(callback)
-		const disposable: Disposable = {
-			dispose: () => {
-				this.records.delete(callback)
-			},
-		}
-		disposables?.push(disposable)
-		return disposable
-	}
-
-	getRevision(path: string): string | undefined {
-		return this.revisions.get(path)?.revision
-	}
-
-	get(path: string): FailedFile | undefined {
-		const failure = this.entries.get(path)
-		return failure && { ...failure }
-	}
-
-	has(path: string): boolean {
-		return this.entries.has(path)
-	}
-
-	hasRevisionFailure(path: string, revision: string): boolean {
-		const current = this.revisions.get(path)
-		return current?.revision === revision && current.failures.size > 0
-	}
-
-	assertRetryable(path: string, revision: string): void {
-		const current = this.revisions.get(path)
-		if (current?.revision !== revision) return
-		for (const failure of current.failures.values()) {
-			if (failure.state === "exhausted") throw Object.assign(new Error(failure.reason), failure)
-		}
-	}
-
-	renew(path: string, revision: string): AbortSignal {
+	renew(path: string, revision: string): void {
 		let current = this.revisions.get(path)
 		if (!current || current.revision !== revision) {
 			current?.controller.abort()
@@ -94,18 +55,11 @@ export class FileFailureRegistry {
 				this.changed()
 			}
 		}
-		return current.controller.signal
 	}
 
 	isCurrent(path: string, revision: string): boolean {
 		const current = this.revisions.get(path)
 		return current?.revision === revision && !current.controller.signal.aborted
-	}
-
-	getFailure(path: string, revision: string, activity: FileFailureActivity): FailedFile | undefined {
-		const current = this.revisions.get(path)
-		const failure = current?.revision === revision ? current.failures.get(activity) : undefined
-		return failure && { ...failure }
 	}
 
 	getRetryBudget(path: string, revision: string, activity: FileFailureActivity): RetryBudget {
@@ -117,10 +71,6 @@ export class FileFailureRegistry {
 			current.budgets.set(activity, budget)
 		}
 		return budget
-	}
-
-	isExhausted(path: string, revision: string, activity: FileFailureActivity): boolean {
-		return this.getFailure(path, revision, activity)?.state === "exhausted"
 	}
 
 	record(
@@ -137,7 +87,6 @@ export class FileFailureRegistry {
 		const failure = { path, revision, activity, reason, attempt, state, classification, ...delay }
 		this.revisions.get(path)!.failures.set(activity, failure)
 		this.entries.set(path, failure)
-		for (const listener of this.records) listener(failure)
 		this.changed()
 	}
 

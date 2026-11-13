@@ -38,16 +38,17 @@ describe("processor factories", () => {
 
 	function dependencies() {
 		const context = makeExtensionContext()
+		const pacers = new ProviderPacerRegistry()
 		return {
 			context,
 			workspacePath: "/workspace",
 			cacheManager: new CacheManager(context, "/workspace"),
 			embedder: new OpenAiEmbedder({ openAiNativeApiKey: "test-key" }),
-			vectorStore: new QdrantVectorStore("/workspace", "http://localhost:6333", 512),
+			vectorStore: new QdrantVectorStore("/workspace", "http://localhost:6333", 512, undefined, pacers),
 			parser: codeParser,
 			ignoreInstance: ignore(),
 			failureRegistry: new FileFailureRegistry(),
-			pacers: new ProviderPacerRegistry(),
+			pacers,
 		}
 	}
 
@@ -189,7 +190,13 @@ describe("processor factories", () => {
 		Object.defineProperty(configManager, "isFeatureConfigured", { value: false })
 		const createEmbedder = vi.spyOn(EmbedderFactory.prototype, "create")
 		const createVectorStore = vi.spyOn(VectorStoreFactory.prototype, "create")
-		const factory = new CodeIndexServiceFactory(configManager, options.workspacePath, options.cacheManager)
+		const factory = new CodeIndexServiceFactory(
+			configManager,
+			options.workspacePath,
+			options.cacheManager,
+			options.failureRegistry,
+			options.pacers,
+		)
 
 		expect(() => factory.createServices(options.context, options.cacheManager, options.ignoreInstance)).toThrow(
 			"serviceFactory.codeIndexingNotConfigured",

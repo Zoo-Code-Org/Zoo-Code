@@ -28,7 +28,7 @@ function setup() {
 		upsertPoints: vi.fn(async () => {}),
 		deletePointsByFilePath: vi.fn(async () => {}),
 	}
-	const cache = { updateHash: vi.fn(), deleteHash: vi.fn() }
+	const cache = { getHash: vi.fn((): string | undefined => "old"), updateHash: vi.fn(), deleteHash: vi.fn() }
 	const failures = new FileFailureRegistry()
 	const pacers = new ProviderPacerRegistry()
 	const run = vi.spyOn(pacers.get("openai:1"), "run")
@@ -57,25 +57,36 @@ describe("FileIndexWriter", () => {
 		expect(points[0].payload.filePath).toBe("a.ts")
 	})
 
-	it("uses the same point id for the same path and start line", async () => {
+	it("gives segments that share a start line distinct point ids", async () => {
 		const { writer, store } = setup()
-		await writer.replace("/ws/a.ts", "h1", [block(3)])
-		await writer.replace("/ws/a.ts", "h2", [{ ...block(3), content: "changed", segmentHash: "other" }])
+		await writer.replace("/ws/a.ts", "h1", [block(3), { ...block(3), content: "tail", segmentHash: "other" }])
 		const ids = (store.upsertPoints.mock.calls as unknown as Array<[Array<{ id: string }>]>).map(
 			([points]) => points[0].id,
 		)
-		expect(ids[0]).toBe(ids[1])
+		expect(new Set(ids).size).toBe(2)
+	})
+
+	it.each([
+		["a cached file", "old", 1],
+		["a new file", undefined, 0],
+	])("deletes old points only for %s", async (_name, cachedHash, deletes) => {
+		const { writer, store, cache } = setup()
+		cache.getHash.mockReturnValue(cachedHash)
+		await expect(writer.replace("/ws/a.ts", "h1", [block(1)])).resolves.toBe(true)
+		expect(store.deletePointsByFilePath).toHaveBeenCalledTimes(deletes)
 	})
 
 	it.each(["embed", "upsert"] as const)(
 		"CI-WR-02: exhausted %s records the activity and keeps the hash",
 		async (activity) => {
-		const context = setup()
-		if (activity === "embed") context.embedder.createEmbeddings.mockRejectedValue(serverError())
-		else context.store.upsertPoints.mockRejectedValue(serverError())
-		await expect(context.writer.replace("/ws/a.ts", "h1", [block(1)])).resolves.toBe(false)
-		expect(context.cache.updateHash).not.toHaveBeenCalled()
-		expect(context.failures.get("a.ts")).toMatchObject({ activity, state: "exhausted", attempt: 3 })
+			const context = setup()
+			if (activity === "embed") context.embedder.createEmbeddings.mockRejectedValue(serverError())
+			else context.store.upsertPoints.mockRejectedValue(serverError())
+			await expect(context.writer.replace("/ws/a.ts", "h1", [block(1)])).resolves.toBe(false)
+			expect(context.cache.updateHash).not.toHaveBeenCalled()
+			expect(context.failures.list()).toEqual([
+				expect.objectContaining({ path: "a.ts", activity, state: "exhausted", attempt: 3 }),
+			])
 		},
 	)
 
@@ -84,7 +95,9 @@ describe("FileIndexWriter", () => {
 		store.deletePointsByFilePath.mockRejectedValue(serverError())
 		await expect(writer.remove("/ws/a.ts")).resolves.toBe(false)
 		expect(cache.deleteHash).not.toHaveBeenCalled()
-		expect(failures.get("a.ts")).toMatchObject({ activity: "delete", state: "exhausted" })
+		expect(failures.list()).toEqual([
+			expect.objectContaining({ path: "a.ts", activity: "delete", state: "exhausted" }),
+		])
 	})
 
 	it("CI-WR-03: each embed attempt goes through the pacer exactly once", async () => {

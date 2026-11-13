@@ -8,8 +8,8 @@ import { codeParser } from "./parser"
 import { FilePreparation } from "./file-preparation"
 import { CacheManager } from "../cache-manager"
 import { Package } from "../../../shared/package"
-import { FileFailureRegistry, UNKNOWN_REVISION } from "../file-failure-registry"
-import { ProviderPacerRegistry } from "../provider-pacer"
+import { type FileFailureRegistry, UNKNOWN_REVISION } from "../file-failure-registry"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 import { FileIndexWriter } from "../file-index-writer"
 import { generateRelativeFilePath } from "../shared/get-relative-path"
 
@@ -64,13 +64,13 @@ export class FileWatcher implements IFileWatcher {
 		private workspacePath: string,
 		_context: vscode.ExtensionContext,
 		private readonly cacheManager: CacheManager,
-		private embedder?: IEmbedder,
-		private vectorStore?: IVectorStore,
-		ignoreInstance?: Ignore,
-		ignoreController?: RooIgnoreController,
-		batchSegmentThreshold?: number,
-		private readonly failures: FileFailureRegistry = new FileFailureRegistry(),
-		private readonly pacers: ProviderPacerRegistry = new ProviderPacerRegistry(),
+		private embedder: IEmbedder | undefined,
+		private vectorStore: IVectorStore | undefined,
+		ignoreInstance: Ignore | undefined,
+		ignoreController: RooIgnoreController | undefined,
+		batchSegmentThreshold: number | undefined,
+		private readonly failures: FileFailureRegistry,
+		private readonly pacers: ProviderPacerRegistry,
 	) {
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
 		if (ignoreInstance) {
@@ -112,8 +112,8 @@ export class FileWatcher implements IFileWatcher {
 	}
 
 	/**
-		* Initializes the file watcher; `signal` is the indexing session's abort signal.
-		*/
+	 * Initializes the file watcher; `signal` is the indexing session's abort signal.
+	 */
 	async initialize(signal?: AbortSignal): Promise<void> {
 		this.signal = signal
 		// Create file watcher
@@ -231,7 +231,11 @@ export class FileWatcher implements IFileWatcher {
 		const batchResults: FileProcessingResult[] = []
 		const totalFilesInBatch = eventsToProcess.size
 		let processedCountInBatch = 0
-		this._onBatchProgressUpdate.fire({ processedInBatch: 0, totalInBatch: totalFilesInBatch, currentFile: undefined })
+		this._onBatchProgressUpdate.fire({
+			processedInBatch: 0,
+			totalInBatch: totalFilesInBatch,
+			currentFile: undefined,
+		})
 
 		const events = [...eventsToProcess.values()]
 		for (let offset = 0; offset < events.length; offset += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
@@ -241,7 +245,9 @@ export class FileWatcher implements IFileWatcher {
 				chunk.map(async (event) => {
 					const filePath = event.uri.fsPath
 					try {
-						return event.type === "delete" ? await this.removeFile(filePath) : await this.indexFile(filePath)
+						return event.type === "delete"
+							? await this.removeFile(filePath)
+							: await this.indexFile(filePath)
 					} catch (error) {
 						return { path: filePath, status: "error", error: error as Error } satisfies FileProcessingResult
 					}

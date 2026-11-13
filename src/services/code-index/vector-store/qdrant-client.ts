@@ -7,7 +7,7 @@ import { Payload, VectorStoreSearchResult } from "../interfaces"
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_SEARCH_MIN_SCORE, QDRANT_CODE_BLOCK_NAMESPACE } from "../constants"
 import { t } from "../../../i18n"
 import { VectorStoreError } from "../shared/indexing-errors"
-import { ProviderPacerRegistry, makeRateLimitScope } from "../provider-pacer"
+import { type ProviderPacerRegistry, makeRateLimitScope } from "../provider-pacer"
 import { retryWithPolicy } from "../shared/retry-policy"
 
 // The patched client reports Retry-After in whole seconds on retry_after (patches/@qdrant__js-client-rest@1.20.0.patch).
@@ -15,7 +15,7 @@ function toVectorStoreError(error: unknown): VectorStoreError {
 	if (error instanceof VectorStoreError) return error
 	const message = error instanceof Error ? error.message : String(error)
 	if (error instanceof QdrantClientResourceExhaustedError) {
-		const seconds = Number((error as QdrantClientResourceExhaustedError).retry_after)
+		const seconds = Number(error.retry_after)
 		return new VectorStoreError(message, error, {
 			classification: "rate-limit",
 			statusCode: 429,
@@ -48,8 +48,8 @@ export class QdrantVectorStore implements IVectorStore {
 		workspacePath: string,
 		url: string,
 		vectorSize: number,
-		apiKey?: string,
-		private readonly pacers: ProviderPacerRegistry = new ProviderPacerRegistry(),
+		apiKey: string | undefined,
+		private readonly pacers: ProviderPacerRegistry,
 	) {
 		// Parse the URL to determine the appropriate QdrantClient configuration
 		const parsedUrl = this.parseQdrantUrl(url)
@@ -228,7 +228,7 @@ export class QdrantVectorStore implements IVectorStore {
 					created = false // Exists and correct
 				} else {
 					// Exists but wrong vector size, recreate with enhanced error handling
-					created = await this._recreateCollectionWithNewDimension(existingVectorSize)
+					created = await this._recreateCollectionWithNewDimension(existingVectorSize, signal)
 				}
 			}
 
@@ -260,7 +260,10 @@ export class QdrantVectorStore implements IVectorStore {
 	 * @param existingVectorSize The current vector size of the existing collection
 	 * @returns Promise resolving to boolean indicating if a new collection was created
 	 */
-	private async _recreateCollectionWithNewDimension(existingVectorSize: number): Promise<boolean> {
+	private async _recreateCollectionWithNewDimension(
+		existingVectorSize: number,
+		signal?: AbortSignal,
+	): Promise<boolean> {
 		console.warn(
 			`[QdrantVectorStore] Collection ${this.collectionName} exists with vector size ${existingVectorSize}, but expected ${this.vectorSize}. Recreating collection.`,
 		)
@@ -289,18 +292,22 @@ export class QdrantVectorStore implements IVectorStore {
 				`[QdrantVectorStore] Creating new collection ${this.collectionName} with vector size ${this.vectorSize}...`,
 			)
 			recreationAttempted = true
-			await this.client.createCollection(this.collectionName, {
-				vectors: {
-					size: this.vectorSize,
-					distance: this.DISTANCE_METRIC,
-					on_disk: true,
-				},
-				hnsw_config: {
-					m: 64,
-					ef_construct: 512,
-					on_disk: true,
-				},
-			})
+			await this.create(
+				() =>
+					this.client.createCollection(this.collectionName, {
+						vectors: {
+							size: this.vectorSize,
+							distance: this.DISTANCE_METRIC,
+							on_disk: true,
+						},
+						hnsw_config: {
+							m: 64,
+							ef_construct: 512,
+							on_disk: true,
+						},
+					}),
+				signal,
+			)
 			console.log(`[QdrantVectorStore] Successfully created new collection ${this.collectionName}`)
 			return true
 		} catch (recreationError) {

@@ -176,7 +176,7 @@ describe("parseRetryAfterMs", () => {
 })
 
 it.each(["2", "invalid", undefined])(
-	"T33 discovers header delay once across formatting and retry wrappers: %s",
+	"discovers header delay once across formatting and retry wrappers: %s",
 	(value) => {
 		const get = vi.fn((name: string) => (name === "retry-after" ? value : undefined))
 		const original = { status: 429, headers: { get } }
@@ -192,7 +192,7 @@ it.each(["2", "invalid", undefined])(
 	},
 )
 
-it("T33 explicit delay wins without reading headers", () => {
+it("explicit delay wins without reading headers", () => {
 	const get = vi.fn()
 	const error = new VectorStoreError("limited", { status: 429, headers: { get } }, { retryAfterMs: 7000 })
 	expect(error.retryAfterMs).toBe(7000)

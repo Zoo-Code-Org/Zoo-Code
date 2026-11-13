@@ -431,8 +431,8 @@ describe("CodeIndexPopover indexing reliability", () => {
 			state: index % 2 === 0 ? "retrying" : "exhausted",
 		}))
 		renderStatusPopover({ ...failedStatus("retrying"), failedFiles, failedFileSummary: undefined })
-		const details = screen.getByText("settings:codeIndex.failedFileDetails (6)").closest("details")!
-		fireEvent.click(within(details).getByText("settings:codeIndex.failedFileDetails (6)"))
+		const details = screen.getByText("settings:codeIndex.failedFileDetails (5)").closest("details")!
+		fireEvent.click(within(details).getByText("settings:codeIndex.failedFileDetails (5)"))
 		for (const failure of failedFiles) {
 			const entry = within(details).getByText(failure.path).closest("li")!
 			expect(

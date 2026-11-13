@@ -256,14 +256,29 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 						encoding_format: "base64",
 					})) as OpenAIEmbeddingResponse)
 
-			const embeddings = response.data.map((item: EmbeddingItem) => {
-				if (typeof item.embedding !== "string") return item.embedding
-				const buffer = Buffer.from(item.embedding, "base64")
-				return Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4))
+			// Convert base64 embeddings to float32 arrays
+			const processedEmbeddings = response.data.map((item: EmbeddingItem) => {
+				if (typeof item.embedding === "string") {
+					const buffer = Buffer.from(item.embedding, "base64")
+
+					// Create Float32Array view over the buffer
+					const float32Array = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
+
+					return {
+						...item,
+						embedding: Array.from(float32Array),
+					}
+				}
+				return item
 			})
 
+			// Replace the original data with processed embeddings
+			response.data = processedEmbeddings
+
+			const embeddings = response.data.map((item) => item.embedding as number[])
+
 			return {
-				embeddings,
+				embeddings: embeddings,
 				usage: {
 					promptTokens: response.usage?.prompt_tokens || 0,
 					totalTokens: response.usage?.total_tokens || 0,

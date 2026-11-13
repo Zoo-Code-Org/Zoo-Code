@@ -187,20 +187,23 @@ describe("CodeIndexManager reliability", () => {
 			{ base: "Indexed", wait: false, failure: true, expected: "Standby" },
 			{ base: "Indexed", wait: false, failure: false, expected: "Indexed" },
 			{ base: "Standby", wait: false, failure: false, expected: "Standby" },
-		] as const)("$base with wait=$wait failure=$failure is $expected", async ({ base, wait, failure, expected }) => {
-			const { manager, stateManager } = makeManager()
-			stateManager.setSystemState(base, "base")
-			if (failure) withFailure(manager)
-			const release = wait ? await withWait(manager) : async () => {}
-			try {
-				const status = manager.getCurrentStatus()
-				expect(status.systemStatus).toBe(expected)
-				expect(status.failedFiles).toHaveLength(failure ? 1 : 0)
-				expect(status.providerWaits).toHaveLength(wait ? 1 : 0)
-			} finally {
-				await release()
-			}
-		})
+		] as const)(
+			"$base with wait=$wait failure=$failure is $expected",
+			async ({ base, wait, failure, expected }) => {
+				const { manager, stateManager } = makeManager()
+				stateManager.setSystemState(base, "base")
+				if (failure) withFailure(manager)
+				const release = wait ? await withWait(manager) : async () => {}
+				try {
+					const status = manager.getCurrentStatus()
+					expect(status.systemStatus).toBe(expected)
+					expect(status.failedFiles).toHaveLength(failure ? 1 : 0)
+					expect(status.providerWaits).toHaveLength(wait ? 1 : 0)
+				} finally {
+					await release()
+				}
+			},
+		)
 	})
 
 	it("CI-MG-04: a CacheReadError from initialize() ends in Error and keeps existing data", async () => {

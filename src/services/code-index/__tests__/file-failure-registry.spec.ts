@@ -21,73 +21,46 @@ describe("FileFailureRegistry", () => {
 		expect(registry.getRetryBudget("a.ts", "two", "embed").retriesUsed).toBe(0)
 	})
 
-	it("retains exhausted budgets per revision and operation until explicit reset", () => {
+	it("keeps a displayed entry across a reset and a new revision until it is cleared", () => {
 		const registry = new FileFailureRegistry()
 		registry.renew("a.ts", "one")
 		registry.record("a.ts", "one", "upsert", "server failed", 3, "exhausted", "server")
-		registry.renew("a.ts", "one")
-		registry.renew("b.ts", "new")
-		expect(registry.isExhausted("a.ts", "one", "upsert")).toBe(true)
-		expect(registry.isExhausted("a.ts", "one", "embed")).toBe(false)
-		expect(() => registry.assertRetryable("a.ts", "one")).toThrow("server failed")
 		registry.resetAllBudgets()
-		expect(registry.isExhausted("a.ts", "one", "upsert")).toBe(false)
-		expect(registry.list()).toHaveLength(1)
-		registry.clear("a.ts", "one")
+		registry.renew("a.ts", "two")
+		expect(registry.list()).toEqual([
+			expect.objectContaining({ path: "a.ts", revision: "two", state: "exhausted" }),
+		])
+		registry.clear("a.ts", "two")
 		expect(registry.list()).toEqual([])
 	})
 
-	it("distinguishes retained display entries from current revision failures", () => {
+	it("rejects stale records and clearing after a path is renewed", () => {
 		const registry = new FileFailureRegistry()
-		expect(registry.hasRevisionFailure("a.ts", "one")).toBe(false)
-		registry.renew("a.ts", "one")
-		registry.record("a.ts", "one", "embed", "old failure", 3, "exhausted", "server")
-		expect(registry.hasRevisionFailure("a.ts", "one")).toBe(true)
-		registry.renew("a.ts", "two")
-		expect(registry.has("a.ts")).toBe(true)
-		expect(registry.hasRevisionFailure("a.ts", "one")).toBe(false)
-		expect(registry.hasRevisionFailure("a.ts", "two")).toBe(false)
-		registry.record("a.ts", "two", "upsert", "new failure", 1, "exhausted")
-		expect(registry.hasRevisionFailure("a.ts", "two")).toBe(true)
-		registry.resetAllBudgets()
-		expect(registry.hasRevisionFailure("a.ts", "two")).toBe(false)
-		expect(registry.has("a.ts")).toBe(true)
-		registry.record("a.ts", "two", "delete", "failed again", 1, "exhausted")
-		registry.clear("a.ts", "two")
-		expect(registry.hasRevisionFailure("a.ts", "two")).toBe(false)
-	})
-
-	it("aborts only renewed path work and rejects stale records and clearing", () => {
-		const registry = new FileFailureRegistry()
-		const old = registry.renew("a.ts", "old")
-		const other = registry.renew("b.ts", "one")
+		registry.renew("a.ts", "old")
 		registry.record("a.ts", "old", "embed", "failed", 1, "retrying", "connection")
 		registry.renew("a.ts", "new")
-		expect(old.aborted).toBe(true)
-		expect(other.aborted).toBe(false)
+		expect(registry.isCurrent("a.ts", "old")).toBe(false)
 		registry.record("a.ts", "new", "parse", "new failure", 1, "exhausted")
 		registry.record("a.ts", "old", "delete", "late failure", 3, "exhausted")
 		registry.clear("a.ts", "old")
 		expect(registry.list()[0]).toMatchObject({ revision: "new", activity: "parse", reason: "new failure" })
 	})
 
-	it("emits every failed attempt and returns detached details", () => {
+	it("signals each change and returns detached details", () => {
 		const registry = new FileFailureRegistry()
-		const records = vi.fn()
 		const changed = vi.fn()
-		const subscription = registry.onDidRecord(records)
-		registry.onDidChange(changed)
+		const subscription = registry.onDidChange(changed)
 		registry.renew("a.ts", "hash")
 		registry.record("a.ts", "hash", "upsert", "busy", 1, "retrying", "server")
 		registry.record("a.ts", "hash", "upsert", "busy", 2, "retrying", "server")
-		expect(records).toHaveBeenCalledTimes(2)
 		expect(changed).toHaveBeenCalledTimes(2)
 		registry.list()[0].reason = "mutated"
 		expect(registry.list()[0].reason).toBe("busy")
 		subscription.dispose()
 		registry.clear("a.ts")
-		expect(records).toHaveBeenCalledTimes(2)
+		expect(changed).toHaveBeenCalledTimes(2)
 	})
+
 	it("CI-FR-03: a success clears the entry for that path only", () => {
 		const registry = new FileFailureRegistry()
 		registry.renew("a.ts", "one")

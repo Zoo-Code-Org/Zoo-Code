@@ -3,6 +3,7 @@
 import { DirectoryScanner } from "../scanner"
 import { ParserLoadError } from "../parser"
 import { FileFailureRegistry } from "../../file-failure-registry"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
 import * as vscode from "vscode"
 
@@ -115,6 +116,9 @@ describe("DirectoryScanner", () => {
 			mockCodeParser,
 			mockCacheManager,
 			mockIgnoreInstance,
+			undefined,
+			new FileFailureRegistry(),
+			new ProviderPacerRegistry(),
 		)
 
 		// Mock default implementations - create proper Stats object
@@ -181,6 +185,9 @@ describe("DirectoryScanner", () => {
 				mockCodeParser,
 				mockCacheManager,
 				mockIgnoreInstance,
+				undefined,
+				new FileFailureRegistry(),
+				new ProviderPacerRegistry(),
 			)
 
 			const { listFiles } = await import("../../../glob/list-files")
@@ -231,6 +238,8 @@ describe("DirectoryScanner", () => {
 				mockCacheManager,
 				mockIgnoreInstance,
 				1,
+				new FileFailureRegistry(),
+				new ProviderPacerRegistry(),
 			)
 			const { listFiles } = await import("../../../glob/list-files")
 			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
@@ -302,6 +311,9 @@ describe("DirectoryScanner", () => {
 				mockCodeParser,
 				mockCacheManager,
 				mockIgnoreInstance,
+				undefined,
+				new FileFailureRegistry(),
+				new ProviderPacerRegistry(),
 			)
 
 			const { listFiles } = await import("../../../glob/list-files")
@@ -488,6 +500,7 @@ describe("DirectoryScanner", () => {
 					mockIgnoreInstance,
 					undefined,
 					failures,
+					new ProviderPacerRegistry(),
 				)
 				const { listFiles } = await import("../../../glob/list-files")
 				vi.mocked(listFiles).mockResolvedValue([["test/gone.js"], false])
@@ -515,6 +528,7 @@ describe("DirectoryScanner", () => {
 				mockIgnoreInstance,
 				undefined,
 				failures,
+				new ProviderPacerRegistry(),
 			)
 			const { listFiles } = await import("../../../glob/list-files")
 			vi.mocked(listFiles).mockResolvedValue([["test/denied.js"], false])
@@ -529,38 +543,42 @@ describe("DirectoryScanner", () => {
 		it.each([
 			["parser load", new ParserLoadError(".js", new Error("wasm"))],
 			["parse", new Error("syntax")],
-		])("CI-SC-02: a %s failure is recorded, the hash is not stored and other files continue", async (_label, error) => {
-			const failures = new FileFailureRegistry()
-			const parseScanner = new DirectoryScanner(
-				mockEmbedder,
-				mockVectorStore,
-				mockCodeParser,
-				mockCacheManager,
-				mockIgnoreInstance,
-				undefined,
-				failures,
-			)
-			const block = {
-				file_path: "test/file2.js",
-				content: "ok",
-				start_line: 1,
-				end_line: 1,
-				identifier: null,
-				type: "function",
-				fileHash: "h",
-				segmentHash: "s",
-			}
-			mockCodeParser.parseFile.mockImplementation(async (filePath: string) => {
-				if (filePath === "test/file1.js") throw error
-				return [block]
-			})
+		])(
+			"CI-SC-02: a %s failure is recorded, the hash is not stored and other files continue",
+			async (_label, error) => {
+				const failures = new FileFailureRegistry()
+				const parseScanner = new DirectoryScanner(
+					mockEmbedder,
+					mockVectorStore,
+					mockCodeParser,
+					mockCacheManager,
+					mockIgnoreInstance,
+					undefined,
+					failures,
+					new ProviderPacerRegistry(),
+				)
+				const block = {
+					file_path: "test/file2.js",
+					content: "ok",
+					start_line: 1,
+					end_line: 1,
+					identifier: null,
+					type: "function",
+					fileHash: "h",
+					segmentHash: "s",
+				}
+				mockCodeParser.parseFile.mockImplementation(async (filePath: string) => {
+					if (filePath === "test/file1.js") throw error
+					return [block]
+				})
 
-			await parseScanner.scanDirectory("/test")
+				await parseScanner.scanDirectory("/test")
 
-			expect(failures.list()).toEqual([expect.objectContaining({ path: "test/file1.js", activity: "parse" })])
-			expect(mockCacheManager.updateHash).not.toHaveBeenCalledWith("test/file1.js", expect.anything())
-			expect(mockCacheManager.updateHash).toHaveBeenCalledWith("test/file2.js", expect.any(String))
-		})
+				expect(failures.list()).toEqual([expect.objectContaining({ path: "test/file1.js", activity: "parse" })])
+				expect(mockCacheManager.updateHash).not.toHaveBeenCalledWith("test/file1.js", expect.anything())
+				expect(mockCacheManager.updateHash).toHaveBeenCalledWith("test/file2.js", expect.any(String))
+			},
+		)
 
 		it("should not process deleted files when signal is aborted", async () => {
 			const { listFiles } = await import("../../../glob/list-files")

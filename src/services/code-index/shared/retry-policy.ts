@@ -14,7 +14,7 @@ export interface RetryFailure {
 	classification: IndexingErrorClassification
 	willRetry: boolean
 	delayMs: number
-	delaySource: "default" | "provider"
+	delaySource: "default"
 }
 
 export interface RetryPolicyOptions {

@@ -1,11 +1,11 @@
 import * as path from "path"
+import { VectorStoreSearchResult } from "./interfaces"
+import { IEmbedder } from "./interfaces/embedder"
+import { IVectorStore } from "./interfaces/vector-store"
+import { CodeIndexConfigManager } from "./config-manager"
+import { CodeIndexStateManager } from "./state-manager"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
-import type { VectorStoreSearchResult } from "./interfaces/vector-store"
-import type { IEmbedder } from "./interfaces/embedder"
-import type { IVectorStore } from "./interfaces/vector-store"
-import type { CodeIndexConfigManager } from "./config-manager"
-import type { CodeIndexStateManager } from "./state-manager"
 import type { FileFailureRegistry } from "./file-failure-registry"
 import type { ProviderPacerRegistry } from "./provider-pacer"
 import { retryWithPolicy } from "./shared/retry-policy"
@@ -35,6 +35,13 @@ export class CodeIndexSearchService {
 		private readonly providerPacers: Pick<ProviderPacerRegistry, "waitingPaths">,
 	) {}
 
+	/**
+	 * Searches the code index for relevant content.
+	 * @param query The search query
+	 * @param directoryPrefix Optional directory path to filter results by
+	 * @returns Search results with incomplete-index details
+	 * @throws Error if the service is not properly configured or ready
+	 */
 	public async searchIndex(query: string, directoryPrefix?: string): Promise<CodeIndexSearchResponse> {
 		if (!this.configManager.isFeatureEnabled || !this.configManager.isFeatureConfigured) {
 			throw new Error("Code index feature is disabled or not configured.")
@@ -67,11 +74,13 @@ export class CodeIndexSearchService {
 				throw new Error("Failed to generate embedding for query.")
 			}
 
+			// Handle directory prefix
 			let normalizedPrefix: string | undefined = undefined
 			if (directoryPrefix) {
 				normalizedPrefix = path.normalize(directoryPrefix)
 			}
 
+			// Perform search
 			const results = await this.vectorStore.search(vector, normalizedPrefix, minScore, maxResults)
 			const failedPaths = [...new Set(this.failures.list().map((failure) => failure.path))]
 			const waitingPaths = this.providerPacers.waitingPaths()
@@ -84,6 +93,8 @@ export class CodeIndexSearchService {
 			}
 		} catch (error) {
 			console.error("[CodeIndexSearchService] Error during search:", error)
+
+			// Capture telemetry for the error
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: (error as Error).message,
 				stack: (error as Error).stack,

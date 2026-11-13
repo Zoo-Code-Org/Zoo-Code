@@ -166,7 +166,10 @@ describe("CodeParser", () => {
 		})
 
 		it.each([
-			["a rejected load", () => vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(new Error("Load failed"))],
+			[
+				"a rejected load",
+				() => vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(new Error("Load failed")),
+			],
 			["no parser for the extension", () => vi.mocked(loadRequiredLanguageParsers).mockResolvedValueOnce({})],
 		])("CI-PA-01: %s throws ParserLoadError and the next call reloads", async (_label, failLoad) => {
 			failLoad()

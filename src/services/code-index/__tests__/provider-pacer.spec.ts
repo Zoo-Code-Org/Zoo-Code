@@ -109,9 +109,9 @@ describe("ProviderPacer (CI-PP-02)", () => {
 
 	it("rethrows non-rate-limit errors unchanged", async () => {
 		const failure = Object.assign(new Error("server"), { status: 500 })
-		await expect(new ProviderPacer("openai:1").run(undefined, undefined, () => Promise.reject(failure))).rejects.toBe(
-			failure,
-		)
+		await expect(
+			new ProviderPacer("openai:1").run(undefined, undefined, () => Promise.reject(failure)),
+		).rejects.toBe(failure)
 	})
 
 	it("keeps waits longer than the 32-bit timer limit", async () => {
@@ -134,7 +134,9 @@ describe("ProviderPacerRegistry", () => {
 		const registry = new ProviderPacerRegistry()
 		const changed = vi.fn()
 		registry.onDidChange(changed)
-		const paused = settle(registry.get("openai:1").run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(5000))))
+		const paused = settle(
+			registry.get("openai:1").run("a.ts", undefined, vi.fn().mockRejectedValueOnce(rateLimit(5000))),
+		)
 		await vi.advanceTimersByTimeAsync(0)
 		const same = settle(registry.get("openai:1").run("a.ts", undefined, vi.fn().mockResolvedValue("ok")))
 		const other = vi.fn().mockResolvedValue("other")

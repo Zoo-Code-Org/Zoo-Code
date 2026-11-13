@@ -14,8 +14,8 @@ import { FileWatcherFactory } from "./processors/file-watcher-factory"
 import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
-import { FileFailureRegistry } from "./file-failure-registry"
-import { ProviderPacerRegistry } from "./provider-pacer"
+import type { FileFailureRegistry } from "./file-failure-registry"
+import type { ProviderPacerRegistry } from "./provider-pacer"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
@@ -34,8 +34,8 @@ export class CodeIndexServiceFactory {
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
-		private readonly failureRegistry: FileFailureRegistry = new FileFailureRegistry(),
-		private readonly pacers: ProviderPacerRegistry = new ProviderPacerRegistry(),
+		private readonly failureRegistry: FileFailureRegistry,
+		private readonly pacers: ProviderPacerRegistry,
 	) {}
 
 	/**

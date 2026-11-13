@@ -353,7 +353,10 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			;(manager as any)._cacheManager = mockCacheManager
 
 			// Simulate an initialized manager by setting the required properties
-			;(manager as any)._orchestrator = { stopWatcher: vi.fn(), stopIndexing: vi.fn() }
+			;(manager as any)._orchestrator = {
+				stopWatcher: vi.fn().mockResolvedValue(undefined),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
+			}
 			;(manager as any)._searchService = {}
 
 			// Verify manager is considered initialized
@@ -547,7 +550,11 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			})
 
 			// Mock orchestrator and search service to simulate initialized state
-			;(manager as any)._orchestrator = { stopWatcher: vi.fn(), stopIndexing: vi.fn(), state: "Error" }
+			;(manager as any)._orchestrator = {
+				stopWatcher: vi.fn().mockResolvedValue(undefined),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
+				state: "Error",
+			}
 			;(manager as any)._searchService = {}
 			;(manager as any)._serviceFactory = {}
 		})
@@ -679,7 +686,10 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			// Setup manager with service instances
 			;(manager as any)._configManager = mockConfigManager
 			;(manager as any)._serviceFactory = {}
-			;(manager as any)._orchestrator = { stopWatcher: vi.fn(), stopIndexing: vi.fn() }
+			;(manager as any)._orchestrator = {
+				stopWatcher: vi.fn().mockResolvedValue(undefined),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
+			}
 			;(manager as any)._searchService = {}
 
 			// Spy on console.error

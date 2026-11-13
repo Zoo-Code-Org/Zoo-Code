@@ -273,7 +273,8 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		["parser load", "parse"],
 	] as const)("CI-FP-02: a %s error is a local error with activity %s", async (stage, activity) => {
 		const dependencies = setup()
-		const error = stage === "parser load" ? new ParserLoadError(".ts", new Error("wasm")) : new Error(`${stage} failed`)
+		const error =
+			stage === "parser load" ? new ParserLoadError(".ts", new Error("wasm")) : new Error(`${stage} failed`)
 		const fail = () => {
 			throw error
 		}

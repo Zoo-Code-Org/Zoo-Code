@@ -18,9 +18,4 @@ describe("EmbedderFactory (CI-EM-03)", () => {
 		new EmbedderFactory().create(config, pacers)
 		expect(BedrockEmbedder).toHaveBeenLastCalledWith("us-east-1", "dev", "amazon.titan-embed-text-v2:0", pacers)
 	})
-
-	it("still creates a Bedrock embedder when no registry is supplied", () => {
-		new EmbedderFactory().create(config)
-		expect(vi.mocked(BedrockEmbedder).mock.lastCall?.[3]).toBeInstanceOf(ProviderPacerRegistry)
-	})
 })

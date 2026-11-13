@@ -12,7 +12,7 @@ export class FileIndexWriter {
 	constructor(
 		private readonly embedder: IEmbedder,
 		private readonly store: IVectorStore,
-		private readonly cache: Pick<ICacheManager, "updateHash" | "deleteHash">,
+		private readonly cache: Pick<ICacheManager, "getHash" | "updateHash" | "deleteHash">,
 		private readonly failures: FileFailureRegistry,
 		private readonly pacers: ProviderPacerRegistry,
 		private readonly workspacePath: string,
@@ -25,9 +25,11 @@ export class FileIndexWriter {
 		this.failures.renew(relativePath, hash)
 		const selected = blocks.filter((block) => block.content.trim())
 		try {
-			await this.attempt(relativePath, hash, "delete", this.store.rateLimitScope, signal, () =>
-				this.store.deletePointsByFilePath(filePath),
-			)
+			if (this.cache.getHash(filePath) !== undefined) {
+				await this.attempt(relativePath, hash, "delete", this.store.rateLimitScope, signal, () =>
+					this.store.deletePointsByFilePath(filePath),
+				)
+			}
 			for (let offset = 0; offset < selected.length; offset += this.batchSize) {
 				const batch = selected.slice(offset, offset + this.batchSize)
 				const { embeddings } = await this.attempt(
@@ -99,11 +101,11 @@ export class FileIndexWriter {
 		})
 	}
 
-	// Same id as the merge-base watcher so scanner and watcher writes of one block replace each other.
+	// Segment hash, not start line: segments split from one long line share a start line.
 	private toPoint(block: CodeBlock, vector: number[]): PointStruct {
 		const absolutePath = generateNormalizedAbsolutePath(block.file_path, this.workspacePath)
 		return {
-			id: uuidv5(`${absolutePath}:${block.start_line}`, QDRANT_CODE_BLOCK_NAMESPACE),
+			id: uuidv5(block.segmentHash, QDRANT_CODE_BLOCK_NAMESPACE),
 			vector,
 			payload: {
 				filePath: generateRelativeFilePath(absolutePath, this.workspacePath),

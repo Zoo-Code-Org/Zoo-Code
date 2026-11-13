@@ -7,7 +7,7 @@ import { generateRelativeFilePath } from "../shared/get-relative-path"
 import { getWorkspacePathForContext } from "../../../utils/path"
 import { scannerExtensions } from "../shared/supported-extensions"
 import * as vscode from "vscode"
-import { ICodeParser, IEmbedder, IVectorStore, IDirectoryScanner } from "../interfaces"
+import { CodeBlock, ICodeParser, IEmbedder, IVectorStore, IDirectoryScanner } from "../interfaces"
 import { createHash } from "crypto"
 import pLimit from "p-limit"
 import { CacheManager } from "../cache-manager"
@@ -24,8 +24,8 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
-import { FileFailureRegistry, UNKNOWN_REVISION, type FileFailureActivity } from "../file-failure-registry"
-import { ProviderPacerRegistry } from "../provider-pacer"
+import { type FileFailureRegistry, UNKNOWN_REVISION, type FileFailureActivity } from "../file-failure-registry"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 import { FileIndexWriter } from "../file-index-writer"
 import { readSource, SOURCE_MISSING } from "../shared/indexing-errors"
 
@@ -38,9 +38,9 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly codeParser: ICodeParser,
 		private readonly cacheManager: CacheManager,
 		private readonly ignoreInstance: Ignore,
-		batchSegmentThreshold?: number,
-		private readonly failures: FileFailureRegistry = new FileFailureRegistry(),
-		private readonly pacers: ProviderPacerRegistry = new ProviderPacerRegistry(),
+		batchSegmentThreshold: number | undefined,
+		private readonly failures: FileFailureRegistry,
+		private readonly pacers: ProviderPacerRegistry,
 	) {
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
@@ -119,7 +119,12 @@ export class DirectoryScanner implements IDirectoryScanner {
 		const writeLimiter = pLimit(BATCH_PROCESSING_CONCURRENCY)
 		const writes: Promise<void>[] = []
 
-		const recordLocalFailure = (filePath: string, revision: string, activity: FileFailureActivity, error: unknown) => {
+		const recordLocalFailure = (
+			filePath: string,
+			revision: string,
+			activity: FileFailureActivity,
+			error: unknown,
+		) => {
 			if (signal?.aborted) return
 			const relativePath = generateRelativeFilePath(filePath, scanWorkspace)
 			const reason = error instanceof Error ? error.message : String(error)
@@ -157,7 +162,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 					return
 				}
 
-				let blocks
+				let blocks: CodeBlock[]
 				try {
 					blocks = await this.codeParser.parseFile(filePath, { content, fileHash: currentFileHash })
 				} catch (error) {
@@ -226,7 +231,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 			error instanceof Error
 				? new Error(`${error.message} (Workspace: ${scanWorkspace}, File: ${filePath})`)
 				: new Error(
-						t("embeddings:scanner.unknownErrorProcessingFile", { filePath }) + ` (Workspace: ${scanWorkspace})`,
+						t("embeddings:scanner.unknownErrorProcessingFile", { filePath }) +
+							` (Workspace: ${scanWorkspace})`,
 					),
 		)
 	}

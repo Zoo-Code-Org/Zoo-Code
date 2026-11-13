@@ -6,8 +6,8 @@ import { IFileWatcher, IVectorStore, BatchProcessingSummary } from "./interfaces
 import { DirectoryScanner } from "./processors"
 import { CacheManager } from "./cache-manager"
 import { CodeIndexScanExecutor } from "./code-index-scan-executor"
-import { FileFailureRegistry } from "./file-failure-registry"
-import { ProviderPacerRegistry } from "./provider-pacer"
+import type { FileFailureRegistry } from "./file-failure-registry"
+import type { ProviderPacerRegistry } from "./provider-pacer"
 import { formatProviderWaitMessage } from "./shared/provider-wait-message"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -21,7 +21,6 @@ import { t } from "../../i18n"
  */
 export class CodeIndexOrchestrator {
 	private _fileWatcherSubscriptions: vscode.Disposable[] = []
-	private _isProcessing: boolean = false
 	private _abortController: AbortController | null = null
 	private scanPromise?: Promise<void>
 	private stopPromise?: Promise<void>
@@ -38,8 +37,8 @@ export class CodeIndexOrchestrator {
 		private readonly vectorStore: IVectorStore,
 		scanner: DirectoryScanner,
 		private readonly fileWatcher: IFileWatcher,
-		private readonly failures: FileFailureRegistry = new FileFailureRegistry(),
-		private readonly pacers: ProviderPacerRegistry = new ProviderPacerRegistry(),
+		private readonly failures: FileFailureRegistry,
+		private readonly pacers: ProviderPacerRegistry,
 	) {
 		this.scanExecutor = new CodeIndexScanExecutor(workspacePath, scanner, vectorStore, stateManager)
 	}
@@ -116,7 +115,8 @@ export class CodeIndexOrchestrator {
 
 	/**
 	 * Starts one indexing session (scan, then watcher). A repeated call while a scan runs returns the running
-	 * scan; a call while stopping waits for the stop to finish first.
+	 * scan; a call while stopping waits for the stop to finish first; a call during the watcher phase stops
+	 * that session and rescans, so an explicit retry reaches failed files.
 	 */
 	public async startIndexing(): Promise<void> {
 		if (this.stopPromise) await this.stopPromise
@@ -135,11 +135,10 @@ export class CodeIndexOrchestrator {
 		}
 
 		if (this._abortController && !this._abortController.signal.aborted) {
-			console.warn("[CodeIndexOrchestrator] Start rejected: indexing session already active.")
-			return
+			await this.stopIndexing()
+			if (this.scanPromise) return this.scanPromise
 		}
 
-		this._isProcessing = true
 		this.scanDone = false
 		this._abortController = new AbortController()
 		const signal = this._abortController.signal
@@ -219,8 +218,6 @@ export class CodeIndexOrchestrator {
 				}),
 			)
 			this.disposeWatcher()
-		} finally {
-			this._isProcessing = false
 		}
 	}
 
@@ -278,43 +275,33 @@ export class CodeIndexOrchestrator {
 	 * and resetting the cache file.
 	 */
 	public async clearIndexData(): Promise<void> {
-		this._isProcessing = true
+		await this.stopIndexing()
 
 		try {
-			await this.stopIndexing()
-
-			try {
-				if (this.configManager.isFeatureConfigured) {
-					await this.vectorStore.deleteCollection()
-				} else {
-					console.warn("[CodeIndexOrchestrator] Service not configured, skipping vector collection clear.")
-				}
-			} catch (error: any) {
-				console.error("[CodeIndexOrchestrator] Failed to clear vector collection:", error)
-				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-					error: error instanceof Error ? error.message : String(error),
-					stack: error instanceof Error ? error.stack : undefined,
-					location: "clearIndexData",
-				})
-				this.stateManager.setSystemState("Error", `Failed to clear vector collection: ${error.message}`)
+			if (this.configManager.isFeatureConfigured) {
+				await this.vectorStore.deleteCollection()
+			} else {
+				console.warn("[CodeIndexOrchestrator] Service not configured, skipping vector collection clear.")
 			}
+		} catch (error: any) {
+			console.error("[CodeIndexOrchestrator] Failed to clear vector collection:", error)
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				location: "clearIndexData",
+			})
+			this.stateManager.setSystemState("Error", `Failed to clear vector collection: ${error.message}`)
+		}
 
-			await this.cacheManager.clearCacheFile()
+		await this.cacheManager.clearCacheFile()
 
-			if (this.stateManager.state !== "Error") {
-				this.stateManager.setSystemState("Standby", "Index data cleared successfully.")
-			}
-		} finally {
-			this._isProcessing = false
+		if (this.stateManager.state !== "Error") {
+			this.stateManager.setSystemState("Standby", "Index data cleared successfully.")
 		}
 	}
 
 	public get isScanning(): boolean {
 		return this.scanPromise !== undefined
-	}
-
-	public get isStopping(): boolean {
-		return this.stopPromise !== undefined
 	}
 
 	/**

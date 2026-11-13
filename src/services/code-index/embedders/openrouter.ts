@@ -182,15 +182,31 @@ export class OpenRouterEmbedder implements IEmbedder {
 				}
 			}
 
+			// The SDK types the response as float arrays, but base64 encoding returns strings, so the shapes do not overlap.
 			const response = (await this.embeddingsClient.embeddings.create(
 				requestParams,
 			)) as unknown as OpenRouterEmbeddingResponse
 
-			const embeddings = response.data.map((item: EmbeddingItem) => {
-				if (typeof item.embedding !== "string") return item.embedding
-				const buffer = Buffer.from(item.embedding, "base64")
-				return Array.from(new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4))
+			// Convert base64 embeddings to float32 arrays
+			const processedEmbeddings = response.data.map((item: EmbeddingItem) => {
+				if (typeof item.embedding === "string") {
+					const buffer = Buffer.from(item.embedding, "base64")
+
+					// Create Float32Array view over the buffer
+					const float32Array = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4)
+
+					return {
+						...item,
+						embedding: Array.from(float32Array),
+					}
+				}
+				return item
 			})
+
+			// Replace the original data with processed embeddings
+			response.data = processedEmbeddings
+
+			const embeddings = response.data.map((item) => item.embedding as number[])
 
 			return {
 				embeddings,

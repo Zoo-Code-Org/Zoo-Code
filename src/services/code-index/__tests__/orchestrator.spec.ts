@@ -182,11 +182,13 @@ describe("CodeIndexOrchestrator", () => {
 			try {
 				const context = setup()
 				const limited = Object.assign(new Error("limited"), { status: 429, retryAfterMs: 3_600_000 })
-				context.scanner.scanDirectory.mockImplementation(async (_dir, _onError, _onIndexed, _onParsed, signal) => {
-					const pacer = context.pacers.get("openai:1")
-					await pacer.run("a.ts", signal, () => Promise.reject(limited)).catch(() => {})
-					return emptyScan
-				})
+				context.scanner.scanDirectory.mockImplementation(
+					async (_dir, _onError, _onIndexed, _onParsed, signal) => {
+						const pacer = context.pacers.get("openai:1")
+						await pacer.run("a.ts", signal, () => Promise.reject(limited)).catch(() => {})
+						return emptyScan
+					},
+				)
 				const start = context.orchestrator.startIndexing()
 				await vi.advanceTimersByTimeAsync(0)
 				expect(context.pacers.waitingPaths()).toEqual(["a.ts"])
@@ -219,7 +221,9 @@ describe("CodeIndexOrchestrator", () => {
 			context.failures.record("late.ts", "h", "embed", "late", 1, "exhausted")
 			await Promise.all([stop, start])
 
-			const lateWrites = context.stateManager.setSystemState.mock.calls.slice(writesAtAbort).map(([state]) => state)
+			const lateWrites = context.stateManager.setSystemState.mock.calls
+				.slice(writesAtAbort)
+				.map(([state]) => state)
 			expect(lateWrites).toEqual(["Standby"])
 			expect(context.stateManager.reportBlockIndexingProgress).not.toHaveBeenCalled()
 		})
@@ -235,6 +239,28 @@ describe("CodeIndexOrchestrator", () => {
 
 			await context.orchestrator.startIndexing()
 			expect(context.scanner.scanDirectory).toHaveBeenCalledTimes(2)
+			expect(context.orchestrator.state).toBe("Indexed")
+		})
+
+		it("a start after a partial index stops the watcher session and rescans the failed file", async () => {
+			const context = setup()
+			context.scanner.scanDirectory
+				.mockImplementationOnce(async () => {
+					context.failures.renew("a.ts", "h")
+					context.failures.record("a.ts", "h", "embed", "server down", 3, "exhausted")
+					return emptyScan
+				})
+				.mockImplementationOnce(async () => {
+					context.failures.clear("a.ts", "h")
+					return emptyScan
+				})
+			await context.orchestrator.startIndexing()
+			expect(context.orchestrator.state).toBe("Standby")
+
+			await context.orchestrator.startIndexing()
+			expect(context.scanner.scanDirectory).toHaveBeenCalledTimes(2)
+			expect(context.fileWatcher.dispose).toHaveBeenCalled()
+			expect(context.failures.list()).toEqual([])
 			expect(context.orchestrator.state).toBe("Indexed")
 		})
 
