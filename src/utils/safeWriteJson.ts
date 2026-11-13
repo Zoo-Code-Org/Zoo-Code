@@ -396,15 +396,19 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			stagedBytes = await fs.readFile(actualTempNewFilePath)
 		}
 
+		await _flushFileToDisk(actualTempNewFilePath)
+
 		// CWE-732: the commit rename below lands the staged file onto the target, so the
 		// file that survives carries the staged file's mode, not the target's. A 0o600
 		// target would otherwise be published 0o644 from the umask-derived default. The
 		// #1912 head (085fbf85e) carries this step for the same function; the blob main
 		// brought in does not, and without it the two resolutions differ on a permission
-		// property and the row that pins it can only pass on one platform.
+		// property and the row that pins it can only pass on one platform. This step sits
+		// after the flush above because that flush opens the staged file with "r+", and a
+		// target that withholds write access hands the staged file a mode that denies the
+		// open. The flush only logs what it could not do, so syncing after the copy can
+		// skip the sync without failing the publish.
 		await _copyTargetMode(resolvedTargetPath, actualTempNewFilePath)
-
-		await _flushFileToDisk(actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a

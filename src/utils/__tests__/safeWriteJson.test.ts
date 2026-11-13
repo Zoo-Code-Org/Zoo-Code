@@ -757,6 +757,41 @@ describe("safeWriteJson", () => {
 		expect(await readFileContent(currentTestFilePath)).toEqual({ saved: true })
 	})
 
+	// The two steps that publish a staged file both touch the staged path, in an order that matters:
+	// _copyTargetMode chmods it to the target's mode and _flushFileToDisk opens it "r+" to
+	// sync it. Run the other way round, a target whose mode withholds write access hands the
+	// staged file a mode that denies the flush's own open, and the flush only logs what it
+	// could not do, so the fsync is skipped while the publish still succeeds. Asserted as the
+	// order of the two fs/promises calls this file already mocks: the order is the same fact
+	// on every platform, while the mode bits that make the denial bite are enforced only where
+	// the runner honours them.
+	test("flushes the staged file before the target mode is copied onto it", async () => {
+		const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+		const targetModeBefore = ((await actual.stat(currentTestFilePath)).mode & 0o777) >>> 0
+		const steps: string[] = []
+		let copiedMode: number | undefined
+		vi.mocked(fs.open).mockImplementation(async (filePath, flags) => {
+			steps.push("flush-open")
+			return actual.open(filePath, flags)
+		})
+		vi.mocked(fs.chmod).mockImplementation(async (filePath, mode) => {
+			steps.push("mode-copy")
+			copiedMode = Number(mode)
+			return actual.chmod(filePath, mode)
+		})
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await safeWriteJson(currentTestFilePath, { ordered: true })
+
+		expect(steps).toEqual(["flush-open", "mode-copy"])
+		// The flush opened the staged file for writing and sync succeeded on it: a swallowed
+		// flush failure logs, so no log means the open the mode copy would have denied.
+		expect(consoleErrorSpy).not.toHaveBeenCalled()
+		// The copy still runs, and still copies the mode the target itself reported.
+		expect(copiedMode).toBe(targetModeBefore)
+		expect(await readFileContent(currentTestFilePath)).toEqual({ ordered: true })
+	}, 20_000)
+
 	test("should garbage collect orphaned replacement files when the canonical path exists", async () => {
 		const initialData = { message: "Initial content" }
 
