@@ -548,7 +548,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// the access, protection and workspace checks have to see: a link is not a way to move
 			// content past .rooignore, a write-protected path or the workspace edge.
 			// A chain of links is walked to its last entry, so 8 hops stands for the longest
-			// chain this move will follow before it treats the destination as unresolvable.
+			// chain this move will follow. An entry that is still a link when the walk runs out of
+			// hops is refused rather than written onto, because writing onto a link replaces it.
 			const linkFollowLimit = 8
 			let linkTargetPath: string | undefined
 			try {
@@ -562,15 +563,36 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// that resolves two steps further. A dangling final target leaves the last spelled
 					// entry in place, which is what one hop leaves today.
 					let linkEntry = moveAbsolutePath
+					// Tracks whether the walk stopped because it reached a plain entry or because it
+					// ran out of hops while the entry it stopped on is still a link.
+					let chainEndsOnLink = true
 					for (let hop = 0; hop < linkFollowLimit; hop++) {
 						const rawTarget = await fs.readlink(linkEntry)
 						const nextEntry = path.resolve(path.dirname(linkEntry), rawTarget)
 						linkTargetPath = nextEntry
 						const nextShape = await fs.lstat(nextEntry)
 						if (!nextShape.isSymbolicLink()) {
+							chainEndsOnLink = false
 							break
 						}
 						linkEntry = nextEntry
+					}
+					if (chainEndsOnLink) {
+						// Out of hops on an entry that is itself a link. The rename below would
+						// replace that link with a regular file, which is the loss this walk exists to
+						// prevent, only deeper in: the links beyond it would go on pointing at an
+						// entry that no longer exists as a link. The move is refused with nothing
+						// written and no path moved.
+						await reportMoveRefusal(
+							"Cannot move file to '" +
+								change.movePath +
+								"': the destination is a link " +
+								"chain longer than " +
+								String(linkFollowLimit) +
+								" links, and its last link " +
+								"would have been replaced by a regular file.",
+						)
+						return { ok: false, mutated }
 					}
 				}
 			} catch (error) {
@@ -695,6 +717,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			let backupPath = path.join(moveDir, `.${moveBase}.${moveStamp}.backup`)
 			await fs.mkdir(moveDir, { recursive: true })
 
+			// Whether the destination bytes actually landed under the backup name. The
+			// restore and the report below may only claim that location once it is true.
+			let backupLanded = false
 			let destinationCommitted = false
 			try {
 				for (let stagingAttempt = 0; ; stagingAttempt++) {
@@ -725,6 +750,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// Preserve the pre-move bytes on disk (atomic rename): the in-memory
 					// copy alone cannot restore the destination after a crash.
 					await fs.rename(destinationWritePath, backupPath)
+					backupLanded = true
 				}
 				await fs.rename(stagingPath, destinationWritePath)
 				destinationCommitted = true
@@ -749,7 +775,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					await fs.rm(destinationWritePath, { force: true }).catch(() => {})
 				}
 				let destinationMissing = false
-				if (destinationBackup !== undefined) {
+				if (destinationBackup !== undefined && backupLanded) {
 					// Put the captured destination bytes back with one rename. If that rename
 					// fails as well, the destination is missing and its content survives only
 					// under the backup name, so the report has to say where it is.
@@ -768,7 +794,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				task.recordToolError("apply_patch")
 				const writeErrorMessage =
 					`Failed to write move destination '${change.movePath}': ${writeError instanceof Error ? writeError.message : String(writeError)}` +
-					(destinationMissing && backupPath !== undefined
+					(destinationMissing && backupLanded
 						? ` The original content is preserved at '${getReadablePath(task.cwd, path.relative(task.cwd, backupPath))}'.`
 						: "")
 				await task.say("error", writeErrorMessage)

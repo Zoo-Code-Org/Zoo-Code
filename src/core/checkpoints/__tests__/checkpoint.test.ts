@@ -183,6 +183,68 @@ describe("Checkpoint functionality", () => {
 			warnSpy.mockRestore()
 		})
 
+		it("releases a queued save at its own deadline while the stalled predecessor still holds the queue", async () => {
+			// The deadline used to gate only the start of an operation. A caller queued behind a save
+			// that never settled waited for it forever, which is the indefinite wait the thread names:
+			// the handoff behind it cannot proceed. The caller has to be released by its own window
+			// while the predecessor still holds the lock, and the operation behind the released one
+			// must still wait for that predecessor rather than start on top of it.
+			mockTask.checkpointTimeout = 0.05
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementationOnce(async () => {
+					order.push("third:start")
+					return { commit: "third-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const queued = checkpointSave(mockTask, false, true)
+			// Nothing below releases the stalled predecessor before this await settles, so a wait
+			// that is still unbounded shows up here as the guard arm winning the race rather than
+			// the save resolving.
+			const released = await Promise.race([
+				queued,
+				new Promise<string>((resolve) => {
+					setTimeout(() => resolve("still waiting behind the stalled predecessor"), 500)
+				}),
+			])
+			expect(released).toBeUndefined()
+			// Released while the predecessor is still running: the stalled save is the only one that
+			// reached the shadow git, and the released request never started.
+			expect(order).toEqual(["stalled:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(1)
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("releasing the wait for queued per-write checkpoint save"),
+			)
+
+			// The lock is not handed over early. A save requested while the stalled predecessor is
+			// still running has to wait for it; its own window is reopened first, so what this
+			// measures is the queue rather than that caller's patience.
+			mockTask.checkpointTimeout = 15
+			const third = checkpointSave(mockTask, false, true)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(order).toEqual(["stalled:start"])
+
+			resolveFirst({ commit: "stalled-commit" })
+			const settled = await stalled
+			const thirdResult = await third
+			// The released request did not re-run when the predecessor finally settled, and the fresh
+			// request ran exactly once, after the predecessor released the queue.
+			expect(order).toEqual(["stalled:start", "third:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(2)
+			expect(settled).toEqual({ commit: "stalled-commit" })
+			expect(thirdResult).toEqual({ commit: "third-commit" })
+			warnSpy.mockRestore()
+		})
+
 		it("drops a queued save for a task that was canceled while it waited", async () => {
 			mockTask.checkpointTimeout = 15
 			const order: string[] = []
