@@ -878,7 +878,7 @@ export type WebViewMessagePayload =
 
 export interface FailedFileStatus {
 	path: string
-	activity: "read" | "parse" | "embed" | "upsert" | "delete" | "verify"
+	activity: "read" | "parse" | "embed" | "upsert" | "delete"
 	reason: string
 	state: "retrying" | "exhausted"
 }

@@ -1,6 +1,6 @@
 // npx vitest services/code-index/processors/__tests__/parser.spec.ts
 
-import { CodeParser } from "../parser"
+import { CodeParser, codeParser, ParserLoadError } from "../parser"
 import { loadRequiredLanguageParsers } from "../../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
@@ -8,8 +8,13 @@ import { Node } from "web-tree-sitter"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
-vi.mock("../../code-index-log", () => ({
-	codeIndexLog: { error: vi.fn(), warn: vi.fn() },
+// Mock TelemetryService
+vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
+	TelemetryService: {
+		instance: {
+			captureEvent: vi.fn(),
+		},
+	},
 }))
 
 // Override Jest-based fs/promises mock with vitest-compatible version
@@ -36,7 +41,6 @@ const mockLanguageParser = {
 	js: {
 		parser: {
 			parse: vi.fn((content: string) => ({
-				delete: vi.fn(),
 				rootNode: {
 					text: content,
 					startPosition: { row: 0 },
@@ -161,16 +165,17 @@ describe("CodeParser", () => {
 			expect(result).toBeDefined()
 		})
 
-		it("should handle parser load errors", async () => {
-			;(loadRequiredLanguageParsers as any).mockRejectedValue(new Error("Load failed"))
+		it.each([
+			["a rejected load", () => vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(new Error("Load failed"))],
+			["no parser for the extension", () => vi.mocked(loadRequiredLanguageParsers).mockResolvedValueOnce({})],
+		])("CI-PA-01: %s throws ParserLoadError and the next call reloads", async (_label, failLoad) => {
+			failLoad()
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBeInstanceOf(
+				ParserLoadError,
+			)
 			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toEqual([])
-		})
-
-		it("should return empty array when no parser is available", async () => {
-			;(loadRequiredLanguageParsers as any).mockResolvedValue({} as any)
-			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toEqual([])
+			expect(Array.isArray(result)).toBe(true)
+			expect(loadRequiredLanguageParsers).toHaveBeenCalledTimes(2)
 		})
 	})
 
@@ -309,6 +314,15 @@ describe("CodeParser", () => {
 				expect(chunk.content.length).toBeGreaterThanOrEqual(100)
 				expect(chunk.content.length).toBeLessThanOrEqual(1150)
 			})
+		})
+	})
+
+	describe("singleton instance", () => {
+		it("should maintain parser state across calls", async () => {
+			const result1 = await codeParser.parseFile("test.js", { content: "const a = 1" })
+			const result2 = await codeParser.parseFile("test.js", { content: "const b = 2" })
+			expect(result1).toBeDefined()
+			expect(result2).toBeDefined()
 		})
 	})
 

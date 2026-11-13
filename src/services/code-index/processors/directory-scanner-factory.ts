@@ -9,12 +9,8 @@ export class DirectoryScannerFactory implements IDirectoryScannerFactory {
 		parser,
 		cacheManager,
 		ignoreInstance,
-		writeGate,
-		generations,
-		failures,
-		workspacePath,
-		isCurrentAttempt,
-		providerPacers,
+		failureRegistry,
+		pacers,
 	}: DirectoryScannerFactoryOptions): DirectoryScanner {
 		return new DirectoryScanner(
 			embedder,
@@ -23,12 +19,8 @@ export class DirectoryScannerFactory implements IDirectoryScannerFactory {
 			cacheManager,
 			ignoreInstance,
 			getEmbeddingBatchSize(),
-			writeGate,
-			generations,
-			failures,
-			workspacePath,
-			isCurrentAttempt,
-			providerPacers,
+			failureRegistry,
+			pacers,
 		)
 	}
 }

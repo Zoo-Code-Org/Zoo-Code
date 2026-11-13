@@ -1,153 +1,157 @@
 import * as vscode from "vscode"
 import { createHash } from "crypto"
-import type { ICacheManager } from "./interfaces/cache"
+import { ICacheManager } from "./interfaces/cache"
 import debounce from "lodash.debounce"
 import { safeWriteJson } from "../../utils/safeWriteJson"
-import { codeIndexLog } from "./code-index-log"
+import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
+import { t } from "../../i18n"
+import { isSourceMissing } from "./shared/indexing-errors"
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
+/** The cache exists but could not be read; treating it as empty would erase the index on the next scan. */
+export class CacheReadError extends Error {
+	constructor(cause: unknown) {
+		super(t("embeddings:orchestrator.cacheReadFailed"), { cause })
+		this.name = "CacheReadError"
+	}
 }
 
-export class CacheManager implements ICacheManager {
-	private readonly cachePath: vscode.Uri
-	private fileHashes: Record<string, string> = {}
-	private openFiles: Record<string, true> = {}
-	private watermark?: number
-	private saveTail: Promise<void> = Promise.resolve()
-	private readonly debouncedSave
-	public loadSucceeded = false
-	public loadedAt = 0
+function isHashMap(value: unknown): value is Record<string, string> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.values(value).every((hash) => typeof hash === "string")
+	)
+}
 
+/**
+ * Manages the cache for code indexing
+ */
+export class CacheManager implements ICacheManager {
+	private cachePath: vscode.Uri
+	private fileHashes: Record<string, string> = {}
+	private _debouncedSaveCache: () => void
+
+	/**
+	 * Creates a new cache manager
+	 * @param context VS Code extension context
+	 * @param workspacePath Path to the workspace
+	 */
 	constructor(context: vscode.ExtensionContext, workspacePath: string) {
 		this.cachePath = vscode.Uri.joinPath(
 			context.globalStorageUri,
 			`roo-index-cache-${createHash("sha256").update(workspacePath).digest("hex")}.json`,
 		)
-		this.debouncedSave = debounce(() => {
-			void this.saveNow().catch((error: unknown) => codeIndexLog.error("Failed to save cache:", error))
+		this._debouncedSaveCache = debounce(async () => {
+			await this._performSave()
 		}, 1500)
 	}
 
+	/**
+	 * Initializes the cache manager by loading the cache file
+	 */
 	async initialize(): Promise<void> {
-		this.fileHashes = {}
-		this.openFiles = {}
-		this.watermark = undefined
-		this.loadSucceeded = false
+		let cacheData: Uint8Array
 		try {
-			const buffer = await vscode.workspace.fs.readFile(this.cachePath)
-			const data: unknown = JSON.parse(Buffer.from(buffer).toString())
-			if (!isRecord(data)) throw new Error("Invalid indexing cache")
-			if (data.version === 2) {
-				if (!isRecord(data.fileHashes) || !isRecord(data.openFiles)) {
-					throw new Error("Invalid indexing cache records")
-				}
-				for (const [filePath, hash] of Object.entries(data.fileHashes)) {
-					if (typeof hash !== "string") throw new Error("Invalid indexing hash")
-					this.fileHashes[filePath] = hash
-				}
-				for (const [filePath, open] of Object.entries(data.openFiles)) {
-					if (open !== true) throw new Error("Invalid open-file record")
-					this.openFiles[filePath] = true
-					delete this.fileHashes[filePath]
-				}
-				if (
-					typeof data.generationWatermark === "number" &&
-					Number.isSafeInteger(data.generationWatermark) &&
-					data.generationWatermark >= 0
-				) {
-					this.watermark = data.generationWatermark
-				}
-			} else {
-				for (const [filePath, hash] of Object.entries(data)) {
-					if (typeof hash !== "string") throw new Error("Invalid legacy indexing cache")
-					this.fileHashes[filePath] = hash
-				}
+			cacheData = await vscode.workspace.fs.readFile(this.cachePath)
+		} catch (error) {
+			if (isSourceMissing(error)) {
+				this.fileHashes = {}
+				return
 			}
-			this.loadSucceeded = true
-		} catch {
+			this.captureError(error, "initialize")
+			throw new CacheReadError(error)
+		}
+		try {
+			const parsed: unknown = JSON.parse(Buffer.from(cacheData).toString())
+			this.fileHashes = isHashMap(parsed) ? parsed : {}
+		} catch (error) {
 			this.fileHashes = {}
-			this.openFiles = {}
-			this.watermark = undefined
+			this.captureError(error, "initialize")
 		}
-		this.loadedAt = Date.now()
 	}
 
-	get generationWatermark(): number | undefined {
-		return this.watermark
+	private captureError(error: unknown, location: string): void {
+		TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+			error: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+			location,
+		})
 	}
 
-	async reserveGenerations(watermark: number): Promise<void> {
-		this.watermark = watermark
-		await this.saveNow()
-	}
-
-	async saveNow(): Promise<void> {
-		this.debouncedSave.cancel()
-		const data = {
-			version: 2,
-			fileHashes: { ...this.fileHashes },
-			openFiles: { ...this.openFiles },
-			generationWatermark: this.watermark,
+	/**
+	 * Saves the cache to disk
+	 */
+	private async _performSave(): Promise<void> {
+		try {
+			await safeWriteJson(this.cachePath.fsPath, this.fileHashes)
+		} catch (error) {
+			console.error("Failed to save cache:", error)
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				location: "_performSave",
+			})
 		}
-		// An older debounced snapshot must never overwrite durable invalidation.
-		const pending = this.saveTail.catch(() => {}).then(() => safeWriteJson(this.cachePath.fsPath, data))
-		this.saveTail = pending
-		await pending
 	}
 
+	/**
+	 * Clears the cache file by writing an empty object to it
+	 */
 	async clearCacheFile(): Promise<void> {
-		this.fileHashes = {}
-		this.openFiles = {}
-		await this.saveNow()
+		try {
+			await safeWriteJson(this.cachePath.fsPath, {})
+			this.fileHashes = {}
+		} catch (error) {
+			console.error("Failed to clear cache file:", error, this.cachePath)
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				location: "clearCacheFile",
+			})
+		}
 	}
 
-	async invalidateFile(filePath: string): Promise<void> {
-		delete this.fileHashes[filePath]
-		this.openFiles[filePath] = true
-		await this.saveNow()
-	}
-
-	completeFile(filePath: string, hash: string): void {
-		this.fileHashes[filePath] = hash
-		delete this.openFiles[filePath]
-		this.debouncedSave()
-	}
-
-	completeRemoval(filePath: string): void {
-		delete this.fileHashes[filePath]
-		delete this.openFiles[filePath]
-		this.debouncedSave()
-	}
-
-	updateHash(filePath: string, hash: string): void {
-		this.completeFile(filePath, hash)
-	}
-
-	deleteHash(filePath: string): void {
-		this.completeRemoval(filePath)
-	}
-
-	getOpenFiles(): Record<string, true> {
-		return { ...this.openFiles }
-	}
-
-	getTrackedPaths(): string[] {
-		return [...new Set([...Object.keys(this.fileHashes), ...Object.keys(this.openFiles)])]
-	}
-
-	isTracked(filePath: string): boolean {
-		return Object.hasOwn(this.fileHashes, filePath) || Object.hasOwn(this.openFiles, filePath)
-	}
-
+	/**
+	 * Gets the hash for a file path
+	 * @param filePath Path to the file
+	 * @returns The hash for the file or undefined if not found
+	 */
 	getHash(filePath: string): string | undefined {
-		return Object.hasOwn(this.fileHashes, filePath) ? this.fileHashes[filePath] : undefined
+		return this.fileHashes[filePath]
 	}
 
+	/**
+	 * Updates the hash for a file path
+	 * @param filePath Path to the file
+	 * @param hash New hash value
+	 */
+	updateHash(filePath: string, hash: string): void {
+		this.fileHashes[filePath] = hash
+		this._debouncedSaveCache()
+	}
+
+	/**
+	 * Deletes the hash for a file path
+	 * @param filePath Path to the file
+	 */
+	deleteHash(filePath: string): void {
+		delete this.fileHashes[filePath]
+		this._debouncedSaveCache()
+	}
+
+	/**
+	 * Flushes any pending debounced cache writes to disk immediately.
+	 */
 	async flush(): Promise<void> {
-		await this.saveNow()
+		await this._performSave()
 	}
 
+	/**
+	 * Gets a copy of all file hashes
+	 * @returns A copy of the file hashes record
+	 */
 	getAllHashes(): Record<string, string> {
 		return { ...this.fileHashes }
 	}

@@ -1,68 +1,26 @@
-import { codeIndexLog } from "../code-index-log"
 import { readFile } from "fs/promises"
 import { createHash } from "crypto"
 import * as path from "path"
-import type { Node } from "web-tree-sitter"
-import { type LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
+import { Node } from "web-tree-sitter"
+import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
-import type { ICodeParser, CodeBlock } from "../parser-types"
-import { isFallbackExtension as shouldUseFallbackChunking } from "../../shared/fallback-extensions"
-import {
-	MAX_BLOCK_CHARS,
-	MIN_BLOCK_CHARS,
-	MIN_CHUNK_REMAINDER_CHARS,
-	MAX_CHARS_TOLERANCE_FACTOR,
-} from "./parser-constants"
-import { isParserAbort, throwIfAborted } from "../parser-errors"
+import { ICodeParser, CodeBlock } from "../interfaces"
+import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
+import { MAX_BLOCK_CHARS, MIN_BLOCK_CHARS, MIN_CHUNK_REMAINDER_CHARS, MAX_CHARS_TOLERANCE_FACTOR } from "../constants"
+import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
+import { sanitizeErrorMessage } from "../shared/validation-helpers"
 
-// The scanner's extension barrel imports host-only code; keep workers independent of it.
-const parserExtensions = new Set(
-	[
-		"tla",
-		"js",
-		"jsx",
-		"ts",
-		"vue",
-		"tsx",
-		"py",
-		"rs",
-		"go",
-		"c",
-		"h",
-		"cpp",
-		"hpp",
-		"cs",
-		"rb",
-		"java",
-		"php",
-		"swift",
-		"sol",
-		"kt",
-		"kts",
-		"ex",
-		"exs",
-		"el",
-		"html",
-		"htm",
-		"md",
-		"markdown",
-		"txt",
-		"json",
-		"css",
-		"rdl",
-		"ml",
-		"mli",
-		"lua",
-		"scala",
-		"toml",
-		"zig",
-		"elm",
-		"ejs",
-		"erb",
-		"vb",
-		"dart",
-	].map((extension) => `.${extension}`),
-)
+/** An eligible file's language parser failed to load; the failure is not cached, so a later call retries. */
+export class ParserLoadError extends Error {
+	constructor(
+		readonly extension: string,
+		cause?: unknown,
+	) {
+		super(`Failed to load the language parser for ${extension} files`, { cause })
+		this.name = "ParserLoadError"
+	}
+}
 
 /**
  * Implementation of the code parser interface
@@ -70,17 +28,8 @@ const parserExtensions = new Set(
 export class CodeParser implements ICodeParser {
 	private loadedParsers: LanguageParser = {}
 	private pendingLoads: Map<string, Promise<LanguageParser>> = new Map()
-	public fallbackNeeded = false
-
-	constructor(
-		private readonly parseInWorker?: (
-			filePath: string,
-			content: string,
-			fileHash: string,
-			signal?: AbortSignal,
-		) => Promise<CodeBlock[]>,
-		private readonly wasmDirectory?: string,
-	) {}
+	// Markdown files are now supported using the custom markdown parser
+	// which extracts headers and sections for semantic indexing
 
 	/**
 	 * Parses a code file into code blocks
@@ -93,11 +42,8 @@ export class CodeParser implements ICodeParser {
 		options?: {
 			content?: string
 			fileHash?: string
-			signal?: AbortSignal
 		},
 	): Promise<CodeBlock[]> {
-		this.fallbackNeeded = false
-		throwIfAborted(options?.signal)
 		// Get file extension
 		const ext = path.extname(filePath).toLowerCase()
 
@@ -118,16 +64,17 @@ export class CodeParser implements ICodeParser {
 				content = await readFile(filePath, "utf8")
 				fileHash = this.createFileHash(content)
 			} catch (error) {
-				throwIfAborted(options?.signal)
-				codeIndexLog.error(`Error reading file ${filePath}:`, error)
+				console.error(`Error reading file ${filePath}:`, error)
+				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+					error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
+					stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
+					location: "parseFile",
+				})
 				return []
 			}
 		}
 
-		throwIfAborted(options?.signal)
-		if (this.parseInWorker && ext !== ".md" && ext !== ".markdown" && !shouldUseFallbackChunking(ext)) {
-			return this.parseInWorker(filePath, content, fileHash, options?.signal)
-		}
+		// Parse the file
 		return this.parseContent(filePath, content, fileHash)
 	}
 
@@ -137,7 +84,7 @@ export class CodeParser implements ICodeParser {
 	 * @returns Boolean indicating if the language is supported
 	 */
 	private isSupportedLanguage(extension: string): boolean {
-		return parserExtensions.has(extension)
+		return scannerExtensions.includes(extension)
 	}
 
 	/**
@@ -149,10 +96,13 @@ export class CodeParser implements ICodeParser {
 		return createHash("sha256").update(content).digest("hex")
 	}
 
-	public fallbackContent(filePath: string, content: string, fileHash: string): CodeBlock[] {
-		return this._performFallbackChunking(filePath, content, fileHash, new Set())
-	}
-
+	/**
+	 * Parses file content into code blocks
+	 * @param filePath Path to the file
+	 * @param content File content
+	 * @param fileHash File hash
+	 * @returns Array of code blocks
+	 */
 	private async parseContent(filePath: string, content: string, fileHash: string): Promise<CodeBlock[]> {
 		const ext = path.extname(filePath).slice(1).toLowerCase()
 		const seenSegmentHashes = new Set<string>()
@@ -174,12 +124,16 @@ export class CodeParser implements ICodeParser {
 				try {
 					await pendingLoad
 				} catch (error) {
-					if (isParserAbort(error)) throw error
-					codeIndexLog.error(`Error in pending parser load for ${filePath}:`, error)
-					return []
+					console.error(`Error in pending parser load for ${filePath}:`, error)
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
+						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
+						location: "parseContent:loadParser",
+					})
+					throw new ParserLoadError(ext, error)
 				}
 			} else {
-				const loadPromise = loadRequiredLanguageParsers([filePath], this.wasmDirectory)
+				const loadPromise = loadRequiredLanguageParsers([filePath])
 				this.pendingLoads.set(ext, loadPromise)
 				try {
 					const newParsers = await loadPromise
@@ -187,9 +141,13 @@ export class CodeParser implements ICodeParser {
 						this.loadedParsers = { ...this.loadedParsers, ...newParsers }
 					}
 				} catch (error) {
-					if (isParserAbort(error)) throw error
-					codeIndexLog.error(`Error loading language parser for ${filePath}:`, error)
-					return []
+					console.error(`Error loading language parser for ${filePath}:`, error)
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
+						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
+						location: "parseContent:loadParser",
+					})
+					throw new ParserLoadError(ext, error)
 				} finally {
 					this.pendingLoads.delete(ext)
 				}
@@ -198,39 +156,59 @@ export class CodeParser implements ICodeParser {
 
 		const language = this.loadedParsers[ext]
 		if (!language) {
-			codeIndexLog.warn(`No parser available for file extension: ${ext}`)
-			return []
+			console.warn(`No parser available for file extension: ${ext}`)
+			throw new ParserLoadError(ext)
 		}
 
 		const tree = language.parser.parse(content)
 
-		try {
-			const captures = tree ? language.query.captures(tree.rootNode) : []
-			if (captures.length === 0) {
-				if (this.wasmDirectory) {
-					this.fallbackNeeded = true
-					return []
-				}
-				return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+		// We don't need to get the query string from languageQueries since it's already loaded
+		// in the language object
+		const captures = tree ? language.query.captures(tree.rootNode) : []
+
+		// Check if captures are empty
+		if (captures.length === 0) {
+			if (content.length >= MIN_BLOCK_CHARS) {
+				// Perform fallback chunking if content is large enough
+				const blocks = this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+				return blocks
+			} else {
+				// Return empty if content is too small for fallback
+				return []
 			}
+		}
 
-			const results: CodeBlock[] = []
-			const queue: Node[] = Array.from(captures).map((capture) => capture.node)
+		const results: CodeBlock[] = []
 
-			for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
-				const currentNode = queue[queueIndex]
-				if (currentNode.text.length < MIN_BLOCK_CHARS) continue
+		// Process captures if not empty
+		const queue: Node[] = Array.from(captures).map((capture) => capture.node)
+
+		while (queue.length > 0) {
+			const currentNode = queue.shift()!
+			// const lineSpan = currentNode.endPosition.row - currentNode.startPosition.row + 1 // Removed as per lint error
+
+			// Check if the node meets the minimum character requirement
+			if (currentNode.text.length >= MIN_BLOCK_CHARS) {
+				// If it also exceeds the maximum character limit, try to break it down
 				if (currentNode.text.length > MAX_BLOCK_CHARS * MAX_CHARS_TOLERANCE_FACTOR) {
-					const children = currentNode.children.filter((child) => child !== null)
-					if (children.length > 0) {
-						queue.push(...children)
+					if (currentNode.children.filter((child) => child !== null).length > 0) {
+						// If it has children, process them instead
+						queue.push(...currentNode.children.filter((child) => child !== null))
 					} else {
-						results.push(...this._chunkLeafNodeByLines(currentNode, filePath, fileHash, seenSegmentHashes))
+						// If it's a leaf node, chunk it
+						const chunkedBlocks = this._chunkLeafNodeByLines(
+							currentNode,
+							filePath,
+							fileHash,
+							seenSegmentHashes,
+						)
+						results.push(...chunkedBlocks)
 					}
 				} else {
+					// Node meets min chars and is within max chars, create a block
 					const identifier =
 						currentNode.childForFieldName("name")?.text ||
-						currentNode.children.find((child) => child?.type === "identifier")?.text ||
+						currentNode.children.find((c) => c?.type === "identifier")?.text ||
 						null
 					const type = currentNode.type
 					const start_line = currentNode.startPosition.row + 1
@@ -256,11 +234,10 @@ export class CodeParser implements ICodeParser {
 					}
 				}
 			}
-
-			return results
-		} finally {
-			tree?.delete()
+			// Nodes smaller than minBlockChars are ignored
 		}
+
+		return results
 	}
 
 	/**
@@ -279,8 +256,6 @@ export class CodeParser implements ICodeParser {
 		let currentChunkLength = 0
 		let chunkStartLineIndex = 0 // 0-based index within the `lines` array
 		const effectiveMaxChars = MAX_BLOCK_CHARS * MAX_CHARS_TOLERANCE_FACTOR
-		const lineOffsets = [0]
-		for (const line of lines) lineOffsets.push(lineOffsets[lineOffsets.length - 1] + line.length + 1)
 
 		const finalizeChunk = (endLineIndex: number) => {
 			if (currentChunkLength >= MIN_BLOCK_CHARS && currentChunkLines.length > 0) {
@@ -346,22 +321,14 @@ export class CodeParser implements ICodeParser {
 					finalizeChunk(i - 1)
 				}
 
+				// Split the oversized line into segments
+				let remainingLineContent = line
 				let currentSegmentStartChar = 0
-				while (currentSegmentStartChar < line.length) {
-					let segmentEnd = Math.min(currentSegmentStartChar + MAX_BLOCK_CHARS, line.length)
-					const precedingUnit = line.charCodeAt(segmentEnd - 1)
-					const followingUnit = line.charCodeAt(segmentEnd)
-					if (
-						precedingUnit >= 0xd800 &&
-						precedingUnit <= 0xdbff &&
-						followingUnit >= 0xdc00 &&
-						followingUnit <= 0xdfff
-					) {
-						segmentEnd--
-					}
-					const segment = line.slice(currentSegmentStartChar, segmentEnd)
+				while (remainingLineContent.length > 0) {
+					const segment = remainingLineContent.substring(0, MAX_BLOCK_CHARS)
+					remainingLineContent = remainingLineContent.substring(MAX_BLOCK_CHARS)
 					createSegmentBlock(segment, originalLineNumber, currentSegmentStartChar)
-					currentSegmentStartChar = segmentEnd
+					currentSegmentStartChar += MAX_BLOCK_CHARS
 				}
 				// Update chunkStartLineIndex to continue processing from the next line
 				chunkStartLineIndex = i + 1
@@ -372,7 +339,10 @@ export class CodeParser implements ICodeParser {
 			if (currentChunkLength > 0 && currentChunkLength + lineLength > effectiveMaxChars) {
 				// Re-balancing Logic
 				let splitIndex = i - 1
-				const remainderLength = lineOffsets[lines.length] - lineOffsets[i] - 1
+				let remainderLength = 0
+				for (let j = i; j < lines.length; j++) {
+					remainderLength += lines[j].length + (j < lines.length - 1 ? 1 : 0)
+				}
 
 				if (
 					currentChunkLength >= MIN_BLOCK_CHARS &&
@@ -380,8 +350,10 @@ export class CodeParser implements ICodeParser {
 					currentChunkLines.length > 1
 				) {
 					for (let k = i - 2; k >= chunkStartLineIndex; k--) {
-						const potentialChunkLength = lineOffsets[k + 1] - lineOffsets[chunkStartLineIndex]
-						const potentialNextChunkLength = lineOffsets[lines.length] - lineOffsets[k + 1]
+						const potentialChunkLines = lines.slice(chunkStartLineIndex, k + 1)
+						const potentialChunkLength = potentialChunkLines.join("\n").length + 1
+						const potentialNextChunkLines = lines.slice(k + 1)
+						const potentialNextChunkLength = potentialNextChunkLines.join("\n").length + 1
 
 						if (
 							potentialChunkLength >= MIN_BLOCK_CHARS &&
@@ -588,3 +560,6 @@ export class CodeParser implements ICodeParser {
 		return results
 	}
 }
+
+// Export a singleton instance for convenience
+export const codeParser = new CodeParser()

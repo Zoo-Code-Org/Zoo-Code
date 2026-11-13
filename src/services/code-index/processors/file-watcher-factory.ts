@@ -12,12 +12,8 @@ export class FileWatcherFactory implements IFileWatcherFactory {
 		vectorStore,
 		ignoreInstance,
 		rooIgnoreController,
-		parser,
-		writeGate,
-		generations,
-		failures,
-		isCurrentAttempt,
-		providerPacers,
+		failureRegistry,
+		pacers,
 	}: FileWatcherFactoryOptions): IFileWatcher {
 		return new FileWatcher(
 			workspacePath,
@@ -28,12 +24,8 @@ export class FileWatcherFactory implements IFileWatcherFactory {
 			ignoreInstance,
 			rooIgnoreController,
 			getEmbeddingBatchSize(),
-			parser,
-			writeGate,
-			generations,
-			failures,
-			isCurrentAttempt,
-			providerPacers,
+			failureRegistry,
+			pacers,
 		)
 	}
 }

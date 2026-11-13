@@ -1,6 +1,5 @@
 import { CodeParser } from "../parser"
-import { scannerExtensions } from "../../shared/supported-extensions"
-import { isFallbackExtension as shouldUseFallbackChunking } from "../../../shared/fallback-extensions"
+import { scannerExtensions, shouldUseFallbackChunking } from "../../shared/supported-extensions"
 
 vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 	TelemetryService: {
