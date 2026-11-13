@@ -1995,6 +1995,43 @@ describe("caller-supplied staging path", () => {
 		expect(fs.unlink).toHaveBeenCalledWith("/tmp/test-dir/.new_x_1.tmp")
 	})
 
+	it("refuses the mode copy when the opened descriptor is not the file the staging check validated", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const customTempPath = "/tmp/test-dir/.new_control_swap.tmp"
+		const stagingName = path.resolve(customTempPath)
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// Three different identities: the staging file the location and file-type check
+		// validated, the target, and the file the staging name carries when the open happens.
+		// The third is a plain single-name regular file, exactly what a symlink to such a
+		// file hands the open, so the nlink guard on the opened descriptor passes it by.
+		const validated = _fileStatsWithIdentity(11n, 41n)
+		// The stand-in carries nlink as a number because fstatSync without bigint reports one, which
+		// is what the guard on the opened descriptor compares. The name check further down lstats
+		// with bigint, where nlink is a bigint, so this double gets the bigint spelling too.
+		const swappedOnDisk = _fileStatsWithIdentity(77n, 41n)
+		;(swappedOnDisk as unknown as { nlink: bigint }).nlink = 1n
+		const openedDescriptor = _fileStatsWithIdentity(77n, 41n)
+		let stagingLookups = 0
+		vi.mocked(fs.lstat).mockImplementation(async (p) => {
+			if (path.resolve(String(p)) !== stagingName) {
+				return swappedOnDisk
+			}
+			stagingLookups += 1
+			return stagingLookups === 1 ? validated : swappedOnDisk
+		})
+		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
+		vi.mocked(fsSync.openSync).mockReturnValue(9)
+		vi.mocked(fsSync.fstatSync).mockReturnValue(openedDescriptor)
+
+		await expect(safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })).rejects.toThrow(
+			"Staging file changed between the check and the mode copy",
+		)
+		// The mode change must not reach a file this write never staged.
+		expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The refusal lands after the open, so the descriptor is still closed.
+		expect(fsSync.closeSync).toHaveBeenCalledWith(9)
+	})
 	it("rejects when the target identity cannot be compared for a reason other than a missing target", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
