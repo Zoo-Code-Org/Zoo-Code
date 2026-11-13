@@ -4075,6 +4075,29 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test.each([
+		["true", true, true],
+		["false", false, false],
+		["unset", undefined, true],
+	])(
+		"task title generation setting %s round-trips through getState and the webview state",
+		async (_label, saved, expected) => {
+			await provider.contextProxy.setValue("taskTitleGenerationEnabled", saved)
+			await provider.contextProxy.setValue(
+				"taskTitleApiConfigId",
+				saved === undefined ? undefined : "title-profile",
+			)
+
+			const state = await provider.getState()
+			const webviewState = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+
+			expect(state.taskTitleGenerationEnabled).toBe(expected)
+			expect(webviewState.taskTitleGenerationEnabled).toBe(expected)
+			expect(state.taskTitleApiConfigId).toBe(saved === undefined ? undefined : "title-profile")
+			expect(webviewState.taskTitleApiConfigId).toBe(saved === undefined ? undefined : "title-profile")
+		},
+	)
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 

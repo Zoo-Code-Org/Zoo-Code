@@ -39,6 +39,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_TASK_TITLE_GENERATION_ENABLED,
 	ImageGenerationProvider,
 } from "@roo-code/types"
 
@@ -257,6 +258,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		includeDiagnosticMessages,
 		maxDiagnosticMessages,
 		includeTaskHistoryInEnhance,
+		taskTitleGenerationEnabled,
+		taskTitleApiConfigId,
 		imageGenerationProvider,
 		openRouterImageApiKey,
 		openRouterImageGenerationSelectedModel,
@@ -597,6 +600,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					alwaysAllowFollowupQuestions: alwaysAllowFollowupQuestions ?? false,
 					followupAutoApproveTimeoutMs,
 					includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
+					taskTitleGenerationEnabled: taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+					taskTitleApiConfigId: taskTitleApiConfigId ?? "",
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
 					timeFormat: timeFormat ?? "auto",
@@ -1191,6 +1196,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								setIncludeTaskHistoryInEnhance={(value) =>
 									setCachedStateField("includeTaskHistoryInEnhance", value)
 								}
+								taskTitleGenerationEnabled={
+									taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED
+								}
+								setTaskTitleGenerationEnabled={(value) =>
+									setCachedStateField("taskTitleGenerationEnabled", value)
+								}
+								taskTitleApiConfigId={taskTitleApiConfigId}
+								setTaskTitleApiConfigId={(value) => setCachedStateField("taskTitleApiConfigId", value)}
 							/>
 						)}
 

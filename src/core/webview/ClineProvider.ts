@@ -67,6 +67,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+	DEFAULT_TASK_TITLE_GENERATION_ENABLED,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -159,6 +160,7 @@ import {
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
+import { TaskTitleService } from "../task-title/TaskTitleService"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
 import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
@@ -333,6 +335,7 @@ export class ClineProvider
 
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
+	private readonly taskTitleService: TaskTitleService
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
@@ -454,6 +457,34 @@ export class ClineProvider
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
 
+		this.taskTitleService = new TaskTitleService({
+			getHistoryItem: (taskId) => this.taskHistoryStore.get(taskId),
+			setAutoTitle: (taskId, autoTitle) => this.setAutoTitle(taskId, autoTitle),
+			getSettings: async () => {
+				const { taskTitleGenerationEnabled, taskTitleApiConfigId, customSupportPrompts } = await this.getState({
+					includeTaskHistory: false,
+				})
+				return {
+					enabled: taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+					apiConfigId: taskTitleApiConfigId,
+					customSupportPrompts,
+				}
+			},
+			resolveProfile: async (apiConfigId) => {
+				const { listApiConfigMeta = [] } = await this.getState({ includeTaskHistory: false })
+				if (!listApiConfigMeta.some(({ id }) => id === apiConfigId)) {
+					return undefined
+				}
+				const { name: _name, ...profile } = await this.providerSettingsManager.getProfile({ id: apiConfigId })
+				return profile.apiProvider ? profile : undefined
+			},
+			isProfileAllowed: async (profile) => {
+				const { organizationAllowList } = await this.getState({ includeTaskHistory: false })
+				return ProfileValidator.isProfileAllowed(profile, organizationAllowList)
+			},
+			log: (message) => this.log(message),
+		})
+
 		// Start configuration loading (which might trigger indexing) in the background.
 		// Don't await, allowing activation to continue immediately.
 
@@ -491,6 +522,7 @@ export class ClineProvider
 		// We do something fairly similar for the IPC-based API.
 		this.taskCreationCallback = (instance: Task) => {
 			this.emit(RooCodeEventName.TaskCreated, instance)
+			this.taskTitleService.onTaskCreated(instance)
 
 			// Create named listener functions so we can remove them later.
 			const onTaskStarted = () => this.emit(RooCodeEventName.TaskStarted, instance.taskId)
@@ -512,7 +544,12 @@ export class ClineProvider
 				}
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
 			}
-			const onTaskAborted = () => this.emit(RooCodeEventName.TaskAborted, instance.taskId)
+			const onTaskAborted = () => {
+				if (instance.abortReason === "user_cancelled") {
+					this.taskTitleService.cancel(instance.taskId, "user")
+				}
+				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
+			}
 			const onTaskFocused = () => this.emit(RooCodeEventName.TaskFocused, instance.taskId)
 			const onTaskUnfocused = () => this.emit(RooCodeEventName.TaskUnfocused, instance.taskId)
 			const onTaskActive = (taskId: string) => this.emit(RooCodeEventName.TaskActive, taskId)
@@ -523,8 +560,10 @@ export class ClineProvider
 			const onTaskUnpaused = (taskId: string) => this.emit(RooCodeEventName.TaskUnpaused, taskId)
 			const onTaskSpawned = (taskId: string) => this.emit(RooCodeEventName.TaskSpawned, taskId)
 			const onTaskUserMessage = (taskId: string) => this.emit(RooCodeEventName.TaskUserMessage, taskId)
-			const onTaskTokenUsageUpdated = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) =>
+			const onTaskTokenUsageUpdated = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
+				this.taskTitleService.onTokenUsageUpdated(taskId, tokenUsage)
 				this.emit(RooCodeEventName.TaskTokenUsageUpdated, taskId, tokenUsage, toolUsage)
+			}
 
 			// Attach the listeners.
 			instance.on(RooCodeEventName.TaskStarted, onTaskStarted)
@@ -558,6 +597,7 @@ export class ClineProvider
 				() => instance.off(RooCodeEventName.TaskUnpaused, onTaskUnpaused),
 				() => instance.off(RooCodeEventName.TaskSpawned, onTaskSpawned),
 				() => instance.off(RooCodeEventName.TaskTokenUsageUpdated, onTaskTokenUsageUpdated),
+				() => this.taskTitleService.forget(instance.taskId),
 			])
 		}
 	}
@@ -1006,6 +1046,7 @@ export class ClineProvider
 		this.skillsManager = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
+		this.taskTitleService.dispose()
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
@@ -2837,6 +2878,19 @@ export class ClineProvider
 		}
 	}
 
+	/*
+	 * Records a generated title unless the task already has one. The store decides under its lock
+	 * against the persisted record, so a deleted or already-titled task is left untouched.
+	 */
+	async setAutoTitle(id: string, autoTitle: string) {
+		const { item } = await this.taskHistoryStore.setAutoTitleIfAbsent(id, autoTitle)
+		this.recentTasksCache = undefined
+
+		if (item && this.isViewLaunched) {
+			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: item })
+		}
+	}
+
 	/* Condenses a task's message history to use fewer tokens. */
 	async condenseTaskContext(taskId: string) {
 		const task = this.taskRegistry.getById(taskId)
@@ -2885,6 +2939,10 @@ export class ClineProvider
 				}
 			}
 
+			for (const taskId of allIdsToDelete) {
+				this.taskTitleService.cancel(taskId, "deleted")
+			}
+
 			// Delete all tasks from state in one batch
 			await this.taskHistoryStore.deleteMany(allIdsToDelete)
 			this.recentTasksCache = undefined
@@ -2928,6 +2986,7 @@ export class ClineProvider
 	}
 
 	async deleteTaskFromState(id: string) {
+		this.taskTitleService.cancel(id, "deleted")
 		await this.taskHistoryStore.delete(id)
 		this.recentTasksCache = undefined
 
@@ -3134,6 +3193,8 @@ export class ClineProvider
 			includeDiagnosticMessages,
 			maxDiagnosticMessages,
 			includeTaskHistoryInEnhance,
+			taskTitleGenerationEnabled,
+			taskTitleApiConfigId,
 			includeCurrentTime,
 			includeCurrentCost,
 			maxGitStatusFiles,
@@ -3340,6 +3401,8 @@ export class ClineProvider
 			includeDiagnosticMessages: includeDiagnosticMessages ?? true,
 			maxDiagnosticMessages: maxDiagnosticMessages ?? 50,
 			includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
+			taskTitleGenerationEnabled: taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+			taskTitleApiConfigId,
 			includeCurrentTime: includeCurrentTime ?? true,
 			includeCurrentCost: includeCurrentCost ?? true,
 			maxGitStatusFiles: maxGitStatusFiles ?? 0,
@@ -3594,6 +3657,8 @@ export class ClineProvider
 			includeDiagnosticMessages: stateValues.includeDiagnosticMessages ?? true,
 			maxDiagnosticMessages: stateValues.maxDiagnosticMessages ?? 50,
 			includeTaskHistoryInEnhance: stateValues.includeTaskHistoryInEnhance ?? true,
+			taskTitleGenerationEnabled: stateValues.taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+			taskTitleApiConfigId: stateValues.taskTitleApiConfigId,
 			includeCurrentTime: stateValues.includeCurrentTime ?? true,
 			includeCurrentCost: stateValues.includeCurrentCost ?? true,
 			maxGitStatusFiles: stateValues.maxGitStatusFiles ?? 0,
@@ -3611,9 +3676,10 @@ export class ClineProvider
 	 * Updates a task in the task history and optionally broadcasts the updated history to the webview.
 	 * Now delegates to TaskHistoryStore for per-task file persistence.
 	 *
-	 * This writer never owns the `title` field: `title` is written only by the rename path
-	 * (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`). Callers here build items
-	 * from snapshots read before taking the store lock, so any title they carry can be stale.
+	 * This writer never owns the `title` or `autoTitle` fields: `title` is written only by the rename
+	 * path (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`) and `autoTitle` only by
+	 * `setAutoTitle`. Callers here build items from snapshots read before taking the store lock,
+	 * so any title they carry can be stale.
 	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
@@ -3622,9 +3688,9 @@ export class ClineProvider
 	async updateTaskHistory(item: HistoryItem, options: { broadcast?: boolean } = {}): Promise<HistoryItem[]> {
 		const { broadcast = true } = options
 
-		// Drop the snapshot's title so upsertCore preserves the value held under the store lock
-		// instead of treating a stale title as a changed field and reverting a concurrent rename.
-		const { title: _title, ...itemWithoutTitle } = item
+		// Drop the snapshot's titles so upsertCore preserves the values held under the store lock
+		// instead of treating a stale title as a changed field and reverting a concurrent write.
+		const { title: _title, autoTitle: _autoTitle, ...itemWithoutTitle } = item
 
 		const history = await this.taskHistoryStore.upsert(itemWithoutTitle)
 		this.recentTasksCache = undefined

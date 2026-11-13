@@ -54,6 +54,9 @@ export const DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT = false
 
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
+/** Whether new root tasks get a short generated title in the background. */
+export const DEFAULT_TASK_TITLE_GENERATION_ENABLED = true
+
 /**
  * Whether workspace-scoped command-list layers (`zoo-code.allowedCommands` /
  * `zoo-code.deniedCommands` values set in workspace settings) participate in
@@ -292,6 +295,8 @@ export const globalSettingsSchema = z.object({
 	customSupportPrompts: customSupportPromptsSchema.optional(),
 	enhancementApiConfigId: z.string().optional(),
 	includeTaskHistoryInEnhance: z.boolean().optional(),
+	taskTitleGenerationEnabled: z.boolean().optional(),
+	taskTitleApiConfigId: z.string().optional(),
 	historyPreviewCollapsed: z.boolean().optional(),
 	reasoningBlockCollapsed: z.boolean().optional(),
 	/**
