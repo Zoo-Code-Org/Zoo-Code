@@ -15,6 +15,7 @@ import { TriangleAlert } from "lucide-react"
 import {
 	type IndexingStatus,
 	type EmbedderProvider,
+	type IndexingStatusUpdateMessage,
 	CODEBASE_INDEX_DEFAULTS,
 	providerIdentifiers,
 } from "@roo-code/types"
@@ -200,12 +201,16 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 }) => {
 	const SECRET_PLACEHOLDER = "••••••••••••••••"
 	const { t } = useAppTranslation()
-	const { codebaseIndexConfig, codebaseIndexModels, cwd, apiConfiguration, platform, arch } = useExtensionState()
+	const { codebaseIndexConfig, codebaseIndexModels, cwd, apiConfiguration, platform, arch, language } =
+		useExtensionState()
 	const [open, setOpen] = useState(false)
 	const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false)
 	const [isSetupSettingsOpen, setIsSetupSettingsOpen] = useState(false)
 
 	const [indexingStatus, setIndexingStatus] = useState<IndexingStatus>(externalIndexingStatus)
+	const failedFileSummary = indexingStatus.failedFileSummary
+	const failedFiles = indexingStatus.failedFiles ?? []
+	const hasFailedFiles = failedFiles.length > 0 || (failedFileSummary?.count ?? 0) > 0
 
 	const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
 	const [saveError, setSaveError] = useState<string | null>(null)
@@ -318,16 +323,14 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 
 	// Listen for indexing status updates and save responses
 	useEffect(() => {
-		const handleMessage = (event: MessageEvent<any>) => {
+		const handleMessage = (
+			event: MessageEvent<
+				IndexingStatusUpdateMessage | { type: "codeIndexSettingsSaved"; success: boolean; error?: string }
+			>,
+		) => {
 			if (event.data.type === "indexingStatusUpdate") {
 				if (!event.data.values.workspacePath || event.data.values.workspacePath === cwd) {
-					setIndexingStatus({
-						systemStatus: event.data.values.systemStatus,
-						message: event.data.values.message || "",
-						processedItems: event.data.values.processedItems,
-						totalItems: event.data.values.totalItems,
-						currentItemUnit: event.data.values.currentItemUnit || "items",
-					})
+					setIndexingStatus(event.data.values)
 				}
 			} else if (event.data.type === "codeIndexSettingsSaved") {
 				if (event.data.success) {
@@ -671,15 +674,90 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 							<div className="text-sm text-vscode-descriptionForeground">
 								<span
 									className={cn("inline-block w-3 h-3 rounded-full mr-2", {
-										"bg-gray-400": indexingStatus.systemStatus === "Standby",
+										"bg-gray-400": indexingStatus.systemStatus === "Standby" && !hasFailedFiles,
+										"bg-amber-500":
+											hasFailedFiles &&
+											(indexingStatus.systemStatus === "Standby" ||
+												indexingStatus.systemStatus === "Indexed"),
 										"bg-yellow-500 animate-pulse": indexingStatus.systemStatus === "Indexing",
-										"bg-green-500": indexingStatus.systemStatus === "Indexed",
+										"bg-green-500": indexingStatus.systemStatus === "Indexed" && !hasFailedFiles,
 										"bg-red-500": indexingStatus.systemStatus === "Error",
+										"bg-amber-500 animate-pulse": indexingStatus.systemStatus === "Stopping",
 									})}
 								/>
 								{t(`settings:codeIndex.indexingStatuses.${indexingStatus.systemStatus.toLowerCase()}`)}
 								{indexingStatus.message ? ` - ${indexingStatus.message}` : ""}
 							</div>
+
+							{indexingStatus.providerWaits?.map((wait, index) => (
+								<div
+									key={`${wait.service}-${index}`}
+									className="text-sm text-vscode-descriptionForeground break-words">
+									<p className="m-0">
+										{t(
+											indexingStatus.systemStatus === "Indexing"
+												? wait.resumeAt === undefined
+													? "settings:codeIndex.providerWaiting"
+													: "settings:codeIndex.providerWaitingUntil"
+												: wait.resumeAt === undefined
+													? "settings:codeIndex.providerPaused"
+													: "settings:codeIndex.providerPausedUntil",
+											{
+												service: wait.service,
+												time:
+													wait.resumeAt === undefined
+														? undefined
+														: new Date(wait.resumeAt).toLocaleString(language),
+											},
+										)}
+									</p>
+									<ul className="m-0 pl-4">
+										{wait.waitingFiles.map((file) => (
+											<li key={file}>{file}</li>
+										))}
+									</ul>
+								</div>
+							))}
+
+							{hasFailedFiles && (
+								<div className="space-y-2 text-sm text-vscode-descriptionForeground break-words">
+									{failedFileSummary && failedFileSummary.count > 0 && (
+										<p className="m-0" role="status">
+											{t(
+												failedFileSummary.state === "retrying"
+													? "settings:codeIndex.indexingFilesRetrying"
+													: "settings:codeIndex.indexingFilesFailed",
+												{ ...failedFileSummary },
+											)}
+										</p>
+									)}
+									<details>
+										<summary className="cursor-pointer text-vscode-foreground">
+											{t("settings:codeIndex.failedFileDetails")} ({failedFiles.length})
+										</summary>
+										<ul className="m-0 mt-2 pl-4 space-y-3">
+											{failedFiles.map((failedFile) => (
+												<li key={`${failedFile.path}:${failedFile.activity}`}>
+													<div className="font-medium text-vscode-foreground">
+														{failedFile.path}
+													</div>
+													<div>
+														{t(
+															`settings:codeIndex.failedFileActivities.${failedFile.activity}`,
+														)}
+													</div>
+													<div>
+														{t(`settings:codeIndex.failedFileStates.${failedFile.state}`)}
+													</div>
+													<div>
+														{t("settings:codeIndex.failedFileReason")}: {failedFile.reason}
+													</div>
+												</li>
+											))}
+										</ul>
+									</details>
+								</div>
+							)}
 
 							{indexingStatus.systemStatus === "Indexing" && (
 								<div className="mt-2">
@@ -1677,11 +1755,17 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						<div className="flex items-center justify-between gap-2 pt-6">
 							<div className="flex gap-2">
 								{currentSettings.codebaseIndexEnabled &&
-									(indexingStatus.systemStatus === "Error" ||
+									(hasFailedFiles ||
+										indexingStatus.systemStatus === "Error" ||
 										indexingStatus.systemStatus === "Standby") && (
 										<Button
 											onClick={() => vscode.postMessage({ type: "startIndexing" })}
-											disabled={saveStatus === "saving" || hasUnsavedChanges}>
+											disabled={
+												saveStatus === "saving" ||
+												hasUnsavedChanges ||
+												indexingStatus.systemStatus === "Indexing" ||
+												indexingStatus.systemStatus === "Stopping"
+											}>
 											{t("settings:codeIndex.startIndexingButton")}
 										</Button>
 									)}

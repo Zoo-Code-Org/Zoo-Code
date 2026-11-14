@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Search provider rate-limited. Indexing resumes automatically after the provider wait.",
 	"authenticationFailed": "Failed to create embeddings: Authentication failed. Please check your API key.",
 	"failedWithStatus": "Failed to create embeddings after {{attempts}} attempts: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Failed to create embeddings after {{attempts}} attempts: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Cannot create services: Code indexing is not properly configured"
 	},
 	"orchestrator": {
+		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
+		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
+		"indexingFilesFailed": "File failures remain. No automatic retries pending. Partial index available.",
+		"indexingStopping": "Stopping indexing...",
 		"indexingFailedNoBlocks": "Indexing failed: No code blocks were successfully indexed. This usually indicates an embedder configuration issue.",
 		"fileWatcherStarted": "File watcher started.",
 		"fileWatcherStopped": "File watcher stopped.",
@@ -64,7 +69,8 @@
 		"unknownError": "Unknown error",
 		"indexingRequiresWorkspace": "Indexing requires an open workspace folder",
 		"indexingStopped": "Indexing stopped by user.",
-		"indexingStoppedPartial": "Indexing stopped. Partial index data preserved."
+		"indexingStoppedPartial": "Indexing stopped. Partial index data preserved.",
+		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
 	},
 	"semble": {
 		"downloadingBinary": "Downloading semble binary...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Failed to download semble: {{errorMessage}}",
 		"checkFailed": "Semble check failed: {{errorMessage}}",
 		"providerReset": "Semble provider reset. On-disk cache remains until next rebuild."
-	}
+	},
+	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
 }

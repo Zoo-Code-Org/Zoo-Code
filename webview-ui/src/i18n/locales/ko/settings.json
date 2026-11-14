@@ -166,6 +166,10 @@
 		"description": "프롬프트 향상, 코드 설명, 문제 해결과 같은 빠른 작업에 사용되는 지원 프롬프트를 구성합니다. 이러한 프롬프트는 Zoo가 일반적인 개발 작업에 대해 더 나은 지원을 제공하는 데 도움이 됩니다."
 	},
 	"codeIndex": {
+		"providerWaiting": "{{service}} 대기 중; 인덱싱이 자동으로 재개됩니다",
+		"providerWaitingUntil": "{{service}} 대기 중; {{time}}에 인덱싱이 자동으로 재개됩니다",
+		"providerPaused": "{{service}} 대기 중",
+		"providerPausedUntil": "{{time}}까지 {{service}} 대기 중",
 		"title": "코드베이스 인덱싱",
 		"enableLabel": "코드베이스 인덱싱 활성화",
 		"enableDescription": "향상된 검색 및 컨텍스트 이해를 위해 코드 인덱싱 활성화",
@@ -210,6 +214,21 @@
 		},
 		"description": "프로젝트의 시맨틱 검색을 활성화하기 위한 코드베이스 인덱싱 설정을 구성합니다. <0>자세히 알아보기</0>",
 		"statusTitle": "상태",
+		"indexingFilesRetrying": "인덱싱에 실패한 파일: {{count}}. {{path}} 재시도 중: {{reason}}",
+		"indexingFilesFailed": "인덱싱에 실패한 파일: {{count}}. {{path}} 자동 재시도 종료: {{reason}}",
+		"failedFileDetails": "실패한 파일 세부 정보",
+		"failedFileReason": "이유",
+		"failedFileStates": {
+			"retrying": "자동 재시도 대기 중",
+			"exhausted": "자동 재시도 종료"
+		},
+		"failedFileActivities": {
+			"read": "파일 읽기",
+			"parse": "파일 파싱",
+			"embed": "임베딩 생성",
+			"upsert": "인덱싱된 블록 저장",
+			"delete": "인덱싱된 블록 제거"
+		},
 		"embedderProviderLabel": "임베더 제공자",
 		"modelPlaceholder": "모델 이름을 입력하세요",
 		"selectModel": "모델 선택",
@@ -226,6 +245,7 @@
 		"saving": "저장 중...",
 		"saveSettings": "저장",
 		"indexingStatuses": {
+			"stopping": "중지 중",
 			"standby": "대기",
 			"indexing": "인덱싱 중",
 			"indexed": "인덱싱됨",

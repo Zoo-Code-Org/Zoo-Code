@@ -25,7 +25,7 @@ export class WorkspaceIndexingEnablementManager {
 			await this.manager.initialize(provider.contextProxy)
 			void this.manager.startIndexing().catch((error) => provider.log(`Indexing error: ${error}`))
 		} else if (!enabled) {
-			this.manager.stopIndexing()
+			await this.manager.stopIndexing()
 		}
 		await provider.postMessageToWebview({
 			type: "indexingStatusUpdate",

@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Nhà cung cấp tìm kiếm đã giới hạn tốc độ yêu cầu. Việc lập chỉ mục tự động tiếp tục sau khi hết thời gian chờ của nhà cung cấp.",
 	"authenticationFailed": "Không thể tạo nhúng: Xác thực không thành công. Vui lòng kiểm tra khóa API của bạn.",
 	"failedWithStatus": "Không thể tạo nhúng sau {{attempts}} lần thử: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Không thể tạo nhúng sau {{attempts}} lần thử: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Không thể tạo dịch vụ: Lập chỉ mục mã không được cấu hình đúng cách"
 	},
 	"orchestrator": {
+		"providerWaiting": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục",
+		"providerWaitingUntil": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục lúc {{time}}",
+		"indexingFilesFailed": "Vẫn còn tệp bị lỗi. Không có lần thử lại tự động nào đang chờ. Có thể dùng chỉ mục một phần.",
+		"indexingStopping": "Đang dừng lập chỉ mục...",
 		"indexingFailedNoBlocks": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công. Điều này thường cho thấy vấn đề cấu hình embedder.",
 		"fileWatcherStarted": "Trình theo dõi tệp đã khởi động.",
 		"fileWatcherStopped": "Trình theo dõi tệp đã dừng.",
@@ -64,7 +69,8 @@
 		"unknownError": "Lỗi không xác định",
 		"indexingRequiresWorkspace": "Lập chỉ mục yêu cầu một thư mục workspace đang mở",
 		"indexingStopped": "Lập chỉ mục đã bị dừng bởi người dùng.",
-		"indexingStoppedPartial": "Lập chỉ mục đã dừng. Dữ liệu chỉ mục một phần được bảo toàn."
+		"indexingStoppedPartial": "Lập chỉ mục đã dừng. Dữ liệu chỉ mục một phần được bảo toàn.",
+		"cacheReadFailed": "Không thể đọc bộ nhớ đệm của chỉ mục mã. Dữ liệu chỉ mục hiện có đã được giữ lại. Bắt đầu lập chỉ mục lại để thử lại."
 	},
 	"semble": {
 		"downloadingBinary": "Đang tải xuống tệp nhị phân semble...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Tải xuống semble thất bại: {{errorMessage}}",
 		"checkFailed": "Kiểm tra semble thất bại: {{errorMessage}}",
 		"providerReset": "Nhà cung cấp Semble đã đặt lại. Bộ nhớ đệm trên đĩa vẫn còn cho đến lần xây dựng lại tiếp theo."
-	}
+	},
+	"quotaExceeded": "Đã đạt hạn ngạch hoặc giới hạn thanh toán của nhà cung cấp nhúng. Kiểm tra gói dịch vụ hoặc thông tin thanh toán của bạn, rồi bắt đầu lập chỉ mục lại."
 }

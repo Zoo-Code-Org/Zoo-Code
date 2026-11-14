@@ -1,4 +1,4 @@
-import { QdrantClient, Schemas } from "@qdrant/js-client-rest"
+import { QdrantClient, QdrantClientResourceExhaustedError, Schemas } from "@qdrant/js-client-rest"
 import { createHash } from "crypto"
 import * as path from "path"
 import { v5 as uuidv5 } from "uuid"
@@ -6,6 +6,24 @@ import { IVectorStore } from "../interfaces/vector-store"
 import { Payload, VectorStoreSearchResult } from "../interfaces"
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_SEARCH_MIN_SCORE, QDRANT_CODE_BLOCK_NAMESPACE } from "../constants"
 import { t } from "../../../i18n"
+import { IndexingRetryError, VectorStoreError } from "../shared/indexing-errors"
+import { type ProviderPacerRegistry, makeRateLimitScope } from "../provider-pacer"
+import { retryWithPolicy } from "../shared/retry-policy"
+
+// The patched client reports Retry-After in whole seconds on retry_after (patches/@qdrant__js-client-rest@1.20.0.patch).
+function toVectorStoreError(error: unknown): VectorStoreError {
+	if (error instanceof VectorStoreError) return error
+	const message = error instanceof Error ? error.message : String(error)
+	if (error instanceof QdrantClientResourceExhaustedError) {
+		const seconds = Number(error.retry_after)
+		return new VectorStoreError(message, error, {
+			classification: "rate-limit",
+			statusCode: 429,
+			retryAfterMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined,
+		})
+	}
+	return new VectorStoreError(message, error)
+}
 
 /**
  * Qdrant implementation of the vector store interface
@@ -18,13 +36,21 @@ export class QdrantVectorStore implements IVectorStore {
 	private readonly collectionName: string
 	private readonly qdrantUrl: string = "http://localhost:6333"
 	private readonly workspacePath: string
+	readonly rateLimitScope: string
 
 	/**
 	 * Creates a new Qdrant vector store
 	 * @param workspacePath Path to the workspace
 	 * @param url Optional URL to the Qdrant server
+	 * @param pacers Shared rate-limit waits for collection and index creation
 	 */
-	constructor(workspacePath: string, url: string, vectorSize: number, apiKey?: string) {
+	constructor(
+		workspacePath: string,
+		url: string,
+		vectorSize: number,
+		apiKey: string | undefined,
+		private readonly pacers: ProviderPacerRegistry,
+	) {
 		// Parse the URL to determine the appropriate QdrantClient configuration
 		const parsedUrl = this.parseQdrantUrl(url)
 
@@ -81,6 +107,25 @@ export class QdrantVectorStore implements IVectorStore {
 		const hash = createHash("sha256").update(workspacePath).digest("hex")
 		this.vectorSize = vectorSize
 		this.collectionName = `ws-${hash.substring(0, 16)}`
+		this.rateLimitScope = makeRateLimitScope("qdrant", this.qdrantUrl)
+	}
+
+	/** Runs one creation request with bounded server/connection retries and the shared rate-limit wait. */
+	private async create<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		// Only the 429 is converted; other errors keep initialize()'s connection and dimension-mismatch messages.
+		const classified = () =>
+			request().catch((error: unknown) => {
+				throw error instanceof QdrantClientResourceExhaustedError ? toVectorStoreError(error) : error
+			})
+		try {
+			return await retryWithPolicy(
+				() => this.pacers.get(this.rateLimitScope).run(undefined, signal, classified),
+				{ signal, budget: { retriesUsed: 0 } },
+			)
+		} catch (error) {
+			// The original error keeps initialize()'s existing connection and dimension-mismatch messages.
+			throw error instanceof IndexingRetryError ? error.cause : error
+		}
 	}
 
 	/**
@@ -144,27 +189,32 @@ export class QdrantVectorStore implements IVectorStore {
 
 	/**
 	 * Initializes the vector store
+	 * @param signal Ends retry and rate-limit waits during collection and index creation
 	 * @returns Promise resolving to boolean indicating if a new collection was created
 	 */
-	async initialize(): Promise<boolean> {
+	async initialize(signal?: AbortSignal): Promise<boolean> {
 		let created = false
 		try {
 			const collectionInfo = await this.getCollectionInfo()
 
 			if (collectionInfo === null) {
 				// Collection info not retrieved (assume not found or inaccessible), create it
-				await this.client.createCollection(this.collectionName, {
-					vectors: {
-						size: this.vectorSize,
-						distance: this.DISTANCE_METRIC,
-						on_disk: true,
-					},
-					hnsw_config: {
-						m: 64,
-						ef_construct: 512,
-						on_disk: true,
-					},
-				})
+				await this.create(
+					() =>
+						this.client.createCollection(this.collectionName, {
+							vectors: {
+								size: this.vectorSize,
+								distance: this.DISTANCE_METRIC,
+								on_disk: true,
+							},
+							hnsw_config: {
+								m: 64,
+								ef_construct: 512,
+								on_disk: true,
+							},
+						}),
+					signal,
+				)
 				created = true
 			} else {
 				// Collection exists, check vector size
@@ -188,14 +238,15 @@ export class QdrantVectorStore implements IVectorStore {
 					created = false // Exists and correct
 				} else {
 					// Exists but wrong vector size, recreate with enhanced error handling
-					created = await this._recreateCollectionWithNewDimension(existingVectorSize)
+					created = await this._recreateCollectionWithNewDimension(existingVectorSize, signal)
 				}
 			}
 
 			// Create payload indexes
-			await this._createPayloadIndexes()
+			await this._createPayloadIndexes(signal)
 			return created
 		} catch (error: any) {
+			if (signal?.aborted) throw error
 			const errorMessage = error?.message || error
 			console.error(
 				`[QdrantVectorStore] Failed to initialize Qdrant collection "${this.collectionName}":`,
@@ -219,7 +270,10 @@ export class QdrantVectorStore implements IVectorStore {
 	 * @param existingVectorSize The current vector size of the existing collection
 	 * @returns Promise resolving to boolean indicating if a new collection was created
 	 */
-	private async _recreateCollectionWithNewDimension(existingVectorSize: number): Promise<boolean> {
+	private async _recreateCollectionWithNewDimension(
+		existingVectorSize: number,
+		signal?: AbortSignal,
+	): Promise<boolean> {
 		console.warn(
 			`[QdrantVectorStore] Collection ${this.collectionName} exists with vector size ${existingVectorSize}, but expected ${this.vectorSize}. Recreating collection.`,
 		)
@@ -248,18 +302,22 @@ export class QdrantVectorStore implements IVectorStore {
 				`[QdrantVectorStore] Creating new collection ${this.collectionName} with vector size ${this.vectorSize}...`,
 			)
 			recreationAttempted = true
-			await this.client.createCollection(this.collectionName, {
-				vectors: {
-					size: this.vectorSize,
-					distance: this.DISTANCE_METRIC,
-					on_disk: true,
-				},
-				hnsw_config: {
-					m: 64,
-					ef_construct: 512,
-					on_disk: true,
-				},
-			})
+			await this.create(
+				() =>
+					this.client.createCollection(this.collectionName, {
+						vectors: {
+							size: this.vectorSize,
+							distance: this.DISTANCE_METRIC,
+							on_disk: true,
+						},
+						hnsw_config: {
+							m: 64,
+							ef_construct: 512,
+							on_disk: true,
+						},
+					}),
+				signal,
+			)
 			console.log(`[QdrantVectorStore] Successfully created new collection ${this.collectionName}`)
 			return true
 		} catch (recreationError) {
@@ -293,41 +351,23 @@ export class QdrantVectorStore implements IVectorStore {
 	}
 
 	/**
-	 * Creates payload indexes for the collection, handling errors gracefully.
+	 * Creates payload indexes. An existing index counts as success; any other failure that outlasts the
+	 * retry policy rejects, so initialization is never reported as successful without its indexes.
 	 */
-	private async _createPayloadIndexes(): Promise<void> {
-		// Create index for the 'type' field to enable metadata filtering
-		try {
-			await this.client.createPayloadIndex(this.collectionName, {
-				field_name: "type",
-				field_schema: "keyword",
-			})
-		} catch (indexError: any) {
-			const errorMessage = (indexError?.message || "").toLowerCase()
-			if (!errorMessage.includes("already exists")) {
-				console.warn(
-					`[QdrantVectorStore] Could not create payload index for type on ${this.collectionName}. Details:`,
-					indexError?.message || indexError,
-				)
-			}
-		}
-
-		// Create indexes for pathSegments fields
-		for (let i = 0; i <= 4; i++) {
-			try {
-				await this.client.createPayloadIndex(this.collectionName, {
-					field_name: `pathSegments.${i}`,
-					field_schema: "keyword",
-				})
-			} catch (indexError: any) {
-				const errorMessage = (indexError?.message || "").toLowerCase()
-				if (!errorMessage.includes("already exists")) {
-					console.warn(
-						`[QdrantVectorStore] Could not create payload index for pathSegments.${i} on ${this.collectionName}. Details:`,
-						indexError?.message || indexError,
-					)
+	private async _createPayloadIndexes(signal?: AbortSignal): Promise<void> {
+		const fields = ["type", ...Array.from({ length: 5 }, (_unused, index) => `pathSegments.${index}`)]
+		for (const fieldName of fields) {
+			await this.create(async () => {
+				try {
+					await this.client.createPayloadIndex(this.collectionName, {
+						field_name: fieldName,
+						field_schema: "keyword",
+					})
+				} catch (indexError) {
+					const message = indexError instanceof Error ? indexError.message.toLowerCase() : ""
+					if (!message.includes("already exists")) throw indexError
 				}
-			}
+			}, signal)
 		}
 	}
 
@@ -370,7 +410,7 @@ export class QdrantVectorStore implements IVectorStore {
 			})
 		} catch (error) {
 			console.error("Failed to upsert points:", error)
-			throw error
+			throw toVectorStoreError(error)
 		}
 	}
 
@@ -463,7 +503,7 @@ export class QdrantVectorStore implements IVectorStore {
 			return filteredPoints as VectorStoreSearchResult[]
 		} catch (error) {
 			console.error("Failed to search points:", error)
-			throw error
+			throw error instanceof QdrantClientResourceExhaustedError ? toVectorStoreError(error) : error
 		}
 	}
 
@@ -536,6 +576,8 @@ export class QdrantVectorStore implements IVectorStore {
 				// Include first few file paths for debugging (avoid logging too many)
 				samplePaths: filePaths.slice(0, 3),
 			})
+			// A swallowed failure would let callers clear the file hash and lose the stale entries.
+			throw toVectorStoreError(error)
 		}
 	}
 

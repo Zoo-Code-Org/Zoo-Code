@@ -11,6 +11,17 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 
+/** An eligible file's language parser failed to load; the failure is not cached, so a later call retries. */
+export class ParserLoadError extends Error {
+	constructor(
+		readonly extension: string,
+		cause?: unknown,
+	) {
+		super(`Failed to load the language parser for ${extension} files`, { cause })
+		this.name = "ParserLoadError"
+	}
+}
+
 /**
  * Implementation of the code parser interface
  */
@@ -119,7 +130,7 @@ export class CodeParser implements ICodeParser {
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
 						location: "parseContent:loadParser",
 					})
-					return []
+					throw new ParserLoadError(ext, error)
 				}
 			} else {
 				const loadPromise = loadRequiredLanguageParsers([filePath])
@@ -136,7 +147,7 @@ export class CodeParser implements ICodeParser {
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
 						location: "parseContent:loadParser",
 					})
-					return []
+					throw new ParserLoadError(ext, error)
 				} finally {
 					this.pendingLoads.delete(ext)
 				}
@@ -146,7 +157,7 @@ export class CodeParser implements ICodeParser {
 		const language = this.loadedParsers[ext]
 		if (!language) {
 			console.warn(`No parser available for file extension: ${ext}`)
-			return []
+			throw new ParserLoadError(ext)
 		}
 
 		const tree = language.parser.parse(content)

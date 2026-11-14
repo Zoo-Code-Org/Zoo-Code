@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Dostawca wyszukiwania ograniczył częstotliwość żądań. Indeksowanie zostanie automatycznie wznowione po upływie czasu oczekiwania dostawcy.",
 	"authenticationFailed": "Nie udało się utworzyć osadzeń: Uwierzytelnianie nie powiodło się. Sprawdź swój klucz API.",
 	"failedWithStatus": "Nie udało się utworzyć osadzeń po {{attempts}} próbach: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Nie udało się utworzyć osadzeń po {{attempts}} próbach: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Nie można utworzyć usług: Indeksowanie kodu nie jest poprawnie skonfigurowane"
 	},
 	"orchestrator": {
+		"providerWaiting": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione",
+		"providerWaitingUntil": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione o {{time}}",
+		"indexingFilesFailed": "Nadal występują błędy plików. Brak oczekujących automatycznych ponowień. Dostępny jest częściowy indeks.",
+		"indexingStopping": "Zatrzymywanie indeksowania...",
 		"indexingFailedNoBlocks": "Indeksowanie nie powiodło się: Żadne bloki kodu nie zostały pomyślnie zaindeksowane. To zwykle wskazuje na problem z konfiguracją embeddera.",
 		"fileWatcherStarted": "Monitor plików uruchomiony.",
 		"fileWatcherStopped": "Monitor plików zatrzymany.",
@@ -64,7 +69,8 @@
 		"unknownError": "Nieznany błąd",
 		"indexingRequiresWorkspace": "Indeksowanie wymaga otwartego folderu workspace",
 		"indexingStopped": "Indeksowanie zatrzymane przez użytkownika.",
-		"indexingStoppedPartial": "Indeksowanie zatrzymane. Częściowe dane indeksu zachowane."
+		"indexingStoppedPartial": "Indeksowanie zatrzymane. Częściowe dane indeksu zachowane.",
+		"cacheReadFailed": "Nie udało się odczytać pamięci podręcznej indeksu kodu. Istniejące dane indeksu zostały zachowane. Uruchom indeksowanie ponownie, aby spróbować jeszcze raz."
 	},
 	"semble": {
 		"downloadingBinary": "Pobieranie binariów semble...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Nie udało się pobrać semble: {{errorMessage}}",
 		"checkFailed": "Sprawdzenie semble nie powiodło się: {{errorMessage}}",
 		"providerReset": "Dostawca Semble zresetowany. Pamięć podręczna na dysku pozostaje do kolejnej przebudowy."
-	}
+	},
+	"quotaExceeded": "Osiągnięto limit wykorzystania lub rozliczeń u dostawcy osadzeń. Sprawdź swój plan lub rozliczenia, a następnie uruchom indeksowanie ponownie."
 }

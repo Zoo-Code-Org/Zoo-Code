@@ -167,6 +167,10 @@
 		"description": "Configureer ondersteuningsprompts die worden gebruikt voor snelle acties zoals het verbeteren van prompts, het uitleggen van code en het oplossen van problemen. Deze prompts helpen Zoo om betere ondersteuning te bieden voor veelvoorkomende ontwikkelingstaken."
 	},
 	"codeIndex": {
+		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
+		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
+		"providerPaused": "Wachten op {{service}}",
+		"providerPausedUntil": "Wachten op {{service}} tot {{time}}",
 		"title": "Codebase indexering",
 		"enableLabel": "Codebase indexering inschakelen",
 		"enableDescription": "Code-indexering inschakelen voor verbeterde zoekresultaten en contextbegrip",
@@ -211,6 +215,21 @@
 		},
 		"description": "Configureer codebase-indexeringsinstellingen om semantisch zoeken voor je project in te schakelen. <0>Meer informatie</0>",
 		"statusTitle": "Status",
+		"indexingFilesRetrying": "Bestanden met indexeringsfouten: {{count}}. Nieuwe poging voor {{path}}: {{reason}}",
+		"indexingFilesFailed": "Bestanden met indexeringsfouten: {{count}}. Automatische nieuwe poging beëindigd voor {{path}}: {{reason}}",
+		"failedFileDetails": "Details van mislukte bestanden",
+		"failedFileReason": "Reden",
+		"failedFileStates": {
+			"retrying": "Automatische nieuwe poging in afwachting",
+			"exhausted": "Automatische nieuwe poging beëindigd"
+		},
+		"failedFileActivities": {
+			"read": "Bestand lezen",
+			"parse": "Bestand parseren",
+			"embed": "Embeddings maken",
+			"upsert": "Geïndexeerde blokken opslaan",
+			"delete": "Geïndexeerde blokken verwijderen"
+		},
 		"embedderProviderLabel": "Embedder Provider",
 		"modelPlaceholder": "Voer modelnaam in",
 		"selectModel": "Selecteer een model",
@@ -227,6 +246,7 @@
 		"saving": "Opslaan...",
 		"saveSettings": "Opslaan",
 		"indexingStatuses": {
+			"stopping": "Wordt gestopt",
 			"standby": "Stand-by",
 			"indexing": "Indexeren",
 			"indexed": "Geïndexeerd",

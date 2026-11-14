@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Der Suchanbieter hat die Anfragerate begrenzt. Die Indexierung wird nach der Wartezeit des Anbieters automatisch fortgesetzt.",
 	"authenticationFailed": "Erstellung von Einbettungen fehlgeschlagen: Authentifizierung fehlgeschlagen. Bitte überprüfe deinen API-Schlüssel.",
 	"failedWithStatus": "Erstellung von Einbettungen nach {{attempts}} Versuchen fehlgeschlagen: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Erstellung von Einbettungen nach {{attempts}} Versuchen fehlgeschlagen: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Kann keine Dienste erstellen: Code-Indizierung ist nicht richtig konfiguriert"
 	},
 	"orchestrator": {
+		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
+		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
+		"indexingFilesFailed": "Es bestehen weiterhin Dateifehler. Keine automatischen Wiederholungen ausstehend. Ein Teilindex ist verfügbar.",
+		"indexingStopping": "Indexierung wird gestoppt...",
 		"indexingFailedNoBlocks": "Indizierung fehlgeschlagen: Keine Code-Blöcke wurden erfolgreich indiziert. Dies deutet normalerweise auf ein Embedder-Konfigurationsproblem hin.",
 		"fileWatcherStarted": "Datei-Watcher gestartet.",
 		"fileWatcherStopped": "Datei-Watcher gestoppt.",
@@ -64,7 +69,8 @@
 		"unknownError": "Unbekannter Fehler",
 		"indexingRequiresWorkspace": "Indexierung erfordert einen offenen Workspace-Ordner",
 		"indexingStopped": "Indexierung vom Benutzer gestoppt.",
-		"indexingStoppedPartial": "Indexierung gestoppt. Teilweise Indexdaten beibehalten."
+		"indexingStoppedPartial": "Indexierung gestoppt. Teilweise Indexdaten beibehalten.",
+		"cacheReadFailed": "Der Cache des Code-Index konnte nicht gelesen werden. Vorhandene Indexdaten wurden beibehalten. Starte die Indexierung erneut, um es noch einmal zu versuchen."
 	},
 	"semble": {
 		"downloadingBinary": "Semble-Binary wird heruntergeladen...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Fehler beim Herunterladen von Semble: {{errorMessage}}",
 		"checkFailed": "Semble-Überprüfung fehlgeschlagen: {{errorMessage}}",
 		"providerReset": "Semble-Anbieter zurückgesetzt. Der Cache auf der Festplatte bleibt bis zum nächsten Neuaufbau erhalten."
-	}
+	},
+	"quotaExceeded": "Kontingent oder Abrechnungslimit des Einbettungsanbieters erreicht. Überprüfe deinen Tarif oder deine Abrechnung und starte die Indexierung erneut."
 }

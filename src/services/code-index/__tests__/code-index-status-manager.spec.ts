@@ -39,6 +39,9 @@ function makeSource(workspacePath: string) {
 		workspacePath,
 		workspaceEnabled: true,
 		autoEnableDefault: true,
+		failedFiles: [],
+		failedFileSummary: undefined,
+		providerWaits: [],
 	}
 	let emit = () => {}
 	const subscription = { dispose: vi.fn() }
@@ -168,6 +171,43 @@ describe("CodeIndexStatusManager", () => {
 		manager.dispose()
 	})
 
+	it.each(["Error", "Stopping", "Standby", "Indexed"] as const)(
+		"publishes computed %s and failures rather than the event payload",
+		(systemStatus) => {
+			const source = makeSource("/first")
+			const publish = vi.fn()
+			const manager = new CodeIndexStatusManager(() => source)
+			manager["publishStatus"] = publish
+			const computed = {
+				...source.status,
+				systemStatus,
+				message: "Computed manager status",
+				failedFiles: [
+					{
+						path: "failed.ts",
+						revision: "version",
+						activity: "embed" as const,
+						reason: "unavailable",
+						classification: "server" as const,
+						attempt: 3,
+						state: "exhausted" as const,
+					},
+				],
+			}
+			source.getCurrentStatus.mockReturnValue(computed)
+			try {
+				manager.init()
+				expect(publish).toHaveBeenCalledExactlyOnceWith(computed)
+				source.status.systemStatus = "Indexing"
+				source.emit()
+				expect(publish).toHaveBeenLastCalledWith(computed)
+				expect(publish).toHaveBeenCalledTimes(2)
+			} finally {
+				manager.dispose()
+			}
+		},
+	)
+
 	it("publishes initial and full updated status without resubscribing in the same workspace", () => {
 		const source = makeSource("/first")
 		const publish = vi.fn()
@@ -177,6 +217,7 @@ describe("CodeIndexStatusManager", () => {
 		manager.init()
 		expect(publish).toHaveBeenCalledExactlyOnceWith(source.status)
 		source.status.message = "Updated"
+		source.status.providerWaits = [{ service: "embedding", resumeAt: 123_000, waitingFiles: ["waiting.ts"] }]
 		source.emit()
 		expect(publish).toHaveBeenLastCalledWith(source.status)
 		expect(publish).toHaveBeenCalledTimes(2)

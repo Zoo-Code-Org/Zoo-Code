@@ -107,52 +107,29 @@ describe("CodeIndexScanExecutor", () => {
 		},
 	)
 
-	it.each([
-		{ found: 0, indexed: 0, error: false, message: undefined },
-		{ found: 3, indexed: 0, error: false, message: "embeddings:orchestrator.indexingFailedNoBlocks" },
-		{ found: 3, indexed: 0, error: true, message: "Indexing failed: batch failure" },
-		{ found: 0, indexed: 0, error: true, message: "Indexing failed completely: batch failure" },
-		{ found: 10, indexed: 9, error: true, message: undefined },
-		{
-			found: 10,
-			indexed: 8,
-			error: true,
-			message: "Indexing partially failed: Only 8 of 10 blocks were indexed. batch failure",
-		},
-		{ found: 10, indexed: 8, error: false, message: undefined },
-	])(
-		"preserves full-scan policy for $indexed/$found blocks, error=$error",
-		async ({ found, indexed, error, message }) => {
+	const scanCases = (["runFullScan", "runIncrementalScan"] as const).flatMap((method) =>
+		[
+			{ found: 0, indexed: 0, errors: 0, partial: false },
+			{ found: 0, indexed: 0, errors: 1, partial: true },
+			{ found: 3, indexed: 3, errors: 0, partial: false },
+			{ found: 3, indexed: 0, errors: 3, partial: true },
+			{ found: 10, indexed: 1, errors: 9, partial: true },
+			{ found: 10, indexed: 8, errors: 0, partial: true },
+		].map((scanCase) => ({ method, ...scanCase })),
+	)
+
+	it.each(scanCases)(
+		"$method completes with a partial index for $indexed/$found blocks and $errors file failures",
+		async ({ method, found, indexed, errors, partial }) => {
 			const { executor, scanner } = setup()
 			scanner.scanDirectory.mockImplementation(async (_path, onError, onIndexed, onParsed) => {
 				onParsed?.(found)
 				onIndexed?.(indexed)
-				if (error) onError?.(new Error("batch failure"))
+				for (let iter = 0; iter < errors; iter++) onError?.(new Error("file failure"))
 				return { stats: { processed: 1, skipped: 0 }, totalBlockCount: found }
 			})
-			const result = executor.runFullScan(new AbortController().signal)
-			if (message) await expect(result).rejects.toThrow(message)
-			else await expect(result).resolves.toBe(true)
+			await expect(executor[method](new AbortController().signal)).resolves.toBe(true)
+			expect(executor.partial).toBe(partial)
 		},
 	)
-
-	it.each([0, 2])("rejects incremental batch errors with %s indexed blocks", async (indexed) => {
-		const { executor, scanner } = setup()
-		const failures = [new Error("embedding failure"), new Error("upsert failure"), new Error("embedding failure")]
-		scanner.scanDirectory.mockImplementation(async (_path, onError, onIndexed, onParsed) => {
-			onParsed?.(3)
-			onIndexed?.(indexed)
-			for (const failure of failures) onError?.(failure)
-			return { stats: { processed: 1, skipped: 0 }, totalBlockCount: 3 }
-		})
-		const result = executor.runIncrementalScan(new AbortController().signal)
-		await expect(result).rejects.toBeInstanceOf(AggregateError)
-		await expect(result).rejects.toMatchObject({
-			errors: failures,
-			message: "Incremental scan failed with 3 errors:\nembedding failure\nupsert failure",
-		})
-		await result.catch((error: AggregateError) => {
-			for (const [index, failure] of failures.entries()) expect(error.errors[index]).toBe(failure)
-		})
-	})
 })

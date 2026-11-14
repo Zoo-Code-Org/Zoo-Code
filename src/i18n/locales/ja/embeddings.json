@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "検索プロバイダーのレート制限に達しました。プロバイダーの待機時間が終了すると、インデックス作成が自動的に再開されます。",
 	"authenticationFailed": "埋め込みの作成に失敗しました：認証に失敗しました。APIキーを確認してください。",
 	"failedWithStatus": "{{attempts}}回試行しましたが、埋め込みの作成に失敗しました：HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "{{attempts}}回試行しましたが、埋め込みの作成に失敗しました：{{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "サービスを作成できません: コードインデックスが正しく設定されていません"
 	},
 	"orchestrator": {
+		"providerWaiting": "{{service}} を待機中です。インデックス作成は自動的に再開されます",
+		"providerWaitingUntil": "{{service}} を待機中です。インデックス作成は {{time}} に自動的に再開されます",
+		"indexingFilesFailed": "ファイルのエラーが残っています。自動再試行の予定はありません。部分的なインデックスを利用できます。",
+		"indexingStopping": "インデックス作成を停止中...",
 		"indexingFailedNoBlocks": "インデックス作成に失敗しました：コードブロックが正常にインデックス化されませんでした。これは通常、エンベッダーの設定問題を示しています。",
 		"fileWatcherStarted": "ファイルウォッチャーが開始されました。",
 		"fileWatcherStopped": "ファイルウォッチャーが停止されました。",
@@ -64,7 +69,8 @@
 		"unknownError": "不明なエラー",
 		"indexingRequiresWorkspace": "インデックス作成には、開かれたワークスペースフォルダーが必要です",
 		"indexingStopped": "ユーザーによりインデックス作成が停止されました。",
-		"indexingStoppedPartial": "インデックス作成が停止されました。部分的なインデックスデータは保持されています。"
+		"indexingStoppedPartial": "インデックス作成が停止されました。部分的なインデックスデータは保持されています。",
+		"cacheReadFailed": "コードインデックスのキャッシュを読み取れませんでした。既存のインデックスデータは保持されています。再試行するには、インデックス作成をもう一度開始してください。"
 	},
 	"semble": {
 		"downloadingBinary": "sembleバイナリをダウンロード中...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "sembleのダウンロードに失敗しました: {{errorMessage}}",
 		"checkFailed": "Sembleの確認に失敗しました: {{errorMessage}}",
 		"providerReset": "Sembleプロバイダーをリセットしました。次回の再構築までディスクキャッシュは残ります。"
-	}
+	},
+	"quotaExceeded": "埋め込みプロバイダーのクォータまたは請求上限に達しました。プランまたは請求情報を確認してから、インデックス作成をもう一度開始してください。"
 }

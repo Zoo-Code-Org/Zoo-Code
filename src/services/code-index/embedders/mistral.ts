@@ -18,6 +18,10 @@ export class MistralEmbedder implements IEmbedder {
 	private static readonly DEFAULT_MODEL = "codestral-embed-2505"
 	private readonly modelId: string
 
+	get rateLimitScope(): string {
+		return this.openAICompatibleEmbedder.rateLimitScope
+	}
+
 	/**
 	 * Creates a new Mistral embedder
 	 * @param apiKey The Mistral API key for authentication

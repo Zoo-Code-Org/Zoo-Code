@@ -166,6 +166,10 @@
 		"description": "プロンプトの強化、コードの説明、問題の修正などの迅速なアクションに使用されるサポートプロンプトを設定します。これらのプロンプトは、Zooが一般的な開発タスクでより良いサポートを提供するのに役立ちます。"
 	},
 	"codeIndex": {
+		"providerWaiting": "{{service}} を待機中です。インデックス作成は自動的に再開されます",
+		"providerWaitingUntil": "{{service}} を待機中です。インデックス作成は {{time}} に自動的に再開されます",
+		"providerPaused": "{{service}} を待機中です",
+		"providerPausedUntil": "{{time}} まで {{service}} を待機します",
 		"title": "コードベースのインデックス作成",
 		"enableLabel": "コードベースのインデックス作成を有効化",
 		"enableDescription": "コードのインデックス作成を有効にして、検索とコンテキストの理解を向上させます",
@@ -210,6 +214,21 @@
 		},
 		"description": "プロジェクトのセマンティック検索を有効にするためのコードベースインデックス設定を構成します。<0>詳細はこちら</0>",
 		"statusTitle": "ステータス",
+		"indexingFilesRetrying": "インデックス作成に失敗したファイル数：{{count}}。{{path}} を再試行中：{{reason}}",
+		"indexingFilesFailed": "インデックス作成に失敗したファイル数：{{count}}。{{path}} の自動再試行は終了しました：{{reason}}",
+		"failedFileDetails": "失敗したファイルの詳細",
+		"failedFileReason": "理由",
+		"failedFileStates": {
+			"retrying": "自動再試行待ち",
+			"exhausted": "自動再試行終了"
+		},
+		"failedFileActivities": {
+			"read": "ファイルの読み込み",
+			"parse": "ファイルの解析",
+			"embed": "埋め込みの作成",
+			"upsert": "インデックス化したブロックの保存",
+			"delete": "インデックス化したブロックの削除"
+		},
 		"embedderProviderLabel": "エンベッダープロバイダー",
 		"modelPlaceholder": "モデル名を入力",
 		"selectModel": "モデルを選択",
@@ -226,6 +245,7 @@
 		"saving": "保存中...",
 		"saveSettings": "保存",
 		"indexingStatuses": {
+			"stopping": "停止中",
 			"standby": "スタンバイ",
 			"indexing": "インデックス中",
 			"indexed": "インデックス済み",

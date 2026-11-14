@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Le fournisseur de recherche a limité la fréquence des requêtes. L’indexation reprend automatiquement après le délai d’attente du fournisseur.",
 	"authenticationFailed": "Échec de la création des embeddings : Échec de l'authentification. Veuillez vérifier votre clé API.",
 	"failedWithStatus": "Échec de la création des embeddings après {{attempts}} tentatives : HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Échec de la création des embeddings après {{attempts}} tentatives : {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Impossible de créer les services : L'indexation du code n'est pas correctement configurée"
 	},
 	"orchestrator": {
+		"providerWaiting": "En attente de {{service}} ; l’indexation reprend automatiquement",
+		"providerWaitingUntil": "En attente de {{service}} ; l’indexation reprend automatiquement à {{time}}",
+		"indexingFilesFailed": "Des fichiers restent en échec. Aucune nouvelle tentative automatique en attente. Un index partiel est disponible.",
+		"indexingStopping": "Arrêt de l'indexation en cours...",
 		"indexingFailedNoBlocks": "Échec de l'indexation : Aucun bloc de code n'a été indexé avec succès. Cela indique généralement un problème de configuration de l'embedder.",
 		"fileWatcherStarted": "Surveillant de fichiers démarré.",
 		"fileWatcherStopped": "Surveillant de fichiers arrêté.",
@@ -64,7 +69,8 @@
 		"unknownError": "Erreur inconnue",
 		"indexingRequiresWorkspace": "L'indexation nécessite l'ouverture d'un dossier workspace",
 		"indexingStopped": "Indexation arrêtée par l'utilisateur.",
-		"indexingStoppedPartial": "Indexation arrêtée. Données d'index partielles conservées."
+		"indexingStoppedPartial": "Indexation arrêtée. Données d'index partielles conservées.",
+		"cacheReadFailed": "Impossible de lire le cache de l'index du code. Les données de l'index existant ont été conservées. Relance l'indexation pour réessayer."
 	},
 	"semble": {
 		"downloadingBinary": "Téléchargement du binaire semble...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Échec du téléchargement de semble : {{errorMessage}}",
 		"checkFailed": "Vérification de semble échouée : {{errorMessage}}",
 		"providerReset": "Fournisseur Semble réinitialisé. Le cache sur disque reste jusqu'à la prochaine reconstruction."
-	}
+	},
+	"quotaExceeded": "Le quota ou la limite de facturation du fournisseur d'embeddings a été atteint. Vérifie ton forfait ou ta facturation, puis relance l'indexation."
 }

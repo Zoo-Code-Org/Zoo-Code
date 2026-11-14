@@ -3,6 +3,7 @@ import { makeExtensionContext } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
+import { CacheManager } from "../cache-manager"
 import { CodeIndexOrchestrator } from "../orchestrator"
 import { CodeIndexSearchService } from "../search-service"
 import type { MockedClass } from "vitest"
@@ -241,13 +242,18 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				value: { startIndexing, stopIndexing: vi.fn() },
 				configurable: true,
 			})
+			// The background start re-checks enablement, which a bare manager reports as off.
+			Object.defineProperty(manager, "isFeatureEnabled", { get: () => true, configurable: true })
+			Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => true, configurable: true })
 
 			manager["startIndexingInBackground"]()
-			await Promise.resolve()
 
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[CodeIndexManager] Background indexing failed:",
-				indexingError,
+			// The start-promise join (R13) adds microtask hops before the catch runs.
+			await vi.waitFor(() =>
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[CodeIndexManager] Background indexing failed:",
+					indexingError,
+				),
 			)
 			consoleErrorSpy.mockRestore()
 		})
@@ -353,7 +359,10 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			;(manager as any)._cacheManager = mockCacheManager
 
 			// Simulate an initialized manager by setting the required properties
-			;(manager as any)._orchestrator = { stopWatcher: vi.fn(), stopIndexing: vi.fn() }
+			;(manager as any)._orchestrator = {
+				stopWatcher: vi.fn().mockResolvedValue(undefined),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
+			}
 			;(manager as any)._searchService = {}
 
 			// Verify manager is considered initialized
@@ -547,7 +556,11 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			})
 
 			// Mock orchestrator and search service to simulate initialized state
-			;(manager as any)._orchestrator = { stopWatcher: vi.fn(), stopIndexing: vi.fn(), state: "Error" }
+			;(manager as any)._orchestrator = {
+				stopWatcher: vi.fn().mockResolvedValue(undefined),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
+				state: "Error",
+			}
 			;(manager as any)._searchService = {}
 			;(manager as any)._serviceFactory = {}
 		})
@@ -633,6 +646,9 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				}),
 			}
 
+			// The vscode mock has no fs; a missing cache is the only empty-cache case under D8.
+			vi.spyOn(CacheManager.prototype, "initialize").mockResolvedValue(undefined)
+
 			// Enable workspace indexing before re-initialization
 			await manager.setWorkspaceEnabled(true)
 
@@ -679,7 +695,10 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			// Setup manager with service instances
 			;(manager as any)._configManager = mockConfigManager
 			;(manager as any)._serviceFactory = {}
-			;(manager as any)._orchestrator = { stopWatcher: vi.fn(), stopIndexing: vi.fn() }
+			;(manager as any)._orchestrator = {
+				stopWatcher: vi.fn().mockResolvedValue(undefined),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
+			}
 			;(manager as any)._searchService = {}
 
 			// Spy on console.error
@@ -810,15 +829,15 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 	})
 
 	describe("stopIndexing", () => {
-		it("should delegate to orchestrator.stopIndexing()", () => {
+		it("should delegate to orchestrator.stopIndexing()", async () => {
 			const mockOrchestrator = {
-				stopIndexing: vi.fn(),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
 				stopWatcher: vi.fn(),
 				state: "Indexing",
 			}
 			;(manager as any)._orchestrator = mockOrchestrator
 
-			manager.stopIndexing()
+			await manager.stopIndexing()
 
 			expect(mockOrchestrator.stopIndexing).toHaveBeenCalled()
 		})

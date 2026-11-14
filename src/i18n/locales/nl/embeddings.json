@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "De zoekprovider heeft het aantal aanvragen beperkt. De indexering wordt automatisch hervat na de wachttijd van de provider.",
 	"authenticationFailed": "Insluitingen maken mislukt: Authenticatie mislukt. Controleer je API-sleutel.",
 	"failedWithStatus": "Insluitingen maken mislukt na {{attempts}} pogingen: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Insluitingen maken mislukt na {{attempts}} pogingen: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Kan geen services maken: Code-indexering is niet correct geconfigureerd"
 	},
 	"orchestrator": {
+		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
+		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
+		"indexingFilesFailed": "Er zijn nog bestandsfouten. Geen automatische nieuwe pogingen in afwachting. Een gedeeltelijke index is beschikbaar.",
+		"indexingStopping": "Indexering wordt gestopt...",
 		"indexingFailedNoBlocks": "Indexering mislukt: Geen codeblokken werden succesvol geïndexeerd. Dit duidt meestal op een embedder configuratieprobleem.",
 		"fileWatcherStarted": "Bestandsmonitor gestart.",
 		"fileWatcherStopped": "Bestandsmonitor gestopt.",
@@ -64,7 +69,8 @@
 		"unknownError": "Onbekende fout",
 		"indexingRequiresWorkspace": "Indexering vereist een geopende workspace map",
 		"indexingStopped": "Indexering gestopt door gebruiker.",
-		"indexingStoppedPartial": "Indexering gestopt. Gedeeltelijke indexgegevens bewaard."
+		"indexingStoppedPartial": "Indexering gestopt. Gedeeltelijke indexgegevens bewaard.",
+		"cacheReadFailed": "De cache van de code-index kon niet worden gelezen. Bestaande indexgegevens zijn bewaard. Start de indexering opnieuw om het nog eens te proberen."
 	},
 	"semble": {
 		"downloadingBinary": "Semble-binary downloaden...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Downloaden van semble mislukt: {{errorMessage}}",
 		"checkFailed": "Semble-controle mislukt: {{errorMessage}}",
 		"providerReset": "Semble-provider gereset. Schijfcache blijft behouden tot de volgende heropbouw."
-	}
+	},
+	"quotaExceeded": "Het quotum of de factureringslimiet van de insluitingsprovider is bereikt. Controleer je abonnement of facturering en start de indexering opnieuw."
 }

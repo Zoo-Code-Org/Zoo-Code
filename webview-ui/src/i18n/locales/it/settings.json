@@ -168,6 +168,10 @@
 		"description": "Configura i prompt di supporto utilizzati per azioni rapide come il miglioramento dei prompt, la spiegazione del codice e la risoluzione dei problemi. Questi prompt aiutano Zoo a fornire una migliore assistenza per le attività di sviluppo comuni."
 	},
 	"codeIndex": {
+		"providerWaiting": "In attesa di {{service}}; l’indicizzazione riprende automaticamente",
+		"providerWaitingUntil": "In attesa di {{service}}; l’indicizzazione riprende automaticamente alle {{time}}",
+		"providerPaused": "In attesa di {{service}}",
+		"providerPausedUntil": "In attesa di {{service}} fino alle {{time}}",
 		"title": "Indicizzazione del codice",
 		"enableLabel": "Abilita indicizzazione del codice",
 		"enableDescription": "Abilita l'indicizzazione del codice per una ricerca e una comprensione del contesto migliorate",
@@ -212,6 +216,21 @@
 		},
 		"description": "Configura le impostazioni di indicizzazione del codebase per abilitare la ricerca semantica del tuo progetto. <0>Scopri di più</0>",
 		"statusTitle": "Stato",
+		"indexingFilesRetrying": "File con errori di indicizzazione: {{count}}. Nuovo tentativo per {{path}}: {{reason}}",
+		"indexingFilesFailed": "File con errori di indicizzazione: {{count}}. Nuovo tentativo automatico terminato per {{path}}: {{reason}}",
+		"failedFileDetails": "Dettagli dei file con errori",
+		"failedFileReason": "Motivo",
+		"failedFileStates": {
+			"retrying": "Nuovo tentativo automatico in attesa",
+			"exhausted": "Nuovo tentativo automatico terminato"
+		},
+		"failedFileActivities": {
+			"read": "Leggere il file",
+			"parse": "Analizzare il file",
+			"embed": "Creare gli embedding",
+			"upsert": "Salvare i blocchi indicizzati",
+			"delete": "Rimuovere i blocchi indicizzati"
+		},
 		"embedderProviderLabel": "Provider Embedder",
 		"modelPlaceholder": "Inserisci il nome del modello",
 		"selectModel": "Seleziona un modello",
@@ -228,6 +247,7 @@
 		"saving": "Salvataggio...",
 		"saveSettings": "Salva",
 		"indexingStatuses": {
+			"stopping": "Arresto in corso",
 			"standby": "In attesa",
 			"indexing": "Indicizzazione",
 			"indexed": "Indicizzato",

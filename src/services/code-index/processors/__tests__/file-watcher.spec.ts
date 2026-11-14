@@ -1,9 +1,12 @@
 // npx vitest services/code-index/processors/__tests__/file-watcher.spec.ts
 
+import nodePath from "path"
 import * as vscode from "vscode"
 
 import { FileWatcher } from "../file-watcher"
 import { FilePreparation } from "../file-preparation"
+import { FileFailureRegistry } from "../../file-failure-registry"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
@@ -34,6 +37,7 @@ vi.mock("../parser", () => ({
 				content: "test content",
 				start_line: 1,
 				end_line: 1,
+				segmentHash: `segment-${filePath}`,
 			},
 		]),
 	},
@@ -154,10 +158,12 @@ describe("FileWatcher", () => {
 		}
 
 		mockEmbedder = {
+			rateLimitScope: "openai:1",
 			createEmbeddings: vi.fn().mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] }),
 		}
 
 		mockVectorStore = {
+			rateLimitScope: "qdrant:1",
 			upsertPoints: vi.fn().mockResolvedValue(undefined),
 			deletePointsByFilePath: vi.fn().mockResolvedValue(undefined),
 			deletePointsByMultipleFilePaths: vi.fn().mockResolvedValue(undefined),
@@ -174,6 +180,10 @@ describe("FileWatcher", () => {
 			mockEmbedder,
 			mockVectorStore,
 			mockIgnoreInstance,
+			undefined,
+			undefined,
+			new FileFailureRegistry(),
+			new ProviderPacerRegistry(),
 		)
 	})
 
@@ -196,7 +206,8 @@ describe("FileWatcher", () => {
 			expect(prepare).toHaveBeenNthCalledWith(1, path)
 			expect(result).toBe(await prepare.mock.results[0].value)
 			expect(result.status).toBe("processed_for_batching")
-			expect(result.pointsToUpsert).toHaveLength(1)
+			expect(result.blocks).toHaveLength(1)
+			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
 			expect(vscode.workspace.fs.stat).toHaveBeenCalledWith(vscode.Uri.file(path))
 			expect(vscode.workspace.fs.readFile).toHaveBeenCalledWith(vscode.Uri.file(path))
 			const secondPath = "/mock/workspace/src/second.ts"
@@ -292,13 +303,13 @@ describe("FileWatcher", () => {
 			expect(skippedPaths).toContain("/mock/workspace/dist/bundle.js")
 		})
 
-		it("should batch delete events after the debounce window", async () => {
+		it("should remove deleted files after the debounce window", async () => {
 			// Initialize the file watcher
 			await fileWatcher.initialize()
 
 			const deletedFiles: string[] = []
-			mockVectorStore.deletePointsByMultipleFilePaths.mockImplementation(async (filePaths: string[]) => {
-				deletedFiles.push(...filePaths)
+			mockVectorStore.deletePointsByFilePath.mockImplementation(async (filePath: string) => {
+				deletedFiles.push(filePath)
 			})
 			const batchPromise = waitForNextBatch()
 
@@ -358,12 +369,236 @@ describe("FileWatcher", () => {
 		})
 	})
 
+	describe("failures and removals", () => {
+		const path = "/mock/workspace/src/file.ts"
+
+		function watcherWithRegistry() {
+			const failures = new FileFailureRegistry()
+			fileWatcher.dispose()
+			fileWatcher = new FileWatcher(
+				"/mock/workspace",
+				mockContext,
+				mockCacheManager,
+				mockEmbedder,
+				mockVectorStore,
+				mockIgnoreInstance,
+				undefined,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			return failures
+		}
+
+		async function runChange() {
+			await fileWatcher.initialize()
+			const batchPromise = waitForNextBatch()
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			return batchPromise
+		}
+
+		it("CI-FW-01: a missing result routes to removeFile", async () => {
+			const failures = watcherWithRegistry()
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({ path, status: "missing" })
+			const summary = await runChange()
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledWith(path)
+			expect(mockCacheManager.deleteHash).toHaveBeenCalledWith(path)
+			expect(summary.processedFiles).toEqual([{ path, status: "success" }])
+			expect(failures.list()).toEqual([])
+		})
+
+		it.each(["read", "parse"] as const)(
+			"CI-FW-02: a local_error is recorded with the result's activity %s",
+			async (activity) => {
+				const failures = watcherWithRegistry()
+				vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+					path,
+					status: "local_error",
+					activity,
+					error: new Error("bad"),
+				})
+				await runChange()
+				expect(failures.list()).toEqual([
+					expect.objectContaining({ path: nodePath.normalize("src/file.ts"), activity, reason: "bad" }),
+				])
+				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			},
+		)
+
+		it("CI-FW-02: prepared blocks are passed to the writer, which embeds and stores the hash", async () => {
+			watcherWithRegistry()
+			const blocks = [
+				{
+					file_path: path,
+					identifier: null,
+					type: "function",
+					start_line: 1,
+					end_line: 2,
+					content: "code",
+					fileHash: "h",
+					segmentHash: "s",
+				},
+			]
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+				path,
+				status: "processed_for_batching",
+				newHash: "h",
+				blocks,
+			})
+			const summary = await runChange()
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledWith(["code"])
+			expect(mockVectorStore.upsertPoints).toHaveBeenCalledTimes(1)
+			expect(mockCacheManager.updateHash).toHaveBeenCalledWith(path, "h")
+			expect(summary.processedFiles).toEqual([{ path, status: "success" }])
+		})
+
+		it("runs a later delete batch only after an earlier change batch finishes", async () => {
+			watcherWithRegistry()
+			await fileWatcher.initialize()
+			const order: string[] = []
+			let finishUpsert!: () => void
+			mockVectorStore.upsertPoints.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						finishUpsert = () => {
+							order.push("upsert")
+							resolve()
+						}
+					}),
+			)
+			mockVectorStore.deletePointsByFilePath.mockImplementation(async () => void order.push("delete"))
+			mockCacheManager.getHash.mockReturnValue(undefined)
+			mockCacheManager.updateHash.mockImplementation(() => void order.push("hash"))
+			mockCacheManager.deleteHash.mockImplementation(() => void order.push("unhash"))
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			await mockOnDidDelete({ fsPath: path })
+			await flushBatch()
+			expect(order).toEqual([])
+			finishUpsert()
+			await vi.advanceTimersByTimeAsync(0)
+			// The delete wins: its points and hash removal come after the change's writes.
+			expect(order).toEqual(["upsert", "hash", "delete", "unhash"])
+		})
+
+		it("clears a stale read failure when the content is unchanged", async () => {
+			const failures = watcherWithRegistry()
+			const relativePath = nodePath.normalize("src/file.ts")
+			failures.renew(relativePath, "unread")
+			failures.record(relativePath, "unread", "read", "busy", 1, "exhausted")
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+				path,
+				status: "skipped",
+				reason: "File has not changed",
+			})
+			await runChange()
+			expect(failures.list()).toEqual([])
+			expect(mockVectorStore.deletePointsByFilePath).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			{ reason: "File is too large", hash: "h", failed: false, removed: true },
+			{ reason: "File is ignored by .rooignore or .gitignore", hash: "h", failed: false, removed: true },
+			{ reason: "File is too large", hash: undefined, failed: true, removed: true },
+			{ reason: "File is too large", hash: undefined, failed: false, removed: false },
+		])(
+			"a change skipped as $reason (hash $hash, failure entry $failed) removes points: $removed",
+			async ({ reason, hash, failed, removed }) => {
+				const failures = watcherWithRegistry()
+				const relativePath = nodePath.normalize("src/file.ts")
+				if (failed) {
+					failures.renew(relativePath, "h0")
+					failures.record(relativePath, "h0", "upsert", "down", 3, "exhausted")
+				}
+				mockCacheManager.getHash.mockReturnValue(hash)
+				vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+					path,
+					status: "skipped",
+					reason,
+				})
+				const summary = await runChange()
+				if (removed) {
+					expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledExactlyOnceWith(path)
+					expect(mockCacheManager.deleteHash).toHaveBeenCalledExactlyOnceWith(path)
+					expect(summary.processedFiles).toEqual([{ path, status: "success" }])
+				} else {
+					expect(mockVectorStore.deletePointsByFilePath).not.toHaveBeenCalled()
+					expect(mockCacheManager.deleteHash).not.toHaveBeenCalled()
+					expect(summary.processedFiles).toEqual([{ path, status: "skipped", reason }])
+				}
+				expect(failures.list()).toEqual([])
+				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			},
+		)
+
+		it("writes nothing after the session signal aborts", async () => {
+			watcherWithRegistry()
+			const controller = new AbortController()
+			await fileWatcher.initialize(controller.signal)
+			controller.abort()
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			expect(mockCacheManager.updateHash).not.toHaveBeenCalled()
+		})
+
+		it("fires no batch-finished or progress events for a batch whose session was stopped", async () => {
+			watcherWithRegistry()
+			const controller = new AbortController()
+			await fileWatcher.initialize(controller.signal)
+			await mockOnDidChange({ fsPath: path })
+			const finished = vi.fn()
+			const progress = vi.fn()
+			fileWatcher.onDidFinishBatchProcessing(finished)
+			fileWatcher.onBatchProgressUpdate(progress)
+			controller.abort()
+			await flushBatch()
+			expect(finished).not.toHaveBeenCalled()
+			expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 1 }))
+		})
+
+		it("fires no processed-file progress when the session stops while a chunk is in flight", async () => {
+			watcherWithRegistry()
+			const controller = new AbortController()
+			let releasePrepare: () => void = () => {}
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						releasePrepare = () =>
+							resolve({ path, status: "local_error", activity: "read", error: new Error("x") })
+					}),
+			)
+			await fileWatcher.initialize(controller.signal)
+			const progress = vi.fn()
+			fileWatcher.onBatchProgressUpdate(progress)
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			expect(progress).toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 0, totalInBatch: 1 }))
+			controller.abort()
+			releasePrepare()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 1 }))
+		})
+	})
+
 	describe("dispose", () => {
 		it("should dispose of the watcher when disposed", async () => {
 			await fileWatcher.initialize()
 			fileWatcher.dispose()
 
 			expect(mockWatcher.dispose).toHaveBeenCalled()
+		})
+
+		it("keeps batch events working after dispose and re-initialize (restart)", async () => {
+			await fileWatcher.initialize()
+			fileWatcher.dispose()
+			await fileWatcher.initialize()
+			const batchPromise = waitForNextBatch()
+			await mockOnDidChange({ fsPath: "/mock/workspace/src/file.ts" })
+			await flushBatch()
+			const summary = await batchPromise
+			expect(summary.processedFiles).toEqual([{ path: "/mock/workspace/src/file.ts", status: "success" }])
 		})
 	})
 })

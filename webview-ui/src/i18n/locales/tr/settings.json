@@ -167,6 +167,10 @@
 		"description": "Prompt geliştirme, kod açıklama ve sorun çözme gibi hızlı eylemler için kullanılan destek promptlarını yapılandırın. Bu promptlar, Zoo'nun yaygın geliştirme görevleri için daha iyi destek sağlamasına yardımcı olur."
 	},
 	"codeIndex": {
+		"providerWaiting": "{{service}} bekleniyor; dizinleme otomatik olarak devam eder",
+		"providerWaitingUntil": "{{service}} bekleniyor; dizinleme {{time}} zamanında otomatik olarak devam eder",
+		"providerPaused": "{{service}} bekleniyor",
+		"providerPausedUntil": "{{time}} zamanına kadar {{service}} bekleniyor",
 		"title": "Kod Tabanı İndeksleme",
 		"enableLabel": "Kod Tabanı İndekslemeyi Etkinleştir",
 		"enableDescription": "Geliştirilmiş arama ve bağlam anlayışı için kod indekslemeyi etkinleştirin",
@@ -211,6 +215,21 @@
 		},
 		"description": "Projenizin anlamsal aramasını etkinleştirmek için kod tabanı indeksleme ayarlarını yapılandırın. <0>Daha fazla bilgi</0>",
 		"statusTitle": "Durum",
+		"indexingFilesRetrying": "İndeksleme hatası olan dosyalar: {{count}}. {{path}} yeniden deneniyor: {{reason}}",
+		"indexingFilesFailed": "İndeksleme hatası olan dosyalar: {{count}}. {{path}} için otomatik yeniden deneme sona erdi: {{reason}}",
+		"failedFileDetails": "Başarısız dosya ayrıntıları",
+		"failedFileReason": "Neden",
+		"failedFileStates": {
+			"retrying": "Otomatik yeniden deneme bekliyor",
+			"exhausted": "Otomatik yeniden deneme sona erdi"
+		},
+		"failedFileActivities": {
+			"read": "Dosya okuma",
+			"parse": "Dosya ayrıştırma",
+			"embed": "Gömme oluşturma",
+			"upsert": "İndekslenen blokları kaydetme",
+			"delete": "İndekslenen blokları kaldırma"
+		},
 		"embedderProviderLabel": "Gömücü Sağlayıcı",
 		"modelPlaceholder": "Model adını girin",
 		"selectModel": "Bir model seçin",
@@ -227,6 +246,7 @@
 		"saving": "Kaydediliyor...",
 		"saveSettings": "Kaydet",
 		"indexingStatuses": {
+			"stopping": "Durduruluyor",
 			"standby": "Bekleme",
 			"indexing": "İndeksleniyor",
 			"indexed": "İndekslendi",

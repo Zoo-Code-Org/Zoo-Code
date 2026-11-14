@@ -166,6 +166,10 @@
 		"description": "Cấu hình các lời nhắc hỗ trợ được sử dụng cho các hành động nhanh như cải thiện lời nhắc, giải thích mã và khắc phục sự cố. Những lời nhắc này giúp Zoo cung cấp hỗ trợ tốt hơn cho các tác vụ phát triển phổ biến."
 	},
 	"codeIndex": {
+		"providerWaiting": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục",
+		"providerWaitingUntil": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục lúc {{time}}",
+		"providerPaused": "Đang chờ {{service}}",
+		"providerPausedUntil": "Đang chờ {{service}} đến {{time}}",
 		"title": "Lập chỉ mục mã nguồn",
 		"enableLabel": "Bật lập chỉ mục mã nguồn",
 		"enableDescription": "Bật lập chỉ mục mã để cải thiện tìm kiếm và sự hiểu biết về ngữ cảnh",
@@ -210,6 +214,21 @@
 		},
 		"description": "Cấu hình cài đặt lập chỉ mục mã nguồn để kích hoạt tìm kiếm ngữ nghĩa cho dự án của bạn. <0>Tìm hiểu thêm</0>",
 		"statusTitle": "Trạng thái",
+		"indexingFilesRetrying": "Số tệp bị lỗi lập chỉ mục: {{count}}. Đang thử lại {{path}}: {{reason}}",
+		"indexingFilesFailed": "Số tệp bị lỗi lập chỉ mục: {{count}}. Đã kết thúc thử lại tự động cho {{path}}: {{reason}}",
+		"failedFileDetails": "Chi tiết tệp bị lỗi",
+		"failedFileReason": "Lý do",
+		"failedFileStates": {
+			"retrying": "Đang chờ thử lại tự động",
+			"exhausted": "Đã kết thúc thử lại tự động"
+		},
+		"failedFileActivities": {
+			"read": "Đọc tệp",
+			"parse": "Phân tích tệp",
+			"embed": "Tạo embedding",
+			"upsert": "Lưu các khối đã lập chỉ mục",
+			"delete": "Xóa các khối đã lập chỉ mục"
+		},
 		"embedderProviderLabel": "Nhà cung cấp Embedder",
 		"modelPlaceholder": "Nhập tên mô hình",
 		"selectModel": "Chọn một mô hình",
@@ -226,6 +245,7 @@
 		"saving": "Đang lưu...",
 		"saveSettings": "Lưu",
 		"indexingStatuses": {
+			"stopping": "Đang dừng",
 			"standby": "Chờ",
 			"indexing": "Đang lập chỉ mục",
 			"indexed": "Đã lập chỉ mục",

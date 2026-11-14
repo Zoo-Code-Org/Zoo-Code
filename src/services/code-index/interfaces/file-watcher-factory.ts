@@ -2,6 +2,8 @@ import type * as vscode from "vscode"
 import type { Ignore } from "ignore"
 import type { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
 import type { CacheManager } from "../cache-manager"
+import type { FileFailureRegistry } from "../file-failure-registry"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 import type { IEmbedder, IFileWatcher, IVectorStore } from "./index"
 
 export interface FileWatcherFactoryOptions {
@@ -12,6 +14,8 @@ export interface FileWatcherFactoryOptions {
 	cacheManager: CacheManager
 	ignoreInstance: Ignore
 	rooIgnoreController?: RooIgnoreController
+	failureRegistry: FileFailureRegistry
+	pacers: ProviderPacerRegistry
 }
 
 export interface IFileWatcherFactory {

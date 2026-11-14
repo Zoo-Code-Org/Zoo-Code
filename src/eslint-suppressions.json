@@ -769,11 +769,6 @@
 			"count": 1
 		}
 	},
-	"core/tools/CodebaseSearchTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/tools/GenerateImageTool.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -1029,19 +1024,9 @@
 			"count": 84
 		}
 	},
-	"services/code-index/__tests__/orchestrator.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 23
-		}
-	},
 	"services/code-index/__tests__/service-factory.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 43
-		}
-	},
-	"services/code-index/embedders/__tests__/bedrock.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
 		}
 	},
 	"services/code-index/embedders/__tests__/gemini.spec.ts": {
@@ -1059,26 +1044,6 @@
 			"count": 1
 		}
 	},
-	"services/code-index/embedders/__tests__/openai-compatible-rate-limit.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 15
-		}
-	},
-	"services/code-index/embedders/__tests__/openai-compatible.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 28
-		}
-	},
-	"services/code-index/embedders/__tests__/openai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"services/code-index/embedders/__tests__/openrouter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
 	"services/code-index/embedders/__tests__/vercel-ai-gateway.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -1086,7 +1051,7 @@
 	},
 	"services/code-index/embedders/bedrock.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"services/code-index/embedders/ollama.ts": {
@@ -1099,14 +1064,9 @@
 			"count": 1
 		}
 	},
-	"services/code-index/embedders/openai.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"services/code-index/embedders/openrouter.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"services/code-index/interfaces/vector-store.ts": {
@@ -1126,22 +1086,12 @@
 	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 22
+			"count": 19
 		}
 	},
 	"services/code-index/processors/__tests__/scanner.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 26
-		}
-	},
-	"services/code-index/processors/file-watcher.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/processors/scanner.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
 		}
 	},
 	"services/code-index/semble/__tests__/provider.spec.ts": {
@@ -1181,12 +1131,12 @@
 	},
 	"services/code-index/vector-store/__tests__/qdrant-client.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 87
+			"count": 85
 		}
 	},
 	"services/code-index/vector-store/qdrant-client.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 3
 		}
 	},
 	"services/glob/__tests__/gitignore-integration.spec.ts": {

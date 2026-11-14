@@ -1,9 +1,9 @@
 import { createHash } from "crypto"
 import path from "path"
 import { FileType, Uri } from "vscode"
-import { v5 as uuidv5 } from "uuid"
-import type { CodeBlock, ICodeParser, IEmbedder } from "../../interfaces"
-import { MAX_FILE_SIZE_BYTES, QDRANT_CODE_BLOCK_NAMESPACE } from "../../constants"
+import type { CodeBlock, ICodeParser } from "../../interfaces"
+import { MAX_FILE_SIZE_BYTES } from "../../constants"
+import { ParserLoadError } from "../parser"
 import { FilePreparation } from "../file-preparation"
 import type { FilePreparationDependencies } from "../file-preparation-dependencies"
 
@@ -24,7 +24,6 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 
 	const filePath = "/workspace/src/file.ts"
 	const relativeFilePath = path[platform].join("src", "file.ts")
-	const normalizedFilePath = path[platform].resolve(filePath)
 	const content = "test content"
 	const hash = createHash("sha256").update(content).digest("hex")
 	const block: CodeBlock = {
@@ -57,11 +56,6 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			},
 			cacheManager: { getHash: vi.fn<FilePreparationDependencies["cacheManager"]["getHash"]>() },
 			parser: { parseFile: vi.fn<ICodeParser["parseFile"]>().mockResolvedValue([{ ...block }]) },
-			embedder: {
-				createEmbeddings: vi
-					.fn<IEmbedder["createEmbeddings"]>()
-					.mockResolvedValue({ embeddings: [[0.1, 0.2]] }),
-			},
 		} satisfies FilePreparationDependencies
 	}
 
@@ -81,7 +75,6 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			expect(dependencies.fileSystem.readFile).not.toHaveBeenCalled()
 			expect(dependencies.cacheManager.getHash).not.toHaveBeenCalled()
 			expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
-			expect(dependencies.embedder.createEmbeddings).not.toHaveBeenCalled()
 		},
 	)
 
@@ -104,7 +97,6 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		expect(dependencies.fileSystem.readFile).not.toHaveBeenCalled()
 		expect(dependencies.cacheManager.getHash).not.toHaveBeenCalled()
 		expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
-		expect(dependencies.embedder.createEmbeddings).not.toHaveBeenCalled()
 	})
 
 	it("skips oversized files without reading them", async () => {
@@ -123,10 +115,9 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		expect(dependencies.fileSystem.readFile).not.toHaveBeenCalled()
 		expect(dependencies.cacheManager.getHash).not.toHaveBeenCalled()
 		expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
-		expect(dependencies.embedder.createEmbeddings).not.toHaveBeenCalled()
 	})
 
-	it("skips unchanged content before parsing or embedding", async () => {
+	it("skips unchanged content before parsing", async () => {
 		const dependencies = setup()
 		dependencies.cacheManager.getHash.mockReturnValue(hash)
 		expect(await new FilePreparation(dependencies).prepareFile(filePath)).toEqual({
@@ -136,37 +127,28 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		})
 		expect(dependencies.cacheManager.getHash).toHaveBeenCalledWith(filePath)
 		expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
-		expect(dependencies.embedder.createEmbeddings).not.toHaveBeenCalled()
 	})
 
-	it("returns the hash and empty points when parsing produces no blocks", async () => {
+	it("returns the hash and no blocks when parsing produces none", async () => {
 		const dependencies = setup()
 		dependencies.parser.parseFile.mockResolvedValue([])
 		expect(await new FilePreparation(dependencies).prepareFile(filePath)).toEqual({
 			path: filePath,
 			status: "processed_for_batching",
 			newHash: hash,
-			pointsToUpsert: [],
+			blocks: [],
 		})
-		expect(dependencies.embedder.createEmbeddings).not.toHaveBeenCalled()
 	})
 
-	it("still parses and returns the hash without an embedder or gitignore", async () => {
+	it("still parses and returns the hash without gitignore", async () => {
 		const dependencies = setup()
 		expect(
-			await new FilePreparation({ ...dependencies, embedder: undefined, ignoreInstance: undefined }).prepareFile(
-				filePath,
-			),
-		).toEqual({
-			path: filePath,
-			status: "processed_for_batching",
-			newHash: hash,
-			pointsToUpsert: [],
-		})
+			(await new FilePreparation({ ...dependencies, ignoreInstance: undefined }).prepareFile(filePath)).status,
+		).toBe("processed_for_batching")
 		expect(dependencies.parser.parseFile).toHaveBeenCalledWith(filePath, { content, fileHash: hash })
 	})
 
-	it("preserves normalized paths, stable IDs and embedding order at the size limit", async () => {
+	it("CI-FP-03: returns parsed blocks and the hash at the size limit and never embeds", async () => {
 		const dependencies = setup()
 		dependencies.fileSystem.stat.mockResolvedValue({
 			type: FileType.File,
@@ -174,37 +156,27 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			mtime: 0,
 			size: MAX_FILE_SIZE_BYTES,
 		})
-		dependencies.parser.parseFile.mockResolvedValue([
-			{ ...block, file_path: "src/../src/file.ts" },
-			{ ...block, start_line: 8, end_line: 10, content: "second" },
-		])
-		dependencies.embedder.createEmbeddings.mockResolvedValue({
-			embeddings: [
-				[0.1, 0.2],
-				[0.3, 0.4],
-			],
-		})
-		expect(await new FilePreparation(dependencies).prepareFile(filePath)).toEqual({
-			path: filePath,
-			status: "processed_for_batching",
-			newHash: hash,
-			pointsToUpsert: [
-				{
-					id: uuidv5(`${normalizedFilePath}:2`, QDRANT_CODE_BLOCK_NAMESPACE),
-					vector: [0.1, 0.2],
-					payload: { filePath: relativeFilePath, codeChunk: content, startLine: 2, endLine: 5 },
-				},
-				{
-					id: uuidv5(`${normalizedFilePath}:8`, QDRANT_CODE_BLOCK_NAMESPACE),
-					vector: [0.3, 0.4],
-					payload: { filePath: relativeFilePath, codeChunk: "second", startLine: 8, endLine: 10 },
-				},
-			],
-		})
+		const blocks = [block, { ...block, start_line: 8, end_line: 10, content: "second" }]
+		dependencies.parser.parseFile.mockResolvedValue(blocks)
+		const result = await new FilePreparation(dependencies).prepareFile(filePath)
+		expect(result).toEqual({ path: filePath, status: "processed_for_batching", newHash: hash, blocks })
+		expect(Object.keys(dependencies)).not.toContain("embedder")
 		expect(dependencies.fileSystem.stat).toHaveBeenCalledWith(Uri.file(filePath))
 		expect(dependencies.fileSystem.readFile).toHaveBeenCalledWith(Uri.file(filePath))
-		expect(dependencies.parser.parseFile).toHaveBeenCalledWith(filePath, { content, fileHash: hash })
-		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledWith([content, "second"])
+	})
+
+	it.each(["stat", "read"] as const)("CI-FP-01: missing source from %s returns missing", async (stage) => {
+		for (const code of ["ENOENT", "FileNotFound"]) {
+			const dependencies = setup()
+			const missing = Object.assign(new Error("gone"), { code })
+			if (stage === "stat") dependencies.fileSystem.stat.mockRejectedValue(missing)
+			else dependencies.fileSystem.readFile.mockRejectedValue(missing)
+			expect(await new FilePreparation(dependencies).prepareFile(filePath)).toEqual({
+				path: filePath,
+				status: "missing",
+			})
+			expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
+		}
 	})
 
 	it("calls service methods with their original receivers", async () => {
@@ -222,8 +194,6 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		expect(dependencies.cacheManager.getHash.mock.contexts[0]).toBe(dependencies.cacheManager)
 		expect(dependencies.parser.parseFile).toHaveBeenCalledOnce()
 		expect(dependencies.parser.parseFile.mock.contexts[0]).toBe(dependencies.parser)
-		expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledOnce()
-		expect(dependencies.embedder.createEmbeddings.mock.contexts[0]).toBe(dependencies.embedder)
 	})
 
 	it("does not treat a hidden workspace ancestor as an excluded directory", async () => {
@@ -274,7 +244,7 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 				path: filePath,
 				status: "processed_for_batching",
 				newHash: expectedHash,
-				pointsToUpsert: [],
+				blocks: [],
 			})
 			expect(dependencies.parser.parseFile).toHaveBeenCalledWith(filePath, {
 				content: expectedContent,
@@ -290,30 +260,34 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			})
 			expect(dependencies.cacheManager.getHash).toHaveBeenCalledWith(filePath)
 			expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
-			expect(dependencies.embedder.createEmbeddings).not.toHaveBeenCalled()
 		})
 	})
 
-	it.each(["access", "ignore", "stat", "read", "cache", "parse", "embed"])(
-		"returns the original %s error as a local error",
-		async (stage) => {
-			const dependencies = setup()
-			const error = new Error(`${stage} failed`)
-			const fail = () => {
-				throw error
-			}
-			if (stage === "access") dependencies.ignoreController.validateAccess.mockImplementation(fail)
-			if (stage === "ignore") dependencies.ignoreInstance.ignores.mockImplementation(fail)
-			if (stage === "stat") dependencies.fileSystem.stat.mockRejectedValue(error)
-			if (stage === "read") dependencies.fileSystem.readFile.mockRejectedValue(error)
-			if (stage === "cache") dependencies.cacheManager.getHash.mockImplementation(fail)
-			if (stage === "parse") dependencies.parser.parseFile.mockRejectedValue(error)
-			if (stage === "embed") dependencies.embedder.createEmbeddings.mockRejectedValue(error)
-			const result = await new FilePreparation(dependencies).prepareFile(filePath)
-			expect(result).toEqual({ path: filePath, status: "local_error", error })
-			expect(result.error).toBe(error)
-		},
-	)
+	it.each([
+		["access", "read"],
+		["ignore", "read"],
+		["stat", "read"],
+		["read", "read"],
+		["cache", "parse"],
+		["parse", "parse"],
+		["parser load", "parse"],
+	] as const)("CI-FP-02: a %s error is a local error with activity %s", async (stage, activity) => {
+		const dependencies = setup()
+		const error =
+			stage === "parser load" ? new ParserLoadError(".ts", new Error("wasm")) : new Error(`${stage} failed`)
+		const fail = () => {
+			throw error
+		}
+		if (stage === "access") dependencies.ignoreController.validateAccess.mockImplementation(fail)
+		if (stage === "ignore") dependencies.ignoreInstance.ignores.mockImplementation(fail)
+		if (stage === "stat") dependencies.fileSystem.stat.mockRejectedValue(Object.assign(error, { code: "EACCES" }))
+		if (stage === "read") dependencies.fileSystem.readFile.mockRejectedValue(error)
+		if (stage === "cache") dependencies.cacheManager.getHash.mockImplementation(fail)
+		if (stage === "parse" || stage === "parser load") dependencies.parser.parseFile.mockRejectedValue(error)
+		const result = await new FilePreparation(dependencies).prepareFile(filePath)
+		expect(result).toEqual({ path: filePath, status: "local_error", activity, error })
+		expect(result.error).toBe(error)
+	})
 
 	it("does not wrap non-Error rejections", async () => {
 		const dependencies = setup()
@@ -321,6 +295,7 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		expect(await new FilePreparation(dependencies).prepareFile(filePath)).toEqual({
 			path: filePath,
 			status: "local_error",
+			activity: "read",
 			error: "read failed",
 		})
 	})

@@ -6285,13 +6285,11 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		expect(provider.log).toHaveBeenCalledWith("Cannot start indexing: No workspace folder open")
 	})
 
-	it("catches both start-indexing calls during error recovery", async () => {
+	it("starts once from Error and leaves recovery to the manager", async () => {
 		const manager = createIndexManager({
+			state: "Error",
 			isInitialized: false,
-			startIndexing: vi
-				.fn()
-				.mockRejectedValueOnce(new Error("first failure"))
-				.mockRejectedValueOnce(new Error("second failure")),
+			startIndexing: vi.fn().mockRejectedValueOnce(new Error("recovery failure")),
 		})
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
@@ -6300,9 +6298,9 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		await webviewMessageHandler(provider, { type: "startIndexing" })
 		await Promise.resolve()
 
-		expect(manager.startIndexing).toHaveBeenCalledTimes(2)
-		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: first failure")
-		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: second failure")
+		expect(manager.initialize).toHaveBeenCalledOnce()
+		expect(manager.startIndexing).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: recovery failure")
 	})
 
 	it("covers changed stop, toggle, and detached toggle rejection paths", async () => {

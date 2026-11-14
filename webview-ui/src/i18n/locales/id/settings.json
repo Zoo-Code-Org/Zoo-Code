@@ -166,6 +166,10 @@
 		"description": "Konfigurasi support prompt yang digunakan untuk aksi cepat seperti meningkatkan prompt, menjelaskan kode, dan memperbaiki masalah. Prompt ini membantu Zoo memberikan bantuan yang lebih baik untuk tugas pengembangan umum."
 	},
 	"codeIndex": {
+		"providerWaiting": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis",
+		"providerWaitingUntil": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis pada {{time}}",
+		"providerPaused": "Menunggu {{service}}",
+		"providerPausedUntil": "Menunggu {{service}} hingga {{time}}",
 		"title": "Pengindeksan Codebase",
 		"enableLabel": "Aktifkan Pengindeksan Codebase",
 		"enableDescription": "Aktifkan pengindeksan kode untuk pencarian dan pemahaman konteks yang lebih baik",
@@ -210,6 +214,21 @@
 		},
 		"description": "Konfigurasi pengaturan pengindeksan codebase untuk mengaktifkan pencarian semantik proyek kamu. <0>Pelajari lebih lanjut</0>",
 		"statusTitle": "Status",
+		"indexingFilesRetrying": "File dengan kegagalan pengindeksan: {{count}}. Mencoba ulang {{path}}: {{reason}}",
+		"indexingFilesFailed": "File dengan kegagalan pengindeksan: {{count}}. Percobaan ulang otomatis berakhir untuk {{path}}: {{reason}}",
+		"failedFileDetails": "Detail file yang gagal",
+		"failedFileReason": "Alasan",
+		"failedFileStates": {
+			"retrying": "Percobaan ulang otomatis tertunda",
+			"exhausted": "Percobaan ulang otomatis berakhir"
+		},
+		"failedFileActivities": {
+			"read": "Baca file",
+			"parse": "Urai file",
+			"embed": "Buat embedding",
+			"upsert": "Simpan blok yang diindeks",
+			"delete": "Hapus blok yang diindeks"
+		},
 		"embedderProviderLabel": "Provider Embedder",
 		"modelPlaceholder": "Masukkan nama model",
 		"selectModel": "Pilih model",
@@ -226,6 +245,7 @@
 		"saving": "Menyimpan...",
 		"saveSettings": "Simpan",
 		"indexingStatuses": {
+			"stopping": "Menghentikan",
 			"standby": "Siaga",
 			"indexing": "Mengindeks",
 			"indexed": "Terindeks",

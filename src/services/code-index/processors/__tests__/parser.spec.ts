@@ -1,6 +1,6 @@
 // npx vitest services/code-index/processors/__tests__/parser.spec.ts
 
-import { CodeParser, codeParser } from "../parser"
+import { CodeParser, codeParser, ParserLoadError } from "../parser"
 import { loadRequiredLanguageParsers } from "../../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
@@ -165,16 +165,20 @@ describe("CodeParser", () => {
 			expect(result).toBeDefined()
 		})
 
-		it("should handle parser load errors", async () => {
-			;(loadRequiredLanguageParsers as any).mockRejectedValue(new Error("Load failed"))
+		it.each([
+			[
+				"a rejected load",
+				() => vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(new Error("Load failed")),
+			],
+			["no parser for the extension", () => vi.mocked(loadRequiredLanguageParsers).mockResolvedValueOnce({})],
+		])("CI-PA-01: %s throws ParserLoadError and the next call reloads", async (_label, failLoad) => {
+			failLoad()
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBeInstanceOf(
+				ParserLoadError,
+			)
 			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toEqual([])
-		})
-
-		it("should return empty array when no parser is available", async () => {
-			;(loadRequiredLanguageParsers as any).mockResolvedValue({} as any)
-			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toEqual([])
+			expect(Array.isArray(result)).toBe(true)
+			expect(loadRequiredLanguageParsers).toHaveBeenCalledTimes(2)
 		})
 	})
 
@@ -318,10 +322,27 @@ describe("CodeParser", () => {
 
 	describe("singleton instance", () => {
 		it("should maintain parser state across calls", async () => {
-			const result1 = await codeParser.parseFile("test.js", { content: "const a = 1" })
-			const result2 = await codeParser.parseFile("test.js", { content: "const b = 2" })
-			expect(result1).toBeDefined()
-			expect(result2).toBeDefined()
+			// Capture each parsed root, so the result reflects the input rather than an earlier fixed capture.
+			const echoRoot = (node: { text: string }) => [
+				{
+					node: {
+						text: node.text,
+						startPosition: { row: 0 },
+						endPosition: { row: 0 },
+						type: "function_declaration",
+						childForFieldName: vi.fn().mockReturnValue(null),
+						children: [],
+					},
+					name: "definition.function",
+				},
+			]
+			mockLanguageParser.js.query.captures.mockImplementationOnce(echoRoot).mockImplementationOnce(echoRoot)
+			const first = "const firstValue = 'singleton parser first input with enough text'"
+			const second = "const secondValue = 'singleton parser second input with enough text'"
+			const result1 = await codeParser.parseFile("test.js", { content: first })
+			const result2 = await codeParser.parseFile("test.js", { content: second })
+			expect(result1.map((block) => block.content)).toEqual([first])
+			expect(result2.map((block) => block.content)).toEqual([second])
 		})
 	})
 

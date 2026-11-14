@@ -243,6 +243,25 @@
 		"title": "Codebase Indexing",
 		"description": "Configure codebase indexing settings to enable semantic search of your project. <0>Learn more</0>",
 		"statusTitle": "Status",
+		"indexingFilesRetrying": "Files with indexing failures: {{count}}. Retrying {{path}}: {{reason}}",
+		"indexingFilesFailed": "Files with indexing failures: {{count}}. Automatic retry ended for {{path}}: {{reason}}",
+		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
+		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
+		"providerPaused": "Waiting for {{service}}",
+		"providerPausedUntil": "Waiting for {{service}} until {{time}}",
+		"failedFileDetails": "Failed file details",
+		"failedFileReason": "Reason",
+		"failedFileStates": {
+			"retrying": "Automatic retry pending",
+			"exhausted": "Automatic retry ended"
+		},
+		"failedFileActivities": {
+			"read": "Read file",
+			"parse": "Parse file",
+			"embed": "Create embeddings",
+			"upsert": "Save indexed blocks",
+			"delete": "Remove indexed blocks"
+		},
 		"enableLabel": "Enable Codebase Indexing",
 		"enableDescription": "Enable code indexing for improved search and context understanding",
 		"embedderProviderLabel": "Embedder Provider",
@@ -310,7 +329,8 @@
 			"standby": "Standby",
 			"indexing": "Indexing",
 			"indexed": "Indexed",
-			"error": "Error"
+			"error": "Error",
+			"stopping": "Stopping"
 		},
 		"validation": {
 			"qdrantUrlRequired": "Qdrant URL is required",

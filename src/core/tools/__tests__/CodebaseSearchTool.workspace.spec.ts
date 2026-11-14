@@ -37,17 +37,23 @@ vi.mock("../../../services/code-index/manager", () => ({
 				initialized = true
 				return { requiresRestart: false }
 			}),
-			searchIndex: vi.fn().mockResolvedValue([
-				{
-					score: 0.9,
-					payload: {
-						filePath: `${workspacePath}/src/result.ts`,
-						startLine: 2,
-						endLine: 4,
-						codeChunk: " match ",
+			searchIndex: vi.fn<CodeIndexManager["searchIndex"]>().mockResolvedValue({
+				results: [
+					{
+						id: "workspace-result",
+						score: 0.9,
+						payload: {
+							filePath: `${workspacePath}/src/result.ts`,
+							startLine: 2,
+							endLine: 4,
+							codeChunk: " match ",
+						},
 					},
-				},
-			]),
+				],
+				incomplete: false,
+				failedPaths: [],
+				waitingPaths: [],
+			}),
 			dispose: vi.fn(),
 		}
 	}),
@@ -122,6 +128,9 @@ describe("CodebaseSearchTool workspace selection", () => {
 					results: [
 						{ filePath: "/second/src/result.ts", score: 0.9, startLine: 2, endLine: 4, codeChunk: "match" },
 					],
+					incomplete: false,
+					failedPaths: [],
+					waitingPaths: [],
 				},
 			}),
 		)

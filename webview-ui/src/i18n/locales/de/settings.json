@@ -167,9 +167,28 @@
 		"description": "Konfiguriere Support-Prompts, die für schnelle Aktionen wie das Verbessern von Prompts, das Erklären von Code und das Beheben von Problemen verwendet werden. Diese Prompts helfen Zoo dabei, bessere Unterstützung für häufige Entwicklungsaufgaben zu bieten."
 	},
 	"codeIndex": {
+		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
+		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
+		"providerPaused": "Warten auf {{service}}",
+		"providerPausedUntil": "Warten auf {{service}} bis {{time}}",
 		"title": "Codebase-Indexierung",
 		"description": "Konfiguriere Codebase-Indexierungseinstellungen, um semantische Suche in deinem Projekt zu aktivieren. <0>Mehr erfahren</0>",
 		"statusTitle": "Status",
+		"indexingFilesRetrying": "Dateien mit Indexierungsfehlern: {{count}}. Erneuter Versuch für {{path}}: {{reason}}",
+		"indexingFilesFailed": "Dateien mit Indexierungsfehlern: {{count}}. Automatische Wiederholung für {{path}} beendet: {{reason}}",
+		"failedFileDetails": "Details zu fehlgeschlagenen Dateien",
+		"failedFileReason": "Grund",
+		"failedFileStates": {
+			"retrying": "Automatische Wiederholung ausstehend",
+			"exhausted": "Automatische Wiederholung beendet"
+		},
+		"failedFileActivities": {
+			"read": "Datei lesen",
+			"parse": "Datei parsen",
+			"embed": "Embeddings erstellen",
+			"upsert": "Indexierte Blöcke speichern",
+			"delete": "Indexierte Blöcke entfernen"
+		},
 		"enableLabel": "Codebase-Indexierung aktivieren",
 		"enableDescription": "Aktiviere die Code-Indizierung für eine verbesserte Suche und ein besseres Kontextverständnis",
 		"embedderProviderLabel": "Embedder-Anbieter",
@@ -227,6 +246,7 @@
 		"saving": "Speichern...",
 		"saveSettings": "Speichern",
 		"indexingStatuses": {
+			"stopping": "Wird gestoppt",
 			"standby": "Bereitschaft",
 			"indexing": "Indexierung",
 			"indexed": "Indexiert",

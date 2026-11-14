@@ -1,7 +1,13 @@
 // npx vitest services/code-index/processors/__tests__/scanner.spec.ts
 
 import { DirectoryScanner } from "../scanner"
+import { ParserLoadError } from "../parser"
+import { FileFailureRegistry } from "../../file-failure-registry"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
+import { createHash } from "crypto"
+import nodePath from "path"
+import * as vscode from "vscode"
 
 // Mock TelemetryService
 vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
@@ -78,10 +84,12 @@ describe("DirectoryScanner", () => {
 
 	beforeEach(async () => {
 		mockEmbedder = {
+			rateLimitScope: "openai:1",
 			createEmbeddings: vi.fn().mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] }),
 			embedderInfo: { name: "mock-embedder", dimensions: 384 },
 		}
 		mockVectorStore = {
+			rateLimitScope: "qdrant:1",
 			upsertPoints: vi.fn().mockResolvedValue(undefined),
 			deletePointsByFilePath: vi.fn().mockResolvedValue(undefined),
 			deletePointsByMultipleFilePaths: vi.fn().mockResolvedValue(undefined),
@@ -112,6 +120,9 @@ describe("DirectoryScanner", () => {
 			mockCodeParser,
 			mockCacheManager,
 			mockIgnoreInstance,
+			undefined,
+			new FileFailureRegistry(),
+			new ProviderPacerRegistry(),
 		)
 
 		// Mock default implementations - create proper Stats object
@@ -178,6 +189,9 @@ describe("DirectoryScanner", () => {
 				mockCodeParser,
 				mockCacheManager,
 				mockIgnoreInstance,
+				undefined,
+				new FileFailureRegistry(),
+				new ProviderPacerRegistry(),
 			)
 
 			const { listFiles } = await import("../../../glob/list-files")
@@ -228,6 +242,8 @@ describe("DirectoryScanner", () => {
 				mockCacheManager,
 				mockIgnoreInstance,
 				1,
+				new FileFailureRegistry(),
+				new ProviderPacerRegistry(),
 			)
 			const { listFiles } = await import("../../../glob/list-files")
 			vi.mocked(listFiles).mockResolvedValue([["test/file1.js"], false])
@@ -299,6 +315,9 @@ describe("DirectoryScanner", () => {
 				mockCodeParser,
 				mockCacheManager,
 				mockIgnoreInstance,
+				undefined,
+				new FileFailureRegistry(),
+				new ProviderPacerRegistry(),
 			)
 
 			const { listFiles } = await import("../../../glob/list-files")
@@ -442,7 +461,7 @@ describe("DirectoryScanner", () => {
 			expect(result.stats.processed).toBe(0)
 		})
 
-		it("should stop processing batches when signal is aborted mid-scan", async () => {
+		it("should not write once the signal aborts mid-scan", async () => {
 			const { listFiles } = await import("../../../glob/list-files")
 			vi.mocked(listFiles).mockResolvedValue([["test/file1.js", "test/file2.js"], false])
 
@@ -467,11 +486,271 @@ describe("DirectoryScanner", () => {
 				return mockBlocks
 			})
 
-			// AbortError should propagate up (the orchestrator handles it in its catch block)
-			await expect(
-				scanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal),
-			).rejects.toThrow("Indexing aborted")
+			await scanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
+			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
+			expect(mockCacheManager.updateHash).not.toHaveBeenCalled()
 		})
+
+		it.each(["stat", "read"] as const)(
+			"CI-SC-01: a file missing at %s is dropped and its old entries deleted without a failure",
+			async (stage) => {
+				const failures = new FileFailureRegistry()
+				const missingScanner = new DirectoryScanner(
+					mockEmbedder,
+					mockVectorStore,
+					mockCodeParser,
+					mockCacheManager,
+					mockIgnoreInstance,
+					undefined,
+					failures,
+					new ProviderPacerRegistry(),
+				)
+				const { listFiles } = await import("../../../glob/list-files")
+				vi.mocked(listFiles).mockResolvedValue([["test/gone.js"], false])
+				mockCacheManager.getAllHashes.mockReturnValue({ "test/gone.js": "old-hash" })
+				const missing = Object.assign(new Error("gone"), { code: "ENOENT" })
+				if (stage === "stat") vi.mocked(stat).mockRejectedValueOnce(missing)
+				else vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(missing)
+
+				await missingScanner.scanDirectory("/test")
+
+				expect(mockCodeParser.parseFile).not.toHaveBeenCalled()
+				expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledWith("test/gone.js")
+				expect(mockCacheManager.deleteHash).toHaveBeenCalledWith("test/gone.js")
+				expect(failures.list()).toEqual([])
+			},
+		)
+
+		it("removes points and the entry of a failed file that has no hash and is gone", async () => {
+			const failures = new FileFailureRegistry()
+			const removalScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([[], false])
+			const relativePath = nodePath.normalize("src/failed.js")
+			failures.renew(relativePath, "h")
+			failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+			await removalScanner.scanDirectory("/test")
+
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+			const [[removedPath]] = vi.mocked(mockVectorStore.deletePointsByFilePath).mock.calls
+			expect(nodePath.isAbsolute(removedPath)).toBe(true)
+			expect(removedPath.endsWith(relativePath)).toBe(true)
+			expect(failures.list()).toEqual([])
+		})
+
+		function createScannerWithFailures() {
+			const failures = new FileFailureRegistry()
+			const failureScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			return { failures, failureScanner }
+		}
+
+		it.each([
+			{ truncated: true, removed: false },
+			{ truncated: false, removed: true },
+		])(
+			"failure-only file with truncated listing=$truncated is removed=$removed",
+			async ({ truncated, removed }) => {
+				const { failures, failureScanner: truncationScanner } = createScannerWithFailures()
+				const { listFiles } = await import("../../../glob/list-files")
+				vi.mocked(listFiles).mockResolvedValue([[], truncated])
+				const relativePath = nodePath.normalize("src/unlisted.js")
+				failures.renew(relativePath, "h")
+				failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+				await truncationScanner.scanDirectory("/test")
+
+				expect(vi.mocked(mockVectorStore.deletePointsByFilePath).mock.calls.length).toBe(removed ? 1 : 0)
+				expect(failures.list()).toHaveLength(removed ? 0 : 1)
+			},
+		)
+
+		it.each(["stat", "read"] as const)(
+			"removes a listed failure-only file missing at %s even when the listing is truncated",
+			async (stage) => {
+				const { failures, failureScanner: truncationScanner } = createScannerWithFailures()
+				const { listFiles } = await import("../../../glob/list-files")
+				vi.mocked(listFiles).mockResolvedValue([["test/vanished.js"], true])
+				const missing = Object.assign(new Error("gone"), { code: "ENOENT" })
+				if (stage === "stat") vi.mocked(stat).mockRejectedValueOnce(missing)
+				else vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(missing)
+				const relativePath = nodePath.normalize("test/vanished.js")
+				failures.renew(relativePath, "h")
+				failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+				await truncationScanner.scanDirectory("/test")
+
+				expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+				expect(failures.list()).toEqual([])
+			},
+		)
+
+		it("removes a listed oversized failure-only file even when the listing is truncated", async () => {
+			const { failures, failureScanner: truncationScanner } = createScannerWithFailures()
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/big.js"], true])
+			vi.mocked(stat).mockResolvedValueOnce({ ...mockStats, size: 2 * 1024 * 1024 })
+			const relativePath = nodePath.normalize("test/big.js")
+			failures.renew(relativePath, "h")
+			failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+			await truncationScanner.scanDirectory("/test")
+
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+			expect(failures.list()).toEqual([])
+		})
+
+		it("drains queued writes and rejects with the abort reason while a parse is pending", async () => {
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js", "test/file2.js"], false])
+			const controller = new AbortController()
+			const abortError = new Error("aborted write")
+			let releaseSecondParse: () => void = () => {}
+			const secondParse = new Promise<void>((resolve) => {
+				releaseSecondParse = resolve
+			})
+			const block = {
+				file_path: "test/file1.js",
+				content: "function hello() {}",
+				start_line: 1,
+				end_line: 1,
+				identifier: "hello",
+				type: "function",
+				fileHash: "hash1",
+				segmentHash: "seg-hash-1",
+			}
+			vi.mocked(mockCodeParser.parseFile)
+				.mockResolvedValueOnce([block])
+				.mockImplementationOnce(async () => {
+					await secondParse
+					return []
+				})
+			vi.mocked(mockEmbedder.createEmbeddings).mockImplementationOnce(async () => {
+				controller.abort()
+				setTimeout(releaseSecondParse, 0)
+				throw abortError
+			})
+
+			const rejection = await scanner
+				.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
+				.then(
+					() => undefined,
+					(error: unknown) => error,
+				)
+
+			// Read the reason only after the scan settles; it is undefined until abort() runs.
+			expect(controller.signal.aborted).toBe(true)
+			expect(rejection).toBeInstanceOf(DOMException)
+			expect(rejection).toBe(controller.signal.reason)
+		})
+
+		it("records a non-missing read error as a read failure", async () => {
+			const failures = new FileFailureRegistry()
+			const readScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/denied.js"], false])
+			vi.mocked(stat).mockRejectedValueOnce(Object.assign(new Error("denied"), { code: "EACCES" }))
+
+			await readScanner.scanDirectory("/test")
+
+			expect(failures.list()).toEqual([expect.objectContaining({ activity: "read", reason: "denied" })])
+			expect(mockVectorStore.deletePointsByFilePath).not.toHaveBeenCalled()
+		})
+
+		it("clears a read failure once the read succeeds with unchanged content", async () => {
+			const failures = new FileFailureRegistry()
+			const recoveryScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/cached.js"], false])
+			mockCacheManager.getHash.mockReturnValue(createHash("sha256").update("test content").digest("hex"))
+			vi.mocked(stat).mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+
+			await recoveryScanner.scanDirectory("/test")
+			expect(failures.list()).toEqual([expect.objectContaining({ activity: "read" })])
+
+			const result = await recoveryScanner.scanDirectory("/test")
+			expect(result.stats.skipped).toBe(1)
+			expect(failures.list()).toEqual([])
+		})
+
+		it.each([
+			["parser load", new ParserLoadError(".js", new Error("wasm"))],
+			["parse", new Error("syntax")],
+		])(
+			"CI-SC-02: a %s failure is recorded, the hash is not stored and other files continue",
+			async (_label, error) => {
+				const failures = new FileFailureRegistry()
+				const parseScanner = new DirectoryScanner(
+					mockEmbedder,
+					mockVectorStore,
+					mockCodeParser,
+					mockCacheManager,
+					mockIgnoreInstance,
+					undefined,
+					failures,
+					new ProviderPacerRegistry(),
+				)
+				const block = {
+					file_path: "test/file2.js",
+					content: "ok",
+					start_line: 1,
+					end_line: 1,
+					identifier: null,
+					type: "function",
+					fileHash: "h",
+					segmentHash: "s",
+				}
+				mockCodeParser.parseFile.mockImplementation(async (filePath: string) => {
+					if (filePath === "test/file1.js") throw error
+					return [block]
+				})
+
+				await parseScanner.scanDirectory("/test")
+
+				expect(failures.list()).toEqual([
+					expect.objectContaining({ path: nodePath.normalize("test/file1.js"), activity: "parse" }),
+				])
+				expect(mockCacheManager.updateHash).not.toHaveBeenCalledWith("test/file1.js", expect.anything())
+				expect(mockCacheManager.updateHash).toHaveBeenCalledWith("test/file2.js", expect.any(String))
+			},
+		)
 
 		it("should not process deleted files when signal is aborted", async () => {
 			const { listFiles } = await import("../../../glob/list-files")

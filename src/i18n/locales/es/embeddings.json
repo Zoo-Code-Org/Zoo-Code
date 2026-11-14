@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "El proveedor de búsqueda ha limitado las solicitudes. La indexación se reanuda automáticamente cuando termina la espera del proveedor.",
 	"authenticationFailed": "No se pudieron crear las incrustaciones: Error de autenticación. Comprueba tu clave de API.",
 	"failedWithStatus": "No se pudieron crear las incrustaciones después de {{attempts}} intentos: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "No se pudieron crear las incrustaciones después de {{attempts}} intentos: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "No se pueden crear servicios: La indexación de código no está configurada correctamente"
 	},
 	"orchestrator": {
+		"providerWaiting": "Esperando a {{service}}; la indexación se reanuda automáticamente",
+		"providerWaitingUntil": "Esperando a {{service}}; la indexación se reanuda automáticamente a las {{time}}",
+		"indexingFilesFailed": "Siguen existiendo errores en archivos. No hay reintentos automáticos pendientes. Hay un índice parcial disponible.",
+		"indexingStopping": "Deteniendo la indexación...",
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
 		"fileWatcherStarted": "Monitor de archivos iniciado.",
 		"fileWatcherStopped": "Monitor de archivos detenido.",
@@ -64,7 +69,8 @@
 		"unknownError": "Error desconocido",
 		"indexingRequiresWorkspace": "La indexación requiere una carpeta de workspace abierta",
 		"indexingStopped": "Indexación detenida por el usuario.",
-		"indexingStoppedPartial": "Indexación detenida. Datos de índice parciales conservados."
+		"indexingStoppedPartial": "Indexación detenida. Datos de índice parciales conservados.",
+		"cacheReadFailed": "No se pudo leer la caché del índice de código. Se conservaron los datos del índice existente. Vuelve a iniciar la indexación para reintentarlo."
 	},
 	"semble": {
 		"downloadingBinary": "Descargando el binario de semble...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Error al descargar semble: {{errorMessage}}",
 		"checkFailed": "Verificación de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveedor de Semble restablecido. La caché en disco se conserva hasta la próxima reconstrucción."
-	}
+	},
+	"quotaExceeded": "Se ha alcanzado la cuota o el límite de facturación del proveedor de incrustaciones. Comprueba tu plan o la facturación y vuelve a iniciar la indexación."
 }

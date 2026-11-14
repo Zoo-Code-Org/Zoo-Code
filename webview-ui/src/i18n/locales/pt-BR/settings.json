@@ -168,6 +168,10 @@
 		"description": "Configure prompts de suporte usados para ações rápidas como melhorar prompts, explicar código e corrigir problemas. Esses prompts ajudam o Zoo a fornecer melhor assistência para tarefas comuns de desenvolvimento."
 	},
 	"codeIndex": {
+		"providerWaiting": "Aguardando {{service}}; a indexação é retomada automaticamente",
+		"providerWaitingUntil": "Aguardando {{service}}; a indexação é retomada automaticamente às {{time}}",
+		"providerPaused": "Aguardando {{service}}",
+		"providerPausedUntil": "Aguardando {{service}} até {{time}}",
 		"title": "Indexação de Código",
 		"enableLabel": "Ativar Indexação de Código",
 		"enableDescription": "Ative a indexação de código para pesquisa e compreensão de contexto aprimoradas",
@@ -212,6 +216,21 @@
 		},
 		"description": "Configure as configurações de indexação da base de código para habilitar a pesquisa semântica do seu projeto. <0>Saiba mais</0>",
 		"statusTitle": "Status",
+		"indexingFilesRetrying": "Arquivos com falhas de indexação: {{count}}. Tentando novamente {{path}}: {{reason}}",
+		"indexingFilesFailed": "Arquivos com falhas de indexação: {{count}}. Nova tentativa automática encerrada para {{path}}: {{reason}}",
+		"failedFileDetails": "Detalhes dos arquivos com falhas",
+		"failedFileReason": "Motivo",
+		"failedFileStates": {
+			"retrying": "Nova tentativa automática pendente",
+			"exhausted": "Nova tentativa automática encerrada"
+		},
+		"failedFileActivities": {
+			"read": "Ler arquivo",
+			"parse": "Analisar arquivo",
+			"embed": "Criar embeddings",
+			"upsert": "Salvar blocos indexados",
+			"delete": "Remover blocos indexados"
+		},
 		"embedderProviderLabel": "Provedor de Embedder",
 		"modelPlaceholder": "Insira o nome do modelo",
 		"selectModel": "Selecione um modelo",
@@ -228,6 +247,7 @@
 		"saving": "Salvando...",
 		"saveSettings": "Salvar",
 		"indexingStatuses": {
+			"stopping": "Parando",
 			"standby": "Em espera",
 			"indexing": "Indexando",
 			"indexed": "Indexado",

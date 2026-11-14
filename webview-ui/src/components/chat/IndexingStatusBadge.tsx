@@ -57,7 +57,10 @@ export const IndexingStatusBadge: React.FC<IndexingStatusBadgeProps> = ({ classN
 		[indexingStatus.processedItems, indexingStatus.totalItems],
 	)
 
-	const tooltipText = useMemo(() => {
+	const hasFailedFiles =
+		(indexingStatus.failedFiles?.length ?? 0) > 0 || (indexingStatus.failedFileSummary?.count ?? 0) > 0
+
+	const statusTooltip = useMemo(() => {
 		switch (indexingStatus.systemStatus) {
 			case "Standby":
 				return t("chat:indexingStatus.ready")
@@ -74,7 +77,32 @@ export const IndexingStatusBadge: React.FC<IndexingStatusBadgeProps> = ({ classN
 		}
 	}, [indexingStatus.systemStatus, progressPercentage, t])
 
+	const tooltipText = useMemo(() => {
+		if (!hasFailedFiles || indexingStatus.systemStatus === "Error" || indexingStatus.systemStatus === "Stopping") {
+			return statusTooltip
+		}
+
+		const summary = indexingStatus.failedFileSummary
+		const failureText =
+			summary && summary.count > 0
+				? t(
+						summary.state === "retrying"
+							? "settings:codeIndex.indexingFilesRetrying"
+							: "settings:codeIndex.indexingFilesFailed",
+						{ ...summary },
+					)
+				: `${t("settings:codeIndex.failedFileDetails")} (${indexingStatus.failedFiles?.length ?? 0})`
+		return `${statusTooltip} - ${failureText}`
+	}, [hasFailedFiles, indexingStatus, statusTooltip, t])
+
 	const statusColorClass = useMemo(() => {
+		if (
+			hasFailedFiles &&
+			(indexingStatus.systemStatus === "Standby" || indexingStatus.systemStatus === "Indexed")
+		) {
+			return "bg-amber-500"
+		}
+
 		const statusColors = {
 			Standby: "bg-vscode-descriptionForeground/60",
 			Indexing: "bg-yellow-500 animate-pulse",
@@ -84,7 +112,7 @@ export const IndexingStatusBadge: React.FC<IndexingStatusBadgeProps> = ({ classN
 		}
 
 		return statusColors[indexingStatus.systemStatus as keyof typeof statusColors] || statusColors.Standby
-	}, [indexingStatus.systemStatus])
+	}, [hasFailedFiles, indexingStatus.systemStatus])
 
 	return (
 		<CodeIndexPopover indexingStatus={indexingStatus}>

@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Penyedia pencarian membatasi laju permintaan. Pengindeksan dilanjutkan secara otomatis setelah waktu tunggu penyedia berakhir.",
 	"authenticationFailed": "Gagal membuat embeddings: Autentikasi gagal. Silakan periksa API key Anda.",
 	"failedWithStatus": "Gagal membuat embeddings setelah {{attempts}} percobaan: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Gagal membuat embeddings setelah {{attempts}} percobaan: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Tidak dapat membuat layanan: Pengindeksan kode tidak dikonfigurasi dengan benar"
 	},
 	"orchestrator": {
+		"providerWaiting": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis",
+		"providerWaitingUntil": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis pada {{time}}",
+		"indexingFilesFailed": "Masih ada kegagalan file. Tidak ada percobaan ulang otomatis yang tertunda. Indeks parsial tersedia.",
+		"indexingStopping": "Menghentikan pengindeksan...",
 		"indexingFailedNoBlocks": "Pengindeksan gagal: Tidak ada blok kode yang berhasil diindeks. Ini biasanya menunjukkan masalah konfigurasi embedder.",
 		"fileWatcherStarted": "Pemantau file dimulai.",
 		"fileWatcherStopped": "Pemantau file dihentikan.",
@@ -64,7 +69,8 @@
 		"unknownError": "Kesalahan tidak diketahui",
 		"indexingRequiresWorkspace": "Pengindeksan memerlukan folder workspace yang terbuka",
 		"indexingStopped": "Pengindeksan dihentikan oleh pengguna.",
-		"indexingStoppedPartial": "Pengindeksan dihentikan. Data indeks parsial dipertahankan."
+		"indexingStoppedPartial": "Pengindeksan dihentikan. Data indeks parsial dipertahankan.",
+		"cacheReadFailed": "Tidak dapat membaca cache indeks kode. Data indeks yang ada tetap disimpan. Mulai pengindeksan lagi untuk mencoba ulang."
 	},
 	"semble": {
 		"downloadingBinary": "Mengunduh biner semble...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Gagal mengunduh semble: {{errorMessage}}",
 		"checkFailed": "Pemeriksaan semble gagal: {{errorMessage}}",
 		"providerReset": "Penyedia Semble direset. Cache di disk tetap ada hingga pembangunan ulang berikutnya."
-	}
+	},
+	"quotaExceeded": "Kuota atau batas penagihan penyedia embeddings telah tercapai. Periksa paket atau penagihanmu, lalu mulai pengindeksan lagi."
 }

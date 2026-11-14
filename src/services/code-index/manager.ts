@@ -1,20 +1,23 @@
 import * as vscode from "vscode"
 import { ContextProxy } from "../../core/config/ContextProxy"
-import { VectorStoreSearchResult } from "./interfaces"
 import { IndexingState } from "./interfaces/manager"
 import { CodeIndexConfigManager } from "./config-manager"
 import type { CodeIndexStateManager } from "./state-manager"
 import { CodeIndexServiceFactory } from "./service-factory"
-import { CodeIndexSearchService } from "./search-service"
+import { CodeIndexSearchService, type CodeIndexSearchResponse } from "./search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
 import { CacheManager } from "./cache-manager"
 import { SembleProvider } from "./semble"
+import { FileFailureRegistry } from "./file-failure-registry"
+import { ProviderPacerRegistry } from "./provider-pacer"
+import { formatProviderWaitMessage } from "./shared/provider-wait-message"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
 import ignore from "ignore"
 import path from "path"
 import { TelemetryService } from "@roo-code/telemetry"
-import { TelemetryEventName } from "@roo-code/types"
+import { TelemetryEventName, type FailedFileSummary } from "@roo-code/types"
+import { t } from "../../i18n"
 
 export class CodeIndexManager {
 	// Specialized class instances
@@ -25,6 +28,11 @@ export class CodeIndexManager {
 	private _searchService: CodeIndexSearchService | undefined
 	private _cacheManager: CacheManager | undefined
 	private _sembleProvider: SembleProvider | undefined
+
+	// One registry and pacer set per workspace: recreating services must not reset retry budgets or provider waits.
+	private readonly failureRegistry = new FileFailureRegistry()
+	private readonly pacers = new ProviderPacerRegistry()
+	private startInFlight?: Promise<void>
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -64,6 +72,7 @@ export class CodeIndexManager {
 
 	public async setWorkspaceEnabled(enabled: boolean): Promise<void> {
 		await this.context.workspaceState.update(this._workspaceEnabledKey(), enabled)
+		if (enabled) this.failureRegistry.resetAllBudgets()
 	}
 
 	public get autoEnableDefault(): boolean {
@@ -137,7 +146,7 @@ export class CodeIndexManager {
 		// 2. Check if feature is enabled
 		if (!this.isFeatureEnabled) {
 			if (this._orchestrator) {
-				this._orchestrator.stopWatcher()
+				await this._orchestrator.stopIndexing()
 			}
 			if (this._sembleProvider) {
 				this._sembleProvider.stopIndexing()
@@ -158,11 +167,10 @@ export class CodeIndexManager {
 			return { requiresRestart }
 		}
 
-		// 5. CacheManager Initialization
-		if (!this._cacheManager) {
-			this._cacheManager = new CacheManager(this.context, this.workspacePath)
-			await this._cacheManager.initialize()
-		}
+		// 5. CacheManager Initialization; an unreadable cache ends here so existing index data is kept.
+		if (!(await this.ensureCacheManager())) return { requiresRestart }
+		// The cache read yields; indexing may have been disabled meanwhile.
+		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) return { requiresRestart }
 
 		// 6. Determine if Core Services Need Recreation
 		const needsServiceRecreation = (!this._serviceFactory && !this._sembleProvider) || requiresRestart
@@ -191,18 +199,46 @@ export class CodeIndexManager {
 		return { requiresRestart }
 	}
 
+	/** Returns false when the cache could not be read; status is then Error and Start Indexing retries. */
+	private async ensureCacheManager(): Promise<boolean> {
+		if (this._cacheManager) return true
+		const cacheManager = new CacheManager(this.context, this.workspacePath)
+		try {
+			await cacheManager.initialize()
+		} catch (error) {
+			console.error("[CodeIndexManager] Failed to read the index cache:", error)
+			this._stateManager.setSystemState(
+				"Error",
+				error instanceof Error ? error.message : t("embeddings:orchestrator.cacheReadFailed"),
+			)
+			return false
+		}
+		this._cacheManager = cacheManager
+		return true
+	}
+
 	private startIndexingInBackground(): void {
-		void this._orchestrator?.startIndexing().catch((error) => {
+		// Initialization awaits the cache read; indexing may have been disabled meanwhile.
+		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) return
+		void this.startOrchestrator().catch((error) => {
 			console.error("[CodeIndexManager] Background indexing failed:", error)
 		})
+	}
+
+	private startOrchestrator(): Promise<void> {
+		if (this.startInFlight) return this.startInFlight
+		const orchestrator = this._orchestrator
+		if (!orchestrator) return Promise.resolve()
+		this.startInFlight = orchestrator.startIndexing().finally(() => {
+			this.startInFlight = undefined
+		})
+		return this.startInFlight
 	}
 
 	/**
 	 * Initiates the indexing process (initial scan and starts watcher).
 	 * Automatically recovers from error state if needed before starting.
-	 *
-	 * @important This method should NEVER be awaited as it starts a long-running background process.
-	 * The indexing will continue asynchronously and progress will be reported through events.
+	 * A repeated call while a start or scan is running returns that start's promise (R13).
 	 */
 	public async startIndexing(): Promise<void> {
 		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) {
@@ -215,57 +251,52 @@ export class CodeIndexManager {
 			return
 		}
 
-		// Check if we're in error state and recover if needed
-		const currentStatus = this.getCurrentStatus()
-		if (currentStatus.systemStatus === "Error") {
-			await this.recoverFromError()
+		if (this.startInFlight) return this.startInFlight
+		this.failureRegistry.resetAllBudgets()
 
-			// After recovery, we need to reinitialize since recoverFromError clears all services
-			// This will be handled by the caller (webviewMessageHandler) checking isInitialized
+		if (this.getCurrentStatus().systemStatus === "Error") {
+			// Recovery drops the config manager, so keep its proxy to re-initialize; initialize() starts indexing.
+			const contextProxy = this._configManager?.getContextProxy()
+			await this.recoverFromError()
+			if (!contextProxy) return
+			await this.initialize(contextProxy)
+			await this.startInFlight
 			return
 		}
 
 		this.assertInitialized()
-		await this._orchestrator!.startIndexing()
+		await this.startOrchestrator()
 	}
 
 	/**
 	 * Stops any in-progress indexing operation and the file watcher.
+	 * Repeated calls while stopping return the same promise.
 	 */
-	public stopIndexing(): void {
+	public stopIndexing(): Promise<void> {
 		if (this._sembleProvider) {
 			this._sembleProvider.stopIndexing()
-			return
+			return Promise.resolve()
 		}
-		if (this._orchestrator) {
-			this._orchestrator.stopIndexing()
-		}
+		return this._orchestrator?.stopIndexing() ?? Promise.resolve()
 	}
 
 	/**
 	 * Stops the file watcher and potentially cleans up resources.
 	 */
-	public stopWatcher(): void {
+	public stopWatcher(): Promise<void> {
 		if (!this.isFeatureEnabled) {
-			return
+			return Promise.resolve()
 		}
-		if (this._orchestrator) {
-			this._orchestrator.stopWatcher()
-		}
+		return this._orchestrator?.stopWatcher() ?? Promise.resolve()
 	}
 
 	/**
-	 * Recovers from error state by clearing the error and resetting internal state.
-	 * This allows the manager to be re-initialized after a recoverable error.
-	 *
-	 * This method clears all service instances (configManager, serviceFactory, orchestrator, searchService)
-	 * to force a complete re-initialization on the next operation. This ensures a clean slate
-	 * after recovering from errors such as network failures or configuration issues.
+	 * Recovers from error state by stopping the current scan and watcher, clearing the error and
+	 * dropping service instances so the next initialize() recreates them.
 	 *
 	 * @remarks
 	 * - Safe to call even when not in error state (idempotent)
 	 * - Does not restart indexing automatically - call initialize() after recovery
-	 * - Service instances will be recreated on next initialize() call
 	 * - Prevents race conditions from multiple concurrent recovery attempts
 	 */
 	public async recoverFromError(): Promise<void> {
@@ -276,7 +307,8 @@ export class CodeIndexManager {
 
 		this._isRecoveringFromError = true
 		try {
-			// Clear error state
+			// The old scan and watcher must stop before replacement work starts (R37).
+			await this._orchestrator?.stopIndexing()
 			this._stateManager.setSystemState("Standby", "")
 		} catch (error) {
 			// Log error but continue with recovery - clearing service instances is more important
@@ -289,6 +321,7 @@ export class CodeIndexManager {
 			this._orchestrator = undefined
 			this._searchService = undefined
 			this._sembleProvider = undefined
+			this._cacheManager = undefined
 
 			// Reset the flag after recovery is complete
 			this._isRecoveringFromError = false
@@ -299,7 +332,7 @@ export class CodeIndexManager {
 	 * Cleans up the manager instance.
 	 */
 	public dispose(): void {
-		this.stopIndexing()
+		void this.stopIndexing()
 		if (this._sembleProvider) {
 			this._sembleProvider.dispose()
 			this._sembleProvider = undefined
@@ -326,22 +359,57 @@ export class CodeIndexManager {
 
 	// --- Private Helpers ---
 
+	/**
+	 * Status precedence: Error > Stopping > active indexing or provider wait > idle partial (Standby with
+	 * failures) > Indexed > Standby.
+	 */
 	public getCurrentStatus() {
 		const status = this._stateManager.getCurrentStatus()
+		const failedFiles = this.failureRegistry.list().map((failure) => ({
+			path: failure.path,
+			activity: failure.activity,
+			reason: failure.reason,
+			state: failure.state,
+		}))
+		const representative = failedFiles.find((failure) => failure.state === "retrying") ?? failedFiles.at(0)
+		const failedFileSummary: FailedFileSummary | undefined = representative && {
+			...representative,
+			count: failedFiles.length,
+		}
+		const providerWaits = this.pacers.providerWaits()
+		let systemStatus: IndexingState = status.systemStatus
+		let message = status.message
+		if (systemStatus !== "Error" && systemStatus !== "Stopping") {
+			if (this.pacers.hasWaitingRequests()) {
+				systemStatus = "Indexing"
+				message = formatProviderWaitMessage(providerWaits)
+			} else if (this._orchestrator?.isScanning) {
+				systemStatus = "Indexing"
+			} else if (systemStatus !== "Indexing" && failedFiles.length > 0) {
+				systemStatus = "Standby"
+				message = t("embeddings:orchestrator.indexingFilesFailed")
+			}
+		}
 		return {
 			...status,
+			systemStatus,
+			message,
+			failedFiles,
+			failedFileSummary,
+			providerWaits,
 			workspacePath: this.workspacePath,
 			workspaceEnabled: this.isWorkspaceEnabled,
 			autoEnableDefault: this.autoEnableDefault,
 		}
 	}
 
-	public async searchIndex(query: string, directoryPrefix?: string): Promise<VectorStoreSearchResult[]> {
+	public async searchIndex(query: string, directoryPrefix?: string): Promise<CodeIndexSearchResponse> {
+		const empty: CodeIndexSearchResponse = { results: [], incomplete: false, failedPaths: [], waitingPaths: [] }
 		if (!this.isFeatureEnabled) {
-			return []
+			return empty
 		}
 		if (this._sembleProvider) {
-			return this._sembleProvider.searchIndex(query, directoryPrefix)
+			return { ...empty, results: await this._sembleProvider.searchIndex(query, directoryPrefix) }
 		}
 		this.assertInitialized()
 		return this._searchService!.searchIndex(query, directoryPrefix)
@@ -352,9 +420,9 @@ export class CodeIndexManager {
 	 * Used by both initialize() and handleSettingsChange().
 	 */
 	private async _recreateServices(): Promise<void> {
-		// Stop watcher if it exists
+		// The old scan and watcher must stop before replacement services start (R37).
 		if (this._orchestrator) {
-			this.stopWatcher()
+			await this._orchestrator.stopIndexing()
 		}
 		// Dispose existing semble provider if switching away
 		if (this._sembleProvider) {
@@ -377,6 +445,8 @@ export class CodeIndexManager {
 			this._configManager!,
 			this.workspacePath,
 			this._cacheManager!,
+			this.failureRegistry,
+			this.pacers,
 		)
 
 		const ignoreInstance = ignore()
@@ -424,6 +494,8 @@ export class CodeIndexManager {
 			vectorStore,
 			scanner,
 			fileWatcher,
+			this.failureRegistry,
+			this.pacers,
 		)
 
 		// (Re)Initialize search service
@@ -432,6 +504,8 @@ export class CodeIndexManager {
 			this._stateManager,
 			embedder,
 			vectorStore,
+			this.failureRegistry,
+			this.pacers,
 		)
 
 		// Clear any error state after successful recreation
@@ -453,7 +527,7 @@ export class CodeIndexManager {
 
 			// If feature is disabled, stop the service (including any active scan)
 			if (!isFeatureEnabled) {
-				this.stopIndexing()
+				await this.stopIndexing()
 				this._stateManager.setSystemState("Standby", "Code indexing is disabled")
 				return
 			}
@@ -461,21 +535,22 @@ export class CodeIndexManager {
 			if (requiresRestart && isFeatureEnabled && isFeatureConfigured) {
 				try {
 					// Ensure cacheManager is initialized before recreating services
-					if (!this._cacheManager) {
-						this._cacheManager = new CacheManager(this.context, this.workspacePath)
-						await this._cacheManager.initialize()
-					}
+					if (!(await this.ensureCacheManager())) return
 
 					// Recreate services with new configuration
 					await this._recreateServices()
 				} catch (error) {
-					// Error state already set in _recreateServices
 					console.error("Failed to recreate services:", error)
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: error instanceof Error ? error.message : String(error),
 						stack: error instanceof Error ? error.stack : undefined,
 						location: "handleSettingsChange",
 					})
+					// Replacement failures leave indexing restartable from Error.
+					this._stateManager.setSystemState(
+						"Error",
+						error instanceof Error ? error.message : t("embeddings:orchestrator.unknownError"),
+					)
 					// Re-throw the error so the caller knows validation failed
 					throw error
 				}

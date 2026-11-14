@@ -46,6 +46,11 @@ overrides:
   '@lmstudio/sdk>zod': 3.25.76
   katex: 0.19.1
 
+patchedDependencies:
+  '@qdrant/js-client-rest@1.20.0':
+    hash: 25b0bcb3835c3b5fe58aa29056bebb895a7d48958dac9d69a33ca7c7186fadd9
+    path: patches/@qdrant__js-client-rest@1.20.0.patch
+
 importers:
 
   .:
@@ -470,8 +475,8 @@ importers:
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
       '@qdrant/js-client-rest':
-        specifier: ^1.14.0
-        version: 1.20.0(typescript@5.9.3)
+        specifier: 1.20.0
+        version: 1.20.0(patch_hash=25b0bcb3835c3b5fe58aa29056bebb895a7d48958dac9d69a33ca7c7186fadd9)(typescript@5.9.3)
       '@roo-code/cloud':
         specifier: workspace:^
         version: link:../packages/cloud
@@ -10697,7 +10702,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@qdrant/js-client-rest@1.20.0(typescript@5.9.3)':
+  '@qdrant/js-client-rest@1.20.0(patch_hash=25b0bcb3835c3b5fe58aa29056bebb895a7d48958dac9d69a33ca7c7186fadd9)(typescript@5.9.3)':
     dependencies:
       '@qdrant/openapi-typescript-fetch': 1.2.6
       typescript: 5.9.3

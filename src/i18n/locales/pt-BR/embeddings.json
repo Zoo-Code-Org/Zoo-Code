@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "O provedor de pesquisa limitou a taxa de solicitações. A indexação é retomada automaticamente após o tempo de espera do provedor.",
 	"authenticationFailed": "Falha ao criar embeddings: Falha na autenticação. Verifique sua chave de API.",
 	"failedWithStatus": "Falha ao criar embeddings após {{attempts}} tentativas: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Falha ao criar embeddings após {{attempts}} tentativas: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Não é possível criar serviços: A indexação de código não está configurada corretamente"
 	},
 	"orchestrator": {
+		"providerWaiting": "Aguardando {{service}}; a indexação é retomada automaticamente",
+		"providerWaitingUntil": "Aguardando {{service}}; a indexação é retomada automaticamente às {{time}}",
+		"indexingFilesFailed": "Ainda há falhas em arquivos. Nenhuma nova tentativa automática pendente. Um índice parcial está disponível.",
+		"indexingStopping": "Parando a indexação...",
 		"indexingFailedNoBlocks": "Indexação falhou: Nenhum bloco de código foi indexado com sucesso. Isso geralmente indica um problema de configuração do embedder.",
 		"fileWatcherStarted": "Monitor de arquivos iniciado.",
 		"fileWatcherStopped": "Monitor de arquivos parado.",
@@ -64,7 +69,8 @@
 		"unknownError": "Erro desconhecido",
 		"indexingRequiresWorkspace": "A indexação requer uma pasta de workspace aberta",
 		"indexingStopped": "Indexação interrompida pelo usuário.",
-		"indexingStoppedPartial": "Indexação interrompida. Dados de índice parciais preservados."
+		"indexingStoppedPartial": "Indexação interrompida. Dados de índice parciais preservados.",
+		"cacheReadFailed": "Não foi possível ler o cache do índice de código. Os dados do índice existente foram preservados. Inicie a indexação novamente para tentar de novo."
 	},
 	"semble": {
 		"downloadingBinary": "Baixando o binário do semble...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Falha ao baixar semble: {{errorMessage}}",
 		"checkFailed": "Verificação do semble falhou: {{errorMessage}}",
 		"providerReset": "Provedor Semble redefinido. O cache em disco permanece até a próxima reconstrução."
-	}
+	},
+	"quotaExceeded": "A cota ou o limite de cobrança do provedor de embeddings foi atingido. Verifique seu plano ou sua cobrança e inicie a indexação novamente."
 }

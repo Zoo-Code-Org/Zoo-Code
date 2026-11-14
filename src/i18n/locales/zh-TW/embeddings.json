@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "搜尋供應商已限制請求速率。供應商的等待時間結束後，索引將自動恢復。",
 	"authenticationFailed": "建立內嵌失敗：驗證失敗。請檢查您的 API 金鑰。",
 	"failedWithStatus": "嘗試 {{attempts}} 次後建立內嵌失敗：HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "嘗試 {{attempts}} 次後建立內嵌失敗：{{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "無法建立服務：程式碼索引未正確設定"
 	},
 	"orchestrator": {
+		"providerWaiting": "正在等待 {{service}}；索引將自動恢復",
+		"providerWaitingUntil": "正在等待 {{service}}；索引將於 {{time}} 自動恢復",
+		"indexingFilesFailed": "仍有檔案失敗。沒有待執行的自動重試。部分索引可供使用。",
+		"indexingStopping": "正在停止索引...",
 		"indexingFailedNoBlocks": "索引失敗：沒有程式碼區塊被成功索引。這通常表示 Embedder 設定問題。",
 		"fileWatcherStarted": "檔案監控已啟動。",
 		"fileWatcherStopped": "檔案監控已停止。",
@@ -64,7 +69,8 @@
 		"unknownError": "未知錯誤",
 		"indexingRequiresWorkspace": "索引需要開啟的工作區資料夾",
 		"indexingStopped": "使用者已停止索引。",
-		"indexingStoppedPartial": "索引已停止。部分索引資料已保留。"
+		"indexingStoppedPartial": "索引已停止。部分索引資料已保留。",
+		"cacheReadFailed": "無法讀取程式碼索引快取。現有索引資料已保留。重新啟動索引以重試。"
 	},
 	"semble": {
 		"downloadingBinary": "正在下載 semble 二進位檔...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "下載 semble 失敗：{{errorMessage}}",
 		"checkFailed": "Semble 檢查失敗：{{errorMessage}}",
 		"providerReset": "Semble 提供者已重設。磁碟快取將保留至下次重建。"
-	}
+	},
+	"quotaExceeded": "已達內嵌供應商的配額或計費上限。檢查方案或帳務資訊，然後重新啟動索引。"
 }

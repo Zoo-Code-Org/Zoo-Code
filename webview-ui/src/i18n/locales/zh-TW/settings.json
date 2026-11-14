@@ -193,9 +193,28 @@
 		"description": "設定用於快速操作的支援提示詞，如增強提示詞、解釋程式碼和修復問題。這些提示詞幫助 Zoo 為常見開發工作提供更好的支援。"
 	},
 	"codeIndex": {
+		"providerWaiting": "正在等待 {{service}}；索引將自動恢復",
+		"providerWaitingUntil": "正在等待 {{service}}；索引將於 {{time}} 自動恢復",
+		"providerPaused": "正在等待 {{service}}",
+		"providerPausedUntil": "正在等待 {{service}}，直到 {{time}}",
 		"title": "程式碼庫索引",
 		"description": "設定程式碼庫索引設定以啟用專案的語意搜尋。<0>了解更多</0>",
 		"statusTitle": "狀態",
+		"indexingFilesRetrying": "索引失敗的檔案數：{{count}}。正在重試 {{path}}：{{reason}}",
+		"indexingFilesFailed": "索引失敗的檔案數：{{count}}。{{path}} 的自動重試已結束：{{reason}}",
+		"failedFileDetails": "失敗檔案詳細資訊",
+		"failedFileReason": "原因",
+		"failedFileStates": {
+			"retrying": "等待自動重試",
+			"exhausted": "自動重試已結束"
+		},
+		"failedFileActivities": {
+			"read": "讀取檔案",
+			"parse": "剖析檔案",
+			"embed": "建立嵌入向量",
+			"upsert": "儲存已索引的區塊",
+			"delete": "移除已索引的區塊"
+		},
 		"enableLabel": "啟用程式碼庫索引",
 		"enableDescription": "啟用程式碼索引以改進搜尋和上下文理解",
 		"embedderProviderLabel": "嵌入器供應商",
@@ -259,6 +278,7 @@
 		"saving": "儲存中...",
 		"saveSettings": "儲存",
 		"indexingStatuses": {
+			"stopping": "正在停止",
 			"standby": "待命",
 			"indexing": "索引中",
 			"indexed": "已索引",

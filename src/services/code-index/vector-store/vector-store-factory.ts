@@ -4,9 +4,10 @@ import type { CodeIndexConfig } from "../interfaces/config"
 import type { IVectorStore } from "../interfaces"
 import type { IVectorStoreFactory } from "../interfaces/vector-store-factory"
 import { QdrantVectorStore } from "./qdrant-client"
+import type { ProviderPacerRegistry } from "../provider-pacer"
 
 export class VectorStoreFactory implements IVectorStoreFactory {
-	public create(config: CodeIndexConfig, workspacePath: string): IVectorStore {
+	public create(config: CodeIndexConfig, workspacePath: string, pacers: ProviderPacerRegistry): IVectorStore {
 		if (config.embedderProvider === "semble") {
 			throw new Error(
 				"Semble provider handles its own vector storage. Do not call createVectorStore() for semble — use SembleProvider instead.",
@@ -19,7 +20,7 @@ export class VectorStoreFactory implements IVectorStoreFactory {
 			throw new Error(t("embeddings:serviceFactory.qdrantUrlMissing"))
 		}
 
-		return new QdrantVectorStore(workspacePath, config.qdrantUrl, vectorSize, config.qdrantApiKey)
+		return new QdrantVectorStore(workspacePath, config.qdrantUrl, vectorSize, config.qdrantApiKey, pacers)
 	}
 
 	private resolveVectorSize(config: CodeIndexConfig): number {

@@ -3530,14 +3530,9 @@ export const webviewMessageHandler = async (
 
 					const currentState = manager.state
 					if (currentState === "Standby" || currentState === "Error") {
+						// Detached: a full scan must not block the message handler. From Error, the manager
+						// itself recovers, re-initializes and starts.
 						void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
-
-						if (!manager.isInitialized) {
-							await manager.initialize(provider.contextProxy)
-							if (manager.state === "Standby" || manager.state === "Error") {
-								void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
-							}
-						}
 					}
 				}
 			} catch (error) {
@@ -3552,7 +3547,7 @@ export const webviewMessageHandler = async (
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
 				}
-				scope.codeIndexManager.stopIndexing()
+				await scope.codeIndexManager.stopIndexing()
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
 					values: scope.codeIndexManager.getCurrentStatus(),
@@ -3594,7 +3589,7 @@ export const webviewMessageHandler = async (
 					const wasEnabled = priorStates.get(m)!
 					const isNowEnabled = m.isWorkspaceEnabled
 					if (wasEnabled && !isNowEnabled) {
-						m.stopIndexing()
+						await m.stopIndexing()
 					} else if (!wasEnabled && isNowEnabled && m.isFeatureEnabled && m.isFeatureConfigured) {
 						await m.initialize(provider.contextProxy)
 						void m.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))

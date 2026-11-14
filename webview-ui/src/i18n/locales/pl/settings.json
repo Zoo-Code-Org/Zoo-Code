@@ -169,6 +169,10 @@
 		"description": "Skonfiguruj podpowiedzi wsparcia używane do szybkich działań, takich jak ulepszanie podpowiedzi, wyjaśnianie kodu i rozwiązywanie problemów. Te podpowiedzi pomagają Zoo zapewnić lepsze wsparcie dla typowych zadań programistycznych."
 	},
 	"codeIndex": {
+		"providerWaiting": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione",
+		"providerWaitingUntil": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione o {{time}}",
+		"providerPaused": "Oczekiwanie na {{service}}",
+		"providerPausedUntil": "Oczekiwanie na {{service}} do {{time}}",
 		"title": "Indeksowanie kodu",
 		"enableLabel": "Włącz indeksowanie kodu",
 		"enableDescription": "Włącz indeksowanie kodu, aby poprawić wyszukiwanie i zrozumienie kontekstu",
@@ -213,6 +217,21 @@
 		},
 		"description": "Skonfiguruj ustawienia indeksowania bazy kodu, aby włączyć wyszukiwanie semantyczne w swoim projekcie. <0>Dowiedz się więcej</0>",
 		"statusTitle": "Status",
+		"indexingFilesRetrying": "Pliki z błędami indeksowania: {{count}}. Ponawianie próby dla {{path}}: {{reason}}",
+		"indexingFilesFailed": "Pliki z błędami indeksowania: {{count}}. Automatyczne ponawianie zakończone dla {{path}}: {{reason}}",
+		"failedFileDetails": "Szczegóły plików z błędami",
+		"failedFileReason": "Powód",
+		"failedFileStates": {
+			"retrying": "Oczekiwanie na automatyczne ponowienie",
+			"exhausted": "Automatyczne ponawianie zakończone"
+		},
+		"failedFileActivities": {
+			"read": "Odczyt pliku",
+			"parse": "Parsowanie pliku",
+			"embed": "Tworzenie embeddingów",
+			"upsert": "Zapisywanie zaindeksowanych bloków",
+			"delete": "Usuwanie zaindeksowanych bloków"
+		},
 		"embedderProviderLabel": "Dostawca Embeddera",
 		"modelPlaceholder": "Wprowadź nazwę modelu",
 		"selectModel": "Wybierz model",
@@ -229,6 +248,7 @@
 		"saving": "Zapisywanie...",
 		"saveSettings": "Zapisz",
 		"indexingStatuses": {
+			"stopping": "Zatrzymywanie",
 			"standby": "Gotowość",
 			"indexing": "Indeksowanie",
 			"indexed": "Zaindeksowane",

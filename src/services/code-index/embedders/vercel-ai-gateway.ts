@@ -27,6 +27,10 @@ export class VercelAiGatewayEmbedder implements IEmbedder {
 	private static readonly DEFAULT_MODEL = "openai/text-embedding-3-large"
 	private readonly modelId: string
 
+	get rateLimitScope(): string {
+		return this.openAICompatibleEmbedder.rateLimitScope
+	}
+
 	/**
 	 * Creates a new Vercel AI Gateway embedder
 	 * @param apiKey The Vercel AI Gateway API key for authentication

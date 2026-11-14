@@ -1,4 +1,5 @@
 {
+	"searchProviderRateLimited": "Il provider di ricerca ha limitato la frequenza delle richieste. L’indicizzazione riprende automaticamente al termine dell’attesa del provider.",
 	"authenticationFailed": "Creazione degli embedding non riuscita: Autenticazione fallita. Controlla la tua chiave API.",
 	"failedWithStatus": "Creazione degli embedding non riuscita dopo {{attempts}} tentativi: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Creazione degli embedding non riuscita dopo {{attempts}} tentativi: {{errorMessage}}",
@@ -57,6 +58,10 @@
 		"codeIndexingNotConfigured": "Impossibile creare i servizi: L'indicizzazione del codice non è configurata correttamente"
 	},
 	"orchestrator": {
+		"providerWaiting": "In attesa di {{service}}; l’indicizzazione riprende automaticamente",
+		"providerWaitingUntil": "In attesa di {{service}}; l’indicizzazione riprende automaticamente alle {{time}}",
+		"indexingFilesFailed": "Persistono errori nei file. Nessun nuovo tentativo automatico in attesa. È disponibile un indice parziale.",
+		"indexingStopping": "Arresto dell'indicizzazione in corso...",
 		"indexingFailedNoBlocks": "Indicizzazione fallita: Nessun blocco di codice è stato indicizzato con successo. Questo di solito indica un problema di configurazione dell'embedder.",
 		"fileWatcherStarted": "Monitoraggio file avviato.",
 		"fileWatcherStopped": "Monitoraggio file fermato.",
@@ -64,7 +69,8 @@
 		"unknownError": "Errore sconosciuto",
 		"indexingRequiresWorkspace": "L'indicizzazione richiede una cartella di workspace aperta",
 		"indexingStopped": "Indicizzazione interrotta dall'utente.",
-		"indexingStoppedPartial": "Indicizzazione interrotta. Dati di indice parziali conservati."
+		"indexingStoppedPartial": "Indicizzazione interrotta. Dati di indice parziali conservati.",
+		"cacheReadFailed": "Impossibile leggere la cache dell'indice del codice. I dati dell'indice esistente sono stati conservati. Riavvia l'indicizzazione per riprovare."
 	},
 	"semble": {
 		"downloadingBinary": "Download del binario semble in corso...",
@@ -73,5 +79,6 @@
 		"downloadFailed": "Download di semble fallito: {{errorMessage}}",
 		"checkFailed": "Verifica di semble fallita: {{errorMessage}}",
 		"providerReset": "Provider Semble ripristinato. La cache su disco rimane fino alla prossima ricostruzione."
-	}
+	},
+	"quotaExceeded": "Quota o limite di fatturazione del provider di embedding raggiunto. Controlla il tuo piano o la fatturazione, poi riavvia l'indicizzazione."
 }

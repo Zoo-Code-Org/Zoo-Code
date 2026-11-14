@@ -2,16 +2,14 @@ import { BedrockRuntimeClient, InvokeModelCommand, InvokeModelCommandInput } fro
 import { fromIni, fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import { createProxyRoutingRequestHandler } from "../../../utils/networkProxy"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces"
-import {
-	MAX_BATCH_TOKENS,
-	MAX_ITEM_TOKENS,
-	MAX_BATCH_RETRIES as MAX_RETRIES,
-	INITIAL_RETRY_DELAY_MS as INITIAL_DELAY_MS,
-} from "../constants"
+import { MAX_BATCH_TOKENS, MAX_ITEM_TOKENS } from "../constants"
 import { getDefaultModelId } from "../../../shared/embeddingModels"
 import { Package } from "../../../shared/package"
 import { t } from "../../../i18n"
-import { withValidationErrorHandling, formatEmbeddingError } from "../shared/validation-helpers"
+import { withValidationErrorHandling, toEmbeddingError } from "../shared/validation-helpers"
+import { EmbeddingError } from "../shared/indexing-errors"
+import { retryWithPolicy } from "../shared/retry-policy"
+import { makeRateLimitScope, type ProviderPacerRegistry } from "../provider-pacer"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -21,17 +19,20 @@ import { TelemetryService } from "@roo-code/telemetry"
 export class BedrockEmbedder implements IEmbedder {
 	private bedrockClient: BedrockRuntimeClient
 	private readonly defaultModelId: string
+	readonly rateLimitScope: string
 
 	/**
 	 * Creates a new Amazon Bedrock embedder
 	 * @param region AWS region for Bedrock service (required)
 	 * @param profile AWS profile name for credentials (optional - uses default credential chain if not provided)
 	 * @param modelId Optional model ID override
+	 * @param pacers Shared rate-limit waits; validation requests honor the same pause as indexing
 	 */
 	constructor(
 		private readonly region: string,
-		private readonly profile?: string,
-		modelId?: string,
+		private readonly profile: string | undefined,
+		modelId: string | undefined,
+		private readonly pacers: ProviderPacerRegistry,
 	) {
 		if (!region) {
 			throw new Error("Region is required for AWS Bedrock embedder")
@@ -50,10 +51,13 @@ export class BedrockEmbedder implements IEmbedder {
 			userAgentAppId: `ZooCode#${Package.version}`,
 			region: this.region,
 			credentials,
+			// Retries are owned by the indexing retry policy; SDK retries would multiply its allowance.
+			maxAttempts: 1,
 			...(requestHandler && { requestHandler }),
 		})
 
 		this.defaultModelId = modelId || getDefaultModelId("bedrock")
+		this.rateLimitScope = makeRateLimitScope("bedrock", undefined, undefined, `${region}|${profile ?? ""}`)
 	}
 
 	/**
@@ -105,7 +109,7 @@ export class BedrockEmbedder implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
-				const batchResult = await this._embedBatchWithRetries(currentBatch, modelToUse)
+				const batchResult = await this._embedBatch(currentBatch, modelToUse)
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
@@ -115,73 +119,32 @@ export class BedrockEmbedder implements IEmbedder {
 		return { embeddings: allEmbeddings, usage }
 	}
 
-	/**
-	 * Helper method to handle batch embedding with retries and exponential backoff
-	 * @param batchTexts Array of texts to embed in this batch
-	 * @param model Model identifier to use
-	 * @returns Promise resolving to embeddings and usage statistics
-	 */
-	private async _embedBatchWithRetries(
+	/** Sends one request per text; retries and rate-limit waits belong to the caller's retry policy and pacer. */
+	private async _embedBatch(
 		batchTexts: string[],
 		model: string,
 	): Promise<{ embeddings: number[][]; usage: { promptTokens: number; totalTokens: number } }> {
-		for (let attempts = 0; attempts < MAX_RETRIES; attempts++) {
-			try {
-				const embeddings: number[][] = []
-				let totalPromptTokens = 0
-				let totalTokens = 0
+		try {
+			const embeddings: number[][] = []
+			let totalTokens = 0
 
-				// Process each text in the batch
-				// Note: Amazon Titan models typically don't support batch embedding in a single request
-				// So we process them individually
-				for (const text of batchTexts) {
-					const embedding = await this._invokeEmbeddingModel(text, model)
-					embeddings.push(embedding.embedding)
-					totalPromptTokens += embedding.inputTextTokenCount || 0
-					totalTokens += embedding.inputTextTokenCount || 0
-				}
-
-				return {
-					embeddings,
-					usage: {
-						promptTokens: totalPromptTokens,
-						totalTokens,
-					},
-				}
-			} catch (error: any) {
-				const hasMoreAttempts = attempts < MAX_RETRIES - 1
-
-				// Check if it's a rate limit error
-				if (error.name === "ThrottlingException" && hasMoreAttempts) {
-					const delayMs = INITIAL_DELAY_MS * Math.pow(2, attempts)
-					console.warn(
-						t("embeddings:rateLimitRetry", {
-							delayMs,
-							attempt: attempts + 1,
-							maxRetries: MAX_RETRIES,
-						}),
-					)
-					await new Promise((resolve) => setTimeout(resolve, delayMs))
-					continue
-				}
-
-				// Capture telemetry before reformatting the error
-				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-					error: error instanceof Error ? error.message : String(error),
-					stack: error instanceof Error ? error.stack : undefined,
-					location: "BedrockEmbedder:_embedBatchWithRetries",
-					attempt: attempts + 1,
-				})
-
-				// Log the error for debugging
-				console.error(`Bedrock embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`, error)
-
-				// Format and throw the error
-				throw formatEmbeddingError(error, MAX_RETRIES)
+			// Amazon Titan models typically don't support batch embedding in a single request.
+			for (const text of batchTexts) {
+				const embedding = await this._invokeEmbeddingModel(text, model)
+				embeddings.push(embedding.embedding)
+				totalTokens += embedding.inputTextTokenCount || 0
 			}
-		}
 
-		throw new Error(t("embeddings:failedMaxAttempts", { attempts: MAX_RETRIES }))
+			return { embeddings, usage: { promptTokens: totalTokens, totalTokens } }
+		} catch (error) {
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+				location: "BedrockEmbedder:_embedBatch",
+			})
+			console.error("Bedrock embedder error:", error)
+			throw toEmbeddingError(asRateLimit(error))
+		}
 	}
 
 	/**
@@ -289,8 +252,18 @@ export class BedrockEmbedder implements IEmbedder {
 	async validateConfiguration(): Promise<{ valid: boolean; error?: string }> {
 		return withValidationErrorHandling(async () => {
 			try {
-				// Test with a minimal embedding request
-				const result = await this._invokeEmbeddingModel("test", this.defaultModelId)
+				// Temporary server, connection and throttling failures recover instead of failing validation.
+				const result = await retryWithPolicy(
+					() =>
+						this.pacers.get(this.rateLimitScope).run(undefined, undefined, async () => {
+							try {
+								return await this._invokeEmbeddingModel("test", this.defaultModelId)
+							} catch (error) {
+								throw asRateLimit(error)
+							}
+						}),
+					{ budget: { retriesUsed: 0 } },
+				)
 
 				// Check if we got a valid response
 				if (!result.embedding || result.embedding.length === 0) {
@@ -301,7 +274,8 @@ export class BedrockEmbedder implements IEmbedder {
 				}
 
 				return { valid: true }
-			} catch (error: any) {
+			} catch (caught: any) {
+				const error = caught?.cause ?? caught
 				// Check for specific AWS errors
 				if (error.name === "UnrecognizedClientException") {
 					return {
@@ -340,4 +314,12 @@ export class BedrockEmbedder implements IEmbedder {
 			name: "bedrock",
 		}
 	}
+}
+
+// The AWS SDK reports throttling by name; give it a 429 so the shared classifier treats it as a rate limit.
+function asRateLimit(error: unknown): unknown {
+	if (error instanceof Error && error.name === "ThrottlingException") {
+		return new EmbeddingError(error.message, error, { classification: "rate-limit", statusCode: 429 })
+	}
+	return error
 }

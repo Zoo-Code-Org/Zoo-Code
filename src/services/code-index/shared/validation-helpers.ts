@@ -1,5 +1,6 @@
 import { t } from "../../../i18n"
 import { serializeError } from "serialize-error"
+import { EmbeddingError, isQuotaError } from "./indexing-errors"
 
 /**
  * Sanitizes error messages by removing sensitive information like file paths and URLs
@@ -205,6 +206,17 @@ export async function withValidationErrorHandling<T extends { valid: boolean; er
 /**
  * Formats an embedding error message based on the error type and context
  */
+/**
+ * Formats a single-attempt embedding failure; the raw error stays in `cause` so retry classification can read
+ * its status and Retry-After headers.
+ */
+export function toEmbeddingError(error: unknown): EmbeddingError {
+	if (error instanceof EmbeddingError) return error
+	if (isQuotaError(error))
+		return new EmbeddingError(t("embeddings:quotaExceeded"), error, { classification: "permanent" })
+	return new EmbeddingError(formatEmbeddingError(error, 1).message, error)
+}
+
 export function formatEmbeddingError(error: any, maxRetries: number): Error {
 	const errorMessage = extractErrorMessage(error)
 	const statusCode = extractStatusCode(error)
