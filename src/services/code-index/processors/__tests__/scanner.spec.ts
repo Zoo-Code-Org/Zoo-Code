@@ -549,23 +549,28 @@ describe("DirectoryScanner", () => {
 			expect(failures.list()).toEqual([])
 		})
 
+		function createScannerWithFailures() {
+			const failures = new FileFailureRegistry()
+			const failureScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			return { failures, failureScanner }
+		}
+
 		it.each([
 			{ truncated: true, removed: false },
 			{ truncated: false, removed: true },
 		])(
 			"failure-only file with truncated listing=$truncated is removed=$removed",
 			async ({ truncated, removed }) => {
-				const failures = new FileFailureRegistry()
-				const truncationScanner = new DirectoryScanner(
-					mockEmbedder,
-					mockVectorStore,
-					mockCodeParser,
-					mockCacheManager,
-					mockIgnoreInstance,
-					undefined,
-					failures,
-					new ProviderPacerRegistry(),
-				)
+				const { failures, failureScanner: truncationScanner } = createScannerWithFailures()
 				const { listFiles } = await import("../../../glob/list-files")
 				vi.mocked(listFiles).mockResolvedValue([[], truncated])
 				const relativePath = nodePath.normalize("src/unlisted.js")
@@ -579,32 +584,27 @@ describe("DirectoryScanner", () => {
 			},
 		)
 
-		it("removes a listed failure-only file confirmed missing even when the listing is truncated", async () => {
-			const failures = new FileFailureRegistry()
-			const truncationScanner = new DirectoryScanner(
-				mockEmbedder,
-				mockVectorStore,
-				mockCodeParser,
-				mockCacheManager,
-				mockIgnoreInstance,
-				undefined,
-				failures,
-				new ProviderPacerRegistry(),
-			)
-			const { listFiles } = await import("../../../glob/list-files")
-			vi.mocked(listFiles).mockResolvedValue([["test/vanished.js"], true])
-			vi.mocked(stat).mockRejectedValueOnce(Object.assign(new Error("gone"), { code: "ENOENT" }))
-			const relativePath = nodePath.normalize("test/vanished.js")
-			failures.renew(relativePath, "h")
-			failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+		it.each(["stat", "read"] as const)(
+			"removes a listed failure-only file missing at %s even when the listing is truncated",
+			async (stage) => {
+				const { failures, failureScanner: truncationScanner } = createScannerWithFailures()
+				const { listFiles } = await import("../../../glob/list-files")
+				vi.mocked(listFiles).mockResolvedValue([["test/vanished.js"], true])
+				const missing = Object.assign(new Error("gone"), { code: "ENOENT" })
+				if (stage === "stat") vi.mocked(stat).mockRejectedValueOnce(missing)
+				else vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(missing)
+				const relativePath = nodePath.normalize("test/vanished.js")
+				failures.renew(relativePath, "h")
+				failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
 
-			await truncationScanner.scanDirectory("/test")
+				await truncationScanner.scanDirectory("/test")
 
-			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
-			expect(failures.list()).toEqual([])
-		})
+				expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+				expect(failures.list()).toEqual([])
+			},
+		)
 
-		it("drains queued writes and propagates an aborted write's error while a parse is pending", async () => {
+		it("drains queued writes and rejects with the abort reason while a parse is pending", async () => {
 			const { listFiles } = await import("../../../glob/list-files")
 			vi.mocked(listFiles).mockResolvedValue([["test/file1.js", "test/file2.js"], false])
 			const controller = new AbortController()
@@ -637,7 +637,7 @@ describe("DirectoryScanner", () => {
 
 			await expect(
 				scanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal),
-			).rejects.toBe(abortError)
+			).rejects.toBe(controller.signal.reason)
 		})
 
 		it("records a non-missing read error as a read failure", async () => {
