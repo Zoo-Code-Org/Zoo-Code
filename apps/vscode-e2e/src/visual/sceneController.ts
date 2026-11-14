@@ -13,6 +13,11 @@ import {
 import { isCompletedAsk } from "../suite/utils"
 
 const POLL_INTERVAL_MS = 100
+
+/** The parts of the built-in Git extension API (`vscode.git`, version 1) that the scm scene reads. */
+interface GitExtension {
+	getAPI(version: 1): { repositories: Array<{ state: { indexChanges: unknown[] } }> }
+}
 const SCENE_TIMEOUT_MS = 60_000
 
 const themeKinds: Record<string, vscode.ColorThemeKind> = {
@@ -68,7 +73,9 @@ export async function run(): Promise<void> {
 	}
 	const log = (message: string) => fs.appendFile(logPath, `${message}\n`, "utf8")
 	await log(`scene=${scene} theme=${themeId}`)
-	if (scene !== "welcome" && scene !== "chat") throw new Error(`Unknown Electron visual scene: ${scene}`)
+	if (scene !== "welcome" && scene !== "chat" && scene !== "scm") {
+		throw new Error(`Unknown Electron visual scene: ${scene}`)
+	}
 	if (!themeKinds[themeId]) throw new Error(`Unsupported Electron visual theme: ${themeId}`)
 
 	const extension = vscode.extensions.getExtension<RooCodeTestAPI>("ZooCodeOrganization.zoo-code")
@@ -145,6 +152,25 @@ export async function run(): Promise<void> {
 			if (completionHandler) api.off(RooCodeEventName.Message, completionHandler)
 		}
 		landmark = result
+	}
+
+	if (scene === "scm") {
+		// Show view title actions without hover, so the screenshot does not depend on the pointer.
+		await vscode.workspace
+			.getConfiguration("workbench.view")
+			.update("alwaysShowHeaderActions", true, vscode.ConfigurationTarget.Global)
+		const gitExtension = vscode.extensions.getExtension<GitExtension>("vscode.git")
+		if (!gitExtension) throw new Error("The built-in Git extension is not available")
+		const git = (gitExtension.isActive ? gitExtension.exports : await gitExtension.activate()).getAPI(1)
+		await poll(
+			async () => git.repositories.map((repository) => repository.state.indexChanges.length),
+			(stagedCounts) => stagedCounts.length === 1 && stagedCounts[0] === 1,
+			"one Git repository with one staged file",
+		)
+		await vscode.commands.executeCommand("workbench.view.scm")
+		await log("scm-ready")
+		landmark = process.env.ROO_CODE_VISUAL_SCM_ACTION_TITLE ?? ""
+		if (!landmark) throw new Error("The Source Control action title is required for the scm scene")
 	}
 
 	await fs.writeFile(

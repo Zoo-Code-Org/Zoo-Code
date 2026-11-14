@@ -18,6 +18,7 @@
 	"command.showRipgrepDiagnostic.title": "Mostra el diagnòstic de Ripgrep",
 	"command.createDiagnosticsReport.title": "Crea un informe de diagnòstic",
 	"command.toggleAutoApprove.title": "Alternar Auto-Aprovació",
+	"command.generateGitCommitMessage.title": "Generar Missatge de Commit (Zoo Code)",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",

@@ -100,6 +100,10 @@ vi.mock("../../services/diagnostics", () => ({
 	createDiagnosticsReport: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock("../../services/git/commitMessageGenerator", () => ({
+	generateCommitMessage: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe("getVisibleProviderOrLog", () => {
 	let mockOutputChannel: vscode.OutputChannel
 
@@ -279,6 +283,32 @@ describe("registerCommands handlers", () => {
 			context: mockContext,
 			outputChannel: mockOutputChannel,
 			providers,
+		})
+	})
+
+	it("generateGitCommitMessage calls generateCommitMessage with visible provider and context", async () => {
+		const { generateCommitMessage } = await import("../../services/git/commitMessageGenerator")
+		const mockScmContext = { rootUri: { fsPath: "/mock/repo" } }
+
+		await handlers["zoo-code.generateGitCommitMessage"](mockScmContext)
+
+		expect(generateCommitMessage).toHaveBeenCalledWith({
+			provider: mockVisibleProviderInstance,
+			outputChannel: mockOutputChannel,
+			context: mockScmContext,
+		})
+	})
+
+	it("generateGitCommitMessage falls back to default provider when no visible provider", async () => {
+		const { generateCommitMessage } = await import("../../services/git/commitMessageGenerator")
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.generateGitCommitMessage"]()
+
+		expect(generateCommitMessage).toHaveBeenCalledWith({
+			provider: mockProvider,
+			outputChannel: mockOutputChannel,
+			context: undefined,
 		})
 	})
 

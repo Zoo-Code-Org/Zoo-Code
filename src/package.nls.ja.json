@@ -27,6 +27,7 @@
 	"command.showRipgrepDiagnostic.title": "Ripgrep 診断を表示",
 	"command.createDiagnosticsReport.title": "診断レポートを作成",
 	"command.toggleAutoApprove.title": "自動承認を切替",
+	"command.generateGitCommitMessage.title": "コミットメッセージの生成 (Zoo Code)",
 	"configuration.title": "Zoo Code",
 	"commands.allowedCommands.description": "'常に実行操作を承認する'が有効な場合に自動実行できるコマンド",
 	"commands.deniedCommands.description": "承認を求めずに自動的に拒否されるコマンドプレフィックス。許可されたコマンドとの競合がある場合、最長プレフィックスマッチが優先されます。すべてのコマンドを拒否するには * を追加してください。",
