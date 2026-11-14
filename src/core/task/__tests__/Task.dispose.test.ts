@@ -139,8 +139,7 @@ describe("Task dispose method", () => {
 			// authority over a file has to stay separate.
 			other.observationRegistry.observe("/workspace/a.ts", "v1", true)
 			expect(other.observationRegistry.get("/workspace/a.ts")?.version).toBe("v1")
-			expect(task.observationRegistry.has("/workspace/a.ts")).toBe(false)
-			expect(task.observationRegistry.size).toBe(0)
+			expect(task.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
 		} finally {
 			void other.dispose().catch(() => {})
 		}
@@ -152,20 +151,20 @@ describe("Task dispose method", () => {
 		// captured before teardown must not survive as authority for a guarded write.
 		task.observationRegistry.observe("/workspace/a.ts", "v1", true)
 		task.observationRegistry.observe("/workspace/b.ts", "v2", false)
-		expect(task.observationRegistry.size).toBe(2)
+		expect(task.observationRegistry.get("/workspace/a.ts")?.version).toBe("v1")
+		expect(task.observationRegistry.get("/workspace/b.ts")?.version).toBe("v2")
 
 		await task.dispose()
 
-		expect(task.observationRegistry.size).toBe(0)
-		expect(task.observationRegistry.has("/workspace/a.ts")).toBe(false)
 		expect(task.observationRegistry.get("/workspace/b.ts")).toBeUndefined()
+		expect(task.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
 
 		// A read that was still awaiting I/O when disposal began resumes afterwards. Its
 		// observation must not land in a retired registry, or the disposed Task would be
 		// authoritative for that file again.
 		expect(task.observationRegistry.closed).toBe(true)
 		task.observationRegistry.observe("/workspace/late.ts", "v3", true)
-		expect(task.observationRegistry.size).toBe(0)
+		expect(task.observationRegistry.get("/workspace/late.ts")).toBeUndefined()
 	})
 
 	test("should reject the memoized completion promise when disposal cannot start", async () => {

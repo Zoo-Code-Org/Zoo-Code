@@ -1762,6 +1762,46 @@ describe("Cline", () => {
 				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig })
 			}).toThrow("Either historyItem or task/images must be provided")
 		})
+
+		it("keeps the observation registry private to each task in a parent/subtask pair", () => {
+			// The write guard compares an observed token against the file on disk, so a
+			// subtask must neither inherit nor overwrite what the parent observed: each
+			// Task builds its own registry rather than borrowing the parent's.
+			const parent = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "parent task",
+				startTask: false,
+			})
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "child task",
+				parentTask: parent,
+				rootTask: parent,
+				startTask: false,
+			})
+
+			// The constructor records the parent object plus the root/parent ids; the
+			// rootTask object field is filled in by callers (ClineProvider), not by the
+			// constructor, so the id link is what this boundary can assert.
+			expect(child.parentTask).toBe(parent)
+			expect(child.parentTaskId).toBe(parent.taskId)
+			expect(child.rootTaskId).toBe(parent.taskId)
+			expect(child.observationRegistry).not.toBe(parent.observationRegistry)
+
+			// The same path recorded in both tasks, with different tokens.
+			parent.observationRegistry.observe("/workspace/shared.ts", "1:2:3:4:5")
+			child.observationRegistry.observe("/workspace/shared.ts", "9:8:7:6:5")
+
+			expect(parent.observationRegistry.get("/workspace/shared.ts")?.version).toBe("1:2:3:4:5")
+			expect(child.observationRegistry.get("/workspace/shared.ts")?.version).toBe("9:8:7:6:5")
+
+			// Neither direction leaks: dropping the child's entry leaves the parent's.
+			child.observationRegistry.forget("/workspace/shared.ts")
+			expect(child.observationRegistry.get("/workspace/shared.ts")).toBeUndefined()
+			expect(parent.observationRegistry.get("/workspace/shared.ts")?.version).toBe("1:2:3:4:5")
+		})
 	})
 
 	describe("updateApiConfiguration", () => {
