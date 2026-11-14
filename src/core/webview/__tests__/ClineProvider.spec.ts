@@ -4394,6 +4394,42 @@ describe("ClineProvider", () => {
 		expect(state.alwaysDenyUnapprovedCommands).toBe(false)
 	})
 
+	describe("getStateToPostToWebview contextWindow", () => {
+		const addTaskWithModel = async (getModel: () => { id: string; info: { contextWindow: number } }) => {
+			const task = new Task(defaultTaskOptions)
+			Object.assign(task, { api: { getModel } })
+			await provider.addClineToStack(task)
+		}
+
+		test("returns the current task's resolved model context window", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await addTaskWithModel(() => ({ id: "static-model", info: { contextWindow: 1_048_576 } }))
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.contextWindow).toBe(1_048_576)
+		})
+
+		test("omits the context window when no task is active", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.contextWindow).toBeUndefined()
+		})
+
+		test("omits the context window instead of failing when the handler throws", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await addTaskWithModel(() => {
+				throw new Error("handler rebuilding")
+			})
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.contextWindow).toBeUndefined()
+		})
+	})
+
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"

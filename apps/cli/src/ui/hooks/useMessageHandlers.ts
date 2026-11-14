@@ -40,7 +40,7 @@ export function useMessageHandlers({ nonInteractive }: UseMessageHandlersOptions
 		setAvailableModes,
 		setCurrentMode,
 		setTokenUsage,
-		setRouterModels,
+		setContextWindow,
 		setTaskHistory,
 		currentTodos,
 		setTodos,
@@ -315,6 +315,10 @@ export function useMessageHandlers({ nonInteractive }: UseMessageHandlersOptions
 					setCurrentMode(newMode)
 				}
 
+				// The extension resolves the current task's model and reports its context window.
+				// When no task is active it's undefined (nothing uses the value when no task is active)
+				setContextWindow(state.contextWindow ?? null)
+
 				// Extract and update task history from state
 				const newTaskHistory = state.taskHistory
 
@@ -382,10 +386,6 @@ export function useMessageHandlers({ nonInteractive }: UseMessageHandlersOptions
 				setAllSlashCommands((msg.commands as SlashCommandResult[]) || [])
 			} else if (msg.type === "modes") {
 				setAvailableModes((msg.modes as ModeResult[]) || [])
-			} else if (msg.type === "routerModels") {
-				if (msg.routerModels) {
-					setRouterModels(msg.routerModels)
-				}
 			}
 		},
 		[
@@ -396,7 +396,7 @@ export function useMessageHandlers({ nonInteractive }: UseMessageHandlersOptions
 			setAvailableModes,
 			setCurrentMode,
 			setTokenUsage,
-			setRouterModels,
+			setContextWindow,
 			setTaskHistory,
 		],
 	)

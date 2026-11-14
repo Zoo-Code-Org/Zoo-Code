@@ -3335,6 +3335,12 @@ export class ClineProvider
 		}
 		const currentTaskApiConfigName = currentTask?.taskApiConfigName
 		const currentTaskApiConfiguration = currentTask?.apiConfiguration
+		let contextWindow: number | undefined
+		try {
+			contextWindow = currentTask?.api?.getModel().info.contextWindow
+		} catch {
+			// The handler may be mid-rebuild; omit the window for this post rather than failing the whole state.
+		}
 		let zooCodeState: {
 			zooCodeIsAuthenticated: boolean
 			zooCodeUserName: string | undefined
@@ -3370,6 +3376,7 @@ export class ClineProvider
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
 			apiConfiguration: currentTaskApiConfiguration ?? apiConfiguration,
+			contextWindow,
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,

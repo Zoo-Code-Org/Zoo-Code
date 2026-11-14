@@ -362,6 +362,12 @@ export type ExtensionState = Pick<
 	currentTaskItem?: HistoryItem
 	currentTaskTodos?: TodoItem[] // Initial todos for the current task
 	apiConfiguration: ProviderSettings
+	/**
+	 * Context window (in tokens) of the current task's resolved model, as computed by the
+	 * extension's provider handler. Covers static and router providers alike, so consumers
+	 * (e.g. the CLI) need no provider-specific model lookup. Undefined when no task is active.
+	 */
+	contextWindow?: number
 	uriScheme?: string
 	shouldShowAnnouncement: boolean
 
