@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "索引需要打开的工作区文件夹",
 		"indexingStopped": "用户已停止索引。",
 		"indexingStoppedPartial": "索引已停止。部分索引数据已保留。",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "无法读取代码索引缓存。现有索引数据已保留。重新启动索引以重试。"
 	},
 	"semble": {
 		"downloadingBinary": "正在下载 semble 二进制文件...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Semble 检查失败：{{errorMessage}}",
 		"providerReset": "Semble 提供程序已重置。磁盘缓存将保留至下次重建。"
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "已达到嵌入提供商的配额或计费上限。检查套餐或计费信息，然后重新启动索引。"
 }

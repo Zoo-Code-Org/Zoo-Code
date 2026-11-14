@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "Indeksowanie wymaga otwartego folderu workspace",
 		"indexingStopped": "Indeksowanie zatrzymane przez użytkownika.",
 		"indexingStoppedPartial": "Indeksowanie zatrzymane. Częściowe dane indeksu zachowane.",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "Nie udało się odczytać pamięci podręcznej indeksu kodu. Istniejące dane indeksu zostały zachowane. Uruchom indeksowanie ponownie, aby spróbować jeszcze raz."
 	},
 	"semble": {
 		"downloadingBinary": "Pobieranie binariów semble...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Sprawdzenie semble nie powiodło się: {{errorMessage}}",
 		"providerReset": "Dostawca Semble zresetowany. Pamięć podręczna na dysku pozostaje do kolejnej przebudowy."
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "Osiągnięto limit wykorzystania lub rozliczeń u dostawcy osadzeń. Sprawdź swój plan lub rozliczenia, a następnie uruchom indeksowanie ponownie."
 }

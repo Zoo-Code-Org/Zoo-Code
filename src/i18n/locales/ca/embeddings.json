@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "Indexació requereix una carpeta de workspace oberta",
 		"indexingStopped": "Indexació aturada per l'usuari.",
 		"indexingStoppedPartial": "Indexació aturada. Dades d'índex parcials conservades.",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "No s'ha pogut llegir la memòria cau de l'índex de codi. S'han conservat les dades de l'índex existent. Torna a iniciar la indexació per tornar-ho a provar."
 	},
 	"semble": {
 		"downloadingBinary": "Descarregant el binari de semble...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Comprovació de semble fallida: {{errorMessage}}",
 		"providerReset": "Proveïdor de Semble restablert. La memòria cau al disc es conserva fins a la propera reconstrucció."
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "S'ha arribat a la quota o al límit de facturació del proveïdor d'incrustacions. Revisa el teu pla o la facturació i torna a iniciar la indexació."
 }

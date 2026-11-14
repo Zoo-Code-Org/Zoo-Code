@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "インデックス作成には、開かれたワークスペースフォルダーが必要です",
 		"indexingStopped": "ユーザーによりインデックス作成が停止されました。",
 		"indexingStoppedPartial": "インデックス作成が停止されました。部分的なインデックスデータは保持されています。",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "コードインデックスのキャッシュを読み取れませんでした。既存のインデックスデータは保持されています。再試行するには、インデックス作成をもう一度開始してください。"
 	},
 	"semble": {
 		"downloadingBinary": "sembleバイナリをダウンロード中...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Sembleの確認に失敗しました: {{errorMessage}}",
 		"providerReset": "Sembleプロバイダーをリセットしました。次回の再構築までディスクキャッシュは残ります。"
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "埋め込みプロバイダーのクォータまたは請求上限に達しました。プランまたは請求情報を確認してから、インデックス作成をもう一度開始してください。"
 }

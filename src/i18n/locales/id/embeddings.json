@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "Pengindeksan memerlukan folder workspace yang terbuka",
 		"indexingStopped": "Pengindeksan dihentikan oleh pengguna.",
 		"indexingStoppedPartial": "Pengindeksan dihentikan. Data indeks parsial dipertahankan.",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "Tidak dapat membaca cache indeks kode. Data indeks yang ada tetap disimpan. Mulai pengindeksan lagi untuk mencoba ulang."
 	},
 	"semble": {
 		"downloadingBinary": "Mengunduh biner semble...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Pemeriksaan semble gagal: {{errorMessage}}",
 		"providerReset": "Penyedia Semble direset. Cache di disk tetap ada hingga pembangunan ulang berikutnya."
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "Kuota atau batas penagihan penyedia embeddings telah tercapai. Periksa paket atau penagihanmu, lalu mulai pengindeksan lagi."
 }

@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "Для индексации требуется открытая папка рабочего пространства",
 		"indexingStopped": "Индексация остановлена пользователем.",
 		"indexingStoppedPartial": "Индексация остановлена. Частичные данные индекса сохранены.",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "Не удалось прочитать кэш индекса кода. Существующие данные индекса сохранены. Запусти индексацию снова, чтобы повторить попытку."
 	},
 	"semble": {
 		"downloadingBinary": "Загрузка бинарного файла semble...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Проверка semble не удалась: {{errorMessage}}",
 		"providerReset": "Провайдер Semble сброшен. Дисковый кеш сохраняется до следующей пересборки."
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "Достигнута квота или лимит расходов у провайдера вложений. Проверь свой тариф или платёжные данные, затем запусти индексацию снова."
 }

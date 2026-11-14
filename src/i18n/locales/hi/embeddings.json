@@ -70,7 +70,7 @@
 		"indexingRequiresWorkspace": "इंडेक्सिंग के लिए एक खुला वर्कस्पेस फ़ोल्डर आवश्यक है",
 		"indexingStopped": "उपयोगकर्ता द्वारा इंडेक्सिंग रोकी गई।",
 		"indexingStoppedPartial": "इंडेक्सिंग रोकी गई। आंशिक इंडेक्स डेटा संरक्षित।",
-		"cacheReadFailed": "Could not read the code index cache. Existing index data was kept. Start indexing again to retry."
+		"cacheReadFailed": "कोड इंडेक्स कैश पढ़ा नहीं जा सका। मौजूदा इंडेक्स डेटा सुरक्षित रखा गया है। फिर से कोशिश करने के लिए इंडेक्सिंग दोबारा शुरू करो।"
 	},
 	"semble": {
 		"downloadingBinary": "semble बाइनरी डाउनलोड हो रहा है...",
@@ -80,5 +80,5 @@
 		"checkFailed": "Semble जाँच विफल: {{errorMessage}}",
 		"providerReset": "Semble प्रदाता रीसेट किया गया। डिस्क कैश अगले रीबिल्ड तक बना रहता है।"
 	},
-	"quotaExceeded": "Embedding provider quota or billing limit reached. Check your plan or billing, then start indexing again."
+	"quotaExceeded": "एम्बेडिंग प्रदाता का कोटा या बिलिंग सीमा पूरी हो गई है। अपना प्लान या बिलिंग जाँचो, फिर इंडेक्सिंग दोबारा शुरू करो।"
 }
