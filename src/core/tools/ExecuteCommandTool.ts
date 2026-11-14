@@ -326,6 +326,26 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// Convert agent-specified timeout from seconds to milliseconds
 			const agentTimeout = resolveAgentTimeoutMs(timeoutSeconds)
 
+			// The background-completion drain must not run before this command's
+			// tool result is published: a background command can finish during the
+			// settle delay while the result is still pending. Every site publishes
+			// through `publishToolResult`, which settles the signal with the
+			// publication outcome, so the drain skips after a failed publication.
+			// Every throw path must settle it too, or the awaiting drain hangs.
+			let settleToolResultPublished: ((published: boolean) => void) | undefined
+			const toolResultPublished = new Promise<boolean>((resolve) => {
+				settleToolResultPublished = resolve
+			})
+			const publishToolResult = (result: ToolResponse): void => {
+				try {
+					pushToolResult(result)
+				} catch (error) {
+					settleToolResultPublished?.(false)
+					throw error
+				}
+				settleToolResultPublished?.(true)
+			}
+
 			const options: ExecuteCommandOptions = {
 				executionId,
 				command: canonicalCommand,
@@ -333,17 +353,22 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				terminalShellIntegrationDisabled,
 				commandExecutionTimeout,
 				agentTimeout,
+				toolResultPublished,
 				toolCallId,
 			}
 
+			let shouldDrainQueuedMessages = false
 			try {
-				const [rejected, result] = await executeCommandInTerminal(task, options)
+				const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, options)
 
 				if (rejected) {
 					markToolRejected(task, toolCallId)
 				}
 
-				pushToolResult(result)
+				publishToolResult(result)
+				// Only drain when the command actually ran: early validation
+				// failures end the turn without an execution.
+				shouldDrainQueuedMessages = commandSubmitted
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
@@ -353,27 +378,54 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					const status: CommandExecutionStatus = { executionId, status: "fallback" }
 					postCommandExecutionStatus(provider, status)
 
-					const [rejected, result] = await executeCommandInTerminal(task, {
-						...options,
-						terminalShellIntegrationDisabled: true,
-					})
+					try {
+						const [rejected, result, commandSubmitted] = await executeCommandInTerminal(task, {
+							...options,
+							terminalShellIntegrationDisabled: true,
+						})
 
-					if (rejected) {
-						markToolRejected(task, toolCallId)
+						if (rejected) {
+							markToolRejected(task, toolCallId)
+						}
+
+						publishToolResult(result)
+						shouldDrainQueuedMessages = commandSubmitted
+					} catch (fallbackError) {
+						// The retry never published: settle before rethrowing.
+						settleToolResultPublished?.(false)
+						throw fallbackError
 					}
-
-					pushToolResult(result)
-				} else {
+				} else if (error instanceof ShellIntegrationError) {
 					// Command was submitted but shell integration lost track of it — show warning.
-					await task.say("shell_integration_warning")
-
-					if (error instanceof ShellIntegrationError) {
-						pushToolResult(
+					try {
+						await task.say("shell_integration_warning")
+						publishToolResult(
 							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
 						)
-					} else {
-						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
+					} catch (warningError) {
+						settleToolResultPublished?.(false)
+						throw warningError
 					}
+					// This arm owes the same drain the normal and fallback arms give,
+					// set only after the warning result published.
+					shouldDrainQueuedMessages = error.commandSubmitted
+				} else {
+					// Ordinary execution error (e.g. the terminal failed to start) —
+					// not a shell-integration failure, so it must not emit the
+					// shell-integration warning; surface it through the tool's error
+					// path instead. Settle first: false skips the drain.
+					settleToolResultPublished?.(false)
+					throw error
+				}
+			}
+
+			// Awaited so a failed submission is observable, and never misattributed
+			// as a shell-integration error after the result was already published.
+			if (shouldDrainQueuedMessages) {
+				try {
+					await task.processQueuedMessages()
+				} catch (error) {
+					console.error("[ExecuteCommandTool] Failed to process queued messages:", error)
 				}
 			}
 
@@ -397,6 +449,12 @@ export type ExecuteCommandOptions = {
 	terminalShellIntegrationDisabled?: boolean
 	commandExecutionTimeout?: number
 	agentTimeout?: number
+	/**
+	 * Resolves true on successful publication, false when it failed. The
+	 * background-completion drain awaits this so queued messages are never
+	 * submitted ahead of the tool result, and skips after a failure.
+	 */
+	toolResultPublished?: Promise<boolean>
 	toolCallId: string
 }
 
@@ -409,9 +467,11 @@ export async function executeCommandInTerminal(
 		terminalShellIntegrationDisabled = true,
 		commandExecutionTimeout = 0,
 		agentTimeout = 0,
+		// Direct callers without a tool-result lifecycle drain immediately.
+		toolResultPublished = Promise.resolve(true),
 		toolCallId,
 	}: ExecuteCommandOptions,
-): Promise<[boolean, ToolResponse]> {
+): Promise<[boolean, ToolResponse, boolean]> {
 	// Convert milliseconds back to seconds for display purposes.
 	const commandExecutionTimeoutSeconds = commandExecutionTimeout / 1000
 	let workingDir: string
@@ -425,7 +485,8 @@ export async function executeCommandInTerminal(
 
 	const workingDirectoryError = await commandWorkingDirectoryError(workingDir)
 	if (workingDirectoryError) {
-		return [false, workingDirectoryError]
+		// The command never ran (working directory validation failed).
+		return [false, workingDirectoryError, false]
 	}
 
 	let runInBackground = false
@@ -434,7 +495,10 @@ export async function executeCommandInTerminal(
 	let persistedResult: PersistedCommandOutput | undefined
 	let exitDetails: ExitCodeDetails | undefined
 	let shellIntegrationError: ShellIntegrationError | undefined
-
+	// Whether the command text actually reached the terminal. `shell_execution_started`
+	// fires only after `TerminalProcess.run()` called `sendText`/`executeCommand`,
+	// so it proves a timeout did not beat submission.
+	let commandSubmitted = false
 	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
 
@@ -476,6 +540,10 @@ export async function executeCommandInTerminal(
 	let lastCommandOutputEmitAt = 0
 	let pendingCommandOutputEmitTimer: NodeJS.Timeout | undefined
 	let commandOutputSayChain: Promise<void> = Promise.resolve()
+	// Outcome of the most recent `command_output` publication: the final forced
+	// one is the last queued before the background drain, so it reports whether
+	// that output reached the webview. A later success clears an earlier failure.
+	let commandOutputPublishFailed = false
 
 	const queueCommandOutputMessage = (text: string, partial: boolean, force = false): Promise<void> => {
 		if (!force && text === lastQueuedCommandOutput) {
@@ -488,8 +556,10 @@ export async function executeCommandInTerminal(
 				await task.say("command_output", text, undefined, partial, undefined, undefined, {
 					isNonInteractive: true,
 				})
+				commandOutputPublishFailed = false
 			})
 			.catch((error) => {
+				commandOutputPublishFailed = true
 				console.error("[ExecuteCommandTool] Failed to publish command output:", error)
 			})
 
@@ -575,11 +645,43 @@ export async function executeCommandInTerminal(
 			// errors here are UI-only and must not surface to the tool result.
 			commandOutputSayChain
 				.then(() => queueCommandOutputMessage(result, false, true))
+				.then(async () => {
+					// The tool returned a "still running" result and drained when the
+					// agent timeout moved the command to the background; process
+					// messages queued since then. Wait on the per-invocation
+					// publication signal: completion can land inside the settle delay.
+					if (!runInBackground) {
+						return
+					}
+					const published = await toolResultPublished
+					// A cancelled task must not drain (the guards inside
+					// processQueuedMessages would no-op anyway, and skipping avoids
+					// error-log noise on a dying task), and neither must a failed
+					// publication: handleError reports that error first.
+					if (task.abort || task.abandoned || !published) {
+						return
+					}
+					// The final `command_output` say is part of what the drain depends
+					// on: #937 requires queued feedback to be considered together with
+					// the finished command's output. A rejected say is swallowed by the
+					// chain's `.catch`, so read the recorded outcome instead.
+					if (commandOutputPublishFailed) {
+						return
+					}
+					return task.processQueuedMessages().catch((error) => {
+						console.error("[ExecuteCommandTool] Failed to process queued messages:", error)
+					})
+				})
 				.catch((error) => {
 					console.error("[ExecuteCommandTool] Failed to flush final command_output:", error)
 				})
 		},
 		onShellExecutionStarted: (pid: number | undefined) => {
+			// The terminal reported that execution began, which only happens after
+			// `TerminalProcess.run()` handed the command to the shell. This is the
+			// submission proof the timeout arm reads; a pre-start timeout leaves it
+			// false because `run()` never reached `sendText`/`executeCommand`.
+			commandSubmitted = true
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
 			postCommandExecutionStatus(provider, status)
 		},
@@ -657,9 +759,15 @@ export async function executeCommandInTerminal(
 			postCommandExecutionStatus(provider, status)
 			await task.say("error", t("common:errors:command_timeout", { seconds: commandExecutionTimeoutSeconds }))
 			task.didToolFailInCurrentTurn = true
+			// Report the tracked submission, not an unconditional true: a timeout
+			// that beat shell integration means `TerminalProcess.run()` never
+			// called `sendText`/`executeCommand`, so nothing ran and the caller
+			// must not drain queued feedback against a command that never started.
 			return [
 				false,
 				`The command was terminated after exceeding a user-configured ${commandExecutionTimeoutSeconds}s timeout. Do not try to re-run the command.`,
+
+				commandSubmitted,
 			]
 		}
 		throw error
@@ -695,7 +803,7 @@ export async function executeCommandInTerminal(
 
 		// Use persisted output format when output was truncated and spilled to disk
 		if (persistedResult?.truncated) {
-			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir)]
+			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir), true]
 		}
 
 		// Use inline format for small outputs (original behavior with exit status).
@@ -710,6 +818,7 @@ export async function executeCommandInTerminal(
 		return [
 			false,
 			`Command executed in terminal within working directory '${currentWorkingDir}'. ${exitStatus}\nOutput:\n${result}`,
+			true,
 		]
 	} else {
 		return [
@@ -719,6 +828,8 @@ export async function executeCommandInTerminal(
 				result.length > 0 ? `Here's the output so far:\n${result}\n` : "\n",
 				"You will be updated on the terminal status and new output in the future.",
 			].join("\n"),
+
+			true,
 		]
 	}
 }

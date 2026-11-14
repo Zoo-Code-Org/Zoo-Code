@@ -229,7 +229,9 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 			this.resetPartialState()
 
 			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[SearchReplaceTool] Failed to process queued messages:", error)
+			})
 		} catch (error) {
 			await handleError("search and replace", error as Error)
 			await task.diffViewProvider.reset()
