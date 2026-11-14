@@ -5,7 +5,14 @@ import type { ModelInfo } from "@roo-code/types"
 import { parseApiPrice } from "../../../shared/cost"
 import { toRequestyServiceUrl } from "../../../shared/utils/requesty"
 
-import { throwIfAborted } from "../utils/abort-signal"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "../utils/abort-signal"
+
+// Bounded wall-clock limit for the models discovery request. Without it a hung connection
+// would keep the request alive indefinitely. The 10_000 ms figure matches the two
+// in-tree fetchers that bound the same call: io-intelligence.ts (axios timeout: 10_000) and
+// kimi-code.ts (KIMI_CODE_MODELS_TIMEOUT_MS = 10_000). kenari, opencode-go and nanogpt do not
+// bound this call at all, so they are not the precedent.// fetchers (kenari, opencode-go, nanogpt).
+const REQUESTY_MODELS_TIMEOUT_MS = 10_000
 
 export async function getRequestyModels(
 	baseUrl?: string,
@@ -13,6 +20,8 @@ export async function getRequestyModels(
 	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
+	// Wall-clock deadline merged into the request signal so the fetch is bounded end to end.
+	const requestSignal = mergeAbortSignalAndTimeout(opts?.signal, REQUESTY_MODELS_TIMEOUT_MS)
 
 	try {
 		const headers: Record<string, string> = {}
@@ -24,7 +33,14 @@ export async function getRequestyModels(
 		const resolvedBaseUrl = toRequestyServiceUrl(baseUrl)
 		const modelsUrl = new URL("v1/models", resolvedBaseUrl)
 
-		const response = await axios.get(modelsUrl.toString(), { headers, signal: opts?.signal })
+		// Axios's own timeout resets once response headers arrive (follow-redirects),
+		// so a slow body could outlive REQUESTY_MODELS_TIMEOUT_MS; requestSignal above
+		// carries the wall-clock deadline.
+		const response = await axios.get(modelsUrl.toString(), {
+			headers,
+			signal: requestSignal,
+			timeout: REQUESTY_MODELS_TIMEOUT_MS,
+		})
 		const rawModels = response.data.data
 
 		for (const rawModel of rawModels) {
@@ -84,11 +100,22 @@ export async function getRequestyModels(
 			models[rawModel.id] = modelInfo
 		}
 	} catch (error) {
-		// Surface cancellation as a rejection: logging and returning here would
+		// Surface a caller cancellation as a rejection: logging and returning here would
 		// present an aborted fetch to callers as a successful (partial) catalog.
 		throwIfAborted(opts?.signal)
 
-		console.error(`Error fetching Requesty models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+		if (requestSignal?.aborted) {
+			// The wall-clock deadline (not a caller abort) fired. Callers intentionally fall back
+			// to the cached/default model info, so keep returning the partial map but log the
+			// dedicated timeout so a hung discovery is observable.
+			console.error(
+				`Requesty models discovery timed out after ${REQUESTY_MODELS_TIMEOUT_MS}ms; falling back to cached/default model info`,
+			)
+		} else {
+			console.error(
+				`Error fetching Requesty models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+			)
+		}
 	}
 
 	return models
