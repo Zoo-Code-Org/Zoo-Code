@@ -43,6 +43,8 @@ import {
 	ImageGenerationProvider,
 } from "@roo-code/types"
 
+import { experimentDefault } from "@roo/experiments"
+
 import { vscode } from "@src/utils/vscode"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -159,6 +161,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const prevMode = useRef(mode)
 	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
+	// Experiment ids toggled during this edit session. Only these are sent on Save: the
+	// extension merges the received map over the stored experiments, so writing the whole
+	// live map would freeze every other experiment at today's default.
+	const changedExperiments = useRef(new Set<ExperimentId>())
+	// Last value submitted per experiment. Until the extension state reflects it, this is the
+	// comparison baseline: comparing against the (stale) host state could drop a follow-up edit.
+	const submittedExperiments = useRef(new Map<ExperimentId, boolean>())
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
 	// The save waiting for the host's answer, and the form state it sent. The "unsaved changes" flag stays on until the
@@ -255,8 +264,67 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
+		changedExperiments.current.clear()
+		// The edit session resets here too: a pending submitted baseline no longer applies.
+		submittedExperiments.current.clear()
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
+
+	// Drop a submitted baseline once the extension state confirms that value.
+	// Retire a submitted baseline once the extension state confirms that value, and retire the
+	// edit session for that experiment with it: drop the id from the change set and let the
+	// confirmed live value stand in the cache. Without this, an experiment this view edited and
+	// saved stays in the change set, so a later unrelated Save compares this view's cached copy
+	// against a newer live value written elsewhere and posts the older copy back over it.
+	// A confirmation retires the session only while the cache still holds the submitted value:
+	// a toggle made after the save is a newer intent than the host's answer, so it keeps its own
+	// cache copy and its change-set entry, and the next Save posts it.
+	useEffect(() => {
+		const live = extensionState.experiments ?? experimentDefault
+		const confirmations: { id: ExperimentId; submitted: boolean; liveValue: boolean }[] = []
+		for (const [id, submitted] of submittedExperiments.current) {
+			const liveValue = live[id] ?? experimentDefault[id]
+			if (liveValue !== submitted) {
+				continue
+			}
+			confirmations.push({ id, submitted, liveValue })
+		}
+		const adopted = new Map<ExperimentId, boolean>()
+		for (const [id, liveValue] of Object.entries(live)) {
+			const experimentId = id as ExperimentId
+			if (submittedExperiments.current.has(experimentId) || changedExperiments.current.has(experimentId)) {
+				continue
+			}
+			adopted.set(experimentId, liveValue)
+		}
+		if (confirmations.length === 0 && adopted.size === 0) {
+			return
+		}
+		setCachedState((prevState) => {
+			// The cached copy is only readable here, and both ref deletes are idempotent, so React
+			// invoking this updater twice retires the same entries it would retire once.
+			const experiments = { ...prevState.experiments } as Record<ExperimentId, boolean>
+			for (const confirmation of confirmations) {
+				const cached = experiments[confirmation.id] ?? experimentDefault[confirmation.id]
+				submittedExperiments.current.delete(confirmation.id)
+				if (cached !== confirmation.submitted) {
+					// Newer than what was submitted: keep the user's copy and keep the entry in the
+					// change set, so the next Save still posts it instead of the host's older answer.
+					continue
+				}
+				changedExperiments.current.delete(confirmation.id)
+				if (experiments[confirmation.id] !== confirmation.liveValue) {
+					experiments[confirmation.id] = confirmation.liveValue
+				}
+			}
+			for (const [id, liveValue] of adopted) {
+				if (experiments[id] !== liveValue) {
+					experiments[id] = liveValue
+				}
+			}
+			return { ...prevState, experiments }
+		})
+	}, [extensionState.experiments])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -265,6 +333,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		}
 
 		handledSettingsImportedAt.current = settingsImportedAt
+		changedExperiments.current.clear()
+		// Imported state replaces the settings the pending baseline was compared against: drop it so
+		// it cannot suppress a later save of the newly imported value.
+		submittedExperiments.current.clear()
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
@@ -328,6 +400,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			setChangeDetected(true)
+			changedExperiments.current.add(id)
 			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
 		})
 	}, [])
@@ -415,6 +488,22 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				setPendingSaveId(saveId)
 			}
 
+			// Only experiments that actually differ from the live state are persisted, so a
+			// future default flip still reaches users who have saved other settings before.
+			const experimentChanges: Record<string, boolean> = {}
+			for (const id of changedExperiments.current) {
+				const value = experiments?.[id] ?? experimentDefault[id]
+				// Baseline: the last submitted value while the host has not confirmed it yet, then
+				// the live state/default. This keeps a follow-up edit made before the state round-trip
+				// from being compared against stale host values.
+				const baseline = submittedExperiments.current.has(id)
+					? submittedExperiments.current.get(id)
+					: (extensionState.experiments?.[id] ?? experimentDefault[id])
+				if (value !== baseline) {
+					experimentChanges[id] = value
+				}
+			}
+
 			vscode.postMessage({
 				type: "updateSettings",
 				requestId: saveId,
@@ -493,7 +582,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					imageGenerationProvider,
 					openRouterImageApiKey,
 					openRouterImageGenerationSelectedModel,
-					experiments,
+					experiments: Object.keys(experimentChanges).length > 0 ? experimentChanges : undefined,
 					customSupportPrompts,
 				},
 			})
@@ -504,6 +593,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
+			// Remember what was submitted until the extension state confirms it.
+			for (const id of changedExperiments.current) {
+				const submitted = experimentChanges[id]
+				if (submitted === undefined) {
+					submittedExperiments.current.delete(id)
+				} else {
+					submittedExperiments.current.set(id, submitted)
+				}
+			}
 			// With a time or date edit the flag is cleared when the host reports the save (see below). A failed save
 			// leaves the user's edits in place to retry.
 			if (!saveId) setChangeDetected(false)
@@ -552,6 +650,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (confirm) {
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
+				submittedExperiments.current.clear()
+				changedExperiments.current.clear()
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
