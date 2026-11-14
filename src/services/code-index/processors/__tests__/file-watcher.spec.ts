@@ -557,6 +557,29 @@ describe("FileWatcher", () => {
 			expect(finished).not.toHaveBeenCalled()
 			expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 1 }))
 		})
+
+		it("fires no processed-file progress when the session stops while a chunk is in flight", async () => {
+			watcherWithRegistry()
+			const controller = new AbortController()
+			let releasePrepare: () => void = () => {}
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						releasePrepare = () =>
+							resolve({ path, status: "local_error", activity: "read", error: new Error("x") })
+					}),
+			)
+			await fileWatcher.initialize(controller.signal)
+			const progress = vi.fn()
+			fileWatcher.onBatchProgressUpdate(progress)
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			expect(progress).toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 0, totalInBatch: 1 }))
+			controller.abort()
+			releasePrepare()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 1 }))
+		})
 	})
 
 	describe("dispose", () => {

@@ -275,6 +275,7 @@ export class FileWatcher implements IFileWatcher {
 					}
 				}),
 			)
+			if (signal?.aborted) break
 			for (const result of results) {
 				batchResults.push(result)
 				processedCountInBatch++

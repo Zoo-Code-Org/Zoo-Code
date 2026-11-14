@@ -148,6 +148,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 						return
 					}
 					if (stats.size > MAX_FILE_SIZE_BYTES) {
+						// Confirmed ineligible, so a truncated listing may still remove its partial points.
+						missingFiles.add(generateRelativeFilePath(filePath, scanWorkspace))
 						skippedCount++
 						return
 					}

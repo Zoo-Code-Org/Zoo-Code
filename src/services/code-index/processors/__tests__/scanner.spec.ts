@@ -604,6 +604,21 @@ describe("DirectoryScanner", () => {
 			},
 		)
 
+		it("removes a listed oversized failure-only file even when the listing is truncated", async () => {
+			const { failures, failureScanner: truncationScanner } = createScannerWithFailures()
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/big.js"], true])
+			vi.mocked(stat).mockResolvedValueOnce({ ...mockStats, size: 2 * 1024 * 1024 })
+			const relativePath = nodePath.normalize("test/big.js")
+			failures.renew(relativePath, "h")
+			failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+			await truncationScanner.scanDirectory("/test")
+
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+			expect(failures.list()).toEqual([])
+		})
+
 		it("drains queued writes and rejects with the abort reason while a parse is pending", async () => {
 			const { listFiles } = await import("../../../glob/list-files")
 			vi.mocked(listFiles).mockResolvedValue([["test/file1.js", "test/file2.js"], false])
