@@ -33,6 +33,8 @@ export class CodeIndexManager {
 	private readonly failureRegistry = new FileFailureRegistry()
 	private readonly pacers = new ProviderPacerRegistry()
 	private startInFlight?: Promise<void>
+	// Separate from startInFlight: the recovery path awaits startInFlight, which initialize() sets.
+	private errorStartInFlight?: Promise<void>
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -251,17 +253,22 @@ export class CodeIndexManager {
 			return
 		}
 
-		if (this.startInFlight) return this.startInFlight
+		const running = this.errorStartInFlight ?? this.startInFlight
+		if (running) return running
 		this.failureRegistry.resetAllBudgets()
 
 		if (this.getCurrentStatus().systemStatus === "Error") {
 			// Recovery drops the config manager, so keep its proxy to re-initialize; initialize() starts indexing.
 			const contextProxy = this._configManager?.getContextProxy()
-			await this.recoverFromError()
-			if (!contextProxy) return
-			await this.initialize(contextProxy)
-			await this.startInFlight
-			return
+			this.errorStartInFlight = (async () => {
+				await this.recoverFromError()
+				if (!contextProxy) return
+				await this.initialize(contextProxy)
+				await this.startInFlight
+			})().finally(() => {
+				this.errorStartInFlight = undefined
+			})
+			return this.errorStartInFlight
 		}
 
 		this.assertInitialized()

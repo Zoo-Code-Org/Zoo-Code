@@ -334,6 +334,28 @@ describe("CodeIndexOrchestrator", () => {
 			expect(context.stateManager.reportBlockIndexingProgress).not.toHaveBeenCalled()
 		})
 
+		it("CI-OR-02: a stop before the scan begins keeps Stopping and skips the scan", async () => {
+			const context = setup()
+			let resolveHasData!: (value: boolean) => void
+			context.vectorStore.hasIndexedData.mockReturnValue(
+				new Promise<boolean>((resolve) => (resolveHasData = resolve)),
+			)
+			const start = context.orchestrator.startIndexing()
+			await tick()
+
+			const stop = context.orchestrator.stopIndexing()
+			const writesAtAbort = context.stateManager.setSystemState.mock.calls.length
+			resolveHasData(true)
+			await Promise.all([stop, start])
+
+			const lateWrites = context.stateManager.setSystemState.mock.calls
+				.slice(writesAtAbort)
+				.map(([state]) => state)
+			expect(lateWrites).toEqual(["Standby"])
+			expect(context.vectorStore.markIndexingIncomplete).not.toHaveBeenCalled()
+			expect(context.scanner.scanDirectory).not.toHaveBeenCalled()
+		})
+
 		it("CI-OR-03: stop then start on the same orchestrator runs a new session and writes status again", async () => {
 			const context = setup()
 			context.scanner.scanDirectory.mockImplementationOnce(waitForAbort)

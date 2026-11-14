@@ -171,6 +171,8 @@ export class CodeIndexOrchestrator {
 			}
 
 			const hasExistingData = await this.vectorStore.hasIndexedData()
+			// The scan executor writes Indexing unconditionally; it must not replace a stop's Stopping.
+			if (signal.aborted) return
 			const completed =
 				hasExistingData && !collectionCreated
 					? await this.scanExecutor.runIncrementalScan(signal)

@@ -131,6 +131,47 @@ describe("CodeIndexManager reliability", () => {
 		expect(order).toEqual(["stopped", "start"])
 	})
 
+	it("CI-MG-01: a second start during an Error-path start joins it", async () => {
+		const { manager, stateManager } = makeManager()
+		const contextProxy = {}
+		manager["_configManager"] = {
+			isFeatureEnabled: true,
+			isFeatureConfigured: true,
+			loadConfiguration: async () => ({ requiresRestart: false }),
+			getContextProxy: () => contextProxy,
+		} as unknown as (typeof manager)["_configManager"]
+		const stale: OrchestratorDouble = {
+			startIndexing: vi.fn(async () => {}),
+			// The stop settles later, leaving a window where the first start is still recovering.
+			stopIndexing: vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, 0))),
+			isScanning: false,
+			state: "Error",
+		}
+		attach(manager, stale)
+		stateManager.setSystemState("Error", "scan failed")
+		const fresh: OrchestratorDouble = {
+			startIndexing: vi.fn(async () => {}),
+			stopIndexing: vi.fn(async () => {}),
+			isScanning: false,
+			state: "Standby",
+		}
+		vi.spyOn(CacheManager.prototype, "initialize").mockResolvedValue(undefined)
+		const recreate = vi
+			.spyOn(manager as unknown as { _recreateServices(): Promise<void> }, "_recreateServices")
+			.mockImplementation(async () => {
+				attach(manager, fresh)
+				manager["_searchService"] = {} as unknown as (typeof manager)["_searchService"]
+			})
+
+		const first = manager.startIndexing()
+		const second = manager.startIndexing()
+		await Promise.all([first, second])
+
+		expect(stale.stopIndexing).toHaveBeenCalledOnce()
+		expect(recreate).toHaveBeenCalledOnce()
+		expect(fresh.startIndexing).toHaveBeenCalledOnce()
+	})
+
 	it.each(["handleSettingsChange", "recoverFromError"] as const)(
 		"CI-MG-02: %s stops the scan and watcher before services are recreated",
 		async (entry) => {
