@@ -8598,6 +8598,30 @@ describe("pushToolResultToUserContent", () => {
 		warnSpy.mockRestore()
 	})
 
+	it("keeps tool_results ahead of images queued by earlier parallel tool calls", () => {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+		const image: Anthropic.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "AAAA" },
+		}
+		const result = (id: string): Anthropic.ToolResultBlockParam => ({
+			type: "tool_result",
+			tool_use_id: id,
+			content: id,
+		})
+
+		task.pushToolResultToUserContent(result("A"))
+		task.userMessageContent.push(image)
+		task.pushToolResultToUserContent(result("B"))
+
+		expect(task.userMessageContent).toEqual([result("A"), result("B"), image])
+	})
+
 	it("should allow different tool_use_ids to be added", () => {
 		const task = new Task({
 			provider: mockProvider,
