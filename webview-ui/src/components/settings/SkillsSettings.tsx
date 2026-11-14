@@ -244,7 +244,7 @@ export const SkillsSettings: React.FC = () => {
 								<div className="text-vscode-descriptionForeground">
 									{t("settings:skills.diagnostics.description")}
 								</div>
-								<ul className="mb-0 mt-2 space-y-1 pl-4">
+								<ul className="mb-0 mt-2 max-h-60 space-y-1 overflow-y-auto pl-4">
 									{skillDiagnostics.map((diagnostic) => {
 										const location = diagnostic.line
 											? `:${diagnostic.line}${diagnostic.column ? `:${diagnostic.column}` : ""}`
