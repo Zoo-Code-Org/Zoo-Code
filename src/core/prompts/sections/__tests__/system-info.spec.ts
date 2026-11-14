@@ -48,18 +48,38 @@ describe("getSystemInfoSection", () => {
 		expect(result).toContain(`Current Workspace Directory: ${mockCwd}`)
 	})
 
-	it("should fallback to platform and release when os-name throws error", () => {
-		mockOsName.mockImplementation(() => {
-			throw new Error("Command failed with ENOENT: powershell")
-		})
+	it.each([
+		{
+			platform: "linux" as const,
+			release: "5.15.0",
+			makeLookupThrow: () =>
+				mockOsName.mockImplementation(() => {
+					throw new Error("Command failed with ENOENT: powershell")
+				}),
+		},
+		{
+			platform: "win32" as const,
+			release: "10.0.26300",
+			makeLookupThrow: () =>
+				vi.spyOn(os, "version").mockImplementation(() => {
+					throw new Error("uv_os_uname failed")
+				}),
+		},
+	])(
+		"falls back to platform and release when the OS lookup throws on $platform",
+		({ platform, release, makeLookupThrow }) => {
+			vi.spyOn(os, "platform").mockReturnValue(platform)
+			vi.spyOn(os, "release").mockReturnValue(release)
+			makeLookupThrow()
 
-		const result = getSystemInfoSection(mockCwd, policyFor())
+			const result = getSystemInfoSection(mockCwd, policyFor())
 
-		expect(result).toContain("Operating System: linux 5.15.0")
-		expect(result).toContain("Default Shell: /bin/bash")
-		expect(result).toContain(`Home Directory: ${mockHomeDir}`)
-		expect(result).toContain(`Current Workspace Directory: ${mockCwd}`)
-	})
+			expect(result).toContain(`Operating System: ${platform} ${release}`)
+			expect(result).toContain("Default Shell: /bin/bash")
+			expect(result).toContain(`Home Directory: ${mockHomeDir}`)
+			expect(result).toContain(`Current Workspace Directory: ${mockCwd}`)
+		},
+	)
 
 	describe("on Windows", () => {
 		beforeEach(() => {

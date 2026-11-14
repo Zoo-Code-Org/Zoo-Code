@@ -16,11 +16,11 @@ import type { EffectiveToolPolicy } from "../tools/effective-tool-policy"
 function getOsInfo(): string {
 	const fallback = `${os.platform()} ${os.release()}`
 
-	if (os.platform() === "win32") {
-		return os.version() || fallback
-	}
-
 	try {
+		if (os.platform() === "win32") {
+			return os.version() || fallback
+		}
+
 		return osName()
 	} catch {
 		return fallback
