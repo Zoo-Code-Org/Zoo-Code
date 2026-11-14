@@ -15,6 +15,12 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
+		// ApplyDiffTool stats around its own read to capture the version token its guarded publish
+		// consumes. Rejecting keeps the fixture honest about the case the code already tolerates:
+		// no stat, no token, no observation, and the publish stays unguarded-by-token.
+		stat: vi
+			.fn()
+			.mockRejectedValue(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })),
 	},
 }))
 

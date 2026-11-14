@@ -18,6 +18,10 @@ vi.mock("@roo-code/telemetry", () => ({
 }))
 
 vi.mock("fs/promises", () => ({
+	// guardedWrite resolves the target through a namespace import, so a tool that binds an
+	// approved outside-workspace target has to find realpath as a named export as well as on
+	// the default object.
+	realpath: vi.fn(async (p: string) => String(p)),
 	default: {
 		readFile: vi.fn(),
 		// ApplyDiffTool stats around its own read to capture the version token its guarded publish
