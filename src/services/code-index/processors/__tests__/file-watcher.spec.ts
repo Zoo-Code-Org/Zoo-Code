@@ -1,5 +1,6 @@
 // npx vitest services/code-index/processors/__tests__/file-watcher.spec.ts
 
+import nodePath from "path"
 import * as vscode from "vscode"
 
 import { FileWatcher } from "../file-watcher"
@@ -419,7 +420,7 @@ describe("FileWatcher", () => {
 				})
 				await runChange()
 				expect(failures.list()).toEqual([
-					expect.objectContaining({ path: "src/file.ts", activity, reason: "bad" }),
+					expect.objectContaining({ path: nodePath.normalize("src/file.ts"), activity, reason: "bad" }),
 				])
 				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
 			},

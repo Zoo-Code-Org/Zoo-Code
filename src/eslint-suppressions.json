@@ -1086,7 +1086,7 @@
 	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 22
+			"count": 19
 		}
 	},
 	"services/code-index/processors/__tests__/scanner.spec.ts": {
@@ -1131,12 +1131,12 @@
 	},
 	"services/code-index/vector-store/__tests__/qdrant-client.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 87
+			"count": 85
 		}
 	},
 	"services/code-index/vector-store/qdrant-client.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"services/glob/__tests__/gitignore-integration.spec.ts": {

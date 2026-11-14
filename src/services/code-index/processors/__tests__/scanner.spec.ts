@@ -5,6 +5,7 @@ import { ParserLoadError } from "../parser"
 import { FileFailureRegistry } from "../../file-failure-registry"
 import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
+import nodePath from "path"
 import * as vscode from "vscode"
 
 // Mock TelemetryService
@@ -576,7 +577,9 @@ describe("DirectoryScanner", () => {
 
 				await parseScanner.scanDirectory("/test")
 
-				expect(failures.list()).toEqual([expect.objectContaining({ path: "test/file1.js", activity: "parse" })])
+				expect(failures.list()).toEqual([
+					expect.objectContaining({ path: nodePath.normalize("test/file1.js"), activity: "parse" }),
+				])
 				expect(mockCacheManager.updateHash).not.toHaveBeenCalledWith("test/file1.js", expect.anything())
 				expect(mockCacheManager.updateHash).toHaveBeenCalledWith("test/file2.js", expect.any(String))
 			},
