@@ -18,7 +18,34 @@ import { safeWriteJson } from "../safeWriteJson"
 // before any vi.fn() wrapper exists, so a test's implementation callback can delegate
 // without recursing into itself.
 type OpenSyncRest = (...args: unknown[]) => number
-type WriteStreamRest = (filePath: string, options: { encoding: string }) => FsWriteStream
+// The options type carries the fs option as well: the staged write below fails at its own
+// open by handing Node's WriteStream an fs whose open never succeeds.
+// The hooks Node's WriteStream calls on a caller-supplied fs object, spelled out in the
+// callback form Node itself uses. They are not named out of @types/node: this tree's
+// TypeScript reports TS2694 for both CreateWriteStreamFSImplementation and the
+// WriteStreamOptions type that carries it under the "fs" spelling, and the
+// promise-flavoured typeof of an fs function carries a __promisify__ member a plain stand-in
+// does not have (TS2741), so the bag is written from the call shapes instead.
+type WriteStreamFsHooks = {
+	fs?: {
+		open?: (
+			path: string | Buffer | URL,
+			flags: string,
+			mode: number | null | undefined,
+			callback: (err: Error | null, fd: number) => void,
+		) => void
+		close?: (fd: number, callback: (err?: Error | null) => void) => void
+		write: (
+			fd: number,
+			buffer: Uint8Array | string,
+			offset: number | null | undefined,
+			length: number,
+			position: number | null | undefined,
+			callback: (err: Error | null, bytesWritten: number) => void,
+		) => void
+	} | null
+}
+type WriteStreamRest = (filePath: string, options: { encoding: string } & WriteStreamFsHooks) => FsWriteStream
 const actuals = vi.hoisted(
 	(): {
 		openSync: OpenSyncRest | null
@@ -116,10 +143,19 @@ describe("safeWriteJson post-commit durability", () => {
 		// has not published anything, and swallowing it would report a write that never ran.
 		// This module writes the staged file through a stream, so the pre-commit failure is
 		// injected on that stream.
-		let tempWriteAttempted = false
+		let stagedOpenAttempted = false
 		const writeStreamActual = actuals.writeStream
 		if (writeStreamActual === null) {
 			throw new Error("fs mock did not capture the real createWriteStream")
+		}
+		// The open that never succeeds, in the callback form Node's WriteStream calls it in.
+		const failOpen = (...args: unknown[]): void => {
+			const callback = args.at(-1)
+			if (typeof callback === "function") {
+				process.nextTick(() =>
+					callback(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })),
+				)
+			}
 		}
 		vi.mocked(fsSync.createWriteStream).mockImplementation(
 			(...args: Parameters<typeof fsSync.createWriteStream>) => {
@@ -127,12 +163,12 @@ describe("safeWriteJson post-commit durability", () => {
 				if (stagedPath.includes(".new_")) {
 					// Pin the injection: without this flag the test would also pass on a run where
 					// the write never reached a staged file at all.
-					tempWriteAttempted = true
-					const stream = writeStreamActual(stagedPath, { encoding: "utf8" })
-					process.nextTick(() => {
-						stream.emit("error", Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
-					})
-					return stream
+					stagedOpenAttempted = true
+					// Fail the staged file at its open rather than emitting a synthetic error after a
+					// successful one. A real open creates the name before anything can fail, so the
+					// residue assertion below would then depend on when the cleanup happened to run;
+					// an open that never succeeds means the name is never created at all.
+					return writeStreamActual(stagedPath, { encoding: "utf8", fs: { ...fsSync, open: failOpen } })
 				}
 				return writeStreamActual(stagedPath, { encoding: "utf8" })
 			},
@@ -140,9 +176,10 @@ describe("safeWriteJson post-commit durability", () => {
 
 		await expect(safeWriteJson(targetPath, { version: "new" })).rejects.toThrow("EACCES: permission denied")
 
-		expect(tempWriteAttempted).toBe(true)
-		// Nothing was published: the target still holds the previous content, and the staged
-		// file this write created is gone again - the failure handler removed it.
+		expect(stagedOpenAttempted).toBe(true)
+		// Nothing was published and nothing was staged: the target still holds the previous
+		// content, and the staged file's name never came into existence because its open is
+		// what failed.
 		expect(JSON.parse(await fs.readFile(targetPath, "utf8"))).toEqual({ version: "old" })
 		expect(await fs.readdir(dir)).toEqual(["history_item.json"])
 	})
