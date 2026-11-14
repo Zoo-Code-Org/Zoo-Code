@@ -108,6 +108,46 @@ export function transformMessagesForCondensing<
 	}))
 }
 
+/**
+ * Removes model reasoning blocks from messages before they are sent for summarization.
+ *
+ * Reasoning is not needed to summarize the conversation, and plain-text reasoning from
+ * thinking models can account for a large share of stored history. The normal request path
+ * drops plain-text reasoning as well (buildCleanConversationHistory in Task.ts); without this
+ * filter the condense request can exceed the context window that the normal request fits in.
+ *
+ * Standalone reasoning items are dropped, as the normal request path skips them. A message
+ * whose content is only reasoning keeps its turn with a short placeholder, so user and
+ * assistant turns still alternate for providers such as Bedrock that reject adjacent user
+ * messages.
+ *
+ * @param messages - The messages to filter
+ * @returns The messages without reasoning blocks
+ */
+export function stripReasoningForCondensing(messages: ApiMessage[]): ApiMessage[] {
+	const result: ApiMessage[] = []
+	for (const message of messages) {
+		// Standalone reasoning items carry no conversational content for the summary.
+		if ((message as { type?: string }).type === "reasoning") {
+			continue
+		}
+		if (!Array.isArray(message.content)) {
+			result.push(message)
+			continue
+		}
+		if (!message.content.some((block) => (block as { type?: string }).type === "reasoning")) {
+			result.push(message)
+			continue
+		}
+		const remaining = message.content.filter((block) => (block as { type?: string }).type !== "reasoning")
+		const content = (
+			remaining.length > 0 ? remaining : [{ type: "text", text: "[Reasoning omitted]" }]
+		) as ApiMessage["content"]
+		result.push({ ...message, content })
+	}
+	return result
+}
+
 export const MIN_CONDENSE_THRESHOLD = 5 // Minimum percentage of context window to trigger condensing
 export const MAX_CONDENSE_THRESHOLD = 100 // Maximum percentage of context window to trigger condensing
 
@@ -306,7 +346,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 
 	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
 	// (e.g., when user triggers condense after receiving attempt_completion but before responding)
-	const messagesWithToolResults = injectSyntheticToolResults(messagesToSummarize)
+	const messagesWithToolResults = injectSyntheticToolResults(stripReasoningForCondensing(messagesToSummarize))
 
 	// Transform tool_use and tool_result blocks to text representations.
 	// This is necessary because some providers (like Bedrock via LiteLLM) require the `tools` parameter
