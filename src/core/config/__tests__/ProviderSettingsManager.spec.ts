@@ -12,7 +12,7 @@ import {
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderSettingsNotFoundError, ProviderProfiles } from "../ProviderSettingsManager"
 
 // `export()` builds an API handler per profile to read model capabilities. Mock
 // buildApiHandler with the real @roo-code/types model definitions so the token-field
@@ -1862,6 +1862,113 @@ describe("ProviderSettingsManager", () => {
 			expect(result.hasChanges).toBe(true)
 			expect(result.activeProfileChanged).toBe(false)
 			expect(result.activeProfileId).toBe("local-id")
+		})
+	})
+
+	describe("profile reads and deletes answer with the type callers branch on", () => {
+		const profilesWith = (apiConfigs: Record<string, unknown>, currentApiConfigName = "default") =>
+			JSON.stringify({
+				currentApiConfigName,
+				apiConfigs,
+				modeApiConfigs: {},
+				migrations: { rateLimitSecondsMigrated: false },
+			})
+
+		it("rejects a name lookup that misses with ProviderSettingsNotFoundError", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWith({ default: { id: "default" } }))
+
+			const error = await providerSettingsManager.getProfile({ name: "absent" }).catch((cause: unknown) => cause)
+
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw new Error(`expected ProviderSettingsNotFoundError, got ${String(error)}`)
+			}
+			expect(error.name).toBe("ProviderSettingsNotFoundError")
+			expect(error.message).toBe("Config with name 'absent' not found")
+		})
+
+		it("rejects an id lookup that misses with ProviderSettingsNotFoundError", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWith({ default: { id: "default" } }))
+
+			const error = await providerSettingsManager
+				.getProfile({ id: "missing-id" })
+				.catch((cause: unknown) => cause)
+
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw new Error(`expected ProviderSettingsNotFoundError, got ${String(error)}`)
+			}
+			expect(error.message).toBe("Config with ID 'missing-id' not found")
+		})
+
+		it("keeps a missed lookup out of the wrapped-read branch", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWith({ default: { id: "default" } }))
+
+			await expect(providerSettingsManager.getProfile({ name: "absent" })).rejects.not.toThrow(
+				"Failed to get profile:",
+			)
+		})
+
+		it("surfaces a failed profile read as a plain Error naming the read", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("storage unavailable"))
+
+			const error = await providerSettingsManager.getProfile({ name: "default" }).catch((cause: unknown) => cause)
+
+			if (!(error instanceof Error)) {
+				throw new Error(`expected an Error, got ${String(error)}`)
+			}
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error.name).toBe("Error")
+			expect(error.message.startsWith("Failed to get profile:")).toBe(true)
+			expect(error.message.includes("storage unavailable")).toBe(true)
+		})
+
+		it("rethrows a missing config from deleteConfig as the typed error", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWith({ default: { id: "default" }, other: { id: "other-id" } }))
+
+			const error = await providerSettingsManager.deleteConfig("absent").catch((cause: unknown) => cause)
+
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				throw new Error(`expected ProviderSettingsNotFoundError, got ${String(error)}`)
+			}
+			expect(error.message).toBe("Config 'absent' not found")
+		})
+
+		it("keeps the last-remaining-config refusal a plain Error under the delete prefix", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWith({ default: { id: "default" } }))
+
+			const error = await providerSettingsManager.deleteConfig("default").catch((cause: unknown) => cause)
+
+			if (!(error instanceof Error)) {
+				throw new Error(`expected an Error, got ${String(error)}`)
+			}
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error.message).toBe("Failed to delete config: Error: Cannot delete the last remaining configuration")
+		})
+	})
+
+	describe("getCurrentProfileName", () => {
+		it("returns the profile the manager store marks current", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "work",
+					apiConfigs: { default: { id: "default" }, work: { id: "work-id" } },
+					modeApiConfigs: {},
+					migrations: { rateLimitSecondsMigrated: false },
+				}),
+			)
+
+			await expect(providerSettingsManager.getCurrentProfileName()).resolves.toBe("work")
+		})
+
+		it("wraps a failed read in an Error naming the active profile", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("storage unavailable"))
+
+			const error = await providerSettingsManager.getCurrentProfileName().catch((cause: unknown) => cause)
+
+			if (!(error instanceof Error)) {
+				throw new Error(`expected an Error, got ${String(error)}`)
+			}
+			expect(error).not.toBeInstanceOf(ProviderSettingsNotFoundError)
+			expect(error.message.startsWith("Failed to read the active profile:")).toBe(true)
 		})
 	})
 })

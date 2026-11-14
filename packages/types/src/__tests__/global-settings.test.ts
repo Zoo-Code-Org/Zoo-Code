@@ -3,6 +3,7 @@ import {
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
 	GLOBAL_SETTINGS_KEYS,
 	globalSettingsSchema,
+	viewStateSchema,
 } from "../global-settings.js"
 
 describe("destructive command guard global setting", () => {
@@ -38,7 +39,6 @@ describe("alwaysDenyUnapprovedCommands global setting", () => {
 		expect(() => globalSettingsSchema.parse({ alwaysDenyUnapprovedCommands: "true" })).toThrow()
 	})
 })
-
 describe("collapseCommandOutputByDefault global setting", () => {
 	it.each([true, false, undefined])("round-trips %s through the export/import schema", (value) => {
 		const settings = globalSettingsSchema.parse({ collapseCommandOutputByDefault: value })
@@ -49,5 +49,87 @@ describe("collapseCommandOutputByDefault global setting", () => {
 	})
 	it("rejects non-boolean values", () => {
 		expect(globalSettingsSchema.safeParse({ collapseCommandOutputByDefault: "true" }).success).toBe(false)
+	})
+})
+
+describe("viewStates global setting", () => {
+	it("preserves each webview instance selection through the persisted schema", () => {
+		const parsed = globalSettingsSchema.parse({
+			viewStates: {
+				"session-1": { mode: "code", currentApiConfigName: "default", updatedAt: 1700000000000 },
+				"session-2": { mode: "architect" },
+			},
+		})
+		// Every field has to survive the round trip: a selection the schema drops is
+		// written back as absent, so the next window opens in the default mode.
+		expect(parsed.viewStates).toEqual({
+			"session-1": { mode: "code", currentApiConfigName: "default", updatedAt: 1700000000000 },
+			"session-2": { mode: "architect" },
+		})
+
+		// The key list is part of the contract: a setting that never reaches
+		// GLOBAL_SETTINGS_KEYS is not a persisted setting, whatever the schema does.
+		expect(GLOBAL_SETTINGS_KEYS).toContain("viewStates")
+	})
+
+	it("accepts an empty entry because every field is optional", () => {
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": {} } })).not.toThrow()
+		// The control that makes the line above a test: an absent viewStates is omitted
+		// rather than defaulted, so an empty entry is a record and not the same shape
+		// as nothing at all.
+		expect(globalSettingsSchema.parse({}).viewStates).toBeUndefined()
+	})
+
+	it("parses a single view state on its own", () => {
+		expect(viewStateSchema.parse({ mode: "ask", currentApiConfigName: "x", updatedAt: 5 })).toEqual({
+			mode: "ask",
+			currentApiConfigName: "x",
+			updatedAt: 5,
+		})
+	})
+
+	it("rejects a numeric mode and names the offending path", () => {
+		// The control first: the same record without the bad field must parse, so a
+		// failure here can only mean the schema rejected that value - not that the record
+		// shape is unsupported or the assertion never ran.
+		expect(globalSettingsSchema.safeParse({ viewStates: { a: { mode: "code" } } }).success).toBe(true)
+
+		const result = globalSettingsSchema.safeParse({ viewStates: { a: { mode: 42 } } })
+
+		expect(result.success).toBe(false)
+		expect(result.error?.issues[0]?.path).toEqual(["viewStates", "a", "mode"])
+	})
+
+	it("rejects a non-string currentApiConfigName and names the offending path", () => {
+		expect(globalSettingsSchema.safeParse({ viewStates: { a: { currentApiConfigName: "x" } } }).success).toBe(true)
+
+		const result = globalSettingsSchema.safeParse({ viewStates: { a: { currentApiConfigName: 7 } } })
+
+		expect(result.success).toBe(false)
+		expect(result.error?.issues[0]?.path).toEqual(["viewStates", "a", "currentApiConfigName"])
+	})
+
+	it("rejects a non-numeric updatedAt and names the offending path", () => {
+		expect(globalSettingsSchema.safeParse({ viewStates: { a: { updatedAt: 1 } } }).success).toBe(true)
+
+		const result = globalSettingsSchema.safeParse({ viewStates: { a: { updatedAt: "1" } } })
+
+		expect(result.success).toBe(false)
+		expect(result.error?.issues[0]?.path).toEqual(["viewStates", "a", "updatedAt"])
+	})
+
+	it("rejects a view state that is not an object", () => {
+		// A bare string under a session id is what a half-migrated store looks like;
+		// accepting it defers the crash to whoever reads the selection back.
+		expect(globalSettingsSchema.safeParse({ viewStates: { a: { mode: "code" } } }).success).toBe(true)
+
+		const result = globalSettingsSchema.safeParse({ viewStates: { a: "code" } })
+
+		expect(result.success).toBe(false)
+		expect(result.error?.issues[0]?.path).toEqual(["viewStates", "a"])
+
+		// A null entry fails for a different reason than a string entry: the record
+		// type tolerates an absent value and rejects a present non-object one.
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": null } })).toThrow()
 	})
 })

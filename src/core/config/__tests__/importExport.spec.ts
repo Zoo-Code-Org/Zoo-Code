@@ -2806,4 +2806,60 @@ describe("importExport", () => {
 			},
 		)
 	})
+
+	describe("viewStates import skip", () => {
+		const importedWith = async (globalSettings: Record<string, unknown>) => {
+			;(fs.readFile as Mock).mockResolvedValue(
+				JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "test",
+						apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+					},
+					globalSettings,
+				}),
+			)
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+			])
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			return {
+				warnings: (result as { warnings?: string[] }).warnings,
+				written: mockContextProxy.setValues.mock.calls[0]?.[0],
+			}
+		}
+
+		it("skips viewStates without a warning and keeps the sibling setting", async () => {
+			const { warnings, written } = await importedWith({
+				mode: "code",
+				viewStates: { "view-1": { mode: "code", updatedAt: 1700000000000 } },
+			})
+
+			// The sibling is the control: if the skip swallowed every key the first line
+			// below fails, so an absent viewStates on its own cannot pass for the wrong
+			// reason.
+			expect(Object.keys(written ?? {})).toContain("mode")
+			expect(Object.keys(written ?? {})).not.toContain("viewStates")
+			// The skip is deliberate, so it must not arrive dressed as an "Unknown setting"
+			// warning: the key is known and deliberately not exported, not junk.
+			expect(warnings?.some((warning) => warning.includes("viewStates"))).toBeFalsy()
+		})
+
+		it("keeps the sibling setting when viewStates is absent", async () => {
+			const { warnings, written } = await importedWith({ mode: "code" })
+
+			expect(Object.keys(written ?? {})).toContain("mode")
+			expect(Object.keys(written ?? {})).not.toContain("viewStates")
+			expect(warnings?.some((warning) => warning.includes("viewStates"))).toBeFalsy()
+		})
+	})
 })
