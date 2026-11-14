@@ -668,6 +668,15 @@ export class DiffViewProvider {
 
 		let editorFailure: unknown
 
+		// Lifecycle teardown first: ahead of the editor branch below and therefore ahead of the awaited
+		// buffer restore. open() installs onDidChangeActiveTextEditor, onDidChangeTextEditorSelection
+		// and onDidChangeTextEditorVisibleRanges, and close() clears activeDiffEditor without
+		// disposing them, so a discard reached after the view was closed used to sweep the artifacts
+		// and leave three window-level handlers plus any pending deferred reveal installed on a
+		// session the caller keeps when this method returns with ownership retained.
+		this.disposeActiveEditorListener()
+		this.cancelDeferredScroll()
+
 		// open() creates the directories and the empty placeholder BEFORE it assigns
 		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
 		// vscode.diff call), so an abandoned create can leave artifacts on disk with no
@@ -681,9 +690,6 @@ export class DiffViewProvider {
 			// of that buffer recreate the file with content nobody ever approved.
 			let bufferUnconfirmed = true
 			try {
-				this.disposeActiveEditorListener()
-				this.cancelDeferredScroll()
-
 				if (document.isDirty) {
 					// Restore the buffer to what this edit started from - the empty placeholder for a create,
 					// the content already on disk for a modify. A refused applyEdit leaves the unapproved streamed
@@ -763,7 +769,10 @@ export class DiffViewProvider {
 			// unlinking on the field alone deletes that write. The placeholder open() created is
 			// zero bytes, so only a file that is still zero bytes is this edit's to remove - the
 			// ENOENT case and any file with content in it release the ownership and leave the
-			// bytes alone, which is what a later writer's approved write needs.
+			// bytes alone, which is what a later writer's approved write needs. The helper below
+			// carries its own ENOENT tolerance for a file that disappears between this stat and
+			// the unlink, and a failed unlink throws before the field is cleared below, so a
+			// retained session still owns the placeholder and a retry path still has it recorded.
 			if (placeholderPath && (await fs.stat(placeholderPath).catch(() => null))?.size === 0) {
 				await this.removeCreatedFile(placeholderPath)
 			}
@@ -785,6 +794,17 @@ export class DiffViewProvider {
 			console.error("Error removing abandoned write_to_file artifacts:", error)
 		}
 
+		// Restore any preview tabs the diff evicted, reconstructing the user's prior
+		// not-yet-edited tab state, the way saveChanges() and revertChanges() do at their own ends.
+		// The discard path never reached this: reset() clears snapshotPreviewTabs right after, so a
+		// denied stream left every tab VS Code evicted to open the diff gone for the session.
+		// Skipped when the sweep failed - the placeholder is then still on disk and still owned, the
+		// snapshot is the only record the retry path has of what is left to remove, and reopening
+		// tabs on top of a half-removed artifact would report a workspace that is not restored.
+		// restorePreviewTabs() reports its own per-tab failures, so it cannot mask editorFailure.
+		if (!cleanupFailure) {
+			await this.restorePreviewTabs()
+		}
 		if (editorFailure) {
 			throw editorFailure instanceof Error ? editorFailure : new Error(String(editorFailure))
 		}
@@ -1599,6 +1619,7 @@ export class DiffViewProvider {
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
 		finalContent: string | undefined
+		openFailure: string | undefined
 	}> {
 		const absolutePath = path.resolve(this.cwd, relPath)
 
@@ -1620,27 +1641,38 @@ export class DiffViewProvider {
 			this.placeholderPath = undefined
 		}
 
+		// The write above is the commit point: an opening failure that follows it is not a
+		// publish failure, so the committed outcome and its bookkeeping are kept and the
+		// opening failure is reported alongside them instead of replacing them.
+		let openFailure: string | undefined
+		const noteOpenFailure = (error: unknown): void => {
+			openFailure = error instanceof Error ? error.message : String(error)
+			console.warn(`Opening ${absolutePath} failed after its content was committed: ${openFailure}`)
+		}
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
-		if (openFile) {
-			// Show the document in the editor
-			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
-				preview: false,
-				preserveFocus: true,
-			})
-		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+		try {
+			if (openFile) {
+				// Show the document in the editor
+				await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+					preview: false,
+					preserveFocus: true,
+				})
+			} else {
+				// Just open the document in memory to trigger diagnostics without showing it
+				const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
+				// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
+				if (doc.isDirty) {
+					await doc.save()
+				}
+
+				// Force a small delay to ensure diagnostics are triggered
+				await new Promise((resolve) => setTimeout(resolve, 100))
 			}
-
-			// Force a small delay to ensure diagnostics are triggered
-			await new Promise((resolve) => setTimeout(resolve, 100))
+		} catch (error) {
+			noteOpenFailure(error)
 		}
-
 		let newProblemsMessage = ""
 
 		if (diagnosticsEnabled) {
@@ -1683,6 +1715,7 @@ export class DiffViewProvider {
 			newProblemsMessage,
 			userEdits: undefined,
 			finalContent: content,
+			openFailure,
 		}
 	}
 }

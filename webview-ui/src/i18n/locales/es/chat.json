@@ -20,7 +20,9 @@
 	"unpin": "Desfijar",
 	"pin": "Fijar",
 	"fileChangesInConversation": {
-		"header": "{{count}} archivo(s) modificado(s) en esta conversación"
+		"header_one": "{{count}} archivo modificado en esta conversación",
+		"header_many": "{{count}} archivos modificados en esta conversación",
+		"header_other": "{{count}} archivos modificados en esta conversación"
 	},
 	"retry": {
 		"title": "Reintentar",
@@ -287,7 +289,8 @@
 		"triggerLabelOff": "Aprobación automática desactivada",
 		"triggerLabelOffShort": "Desactivado",
 		"triggerLabel_zero": "0 aprobaciones automáticas",
-		"triggerLabel_one": "1 aprobación automática",
+		"triggerLabel_one": "{{count}} aprobación automática",
+		"triggerLabel_many": "{{count}} aprobaciones automáticas",
 		"triggerLabel_other": "{{count}} aprobaciones automáticas",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +308,8 @@
 		"truncation": {
 			"title": "Contexto truncado",
 			"inProgress": "Truncando contexto...",
-			"messagesRemoved": "{{count}} mensaje eliminado",
+			"messagesRemoved_one": "{{count}} mensaje eliminado",
+			"messagesRemoved_many": "{{count}} mensajes eliminados",
 			"messagesRemoved_other": "{{count}} mensajes eliminados",
 			"description": "Se eliminaron mensajes más antiguos de la conversación para mantenerse dentro del límite de la ventana de contexto. Este es un enfoque rápido pero menos conservador del contexto en comparación con la condensación."
 		}
@@ -349,7 +353,9 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Límite de Solicitudes Auto-aprobadas Alcanzado",
-			"description": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitud(es) API. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"description_one": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitud API. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"description_many": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitudes API. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"description_other": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitudes API. ¿Deseas reiniciar el contador y continuar con la tarea?",
 			"button": "Reiniciar y Continuar"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +367,8 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo quiere buscar en la base de código <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo quiere buscar en la base de código <code>{{query}}</code> en <code>{{path}}</code>",
-		"didSearch_one": "Se encontró 1 resultado",
+		"didSearch_one": "Se encontró {{count}} resultado",
+		"didSearch_many": "Se encontraron {{count}} resultados",
 		"didSearch_other": "Se encontraron {{count}} resultados",
 		"resultTooltip": "Puntuación de similitud: {{score}} (haz clic para abrir el archivo)"
 	},
@@ -433,8 +440,10 @@
 	"tooManyTools": {
 		"title": "Demasiadas herramientas habilitadas",
 		"toolsPart_one": "{{count}} herramienta",
+		"toolsPart_many": "{{count}} herramientas",
 		"toolsPart_other": "{{count}} herramientas",
 		"serversPart_one": "{{count}} servidor MCP",
+		"serversPart_many": "{{count}} servidores MCP",
 		"serversPart_other": "{{count}} servidores MCP",
 		"messageTemplate": "Tienes {{tools}} habilitadas a través de {{servers}}. Un número tan alto puede confundir al modelo y llevar a errores. Intenta mantenerlo por debajo de {{threshold}}.",
 		"openMcpSettings": "Abrir configuración de MCP"

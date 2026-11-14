@@ -126,6 +126,7 @@
 		"rooHistoryImport": {
 			"nothingFound": "Nessuna cronologia di attività Roo Code trovata da importare da {{domain}}.",
 			"alreadyImported_one": "La cronologia di {{count}} attività Roo Code è già stata importata in Zoo Code.",
+			"alreadyImported_many": "Tutte le {{count}} cronologie di attività Roo Code sono già state importate in Zoo Code.",
 			"alreadyImported_other": "Tutte le {{count}} cronologie di attività Roo Code sono già state importate in Zoo Code."
 		}
 	},
@@ -144,6 +145,7 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "Importata {{count}} cronologia di attività Roo Code in Zoo Code.",
+			"success_many": "Importate {{count}} cronologie di attività Roo Code in Zoo Code.",
 			"success_other": "Importate {{count}} cronologie di attività Roo Code in Zoo Code."
 		}
 	},

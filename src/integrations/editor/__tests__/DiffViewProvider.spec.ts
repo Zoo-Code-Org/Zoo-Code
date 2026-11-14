@@ -6,9 +6,21 @@ import type { Task } from "../../../core/task/Task"
 import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import delay from "delay"
-import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import {
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+	DEFAULT_WRITE_DELAY_MS,
+} from "@roo-code/types"
 
-import { makePosition, makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+import {
+	makeDisposable,
+	makePosition,
+	makeRange,
+	makeTextDocument,
+	makeTextEditor,
+	makeUri,
+} from "../../../test-utils/vscode"
 
 // Mock delay
 vi.mock("delay", () => ({
@@ -848,6 +860,24 @@ describe("DiffViewProvider", () => {
 
 			// Verify delay was called with 0 (safe minimum)
 			expect(mockDelay).toHaveBeenCalledWith(0)
+		})
+
+		it("keeps the committed outcome and reports the opening failure separately when the open rejects after publication", async () => {
+			const fsMock = await import("fs/promises")
+			const reason = new Error("TextEditorService refused to show the document")
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValueOnce(reason)
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+			// The write landed before the open failed, so the committed result is still returned
+			// and the opening failure travels as its own field rather than as a failed publish.
+			expect(fsMock.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(result.finalContent).toBe("new content")
+			expect(result.userEdits).toBeUndefined()
+			expect(result.openFailure).toContain("TextEditorService refused to show the document")
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed after its content was committed"))
+			warn.mockRestore()
 		})
 
 		it("should store results for formatFileWriteResponse", async () => {
@@ -2874,6 +2904,185 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["placeholderPath"] as string | undefined).toBeUndefined()
 		})
 
+		it("disposes the touch listeners and cancels the deferred scroll while the buffer restore is still pending", async () => {
+			// Review row wM62emT0. The window a late deferred reveal can fire in is exactly the window the
+			// buffer restore is awaited in, so this test holds applyEdit() open, starts the discard, and
+			// asks whether the teardown already happened before the restoration is settled. Fake timers keep
+			// that window open instead of leaning on wall-clock scheduling, and the restoration is resolved in
+			// a finally block so the pending promise cannot outlive the test. The handle is declared out
+			// of the try on purpose: a failure inside the try must report itself instead of being replaced
+			// by the reference error a finally-block read of an uninitialised let would raise.
+			let settleRestore: (applied: boolean) => void = () => {}
+			vi.useFakeTimers()
+			try {
+				const callOrder: string[] = []
+				const revealRange = vi.fn()
+				const document = makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("a\nCHANGED\nc\nd\n"),
+					positionAt: vi.fn((offset: number) => makePosition(0, offset)),
+				})
+				Object.assign(document, { isDirty: true })
+				const editor = makeTextEditor({ document, visibleRanges: [makeRange()], revealRange })
+				const disposeActive = vi.fn()
+				const disposeSelection = vi.fn()
+				const disposeScroll = vi.fn()
+				openAbandonedView(document, [], callOrder)
+				Object.assign(diffViewProvider, {
+					activeDiffEditor: editor,
+					editType: "modify",
+					originalContent: "a\nb\nc\nd\n",
+					placeholderPath: undefined,
+					diffScrollLine: 1,
+					activeEditorListener: makeDisposable({ dispose: disposeActive }),
+					diffEditorSelectionListener: makeDisposable({ dispose: disposeSelection }),
+					diffScrollListener: makeDisposable({ dispose: disposeScroll }),
+				})
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				// The keep path re-shows the edited file; give that re-show an editor double so the
+				// assertions below are the only thing this test can fail on.
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
+				// Schedule the deferred re-reveal the way a tool does, then deny the stream while it is
+				// still pending. The first reveal is the immediate one; only a surviving timer would add a
+				// second one after the buffer was already restored.
+				diffViewProvider.scrollToFirstDiff()
+				expect(revealRange).toHaveBeenCalledTimes(1)
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(
+					() =>
+						new Promise<boolean>((resolve) => {
+							settleRestore = resolve
+						}),
+				)
+				const discarding = diffViewProvider.discardUnapprovedStream()
+				await Promise.resolve()
+				await Promise.resolve()
+				expect(disposeActive).toHaveBeenCalledOnce()
+				expect(disposeSelection).toHaveBeenCalledOnce()
+				expect(disposeScroll).toHaveBeenCalledOnce()
+				expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+				// Advancing past the deferred reveal must not put the viewport anywhere: the timer was
+				// cancelled before the restore was awaited, so there is no late reveal left to fire.
+				vi.advanceTimersByTime(2000)
+				expect(revealRange).toHaveBeenCalledTimes(1)
+				settleRestore(true)
+				await discarding
+				expect(callOrder).toEqual(["closeDiffViews", "closeFileTab"])
+			} finally {
+				settleRestore(true)
+				vi.useRealTimers()
+			}
+		})
+
+		it("disposes the touch listeners on the path where the abandoned view is already closed", async () => {
+			// Review row wM62emT0, the half the sweep-only test below does not cover. open() installs
+			// onDidChangeActiveTextEditor, onDidChangeTextEditorSelection and
+			// onDidChangeTextEditorVisibleRanges, and close() clears activeDiffEditor without touching
+			// them. A discard reached from that state used to run the sweep and nothing else: the three
+			// window-level handlers and any pending deferred reveal stayed installed on a session the
+			// caller may keep for a retry, and reset() is not called when ownership is retained.
+			vi.useFakeTimers()
+			try {
+				const disposeActive = vi.fn()
+				const disposeSelection = vi.fn()
+				const disposeScroll = vi.fn()
+				const lateReveal = vi.fn()
+				Object.assign(diffViewProvider, {
+					relPath: "mock-target-file.ts",
+					activeDiffEditor: undefined,
+					editType: "create",
+					createdDirs: [],
+					placeholderPath: mockTargetPath,
+					activeEditorListener: makeDisposable({ dispose: disposeActive }),
+					diffEditorSelectionListener: makeDisposable({ dispose: disposeSelection }),
+					diffScrollListener: makeDisposable({ dispose: disposeScroll }),
+					// The pending reveal is seeded here, next to the listeners, because the field is declared
+					// ReturnType<typeof setTimeout> on the provider while this file resolves the global timer call
+					// to the other declaration; assigning the same handle through bracket notation would need an
+					// assertion. Same handle, same fake clock, same late-reveal guard.
+					deferredScrollTimer: setTimeout(lateReveal, 300),
+				})
+				vi.mocked(fs.unlink).mockResolvedValue(undefined)
+				await diffViewProvider.discardUnapprovedStream()
+				expect(disposeActive).toHaveBeenCalledOnce()
+				expect(disposeSelection).toHaveBeenCalledOnce()
+				expect(disposeScroll).toHaveBeenCalledOnce()
+				expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+				vi.advanceTimersByTime(1000)
+				expect(lateReveal).not.toHaveBeenCalled()
+				expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+		it("reopens a preview tab the diff evicted before reset() drops the snapshot", async () => {
+			// Review row wM62emT7. restorePreviewTabs() is defined at DiffViewProvider.ts:1135 and
+			// called from saveChanges() and revertChanges(), but the discard path never reached it, so a
+			// denied stream left every preview tab VS Code evicted to open the diff gone: reset() clears
+			// snapshotPreviewTabs and nothing reopens what it held.
+			const revealRange = vi.fn()
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor({ revealRange }))
+			// No tab in any group: the captured file is one the diff evicted.
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: (): vscode.TabGroup[] => [],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "modify",
+				createdDirs: [],
+				placeholderPath: undefined,
+				snapshotPreviewTabs: [
+					{
+						uri: makeSnapshotUri(`${mockCwd}/mock-preview-tab.ts`),
+						scrollLine: 7,
+						viewColumn: vscode.ViewColumn.One,
+					},
+				],
+			})
+			await diffViewProvider.discardUnapprovedStream()
+			await diffViewProvider.reset()
+			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
+				{ fsPath: `${mockCwd}/mock-preview-tab.ts`, scheme: "file" },
+				{ preview: true, preserveFocus: true, viewColumn: vscode.ViewColumn.One },
+			)
+			expect(revealRange).toHaveBeenCalledTimes(1)
+			expect(revealRange).toHaveBeenCalledWith(
+				expect.objectContaining({ start: { line: 7, character: 0 } }),
+				vscode.TextEditorRevealType.AtTop,
+			)
+			expect(diffViewProvider["snapshotPreviewTabs"]).toEqual([])
+		})
+
+		it("leaves the snapshot in place when the artifact sweep fails so the retry can finish it", async () => {
+			// The restoration is skipped, not merely ordered late, when the sweep failed: the placeholder
+			// is still on disk and owned, and reopening the evicted tabs would report a restored
+			// workspace on top of a half-removed artifact while the snapshot is the only record the
+			// retry path has of what is left to remove.
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: (): vscode.TabGroup[] => [],
+				configurable: true,
+			})
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: mockTargetPath,
+				snapshotPreviewTabs: [
+					{
+						uri: makeSnapshotUri(`${mockCwd}/mock-preview-tab.ts`),
+						scrollLine: 7,
+						viewColumn: vscode.ViewColumn.One,
+					},
+				],
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("EPERM: operation not permitted"))
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("EPERM")
+			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			expect(diffViewProvider["snapshotPreviewTabs"]).toHaveLength(1)
+		})
 		it("removes the placeholder and created directories even when open() failed before activeDiffEditor was assigned", async () => {
 			// open() creates the directories (line 130) and the empty placeholder (line 134)
 			// BEFORE openDiffEditor() assigns activeDiffEditor (line 173). If that call rejects
@@ -3233,6 +3442,446 @@ describe("DiffViewProvider", () => {
 
 			expect(diffViewProvider.isEditingDifferentPath("./dir/path.ts")).toBe(true)
 			expect(diffViewProvider.isEditingDifferentPath("dir/path.ts")).toBe(false)
+		})
+	})
+
+	describe("blocking rows this unit owns at head d52c1614f6e4", () => {
+		// Each it below closes a line of the 50 blocking rows the mutation-diff leg published at
+		// p1066/u6-execute-error-path-cleanup d52c1614f6e4. The lines named here are the ones this
+		// unit's own diff defines: for each of them no earlier-merging unit in the chain
+		// (U3 #1931, U4 #1929, U5a #1930, U5b #2435) adds the same line against its own merge base,
+		// so the construct is this unit's to settle and no suppression directive is used anywhere.
+		const settleRelPath = "settled-target-file.ts"
+		const settleTargetPath = `${mockCwd}/settled-target-file.ts`
+
+		// revertChanges() reads only uri/getText/positionAt/isDirty/save off the diff document,
+		// so the double stays that narrow and every input the rollback decides on is an argument.
+		const makeRollbackDocument = (content: string, isDirty: boolean, saved: boolean) => ({
+			uri: makeUri(settleTargetPath),
+			getText: vi.fn().mockReturnValue(content),
+			// Distinct answers per offset: a fixture that returned (0,0) for every offset could not tell a
+			// full-buffer range from an empty one. The Range double wraps whatever positions it is given.
+			positionAt: vi.fn((offset: number) =>
+				offset === 0 ? { line: 0, character: 0 } : { line: 1, character: offset },
+			),
+			isDirty,
+			save: vi.fn().mockResolvedValue(saved),
+		})
+
+		const makeDirtyFileTab = () => ({
+			input: Object.assign(new vscode.TabInputText(makeUri(settleTargetPath)), {
+				uri: makeUri(settleTargetPath),
+			}),
+			isDirty: true,
+			label: settleRelPath,
+		})
+
+		// Both fixtures below sit on module-level VS Code properties the provider reads live, so each
+		// run installs its own value and hands the original descriptor back rather than leaking state.
+		const withTabGroupsAll = (tabs: unknown[], run: () => Promise<unknown>) => {
+			const original = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			Object.defineProperty(vscode.window.tabGroups, "all", { get: () => [{ tabs }], configurable: true })
+			return run().finally(() => {
+				if (original) {
+					Object.defineProperty(vscode.window.tabGroups, "all", original)
+				}
+			})
+		}
+
+		const withTextDocuments = (documents: unknown[], run: () => Promise<unknown>) => {
+			const original = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { value: documents, configurable: true })
+			return run().finally(() => {
+				if (original) {
+					Object.defineProperty(vscode.workspace, "textDocuments", original)
+				}
+			})
+		}
+
+		it("line 596: reports no different path when the session flag is up but its retained path is gone", () => {
+			// The guard's other exit. isEditing can stay true with relPath already cleared by a reset
+			// whose tab close rejected, and falling through to the comparison would then call every
+			// later write a second write, because undefined differs from every path.
+			Object.assign(diffViewProvider, { isEditing: true, relPath: undefined })
+
+			expect(diffViewProvider.isEditingDifferentPath("any/path.ts")).toBe(false)
+		})
+
+		it("line 833: restores the recorded content rather than an empty buffer when a new-file rollback meets a dirty diff buffer", async () => {
+			const document = makeRollbackDocument("partial model output", true, true)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: undefined,
+				originalContent: "the content the file held before this write",
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await withTabGroupsAll([makeDirtyFileTab()], () => diffViewProvider.revertChanges())
+
+			// Distinct positions prove the range spans the buffer: an empty or reversed range would hand
+			// the Range double the same position twice, and the uri is the document being rolled back.
+			const [replacedUri, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			expect(replacedUri).toBe(document.uri)
+			expect(document.positionAt).toHaveBeenNthCalledWith(1, 0)
+			expect(document.positionAt).toHaveBeenNthCalledWith(2, "partial model output".length)
+			expect(replacedText).toBe("the content the file held before this write")
+		})
+
+		it("line 833: falls back to an empty buffer text, not a placeholder string, when a new-file rollback has no recorded original", async () => {
+			const document = makeRollbackDocument("partial model output", true, true)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: undefined,
+				originalContent: undefined,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await withTabGroupsAll([makeDirtyFileTab()], () => diffViewProvider.revertChanges())
+
+			// Distinct positions prove the range spans the buffer: an empty or reversed range would hand
+			// the Range double the same position twice, and the uri is the document being rolled back.
+			const [replacedUri, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			expect(replacedUri).toBe(document.uri)
+			expect(document.positionAt).toHaveBeenNthCalledWith(1, 0)
+			expect(document.positionAt).toHaveBeenNthCalledWith(2, "partial model output".length)
+			expect(replacedText).toBe("")
+		})
+
+		it("line 841: reports the unconfirmed save of the diff buffer it just restored, naming the path and the stopped work", async () => {
+			// applyEdit confirmed, document.save() did not: the rollback stops before any close or
+			// unlink, and the report is the only thing the caller gets, so it has to carry the reason.
+			const document = makeRollbackDocument("partial model output", true, false)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: settleTargetPath,
+				originalContent: "",
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await withTabGroupsAll([makeDirtyFileTab()], async () => {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrowError(
+					new Error(
+						`Rollback could not save the restored buffer for ${settleTargetPath}; its clean state is unconfirmed, so the rollback stopped before closing tabs or deleting the file.`,
+					),
+				)
+			})
+
+			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("line 883: restores the recorded content rather than an empty buffer when an existing file is rolled back", async () => {
+			const document = makeRollbackDocument("streamed content", false, true)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "the content the file held before this write",
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			await diffViewProvider.revertChanges()
+
+			const [, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			expect(replacedText).toBe("the content the file held before this write")
+		})
+
+		it("line 883: strips an empty buffer text rather than a stand-in when a modify rollback has no recorded original", async () => {
+			const document = makeRollbackDocument("streamed content", false, true)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: undefined,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			await diffViewProvider.revertChanges()
+
+			const [, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+			expect(replacedText).toBe("")
+		})
+
+		it("lines 896 and 901 and 902 and 904: rolls back to the centralized defaults when the task behind the rollback is gone", async () => {
+			// revertChanges() reads its auto-close settings through taskRef -> providerRef -> getState().
+			// Any link of that chain can already be gone by the time a denial lands, and a rollback that
+			// throws while reading them would take the session teardown with it. It must instead fall
+			// back to the same defaults saveChanges() uses.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const keepOrClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+			})
+			diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
+
+			await diffViewProvider.revertChanges()
+
+			const args = keepOrClose.mock.calls[0]
+			expect(args[0]).toBe(settleTargetPath)
+			expect(args[1]).toBe(false)
+			expect(args[2]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES)
+			expect(args[3]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED)
+			expect(args[4]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES)
+		})
+
+		it("line 896: rolls back to the centralized defaults when the task no longer holds a provider", async () => {
+			const document = makeRollbackDocument("streamed content", false, true)
+			const keepOrClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () => ({ providerRef: { deref: () => undefined } }),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
+
+			await diffViewProvider.revertChanges()
+
+			const args = keepOrClose.mock.calls[0]
+			expect(args[2]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES)
+			expect(args[3]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED)
+			expect(args[4]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES)
+		})
+
+		it("lines 902 and 904: carries the settings the state holds through the rollback path", async () => {
+			// The rollback path is the one the auto-close decision table never exercised: every row of
+			// that table drives saveChanges(). Opting in on the rollback path has to close the tab, or
+			// the settings would mean one thing on accept and another on deny.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			const showEditedFile = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: true,
+						autoCloseZooOpenedFilesAfterUserEdited: true,
+						autoCloseZooOpenedNewFiles: true,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+			diffViewProvider["showEditedFileWithoutDisruptingFocus"] = showEditedFile
+
+			await diffViewProvider.revertChanges()
+
+			expect(closeFileTab).toHaveBeenCalledWith(settleTargetPath)
+			expect(showEditedFile).not.toHaveBeenCalled()
+		})
+
+		it("lines 918 to 921: forwards the three settings in the slots the decision reads them from", async () => {
+			// The outcome of this footing cannot tell the two unreadable settings apart: with the base
+			// auto-close off and a modify rollback, the tab is kept whichever value the after-user-edited
+			// and new-files arguments hold. Only the arguments themselves can show that the values state
+			// holds reach keepOrCloseEditedFile in their own slots rather than as centralized defaults -
+			// and the two assertions below fail when a forwarded value is replaced by its default,
+			// while a swap of the two settings that share a value here would still pass.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const keepOrClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: false,
+						autoCloseZooOpenedFilesAfterUserEdited: true,
+						autoCloseZooOpenedNewFiles: false,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
+
+			await diffViewProvider.revertChanges()
+
+			const args = keepOrClose.mock.calls[0]
+			expect(args[2]).toBe(false)
+			expect(args[3]).toBe(true)
+			expect(args[4]).toBe(false)
+		})
+		it("lines 918 to 921: pins the new-files argument in its own slot on the same unreadable footing", async () => {
+			// The row above sets the two settings the decision cannot read to distinct values only for the
+			// after-user-edited slot; autoCloseZooOpenedNewFiles shares its value with the base setting
+			// there, so dropping its forward would pass. Flipping only that flag here makes the same
+			// assertion catch it, and the two rows together pin all three arguments against being
+			// replaced by their centralized defaults on a path where the outcome cannot tell them apart.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const keepOrClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: false,
+						autoCloseZooOpenedFilesAfterUserEdited: false,
+						autoCloseZooOpenedNewFiles: true,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
+
+			await diffViewProvider.revertChanges()
+
+			const args = keepOrClose.mock.calls[0]
+			expect(args[2]).toBe(false)
+			expect(args[3]).toBe(false)
+			expect(args[4]).toBe(true)
+		})
+
+		it("lines 902 and 904: keeps the tab on the rollback path when the user touched the document and the after-user-edited setting is off", async () => {
+			// The touched-document branch is the only one where autoCloseZooOpenedFilesAfterUserEdited decides
+			// the outcome on a modify rollback, and it is the only branch where autoCloseZooOpenedNewFiles is
+			// unreadable. Setting the three flags to distinct values here means a wrong forwarded value moves
+			// the outcome: base on + after-user-edited on would close, new-files on alone would close.
+			const document = makeRollbackDocument("streamed content", false, true)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			const showEditedFile = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: true,
+				userTouchedDiffEditor: false,
+			})
+			diffViewProvider["taskRef"] = {
+				deref: () =>
+					makeTaskDouble({
+						autoCloseZooOpenedFiles: true,
+						autoCloseZooOpenedFilesAfterUserEdited: false,
+						autoCloseZooOpenedNewFiles: false,
+					}),
+			} as unknown as WeakRef<Task>
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+			diffViewProvider["showEditedFileWithoutDisruptingFocus"] = showEditedFile
+
+			await diffViewProvider.revertChanges()
+
+			expect(closeFileTab).not.toHaveBeenCalled()
+			expect(showEditedFile).toHaveBeenCalledWith(settleTargetPath)
+		})
+
+		it("lines 1209 and 1211: stops the rollback and reports the refused restore of the file-scheme buffer by name", async () => {
+			// The diff-side restore confirms; the plain file-scheme buffer holding the same unapproved
+			// content is the one VS Code refuses to put back. Closing it anyway would hand the user a
+			// save prompt over exactly the content this rollback discards.
+			const document = makeRollbackDocument("partial model output", true, true)
+			const streamedBuffer = {
+				uri: makeUri(settleTargetPath),
+				scheme: "file",
+				getText: vi.fn().mockReturnValue("partial model output"),
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+				isDirty: true,
+				save: vi.fn().mockResolvedValue(true),
+			}
+			Object.assign(diffViewProvider, {
+				relPath: settleRelPath,
+				activeDiffEditor: { document },
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: settleTargetPath,
+				originalContent: "",
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+
+			await withTextDocuments([streamedBuffer], () =>
+				withTabGroupsAll([makeDirtyFileTab()], async () => {
+					await expect(diffViewProvider.revertChanges()).rejects.toThrowError(
+						new Error(
+							`Rollback could not restore the buffer for ${settleTargetPath}; it may still hold unapproved content, so the tab was left open rather than closed.`,
+						),
+					)
+				}),
+			)
+
+			expect(streamedBuffer.save).not.toHaveBeenCalled()
+			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("lines 1558 and 1559 and 1563 and 1564 and 1569 and 1570 and 1571: clears every session field the reset owns, not only the ones with a visible effect", async () => {
+			// A flag that survives reset() is read by the NEXT edit as if it described that edit:
+			// documentWasOpen decides whether the tab is restored instead of closed, the two touched
+			// flags decide auto-close, and streamedLines/preDiagnostics/snapshotPreviewTabs carry one
+			// edit's stream, diagnostics and tab snapshot into the next one.
+			Object.assign(diffViewProvider, {
+				documentWasOpen: true,
+				documentWasPinned: true,
+				streamedLines: ["leftover streamed line"],
+				preDiagnostics: [{ message: "leftover diagnostic" }],
+				userTouchedDocument: true,
+				userTouchedDiffEditor: true,
+				snapshotPreviewTabs: [makePreviewTab(`${mockCwd}/leftover-preview.ts`)],
+			})
+
+			await diffViewProvider.reset()
+
+			expect(diffViewProvider["documentWasOpen"]).toBe(false)
+			expect(diffViewProvider["documentWasPinned"]).toBe(false)
+			expect(diffViewProvider["userTouchedDocument"]).toBe(false)
+			expect(diffViewProvider["userTouchedDiffEditor"]).toBe(false)
+			expect(diffViewProvider["streamedLines"]).toEqual([])
+			expect(diffViewProvider["preDiagnostics"]).toEqual([])
+			expect(diffViewProvider["snapshotPreviewTabs"]).toEqual([])
 		})
 	})
 })
