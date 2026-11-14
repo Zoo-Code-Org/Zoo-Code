@@ -16,7 +16,12 @@
 	"playwright-ct": false,
 	"workspaces": {
 		"src": {
-			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!"],
+			"entry": [
+				"extension.ts!",
+				"extension/api.ts!",
+				"workers/countTokens.ts!",
+				"services/file-safety/safeWriteText.ts!"
+			],
 			"project": [
 				"**/*.ts!",
 				"!**/__tests__/**!",
@@ -26,6 +31,7 @@
 				"!utils/WorkspacePathResolver.ts!",
 				"!test-utils/**!",
 				"!utils/versionToken.ts!",
+				"!core/tools/guardedWrite.ts!",
 				"!services/tools/Bm25Ranker.ts!",
 				"!services/tools/types.ts!",
 				"!core/tools/helpers/toolResultFormatting.ts!"

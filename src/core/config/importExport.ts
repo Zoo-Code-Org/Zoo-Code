@@ -346,10 +346,26 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 
 		const dirname = path.dirname(uri.fsPath)
 		await fs.mkdir(dirname, { recursive: true })
-		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings })
+		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings }, { refuseSymlinkTarget: true })
 	} catch (e) {
 		console.error("Failed to export settings:", e)
-		// Don't re-throw - the UI will handle showing error messages
+		// Don't re-throw - this route has no result object for the caller to report, so the
+		// notification happens here, the way the import route notifies through
+		// settings_import_failed below. A refusal to publish (a link at the chosen path the user
+		// never picked) is otherwise invisible: the dialog closes, the log line is not user-facing,
+		// and the file the user asked for does not exist. The writer's own message names the path it
+		// refused and the destination it would have written through, so the reason travels with the
+		// message.
+		const reason = e instanceof Error ? e.message : String(e)
+		try {
+			await vscode.window.showErrorMessage(t("common:errors.settings_export_failed", { error: reason }))
+		} catch (notificationError) {
+			// The route is awaited by webviewMessageHandler without a try of its own, so a notification
+			// channel that itself fails must not turn this swallowed write failure into a rejection the
+			// webview never sees. The console line above already names the write failure; this one names
+			// the notification that could not carry it.
+			console.error("Failed to notify the user about the export failure:", notificationError)
+		}
 	}
 }
 
