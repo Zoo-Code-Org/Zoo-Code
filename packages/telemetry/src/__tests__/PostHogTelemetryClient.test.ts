@@ -8,6 +8,11 @@ import { PostHog } from "posthog-node"
 import { type TelemetryPropertiesProvider, TelemetryEventName, ApiProviderError } from "@roo-code/types"
 
 import { PostHogTelemetryClient } from "../PostHogTelemetryClient"
+import { hashDistinctId } from "../distinct-id"
+
+// The client must use the salted hash as its PostHog distinct ID, never the raw
+// VS Code machine ID (issue #830).
+const hashedMachineId = hashDistinctId("test-machine-id")
 
 vi.mock("posthog-node")
 
@@ -277,13 +282,29 @@ describe("PostHogTelemetryClient", () => {
 			})
 
 			expect(mockPostHogClient.capture).toHaveBeenCalledWith({
-				distinctId: "test-machine-id",
+				distinctId: hashedMachineId,
 				event: TelemetryEventName.TASK_CREATED,
 				properties: expect.objectContaining({
 					appVersion: "1.0.0",
 					test: "value",
 				}),
 			})
+		})
+
+		it("never uses the raw VS Code machine ID as the PostHog distinct ID", async () => {
+			const client = new PostHogTelemetryClient()
+			client.updateTelemetryState(true)
+
+			await client.capture({
+				event: TelemetryEventName.TASK_CREATED,
+				properties: { test: "value" },
+			})
+
+			expect(mockPostHogClient.capture).toHaveBeenCalledTimes(1)
+			const captureCall = mockPostHogClient.capture.mock.calls[0][0]
+			expect(captureCall.distinctId).toBe(hashedMachineId)
+			expect(captureCall.distinctId).not.toBe("test-machine-id")
+			expect(captureCall.distinctId).not.toContain("test-machine-id")
 		})
 
 		it("should filter out git repository properties when capturing events", async () => {
@@ -313,7 +334,7 @@ describe("PostHogTelemetryClient", () => {
 			})
 
 			expect(mockPostHogClient.capture).toHaveBeenCalledWith({
-				distinctId: "test-machine-id",
+				distinctId: hashedMachineId,
 				event: TelemetryEventName.TASK_CREATED,
 				properties: expect.objectContaining({
 					appVersion: "1.0.0",
@@ -402,7 +423,7 @@ describe("PostHogTelemetryClient", () => {
 
 			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(
 				error,
-				"test-machine-id",
+				hashedMachineId,
 				expect.objectContaining({
 					customProp: "value",
 					$app_version: "1.0.0",
@@ -417,7 +438,7 @@ describe("PostHogTelemetryClient", () => {
 			const error = new Error("Test error")
 			await client.captureException(error)
 
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				$app_version: undefined,
 			})
 		})
@@ -485,7 +506,7 @@ describe("PostHogTelemetryClient", () => {
 			const error = new Error("Internal server error")
 			client.captureException(error)
 
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				$app_version: undefined,
 			})
 		})
@@ -497,7 +518,7 @@ describe("PostHogTelemetryClient", () => {
 			const error = Object.assign(new Error("Internal server error"), { status: 500 })
 			client.captureException(error)
 
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				$app_version: undefined,
 			})
 		})
@@ -537,7 +558,7 @@ describe("PostHogTelemetryClient", () => {
 
 			// The implementation overrides error.message with the extracted message from getErrorMessage
 			expect(error.message).toBe("Upstream provider error: model overloaded")
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				$app_version: undefined,
 			})
 		})
@@ -558,7 +579,7 @@ describe("PostHogTelemetryClient", () => {
 
 			// The implementation overrides error.message with the extracted message from getErrorMessage
 			expect(error.message).toBe("Upstream provider: connection timeout")
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				$app_version: undefined,
 			})
 		})
@@ -576,7 +597,7 @@ describe("PostHogTelemetryClient", () => {
 
 			// Verify error message remains the primary message
 			expect(error.message).toBe("Primary error message")
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				$app_version: undefined,
 			})
 		})
@@ -589,7 +610,7 @@ describe("PostHogTelemetryClient", () => {
 			client.captureException(error)
 
 			// The implementation auto-extracts properties from ApiProviderError
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				provider: "OpenRouter",
 				modelId: "gpt-4",
 				operation: "createMessage",
@@ -606,7 +627,7 @@ describe("PostHogTelemetryClient", () => {
 			client.captureException(error, { customProperty: "value" })
 
 			// additionalProperties take precedence over auto-extracted properties
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				provider: "OpenRouter",
 				modelId: "gpt-4",
 				operation: "createMessage",
@@ -622,7 +643,7 @@ describe("PostHogTelemetryClient", () => {
 			const error = new Error("Regular error")
 			client.captureException(error, { customProperty: "value" })
 
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, hashedMachineId, {
 				customProperty: "value",
 				$app_version: undefined,
 			})

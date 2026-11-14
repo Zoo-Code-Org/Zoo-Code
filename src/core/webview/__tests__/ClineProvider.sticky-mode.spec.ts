@@ -193,20 +193,26 @@ vi.mock("../../../utils/storage", async (importOriginal) => {
 	}
 })
 
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		hasInstance: vi.fn().mockReturnValue(true),
-		createInstance: vi.fn(),
-		get instance() {
-			return {
-				trackEvent: vi.fn(),
-				trackError: vi.fn(),
-				setProvider: vi.fn(),
-				captureModeSwitch: vi.fn(),
-			}
+vi.mock("@roo-code/telemetry", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@roo-code/telemetry")>()
+	return {
+		// Keep the real hashDistinctId: getStateToPostToWebview hashes the machine ID
+		// before posting it to the webview (issue #830).
+		...actual,
+		TelemetryService: {
+			hasInstance: vi.fn().mockReturnValue(true),
+			createInstance: vi.fn(),
+			get instance() {
+				return {
+					trackEvent: vi.fn(),
+					trackError: vi.fn(),
+					setProvider: vi.fn(),
+					captureModeSwitch: vi.fn(),
+				}
+			},
 		},
-	},
-}))
+	}
+})
 
 describe("ClineProvider - Sticky Mode", () => {
 	let provider: ClineProvider

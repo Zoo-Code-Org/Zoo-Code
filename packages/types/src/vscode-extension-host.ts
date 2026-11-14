@@ -391,6 +391,10 @@ export type ExtensionState = Pick<
 	cwd?: string // Current working directory
 	telemetrySetting: TelemetrySetting
 	telemetryKey?: string
+	// Salted SHA-256 hash of vscode.env.machineId (see hashDistinctId in
+	// @roo-code/telemetry), not the raw machine ID: the webview uses this value as
+	// its PostHog distinct ID, so the raw identifier never crosses the webview
+	// boundary (issue #830).
 	machineId?: string
 	// Live vscode.env.isTelemetryEnabled, so the webview's own PostHog client can respect
 	// the VS Code global telemetry toggle the same way the extension-side gate does --

@@ -19,6 +19,7 @@ export const MAX_LIST_FILES_LIMIT_CODE_INDEX = 50_000
 export const BATCH_SEGMENT_THRESHOLD = 60 // Number of code segments to batch for embeddings/upserts
 export const MAX_BATCH_RETRIES = 3
 export const INITIAL_RETRY_DELAY_MS = 500
+export const CIRCUIT_BREAKER_BATCH_THRESHOLD = 3 // Consecutive failed batches before the file watcher's circuit breaker opens
 export const PARSING_CONCURRENCY = 10
 export const MAX_PENDING_BATCHES = 20 // Maximum number of batches to accumulate before waiting
 

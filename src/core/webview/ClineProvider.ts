@@ -85,7 +85,7 @@ import {
 	type TaskExecutionContext,
 } from "../task/providerHandoff"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
-import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryService, hashDistinctId } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 
 import { Package } from "../../shared/package"
@@ -3321,7 +3321,9 @@ export class ClineProvider
 		}
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
-		const machineId = vscode.env.machineId
+		// The webview uses this value as its PostHog distinct ID, so it must be the
+		// salted hash: the raw machine ID never crosses the webview boundary (issue #830).
+		const machineId = hashDistinctId(vscode.env.machineId)
 		const vscodeTelemetryEnabled = vscode.env.isTelemetryEnabled
 		const mergedAllowedCommands = this.mergeAllowedCommands(allowedCommands)
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)

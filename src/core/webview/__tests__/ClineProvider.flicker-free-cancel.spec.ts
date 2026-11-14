@@ -106,14 +106,20 @@ vi.mock("../../../utils/path", () => ({
 }))
 
 // Mock TelemetryService
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			setProvider: vi.fn(),
-			captureTaskCreated: vi.fn(),
+vi.mock("@roo-code/telemetry", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@roo-code/telemetry")>()
+	return {
+		// Keep the real hashDistinctId: getStateToPostToWebview hashes the machine ID
+		// before posting it to the webview (issue #830).
+		...actual,
+		TelemetryService: {
+			instance: {
+				setProvider: vi.fn(),
+				captureTaskCreated: vi.fn(),
+			},
 		},
-	},
-}))
+	}
+})
 
 // Mock CloudService
 vi.mock("@roo-code/cloud", () => ({

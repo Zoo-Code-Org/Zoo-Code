@@ -15,6 +15,7 @@ import {
 } from "@roo-code/types"
 
 import { BaseTelemetryClient } from "./BaseTelemetryClient"
+import { hashDistinctId } from "./distinct-id"
 
 /**
  * PostHogTelemetryClient handles telemetry event tracking for the Roo Code extension.
@@ -23,7 +24,9 @@ import { BaseTelemetryClient } from "./BaseTelemetryClient"
  */
 export class PostHogTelemetryClient extends BaseTelemetryClient {
 	private client: PostHog
-	private distinctId: string = vscode.env.machineId
+	// Pseudonymous distinct ID: salted SHA-256 of the machine ID, never the raw
+	// value (issue #830).
+	private distinctId: string = hashDistinctId(vscode.env.machineId)
 	// Git repository properties that should be filtered out
 	private readonly gitPropertyNames = ["repositoryUrl", "repositoryName", "defaultBranch"]
 
