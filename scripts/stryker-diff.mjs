@@ -39,6 +39,15 @@ export const JOB_TIMEOUT_MINUTES = 30
 export const TERMINUS_RESERVE_MINUTES = 3
 export const MANIFEST_BUDGET_MINUTES = JOB_TIMEOUT_MINUTES - TERMINUS_RESERVE_MINUTES
 export const manifestBudgetMs = MANIFEST_BUDGET_MINUTES * 60 * 1_000
+// Related-test discovery runs before the engine is handed a budget, so it needs its own cap: the
+// time the manifest still has left after TERMINUS_RESERVE_MINUTES, which is what recording a stop and
+// appending the job summary costs. A cap of zero means discovery is refused before it starts.
+export const DISCOVERY_TIMEOUT_MINUTES = 5
+export const discoveryTimeoutMs = (spentMinutes, budgetMinutes = MANIFEST_BUDGET_MINUTES) => {
+	const spareMinutes = budgetMinutes - spentMinutes - TERMINUS_RESERVE_MINUTES
+	if (spareMinutes <= 0) return 0
+	return Math.min(DISCOVERY_TIMEOUT_MINUTES, spareMinutes) * 60 * 1_000
+}
 
 export function manifestRunBudgetMinutes(spentMinutes, budgetMinutes = MANIFEST_BUDGET_MINUTES) {
 	const spareMinutes = budgetMinutes - spentMinutes
@@ -462,7 +471,12 @@ export function resolveStrykerTempDir(repoRoot, runRoot) {
 	return path.relative(runRoot, path.join(repoRoot, ".stryker-tmp")) || ".stryker-tmp"
 }
 
-export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
+export function discoverRelatedTestFiles(
+	repoRoot,
+	packageEntry,
+	reportDirectory,
+	timeoutMs = DISCOVERY_TIMEOUT_MINUTES * 60 * 1_000,
+) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
 	const outputFile = path.join(reportDirectory, "vitest-related.json")
@@ -474,14 +488,14 @@ export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory
 		{
 			cwd: runRoot,
 			encoding: "utf8",
-			timeout: 5 * 60 * 1_000,
+			timeout: timeoutMs,
 			maxBuffer: 50 * 1024 * 1024,
 			env: process.env,
 		},
 	)
 
 	if (result.error?.code === "ETIMEDOUT") {
-		throw new Error(`${packageEntry.id} related-test discovery exceeded 5 minutes`)
+		throw new Error(`${packageEntry.id} related-test discovery exceeded ${Math.round(timeoutMs / 60_000)} minutes`)
 	}
 	if (result.error) {
 		throw new Error(`${packageEntry.id} related-test discovery could not start: ${result.error.message}`)
@@ -869,6 +883,7 @@ export function runManifest(
 	{
 		runMutation = runStryker,
 		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+		discoverTests = discoverRelatedTestFiles,
 		now = () => Date.now(),
 		budgetMinutes = MANIFEST_BUDGET_MINUTES,
 	} = {},
@@ -893,7 +908,17 @@ export function runManifest(
 			const reportDirectory = path.join(reportRoot, packageEntry.id)
 			fs.mkdirSync(reportDirectory, { recursive: true })
 			if (packageEntry.discoverRelatedTests) {
-				packageEntry.testFiles = discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory)
+				const spentBeforeDiscovery = (now() - manifestStartMs) / 60_000
+				const discoveryMs = discoveryTimeoutMs(spentBeforeDiscovery, budgetMinutes)
+				if (discoveryMs === 0) {
+					throw manifestBudgetError(
+						packageEntry,
+						"related-test discovery",
+						spentBeforeDiscovery,
+						budgetMinutes,
+					)
+				}
+				packageEntry.testFiles = discoverTests(repoRoot, packageEntry, reportDirectory, discoveryMs)
 			}
 			const preflightOutput = stripAnsi(
 				runMutation(repoRoot, packageEntry, reportRoot, true, launchBudgetMinutes(packageEntry, "preflight")),
@@ -952,7 +977,13 @@ export function runManifest(
 				result: counts.blocking.length > 0 || counts.advisories.length > 0 ? "Advisory findings" : "Passed",
 			})
 		} catch (error) {
-			if (error?.manifestBudgetStop === true) throw error
+			if (error?.manifestBudgetStop === true) {
+				// The budget stop ends the run itself, so the summary has to carry the packages that did
+				// finish before the rejection travels to main; main keeps writing the rejection record as a
+				// separate outcome in its own catch.
+				appendSummary(rows, advisories, manifest, path.join(reportRoot, PR_COMMENT_FILENAME))
+				throw error
+			}
 			advisories.push(error.message)
 			rows.push({
 				id: packageEntry.id,
