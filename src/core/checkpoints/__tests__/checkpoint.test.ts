@@ -112,6 +112,303 @@ describe("Checkpoint functionality", () => {
 	})
 
 	describe("checkpointSave", () => {
+		it("serializes concurrent saves for the same task so stageAll + commit never overlap", async () => {
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("first:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementationOnce(async () => {
+					order.push("second:start")
+					return { commit: "second-commit" }
+				})
+
+			const first = checkpointSave(mockTask, false, true)
+			const second = checkpointSave(mockTask, false, true)
+
+			// The second save must not reach the service while the first is still running:
+			// a queued save owns the stageAll + commit pair until it settles.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(order).toEqual(["first:start"])
+
+			resolveFirst({ commit: "first-commit" })
+			await Promise.all([first, second])
+			expect(order).toEqual(["first:start", "second:start"])
+		})
+
+		it("drops a queued save whose checkpoint window expired behind a stalled predecessor", async () => {
+			// A stalled baseline releases the task after checkpointTimeout, but the queue used to
+			// start it anyway, however late, committing whatever the workspace had become by then.
+			// It must not: the save is dropped and the caller resolves with no commit.
+			mockTask.checkpointTimeout = 0.01
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementation(async () => {
+					order.push("late:start")
+					return { commit: "late-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const queued = await (async () => {
+				await new Promise((resolve) => setTimeout(resolve, 5))
+				const second = checkpointSave(mockTask, false, true)
+				// Give the expired request its turn behind the still-running baseline, then release
+				// the baseline so the queue drains.
+				await new Promise((resolve) => setTimeout(resolve, 30))
+				resolveFirst({ commit: "stalled-commit" })
+				return second
+			})()
+
+			const second = await queued
+			await stalled
+			// Only the stalled baseline ever reached the shadow git; the expired save never started,
+			// so no commit describes a workspace that has since moved on.
+			expect(order).toEqual(["stalled:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(1)
+			expect(second).toBeUndefined()
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("skipping queued per-write checkpoint save"))
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("expired behind a slower checkpoint"))
+			warnSpy.mockRestore()
+		})
+
+		it("releases a queued save at its own deadline while the stalled predecessor still holds the queue", async () => {
+			// The deadline used to gate only the start of an operation. A caller queued behind a save
+			// that never settled waited for it forever, which is the indefinite wait the thread names:
+			// the handoff behind it cannot proceed. The caller has to be released by its own window
+			// while the predecessor still holds the lock, and the operation behind the released one
+			// must still wait for that predecessor rather than start on top of it.
+			mockTask.checkpointTimeout = 0.05
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementationOnce(async () => {
+					order.push("third:start")
+					return { commit: "third-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const queued = checkpointSave(mockTask, false, true)
+			// Nothing below releases the stalled predecessor before this await settles, so a wait
+			// that is still unbounded shows up here as the guard arm winning the race rather than
+			// the save resolving.
+			const released = await Promise.race([
+				queued,
+				new Promise<string>((resolve) => {
+					setTimeout(() => resolve("still waiting behind the stalled predecessor"), 500)
+				}),
+			])
+			expect(released).toBeUndefined()
+			// Released while the predecessor is still running: the stalled save is the only one that
+			// reached the shadow git, and the released request never started.
+			expect(order).toEqual(["stalled:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(1)
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("releasing the wait for queued per-write checkpoint save"),
+			)
+
+			// The lock is not handed over early. A save requested while the stalled predecessor is
+			// still running has to wait for it; its own window is reopened first, so what this
+			// measures is the queue rather than that caller's patience.
+			mockTask.checkpointTimeout = 15
+			const third = checkpointSave(mockTask, false, true)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(order).toEqual(["stalled:start"])
+
+			resolveFirst({ commit: "stalled-commit" })
+			const settled = await stalled
+			const thirdResult = await third
+			// The released request did not re-run when the predecessor finally settled, and the fresh
+			// request ran exactly once, after the predecessor released the queue.
+			expect(order).toEqual(["stalled:start", "third:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(2)
+			expect(settled).toEqual({ commit: "stalled-commit" })
+			expect(thirdResult).toEqual({ commit: "third-commit" })
+			warnSpy.mockRestore()
+		})
+
+		it("does not start a released save when the predecessor settles in the same millisecond as the deadline", async () => {
+			// The rows above release the stalled predecessor only after the caller was already released, so
+			// the millisecond the deadline itself falls in is never the millisecond a predecessor settles.
+			// That millisecond is the one the start gate cannot tell apart from a turn arriving on time: it
+			// asks whether the clock is past the deadline, and a reading equal to the deadline is not past
+			// it. Date.now is pinned here so the release and the settle are the same reading of the clock,
+			// which makes this row about the release rather than about how long anyone was willing to wait.
+			const deadline = 1_700_000_000_000
+			let now = deadline - 20
+			const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now)
+			mockTask.checkpointTimeout = 0.02
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementationOnce(async () => {
+					order.push("started-after-release")
+					return { commit: "late-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const queued = checkpointSave(mockTask, false, true)
+			// Move the pinned clock onto the deadline while the predecessor is still running, so the window
+			// closing and any later start read one and the same value.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			now = deadline
+			const released = await Promise.race([
+				queued,
+				new Promise<string>((resolve) => {
+					setTimeout(() => resolve("still waiting behind the stalled predecessor"), 500)
+				}),
+			])
+			expect(released).toBeUndefined()
+			expect(order).toEqual(["stalled:start"])
+
+			// The predecessor finally settles with the clock still reading exactly the deadline.
+			resolveFirst({ commit: "stalled-commit" })
+			const settled = await stalled
+			await new Promise((resolve) => setTimeout(resolve, 25))
+
+			expect(now).toBe(deadline)
+			expect(settled).toEqual({ commit: "stalled-commit" })
+			// A released wait must not turn into a late save: nothing but the stalled predecessor reached
+			// the service, and both ends of the release are reported.
+			expect(order).toEqual(["stalled:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(1)
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("releasing the wait for queued per-write checkpoint save"),
+			)
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("released at its deadline while a slower checkpoint was still running"),
+			)
+			nowSpy.mockRestore()
+			warnSpy.mockRestore()
+		})
+
+		it("drops a queued save for a task that was canceled while it waited", async () => {
+			mockTask.checkpointTimeout = 15
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementation(async () => {
+					order.push("canceled:start")
+					return { commit: "canceled-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			mockTask.abort = false
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const queued = checkpointSave(mockTask, false, true)
+			await new Promise((resolve) => setTimeout(resolve, 5))
+			// Cancellation arrives while the save is queued, before its turn.
+			mockTask.abort = true
+			resolveFirst({ commit: "stalled-commit" })
+
+			const second = await queued
+			await stalled
+
+			expect(order).toEqual(["stalled:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(1)
+			expect(second).toBeUndefined()
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("task canceled"))
+			warnSpy.mockRestore()
+			mockTask.abort = false
+		})
+
+		it("runs a save requested after a stalled predecessor settles, exactly once each", async () => {
+			// The gate must not poison the queue: the dropped request stays dropped, while a fresh
+			// request after the stall settles gets its normal turn.
+			mockTask.checkpointTimeout = 0.01
+			const order: string[] = []
+			let resolveFirst: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint
+				.mockImplementationOnce(() => {
+					order.push("stalled:start")
+					return new Promise((resolve) => {
+						resolveFirst = resolve
+					})
+				})
+				.mockImplementation(async () => {
+					order.push("fresh:start")
+					return { commit: "fresh-commit" }
+				})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			// Requested while its window is still open, so the drop below is about the wait behind
+			// the stalled baseline rather than about an already-expired request.
+			const expired = checkpointSave(mockTask, false, true)
+			await new Promise((resolve) => setTimeout(resolve, 30))
+			resolveFirst({ commit: "stalled-commit" })
+			const expiredResult = await expired
+			const settled = await stalled
+			const fresh = await checkpointSave(mockTask, false, true)
+
+			expect(order).toEqual(["stalled:start", "fresh:start"])
+			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledTimes(2)
+			// The dropped request resolves exactly the way a missing service does: no commit value,
+			// while the predecessor that held the queue keeps its own result.
+			expect(expiredResult).toBeUndefined()
+			expect(settled).toEqual({ commit: "stalled-commit" })
+			expect(fresh).toEqual({ commit: "fresh-commit" })
+			warnSpy.mockRestore()
+		})
+
+		it("never drops a user-initiated restore queued behind a stalled save", async () => {
+			// Restores carry no expiry: dropping one would silently discard an explicit user action.
+			mockTask.checkpointTimeout = 0.01
+			mockTask.clineMessages = [{ ts: 2, type: "say", say: "checkpoint_saved", text: RESTORE_HASH }]
+			const order: string[] = []
+			let resolveSave: (value: { commit: string }) => void = () => {}
+			mockCheckpointService.saveCheckpoint.mockImplementationOnce(() => {
+				order.push("save:start")
+				return new Promise((resolve) => {
+					resolveSave = resolve
+				})
+			})
+			mockCheckpointService.restoreCheckpoint.mockImplementationOnce(() => {
+				order.push("restore:start")
+				return Promise.resolve(undefined)
+			})
+
+			const stalled = checkpointSave(mockTask, true, true)
+			const restore = checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "preview" })
+			await new Promise((resolve) => setTimeout(resolve, 30))
+			resolveSave({ commit: "stalled-commit" })
+			await Promise.all([stalled, restore])
+
+			expect(order).toEqual(["save:start", "restore:start"])
+			expect(mockCheckpointService.restoreCheckpoint).toHaveBeenCalledWith(RESTORE_HASH)
+		})
+
 		it("should wait for checkpoint service initialization before saving", async () => {
 			// Set up task with uninitialized service
 			mockCheckpointService.isInitialized = false
@@ -129,9 +426,11 @@ describe("Checkpoint functionality", () => {
 			const result = await savePromise
 
 			// saveCheckpoint should have been called
+			// The baseline carries a content premise now: it describes the workspace before any agent
+			// write, and saveCheckpoint declines to publish if a write landed before it staged.
 			expect(mockCheckpointService.saveCheckpoint).toHaveBeenCalledWith(
 				expect.stringContaining("Task: test-task-id"),
-				{ allowEmpty: true, suppressMessage: false },
+				{ allowEmpty: true, suppressMessage: false, contentPremise: expect.any(Function) },
 			)
 
 			// Result should contain the commit hash
@@ -278,6 +577,37 @@ describe("Checkpoint functionality", () => {
 			})
 
 			expect(mockCheckpointService.restoreCheckpoint).not.toHaveBeenCalled()
+		})
+
+		it("serializes a restore against a queued save so no save stages over a restore", async () => {
+			const order: string[] = []
+			let resolveRestore: () => void = () => {}
+			mockCheckpointService.restoreCheckpoint.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						order.push("restore:start")
+						resolveRestore = resolve as () => void
+					}),
+			)
+			mockCheckpointService.saveCheckpoint.mockImplementationOnce(async () => {
+				order.push("save:start")
+				return { commit: "queued-commit" }
+			})
+
+			const restore = checkpointRestore(mockTask, { ts: 2, commitHash: RESTORE_HASH, mode: "preview" })
+			// Let the restore reach the shadow-git reset.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			const save = checkpointSave(mockTask, false, true)
+			// The save must not reach stageAll + commit while the restore is resetting the
+			// workspace: that commit would record the restored bytes and drop the write's own
+			// checkpoint.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(order).toEqual(["restore:start"])
+
+			resolveRestore()
+			await Promise.all([restore, save])
+			expect(order).toEqual(["restore:start", "save:start"])
 		})
 
 		it.each(["delete", "edit"] as const)(

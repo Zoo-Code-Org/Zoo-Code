@@ -2,6 +2,7 @@ import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
 import type { ClineApiReqInfo } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../task/Task"
@@ -26,6 +27,15 @@ function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOU
 		checkpointWarning: type && timeout ? { type, timeout } : undefined,
 	})
 }
+
+/** In-flight shadow-git initializations per task. Creating the service and running
+ * initShadowGit is the one checkpoint operation the per-task work queue below does not cover,
+ * so it carries its own handle: a caller whose own bounded wait expires must not release an
+ * initialization it did not start, because a released lookup creates a second
+ * RepoPerTaskCheckpointService over the same task directory while the first is still
+ * committing. The entry leaves the map only when the operation settles, so a late caller
+ * either joins it or finds it gone, never both. */
+const checkpointInits = new Map<string, Promise<RepoPerTaskCheckpointService | undefined>>()
 
 export async function getCheckpointService(task: Task, { interval = 250 }: { interval?: number } = {}) {
 	if (!task.enableCheckpoints) {
@@ -77,27 +87,45 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			log,
 		}
 
-		if (task.checkpointServiceInitializing) {
+		const inFlight = checkpointInits.get(task.taskId)
+
+		if (inFlight || task.checkpointServiceInitializing) {
 			const checkpointInitStartTime = Date.now()
 			let warningShown = false
 
-			await pWaitFor(
-				() => {
-					const elapsed = Date.now() - checkpointInitStartTime
+			try {
+				await pWaitFor(
+					() => {
+						const elapsed = Date.now() - checkpointInitStartTime
 
-					// Show warning if we're past the threshold and haven't shown it yet
-					if (!warningShown && elapsed >= WARNING_THRESHOLD_MS) {
-						warningShown = true
-						sendCheckpointInitWarn(task, "WAIT_TIMEOUT", WARNING_THRESHOLD_MS / 1000)
-					}
+						// Show warning if we're past the threshold and haven't shown it yet
+						if (!warningShown && elapsed >= WARNING_THRESHOLD_MS) {
+							warningShown = true
+							sendCheckpointInitWarn(task, "WAIT_TIMEOUT", WARNING_THRESHOLD_MS / 1000)
+						}
 
-					console.log(
-						`[Task#getCheckpointService] waiting for service to initialize (${Math.round(elapsed / 1000)}s)`,
-					)
-					return !!task.checkpointService && !!task?.checkpointService?.isInitialized
-				},
-				{ interval, timeout: checkpointTimeoutMs },
-			)
+						console.log(
+							`[Task#getCheckpointService] waiting for service to initialize (${Math.round(elapsed / 1000)}s)`,
+						)
+						return !!task.checkpointService && !!task?.checkpointService?.isInitialized
+					},
+					{ interval, timeout: checkpointTimeoutMs },
+				)
+			} catch (error) {
+				// A handle still in the map means the initialization this caller joined is still
+				// running: this caller's window closing is that caller's timeout, not the outcome of
+				// the operation it waited on. Report no service and change nothing else - the caller
+				// that started the initialization still owns the task's checkpoint state, and a later
+				// lookup joins the same operation instead of creating a second shadow git for the
+				// same task.
+				if (error.name === "TimeoutError" && inFlight) {
+					sendCheckpointInitWarn(task, "WAIT_TIMEOUT", checkpointTimeoutMs / 1000)
+					return undefined
+				}
+
+				throw error
+			}
+
 			if (!task?.checkpointService) {
 				sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
 				task.enableCheckpoints = false
@@ -112,14 +140,39 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			return undefined
 		}
 
-		const service = RepoPerTaskCheckpointService.create(options)
-		task.checkpointServiceInitializing = true
-		await checkGitInstallation(task, service, log, provider)
-		task.checkpointService = service
-		if (task.enableCheckpoints) {
-			sendCheckpointInitWarn(task)
+		const starting = (async () => {
+			const service = RepoPerTaskCheckpointService.create(options)
+			task.checkpointServiceInitializing = true
+			await checkGitInstallation(task, service, log, provider)
+			if (!service.isInitialized) {
+				// checkGitInstallation disables checkpoints when Git is unavailable and
+				// logs initShadowGit failures without throwing: storing such a service
+				// would hand later saves (and the fast path above) an uninitialized
+				// handle whose isInitialized can never flip, so a failed
+				// initialization must resolve to no service at all.
+				task.checkpointServiceInitializing = false
+				return undefined
+			}
+			task.checkpointService = service
+			if (task.enableCheckpoints) {
+				sendCheckpointInitWarn(task)
+			}
+			return service
+		})()
+
+		// Registered before this side awaits anything, so a lookup arriving on the next tick joins
+		// this initialization instead of racing it into a second service.
+		checkpointInits.set(task.taskId, starting)
+
+		try {
+			return await starting
+		} finally {
+			// Settled is the only moment the operation stops being shared: success or failure, the
+			// handle leaves the map when the work it names is over, not when a caller loses patience.
+			if (checkpointInits.get(task.taskId) === starting) {
+				checkpointInits.delete(task.taskId)
+			}
 		}
-		return service
 	} catch (err) {
 		if (err.name === "TimeoutError" && task.enableCheckpoints) {
 			sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
@@ -202,6 +255,10 @@ async function checkGitInstallation(
 		} catch (err) {
 			log(`[Task#getCheckpointService] initShadowGit -> ${err.message}`)
 			task.enableCheckpoints = false
+			// The "initialize" event never fires for a failed initShadowGit, so
+			// clear the flag here or later lookups wait on an initialization
+			// that already died.
+			task.checkpointServiceInitializing = false
 		}
 	} catch (err) {
 		log(`[Task#getCheckpointService] Unexpected error during Git check: ${err.message}`)
@@ -209,6 +266,130 @@ async function checkGitInstallation(
 		task.enableCheckpoints = false
 		task.checkpointServiceInitializing = false
 	}
+}
+
+// Serialize checkpoint work per task. saveCheckpoint() runs stageAll + commit and
+// restoreCheckpoint() resets the workspace through the same shadow git, so two concurrent
+// operations for the same task (for example the task-start baseline racing the first
+// per-write save after the baseline timeout, or a restore while a per-write save is still
+// queued) can stage each other's writes or interleave commits. A per-task promise queue
+// makes every save and every restore wait for the previous one, including a baseline that
+// is still running.
+const checkpointWorkQueues = new Map<string, Promise<unknown>>()
+
+type QueuedCheckpointWorkOptions = {
+	/** Human-readable name used in the skip warning, e.g. "queued per-write checkpoint save". */
+	label: string
+	/** Wall-clock deadline after which the operation must not start: a save requested behind a
+	 * stalled predecessor stages whatever the workspace looks like when it finally gets its turn,
+	 * which is not the state the caller asked to record. Omit for work that must run whenever its
+	 * turn arrives, such as a user-initiated restore. */
+	expiresAt?: number
+	/** Checked when the operation's turn arrives, not when it is requested: a task that was canceled
+	 * while its work was queued performs no checkpoint work. */
+	isCanceled?: () => boolean
+}
+
+const DEFAULT_QUEUED_WORK_OPTIONS: QueuedCheckpointWorkOptions = { label: "checkpoint work" }
+
+function enqueueCheckpointWork<T>(
+	taskId: string,
+	operation: () => Promise<T>,
+	options: QueuedCheckpointWorkOptions = DEFAULT_QUEUED_WORK_OPTIONS,
+): Promise<T | undefined> {
+	const previous = checkpointWorkQueues.get(taskId) ?? Promise.resolve()
+	// Both arms of the previous settlement get the same gate, so a failed predecessor does not
+	// smuggle an expired or canceled operation past it.
+	// attempt may return the operation's promise or nothing at all; Promise.then flattens the
+	// former and resolves the latter, which is exactly the two outcomes callers need.
+	// Whether the deadline arm below already let this caller go. attempt reads it, because the
+	// expiry test in the gate asks whether the clock is past the deadline, and a predecessor that
+	// settles in the very millisecond the deadline falls in has not passed it: without this record
+	// the released caller would hold the answer the release gave it and the operation would start
+	// anyway. Releasing a wait only means the wait is over if the released work cannot start.
+	let releasedByDeadline = false
+	const attempt = (): T | Promise<T> | undefined => {
+		const expired = options.expiresAt !== undefined && Date.now() > options.expiresAt
+		let reason: string | undefined
+		if (expired) {
+			reason = "expired behind a slower checkpoint"
+		} else if (releasedByDeadline) {
+			reason = "released at its deadline while a slower checkpoint was still running"
+		} else if (options.isCanceled?.()) {
+			reason = "task canceled"
+		}
+		if (reason !== undefined) {
+			console.warn(
+				`[checkpoints] skipping ${options.label} for task ${taskId}: ${reason}; it never reached the shadow git`,
+			)
+			return undefined
+		}
+		return operation()
+	}
+	// Whether the operation ahead of this caller has released the queue. The deadline below
+	// releases a wait, so it must stop being able to once the caller's own turn has arrived:
+	// from that point the caller is either running or already dropped by the gate above.
+	let predecessorSettled = false
+	void previous.then(
+		() => {
+			predecessorSettled = true
+		},
+		() => {
+			predecessorSettled = true
+		},
+	)
+	const next = previous.then(attempt, attempt)
+	const tail = next.then(
+		() => undefined,
+		() => undefined,
+	)
+	checkpointWorkQueues.set(taskId, tail)
+	void tail.finally(() => {
+		if (checkpointWorkQueues.get(taskId) === tail) {
+			checkpointWorkQueues.delete(taskId)
+		}
+	})
+	if (options.expiresAt === undefined) {
+		return next
+	}
+	// The deadline below bounds the wait as well as the start. A caller whose window closes
+	// while its predecessor is still running is released now, the way it is released when its
+	// turn arrives: no work ran and the caller resolves with no commit, which is how a dropped
+	// save and a missing service are already reported. The queue itself keeps waiting on the
+	// predecessor, so the lock is not handed to the operation behind this one early, and the
+	// release is recorded for attempt to honour when that predecessor settles, so a released
+	// operation never starts late - not even in the millisecond the deadline falls in, which is
+	// the one reading the expiry test alone cannot tell apart from a turn arriving on time. A
+	// user-initiated restore carries no expiry and keeps waiting for its turn, which is what
+	// dropping one would mean the loss of.
+	const waitMs = Math.max(0, options.expiresAt - Date.now())
+	let stopWaitTimer = (): void => {}
+	const releasedAtDeadline = new Promise<undefined>((resolve) => {
+		const timer = setTimeout(() => {
+			if (predecessorSettled) {
+				// Its turn arrived, so there is no wait left to release. The operation either ran
+				// or the gate above dropped it, and next carries whichever answer that was.
+				return
+			}
+			console.warn(
+				`[checkpoints] releasing the wait for ${options.label} for task ${taskId}: its window closed while a slower checkpoint was still running; the queue keeps the lock and this operation will not start late`,
+			)
+			// Latched before the caller is released, so the gate at the top of this function sees the
+			// release even when the clock has not moved past the deadline by the time the predecessor
+			// settles. Order matters: setting it after resolve would let a settled predecessor start
+			// the work in between.
+			releasedByDeadline = true
+			resolve(undefined)
+		}, waitMs)
+		stopWaitTimer = (): void => {
+			clearTimeout(timer)
+			resolve(undefined)
+		}
+	})
+	// Whichever arm settles first ends the caller's wait, so the timer is cancelled on the
+	// normal path and the caller keeps the result it already had on the released path.
+	void next.then(stopWaitTimer, stopWaitTimer)
+	return Promise.race([next, releasedAtDeadline])
 }
 
 export async function checkpointSave(task: Task, force = false, suppressMessage = false) {
@@ -220,13 +401,48 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
-	// Start the checkpoint process in the background.
-	return service
-		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
-		.catch((err) => {
-			console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
-			task.enableCheckpoints = false
-		})
+	// Start the checkpoint process in the background, queued behind any checkpoint work
+	// already running for this task so stageAll + commit never overlap. The queue is not only a
+	// lock: a save that is still queued past the caller's own checkpoint window is describing a
+	// workspace that has moved on, so it is dropped rather than started late, and a save queued by a
+	// task that has since been canceled performs no checkpoint work at all. A dropped save is
+	// reported to the caller the same way a missing service is (a resolve with no commit), which is
+	// how the task-start baseline already treats it - by retrying on a later loop entry.
+	const timeoutSeconds = task.checkpointTimeout > 0 ? task.checkpointTimeout : DEFAULT_CHECKPOINT_TIMEOUT_SECONDS
+	// A task-start baseline describes the workspace before any agent write: it is the rollback point for
+	// the first write of the request loop. The queue orders this save behind whatever is already running,
+	// but ordering is not content - saveCheckpoint stages when it executes - so a baseline that is still
+	// running when the first write lands would commit the write bytes as the pre-task state, and the
+	// per-write save queued behind it would then find nothing to commit. The branch taken here is to
+	// decline to publish. The other branch the ask names - freezing what the baseline stages, by copying
+	// the workspace at request time or by staging and writing a tree then - is worse: either does its
+	// expensive git work outside the very lock whose comment claims it makes late work safe, a copy can
+	// catch a file half-written and so records a state that is neither pre-write nor post-write, and it
+	// would leave the shadow git meaning two different things by what the workspace looked like. A
+	// declined baseline costs the caller nothing it does not already handle: a resolve with no commit is
+	// how a dropped save is reported today, which is how the task-start baseline already treats it - by
+	// retrying on a later loop entry. The content the task started with stays recorded in the
+	// initialization commit, and the write keeps a record of its own whose diff base is that content.
+	// Per-write saves carry no premise, because recording the workspace as it stands when the save runs
+	// is exactly what a per-write save is for.
+	const requestedBeforeAnyWrite = force && !task.didEditFile
+	return enqueueCheckpointWork(
+		task.taskId,
+		() =>
+			service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, {
+				allowEmpty: force,
+				suppressMessage,
+				contentPremise: requestedBeforeAnyWrite ? () => !task.didEditFile : undefined,
+			}),
+		{
+			label: force ? "queued task-start checkpoint baseline" : "queued per-write checkpoint save",
+			expiresAt: Date.now() + Math.max(1, timeoutSeconds * 1000),
+			isCanceled: () => task.abort,
+		},
+	).catch((err) => {
+		console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
+		task.enableCheckpoints = false
+	})
 }
 
 export type CheckpointRestoreOptions = {
@@ -257,7 +473,11 @@ export async function checkpointRestore(
 	const provider = task.providerRef.deref()
 
 	try {
-		await service.restoreCheckpoint(commitHash)
+		// The same per-task lock the saves use, in both directions: a restore resets the
+		// workspace through shadow git, so a queued save must not stage and commit while it
+		// is running (that save would record the restored bytes and drop the write's own
+		// checkpoint), and a restore requested during a save waits for that save to settle.
+		await enqueueCheckpointWork(task.taskId, () => service.restoreCheckpoint(commitHash))
 		TelemetryService.instance.captureCheckpointRestored(task.taskId)
 		await provider?.postMessageToWebview({ type: "currentCheckpointUpdated", text: commitHash })
 

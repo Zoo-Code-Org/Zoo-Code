@@ -721,6 +721,10 @@
 		"enable": {
 			"label": "啟用自動檢查點",
 			"description": "啟用後，Zoo 將在工作執行期間自動建立檢查點，方便檢視變更或回到較早的狀態。 <0>了解更多</0>"
+		},
+		"perWrite": {
+			"label": "每次檔案寫入後建立檢查點",
+			"description": "在代理的 write_to_file、edit_file 或 apply_patch 工具每次成功寫入後記錄一個檢查點；涉及多個檔案的補丁只產生一個檢查點。在編輯器中儲存檔案不會記錄檢查點。"
 		}
 	},
 	"notifications": {

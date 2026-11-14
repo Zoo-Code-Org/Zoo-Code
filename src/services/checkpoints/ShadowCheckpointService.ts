@@ -330,7 +330,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	public async saveCheckpoint(
 		message: string,
-		options?: { allowEmpty?: boolean; suppressMessage?: boolean },
+		options?: { allowEmpty?: boolean; suppressMessage?: boolean; contentPremise?: () => boolean },
 	): Promise<CheckpointResult | undefined> {
 		try {
 			this.log(
@@ -339,6 +339,17 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 			if (!this.git) {
 				throw new Error("Shadow git repo not initialized")
+			}
+
+			// Content, not only ordering: stageAll captures whatever the workspace holds at this instant,
+			// so a premise that no longer holds means this save would record a state its caller never asked
+			// about. The answer is taken here, immediately before the capture, with no await between the two,
+			// so nothing else this task does can slip in after the premise is checked.
+			if (options?.contentPremise && !options.contentPremise()) {
+				this.log(
+					`[${this.constructor.name}#saveCheckpoint] dropping the save: its content premise no longer holds at staging time, so nothing was committed`,
+				)
+				return undefined
 			}
 
 			const startTime = Date.now()
