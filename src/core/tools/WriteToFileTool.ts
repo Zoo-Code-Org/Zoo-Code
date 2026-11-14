@@ -10,12 +10,14 @@ import { fileExistsAtPath, createDirectoriesForFile } from "../../utils/fs"
 import { stripLineNumbers, everyLineHasLineNumbers } from "../../integrations/misc/extract-text"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { canonicalizeForApproval } from "./guardedWrite"
 
 interface WriteToFileParams {
 	path: string
@@ -87,6 +89,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
 
+		// The reviewer approves a name; guardedWrite publishes against the target that name
+		// resolves to. Capture the canonical identity before the ask, as the sibling tools
+		// do, so an approved outside-workspace write is not refused after the fact and a
+		// rename between the ask and the publish cannot retarget it.
+		const approvedCanonicalTarget = isOutsideWorkspace
+			? await canonicalizeForApproval(absolutePath, relPath)
+			: undefined
+
 		const sharedMessageProps: ClineSayTool = {
 			tool: fileExists ? "editedExistingFile" : "newFileCreated",
 			path: getReadablePath(task.cwd, relPath),
@@ -110,8 +120,25 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			if (isPreventFocusDisruptionEnabled) {
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
 				if (fileExists) {
-					const absolutePath = path.resolve(task.cwd, relPath)
-					task.diffViewProvider.originalContent = await fs.readFile(absolutePath, "utf-8")
+					// This arm reads the whole file itself, so it is the one place in the tool
+					// that can earn a complete observation for the content a full-file
+					// replacement is built on. Bracket the read with stats and record it only
+					// while the bracketing stats agree. Without this record the guarded publish
+					// finds no observation, treats the target as never read, and refuses a file
+					// this arm just read end to end.
+					const readPreStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+					const readToken = readPreStats === undefined ? undefined : versionTokenOfStat(readPreStats)
+					const readContent = readToken === undefined ? undefined : await fs.readFile(absolutePath, "utf-8")
+					const readPostStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+					if (
+						readToken !== undefined &&
+						readContent !== undefined &&
+						readPostStats !== undefined &&
+						versionTokenOfStat(readPostStats) === readToken
+					) {
+						task.observationRegistry.observe(absolutePath, readToken, true)
+					}
+					task.diffViewProvider.originalContent = readContent ?? ""
 				} else {
 					task.diffViewProvider.originalContent = ""
 				}
@@ -132,7 +159,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Name the operation the guard must judge: replacing an existing target is an
+				// update, and the guard then compares against the token recorded above.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					fileExists ? "update" : "create",
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
@@ -164,7 +203,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					fileExists ? "update" : "create",
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			if (relPath) {
