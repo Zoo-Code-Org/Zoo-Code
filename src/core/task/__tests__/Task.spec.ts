@@ -477,6 +477,8 @@ describe("Cline", () => {
 			apiConfiguration: mockApiConfig,
 			autoApprovalEnabled: false,
 		})
+		// A persistent mid-stream failure asks the user; these tests confirm the retry.
+		vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 		return task
 	}
@@ -673,6 +675,121 @@ describe("Cline", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
 
 			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+		})
+	})
+
+	describe("persistent mid-stream failure", () => {
+		async function* idleTimeoutStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new Error("Provider ended the request: Upstream idle timeout exceeded.")
+		}
+
+		// 5 is MAX_MID_STREAM_AUTO_RETRIES: the first attempt plus 5 automatic retries.
+		it.each([
+			{ autoApprovalEnabled: true, expectedAttempts: 6, expectedBackoffAttempts: [0, 1, 2, 3, 4] },
+			{ autoApprovalEnabled: false, expectedAttempts: 1, expectedBackoffAttempts: [] },
+		])(
+			"asks the user instead of retrying forever (autoApprovalEnabled=$autoApprovalEnabled)",
+			async ({ autoApprovalEnabled, expectedAttempts, expectedBackoffAttempts }) => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					providerStateWith({ autoApprovalEnabled, requestDelaySeconds: 0 }),
+				)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+				vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+				const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+				const askSpy = vi
+					.spyOn(task, "ask")
+					.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementation(() => idleTimeoutStream())
+
+				// Declining ends the turn: the "API request failed" error is handled inside the loop,
+				// so the call resolves rather than rejecting.
+				await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])).resolves.toBe(
+					true,
+				)
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(expectedAttempts)
+				expect(backoffSpy.mock.calls.map(([attempt]) => attempt)).toEqual(expectedBackoffAttempts)
+				expect(askSpy).toHaveBeenCalledOnce()
+				expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("idle timeout"))
+			},
+		)
+
+		it("restarts automatic retries from attempt 0 after the user approves the capped prompt", async () => {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => idleTimeoutStream())
+
+			await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])).resolves.toBe(
+				true,
+			)
+
+			// Two rounds of the first attempt plus 5 automatic retries, each ending in a prompt.
+			expect(attemptApiRequestSpy).toHaveBeenCalledTimes(12)
+			expect(backoffSpy.mock.calls.map(([attempt]) => attempt)).toEqual([0, 1, 2, 3, 4, 0, 1, 2, 3, 4])
+			expect(askSpy).toHaveBeenCalledTimes(2)
+		})
+
+		it("does not add the user message to history again when the user confirms a retry", async () => {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: false, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			const historySpy = vi
+				.spyOn(getTaskTestAccess(task), "addToApiConversationHistory")
+				.mockResolvedValue(undefined)
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValueOnce({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => idleTimeoutStream())
+
+			await expect(task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])).resolves.toBe(
+				true,
+			)
+
+			expect(askSpy).toHaveBeenCalledTimes(2)
+			expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+			const userMessages = historySpy.mock.calls.filter(
+				([message]) => (message as { role: string }).role === "user",
+			)
+			expect(userMessages).toHaveLength(1)
 		})
 	})
 
@@ -1220,6 +1337,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
+			// Mid-stream failures ask the user; confirm the retry.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
@@ -1268,6 +1387,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
+			// Mid-stream failures ask the user; confirm the retry.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
@@ -1360,6 +1481,8 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
+			// Mid-stream failures ask the user; confirm the retry.
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
@@ -5866,6 +5989,64 @@ describe("Cline", () => {
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
 				expect(attemptApiRequestSpy.mock.calls[1]?.[0]).toBe(0)
 				expect(attemptApiRequestSpy.mock.calls[1]?.[1]).toBe(options)
+			})
+
+			it("truncates on a context-window overflow even when the history retry attempt is past the truncation cap", async () => {
+				// A request re-sent after mid-stream retries carries a high history retry attempt.
+				const task = await createRetryForwardingTask()
+				const truncateSpy = vi
+					.spyOn(getTaskTestAccess(task), "handleContextWindowExceededError")
+					.mockResolvedValue(undefined)
+				vi.spyOn(task, "ask").mockRejectedValue(
+					new Error("a context-window overflow must truncate, not prompt"),
+				)
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 400, message: "context length exceeded" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				const options = retryForwardingOptions()
+				const iterator = task.attemptApiRequest(6, options)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				expect(truncateSpy).toHaveBeenCalledOnce()
+				expect(attemptApiRequestSpy.mock.calls[1]).toEqual([7, options, 1])
+			})
+
+			it("stops truncating once the context-window retries for the request are exhausted", async () => {
+				const task = await createRetryForwardingTask()
+				const truncateSpy = vi
+					.spyOn(getTaskTestAccess(task), "handleContextWindowExceededError")
+					.mockResolvedValue(undefined)
+				const askSpy = vi
+					.spyOn(task, "ask")
+					.mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+				vi.spyOn(task.api, "createMessage")
+					.mockImplementationOnce(() => failingStream({ status: 400, message: "context length exceeded" }))
+					.mockImplementationOnce(() =>
+						asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry response" }]),
+					)
+
+				const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest")
+				const options = retryForwardingOptions()
+				// 3 is MAX_CONTEXT_WINDOW_RETRIES.
+				const iterator = task.attemptApiRequest(0, options, 3)
+
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retry response" },
+				})
+
+				expect(truncateSpy).not.toHaveBeenCalled()
+				expect(askSpy).toHaveBeenCalledWith("api_req_failed", "context length exceeded")
+				// The user-confirmed retry is a fresh request with a fresh truncation budget.
+				expect(attemptApiRequestSpy.mock.calls[1]).toEqual([0, options])
 			})
 
 			it("carries the derived model snapshot into the retry recursion when the caller omitted one", async () => {
