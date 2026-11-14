@@ -103,4 +103,36 @@ describe("BedrockCustomArn - the memoised ARN validation", () => {
 			screen.getByText("settings:validation.arn.regionMismatch arnRegion=eu-west-1 region=us-east-1"),
 		).toBeDefined()
 	})
+	it("drops the region warning once a matching ARN arrives and keeps that ARN in the input", () => {
+		const base: ProviderSettings = { apiProvider: providerIdentifiers.bedrock, awsRegion: "us-east-1" }
+		const setApiConfigurationField = vi.fn()
+		const mismatchedArn =
+			"arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-3-7-sonnet-20250219-v1:0"
+		const matchedArn =
+			"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+
+		const { rerender } = render(
+			<BedrockCustomArn apiConfiguration={base} setApiConfigurationField={setApiConfigurationField} />,
+		)
+		rerender(
+			<BedrockCustomArn
+				apiConfiguration={{ ...base, awsCustomArn: mismatchedArn }}
+				setApiConfigurationField={setApiConfigurationField}
+			/>,
+		)
+		expect(
+			screen.getByText("settings:validation.arn.regionMismatch arnRegion=eu-west-1 region=us-east-1"),
+		).toBeDefined()
+
+		rerender(
+			<BedrockCustomArn
+				apiConfiguration={{ ...base, awsCustomArn: matchedArn }}
+				setApiConfigurationField={setApiConfigurationField}
+			/>,
+		)
+
+		expect(screen.queryByText(/regionMismatch/)).toBeNull()
+		expect(screen.queryByText("settings:providers.invalidArnFormat")).toBeNull()
+		expect((screen.getByTestId("custom-arn-input") as HTMLInputElement).value).toBe(matchedArn)
+	})
 })

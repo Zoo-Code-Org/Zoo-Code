@@ -2,7 +2,9 @@ import fs from "fs/promises"
 import path from "path"
 
 import type { DiffResult, ToolResponse } from "../../../shared/tools"
+import type { FileObservation } from "../../task/observationRegistry"
 import type { Task } from "../../task/Task"
+import { ObservationRegistry } from "../../task/observationRegistry"
 import { fileExistsAtPath } from "../../../utils/fs"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ToolCallbacks } from "../BaseTool"
@@ -538,33 +540,93 @@ describe("ApplyDiffTool failure reporting", () => {
 		// the hunks were computed against, and a failure exit revokes exactly that observation.
 		// A matching token is not the same entry - a concurrent complete read can carry the same
 		// token and deserve to stay.
-		function _handEntryToAnotherRead(complete: boolean) {
-			let lookups = 0
-			vi.mocked(mockTask.observationRegistry.get).mockImplementation(() => {
-				const created = vi.mocked(mockTask.observationRegistry.observe).mock.calls.at(0)
-				if (lookups++ === 0 || created === undefined) {
-					// Nothing observed yet, so this call is the one that creates the partial entry.
-					return undefined
+		// Every case installs a real registry, so the entry the tool creates is the object the registry
+		// actually stores. A stand-in that builds a fresh object on each lookup never hands the failure
+		// exit the entry it is deciding about, and an identity-based cleanup would then fail whatever
+		// the implementation did. The concurrent read replaces that stored object through observe and
+		// carries the very version the tool recorded.
+		function installRealRegistry(concurrentComplete?: boolean) {
+			const observeForReal = ObservationRegistry.prototype.observe
+			const forgetForReal = ObservationRegistry.prototype.forget
+			const registry = new ObservationRegistry()
+			let observedPath: string | undefined
+			let created: FileObservation | undefined
+			let concurrent: FileObservation | undefined
+			let entryAtForget: FileObservation | undefined
+			const observeSpy = vi.spyOn(registry, "observe").mockImplementation((absolutePath, version, complete) => {
+				observeForReal.call(registry, absolutePath, version, complete)
+				observedPath = absolutePath
+				if (created !== undefined) {
+					return
 				}
-				// The second lookup is the failure exit deciding whether it may forget.
-				return { version: created[1], observedAt: 0, complete }
+				created = registry.get(absolutePath)
+				if (concurrentComplete !== undefined) {
+					observeForReal.call(registry, absolutePath, version, concurrentComplete)
+					concurrent = registry.get(absolutePath)
+				}
 			})
+			const forgetSpy = vi.spyOn(registry, "forget").mockImplementation((absolutePath) => {
+				entryAtForget = registry.get(absolutePath)
+				return forgetForReal.call(registry, absolutePath)
+			})
+			// Task declares the registry read-only, so installing one per case needs a mutable view.
+			const taskWithRegistry = mockTask as { observationRegistry: ObservationRegistry }
+			taskWithRegistry.observationRegistry = registry
+			const observedPathOfTool = (): string => {
+				if (observedPath === undefined) {
+					throw new Error("the tool never recorded an observation")
+				}
+				return observedPath
+			}
+			return {
+				registry,
+				observeSpy,
+				forgetSpy,
+				observedPathOfTool,
+				created: () => created,
+				concurrent: () => concurrent,
+				entryAtForget: () => entryAtForget,
+			}
 		}
 
 		it("keeps the entry a concurrent complete read recorded on the same version", async () => {
-			_handEntryToAnotherRead(true)
+			const recorded = installRealRegistry(true)
 			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(1) }, 1)
 
 			expect(output).toContain("FAILURE-MARKER-1")
-			expect(mockTask.observationRegistry.forget).not.toHaveBeenCalled()
+			expect(recorded.observeSpy.mock.calls[0]?.[2]).toBe(false)
+			expect(recorded.created()?.complete).toBe(false)
+			expect(recorded.concurrent()?.complete).toBe(true)
+			expect(recorded.concurrent()?.version).toBe(recorded.created()?.version)
+			expect(recorded.forgetSpy).not.toHaveBeenCalled()
+			expect(recorded.registry.get(recorded.observedPathOfTool())).toBe(recorded.concurrent())
 		})
 
 		it("forgets the entry this call created while it is still the recorded one", async () => {
-			_handEntryToAnotherRead(false)
+			const recorded = installRealRegistry()
 			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(1) }, 1)
 
 			expect(output).toContain("FAILURE-MARKER-1")
-			expect(mockTask.observationRegistry.forget).toHaveBeenCalledWith(expect.stringContaining("file.txt"))
+			expect(recorded.concurrent()).toBeUndefined()
+			expect(recorded.entryAtForget()).toBe(recorded.created())
+			expect(recorded.forgetSpy).toHaveBeenCalledWith(recorded.observedPathOfTool())
+			expect(recorded.registry.get(recorded.observedPathOfTool())).toBeUndefined()
+		})
+
+		// This is where ownership and matching fields part company: the entry the failure exit
+		// compares is not the one this call created, yet its version and completeness match, so
+		// production forgets it. Recorded as it behaves, with no production change.
+		it("forgets the entry a partial concurrent read left behind the same version", async () => {
+			const recorded = installRealRegistry(false)
+			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(1) }, 1)
+
+			expect(output).toContain("FAILURE-MARKER-1")
+			expect(recorded.concurrent()?.version).toBe(recorded.created()?.version)
+			expect(recorded.concurrent()?.complete).toBe(false)
+			expect(recorded.entryAtForget()).toBeDefined()
+			expect(recorded.entryAtForget()).not.toBe(recorded.created())
+			expect(recorded.forgetSpy).toHaveBeenCalledWith(recorded.observedPathOfTool())
+			expect(recorded.registry.get(recorded.observedPathOfTool())).toBeUndefined()
 		})
 	})
 })

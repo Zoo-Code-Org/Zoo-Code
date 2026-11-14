@@ -179,4 +179,13 @@ describe("getModelValidationError - the model a dynamic provider rejected", () =
 			"settings:validation.modelAvailability modelId=not-in-the-list",
 		)
 	})
+	it("accepts the model that is in the fetched list", () => {
+		const config: ProviderSettings = {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterApiKey: "mock-key",
+			openRouterModelId: "valid-model",
+		}
+
+		expect(getModelValidationError(config, t, routerModels)).toBeUndefined()
+	})
 })
