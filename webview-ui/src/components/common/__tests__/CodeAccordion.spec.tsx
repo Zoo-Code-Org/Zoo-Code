@@ -4,8 +4,16 @@ import CodeAccordion from "../CodeAccordion"
 
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
-		t: (key: string, options?: Record<string, unknown>) =>
-			key === "chat:codeAccordion.openFileAriaLabel" ? `${key} ${JSON.stringify(options)}` : key,
+		t: (key: string, options?: Record<string, unknown>) => {
+			const translations: Record<string, string> = {
+				"chat:codeAccordion.userEdits": "User Edits",
+				"chat:codeAccordion.consoleLogs": "Console Logs",
+			}
+			return (
+				translations[key] ??
+				(key === "chat:codeAccordion.openFileAriaLabel" ? `${key} ${JSON.stringify(options)}` : key)
+			)
+		},
 	}),
 }))
 
@@ -29,5 +37,19 @@ describe("CodeAccordion", () => {
 		expect(
 			screen.getByLabelText(`chat:codeAccordion.openFileAriaLabel ${JSON.stringify({ path: "src/example.ts" })}`),
 		).toBeInTheDocument()
+	})
+
+	it("renders the translated user-edits label for feedback", () => {
+		render(
+			<CodeAccordion
+				code="const x = 1"
+				language="typescript"
+				isExpanded={false}
+				isFeedback={true}
+				onToggleExpand={() => {}}
+			/>,
+		)
+
+		expect(screen.getByText("User Edits")).toBeInTheDocument()
 	})
 })
