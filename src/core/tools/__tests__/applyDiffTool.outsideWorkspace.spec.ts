@@ -20,6 +20,12 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn(),
+		// ApplyDiffTool stats around its own read to capture the version token its guarded publish
+		// consumes, so the fs double has to carry a stat. Rejecting keeps the fixture honest about
+		// the case the code already tolerates: no stat, no token, publish unguarded-by-token.
+		stat: vi
+			.fn()
+			.mockRejectedValue(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })),
 	},
 }))
 
@@ -102,7 +108,12 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 			diffViewProvider: {
 				editType: undefined,
 				originalContent: "",
-				open: vi.fn().mockResolvedValue(undefined),
+				open: vi.fn().mockImplementation(async function () {
+					// The real open() re-reads the file and records that text as the save baseline; ApplyDiffTool
+					// compares that baseline against its own read and fails closed when they differ, so the
+					// double has to emulate the re-read instead of a no-op.
+					task.diffViewProvider.originalContent = "old\n"
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 				reset: vi.fn().mockResolvedValue(undefined),
 				revertChanges: vi.fn().mockResolvedValue(undefined),

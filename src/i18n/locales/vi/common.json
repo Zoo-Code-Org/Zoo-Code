@@ -125,7 +125,6 @@
 		"auto_import_failed": "Không thể tự động nhập cài đặt ZooCode: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Không tìm thấy lịch sử nhiệm vụ Roo Code nào để nhập từ {{domain}}.",
-			"alreadyImported_one": "{{count}} lịch sử nhiệm vụ Roo Code đã được nhập vào Zoo Code.",
 			"alreadyImported_other": "Tất cả {{count}} lịch sử nhiệm vụ Roo Code đã được nhập vào Zoo Code."
 		}
 	},
@@ -143,7 +142,6 @@
 			"signInUnavailable": "Đăng nhập Roo Code Cloud hiện không khả dụng. Hãy cấu hình nhà cung cấp khác để tiếp tục."
 		},
 		"rooHistoryImport": {
-			"success_one": "Đã nhập {{count}} lịch sử nhiệm vụ Roo Code vào Zoo Code.",
 			"success_other": "Đã nhập {{count}} lịch sử nhiệm vụ Roo Code vào Zoo Code."
 		}
 	},
