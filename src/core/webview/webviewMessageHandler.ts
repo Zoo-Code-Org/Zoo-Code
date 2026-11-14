@@ -41,6 +41,7 @@ import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { isNonPortableSettingsKey } from "../config/ContextProxy"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
@@ -701,6 +702,17 @@ export const webviewMessageHandler = async (
 			)
 
 			provider.isViewLaunched = true
+			// Claims minted before this launch were held by the provider, because posting one earlier
+			// could be lost while postMessage still resolved true. The listener exists now, so this is
+			// the point where the queued posts can actually be received. A failed flush must not fail
+			// the launch, so it is contained here.
+			try {
+				await provider.deliverPendingViewStateClaims()
+			} catch (error) {
+				provider.log(
+					`[viewStateClaim] Flushing pending claims on launch failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 			break
 		case "webviewHeartbeat":
 			// Confirm renderer liveness and advance the watchdog recovery health window.
@@ -774,6 +786,18 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					if (isNonPortableSettingsKey(key)) {
+						// Per-view selections and the claim token that binds them are minted and held by the host,
+						// and the settings-file path already refuses them. A posted updateSettings is the same
+						// untrusted input, so writing them here would let a webview choose which persisted view
+						// entry - and with which identity - it owns, bypassing the claim check in setViewStateId.
+						provider.log(
+							`[updateSettings] Ignoring non-portable settings key ${key} posted by the webview.`,
+						)
+
+						continue
+					}
+
 					// An invalid display value is ignored, before anything is done for it.
 					if (isInvalidDisplayValue(key, value)) {
 						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)

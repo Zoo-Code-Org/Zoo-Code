@@ -1076,6 +1076,26 @@ describe("ClineProvider", () => {
 		expect(forceFullModelDetailsLoad).not.toHaveBeenCalled()
 	})
 
+	test("resolveWebviewView re-arms the claim gate for the renderer it is about to mount", async () => {
+		// A previous mount arms the claim gate through webviewDidLaunch, and claim delivery is gated on that
+		// flag. Resolving the view mounts a fresh renderer that has not sent webviewDidLaunch yet, so a claim
+		// minted in between must queue rather than post into a renderer with no listener attached.
+		provider.isViewLaunched = true
+
+		await provider.resolveWebviewView(mockWebviewView)
+
+		expect(provider.isViewLaunched).toBe(false)
+	})
+
+	test("mints a temporary view id that is scoped to this extension host", () => {
+		// viewStates is one machine-wide globalState key while the instance counter restarts at 0 in every
+		// host, so the temporary id has to carry something host-specific or two windows collide on sidebar-0.
+		const scope = ClineProvider["hostScope"]()
+		expect(scope).toMatch(/^[A-Za-z0-9_-]{1,8}$/)
+		expect(ClineProvider["hostScopeToken"]).toBe(scope)
+		expect(provider.viewId.startsWith("sidebar-" + scope + "-")).toBe(true)
+		expect(provider.viewId.length).toBeLessThanOrEqual(ClineProvider["MAX_VIEW_STATE_ID_LENGTH"])
+	})
 	test("resolveWebviewView hydrates the saved terminalProfile into the process-wide Terminal state", async () => {
 		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
 		// Seed the persisted setting so the real getState() returns it during hydration.
@@ -2804,6 +2824,156 @@ describe("ClineProvider", () => {
 				expect(mockWebviewPanel.webview.html).toBe(html)
 			})
 
+			test("retires the view-state generation when the provider disposes", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const generation = provider["viewStateGeneration"]
+
+				await provider.dispose()
+
+				expect(provider["viewStateGeneration"]).toBe(generation + 1)
+				expect(provider["isViewStateGenerationLive"](generation)).toBe(false)
+			})
+
+			test("detaches this provider's queued view-state writes when it disposes", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const entry: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider,
+					generation: provider["viewStateGeneration"],
+					run: async () => {},
+				}
+				// The pump advances on the fake clock, so the entry is read while it still waits on the queue.
+				const queued = ClineProvider["enqueuePersistedViewStateWrite"](entry)
+
+				expect(ClineProvider["pendingViewStateWrites"]).toContain(entry)
+				expect(provider["scheduledViewStateWrites"]).toContain(entry)
+
+				await provider.dispose()
+
+				expect(ClineProvider["pendingViewStateWrites"]).not.toContain(entry)
+				expect(provider["scheduledViewStateWrites"]).toEqual([])
+				expect(entry.provider).toBeNull()
+
+				void queued
+			})
+
+			test("leaves the shared queue untouched when dispose finds the entry already drained", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const drained: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider,
+					generation: provider["viewStateGeneration"],
+					run: async () => {},
+				}
+				const queuedDrained = ClineProvider["enqueuePersistedViewStateWrite"](drained)
+				// The queue step drops the entry from the shared list at its own turn before it asks
+				// whether the owner's generation is still live, so a write whose owner went stale
+				// stays on this provider's schedule while it is already gone from the shared list.
+				// That is the state below, built the way the queue step builds it.
+				const drainedIndex = ClineProvider["pendingViewStateWrites"].indexOf(drained)
+				ClineProvider["pendingViewStateWrites"].splice(drainedIndex, 1)
+				// A write belonging to somebody else, left on the shared queue so that a splice
+				// run without a match would remove it.
+				const neighbour: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider: null,
+					generation: 0,
+					run: async () => {},
+				}
+				ClineProvider["pendingViewStateWrites"].push(neighbour)
+				const sharedBefore = ClineProvider["pendingViewStateWrites"].slice()
+
+				await provider.dispose()
+
+				expect(ClineProvider["pendingViewStateWrites"]).toEqual(sharedBefore)
+				expect(ClineProvider["pendingViewStateWrites"]).toContain(neighbour)
+				expect(provider["scheduledViewStateWrites"]).toEqual([])
+				expect(drained.provider).toBeNull()
+				expect(ClineProvider["pendingViewStateWrites"]).toHaveLength(sharedBefore.length)
+
+				// The neighbour belongs to no provider, so this dispose leaves it on the shared
+				// queue; take it back out rather than hand it to the next test.
+				const neighbourIndex = ClineProvider["pendingViewStateWrites"].indexOf(neighbour)
+				if (neighbourIndex !== -1) {
+					ClineProvider["pendingViewStateWrites"].splice(neighbourIndex, 1)
+				}
+
+				void queuedDrained
+			})
+
+			test("splices the provider entry out of the shared queue without touching the entry behind it", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				const entry: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider,
+					generation: provider["viewStateGeneration"],
+					run: async () => {},
+				}
+				const queued = ClineProvider["enqueuePersistedViewStateWrite"](entry)
+				// A write from another provider that is already waiting behind this one.
+				const behind: {
+					provider: ClineProvider | null
+					generation: number
+					run: (owner: ClineProvider) => Promise<void>
+				} = {
+					provider: null,
+					generation: 0,
+					run: async () => {},
+				}
+				ClineProvider["pendingViewStateWrites"].push(behind)
+
+				const entryIndex = ClineProvider["pendingViewStateWrites"].indexOf(entry)
+				expect(ClineProvider["pendingViewStateWrites"].indexOf(behind)).toBe(entryIndex + 1)
+
+				await provider.dispose()
+
+				expect(ClineProvider["pendingViewStateWrites"]).not.toContain(entry)
+				expect(ClineProvider["pendingViewStateWrites"]).toContain(behind)
+				expect(provider["scheduledViewStateWrites"]).toEqual([])
+				expect(entry.provider).toBeNull()
+
+				const behindIndex = ClineProvider["pendingViewStateWrites"].indexOf(behind)
+				if (behindIndex !== -1) {
+					ClineProvider["pendingViewStateWrites"].splice(behindIndex, 1)
+				}
+
+				void queued
+			})
+
+			test("numbers this provider's view id from the shared counter", () => {
+				const suffix = Number(String(provider["viewId"]).split("-").pop())
+
+				expect(Number.isNaN(suffix)).toBe(false)
+				expect(ClineProvider["nextViewId"]).toBeGreaterThan(suffix)
+			})
+
+			test("keeps the per-field view-state write versions the record gates on", () => {
+				expect(provider["viewLocalStateWriteVersions"]).toEqual({
+					mode: 0,
+					currentApiConfigName: 0,
+					apiConfiguration: 0,
+				})
+			})
+
+			test("reports a message as undelivered once the provider is disposed", async () => {
+				await provider.resolveWebviewView(mockWebviewPanel)
+				await provider.dispose()
+
+				expect(await provider.postMessageToWebview({ type: "mcpServers", mcpServers: [] })).toBe(false)
+			})
+
 			test.each([false, true])(
 				"replaces the tab host without disposing its provider or task (interrupted: %s)",
 				async (interrupted) => {
@@ -3234,8 +3404,9 @@ describe("ClineProvider", () => {
 
 		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
 
-		// Should not throw
-		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+		// Should not throw, and must report the failed delivery rather than resolving as if the
+		// webview had taken the message.
+		await expect(provider.postMessageToWebview(message)).resolves.toBe(false)
 	})
 
 	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
@@ -3320,7 +3491,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("posts a request and resolves the matching response", async () => {
-			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture()
 			await Promise.resolve()
 			const requestId = postMessageSpy.mock.calls[0]?.[0].requestId
@@ -3336,7 +3507,7 @@ describe("ClineProvider", () => {
 
 		test("rejects a request after its timeout", async () => {
 			vi.useFakeTimers()
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture(100)
 			const rejection = expect(request).rejects.toThrow("Theme fixture probe timed out after 100ms")
 
@@ -3345,7 +3516,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("rejects pending requests when webview resources are cleared", async () => {
-			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 			const request = provider.requestWebviewThemeFixture()
 			const rejection = expect(request).rejects.toThrow(
 				"Webview was disposed before the theme fixture probe completed",
@@ -3371,7 +3542,7 @@ describe("ClineProvider", () => {
 			mdmService,
 		)
 
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockImplementation(async () => true)
 		vi.spyOn(provider as any, "getStateToPostToWebview").mockResolvedValue({ version: "1.0.0" })
 
 		await provider.postStateToWebview()
@@ -3381,8 +3552,8 @@ describe("ClineProvider", () => {
 	})
 
 	test("postStateToWebviewWithoutTaskHistory waits for the webview post boundary", async () => {
-		let releasePost!: () => void
-		const pendingPost = new Promise<void>((resolve) => {
+		let releasePost!: (delivered: boolean) => void
+		const pendingPost = new Promise<boolean>((resolve) => {
 			releasePost = resolve
 		})
 		let statePostSettled = false
@@ -3401,7 +3572,7 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy).toHaveBeenCalledOnce()
 		expect(statePostSettled).toBe(false)
 
-		releasePost()
+		releasePost(true)
 		await statePost
 		expect(statePostSettled).toBe(true)
 	})
@@ -3428,7 +3599,7 @@ describe("ClineProvider", () => {
 		vi.spyOn(provider, "getStateToPostToWebview")
 			.mockReturnValueOnce(olderSnapshot)
 			.mockResolvedValueOnce(readyState)
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 		const olderPost = postState(provider)
 		await Promise.resolve()
@@ -3455,7 +3626,7 @@ describe("ClineProvider", () => {
 		],
 	])("%s skips task history computation", async (_methodName, postState) => {
 		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll")
-		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 		await postState(provider)
 
@@ -5568,7 +5739,6 @@ describe("ClineProvider", () => {
 
 			// Spy on log method to verify warning was logged
 			const logSpy = vi.spyOn(provider, "log")
-
 			// Create history item with non-existent mode
 			const historyItem = {
 				id: "test-id",
@@ -8427,7 +8597,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				} as any)
 				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
@@ -8531,7 +8701,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
 				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
-				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(true)
 
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi
@@ -8589,5 +8759,252 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
 		})
+	})
+})
+describe("view state claims driven at the method boundary (PR 2414 asks)", () => {
+	// The view-state methods are private, so the doubles above cannot inherit them: each one is run with the
+	// double as its receiver through the prototype. The cast is to a record of functions because the
+	// private names are not reachable by property access on the prototype either.
+	const proto = ClineProvider.prototype as unknown as Record<string, (this: unknown, ...args: unknown[]) => unknown>
+	const drive = <T>(name: string, self: ClineProvider, ...args: unknown[]): Promise<T> =>
+		Promise.resolve(proto[name].call(self, ...args) as T)
+
+	// The view-state machinery is private and has no caller at this head: registration and the callers
+	// that would use it arrive with the next unit. So the real methods are driven through bracket notation
+	// over a structural double carrying only the members they read, asserted once here rather than cast at
+	// every call.
+	const makeViewHost = (
+		initial: Record<string, unknown> = {},
+		write?: (storage: Record<string, unknown>, calls: { n: number }, key: string, value: unknown) => void,
+	) => {
+		const storage: Record<string, unknown> = {}
+		const calls = { n: 0 }
+		const host: Record<string, unknown> = {
+			context: {
+				globalState: {
+					get: (key: string) => storage[key],
+					update: async (key: string, value: unknown) => {
+						storage[key] = value
+					},
+				},
+			},
+			contextProxy: {
+				getValue: (key: string) => storage[key],
+				setValue: async (key: string, value: unknown) => {
+					calls.n += 1
+					if (write) {
+						write(storage, calls, key, value)
+						return
+					}
+					storage[key] = value
+				},
+			},
+			getPersistedViewStates: () =>
+				Object.assign(Object.create(null) as Record<string, unknown>, storage["viewStates"] ?? {}),
+			prunePersistedViewStates: (states: Record<string, unknown>) => ({ ...states }),
+			isViewStateGenerationLive: (generation: number) =>
+				host["_disposed"] !== true && host["viewStateGeneration"] === generation,
+			postViewStateClaimToWebview: (viewStateId: string, claimToken: string) =>
+				proto["postViewStateClaimToWebview"].call(host, viewStateId, claimToken),
+			enqueueViewStateWrite: (run: (provider: ClineProvider) => Promise<void>) =>
+				run(host as unknown as ClineProvider),
+			postMessageToWebview: vi.fn().mockResolvedValue(true),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+			diagnosticsRecorder: { record: vi.fn() },
+			log: vi.fn(),
+			view: { visible: true },
+			viewId: "sidebar-host-0",
+			viewStateId: "sidebar-host-0",
+			viewStateGeneration: 0,
+			wroteUnderTemporaryViewStateId: false,
+			pendingViewStateClaims: new Map<string, string>(),
+			scheduledViewStateWrites: [],
+			isViewLaunched: false,
+			_disposed: false,
+		}
+		Object.assign(host, initial)
+		const provider = host as unknown as ClineProvider
+		const persisted = () =>
+			(storage["viewStates"] ?? {}) as Record<
+				string,
+				{ mode?: string; claimToken?: string; updatedAt?: number } | undefined
+			>
+		return { provider, storage, persisted }
+	}
+
+	it.each([
+		{ label: "a launched webview that accepts the post", launched: true, post: true, expected: "delivered" },
+		{ label: "a webview that has not launched yet", launched: false, post: true, expected: "queued" },
+		{
+			label: "a launched webview whose post resolves as not delivered",
+			launched: true,
+			post: false,
+			expected: "queued",
+		},
+	])("mints the claim host-side and reports $label as $expected", async ({ launched, post, expected }) => {
+		const { provider, persisted } = makeViewHost({ isViewLaunched: launched }, undefined)
+		provider.postMessageToWebview = vi.fn().mockResolvedValue(post)
+		const result = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+
+		expect(result.persisted).toBe(true)
+		expect(result.claim).toBe(expected)
+		const entry = persisted()["sidebar-host-0"]
+		expect(entry?.mode).toBe("code")
+		expect(entry?.claimToken).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+		if (expected === "delivered") {
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "viewStateClaim",
+				viewStateId: "sidebar-host-0",
+				viewStateClaim: entry?.claimToken,
+			})
+			expect(provider["pendingViewStateClaims"].size).toBe(0)
+		} else if (launched) {
+			expect(provider.postMessageToWebview).toHaveBeenCalledTimes(1)
+			expect(provider["pendingViewStateClaims"].get("sidebar-host-0")).toBe(entry?.claimToken)
+		} else {
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+			expect(provider["pendingViewStateClaims"].get("sidebar-host-0")).toBe(entry?.claimToken)
+		}
+	})
+
+	it("refuses a claim token the webview tried to supply", async () => {
+		const { provider, persisted } = makeViewHost({ isViewLaunched: true })
+		await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+			claimToken: "chosen-by-the-webview",
+		})
+
+		expect(persisted()["sidebar-host-0"]?.claimToken).not.toBe("chosen-by-the-webview")
+	})
+
+	it.each([
+		{ label: "still carries its own binding", later: false },
+		{ label: "was re-bound by a later write", later: true },
+	])("rolls back a persisted claim whose view died while $label", async ({ later }) => {
+		const prior = { mode: "architect", claimToken: "prior-token", updatedAt: 1 }
+		let minted: string | undefined
+		const { provider, storage, persisted } = makeViewHost(
+			{ viewStateGeneration: 5 },
+			(storage2, calls, _key, value) => {
+				const written = value as Record<string, { claimToken?: string }>
+				if (calls.n === 1) {
+					minted = written["sidebar-host-0"]?.claimToken
+					storage2["viewStates"] = value
+					provider["viewStateGeneration"] = 6
+					return
+				}
+				if (later) {
+					storage2["viewStates"] = {
+						"sidebar-host-0": { mode: "code", claimToken: "later-token", updatedAt: 2 },
+					}
+					return
+				}
+				storage2["viewStates"] = value
+			},
+		)
+		void storage
+		storage["viewStates"] = { "sidebar-host-0": { ...prior } }
+
+		const result = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+		expect(minted).toBeDefined()
+		expect(result).toEqual({ persisted: false, claim: "none" })
+		if (later) {
+			expect(persisted()["sidebar-host-0"]?.claimToken).toBe("later-token")
+			expect(persisted()["sidebar-host-0"]?.mode).toBe("code")
+		} else {
+			expect(persisted()["sidebar-host-0"]).toEqual(prior)
+		}
+	})
+
+	it("flushes a queued claim on the next launch and re-queues it when that post fails", async () => {
+		const { provider, persisted } = makeViewHost()
+		const queued = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+		expect(queued.claim).toBe("queued")
+		const token = persisted()["sidebar-host-0"]?.claimToken
+		expect(token).toBeDefined()
+
+		provider.isViewLaunched = true
+		provider.postMessageToWebview = vi.fn().mockResolvedValue(false)
+		await drive<void>("deliverPendingViewStateClaims", provider)
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "viewStateClaim",
+			viewStateId: "sidebar-host-0",
+			viewStateClaim: token,
+		})
+		expect(provider["pendingViewStateClaims"].get("sidebar-host-0")).toBe(token)
+
+		provider.postMessageToWebview = vi.fn().mockResolvedValue(true)
+		await drive<void>("deliverPendingViewStateClaims", provider)
+		expect(provider["pendingViewStateClaims"].size).toBe(0)
+		expect(persisted()["sidebar-host-0"]?.claimToken).toBe(token)
+	})
+
+	it("deletes a persisted entry only when the expected claim token still matches", async () => {
+		const { provider, storage, persisted } = makeViewHost()
+		storage["viewStates"] = { "sidebar-host-0": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+
+		await expect(drive<boolean>("clearPersistedViewState", provider, "sidebar-host-0", "token-b")).resolves.toBe(
+			false,
+		)
+		expect(persisted()["sidebar-host-0"]?.claimToken).toBe("token-a")
+
+		await expect(drive<boolean>("clearPersistedViewState", provider, "sidebar-host-0", "token-a")).resolves.toBe(
+			true,
+		)
+		expect(persisted()["sidebar-host-0"]).toBeUndefined()
+
+		storage["viewStates"] = { "sidebar-host-0": { mode: "code", claimToken: "token-c", updatedAt: 2 } }
+		await expect(drive<boolean>("clearPersistedViewState", provider, "sidebar-host-0")).resolves.toBe(true)
+		expect(persisted()["sidebar-host-0"]).toBeUndefined()
+	})
+
+	it("re-binds a durable entry only for the claim no webview can present any more", async () => {
+		const { provider, storage, persisted } = makeViewHost()
+		storage["viewStates"] = { "stable-view": { mode: "code", claimToken: "dead-token", updatedAt: 1 } }
+
+		await expect(
+			drive<string | undefined>("rebindUnboundViewStateEntry", provider, "stable-view"),
+		).resolves.toBeUndefined()
+		expect(persisted()["stable-view"]?.claimToken).toBe("dead-token")
+		await expect(
+			drive<string | undefined>("rebindUnboundViewStateEntry", provider, "stable-view", "some-other-token"),
+		).resolves.toBeUndefined()
+		expect(persisted()["stable-view"]?.claimToken).toBe("dead-token")
+
+		const rebound = await drive<string | undefined>(
+			"rebindUnboundViewStateEntry",
+			provider,
+			"stable-view",
+			"dead-token",
+		)
+		expect(rebound).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+		expect(persisted()["stable-view"]?.claimToken).toBe(rebound)
+		expect(persisted()["stable-view"]?.mode).toBe("code")
+	})
+
+	it("leaves the entry under the stable id with authorship set when the restore write fails", async () => {
+		const { provider, storage, persisted } = makeViewHost(
+			{ wroteUnderTemporaryViewStateId: true },
+			(storage2, calls) => {
+				if (calls.n === 2) {
+					provider["viewStateGeneration"] = 1
+					throw new Error("restore write failed")
+				}
+				storage2["viewStates"] = { "stable-view": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+				provider["viewStateGeneration"] = 1
+			},
+		)
+		storage["viewStates"] = { "sidebar-host-0": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+
+		await drive<void>("rekeyPersistedViewStateEntry", provider, "stable-view")
+
+		expect(persisted()["stable-view"]?.claimToken).toBe("token-a")
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
 	})
 })

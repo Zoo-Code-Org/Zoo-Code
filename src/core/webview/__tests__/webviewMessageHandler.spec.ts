@@ -129,6 +129,8 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
+	// The webviewDidLaunch handler flushes claims the provider queued before the renderer launched.
+	deliverPendingViewStateClaims: vi.fn().mockResolvedValue(undefined),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
@@ -2832,6 +2834,43 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(calls.at(-1)).toEqual([true])
 	})
 
+	// Review follow-up on the attach-time claim retry: a claim minted before the renderer launched is
+	// held by the provider, because a message posted before the webview attaches its listener can be
+	// lost while postMessage still resolves true. The flush therefore belongs to webviewDidLaunch, and
+	// it has to run only after isViewLaunched is set - flushing earlier would post back into the window
+	// the gate exists to close.
+	it("flushes the provider's pending view-state claims on webviewDidLaunch, after isViewLaunched is set", async () => {
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		// Establish the false value inside this row: every beforeEach in this file runs
+		// clearAllMocks, which resets call records and not properties, so a value an earlier row
+		// left set could make the ordering pass on its own.
+		mockClineProvider.isViewLaunched = false
+		const launchedWhenFlushed: boolean[] = []
+		vi.mocked(mockClineProvider.deliverPendingViewStateClaims).mockImplementationOnce(async () => {
+			launchedWhenFlushed.push(mockClineProvider.isViewLaunched)
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		expect(mockClineProvider.deliverPendingViewStateClaims).toHaveBeenCalledTimes(1)
+		expect(launchedWhenFlushed).toEqual([true])
+	})
+
+	it("contains a rejected claim flush so webviewDidLaunch still completes", async () => {
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		vi.mocked(mockClineProvider.deliverPendingViewStateClaims).mockImplementationOnce(() => {
+			throw new Error("Claim flush failed")
+		})
+
+		await expect(webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })).resolves.toBeUndefined()
+
+		expect(mockClineProvider.deliverPendingViewStateClaims).toHaveBeenCalledTimes(1)
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Flushing pending claims on launch failed"),
+		)
+	})
+
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
 	// via an async provider.getStateToPostToWebview().then(...) continuation, outside
 	// telemetrySettingQueue -- so it could resolve after a concurrent "telemetrySetting" message
@@ -3137,8 +3176,35 @@ describe("webviewMessageHandler - renameTaskWithId", () => {
 	})
 })
 
-// The display settings are written like any other setting, but the webview is not trusted: a value that its own
-// controls cannot produce (a hand-written message) is ignored before anything is done for it.
+describe("webviewMessageHandler - non-portable settings keys", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("refuses viewStates while applying the portable keys of the same payload", async () => {
+		// The per-view selections and the claim token that binds them are minted by the host, and the
+		// settings-file path already refuses them. A posted updateSettings is the same untrusted input,
+		// so writing them straight into the shared store would let a webview choose which persisted view
+		// entry - and with which identity - it owns.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: {
+				viewStates: { "some-view": { claimToken: "webview-minted", mode: "code", updatedAt: 1 } },
+				customInstructions: "carry on",
+			},
+		})
+
+		const writtenKeys = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map((call) => String(call[0]))
+		expect(writtenKeys).not.toContain("viewStates")
+		expect(writtenKeys).toContain("customInstructions")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring non-portable settings key viewStates"),
+		)
+	})
+})
+
+// The display settings are written like any other setting, but the webview is not trusted: a
+// value its own controls cannot produce (a hand-written message) is ignored before storage.
 describe("updateSettings with the display settings", () => {
 	const save = (updatedSettings: Record<string, unknown>) =>
 		webviewMessageHandler(mockClineProvider, { type: "updateSettings", updatedSettings })

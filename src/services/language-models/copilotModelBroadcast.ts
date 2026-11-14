@@ -10,7 +10,7 @@ export interface CopilotModelBroadcastTarget {
 		type: typeof VsCodeLmModelsMessageType.githubCopilotModels
 		vsCodeLmModels: Awaited<ReturnType<typeof getGitHubCopilotModels>>
 		githubCopilotAccount: string | null
-	}): Promise<void>
+	}): Promise<unknown>
 }
 
 export interface CopilotModelBroadcastOptions {

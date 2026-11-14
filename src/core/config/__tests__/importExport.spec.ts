@@ -251,6 +251,55 @@ describe("importExport", () => {
 		})
 	})
 
+	describe("host-owned view state on import", () => {
+		const settingsWithImportedViewStates = JSON.stringify({
+			providerProfiles: {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+				},
+			},
+			globalSettings: {
+				customInstructions: "keep me",
+				viewStates: { "view-1": { mode: "architect", claimToken: "planted-claim" } },
+			},
+		})
+
+		beforeEach(() => {
+			;(fs.readFile as Mock).mockResolvedValue(settingsWithImportedViewStates)
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+			mockProviderSettingsManager.import.mockResolvedValue(undefined)
+			mockProviderSettingsManager.listConfig.mockResolvedValue([])
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+		})
+
+		it("drops viewStates so an imported file cannot plant another view's claim", async () => {
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result).toMatchObject({ success: true })
+
+			// A claim token is host-minted: a file that could carry an entry could replay it as that
+			// view's identity, so the key is dropped before anything is written.
+			expect(mockContextProxy.setValues).toHaveBeenCalledTimes(1)
+			const [appliedSettings] = (mockContextProxy.setValues as Mock).mock.calls[0]
+			expect(appliedSettings).not.toHaveProperty("viewStates")
+			expect(appliedSettings).toMatchObject({ customInstructions: "keep me" })
+			const warnings = (result as { warnings?: string[] }).warnings ?? []
+			expect(warnings).toHaveLength(1)
+			expect(warnings[0]).toContain('globalSettings.viewStates" was skipped')
+			expect(warnings[0]).toContain("not portable")
+		})
+	})
+
 	describe("importSettings", () => {
 		it("should return success: false when user cancels file selection", async () => {
 			;(vscode.window.showOpenDialog as Mock).mockResolvedValue(undefined)
