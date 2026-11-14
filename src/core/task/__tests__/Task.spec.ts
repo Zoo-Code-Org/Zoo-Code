@@ -11,8 +11,10 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import type { Mock } from "vitest"
 
 import {
+	ApiProviderError,
 	providerIdentifiers,
 	RooCodeEventName,
+	TelemetryEventName,
 	type ClineMessage,
 	type GlobalState,
 	type HistoryItem,
@@ -20,6 +22,7 @@ import {
 	type ProviderSettings,
 	type ModelInfo,
 	type TaskLike,
+	type TelemetryClient,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -673,6 +676,171 @@ describe("Cline", () => {
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
 
 			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+		})
+	})
+
+	/**
+	 * Issue #513 regression coverage. Provider catch blocks capture the failure
+	 * and re-throw, and the retry loop in Task#attemptApiRequest re-enters the
+	 * provider per attempt, so one persistent API error used to be captured once
+	 * per attempt. These tests pin the single-capture policy at the seam where
+	 * the amplification happens.
+	 */
+	describe("api error telemetry single-capture", () => {
+		let recordingClient: TelemetryClient
+		let telemetryInstanceSlot: { _instance: TelemetryService | null }
+
+		beforeEach(() => {
+			recordingClient = {
+				setProvider: vi.fn(),
+				capture: vi.fn().mockResolvedValue(undefined),
+				captureException: vi.fn().mockResolvedValue(undefined),
+				updateTelemetryState: vi.fn(),
+				isTelemetryEnabled: vi.fn().mockReturnValue(true),
+				shutdown: vi.fn().mockResolvedValue(undefined),
+			}
+
+			// Swap the shared singleton for one wired to the recording client. The
+			// cast names the one private static member it touches; TelemetryService
+			// has no public reset, and afterEach hands the slot back by nulling it
+			// so the shared beforeEach re-creates the default instance.
+			telemetryInstanceSlot = TelemetryService as unknown as { _instance: TelemetryService | null }
+			telemetryInstanceSlot._instance = null
+			TelemetryService.createInstance([recordingClient])
+		})
+
+		afterEach(() => {
+			telemetryInstanceSlot._instance = null
+		})
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 3,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("captures exactly one exception when a provider captures and throws across retry attempts", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+			// Spies observe without replacing: this counts provider-side captures
+			// while the real single-capture policy decides what reaches the client.
+			const serviceCaptureSpy = vi.spyOn(TelemetryService.instance, "captureException")
+
+			// Fault injection at the provider seam: each failed attempt mimics the
+			// provider contract (build a fresh ApiProviderError, capture it, throw
+			// it) and the third attempt recovers so the real retry loop terminates.
+			let attempts = 0
+			vi.spyOn(task.api, "createMessage").mockImplementation(() => {
+				attempts++
+				if (attempts <= 2) {
+					const apiError = new ApiProviderError(
+						"upstream exploded",
+						providerIdentifiers.anthropic,
+						"claude-3-5-sonnet-20241022",
+						"createMessage",
+					)
+					TelemetryService.instance.captureException(apiError)
+					return {
+						// eslint-disable-next-line require-yield -- fault-injection stream: the provider contract under test throws on the first chunk
+						async *[Symbol.asyncIterator]() {
+							throw apiError
+						},
+						async next() {
+							throw apiError
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(error: unknown) {
+							throw error
+						},
+						async [Symbol.asyncDispose]() {},
+					} as AsyncGenerator<ApiStreamChunk>
+				}
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "recovered" }
+					},
+					async next() {
+						return { done: false, value: { type: "text", text: "recovered" } as ApiStreamChunk }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: unknown) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {},
+				} as AsyncGenerator<ApiStreamChunk>
+			})
+
+			// Drive the real retry loop: attempts 1 and 2 throw after capturing,
+			// the catch backs off (requestDelaySeconds is 0) and recurses, and
+			// attempt 3 succeeds.
+			const chunks: ApiStreamChunk[] = []
+			for await (const chunk of task.attemptApiRequest(0)) {
+				chunks.push(chunk)
+			}
+
+			expect(attempts).toBe(3)
+			expect(serviceCaptureSpy).toHaveBeenCalledTimes(2)
+			expect(recordingClient.captureException).toHaveBeenCalledTimes(1)
+			expect(recordingClient.captureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "upstream exploded",
+					provider: providerIdentifiers.anthropic,
+					operation: "createMessage",
+					captured: true,
+				}),
+				undefined,
+			)
+			expect(chunks).toEqual([{ type: "text", text: "recovered" }])
+		})
+
+		it("reports the consecutive mistake limit as a named event without capturing an exception", async () => {
+			const task = await createAutoApprovedTask()
+			// The guard fires at the top of the request loop, before any provider
+			// call. Answering it sets abort, and the interstitial api_req_started
+			// say() then refuses to run on an aborted task, which deterministically
+			// ends the loop without ever issuing the underlying API request.
+			task.consecutiveMistakeCount = 3
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+			const askSpy = vi.spyOn(task, "ask").mockImplementation(async (type) => {
+				if (type === "mistake_limit_reached") {
+					task.abort = true
+					return { response: "yesButtonClicked" } satisfies TaskAskResult
+				}
+				throw new Error(`unexpected ask: ${type}`)
+			})
+			const mistakeEventSpy = vi.spyOn(TelemetryService.instance, "captureConsecutiveMistakeError")
+			const createMessageSpy = vi.spyOn(task.api, "createMessage")
+
+			await expect(
+				task.recursivelyMakeClineRequests([{ type: "text", text: "original request" }]),
+			).rejects.toThrow("aborted")
+
+			expect(askSpy).toHaveBeenCalledWith("mistake_limit_reached", expect.any(String))
+			expect(mistakeEventSpy).toHaveBeenCalledWith(task.taskId, "unknown", 3, task.consecutiveMistakeLimit)
+			expect(createMessageSpy).not.toHaveBeenCalled()
+			// The mistake limit is control flow: it reaches telemetry as the named
+			// event only, never as a $exception.
+			expect(recordingClient.captureException).not.toHaveBeenCalled()
+			expect(recordingClient.capture).toHaveBeenCalledWith(
+				expect.objectContaining({ event: TelemetryEventName.CONSECUTIVE_MISTAKE_ERROR }),
+			)
 		})
 	})
 
