@@ -159,6 +159,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 				processedFiles.add(filePath)
 				if (this.cacheManager.getHash(filePath) === currentFileHash) {
 					skippedCount++
+					// The stored hash proves the file is indexed; an earlier read failure is stale.
+					if (!signal?.aborted) this.failures.clear(generateRelativeFilePath(filePath, scanWorkspace))
 					return
 				}
 

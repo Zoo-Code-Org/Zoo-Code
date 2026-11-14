@@ -24,6 +24,13 @@ vi.mock("vscode", () => {
 	}
 })
 vi.mock("@roo-code/telemetry", () => ({ TelemetryService: { instance: { captureEvent: vi.fn() } } }))
+const replacementOrder = vi.hoisted(() => [] as string[])
+vi.mock("../semble", () => ({
+	SembleProvider: vi.fn().mockImplementation(function () {
+		replacementOrder.push("recreate")
+		return { initialize: vi.fn(async () => {}), dispose: vi.fn(), stopIndexing: vi.fn() }
+	}),
+}))
 vi.mock("../../../i18n", () => ({ t: (key: string) => key }))
 
 const workspacePath = path.join(path.sep, "test", "workspace")
@@ -116,10 +123,14 @@ describe("CodeIndexManager reliability", () => {
 		"CI-MG-02: %s stops the scan and watcher before services are recreated",
 		async (entry) => {
 			const { manager } = makeManager()
-			const order: string[] = []
+			replacementOrder.length = 0
+			// The stop settles a tick later, so replacement work that does not await it would run first.
 			const orchestrator: OrchestratorDouble = {
 				startIndexing: vi.fn(async () => {}),
-				stopIndexing: vi.fn(async () => void order.push("stop")),
+				stopIndexing: vi.fn(async () => {
+					await new Promise((resolve) => setTimeout(resolve, 0))
+					replacementOrder.push("stop")
+				}),
 				isScanning: false,
 				state: "Indexed",
 			}
@@ -130,16 +141,11 @@ describe("CodeIndexManager reliability", () => {
 				currentEmbedderProvider: "semble",
 				loadConfiguration: async () => ({ requiresRestart: true }),
 			} as unknown as (typeof manager)["_configManager"]
-			const recreate = vi.spyOn(manager as unknown as { _recreateServices(): Promise<void> }, "_recreateServices")
-			recreate.mockImplementation(async () => {
-				await orchestrator.stopIndexing()
-				order.push("recreate")
-			})
 
 			await manager[entry]()
 
-			expect(order[0]).toBe("stop")
-			if (entry === "handleSettingsChange") expect(order).toEqual(["stop", "recreate"])
+			expect(replacementOrder[0]).toBe("stop")
+			if (entry === "handleSettingsChange") expect(replacementOrder).toEqual(["stop", "recreate"])
 			else expect(manager["_orchestrator"]).toBeUndefined()
 		},
 	)

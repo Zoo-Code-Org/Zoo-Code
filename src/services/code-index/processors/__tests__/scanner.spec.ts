@@ -5,6 +5,7 @@ import { ParserLoadError } from "../parser"
 import { FileFailureRegistry } from "../../file-failure-registry"
 import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
+import { createHash } from "crypto"
 import nodePath from "path"
 import * as vscode from "vscode"
 
@@ -541,6 +542,31 @@ describe("DirectoryScanner", () => {
 
 			expect(failures.list()).toEqual([expect.objectContaining({ activity: "read", reason: "denied" })])
 			expect(mockVectorStore.deletePointsByFilePath).not.toHaveBeenCalled()
+		})
+
+		it("clears a read failure once the read succeeds with unchanged content", async () => {
+			const failures = new FileFailureRegistry()
+			const recoveryScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/cached.js"], false])
+			mockCacheManager.getHash.mockReturnValue(createHash("sha256").update("test content").digest("hex"))
+			vi.mocked(stat).mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "EBUSY" }))
+
+			await recoveryScanner.scanDirectory("/test")
+			expect(failures.list()).toEqual([expect.objectContaining({ activity: "read" })])
+
+			const result = await recoveryScanner.scanDirectory("/test")
+			expect(result.stats.skipped).toBe(1)
+			expect(failures.list()).toEqual([])
 		})
 
 		it.each([

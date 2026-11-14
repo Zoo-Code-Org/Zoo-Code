@@ -216,6 +216,8 @@ export class CodeIndexManager {
 	}
 
 	private startIndexingInBackground(): void {
+		// Initialization awaits the cache read; indexing may have been disabled meanwhile.
+		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) return
 		void this.startOrchestrator().catch((error) => {
 			console.error("[CodeIndexManager] Background indexing failed:", error)
 		})

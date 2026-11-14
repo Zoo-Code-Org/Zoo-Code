@@ -50,10 +50,14 @@ export class CodeIndexSearchService {
 		const minScore = this.configManager.currentSearchMinScore
 		const maxResults = this.configManager.currentSearchMaxResults
 
-		const currentState = this.stateManager.getCurrentStatus().systemStatus
+		const initialState = this.stateManager.getCurrentStatus().systemStatus
 		const partialStandby =
-			currentState === "Standby" && this.hasOutstandingWork() && (await this.vectorStore.collectionExists())
-		if (currentState !== "Indexed" && currentState !== "Indexing" && !partialStandby) {
+			initialState === "Standby" && this.hasOutstandingWork() && (await this.vectorStore.collectionExists())
+		// The collection lookup is awaited, so a stop or error may have started meanwhile.
+		const currentState = this.stateManager.getCurrentStatus().systemStatus
+		const ready =
+			currentState === "Indexed" || currentState === "Indexing" || (partialStandby && currentState === "Standby")
+		if (!ready) {
 			throw new Error(`Code index is not ready for search. Current state: ${currentState}`)
 		}
 
@@ -84,10 +88,11 @@ export class CodeIndexSearchService {
 			const results = await this.vectorStore.search(vector, normalizedPrefix, minScore, maxResults)
 			const failedPaths = [...new Set(this.failures.list().map((failure) => failure.path))]
 			const waitingPaths = this.providerPacers.waitingPaths()
-			const scanning = this.stateManager.getCurrentStatus().systemStatus === "Indexing"
+			// Only Indexed proves the scan finished; a stop during the query leaves Standby without that proof.
+			const complete = this.stateManager.getCurrentStatus().systemStatus === "Indexed"
 			return {
 				results,
-				incomplete: scanning || failedPaths.length > 0 || waitingPaths.length > 0,
+				incomplete: !complete || failedPaths.length > 0 || waitingPaths.length > 0,
 				failedPaths,
 				waitingPaths,
 			}

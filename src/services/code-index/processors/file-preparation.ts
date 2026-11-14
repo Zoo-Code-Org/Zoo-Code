@@ -7,6 +7,11 @@ import { generateRelativeFilePath } from "../shared/get-relative-path"
 import { readSource, SOURCE_MISSING } from "../shared/indexing-errors"
 import { isPathInIgnoredDirectory } from "../../glob/ignore-utils"
 
+export const SKIP_UNCHANGED = "File has not changed"
+export const SKIP_IGNORED_DIRECTORY = "File is in an ignored directory"
+export const SKIP_IGNORED = "File is ignored by .rooignore or .gitignore"
+export const SKIP_TOO_LARGE = "File is too large"
+
 /** Prepares one file for batching without embedding, writing points or mutating the hash cache. */
 export class FilePreparation {
 	constructor(private readonly dependencies: FilePreparationDependencies) {}
@@ -29,7 +34,7 @@ export class FilePreparation {
 		try {
 			const newHash = createHash("sha256").update(content).digest("hex")
 			if (dependencies.cacheManager.getHash(filePath) === newHash) {
-				return this.skippedResult(filePath, "File has not changed")
+				return this.skippedResult(filePath, SKIP_UNCHANGED)
 			}
 			const blocks = await dependencies.parser.parseFile(filePath, { content, fileHash: newHash })
 			return { path: filePath, status: "processed_for_batching", newHash, blocks }
@@ -43,20 +48,20 @@ export class FilePreparation {
 		// Use relative paths so ignored directories outside the workspace do not exclude the file.
 		const relativeFilePath = generateRelativeFilePath(filePath, dependencies.workspacePath)
 		if (isPathInIgnoredDirectory(relativeFilePath)) {
-			return "File is in an ignored directory"
+			return SKIP_IGNORED_DIRECTORY
 		}
 
 		if (
 			!dependencies.ignoreController.validateAccess(filePath) ||
 			dependencies.ignoreInstance?.ignores(relativeFilePath)
 		) {
-			return "File is ignored by .rooignore or .gitignore"
+			return SKIP_IGNORED
 		}
 
 		const fileStat = await readSource(dependencies.fileSystem.stat(Uri.file(filePath)))
 		if (fileStat === SOURCE_MISSING) return SOURCE_MISSING
 		if (fileStat.size > MAX_FILE_SIZE_BYTES) {
-			return "File is too large"
+			return SKIP_TOO_LARGE
 		}
 		return undefined
 	}

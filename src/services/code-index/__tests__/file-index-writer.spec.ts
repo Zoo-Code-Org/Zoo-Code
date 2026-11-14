@@ -115,9 +115,36 @@ describe("FileIndexWriter", () => {
 			controller.abort()
 			throw serverError()
 		})
-		await expect(writer.replace("/ws/a.ts", "h1", [block(1)], controller.signal)).rejects.toBeDefined()
+		await expect(writer.replace("/ws/a.ts", "h1", [block(1)], controller.signal)).rejects.toBe(
+			controller.signal.reason,
+		)
 		expect(cache.updateHash).not.toHaveBeenCalled()
 		expect(failures.list()).toEqual([])
+	})
+
+	it("drops the old hash once its points are deleted, so a failed replacement is re-indexed", async () => {
+		const { writer, embedder, store, cache } = setup()
+		embedder.createEmbeddings.mockRejectedValue(Object.assign(new Error("bad"), { status: 400 }))
+		await expect(writer.replace("/ws/a.ts", "h1", [block(1)])).resolves.toBe(false)
+		expect(store.deletePointsByFilePath).toHaveBeenCalledOnce()
+		expect(cache.deleteHash).toHaveBeenCalledWith("/ws/a.ts")
+		expect(cache.updateHash).not.toHaveBeenCalled()
+	})
+
+	it("deletes partial points from a failed first attempt that stored no hash", async () => {
+		const { writer, store, cache, failures } = setup()
+		cache.getHash.mockReturnValue(undefined)
+		store.upsertPoints
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValue(Object.assign(new Error("bad"), { status: 400 }))
+		const blocks = Array.from({ length: 4 }, (_unused, index) => block(index + 1))
+		await expect(writer.replace("/ws/a.ts", "h1", blocks)).resolves.toBe(false)
+		expect(store.deletePointsByFilePath).not.toHaveBeenCalled()
+		expect(failures.list()).toHaveLength(1)
+
+		store.upsertPoints.mockResolvedValue(undefined)
+		await expect(writer.replace("/ws/a.ts", "h2", [block(1)])).resolves.toBe(true)
+		expect(store.deletePointsByFilePath).toHaveBeenCalledOnce()
 	})
 
 	it("removal success deletes the hash and clears prior failures", async () => {

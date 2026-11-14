@@ -80,14 +80,46 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		await next
 	})
 
-	it("never shortens an existing pause", async () => {
+	it("never shortens an existing pause when a later 429 asks for less", async () => {
 		const pacer = new ProviderPacer("openai:1")
+		let releaseShort: (() => void) | undefined
+		const shortRequest = vi
+			.fn()
+			.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (releaseShort = () => reject(rateLimit(1000)))),
+			)
+			.mockResolvedValue("ok")
+		const short = settle(pacer.run(undefined, undefined, shortRequest))
 		const slow = settle(pacer.run(undefined, undefined, vi.fn().mockRejectedValueOnce(rateLimit(60_000))))
 		await vi.advanceTimersByTimeAsync(0)
-		const short = settle(pacer.run(undefined, undefined, vi.fn().mockResolvedValue("ok")))
 		expect(pacer.resumeAt).toBe(60_000)
-		await vi.advanceTimersByTimeAsync(60_000)
+		releaseShort?.()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(pacer.resumeAt).toBe(60_000)
+		await vi.advanceTimersByTimeAsync(59_999)
+		expect(shortRequest).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(1)
 		await Promise.all([slow, short])
+		expect(shortRequest).toHaveBeenCalledTimes(2)
+	})
+
+	it("counts concurrent 429s during one pause as a single backoff step", async () => {
+		const pacer = new ProviderPacer("openai:1")
+		const releases: Array<() => void> = []
+		const request = () =>
+			vi
+				.fn()
+				.mockImplementationOnce(
+					() => new Promise((_resolve, reject) => releases.push(() => reject(rateLimit()))),
+				)
+				.mockResolvedValue("ok")
+		const runs = [1, 2, 3, 4].map(() => settle(pacer.run(undefined, undefined, request())))
+		await vi.advanceTimersByTimeAsync(0)
+		for (const release of releases) release()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(pacer.resumeAt! - Date.now()).toBe(1000)
+		await vi.advanceTimersByTimeAsync(1000)
+		await Promise.all(runs)
 	})
 
 	it("rejects a waiter at once with the abort reason and drops its path", async () => {

@@ -110,6 +110,7 @@ describe("CodeIndexScanExecutor", () => {
 	const scanCases = (["runFullScan", "runIncrementalScan"] as const).flatMap((method) =>
 		[
 			{ found: 0, indexed: 0, errors: 0, partial: false },
+			{ found: 0, indexed: 0, errors: 1, partial: true },
 			{ found: 3, indexed: 3, errors: 0, partial: false },
 			{ found: 3, indexed: 0, errors: 3, partial: true },
 			{ found: 10, indexed: 1, errors: 9, partial: true },

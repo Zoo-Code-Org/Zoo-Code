@@ -93,6 +93,10 @@ export class CodeIndexOrchestrator {
 						totalInBatch,
 						currentFile ? path.basename(currentFile) : undefined,
 					)
+					// The watcher reports progress after the batch-finished event; settle the status again.
+					if (processedInBatch === totalInBatch && !this.watcherBatchPending) {
+						this.updateRecoveryStatus(signal)
+					}
 				}),
 				this.fileWatcher.onDidFinishBatchProcessing((summary: BatchProcessingSummary) => {
 					if (summary.batchError) {

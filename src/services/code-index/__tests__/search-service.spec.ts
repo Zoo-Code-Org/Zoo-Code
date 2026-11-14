@@ -42,7 +42,7 @@ function prepare(state: IndexingState, { failed = false, exists = true, enabled 
 	}
 	const pacers = new ProviderPacerRegistry()
 	const service = new CodeIndexSearchService(config, stateManager, embedder, store, failures, pacers)
-	return { service, failures, pacers, store, embedder, setSystemState }
+	return { service, failures, pacers, store, embedder, setSystemState, stateManager }
 }
 
 async function withWaitingPath(pacers: ProviderPacerRegistry, file: string) {
@@ -116,6 +116,26 @@ describe("CodeIndexSearchService (CI-SS-01)", () => {
 			expect(embedder.createEmbeddings).not.toHaveBeenCalled()
 		},
 	)
+
+	it("rejects when the state moves to Stopping during the collection lookup", async () => {
+		const { service, store, embedder, stateManager } = prepare("Standby", { failed: true })
+		store.collectionExists.mockImplementation(async () => {
+			stateManager.setSystemState("Stopping", "stopping")
+			return true
+		})
+		await expect(service.searchIndex("query")).rejects.toThrow("Current state: Stopping")
+		expect(embedder.createEmbeddings).not.toHaveBeenCalled()
+	})
+
+	it("reports incomplete when indexing stops to Standby while the query is in flight", async () => {
+		const { service, store, stateManager } = prepare("Indexing")
+		store.search.mockImplementation(async () => {
+			stateManager.setSystemState("Standby", "stopped")
+			return []
+		})
+		const response = await service.searchIndex("query")
+		expect(response).toMatchObject({ incomplete: true, failedPaths: [], waitingPaths: [] })
+	})
 
 	it("does not set Error when a query fails", async () => {
 		const { service, embedder, setSystemState } = prepare("Indexed")

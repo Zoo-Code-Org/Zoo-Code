@@ -5,7 +5,7 @@ import { Ignore } from "ignore"
 import { scannerExtensions } from "../shared/supported-extensions"
 import { IFileWatcher, FileProcessingResult, IEmbedder, IVectorStore, BatchProcessingSummary } from "../interfaces"
 import { codeParser } from "./parser"
-import { FilePreparation } from "./file-preparation"
+import { FilePreparation, SKIP_UNCHANGED } from "./file-preparation"
 import { CacheManager } from "../cache-manager"
 import { Package } from "../../../shared/package"
 import { type FileFailureRegistry, UNKNOWN_REVISION } from "../file-failure-registry"
@@ -24,6 +24,7 @@ export class FileWatcher implements IFileWatcher {
 	private fileWatcher?: vscode.FileSystemWatcher
 	private ignoreController: RooIgnoreController
 	private accumulatedEvents: Map<string, { uri: vscode.Uri; type: "create" | "change" | "delete" }> = new Map()
+	private batchQueue: Promise<void> = Promise.resolve()
 	private batchProcessDebounceTimer?: NodeJS.Timeout
 	private readonly BATCH_DEBOUNCE_DELAY_MS = 500
 	private readonly FILE_PROCESSING_CONCURRENCY_LIMIT = 10
@@ -130,16 +131,15 @@ export class FileWatcher implements IFileWatcher {
 	}
 
 	/**
-	 * Disposes the file watcher
+	 * Stops watching. The event emitters stay usable because the orchestrator reuses this watcher on restart;
+	 * it disposes its own subscriptions.
 	 */
 	dispose(): void {
 		this.fileWatcher?.dispose()
+		this.fileWatcher = undefined
 		if (this.batchProcessDebounceTimer) {
 			clearTimeout(this.batchProcessDebounceTimer)
 		}
-		this._onDidStartBatchProcessing.dispose()
-		this._onBatchProgressUpdate.dispose()
-		this._onDidFinishBatchProcessing.dispose()
 		this.accumulatedEvents.clear()
 	}
 
@@ -194,22 +194,28 @@ export class FileWatcher implements IFileWatcher {
 		const filePathsInBatch = Array.from(eventsToProcess.keys())
 		this._onDidStartBatchProcessing.fire(filePathsInBatch)
 
-		await this.processBatch(eventsToProcess)
+		// Batches run one at a time so a later change or delete of a path cannot finish before an earlier one.
+		// Each batch keeps its own session signal, so a restart's new signal never authorizes a stale write.
+		const signal = this.signal
+		this.batchQueue = this.batchQueue
+			.then(() => this.processBatch(eventsToProcess, signal))
+			.catch((error) => console.error("[FileWatcher] Batch processing failed:", error))
+		await this.batchQueue
 	}
 
-	private async removeFile(filePath: string): Promise<FileProcessingResult> {
+	private async removeFile(filePath: string, signal: AbortSignal | undefined): Promise<FileProcessingResult> {
 		if (!this.writer) return { path: filePath, status: "success" }
-		const removed = await this.writer.remove(filePath, this.signal)
+		const removed = await this.writer.remove(filePath, signal)
 		return removed
 			? { path: filePath, status: "success" }
 			: { path: filePath, status: "error", error: new Error(`Failed to remove ${filePath} from the index`) }
 	}
 
-	private async indexFile(filePath: string): Promise<FileProcessingResult> {
+	private async indexFile(filePath: string, signal: AbortSignal | undefined): Promise<FileProcessingResult> {
 		const result = await this.processFile(filePath)
-		if (result.status === "missing") return this.removeFile(filePath)
+		if (result.status === "missing") return this.removeFile(filePath, signal)
 		if (result.status === "local_error") {
-			if (!this.signal?.aborted) {
+			if (!signal?.aborted) {
 				const relativePath = generateRelativeFilePath(filePath, this.workspacePath)
 				const revision = result.newHash ?? UNKNOWN_REVISION
 				const reason = result.error instanceof Error ? result.error.message : String(result.error)
@@ -218,8 +224,18 @@ export class FileWatcher implements IFileWatcher {
 			}
 			return result
 		}
+		if (result.status === "skipped") {
+			if (result.reason === SKIP_UNCHANGED) {
+				// Content matches the stored hash, so the file is indexed; an earlier read failure is stale.
+				if (!signal?.aborted) this.failures.clear(generateRelativeFilePath(filePath, this.workspacePath))
+				return result
+			}
+			// A file that became ignored or too large must not keep its old points.
+			if (this.cacheManager.getHash(filePath) !== undefined) return this.removeFile(filePath, signal)
+			return result
+		}
 		if (result.status !== "processed_for_batching" || !result.newHash || !this.writer) return result
-		const indexed = await this.writer.replace(filePath, result.newHash, result.blocks ?? [], this.signal)
+		const indexed = await this.writer.replace(filePath, result.newHash, result.blocks ?? [], signal)
 		return indexed
 			? { path: filePath, status: "success" }
 			: { path: filePath, status: "error", error: new Error(`Failed to index ${filePath}`) }
@@ -227,6 +243,7 @@ export class FileWatcher implements IFileWatcher {
 
 	private async processBatch(
 		eventsToProcess: Map<string, { uri: vscode.Uri; type: "create" | "change" | "delete" }>,
+		signal: AbortSignal | undefined,
 	): Promise<void> {
 		const batchResults: FileProcessingResult[] = []
 		const totalFilesInBatch = eventsToProcess.size
@@ -239,15 +256,15 @@ export class FileWatcher implements IFileWatcher {
 
 		const events = [...eventsToProcess.values()]
 		for (let offset = 0; offset < events.length; offset += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
-			if (this.signal?.aborted) break
+			if (signal?.aborted) break
 			const chunk = events.slice(offset, offset + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
 			const results = await Promise.all(
 				chunk.map(async (event) => {
 					const filePath = event.uri.fsPath
 					try {
 						return event.type === "delete"
-							? await this.removeFile(filePath)
-							: await this.indexFile(filePath)
+							? await this.removeFile(filePath, signal)
+							: await this.indexFile(filePath, signal)
 					} catch (error) {
 						return { path: filePath, status: "error", error: error as Error } satisfies FileProcessingResult
 					}

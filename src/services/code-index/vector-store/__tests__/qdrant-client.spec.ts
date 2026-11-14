@@ -1,4 +1,4 @@
-import { QdrantClient } from "@qdrant/js-client-rest"
+import { QdrantClient, QdrantClientResourceExhaustedError } from "@qdrant/js-client-rest"
 import { createHash } from "crypto"
 
 import { QdrantVectorStore } from "../qdrant-client"
@@ -835,6 +835,24 @@ describe("QdrantVectorStore", () => {
 				vitest.spyOn(console, "warn").mockImplementation(function () {})
 				const pending = vectorStore.initialize()
 				await vitest.advanceTimersByTimeAsync(1000)
+				await expect(pending).resolves.toBe(true)
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(2)
+			})
+
+			it.each([
+				["with Retry-After: 2", 2, 2000],
+				["without Retry-After", undefined, 1000],
+			])("waits and recovers when collection creation gets a 429 %s", async (_label, retryAfter, waitMs) => {
+				// The module is automocked, so set the fields the patched client would assign.
+				const limited = Object.assign(new QdrantClientResourceExhaustedError("Too many requests", 0), {
+					message: "Too many requests",
+					retry_after: retryAfter,
+				})
+				mockQdrantClientInstance.createCollection.mockRejectedValueOnce(limited)
+				const pending = vectorStore.initialize()
+				await vitest.advanceTimersByTimeAsync(waitMs - 1)
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
+				await vitest.advanceTimersByTimeAsync(1)
 				await expect(pending).resolves.toBe(true)
 				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(2)
 			})

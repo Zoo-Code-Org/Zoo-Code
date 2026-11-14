@@ -295,7 +295,7 @@ describe("CodebaseSearchTool", () => {
 		},
 	)
 
-	it.each([false, true])("warns about an incomplete index with matches: %s", async (hasMatches) => {
+	it.each([false, true])("CI-TL-01: warns about an incomplete index with matches: %s", async (hasMatches) => {
 		const failedPaths = ["src/failed.ts", "other/unreadable.ts"]
 		vi.mocked(manager.searchIndex).mockResolvedValue(
 			searchResponse(hasMatches ? [result()] : [], failedPaths, [], true),

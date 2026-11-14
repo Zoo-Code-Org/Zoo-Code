@@ -94,7 +94,8 @@ export class ProviderPacer {
 
 	private pause(error: unknown): void {
 		const now = Date.now()
-		this.consecutiveRateLimits++
+		// Concurrent 429s from requests sent before the pause belong to the same episode.
+		if (now >= this.pausedUntil) this.consecutiveRateLimits++
 		const requested = new EmbeddingError("Provider rate limited", error).retryAfterMs
 		const delay =
 			typeof requested === "number" && requested > 0 && Number.isFinite(new Date(now + requested).getTime())

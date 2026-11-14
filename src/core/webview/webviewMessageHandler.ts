@@ -3530,12 +3530,12 @@ export const webviewMessageHandler = async (
 
 					const currentState = manager.state
 					if (currentState === "Standby" || currentState === "Error") {
-						void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
+						await manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 
 						if (!manager.isInitialized) {
 							await manager.initialize(provider.contextProxy)
 							if (manager.state === "Standby" || manager.state === "Error") {
-								void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
+								await manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 							}
 						}
 					}

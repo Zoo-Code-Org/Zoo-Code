@@ -322,10 +322,12 @@ describe("CodeParser", () => {
 
 	describe("singleton instance", () => {
 		it("should maintain parser state across calls", async () => {
-			const result1 = await codeParser.parseFile("test.js", { content: "const a = 1" })
-			const result2 = await codeParser.parseFile("test.js", { content: "const b = 2" })
-			expect(result1).toBeDefined()
-			expect(result2).toBeDefined()
+			const first = "const firstValue = 'singleton parser first input with enough text'"
+			const second = "const secondValue = 'singleton parser second input with enough text'"
+			const result1 = await codeParser.parseFile("test.js", { content: first })
+			const result2 = await codeParser.parseFile("test.js", { content: second })
+			expect(result1.map((block) => block.content)).toEqual([first])
+			expect(result2.map((block) => block.content)).toEqual([second])
 		})
 	})
 

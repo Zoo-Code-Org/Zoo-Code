@@ -22,13 +22,19 @@ export class FileIndexWriter {
 	/** Replaces the file's points with `blocks`; returns false when the file failed and was recorded. */
 	async replace(filePath: string, hash: string, blocks: CodeBlock[], signal?: AbortSignal): Promise<boolean> {
 		const relativePath = generateRelativeFilePath(filePath, this.workspacePath)
+		// A failed earlier attempt may have upserted some batches before any hash was stored.
+		const mayHavePoints =
+			this.cache.getHash(filePath) !== undefined ||
+			this.failures.list().some((failure) => failure.path === relativePath)
 		this.failures.renew(relativePath, hash)
 		const selected = blocks.filter((block) => block.content.trim())
 		try {
-			if (this.cache.getHash(filePath) !== undefined) {
+			if (mayHavePoints) {
 				await this.attempt(relativePath, hash, "delete", this.store.rateLimitScope, signal, () =>
 					this.store.deletePointsByFilePath(filePath),
 				)
+				// The old points are gone, so the old hash must not let an unchanged file skip re-indexing.
+				if (!signal?.aborted) this.cache.deleteHash(filePath)
 			}
 			for (let offset = 0; offset < selected.length; offset += this.batchSize) {
 				const batch = selected.slice(offset, offset + this.batchSize)

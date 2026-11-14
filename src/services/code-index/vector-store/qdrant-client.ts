@@ -112,11 +112,16 @@ export class QdrantVectorStore implements IVectorStore {
 
 	/** Runs one creation request with bounded server/connection retries and the shared rate-limit wait. */
 	private async create<T>(request: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-		try {
-			return await retryWithPolicy(() => this.pacers.get(this.rateLimitScope).run(undefined, signal, request), {
-				signal,
-				budget: { retriesUsed: 0 },
+		// Only the 429 is converted; other errors keep initialize()'s connection and dimension-mismatch messages.
+		const classified = () =>
+			request().catch((error: unknown) => {
+				throw error instanceof QdrantClientResourceExhaustedError ? toVectorStoreError(error) : error
 			})
+		try {
+			return await retryWithPolicy(
+				() => this.pacers.get(this.rateLimitScope).run(undefined, signal, classified),
+				{ signal, budget: { retriesUsed: 0 } },
+			)
 		} catch (error) {
 			// The original error keeps initialize()'s existing connection and dimension-mismatch messages.
 			throw error instanceof IndexingRetryError ? error.cause : error
@@ -498,7 +503,7 @@ export class QdrantVectorStore implements IVectorStore {
 			return filteredPoints as VectorStoreSearchResult[]
 		} catch (error) {
 			console.error("Failed to search points:", error)
-			throw error
+			throw error instanceof QdrantClientResourceExhaustedError ? toVectorStoreError(error) : error
 		}
 	}
 

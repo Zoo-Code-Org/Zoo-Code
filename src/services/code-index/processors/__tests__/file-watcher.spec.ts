@@ -453,6 +453,64 @@ describe("FileWatcher", () => {
 			expect(summary.processedFiles).toEqual([{ path, status: "success" }])
 		})
 
+		it("runs a later delete batch only after an earlier change batch finishes", async () => {
+			watcherWithRegistry()
+			await fileWatcher.initialize()
+			const order: string[] = []
+			let finishUpsert!: () => void
+			mockVectorStore.upsertPoints.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						finishUpsert = () => {
+							order.push("upsert")
+							resolve()
+						}
+					}),
+			)
+			mockVectorStore.deletePointsByFilePath.mockImplementation(async () => void order.push("delete"))
+			mockCacheManager.getHash.mockReturnValue(undefined)
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			await mockOnDidDelete({ fsPath: path })
+			await flushBatch()
+			expect(order).toEqual([])
+			finishUpsert()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(order).toEqual(["upsert", "delete"])
+		})
+
+		it("clears a stale read failure when the content is unchanged", async () => {
+			const failures = watcherWithRegistry()
+			const relativePath = nodePath.normalize("src/file.ts")
+			failures.renew(relativePath, "unread")
+			failures.record(relativePath, "unread", "read", "busy", 1, "exhausted")
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+				path,
+				status: "skipped",
+				reason: "File has not changed",
+			})
+			await runChange()
+			expect(failures.list()).toEqual([])
+			expect(mockVectorStore.deletePointsByFilePath).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			["File is too large", "h", 1],
+			["File is ignored by .rooignore or .gitignore", "h", 1],
+			["File is too large", undefined, 0],
+		])("a change skipped as %s with cached hash %s removes old points %i times", async (reason, hash, removals) => {
+			watcherWithRegistry()
+			mockCacheManager.getHash.mockReturnValue(hash)
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+				path,
+				status: "skipped",
+				reason,
+			})
+			await runChange()
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledTimes(removals)
+			expect(mockCacheManager.deleteHash).toHaveBeenCalledTimes(removals)
+		})
+
 		it("writes nothing after the session signal aborts", async () => {
 			watcherWithRegistry()
 			const controller = new AbortController()
@@ -471,6 +529,17 @@ describe("FileWatcher", () => {
 			fileWatcher.dispose()
 
 			expect(mockWatcher.dispose).toHaveBeenCalled()
+		})
+
+		it("keeps batch events working after dispose and re-initialize (restart)", async () => {
+			await fileWatcher.initialize()
+			fileWatcher.dispose()
+			await fileWatcher.initialize()
+			const batchPromise = waitForNextBatch()
+			await mockOnDidChange({ fsPath: "/mock/workspace/src/file.ts" })
+			await flushBatch()
+			const summary = await batchPromise
+			expect(summary.processedFiles).toEqual([{ path: "/mock/workspace/src/file.ts", status: "success" }])
 		})
 	})
 })
