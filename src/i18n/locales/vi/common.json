@@ -47,6 +47,7 @@
 		"cannot_access_path": "Không thể truy cập đường dẫn {{path}}: {{error}}",
 		"path_outside_workspace": "Đường dẫn nằm ngoài không gian làm việc",
 		"settings_import_failed": "Nhập cài đặt thất bại: {{error}}.",
+		"settings_export_failed": "Không xuất được cài đặt: {{error}}",
 		"mistake_limit_guidance": "Điều này có thể cho thấy sự thất bại trong quá trình suy nghĩ của mô hình hoặc không thể sử dụng công cụ đúng cách, có thể được giảm thiểu bằng hướng dẫn của người dùng (ví dụ: \"Hãy thử chia nhỏ nhiệm vụ thành các bước nhỏ hơn\").",
 		"violated_organization_allowlist": "Không thể chạy tác vụ: hồ sơ hiện tại không tương thích với cài đặt của tổ chức của bạn",
 		"condense_failed": "Không thể nén ngữ cảnh",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Không có nội dung terminal được chọn",
 		"auto_import_failed": "Không thể tự động nhập cài đặt ZooCode: {{error}}",
+		"settings_export_location_not_remembered": "Cài đặt đã được xuất tới {{path}}, nhưng không thể ghi nhớ vị trí cho lần xuất tiếp theo: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Không tìm thấy lịch sử nhiệm vụ Roo Code nào để nhập từ {{domain}}.",
 			"alreadyImported_other": "Tất cả {{count}} lịch sử nhiệm vụ Roo Code đã được nhập vào Zoo Code."
@@ -133,6 +135,7 @@
 		"custom_storage_path_set": "Đã thiết lập đường dẫn lưu trữ tùy chỉnh: {{path}}",
 		"default_storage_path": "Đã quay lại sử dụng đường dẫn lưu trữ mặc định",
 		"settings_imported": "Cài đặt đã được nhập thành công.",
+		"settings_exported": "Cài đặt đã được xuất tới {{path}}.",
 		"auto_import_success": "Cài đặt ZooCode đã được tự động nhập từ {{filename}}",
 		"image_copied_to_clipboard": "URI dữ liệu hình ảnh đã được sao chép vào clipboard",
 		"image_saved": "Hình ảnh đã được lưu vào {{path}}",

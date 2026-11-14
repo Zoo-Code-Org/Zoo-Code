@@ -47,6 +47,7 @@
 		"cannot_access_path": "Impossible d'accéder au chemin {{path}} : {{error}}",
 		"path_outside_workspace": "Le chemin est à l'extérieur de l'espace de travail",
 		"settings_import_failed": "Échec de l'importation des paramètres : {{error}}",
+		"settings_export_failed": "Échec de l'exportation des paramètres : {{error}}",
 		"mistake_limit_guidance": "Cela peut indiquer un échec dans le processus de réflexion du modèle ou une incapacité à utiliser un outil correctement, ce qui peut être atténué avec des conseils de l'utilisateur (par ex. \"Essaie de diviser la tâche en étapes plus petites\").",
 		"violated_organization_allowlist": "Échec de l'exécution de la tâche : le profil actuel n'est pas compatible avec les paramètres de votre organisation",
 		"condense_failed": "Échec de la condensation du contexte",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Aucun contenu de terminal sélectionné",
 		"auto_import_failed": "Échec de l'importation automatique des paramètres ZooCode : {{error}}",
+		"settings_export_location_not_remembered": "Paramètres exportés vers {{path}}, mais l'emplacement n'a pas pu être mémorisé pour le prochain export : {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Aucun historique de tâches Roo Code trouvé à importer depuis {{domain}}.",
 			"alreadyImported_one": "L'historique de {{count}} tâche Roo Code a déjà été importé dans Zoo Code.",
@@ -135,6 +137,7 @@
 		"custom_storage_path_set": "Chemin de stockage personnalisé défini : {{path}}",
 		"default_storage_path": "Retour au chemin de stockage par défaut",
 		"settings_imported": "Paramètres importés avec succès.",
+		"settings_exported": "Paramètres exportés vers {{path}}.",
 		"auto_import_success": "Paramètres ZooCode importés automatiquement depuis {{filename}}",
 		"image_copied_to_clipboard": "URI de données d'image copiée dans le presse-papiers",
 		"image_saved": "Image enregistrée dans {{path}}",

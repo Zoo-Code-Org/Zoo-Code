@@ -47,6 +47,7 @@
 		"cannot_access_path": "{{path}} yoluna erişilemiyor: {{error}}",
 		"path_outside_workspace": "Yol çalışma alanının dışında",
 		"settings_import_failed": "Ayarlar içe aktarılamadı: {{error}}.",
+		"settings_export_failed": "Ayarlar dışa aktarılamadı: {{error}}",
 		"mistake_limit_guidance": "Bu, modelin düşünce sürecindeki bir başarısızlığı veya bir aracı düzgün kullanamama durumunu gösterebilir, bu da kullanıcı rehberliği ile hafifletilebilir (örn. \"Görevi daha küçük adımlara bölmeyi deneyin\").",
 		"violated_organization_allowlist": "Görev yürütülemedi: Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
 		"condense_failed": "Bağlam sıkıştırılamadı",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Seçili terminal içeriği yok",
 		"auto_import_failed": "ZooCode ayarları otomatik olarak içe aktarılamadı: {{error}}",
+		"settings_export_location_not_remembered": "Ayarlar {{path}} konumuna dışa aktarıldı, ancak sonraki dışa aktarma için konum hatırlanamadı: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}} kaynağından içe aktarılacak Roo Code görev geçmişi bulunamadı.",
 			"alreadyImported_one": "{{count}} Roo Code görev geçmişinin tamamı zaten Zoo Code'a aktarılmış.",
@@ -134,6 +136,7 @@
 		"custom_storage_path_set": "Özel depolama yolu ayarlandı: {{path}}",
 		"default_storage_path": "Varsayılan depolama yoluna geri dönüldü",
 		"settings_imported": "Ayarlar başarıyla içe aktarıldı.",
+		"settings_exported": "Ayarlar {{path}} konumuna dışa aktarıldı.",
 		"auto_import_success": "ZooCode ayarları {{filename}} dosyasından otomatik olarak içe aktarıldı",
 		"image_copied_to_clipboard": "Resim veri URI'si panoya kopyalandı",
 		"image_saved": "Resim {{path}} konumuna kaydedildi",

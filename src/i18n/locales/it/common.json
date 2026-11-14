@@ -47,6 +47,7 @@
 		"cannot_access_path": "Impossibile accedere al percorso {{path}}: {{error}}",
 		"path_outside_workspace": "Il percorso è fuori dall'area di lavoro",
 		"settings_import_failed": "Importazione delle impostazioni fallita: {{error}}.",
+		"settings_export_failed": "Esportazione delle impostazioni non riuscita: {{error}}",
 		"mistake_limit_guidance": "Questo può indicare un fallimento nel processo di pensiero del modello o l'incapacità di utilizzare correttamente uno strumento, che può essere mitigato con la guida dell'utente (ad es. \"Prova a suddividere l'attività in passaggi più piccoli\").",
 		"violated_organization_allowlist": "Impossibile eseguire l'attività: il profilo corrente non è compatibile con le impostazioni della tua organizzazione",
 		"condense_failed": "Impossibile condensare il contesto",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Nessun contenuto del terminale selezionato",
 		"auto_import_failed": "Importazione automatica delle impostazioni ZooCode fallita: {{error}}",
+		"settings_export_location_not_remembered": "Impostazioni esportate in {{path}}, ma la posizione non è stata memorizzata per l'esportazione successiva: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Nessuna cronologia di attività Roo Code trovata da importare da {{domain}}.",
 			"alreadyImported_one": "La cronologia di {{count}} attività Roo Code è già stata importata in Zoo Code.",
@@ -135,6 +137,7 @@
 		"custom_storage_path_set": "Percorso di archiviazione personalizzato impostato: {{path}}",
 		"default_storage_path": "Tornato al percorso di archiviazione predefinito",
 		"settings_imported": "Impostazioni importate con successo.",
+		"settings_exported": "Impostazioni esportate in {{path}}.",
 		"auto_import_success": "Impostazioni ZooCode importate automaticamente da {{filename}}",
 		"image_copied_to_clipboard": "URI dati dell'immagine copiato negli appunti",
 		"image_saved": "Immagine salvata in {{path}}",

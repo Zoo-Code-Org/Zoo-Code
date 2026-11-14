@@ -78,6 +78,23 @@ function formatZodIssues(error: ZodError): string {
 	return error.issues.map((issue) => `[${issue.path.join(".") || "value"}]: ${issue.message}`).join(", ")
 }
 
+/**
+ * Save and open dialogs remember an absolute directory per machine, so these
+ * settings are host-local state rather than configuration. An exported settings
+ * file must not be able to install another machine's folder layout into this
+ * one: the dialogs would then probe, and default to, a path nobody picked on
+ * this machine. They are dropped on import and re-established by the next dialog
+ * choice.
+ */
+const hostLocalPathKeyNames = [
+	"lastSettingsExportPath",
+	"lastTaskExportPath",
+	"lastModeExportPath",
+	"lastImageSavePath",
+] as const satisfies readonly (keyof GlobalSettings)[]
+
+const hostLocalPathKeys: ReadonlySet<string> = new Set(hostLocalPathKeyNames)
+
 function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 	sanitizedGlobalSettings: GlobalSettings
 	warnings: string[]
@@ -102,6 +119,12 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 		if (!schema) {
 			warnings.push(`Setting "${path}" was skipped: Unknown setting.`)
+			continue
+		}
+
+		if (hostLocalPathKeys.has(key)) {
+			// Deliberately silent: every settings export contains these keys, so warning
+			// on each import would report nothing the user can act on.
 			continue
 		}
 
@@ -270,10 +293,13 @@ export async function importSettingsFromPath(
  * @returns Promise resolving to import result
  */
 export const importSettings = async ({ providerSettingsManager, contextProxy, customModesManager }: ImportOptions) => {
-	// Use the last export path as a sensible default, falling back to Downloads
-	const defaultUri = resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
+	// Use the last export path as a sensible default, falling back to Downloads.
+	// An open dialog only reads from that folder, so requiring write access here
+	// would drop a read-only folder that does hold the settings file.
+	const defaultUri = await resolveDefaultSaveUri(contextProxy, "lastSettingsExportPath", "zoo-code-settings.json", {
 		useWorkspace: false,
 		fallbackDir: path.join(os.homedir(), "Downloads"),
+		accessMode: fs.constants.R_OK,
 	})
 
 	const uris = await vscode.window.showOpenDialog({
@@ -327,8 +353,6 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 		return
 	}
 
-	await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
-
 	try {
 		const providerProfiles = await providerSettingsManager.export()
 		const globalSettings = await contextProxy.export()
@@ -348,9 +372,35 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 		await fs.mkdir(dirname, { recursive: true })
 		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings })
 	} catch (e) {
+		const message = e instanceof Error ? e.message : String(e)
 		console.error("Failed to export settings:", e)
-		// Don't re-throw - the UI will handle showing error messages
+		// A silent export failure is how a user ends up with a settings file in a
+		// folder they never picked: nothing on disk reported that the chosen
+		// location was unwritable.
+		await vscode.window.showErrorMessage(t("common:errors.settings_export_failed", { error: message }))
+		return
 	}
+
+	// Remember only a location that actually received the file, so a failed export
+	// cannot steer the next dialog either. It runs before the confirmation because
+	// `showInformationMessage` only resolves once the notification is dismissed, and
+	// it is guarded because failing to remember a location is not a failed export:
+	// the export is still reported, just as the partial result it is, and the
+	// rejection must not escape into the unawaited message handler.
+	try {
+		await saveLastExportPath(contextProxy, "lastSettingsExportPath", uri)
+	} catch (e) {
+		const reason = e instanceof Error ? e.message : String(e)
+		console.error("Failed to remember the export location:", e)
+		// The file was written: report that part plainly, and report the part that
+		// did not happen instead of pretending the export was complete.
+		await vscode.window.showWarningMessage(
+			t("common:warnings.settings_export_location_not_remembered", { path: uri.fsPath, error: reason }),
+		)
+		return
+	}
+
+	await vscode.window.showInformationMessage(t("common:info.settings_exported", { path: uri.fsPath }))
 }
 
 /**

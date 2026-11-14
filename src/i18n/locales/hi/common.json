@@ -47,6 +47,7 @@
 		"cannot_access_path": "पाथ {{path}} तक पहुंच नहीं पा रहे हैं: {{error}}",
 		"path_outside_workspace": "पथ वर्कस्पेस से बाहर है",
 		"settings_import_failed": "सेटिंग्स इम्पोर्ट करने में विफल: {{error}}।",
+		"settings_export_failed": "सेटिंग्स निर्यात करने में विफल: {{error}}",
 		"mistake_limit_guidance": "यह मॉडल की सोच प्रक्रिया में विफलता या किसी टूल का सही उपयोग न कर पाने का संकेत हो सकता है, जिसे उपयोगकर्ता के मार्गदर्शन से ठीक किया जा सकता है (जैसे \"कार्य को छोटे चरणों में बांटने की कोशिश करें\")।",
 		"violated_organization_allowlist": "कार्य चलाने में विफल: वर्तमान प्रोफ़ाइल आपके संगठन की सेटिंग्स के साथ संगत नहीं है",
 		"condense_failed": "संदर्भ को संक्षिप्त करने में विफल",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "कोई टर्मिनल सामग्री चयनित नहीं",
 		"auto_import_failed": "ZooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}",
+		"settings_export_location_not_remembered": "सेटिंग्स {{path}} में निर्यात की गईं, लेकिन अगले निर्यात के लिए स्थान याद नहीं रखा जा सका: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}} से आयात करने के लिए कोई Roo Code कार्य इतिहास नहीं मिला।",
 			"alreadyImported_one": "सभी {{count}} Roo Code कार्य इतिहास पहले से ही Zoo Code में आयात किया जा चुका है।",
@@ -134,6 +136,7 @@
 		"custom_storage_path_set": "कस्टम स्टोरेज पाथ सेट किया गया: {{path}}",
 		"default_storage_path": "डिफ़ॉल्ट स्टोरेज पाथ का उपयोग पुनः शुरू किया गया",
 		"settings_imported": "सेटिंग्स सफलतापूर्वक इम्पोर्ट की गईं।",
+		"settings_exported": "सेटिंग्स {{path}} में निर्यात की गईं।",
 		"auto_import_success": "ZooCode सेटिंग्स {{filename}} से स्वचालित रूप से आयात की गईं",
 		"image_copied_to_clipboard": "छवि डेटा URI क्लिपबोर्ड में कॉपी की गई",
 		"image_saved": "छवि {{path}} में सहेजी गई",

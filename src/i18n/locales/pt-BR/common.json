@@ -51,6 +51,7 @@
 		"cannot_access_path": "Não é possível acessar o caminho {{path}}: {{error}}",
 		"path_outside_workspace": "O caminho está fora do espaço de trabalho",
 		"settings_import_failed": "Falha ao importar configurações: {{error}}",
+		"settings_export_failed": "Falha ao exportar configurações: {{error}}",
 		"mistake_limit_guidance": "Isso pode indicar uma falha no processo de pensamento do modelo ou incapacidade de usar uma ferramenta adequadamente, o que pode ser mitigado com orientação do usuário (ex. \"Tente dividir a tarefa em etapas menores\").",
 		"violated_organization_allowlist": "Falha ao executar a tarefa: o perfil atual não é compatível com as configurações da sua organização",
 		"condense_failed": "Falha ao condensar o contexto",
@@ -127,6 +128,7 @@
 	"warnings": {
 		"no_terminal_content": "Nenhum conteúdo do terminal selecionado",
 		"auto_import_failed": "Falha ao importar automaticamente as configurações do ZooCode: {{error}}",
+		"settings_export_location_not_remembered": "Configurações exportadas para {{path}}, mas o local não pôde ser lembrado para a próxima exportação: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Nenhum histórico de tarefas do Roo Code encontrado para importar de {{domain}}.",
 			"alreadyImported_one": "O histórico de {{count}} tarefa do Roo Code já foi importado para o Zoo Code.",
@@ -139,6 +141,7 @@
 		"custom_storage_path_set": "Caminho de armazenamento personalizado definido: {{path}}",
 		"default_storage_path": "Retornado ao caminho de armazenamento padrão",
 		"settings_imported": "Configurações importadas com sucesso.",
+		"settings_exported": "Configurações exportadas para {{path}}.",
 		"auto_import_success": "Configurações do ZooCode importadas automaticamente de {{filename}}",
 		"image_copied_to_clipboard": "URI de dados da imagem copiada para a área de transferência",
 		"image_saved": "Imagem salva em {{path}}",

@@ -47,6 +47,7 @@
 		"cannot_access_path": "Tidak dapat mengakses path {{path}}: {{error}}",
 		"path_outside_workspace": "Path berada di luar workspace",
 		"settings_import_failed": "Impor pengaturan gagal: {{error}}.",
+		"settings_export_failed": "Gagal mengekspor pengaturan: {{error}}",
 		"mistake_limit_guidance": "Ini mungkin menunjukkan kegagalan dalam proses pemikiran model atau ketidakmampuan untuk menggunakan tool dengan benar, yang dapat diatasi dengan beberapa panduan pengguna (misalnya \"Coba bagi tugas menjadi langkah-langkah yang lebih kecil\").",
 		"violated_organization_allowlist": "Gagal menjalankan tugas: profil saat ini tidak kompatibel dengan pengaturan organisasi kamu",
 		"condense_failed": "Gagal mengompres konteks",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Tidak ada konten terminal yang dipilih",
 		"auto_import_failed": "Gagal mengimpor pengaturan ZooCode secara otomatis: {{error}}",
+		"settings_export_location_not_remembered": "Pengaturan diekspor ke {{path}}, tetapi lokasi tidak dapat diingat untuk ekspor berikutnya: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Tidak ada riwayat tugas Roo Code yang ditemukan untuk diimpor dari {{domain}}.",
 			"alreadyImported_other": "Semua {{count}} riwayat tugas Roo Code sudah diimpor ke Zoo Code."
@@ -133,6 +135,7 @@
 		"custom_storage_path_set": "Path penyimpanan kustom diatur: {{path}}",
 		"default_storage_path": "Kembali menggunakan path penyimpanan default",
 		"settings_imported": "Pengaturan berhasil diimpor.",
+		"settings_exported": "Pengaturan diekspor ke {{path}}.",
 		"auto_import_success": "Pengaturan ZooCode berhasil diimpor secara otomatis dari {{filename}}",
 		"image_copied_to_clipboard": "Data URI gambar disalin ke clipboard",
 		"image_saved": "Gambar disimpan ke {{path}}",

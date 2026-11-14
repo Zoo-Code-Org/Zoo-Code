@@ -51,6 +51,7 @@
 		"cannot_access_path": "No es pot accedir a la ruta {{path}}: {{error}}",
 		"path_outside_workspace": "La ruta és fora de l'espai de treball",
 		"settings_import_failed": "Ha fallat la importació de la configuració: {{error}}.",
+		"settings_export_failed": "No s'ha pogut exportar la configuració: {{error}}",
 		"mistake_limit_guidance": "Això pot indicar un error en el procés de pensament del model o la incapacitat d'utilitzar una eina correctament, que es pot mitigar amb orientació de l'usuari (p. ex. \"Prova de dividir la tasca en passos més petits\").",
 		"violated_organization_allowlist": "Ha fallat l'execució de la tasca: el perfil actual no és compatible amb la configuració de la teva organització",
 		"condense_failed": "Ha fallat la condensació del context",
@@ -127,6 +128,7 @@
 	"warnings": {
 		"no_terminal_content": "No s'ha seleccionat contingut de terminal",
 		"auto_import_failed": "Ha fallat la importació automàtica de la configuració de ZooCode: {{error}}",
+		"settings_export_location_not_remembered": "Configuració exportada a {{path}}, però no s'ha pogut recordar la ubicació per a la propera exportació: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "No s'ha trobat historial de tasques de Roo Code per importar de {{domain}}.",
 			"alreadyImported_one": "Tot l'historial de tasca de Roo Code ({{count}}) ja s'ha importat a Zoo Code.",
@@ -139,6 +141,7 @@
 		"custom_storage_path_set": "Ruta d'emmagatzematge personalitzada establerta: {{path}}",
 		"default_storage_path": "S'ha reprès l'ús de la ruta d'emmagatzematge predeterminada",
 		"settings_imported": "Configuració importada correctament.",
+		"settings_exported": "Configuració exportada a {{path}}.",
 		"auto_import_success": "Configuració de ZooCode importada automàticament des de {{filename}}",
 		"image_copied_to_clipboard": "URI de dades de la imatge copiada al portapapers",
 		"image_saved": "Imatge desada a {{path}}",

@@ -47,6 +47,7 @@
 		"cannot_access_path": "無法存取路徑 {{path}}：{{error}}",
 		"path_outside_workspace": "路徑位於工作區之外",
 		"settings_import_failed": "設定匯入失敗：{{error}}。",
+		"settings_export_failed": "匯出設定失敗：{{error}}",
 		"mistake_limit_guidance": "這可能表明模型思維過程失敗或無法正確使用工具，可透過使用者指導來緩解（例如「嘗試將工作分解為更小的步驟」）。",
 		"violated_organization_allowlist": "執行工作失敗：目前設定檔與您的組織設定不相容",
 		"condense_failed": "壓縮上下文失敗",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "沒有選擇終端機內容",
 		"auto_import_failed": "自動匯入 ZooCode 設定失敗：{{error}}",
+		"settings_export_location_not_remembered": "設定已匯出到 {{path}}，但無法記住下次匯出所使用的位置：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可從 {{domain}} 匯入的 Roo Code 工作歷史記錄。",
 			"alreadyImported_other": "全部 {{count}} 筆 Roo Code 工作歷史記錄已匯入 Zoo Code。"
@@ -133,6 +135,7 @@
 		"custom_storage_path_set": "自訂儲存路徑已設定：{{path}}",
 		"default_storage_path": "已恢復使用預設儲存路徑",
 		"settings_imported": "設定已成功匯入。",
+		"settings_exported": "設定已匯出到 {{path}}。",
 		"auto_import_success": "已自動匯入 ZooCode 設定：{{filename}}",
 		"image_copied_to_clipboard": "圖片資料 URI 已複製到剪貼簿",
 		"image_saved": "圖片已儲存至 {{path}}",

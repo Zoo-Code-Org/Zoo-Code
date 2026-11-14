@@ -47,6 +47,7 @@
 		"cannot_access_path": "パス {{path}} にアクセスできません：{{error}}",
 		"path_outside_workspace": "パスはワークスペースの外にあります",
 		"settings_import_failed": "設定のインポートに失敗しました：{{error}}",
+		"settings_export_failed": "設定のエクスポートに失敗しました: {{error}}",
 		"mistake_limit_guidance": "これは、モデルの思考プロセスの失敗やツールを適切に使用できないことを示している可能性があり、ユーザーのガイダンスによって軽減できます（例：「タスクをより小さなステップに分割してみてください」）。",
 		"violated_organization_allowlist": "タスクの実行に失敗しました: 現在のプロファイルは組織の設定と互換性がありません",
 		"condense_failed": "コンテキストの圧縮に失敗しました",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",
 		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}",
+		"settings_export_location_not_remembered": "設定を {{path}} にエクスポートしましたが、次のエクスポート用の保存場所を記憶できませんでした：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}からインポートするRoo Codeのタスク履歴が見つかりませんでした。",
 			"alreadyImported_other": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。"
@@ -133,6 +135,7 @@
 		"custom_storage_path_set": "カスタムストレージパスが設定されました：{{path}}",
 		"default_storage_path": "デフォルトのストレージパスに戻りました",
 		"settings_imported": "設定が正常にインポートされました。",
+		"settings_exported": "設定を {{path}} にエクスポートしました。",
 		"auto_import_success": "ZooCode設定が{{filename}}から自動インポートされました",
 		"image_copied_to_clipboard": "画像データURIがクリップボードにコピーされました",
 		"image_saved": "画像を{{path}}に保存しました",

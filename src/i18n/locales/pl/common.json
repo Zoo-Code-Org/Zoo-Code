@@ -47,6 +47,7 @@
 		"cannot_access_path": "Nie można uzyskać dostępu do ścieżki {{path}}: {{error}}",
 		"path_outside_workspace": "Ścieżka znajduje się poza obszarem roboczym",
 		"settings_import_failed": "Nie udało się zaimportować ustawień: {{error}}.",
+		"settings_export_failed": "Nie udało się wyeksportować ustawień: {{error}}",
 		"mistake_limit_guidance": "To może wskazywać na błąd w procesie myślowym modelu lub niezdolność do prawidłowego użycia narzędzia, co można złagodzić poprzez wskazówki użytkownika (np. \"Spróbuj podzielić zadanie na mniejsze kroki\").",
 		"violated_organization_allowlist": "Nie udało się uruchomić zadania: bieżący profil nie jest kompatybilny z ustawieniami Twojej organizacji",
 		"condense_failed": "Nie udało się skondensować kontekstu",
@@ -123,6 +124,7 @@
 	"warnings": {
 		"no_terminal_content": "Nie wybrano zawartości terminala",
 		"auto_import_failed": "Nie udało się automatycznie zaimportować ustawień ZooCode: {{error}}",
+		"settings_export_location_not_remembered": "Ustawienia wyeksportowane do {{path}}, ale nie udało się zapamiętać lokalizacji do następnego eksportu: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Nie znaleziono historii zadań Roo Code do zaimportowania z {{domain}}.",
 			"alreadyImported_one": "{{count}} historia zadań Roo Code została już zaimportowana do Zoo Code.",
@@ -136,6 +138,7 @@
 		"custom_storage_path_set": "Ustawiono niestandardową ścieżkę przechowywania: {{path}}",
 		"default_storage_path": "Wznowiono używanie domyślnej ścieżki przechowywania",
 		"settings_imported": "Ustawienia zaimportowane pomyślnie.",
+		"settings_exported": "Ustawienia wyeksportowane do {{path}}.",
 		"auto_import_success": "Ustawienia ZooCode zostały automatycznie zaimportowane z {{filename}}",
 		"image_copied_to_clipboard": "URI danych obrazu skopiowane do schowka",
 		"image_saved": "Obraz zapisany w {{path}}",
