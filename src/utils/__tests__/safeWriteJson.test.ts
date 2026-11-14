@@ -1429,6 +1429,90 @@ describe("safeWriteJson", () => {
 		}
 	})
 
+	// The re-check inside the failure path has a second shape, and no row reached it: the publish
+	// target canonicalizes and only the confined scope fails. The row above breaks fs.realpath for
+	// every path once its flag lands, so line 503 throws too, publishedPath never gets a value, and
+	// the log-and-continue at lines 516 to 519 runs with BOTH resolutions unresolved - which is not
+	// the state line 507 is written to distinguish. This row keeps the target resolvable and fails
+	// fs.realpath on the confined scope alone, so line 503 lands, line 504 throws, and the
+	// log-and-continue runs with publishedPath set and scopeRoot undefined. The array below is this
+	// row's own witness, recorded inside its mock, of which resolutions were attempted while the
+	// write was already failing and in what order.
+	test("reports the scope root failure and still rolls back when only the confined scope cannot be canonicalized", async () => {
+		const initialData = { message: "Initial content, must survive a scope root that cannot resolve" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		let teardownCheckBroken = false
+		const resolutionsWhileFailing: string[] = []
+		// Distinctly worded so the diagnostic this row asserts can only be met by this failure.
+		const scopeRootFailure = Object.assign(
+			new Error("EPERM: operation not permitted, realpath of the confined scope"),
+			{ code: "EPERM" },
+		)
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+			if (teardownCheckBroken) {
+				resolutionsWhileFailing.push(String(target))
+				// Only the confined scope fails here. The publish target still canonicalizes.
+				if (path.resolve(String(target)) === tempDir) {
+					throw scopeRootFailure
+				}
+			}
+			return String(target)
+		})
+		let renameCallCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 1) {
+				// The single-rename commit fails with EPERM, which starts the two-step fallback.
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+			if (renameCallCount === 2) {
+				// The backup lands here, so the failing write is what the catch block then reads.
+				teardownCheckBroken = true
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			}
+			if (renameCallCount === 3) {
+				throw new Error("Fallback replacement rename failed")
+			}
+			// The rollback rename.
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		try {
+			// The caller still sees the failure that started the teardown, not the realpath rejection
+			// of a scope that could not be canonicalized.
+			await expect(safeWriteJson(currentTestFilePath, newData, { confineTo: tempDir })).rejects.toThrow(
+				"Fallback replacement rename failed",
+			)
+			// Line 503 landed and line 504 threw, in that order, and nothing else was canonicalized
+			// while the write was failing: publishedPath is set and scopeRoot is undefined.
+			expect(resolutionsWhileFailing).toEqual([currentTestFilePath, tempDir])
+			// The re-check that could not run is reported rather than silently skipped, and what it
+			// reported is the scope resolution it actually met.
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("could not run during the teardown"),
+				expect.objectContaining({
+					message: "EPERM: operation not permitted, realpath of the confined scope",
+					code: "EPERM",
+				}),
+			)
+			// The log-and-continue does not decide the teardown: the rollback ran, so the committed copy
+			// is back at the canonical path with its own bytes.
+			expect(await fileExists(currentTestFilePath)).toBe(true)
+			expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
+			// And neither a backup nor a staged file outlives the failed write.
+			const leftovers = (await fs.readdir(tempDir)).filter(
+				(entry) => entry.includes(".bak_") || entry.includes(".new_"),
+			)
+			expect(leftovers).toEqual([])
+		} finally {
+			realpathSpy.mockRestore()
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
 	// Line 343 is the recovery call, and this pull changed its argument from the caller's
 	// spelling to the resolved publish target. The two spellings only differ when the
 	// orphaned replacement files sit beside the referent rather than beside the alias, which
