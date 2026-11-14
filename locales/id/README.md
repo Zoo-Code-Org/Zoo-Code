@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.96.0
+## Yang Baru di v3.98.0
 
-- ✨ **Setelan obrolan dan diagnostik baru:** Tampilkan stempel waktu pesan dengan format waktu dan tanggal yang bisa dikonfigurasi, atur TTL prompt-cache untuk profil Anthropic, dan buat laporan diagnostik yang menjaga privasi.
-- 💸 **Biaya dan cache penyedia yang lebih akurat:** Jaga hasil tool Anthropic tetap utuh, pakai token keluaran kumulatif dalam biaya Anthropic dan MiniMax, baca penghitung prompt-cache DeepSeek, arahkan ke cache Responses xAI, dan tagih pembacaan cache Mistral pada 0,1x.
-- 🧭 **Obrolan yang lebih andal dan cepat:** Lanjutkan tugas yang selesai setelah mulai ulang, pulihkan checkpoint saat commit yang tersimpan hilang, muat ulang otomatis renderer webview yang mati, batasi pembaruan streaming, dan muat bahasa sesuai permintaan.
+- **Judul tugas otomatis dan kontrol model yang lebih detail:** Buat judul untuk tugas root baru secara otomatis dan coba setelan eksperimental dynamic thinking-effort.
+- **Dukungan model dan penyedia yang diperluas:** Gunakan GPT-6.1 Terra, ambil daftar model Friendli terbaru, dan tetapkan Zoo Gateway sebagai yang pertama di setelan penyedia.
+- **Obrolan dan edit yang lebih aman serta responsif:** Batalkan permintaan OpenAI Native dan Requesty dengan bersih, lindungi diff di luar workspace dari persetujuan otomatis yang tidak disengaja, ganti bahasa UI secara konsisten, dan hindari pemulihan backup JSON yang ambigu.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

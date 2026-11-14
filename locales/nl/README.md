@@ -47,11 +47,11 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.96.0
+## Nieuw in v3.98.0
 
-- ✨ **Nieuwe chatinstellingen en diagnostiek:** Toon tijdstempels bij berichten met instelbare tijd- en datumformaten, stel de prompt-cache-TTL voor Anthropic-profielen af en genereer privacyvriendelijke diagnostiekrapporten.
-- 💸 **Nauwkeurigere providerkosten en caching:** Houdt Anthropic-toolresultaten intact, neemt cumulatieve outputtokens mee in Anthropic- en MiniMax-kosten, leest DeepSeek-prompt-cache-tellers, richt zich op de xAI Responses-cache en factureert Mistral-cache-leesacties tegen 0,1x.
-- 🧭 **Betrouwbaardere en snellere chats:** Hervat voltooide taken na een herstart, herstel checkpoints wanneer de opgeslagen commit ontbreekt, herlaad een dode webview-renderer automatisch, beperk streamingupdates en laad talen op verzoek.
+- **Automatische taaktitels en fijnere modelregeling:** Genereer automatisch titels voor nieuwe root-taken en probeer de experimentele instelling voor dynamische denkinspanning.
+- **Uitgebreidere ondersteuning voor modellen en providers:** Gebruik GPT-6.1 Terra, haal de nieuwste Friendli-modellenlijst op en houd Zoo Gateway bovenaan in de providerinstellingen.
+- **Veiligere, responsievere chats en bewerkingen:** Annuleer OpenAI Native- en Requesty-verzoeken netjes, voorkom onbedoelde automatische goedkeuring van diffs buiten de workspace, schakel consistent tussen UI-talen en vermijd dubbelzinnig herstel van JSON-back-ups.
 
 ## Wat kan Zoo Code voor JOU doen?
 

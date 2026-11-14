@@ -324,10 +324,10 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Zoo Code v3.96.0'daki yenilikler",
-			"highlight1": "✨ Yeni sohbet ayarları ve tanılama: Yapılandırılabilir saat ve tarih biçimleriyle mesaj zaman damgalarını göster, Anthropic profilleri için prompt-cache TTL'sini ayarla ve gizliliği koruyan tanılama raporları oluştur.",
-			"highlight2": "💸 Daha doğru sağlayıcı maliyetleri ve önbellekleme: Anthropic araç sonuçlarını olduğu gibi korur, Anthropic ve MiniMax maliyetlerine kümülatif çıktı token'larını dahil eder, DeepSeek prompt-cache sayaçlarını okur, xAI Responses önbelleğini hedefler ve Mistral önbellek okumalarını 0,1x ile faturalandırır.",
-			"highlight3": "🧭 Daha güvenilir ve hızlı sohbetler: Yeniden başlatmanın ardından tamamlanan görevleri sürdür, kaydedilen commit eksikse checkpoint'i geri yükle, yanıt vermeyen webview oluşturucusunu otomatik olarak yeniden yükle, akış güncellemelerini kısıtla ve dilleri talep üzerine yükle."
+			"heading": "Zoo Code v3.98.0'daki yenilikler",
+			"highlight1": "Otomatik görev başlıkları ve daha hassas model kontrolü: Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.",
+			"highlight2": "Genişletilmiş model ve sağlayıcı desteği: GPT-6.1 Terra'yı kullan, en güncel Friendli model listesini getir ve sağlayıcı ayarlarında Zoo Gateway'i ilk sırada tut.",
+			"highlight3": "Daha güvenli ve duyarlı sohbetler ile düzenlemeler: OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın."
 		}
 	},
 	"costs": {

@@ -341,10 +341,10 @@
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.96.0 新功能",
-			"highlight1": "✨ 全新聊天設定與診斷: 以可設定的時間與日期格式顯示訊息時間戳記，為 Anthropic 設定檔調整 prompt-cache TTL，並產生注重隱私的診斷報告。",
-			"highlight2": "💸 更精準的供應商計費與快取: 保持 Anthropic 工具結果完整無損，在 Anthropic 和 MiniMax 成本中採用累計輸出 token，讀取 DeepSeek 的 prompt-cache 計數器，命中 xAI Responses 快取，並以 0.1x 計收 Mistral 快取讀取費用。",
-			"highlight3": "🧭 更可靠、更快速的對話: 重新啟動後續跑已完成的任務，在已儲存的 commit 遺失時仍能還原 checkpoint，自動重新載入無回應的 webview 轉譯器，節流串流更新，並視需要載入語言包。"
+			"heading": "Zoo Code v3.98.0 新功能",
+			"highlight1": "自動任務標題與更精細的模型控制: 自動為新的根任務產生標題，並嘗試實驗性的動態思考力度設定。",
+			"highlight2": "擴充的模型與供應商支援: 使用 GPT-6.1 Terra，取得最新的 Friendli 模型清單，並在供應商設定中讓 Zoo Gateway 保持首位。",
+			"highlight3": "更安全、回應更迅速的對話與編輯: 正常取消 OpenAI Native 和 Requesty 請求，防止工作區外的 diff 遭到意外自動核准，一致地切換介面語言，並避免有歧義的 JSON 備份復原。"
 		}
 	},
 	"reasoning": {

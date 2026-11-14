@@ -47,11 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.96.0
+## Novidades na v3.98.0
 
-- ✨ **Novas configurações de chat e diagnósticos:** Mostra carimbos de data/hora nas mensagens com formatos de hora e data configuráveis, ajusta o TTL do prompt-cache para perfis Anthropic e gera relatórios de diagnóstico que preservam a privacidade.
-- 💸 **Custos e cache de provedores mais precisos:** Mantém os resultados de ferramentas do Anthropic intactos, adota tokens de saída cumulativos nos custos do Anthropic e MiniMax, lê os contadores de prompt-cache do DeepSeek, mira o cache de Responses do xAI e cobra leituras de cache do Mistral a 0,1x.
-- 🧭 **Chats mais confiáveis e rápidos:** Retoma tarefas concluídas depois de reiniciar, restaura checkpoints quando o commit salvo está ausente, recarrega automaticamente um renderizador de webview morto, limita atualizações de streaming e carrega idiomas sob demanda.
+- **Títulos automáticos de tarefas e controle mais preciso de modelos:** Gere títulos para novas tarefas raiz automaticamente e experimente a configuração experimental de esforço de raciocínio dinâmico.
+- **Suporte ampliado a modelos e provedores:** Use GPT-6.1 Terra, obtenha a lista mais recente de modelos do Friendli e mantenha o Zoo Gateway em primeiro lugar nas configurações de provedores.
+- **Chats e edições mais seguros e responsivos:** Cancele solicitações do OpenAI Native e do Requesty corretamente, proteja diffs fora do workspace contra aprovação automática acidental, alterne os idiomas da interface de forma consistente e evite recuperações ambíguas de backups JSON.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

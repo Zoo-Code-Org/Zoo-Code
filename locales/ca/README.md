@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.96.0
+## Novetats a la v3.98.0
 
-- ✨ **Nous ajustos de xat i diagnòstics:** Mostra marques de temps als missatges amb formats d'hora i data configurables, ajusta el TTL de la cau de prompts per als perfils d'Anthropic i genera informes de diagnòstic que preserven la privacitat.
-- 💸 **Costos i cau dels proveïdors més precisos:** Manté intactes els resultats d'eines d'Anthropic, adopta els tokens de sortida acumulatius en els costos d'Anthropic i MiniMax, llegeix els comptadors de cau de prompts de DeepSeek, apunta a la cau de Responses de xAI i factura les lectures de cau de Mistral a 0,1x.
-- 🧭 **Xats més fiables i ràpids:** Repren les tasques completades després d'un reinici, restaura checkpoints quan falta el commit desat, recarrega automàticament un renderitzador de webview mort, regula les actualitzacions de streaming i carrega els idiomes sota demanda.
+- **Títols de tasques automàtics i més control dels models:** Genera títols per a les noves tasques arrel automàticament i prova el paràmetre experimental d'esforç de raonament dinàmic.
+- **Més compatibilitat amb models i proveïdors:** Utilitza GPT-6.1 Terra, obtén la llista més recent de models de Friendli i mantén Zoo Gateway al primer lloc de la configuració de proveïdors.
+- **Xats i edicions més segurs i responsius:** Cancel·la netament les sol·licituds d'OpenAI Native i Requesty, evita l'aprovació automàtica accidental de diffs fora de l'espai de treball, canvia l'idioma de la interfície de manera coherent i evita recuperacions ambigües de còpies de seguretat JSON.
 
 ## Què pot fer Zoo Code per TU?
 

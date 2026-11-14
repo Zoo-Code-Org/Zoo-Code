@@ -326,10 +326,10 @@
 		"title": "Zoo Code {{version}} lançado",
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novidades do Zoo Code v3.96.0",
-			"highlight1": "✨ Novas configurações de chat e diagnósticos: Mostra carimbos de data/hora nas mensagens com formatos de hora e data configuráveis, ajusta o TTL do prompt-cache para perfis Anthropic e gera relatórios de diagnóstico que preservam a privacidade.",
-			"highlight2": "💸 Custos e cache de provedores mais precisos: Mantém os resultados de ferramentas do Anthropic intactos, adota tokens de saída cumulativos nos custos do Anthropic e MiniMax, lê os contadores de prompt-cache do DeepSeek, mira o cache de Responses do xAI e cobra leituras de cache do Mistral a 0,1x.",
-			"highlight3": "🧭 Chats mais confiáveis e rápidos: Retoma tarefas concluídas depois de reiniciar, restaura checkpoints quando o commit salvo está ausente, recarrega automaticamente um renderizador de webview morto, limita atualizações de streaming e carrega idiomas sob demanda."
+			"heading": "Novidades do Zoo Code v3.98.0",
+			"highlight1": "Títulos automáticos de tarefas e controle mais preciso de modelos: Gere títulos para novas tarefas raiz automaticamente e experimente a configuração experimental de esforço de raciocínio dinâmico.",
+			"highlight2": "Suporte ampliado a modelos e provedores: Use GPT-6.1 Terra, obtenha a lista mais recente de modelos do Friendli e mantenha o Zoo Gateway em primeiro lugar nas configurações de provedores.",
+			"highlight3": "Chats e edições mais seguros e responsivos: Cancele solicitações do OpenAI Native e do Requesty corretamente, proteja diffs fora do workspace contra aprovação automática acidental, alterne os idiomas da interface de forma consistente e evite recuperações ambíguas de backups JSON."
 		}
 	},
 	"costs": {

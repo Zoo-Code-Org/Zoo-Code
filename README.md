@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.96.0
+## What's New in v3.98.0
 
-- ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.
-- 💸 **More accurate provider costs and caching:** Keep Anthropic tool results intact, adopt cumulative output tokens in Anthropic and MiniMax costs, read DeepSeek prompt-cache counters, target the xAI Responses cache, and bill Mistral cache reads at 0.1x.
-- 🧭 **More reliable and faster chats:** Resume completed tasks after a restart, restore checkpoints when the saved commit is missing, auto-reload a dead webview renderer, throttle streaming updates, and load locales on demand.
+- **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
+- **Expanded model and provider support:** Use GPT-6.1 Terra, fetch the latest Friendli model list, and keep Zoo Gateway first in provider settings.
+- **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
 
 <details>
   <summary>🌐 Available languages</summary>
