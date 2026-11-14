@@ -542,6 +542,21 @@ describe("FileWatcher", () => {
 			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
 			expect(mockCacheManager.updateHash).not.toHaveBeenCalled()
 		})
+
+		it("fires no batch-finished or progress events for a batch whose session was stopped", async () => {
+			watcherWithRegistry()
+			const controller = new AbortController()
+			await fileWatcher.initialize(controller.signal)
+			await mockOnDidChange({ fsPath: path })
+			const finished = vi.fn()
+			const progress = vi.fn()
+			fileWatcher.onDidFinishBatchProcessing(finished)
+			fileWatcher.onBatchProgressUpdate(progress)
+			controller.abort()
+			await flushBatch()
+			expect(finished).not.toHaveBeenCalled()
+			expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ processedInBatch: 1 }))
+		})
 	})
 
 	describe("dispose", () => {

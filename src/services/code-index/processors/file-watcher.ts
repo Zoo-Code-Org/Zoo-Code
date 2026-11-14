@@ -286,6 +286,8 @@ export class FileWatcher implements IFileWatcher {
 			}
 		}
 
+		// The orchestrator reset its counter on stop; a stale finish would decrement the next session's count.
+		if (signal?.aborted) return
 		this._onDidFinishBatchProcessing.fire({ processedFiles: batchResults })
 		this._onBatchProgressUpdate.fire({ processedInBatch: totalFilesInBatch, totalInBatch: totalFilesInBatch })
 		if (this.accumulatedEvents.size === 0) {
