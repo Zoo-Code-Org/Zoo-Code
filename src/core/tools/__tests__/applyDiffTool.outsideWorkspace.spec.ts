@@ -101,6 +101,12 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 					}),
 				}),
 			},
+			// The merged tool consults the observation registry during its pre-save authorization,
+			// so the double has to carry it. No row below asserts on it.
+			observationRegistry: {
+				get: vi.fn().mockReturnValue(undefined),
+				observe: vi.fn(),
+			},
 			diffStrategy: {
 				getName: () => "test",
 				applyDiff: vi.fn().mockResolvedValue({ success: true, content: "new\n" }),

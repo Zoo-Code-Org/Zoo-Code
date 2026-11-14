@@ -208,7 +208,19 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
 				// Direct file write without diff view or opening the file
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// The replacement was applied to the whole file this tool read: a full-file
+				// replacement of an existing target.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"update",
+					// The replacement was built from the bytes this tool just read, so it may re-observe
+					// what that read proves about the current version.
+					true,
+				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)

@@ -32,12 +32,44 @@ const targetPath = path.resolve(process.env.INTERRUPTION_TARGET_PATH)
 const fsPromises = require("fs/promises")
 const actualRename = fsPromises.rename
 
+// Identity, not spelling. The writer renames to the publish target it resolved through
+// symlinks, and node's async fs.realpath expands an NTFS 8.3 alias, so on a runner whose temp
+// path is reported as an alias (the normal windows-latest condition: the profile is RUNNER~1
+// there) the parent's authorized spelling and the writer's rename destination are different
+// strings for one file. Text equality here never fires, every case prints WRITE_COMPLETED, and
+// the injection silently stops being an injection. Decide what the destination IS: same name,
+// and the same directory by dev+ino. The basenames under test are unique inside the storage
+// directory, so the pair cannot land on another file.
+const targetBase = path.basename(targetPath)
+function sameTargetAsAuthorized(candidate) {
+	if (path.basename(String(candidate)) !== targetBase) {
+		return false
+	}
+	const resolved = path.resolve(String(candidate))
+	if (resolved === targetPath) {
+		return true
+	}
+	let candidateDir = null
+	let authorizedDir = null
+	try {
+		candidateDir = fs.statSync(path.dirname(resolved), { bigint: true })
+	} catch {
+		return false
+	}
+	try {
+		authorizedDir = fs.statSync(path.dirname(targetPath), { bigint: true })
+	} catch {
+		return false
+	}
+	return candidateDir.dev === authorizedDir.dev && candidateDir.ino === authorizedDir.ino
+}
+
 // Fault injection: hard-kill before the replacement lands. Any rename
-// whose destination is the canonical path is the commit step, whatever
+// whose destination is the publish target is the commit step, whatever
 // replacement protocol the writer uses; exit before performing it.
 let commitAttempts = 0
 fsPromises.rename = async function interruptionRename(oldPath, newPath) {
-	if (path.resolve(String(newPath)) === targetPath) {
+	if (sameTargetAsAuthorized(newPath)) {
 		commitAttempts++
 		if (process.env.INTERRUPTION_MODE === "fallback" && commitAttempts === 1) {
 			return Promise.reject(Object.assign(new Error("Injected EPERM"), { code: "EPERM" }))
