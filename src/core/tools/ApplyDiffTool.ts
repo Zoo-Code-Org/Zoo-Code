@@ -6,6 +6,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -36,6 +37,24 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 		if (diffContent && !task.api.getModel().id.includes("claude")) {
 			diffContent = unescapeHtmlEntities(diffContent)
+		}
+
+		// Identity of a partial observation this call created (undefined when the model had
+		// already observed the file): only this exact observation may be removed on a failure
+		// exit, so a replaced or published observation is never discarded here. Declared outside
+		// the try so the catch exit can use it too.
+		let partialObservation: { path: string; version: string; complete: boolean } | undefined
+		const forgetPartialObservationIfCurrent = () => {
+			if (!partialObservation) {
+				return
+			}
+			const current = task.observationRegistry.get(partialObservation.path)
+			// A matching version token is not the same observation: a concurrent complete read
+			// can record this very version with `complete` true, and forgetting that entry would
+			// discard authority this call never held. Compare both fields the entry carries.
+			if (current?.version === partialObservation.version && current?.complete === partialObservation.complete) {
+				task.observationRegistry.forget(partialObservation.path)
+			}
 		}
 
 		try {
@@ -74,7 +93,32 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// The diff below is built from this exact read, so the save that follows must be
+			// authorized against the version captured here - not against whatever version the
+			// preview happens to stat afterwards. Same contract as ApplyPatchTool's hunk read:
+			// stat around the read and observe only when the file did not change underneath it.
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					// A tool read is not a model read. With no prior observation this stays a
+					// partial observation of the version the diff was computed against - the only
+					// authorization the save can have, since apply_diff computes its hunks from
+					// this read. When the model already observed the file, keep the completeness it
+					// observation to the current version would let content the model built from a
+					// stale read pass the compare-and-swap, so an out-of-date observation is left
+					// alone and the save fails with the re-read remediation.
+					const prior = task.observationRegistry.get(absolutePath)
+					if (prior === undefined) {
+						task.observationRegistry.observe(absolutePath, preReadToken, false)
+						partialObservation = { path: absolutePath, version: preReadToken, complete: false }
+					} else if (prior.version === preReadToken) {
+						task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
+					}
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
@@ -116,6 +160,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				task.recordToolError("apply_diff", formattedError)
 
 				pushToolResult(formattedError)
+				forgetPartialObservationIfCurrent()
 				return
 			}
 
@@ -174,10 +219,12 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				const didApprove = await askApproval("tool", completeMessage, toolProgressStatus, isWriteProtected)
 
 				if (!didApprove) {
+					forgetPartialObservationIfCurrent()
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
+				// Save directly without showing diff view or opening the file. The diff is
+				// applied to an existing file, so edit-guard semantics require a prior read.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -186,6 +233,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"edit",
 				)
 			} else {
 				// Original behavior with diff view
@@ -220,12 +268,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 
 				if (!didApprove) {
 					await task.diffViewProvider.revertChanges()
+					forgetPartialObservationIfCurrent()
 					task.processQueuedMessages()
 					return
 				}
 
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
 			}
 
 			// Track file edit operation
@@ -276,6 +325,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			return
 		} catch (error) {
 			await handleError("applying diff", error as Error)
+			forgetPartialObservationIfCurrent()
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 			task.processQueuedMessages()

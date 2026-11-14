@@ -17,6 +17,16 @@ export class ApplyPatchError extends Error {
 }
 
 /**
+ * Why a hunk wants the file read.
+ *
+ * "publish": the string handed back here is the string the tool writes back (an
+ * update, or a move's destination), so a read that cannot represent the file's bytes
+ * faithfully must not become the published content. "record": nothing is republished
+ * from it (a delete, whose publish is an unlink), so the reading is a snapshot.
+ */
+export type PatchReadIntent = "publish" | "record"
+
+/**
  * Result of applying a patch to a file.
  */
 export interface ApplyPatchFileChange {
@@ -150,7 +160,7 @@ export function applyChunksToContent(originalContent: string, filePath: string, 
  */
 export async function processHunk(
 	hunk: Hunk,
-	readFile: (path: string) => Promise<string>,
+	readFile: (path: string, intent: PatchReadIntent) => Promise<string>,
 ): Promise<ApplyPatchFileChange> {
 	switch (hunk.type) {
 		case "AddFile":
@@ -161,7 +171,7 @@ export async function processHunk(
 			}
 
 		case "DeleteFile": {
-			const content = await readFile(hunk.path)
+			const content = await readFile(hunk.path, "record")
 			return {
 				type: "delete",
 				path: hunk.path,
@@ -170,7 +180,7 @@ export async function processHunk(
 		}
 
 		case "UpdateFile": {
-			const originalContent = await readFile(hunk.path)
+			const originalContent = await readFile(hunk.path, "publish")
 			const newContent = applyChunksToContent(originalContent, hunk.path, hunk.chunks)
 			return {
 				type: "update",
@@ -192,7 +202,7 @@ export async function processHunk(
  */
 export async function processAllHunks(
 	hunks: Hunk[],
-	readFile: (path: string) => Promise<string>,
+	readFile: (path: string, intent: PatchReadIntent) => Promise<string>,
 ): Promise<ApplyPatchFileChange[]> {
 	const changes: ApplyPatchFileChange[] = []
 
