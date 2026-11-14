@@ -72,6 +72,10 @@ export interface ExtensionStateContextType extends ExtensionState {
 	marketplaceInstalledMetadata?: MarketplaceInstalledMetadata
 	profileThresholds: Record<string, number>
 	setProfileThresholds: (value: Record<string, number>) => void
+	profileIdleThresholds: Record<string, number>
+	setProfileIdleThresholds: (value: Record<string, number>) => void
+	profileIdleCondenseTimes: Record<string, number>
+	setProfileIdleCondenseTimes: (value: Record<string, number>) => void
 	setApiConfiguration: (config: ProviderSettings) => void
 	setCustomInstructions: (value?: string) => void
 	setAlwaysAllowReadOnly: (value: boolean) => void
@@ -149,6 +153,12 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setAutoCondenseContext: (value: boolean) => void
 	autoCondenseContextPercent: number
 	setAutoCondenseContextPercent: (value: number) => void
+	idleCondenseContext: boolean
+	setIdleCondenseContext: (value: boolean) => void
+	idleCondenseContextPercent: number
+	setIdleCondenseContextPercent: (value: number) => void
+	idleCondenseTimeInSeconds: number
+	setIdleCondenseTimeInSeconds: (value: number) => void
 	routerModels?: RouterModels
 	includeDiagnosticMessages?: boolean
 	setIncludeDiagnosticMessages: (value: boolean) => void
@@ -303,6 +313,11 @@ export const createInitialExtensionState = (): ExtensionState => ({
 	autoCondenseContext: true,
 	autoCondenseContextPercent: 100,
 	profileThresholds: {},
+	idleCondenseContext: false,
+	idleCondenseContextPercent: 50,
+	idleCondenseTimeInSeconds: 180,
+	profileIdleThresholds: {},
+	profileIdleCondenseTimes: {},
 	codebaseIndexConfig: {
 		codebaseIndexEnabled: true,
 		codebaseIndexQdrantUrl: "http://localhost:6333",
@@ -676,6 +691,11 @@ export const ExtensionStateContextProvider: React.FC<{
 		marketplaceItems,
 		marketplaceInstalledMetadata,
 		profileThresholds: state.profileThresholds ?? {},
+		profileIdleThresholds: state.profileIdleThresholds ?? {},
+		profileIdleCondenseTimes: state.profileIdleCondenseTimes ?? {},
+		idleCondenseContext: state.idleCondenseContext ?? false,
+		idleCondenseContextPercent: state.idleCondenseContextPercent ?? 50,
+		idleCondenseTimeInSeconds: state.idleCondenseTimeInSeconds ?? 180,
 		alwaysAllowFollowupQuestions,
 		followupAutoApproveTimeoutMs,
 		taskSyncEnabled: state.taskSyncEnabled,
@@ -762,6 +782,14 @@ export const ExtensionStateContextProvider: React.FC<{
 		setAutoCondenseContextPercent: (value) =>
 			setState((prevState) => ({ ...prevState, autoCondenseContextPercent: value })),
 		setProfileThresholds: (value) => setState((prevState) => ({ ...prevState, profileThresholds: value })),
+		setProfileIdleThresholds: (value) => setState((prevState) => ({ ...prevState, profileIdleThresholds: value })),
+		setProfileIdleCondenseTimes: (value) =>
+			setState((prevState) => ({ ...prevState, profileIdleCondenseTimes: value })),
+		setIdleCondenseContext: (value) => setState((prevState) => ({ ...prevState, idleCondenseContext: value })),
+		setIdleCondenseContextPercent: (value) =>
+			setState((prevState) => ({ ...prevState, idleCondenseContextPercent: value })),
+		setIdleCondenseTimeInSeconds: (value) =>
+			setState((prevState) => ({ ...prevState, idleCondenseTimeInSeconds: value })),
 		includeDiagnosticMessages: state.includeDiagnosticMessages,
 		setIncludeDiagnosticMessages: (value) => {
 			setState((prevState) => ({ ...prevState, includeDiagnosticMessages: value }))

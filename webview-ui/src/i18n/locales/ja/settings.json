@@ -755,6 +755,18 @@
 			"profileDescription": "このプロファイルのみのカスタムしきい値（グローバルデフォルトを上書き）",
 			"usesGlobal": "（グローバル {{threshold}}% を使用）"
 		},
+		"idleCondensing": {
+			"name": "アイドル時の圧縮",
+			"description": "アイドル時にコンテキストを圧縮するためのしきい値を低めに設定。キーボードに戻ったとき、いつでもクリーンなコンテキストが使えるようになります。",
+			"thresholdDescription": "モデルがアイドル状態のときにのみ適用される、コンテキストを圧縮するための低めのしきい値です。",
+			"thresholdProfileDescription": "このプロファイルのみのカスタムアイドルしきい値（グローバルデフォルトを上書き。プロファイルの圧縮しきい値を上限とします）",
+			"idleTime": {
+				"label": "アイドル時間",
+				"seconds": "秒",
+				"description": "モデルがアイドル状態である必要がある時間。"
+			},
+			"useGlobal": "グローバル設定を使用"
+		},
 		"maxImageFileSize": {
 			"label": "最大画像ファイルサイズ",
 			"mb": "MB",

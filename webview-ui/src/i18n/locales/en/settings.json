@@ -839,6 +839,18 @@
 			"profileDescription": "Custom threshold for this profile only (overrides global default)",
 			"usesGlobal": "(uses global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Idle condensing",
+			"description": "A lower threshold for condensing the context during idle moments, so you always have a clean context when you return to the keyboard.",
+			"thresholdDescription": "A lower threshold to condense the context that applies only when the model is idle.",
+			"thresholdProfileDescription": "Custom idle threshold for this profile only (overrides global default, capped at the profile's condensing threshold)",
+			"idleTime": {
+				"label": "Idle time",
+				"seconds": "seconds",
+				"description": "How long the model must be idle."
+			},
+			"useGlobal": "Use global settings"
+		},
 		"includeCurrentTime": {
 			"label": "Include current time in context",
 			"description": "When enabled, the current time and timezone information will be included in the system prompt. Disable this if models are stopping work due to time concerns."

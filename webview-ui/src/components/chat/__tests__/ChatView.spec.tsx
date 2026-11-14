@@ -1703,6 +1703,8 @@ describe("ChatView - Follow-up Suggestions", () => {
 		// so the appended "\n" is absent from the DOM value.
 		await waitFor(() => expect(input.value).toBe("Draft text Copy me"))
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+		// The draft changed programmatically, so the idle countdown must restart.
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "idleCondenseReset" })
 
 		// With an empty draft the answer is set as-is (no dangling "\n" prefix).
 		fireEvent.change(input, { target: { value: "" } })
@@ -1751,6 +1753,33 @@ describe("ChatView - Follow-up Suggestions", () => {
 		await waitFor(() => expect(input.value).toBe("Padded"))
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
 	})
+
+	it("posts idleCondenseReset when a setChatBoxMessage invoke rewrites the input", async () => {
+		const { getByTestId } = renderChatView()
+
+		mockPostMessage({ mode: "ask", customModes: [] })
+
+		const input = getByTestId("chat-textarea").querySelector("input")
+		if (!input) {
+			throw new Error("expected the chat input to be rendered")
+		}
+		// Pre-fill a draft so the invoke appends to it, then clear the calls
+		// made while setting up so only the invoke path is asserted on.
+		fireEvent.change(input, { target: { value: "Draft" } })
+		vscodePostMessageMock.cleanup()
+
+		await dispatchExtensionMessage({
+			type: "invoke",
+			invoke: "setChatBoxMessage",
+			text: "from invoke",
+			images: [],
+		})
+
+		await waitFor(() => expect(input.value).toBe("Draft from invoke"))
+		// The invoke path changes the prompt programmatically without a
+		// textarea onChange, so the armed idle countdown must restart.
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "idleCondenseReset" })
+	})
 })
 
 describe("ChatView - Context Condensing Indicator Tests", () => {
@@ -1766,6 +1795,7 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 
 		// First hydrate state with an active task
 		mockPostMessage({
+			currentTaskId: "test-task-id",
 			clineMessages: [
 				{
 					type: "say",
@@ -1820,5 +1850,127 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 			},
 			{ timeout: 2000 },
 		)
+	})
+
+	it("queues messages sent while a condense is in progress", async () => {
+		// While isCondensing is true, handleSendMessage must queue the message
+		// (queueMessage) instead of sending askResponse, so it drains via
+		// processQueuedMessages once the condensation finishes.
+		const { getByTestId } = renderChatView()
+
+		// Hydrate with a completed API request so sending is enabled and not streaming
+		mockPostMessage({
+			currentTaskId: "test-task-id",
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "say",
+					say: "api_req_started",
+					ts: Date.now() - 1000,
+					text: JSON.stringify({ apiProtocol: "anthropic", cost: 0.05, tokensIn: 100, tokensOut: 50 }),
+				},
+				{
+					type: "say",
+					say: "api_req_finished",
+					ts: Date.now() - 500,
+					text: JSON.stringify({ cost: 0.05, tokensIn: 100, tokensOut: 50 }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+
+		// Pin the precondition: sending is enabled and not streaming, so the
+		// only reason for queueing below is isCondensing.
+		await waitFor(() => {
+			const input = getByTestId("chat-textarea").querySelector("input")!
+			expect(input.getAttribute("data-sending-disabled")).toBe("false")
+		})
+
+		// Put ChatView into the condensing state the way the extension does
+		await act(async () => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "condenseTaskContextStarted", text: "test-task-id" },
+				}),
+			)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+
+		vscodePostMessageMock.cleanup()
+
+		const chatTextArea = getByTestId("chat-textarea")
+		const input = chatTextArea.querySelector("input")! as HTMLInputElement
+
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "queued during condense" } })
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "queueMessage",
+				text: "queued during condense",
+				images: [],
+			})
+		})
+
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "askResponse",
+				askResponse: "messageResponse",
+			}),
+		)
+	})
+
+	it("ignores condense cues tagged with another task's id", async () => {
+		// The started/response cues carry the task they belong to. A cue from
+		// a different (e.g. previously condensing) task must not toggle the
+		// current view's indicator; the current task's cue still must.
+		const { container, getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 5_000)
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+		})
+
+		const findCondensingRow = () =>
+			Array.from(container.querySelectorAll('[data-testid="chat-row"]')).find((row) => {
+				const text = row.textContent || ""
+				return text.includes('"say":"condense_context"') && text.includes('"partial":true')
+			})
+
+		// Reject path: a stale started cue for another task stays ignored.
+		await dispatchExtensionMessage({ type: "condenseTaskContextStarted", text: "task-b" })
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+		expect(findCondensingRow()).toBeUndefined()
+
+		// Accept path: the current task's cue shows the indicator.
+		await dispatchExtensionMessage({ type: "condenseTaskContextStarted", text: "task-a" })
+		await waitFor(() => {
+			expect(findCondensingRow()).toBeTruthy()
+		})
+
+		// Reject path: a stale response for another task does not clear it.
+		await dispatchExtensionMessage({ type: "condenseTaskContextResponse", text: "task-b" })
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+		expect(findCondensingRow()).toBeTruthy()
+
+		// Accept path: the current task's response clears it.
+		await dispatchExtensionMessage({ type: "condenseTaskContextResponse", text: "task-a" })
+		await waitFor(() => {
+			expect(findCondensingRow()).toBeUndefined()
+		})
 	})
 })

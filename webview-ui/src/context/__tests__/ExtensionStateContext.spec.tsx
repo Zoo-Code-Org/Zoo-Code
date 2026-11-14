@@ -112,6 +112,50 @@ const ApiConfigTestComponent = () => {
 	)
 }
 
+const IdleCondenseTestComponent = () => {
+	const {
+		idleCondenseContext,
+		setIdleCondenseContext,
+		idleCondenseContextPercent,
+		setIdleCondenseContextPercent,
+		idleCondenseTimeInSeconds,
+		setIdleCondenseTimeInSeconds,
+		profileIdleThresholds,
+		setProfileIdleThresholds,
+		profileIdleCondenseTimes,
+		setProfileIdleCondenseTimes,
+	} = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="idle-condense">{JSON.stringify(idleCondenseContext)}</div>
+			<div data-testid="idle-condense-percent">{JSON.stringify(idleCondenseContextPercent)}</div>
+			<div data-testid="idle-condense-time">{JSON.stringify(idleCondenseTimeInSeconds)}</div>
+			<div data-testid="profile-idle-thresholds">{JSON.stringify(profileIdleThresholds)}</div>
+			<div data-testid="profile-idle-condense-times">{JSON.stringify(profileIdleCondenseTimes)}</div>
+			<button data-testid="set-idle-condense-button" onClick={() => setIdleCondenseContext(true)}>
+				Enable Idle Condense
+			</button>
+			<button data-testid="set-idle-condense-percent-button" onClick={() => setIdleCondenseContextPercent(75)}>
+				Set Percent
+			</button>
+			<button data-testid="set-idle-condense-time-button" onClick={() => setIdleCondenseTimeInSeconds(60)}>
+				Set Time
+			</button>
+			<button
+				data-testid="set-profile-idle-thresholds-button"
+				onClick={() => setProfileIdleThresholds({ architect: 40 })}>
+				Set Profile Idle Thresholds
+			</button>
+			<button
+				data-testid="set-profile-idle-condense-times-button"
+				onClick={() => setProfileIdleCondenseTimes({ code: 90 })}>
+				Set Profile Idle Condense Times
+			</button>
+		</div>
+	)
+}
+
 const InitialStateTestComponent = () => {
 	const {
 		alwaysAllowFollowupQuestions,
@@ -722,6 +766,77 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
 	})
 
+	it("initializes idle condensing fields to their defaults", () => {
+		const state = createInitialExtensionState()
+
+		expect(state.idleCondenseContext).toBe(false)
+		expect(state.idleCondenseContextPercent).toBe(50)
+		expect(state.idleCondenseTimeInSeconds).toBe(180)
+		expect(state.profileIdleThresholds).toEqual({})
+		expect(state.profileIdleCondenseTimes).toEqual({})
+	})
+
+	it("updates idle condensing fields through their setters", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<IdleCondenseTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("idle-condense").textContent!)).toBe(false)
+		expect(JSON.parse(screen.getByTestId("idle-condense-percent").textContent!)).toBe(50)
+		expect(JSON.parse(screen.getByTestId("idle-condense-time").textContent!)).toBe(180)
+		expect(JSON.parse(screen.getByTestId("profile-idle-thresholds").textContent!)).toEqual({})
+		expect(JSON.parse(screen.getByTestId("profile-idle-condense-times").textContent!)).toEqual({})
+
+		act(() => {
+			screen.getByTestId("set-idle-condense-button").click()
+		})
+		act(() => {
+			screen.getByTestId("set-idle-condense-percent-button").click()
+		})
+		act(() => {
+			screen.getByTestId("set-idle-condense-time-button").click()
+		})
+		act(() => {
+			screen.getByTestId("set-profile-idle-thresholds-button").click()
+		})
+		act(() => {
+			screen.getByTestId("set-profile-idle-condense-times-button").click()
+		})
+
+		expect(JSON.parse(screen.getByTestId("idle-condense").textContent!)).toBe(true)
+		expect(JSON.parse(screen.getByTestId("idle-condense-percent").textContent!)).toBe(75)
+		expect(JSON.parse(screen.getByTestId("idle-condense-time").textContent!)).toBe(60)
+		expect(JSON.parse(screen.getByTestId("profile-idle-thresholds").textContent!)).toEqual({ architect: 40 })
+		expect(JSON.parse(screen.getByTestId("profile-idle-condense-times").textContent!)).toEqual({ code: 90 })
+	})
+
+	it("falls back to the idle condensing defaults when initialState carries explicit undefined values", () => {
+		// A hand-written state payload can carry explicit undefined values, which the plain
+		// merge spread lets overwrite the initialized defaults; the provider's fallbacks must
+		// still expose the documented defaults rather than undefined.
+		render(
+			<ExtensionStateContextProvider
+				initialState={{
+					profileThresholds: undefined,
+					profileIdleThresholds: undefined,
+					profileIdleCondenseTimes: undefined,
+					idleCondenseContext: undefined,
+					idleCondenseContextPercent: undefined,
+					idleCondenseTimeInSeconds: undefined,
+				}}>
+				<IdleCondenseTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("idle-condense").textContent!)).toBe(false)
+		expect(JSON.parse(screen.getByTestId("idle-condense-percent").textContent!)).toBe(50)
+		expect(JSON.parse(screen.getByTestId("idle-condense-time").textContent!)).toBe(180)
+		expect(JSON.parse(screen.getByTestId("profile-idle-thresholds").textContent!)).toEqual({})
+		expect(JSON.parse(screen.getByTestId("profile-idle-condense-times").textContent!)).toEqual({})
+	})
+
 	it("initializes the write delay to the pre-hydration default", () => {
 		// The initializer itself (not a merge fixture) must carry the shared
 		// default: a regression that dropped it from createInitialExtensionState
@@ -944,6 +1059,9 @@ describe("mergeExtensionState", () => {
 			organizationAllowList: { allowAll: true, providers: {} },
 			autoCondenseContext: true,
 			autoCondenseContextPercent: 100,
+			idleCondenseContext: false,
+			idleCondenseContextPercent: 50,
+			idleCondenseTimeInSeconds: 180,
 			cloudIsAuthenticated: false,
 			sharingEnabled: false,
 			publicSharingEnabled: false,
@@ -1016,6 +1134,9 @@ describe("mergeExtensionState", () => {
 			organizationAllowList: { allowAll: true, providers: {} },
 			autoCondenseContext: true,
 			autoCondenseContextPercent: 100,
+			idleCondenseContext: false,
+			idleCondenseContextPercent: 50,
+			idleCondenseTimeInSeconds: 180,
 			cloudIsAuthenticated: false,
 			sharingEnabled: false,
 			publicSharingEnabled: false,

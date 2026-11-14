@@ -65,7 +65,7 @@ type TaskTestAccess = {
 		requestModelInfo: ModelInfo,
 	) => Array<{ role: string; content: unknown } | { type: "reasoning"; encrypted_content: string }>
 	attemptApiRequestWithActiveApi: () => AsyncGenerator<ApiStreamChunk>
-	condenseContextWithActiveApi: () => Promise<void>
+	condenseContextWithActiveApi: () => Promise<{ condensed: boolean; prevContextTokens: number }>
 	retiredApis: Set<unknown>
 }
 
@@ -2019,7 +2019,10 @@ describe("Cline", () => {
 			const oldDispose = disposableApi(task)
 			let release!: () => void
 			vi.spyOn(getTaskTestAccess(task), "condenseContextWithActiveApi").mockImplementation(
-				() => new Promise<void>((resolve) => (release = resolve)),
+				() =>
+					new Promise<{ condensed: boolean; prevContextTokens: number }>((resolve) => {
+						release = () => resolve({ condensed: false, prevContextTokens: 0 })
+					}),
 			)
 
 			const condensing = task.condenseContext()
@@ -2684,6 +2687,90 @@ describe("Cline", () => {
 
 			const metadata = requireDefined(createMessage.mock.calls[0])[2]
 			expect(metadata?.mode).toBe("ask")
+		})
+
+		// Regression: a delegated task that keeps a provider profile different from
+		// the provider's current selection must resolve profile-scoped condense
+		// thresholds for the task, not for the global selection. A 55k/128k context
+		// sits above the child profile's 40% threshold and below the global
+		// profile's 90% threshold, so whether the normal request path condenses
+		// reveals which profile's threshold the threshold check used.
+		async function createProfileSplitCondenseTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({
+					mode: "code",
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 0,
+					autoCondenseContext: true,
+					autoCondenseContextPercent: 100,
+					profileThresholds: { "profile-global": 90, "profile-child": 40 },
+					currentApiConfigName: "global-profile",
+					listApiConfigMeta: [
+						{ id: "profile-global", name: "global-profile" },
+						{ id: "profile-child", name: "child-profile" },
+					],
+				}),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 55_000,
+			})
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 128_000,
+					maxTokens: 4096,
+					inputPrice: 0.3,
+					outputPrice: 1.5,
+				} as ModelInfo,
+			})
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+			vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const stream = (async function* () {
+				yield { type: "text", text: "response" } as ApiStreamChunk
+			})()
+			vi.spyOn(task.api, "createMessage").mockReturnValue(stream)
+			// The summarizeConversation module mock is never cleared, so pin the
+			// call count this request starts from.
+			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
+			return { task, summarizeCallsBefore }
+		}
+
+		it("condenses the normal request path with the task's own profile threshold when it keeps another profile", async () => {
+			const { task, summarizeCallsBefore } = await createProfileSplitCondenseTask()
+			// A delegated child kept a different provider profile than the
+			// provider's current selection: its 40% threshold must win.
+			task["taskApiConfigReady"] = Promise.resolve()
+			task["_taskApiConfigName"] = "child-profile"
+
+			await task.attemptApiRequest(0).next()
+
+			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore + 1)
+		})
+
+		it("keeps the provider's current profile threshold for the normal request path when the task has no own profile", async () => {
+			const { task, summarizeCallsBefore } = await createProfileSplitCondenseTask()
+
+			// Accept path for the fallback: the task initializes to the provider's
+			// current profile ("profile-global", 90%), so the ~43% context stays
+			// below the threshold and no condense runs.
+			await task.attemptApiRequest(0).next()
+
+			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore)
 		})
 
 		it("condenses with an undefined state snapshot when the provider is gone", async () => {
@@ -8172,6 +8259,41 @@ describe("Queued message processing after condense", () => {
 		vi.useRealTimers()
 
 		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("drains the queue after a condense whose summarization failed", async () => {
+		const provider = createProvider()
+		const task = new Task({
+			provider,
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+
+		vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("system")
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		// The summarize request fails, so the condense reports the error and
+		// returns without replacing the history.
+		vi.mocked(summarizeConversation).mockResolvedValueOnce({
+			messages: [{ role: "user", content: [{ type: "text", text: "unchanged" }], ts: Date.now() }],
+			summary: "",
+			cost: 0,
+			error: "Condensing failed: rate limited",
+		})
+
+		// Queue a message while the (failing) condense runs.
+		task.messageQueueService.addMessage("queued after failure")
+
+		vi.useFakeTimers()
+		await task.condenseContext()
+
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		// The failure path must still deliver the queued message: nothing else
+		// will trigger a submit, so skipping the drain strands the user's prompt.
+		expect(submitSpy).toHaveBeenCalledWith("queued after failure", undefined)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 

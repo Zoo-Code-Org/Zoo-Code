@@ -757,6 +757,18 @@
 			"profileDescription": "Limite personalizado apenas para este perfil (substitui o padrão global)",
 			"usesGlobal": "(usa global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensação em ociosidade",
+			"description": "Um limite mais baixo para condensar o contexto durante momentos de ociosidade, para que você sempre tenha um contexto limpo ao voltar ao teclado.",
+			"thresholdDescription": "Um limite mais baixo para condensar o contexto, aplicado apenas quando o modelo está ocioso.",
+			"thresholdProfileDescription": "Limite de ociosidade personalizado apenas para este perfil (substitui o padrão global, limitado ao limite de condensação do perfil)",
+			"idleTime": {
+				"label": "Tempo de ociosidade",
+				"seconds": "segundos",
+				"description": "Quanto tempo o modelo deve ficar ocioso."
+			},
+			"useGlobal": "Usar configurações globais"
+		},
 		"maxImageFileSize": {
 			"label": "Tamanho máximo do arquivo de imagem",
 			"mb": "MB",

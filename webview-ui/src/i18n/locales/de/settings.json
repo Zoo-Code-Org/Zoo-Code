@@ -756,6 +756,18 @@
 			"profileDescription": "Benutzerdefinierter Schwellenwert nur für dieses Profil (überschreibt globalen Standard)",
 			"usesGlobal": "(verwendet global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Komprimierung im Leerlauf",
+			"description": "Ein niedrigerer Schwellenwert zum Komprimieren des Kontexts im Leerlauf, damit du immer einen sauberen Kontext hast, wenn du zurück an die Tastatur kommst.",
+			"thresholdDescription": "Ein niedrigerer Schwellenwert zum Komprimieren des Kontexts, der nur gilt, wenn das Modell im Leerlauf ist.",
+			"thresholdProfileDescription": "Benutzerdefinierter Leerlauf-Schwellenwert nur für dieses Profil (überschreibt globalen Standard, begrenzt auf den Komprimierungsschwellenwert des Profils)",
+			"idleTime": {
+				"label": "Leerlaufzeit",
+				"seconds": "Sekunden",
+				"description": "Wie lange das Modell im Leerlauf sein muss."
+			},
+			"useGlobal": "Globale Einstellungen verwenden"
+		},
 		"maxImageFileSize": {
 			"label": "Maximale Bilddateigröße",
 			"mb": "MB",

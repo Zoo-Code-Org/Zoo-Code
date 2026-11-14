@@ -758,6 +758,18 @@
 			"profileDescription": "Niestandardowy próg tylko dla tego profilu (zastępuje globalny domyślny)",
 			"usesGlobal": "(używa globalnego {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Kondensacja podczas bezczynności",
+			"description": "Niższy próg kondensacji kontekstu w chwilach bezczynności, dzięki czemu zawsze masz czysty kontekst, gdy wracasz do klawiatury.",
+			"thresholdDescription": "Niższy próg kondensacji kontekstu, który obowiązuje tylko wtedy, gdy model jest bezczynny.",
+			"thresholdProfileDescription": "Niestandardowy próg bezczynności tylko dla tego profilu (zastępuje domyślny globalny, ograniczony do progu kondensacji profilu)",
+			"idleTime": {
+				"label": "Czas bezczynności",
+				"seconds": "sekund",
+				"description": "Jak długo model musi pozostawać bezczynny."
+			},
+			"useGlobal": "Użyj ustawień globalnych"
+		},
 		"maxImageFileSize": {
 			"label": "Maksymalny rozmiar pliku obrazu",
 			"mb": "MB",

@@ -755,6 +755,18 @@
 			"profileDescription": "Ngưỡng tùy chỉnh chỉ cho hồ sơ này (ghi đè mặc định toàn cục)",
 			"usesGlobal": "(sử dụng toàn cục {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Nén khi nhàn rỗi",
+			"description": "Ngưỡng thấp hơn để nén ngữ cảnh trong những lúc nhàn rỗi, để bạn luôn có ngữ cảnh sạch khi quay lại bàn phím.",
+			"thresholdDescription": "Ngưỡng thấp hơn để nén ngữ cảnh, chỉ áp dụng khi mô hình nhàn rỗi.",
+			"thresholdProfileDescription": "Ngưỡng nhàn rỗi tùy chỉnh chỉ cho hồ sơ này (ghi đè mặc định toàn cục, giới hạn ở ngưỡng nén của hồ sơ)",
+			"idleTime": {
+				"label": "Thời gian nhàn rỗi",
+				"seconds": "giây",
+				"description": "Mô hình phải nhàn rỗi bao lâu."
+			},
+			"useGlobal": "Sử dụng cài đặt toàn cục"
+		},
 		"maxImageFileSize": {
 			"label": "Kích thước tối đa của tệp hình ảnh",
 			"mb": "MB",

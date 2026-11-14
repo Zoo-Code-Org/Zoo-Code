@@ -3204,6 +3204,11 @@ describe("ClineProvider", () => {
 			organizationAllowList: ORGANIZATION_ALLOW_ALL,
 			autoCondenseContext: true,
 			autoCondenseContextPercent: 100,
+			idleCondenseContext: false,
+			idleCondenseContextPercent: 50,
+			idleCondenseTimeInSeconds: 180,
+			profileIdleThresholds: {},
+			profileIdleCondenseTimes: {},
 			cloudIsAuthenticated: false,
 			sharingEnabled: false,
 			publicSharingEnabled: false,
@@ -4568,6 +4573,367 @@ describe("ClineProvider", () => {
 		expect(updateGlobalStateSpy).toHaveBeenCalledWith("autoCondenseContextPercent", 75)
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("autoCondenseContextPercent", 75)
 		expect(mockPostMessage).toHaveBeenCalled()
+	})
+
+	describe("idle condensing settings", () => {
+		const getMessageHandler = () => {
+			const onDidReceive = mockWebviewView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>
+			return onDidReceive.mock.calls[0][0] as (message: WebviewMessage) => Promise<void>
+		}
+
+		test("getState defaults idle condensing to disabled with 50% threshold and 180s idle time", async () => {
+			const idleKeys = [
+				"idleCondenseContext",
+				"idleCondenseContextPercent",
+				"idleCondenseTimeInSeconds",
+				"profileIdleThresholds",
+				"profileIdleCondenseTimes",
+			]
+			;(mockContext.globalState.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) =>
+				idleKeys.includes(key) ? undefined : null,
+			)
+
+			const state = await provider.getState()
+
+			expect(state.idleCondenseContext).toBe(false)
+			expect(state.idleCondenseContextPercent).toBe(50)
+			expect(state.idleCondenseTimeInSeconds).toBe(180)
+			expect(state.profileIdleThresholds).toEqual({})
+			expect(state.profileIdleCondenseTimes).toEqual({})
+		})
+
+		test("getState returns saved idle condensing values", async () => {
+			await provider.contextProxy.setValue("idleCondenseContext", true)
+			await provider.contextProxy.setValue("idleCondenseContextPercent", 40)
+			await provider.contextProxy.setValue("idleCondenseTimeInSeconds", 60)
+			await provider.contextProxy.setValue("profileIdleThresholds", { "model-a": 30 })
+			await provider.contextProxy.setValue("profileIdleCondenseTimes", { "model-a": 90 })
+
+			const state = await provider.getState()
+
+			expect(state.idleCondenseContext).toBe(true)
+			expect(state.idleCondenseContextPercent).toBe(40)
+			expect(state.idleCondenseTimeInSeconds).toBe(60)
+			expect(state.profileIdleThresholds).toEqual({ "model-a": 30 })
+			expect(state.profileIdleCondenseTimes).toEqual({ "model-a": 90 })
+		})
+
+		test("getStateToPostToWebview defaults idle condensing fields", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			;(mockContext.globalState.get as ReturnType<typeof vi.fn>).mockImplementation(() => undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.idleCondenseContext).toBe(false)
+			expect(state.idleCondenseContextPercent).toBe(50)
+			expect(state.idleCondenseTimeInSeconds).toBe(180)
+			expect(state.profileIdleThresholds).toEqual({})
+			expect(state.profileIdleCondenseTimes).toEqual({})
+		})
+
+		test("getStateToPostToWebview returns saved idle condensing values", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.contextProxy.setValue("idleCondenseContext", true)
+			await provider.contextProxy.setValue("idleCondenseContextPercent", 42)
+			await provider.contextProxy.setValue("idleCondenseTimeInSeconds", 15)
+			await provider.contextProxy.setValue("profileIdleThresholds", { "model-a": 25 })
+			await provider.contextProxy.setValue("profileIdleCondenseTimes", { "model-a": -1 })
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.idleCondenseContext).toBe(true)
+			expect(state.idleCondenseContextPercent).toBe(42)
+			expect(state.idleCondenseTimeInSeconds).toBe(15)
+			expect(state.profileIdleThresholds).toEqual({ "model-a": 25 })
+			expect(state.profileIdleCondenseTimes).toEqual({ "model-a": -1 })
+		})
+
+		test("clamps an idleCondenseContextPercent message to the maximum threshold", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContextPercent: 150 } })
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 100)
+		})
+
+		test("clamps an idleCondenseContextPercent message to the minimum threshold", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContextPercent: 1 } })
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 5)
+		})
+
+		test("clamps an idleCondenseContextPercent message to the main threshold saved in the same message", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: { idleCondenseContextPercent: 90, autoCondenseContextPercent: 80 },
+			})
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 80)
+		})
+
+		test("keeps a valid idleCondenseContextPercent message unchanged", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContextPercent: 40 } })
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 40)
+		})
+
+		test("clamps profileIdleThresholds entries but keeps -1 inheritance", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					profileIdleThresholds: { inherited: -1, capped: 90, belowMin: 1, aboveMax: 150 },
+					autoCondenseContextPercent: 80,
+				},
+			})
+
+			// 90 clamps to the global main threshold; out-of-bounds values keep global
+			// inheritance instead of becoming valid overrides through clamping.
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", {
+				inherited: -1,
+				capped: 80,
+				belowMin: -1,
+				aboveMax: -1,
+			})
+		})
+
+		test("clamps profileIdleThresholds against each profile's own main threshold", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					// Global main is 40; "raised" opts into 90 and "inherited" inherits via -1.
+					autoCondenseContextPercent: 40,
+					profileThresholds: { raised: 90, lowered: 60, inherited: -1 },
+					profileIdleThresholds: {
+						raised: 70,
+						lowered: 70,
+						inherited: 70,
+						fallback: 70,
+						idleInherited: -1,
+					},
+				},
+			})
+
+			// "raised" is clamped against its profile threshold (90) and stays 70 instead of
+			// being lowered to the global 40; "lowered" is capped at its profile threshold (60);
+			// "inherited" has a -1 profile threshold so it falls back to the global 40, as does
+			// "fallback" which has no profile threshold entry at all; an idle -1 entry is kept.
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", {
+				raised: 70,
+				lowered: 60,
+				inherited: 40,
+				fallback: 40,
+				idleInherited: -1,
+			})
+		})
+
+		test("clamps idle thresholds against main percentages persisted in global state", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Neither the main percent nor the profile thresholds are in the message, so the
+			// handler must resolve them from global state instead of the message or the default.
+			await provider.contextProxy.setValue("autoCondenseContextPercent", 70)
+			await provider.contextProxy.setValue("profileThresholds", { raised: 90 })
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: { idleCondenseContextPercent: 90, profileIdleThresholds: { raised: 80 } },
+			})
+
+			// The global idle percent is capped at the stored main percent (70), while the
+			// profile idle override is clamped against that profile's own stored threshold (90).
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 70)
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", { raised: 80 })
+		})
+
+		test("ignores a non-numeric autoCondenseContextPercent message when clamping idle thresholds", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// The stored main percent is the clamp bound...
+			await provider.contextProxy.setValue("autoCondenseContextPercent", 70)
+
+			// ...but a hand-crafted message rides a garbage main percent alongside
+			// otherwise valid idle settings. Feeding it to the clamp unchanged
+			// poisons every bound (NaN comparisons silently pass), so only a
+			// finite number from the message may count; here the stored 70 wins.
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					autoCondenseContextPercent: "oops" as unknown as number,
+					idleCondenseContextPercent: 90,
+					profileIdleThresholds: { lowered: 80 },
+				},
+			})
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContextPercent", 70)
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleThresholds", { lowered: 70 })
+		})
+
+		test("rejects invalid idle-condense payloads instead of persisting them", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// A hand-crafted message can carry payloads the webview controls never produce;
+			// storing them unchanged would surface as NaN at the runtime (e.g. idle
+			// condensing below the configured threshold), so the handler must reject them
+			// without persisting, while valid values in the same save still persist.
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					idleCondenseContextPercent: "40" as unknown as number,
+					profileIdleThresholds: null as unknown as Record<string, number>,
+					idleCondenseTimeInSeconds: "180" as unknown as number,
+					profileIdleCondenseTimes: "180" as unknown as Record<string, number>,
+					idleCondenseContext: true,
+				},
+			})
+
+			const persistedKeys: unknown[] = updateGlobalStateSpy.mock.calls.map(([key]: [unknown]) => key)
+			expect(persistedKeys).not.toContain("idleCondenseContextPercent")
+			expect(persistedKeys).not.toContain("profileIdleThresholds")
+			expect(persistedKeys).not.toContain("idleCondenseTimeInSeconds")
+			expect(persistedKeys).not.toContain("profileIdleCondenseTimes")
+			// A valid sibling still persists.
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseContext", true)
+		})
+
+		test("clamps a negative idleCondenseTimeInSeconds message to zero", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseTimeInSeconds: -5 } })
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseTimeInSeconds", 0)
+		})
+
+		test("rounds a fractional idleCondenseTimeInSeconds message", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseTimeInSeconds: 2.6 } })
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("idleCondenseTimeInSeconds", 3)
+		})
+
+		test("clamps profileIdleCondenseTimes entries but keeps -1 inheritance", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await getMessageHandler()({
+				type: "updateSettings",
+				updatedSettings: {
+					profileIdleCondenseTimes: { inherited: -1, negative: -3.4, zero: 0, rounded: 10.4 },
+				},
+			})
+
+			// A negative delay keeps global inheritance instead of clamping into a
+			// valid (immediate) 0s override; 0 remains a legitimate explicit override.
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("profileIdleCondenseTimes", {
+				inherited: -1,
+				negative: -1,
+				zero: 0,
+				rounded: 10,
+			})
+		})
+
+		test("idleCondenseReset message restarts the active task idle timer", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const resetIdleCondenseTimer = vi.fn()
+			// Double only provides the member the idleCondenseReset handler touches.
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({ resetIdleCondenseTimer } as unknown as Task)
+
+			await getMessageHandler()({ type: "idleCondenseReset" })
+
+			expect(resetIdleCondenseTimer).toHaveBeenCalledTimes(1)
+		})
+
+		test("idleCondenseReset message is a no-op without an active task", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+
+			await expect(getMessageHandler()({ type: "idleCondenseReset" })).resolves.toBeUndefined()
+		})
+
+		test("saving an idle-condense setting re-evaluates the active task", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			// Double only provides the member the re-evaluation call touches.
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContext: true } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
+		})
+
+		test("re-evaluates the active task when a later write fails after an idle setting was stored", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+			// The writes are not a transaction: idleCondenseContext stores, then
+			// the next key's write fails. The stored key still changed the task's
+			// idle-condense eligibility, so the re-evaluation must still run.
+			updateGlobalStateSpy.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("write failed"))
+
+			await expect(
+				getMessageHandler()({
+					type: "updateSettings",
+					updatedSettings: { idleCondenseContext: true, soundEnabled: true },
+				}),
+			).rejects.toThrow("write failed")
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
+		})
+
+		test.each([
+			["idleCondenseContextPercent", 60],
+			["idleCondenseTimeInSeconds", 60],
+			["profileIdleThresholds", { a: 60 }],
+			["profileIdleCondenseTimes", { a: 60 }],
+			["autoCondenseContext", true],
+			["autoCondenseContextPercent", 90],
+			["profileThresholds", { a: 90 }],
+		])("saving the related key %s also re-evaluates the active task", async (key, value) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { [key]: value } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).toHaveBeenCalledTimes(1)
+		})
+
+		test("saving an unrelated setting does not re-evaluate the active task", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const reevaluateIdleCondenseAfterSettingsSave = vi.fn()
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue({
+				reevaluateIdleCondenseAfterSettingsSave,
+			} as unknown as Task)
+
+			await getMessageHandler()({ type: "updateSettings", updatedSettings: { soundEnabled: true } })
+
+			expect(reevaluateIdleCondenseAfterSettingsSave).not.toHaveBeenCalled()
+		})
+
+		test("saving an idle-condense setting without an active task does not throw", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+
+			await expect(
+				getMessageHandler()({ type: "updateSettings", updatedSettings: { idleCondenseContext: true } }),
+			).resolves.toBeUndefined()
+		})
 	})
 
 	describe("auto-close settings are included in posted state", () => {

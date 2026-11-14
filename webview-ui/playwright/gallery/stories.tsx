@@ -181,6 +181,11 @@ export const stories: Record<string, Story> = {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />
 	},
+	"context-management-settings": async () => {
+		const { ContextManagementSettingsStory } =
+			await import("@/components/settings/__tests__/ContextManagementSettings.visual.fixture")
+		return <ContextManagementSettingsStory />
+	},
 	"history-empty": async () => {
 		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([
 			import("../AppProviders"),
