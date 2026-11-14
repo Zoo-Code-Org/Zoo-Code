@@ -5,6 +5,7 @@ import type { ProviderSettings } from "@roo-code/types"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { truncateOutput } from "../../integrations/misc/extract-text"
+import { fileExistsAtPath } from "../../utils/fs"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 
 export interface GitRepositoryChange {
@@ -92,6 +93,7 @@ const DIFF_HEADER = /^diff --(?:git|cc|combined) /
 const DIFF_PATH_LINE = /^(?:--- |\+\+\+ |rename from |rename to |copy from |copy to )([^\t\r\n]+)/
 const GIT_PATH_ESCAPES: Record<string, string> = { a: "\x07", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v" }
 export const IGNORED_FILE_NOTE = "(Content left out: the file is in .rooignore.)"
+export const ROOIGNORE_UNREADABLE_MESSAGE = "Cannot read .rooignore. No diff was sent."
 
 /**
  * Accesses the VS Code Git extension API.
@@ -264,10 +266,12 @@ function isSectionBlocked(section: string[], isAllowed: (relativePath: string) =
 		if (written === undefined || written === "/dev/null") {
 			return false
 		}
-		// The `a/` and `b/` prefixes (or `i/`, `w/`, `c/`, `o/` with diff.mnemonicPrefix) are not part of the
-		// path. With diff.noPrefix there is no prefix, so the path is also checked as written.
-		const gitPath = unquoteGitPath(written)
-		return [gitPath, gitPath.replace(/^[abciow]\//, "")].some((candidate) => !isAllowed(candidate))
+		// The path can start with a prefix that is not part of it: `a/` and `b/` by default, `i/` or `w/` with
+		// diff.mnemonicPrefix, any text with diff.srcPrefix and diff.dstPrefix, or none with diff.noPrefix.
+		// The path is checked as written and without each number of leading folders. A file in a folder
+		// can then be left out by a rule for the root (`/.env`), but a blocked file is never kept.
+		const segments = unquoteGitPath(written).split("/")
+		return segments.some((_, start) => !isAllowed(segments.slice(start).join("/")))
 	})
 }
 
@@ -281,7 +285,10 @@ export function omitIgnoredFiles(diff: string, isAllowed: (relativePath: string)
 	let section: string[] = []
 	const closeSection = () => {
 		const [header = ""] = section
-		kept.push(...(isSectionBlocked(section, isAllowed) ? [header, IGNORED_FILE_NOTE] : section))
+		// One push per line: spreading a large file into push() would exceed the argument limit.
+		for (const line of isSectionBlocked(section, isAllowed) ? [header, IGNORED_FILE_NOTE] : section) {
+			kept.push(line)
+		}
 		section = []
 	}
 	for (const line of diff.split("\n")) {
@@ -294,11 +301,18 @@ export function omitIgnoredFiles(diff: string, isAllowed: (relativePath: string)
 	return kept.join("\n")
 }
 
-/** The diff without the content of files that `.rooignore` in the repository root blocks. */
+/**
+ * The diff without the content of files that `.rooignore` in the repository root blocks. Rejects when
+ * `.rooignore` exists but cannot be read, because the controller then allows every file.
+ */
 async function withoutIgnoredFiles(repository: GitRepository, diff: string): Promise<string> {
-	const rooIgnore = new RooIgnoreController(repository.rootUri.fsPath)
+	const root = repository.rootUri.fsPath
+	const rooIgnore = new RooIgnoreController(root)
 	try {
 		await rooIgnore.initialize()
+		if (rooIgnore.rooIgnoreContent === undefined && (await fileExistsAtPath(path.join(root, ".rooignore")))) {
+			throw new Error(ROOIGNORE_UNREADABLE_MESSAGE)
+		}
 		return omitIgnoredFiles(diff, (relativePath) => rooIgnore.validateAccess(relativePath))
 	} finally {
 		rooIgnore.dispose()

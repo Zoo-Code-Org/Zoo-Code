@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import * as path from "path"
 import * as vscode from "vscode"
@@ -20,6 +20,7 @@ import {
 	IGNORED_FILE_NOTE,
 	NO_CHANGES_MESSAGE,
 	omitIgnoredFiles,
+	ROOIGNORE_UNREADABLE_MESSAGE,
 	resetCommitMessageRequestState,
 	resolveGitRepository,
 	PREVIOUS_REQUEST_WAIT_MS,
@@ -255,6 +256,14 @@ describe("commitMessageGenerator", () => {
 				),
 			],
 			[
+				"custom prefixes (diff.srcPrefix and diff.dstPrefix)",
+				section("diff --git old/.env new/.env", "--- old/.env", "+++ new/.env", "@@ -1 +1 @@", "+A=1"),
+			],
+			[
+				"custom prefixes with more than one folder",
+				section("diff --git x/old/.env y/new/.env", "--- x/old/.env", "+++ y/new/.env", "@@ -1 +1 @@", "+A=1"),
+			],
+			[
 				"mnemonic prefixes",
 				section("diff --git i/.env w/.env", "--- i/.env", "+++ w/.env", "@@ -1 +1 @@", "+A=1"),
 			],
@@ -287,6 +296,10 @@ describe("commitMessageGenerator", () => {
 			["a file whose content has path lines after its first hunk", section(app, "--- a/.env", "+++ b/.env")],
 			["the list of untracked files", "Untracked files:\n.env\nsrc/app.ts"],
 			["an empty diff", ""],
+			[
+				"a file with more lines than a call can take as arguments",
+				`${app}\n${Array<string>(200_000).fill("+x").join("\n")}`,
+			],
 		])("keeps %s unchanged", (_label, diff) => {
 			expect(omitIgnoredFiles(diff, isAllowed)).toBe(diff)
 		})
@@ -294,7 +307,8 @@ describe("commitMessageGenerator", () => {
 		it.each([
 			["a changed file", ["--- a/x", "+++ b/y"], ["a/x", "x", "b/y", "y"]],
 			["an added file", ["--- /dev/null", "+++ b/y"], ["b/y", "y"]],
-		])("checks each path of %s with and without its prefix", (_label, pathLines, expected) => {
+			["a file in a folder", ["--- a/src/x", "+++ b/src/x"], ["a/src/x", "src/x", "x", "b/src/x", "src/x", "x"]],
+		])("checks each path of %s without each number of leading folders", (_label, pathLines, expected) => {
 			const checked: string[] = []
 			omitIgnoredFiles(
 				section("diff --git a/x b/y", ...pathLines, "@@ -0,0 +1 @@", "--- a/z"),
@@ -1210,6 +1224,29 @@ describe("commitMessageGenerator", () => {
 			expect(mockProvider.getState).not.toHaveBeenCalled()
 			expect(singleCompletionHandler).not.toHaveBeenCalled()
 			await vi.waitFor(() => expect(watcherDispose).toHaveBeenCalledTimes(1))
+		})
+
+		it("stops without a provider request when .rooignore exists but cannot be read", async () => {
+			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
+			try {
+				// A folder named .rooignore exists, but reading it as a file fails.
+				await mkdir(path.join(root, ".rooignore"))
+				vi.spyOn(console, "error").mockImplementation(() => {})
+				mockRepo = makeRepo(root)
+				useOnlyRepository(mockRepo)
+				mockRepo.diff = vi.fn().mockResolvedValue("diff --git a/.env b/.env\n@@ -1 +1 @@\n+DB=hunter2")
+
+				await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+				expect(singleCompletionHandler).not.toHaveBeenCalled()
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+					`Failed to generate commit message: ${ROOIGNORE_UNREADABLE_MESSAGE}`,
+				)
+				expect(mockRepo.inputBox.value).toBe("")
+			} finally {
+				vi.restoreAllMocks()
+				await rm(root, { recursive: true, force: true })
+			}
 		})
 
 		it("sends the diff unchanged when the repository has no .rooignore", async () => {
