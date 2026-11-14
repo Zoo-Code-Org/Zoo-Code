@@ -1,8 +1,12 @@
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 
 import { ObservationRegistry } from "../observationRegistry"
 
 describe("ObservationRegistry", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
 	it("observe → get returns the recorded version and observedAt", () => {
 		vi.useFakeTimers()
 		try {

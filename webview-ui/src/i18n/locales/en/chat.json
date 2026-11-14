@@ -20,7 +20,8 @@
 	"unpin": "Unpin",
 	"pin": "Pin",
 	"fileChangesInConversation": {
-		"header": "{{count}} file(s) changed in this conversation"
+		"header_one": "{{count}} file changed in this conversation",
+		"header_other": "{{count}} files changed in this conversation"
 	},
 	"retry": {
 		"title": "Retry",
@@ -217,7 +218,7 @@
 		"truncation": {
 			"title": "Context Truncated",
 			"inProgress": "Truncating context...",
-			"messagesRemoved": "{{count}} message removed",
+			"messagesRemoved_one": "{{count}} message removed",
 			"messagesRemoved_other": "{{count}} messages removed",
 			"description": "Older messages were removed from the conversation to stay within the context window limit. This is a fast but less context-preserving approach compared to condensation."
 		}
@@ -260,7 +261,7 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo wants to search the codebase for <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo wants to search the codebase for <code>{{query}}</code> in <code>{{path}}</code>",
-		"didSearch_one": "Found 1 result",
+		"didSearch_one": "Found {{count}} result",
 		"didSearch_other": "Found {{count}} results",
 		"resultTooltip": "Similarity score: {{score}} (click to open file)"
 	},
@@ -333,7 +334,7 @@
 		"triggerLabelOff": "Auto-approve off",
 		"triggerLabelOffShort": "Off",
 		"triggerLabel_zero": "0 auto-approve",
-		"triggerLabel_one": "1 auto-approved",
+		"triggerLabel_one": "{{count}} auto-approved",
 		"triggerLabel_other": "{{count}} auto-approved",
 		"triggerLabelAll": "BRRR"
 	},
@@ -376,7 +377,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Auto-Approved Request Limit Reached",
-			"description": "Zoo has reached the auto-approved limit of {{count}} API request(s). Would you like to reset the count and proceed with the task?",
+			"description_one": "Zoo has reached the auto-approved limit of {{count}} API request. Would you like to reset the count and proceed with the task?",
+			"description_other": "Zoo has reached the auto-approved limit of {{count}} API requests. Would you like to reset the count and proceed with the task?",
 			"button": "Reset and Continue"
 		},
 		"autoApprovedCostLimitReached": {

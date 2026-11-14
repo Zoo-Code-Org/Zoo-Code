@@ -11,8 +11,8 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key,
 	}),
 }))
