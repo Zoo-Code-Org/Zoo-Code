@@ -129,18 +129,6 @@ export const ipcMessageSchema = z.discriminatedUnion("type", [
 export type IpcMessage = z.infer<typeof ipcMessageSchema>
 
 /**
- * IpcClientEvents
- */
-
-export type IpcClientEvents = {
-	[IpcMessageType.Connect]: []
-	[IpcMessageType.Disconnect]: []
-	[IpcMessageType.Ack]: [data: Ack]
-	[IpcMessageType.TaskCommand]: [data: TaskCommand]
-	[IpcMessageType.TaskEvent]: [data: TaskEvent]
-}
-
-/**
  * IpcServerEvents
  */
 
