@@ -118,3 +118,41 @@ describe("SettingsView – saving the time and date settings", () => {
 		expect(screen.getByTestId("save-button")).toBeDisabled() // cleared without waiting for the host
 	})
 })
+
+describe("SettingsView – saving the web fetch auto-approval", () => {
+	beforeEach(() => postMessage.mockClear())
+
+	const editWebFetch = async () => {
+		fireEvent.click(await screen.findByTestId("always-allow-web-fetch-toggle"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	}
+
+	it("waits for the host's answer and keeps Save disabled until then", async () => {
+		renderTab("autoApprove")
+		await editWebFetch()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(posted("updateSettings")[0].requestId).toMatch(/^settings-save-/)
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+	})
+
+	it("keeps the edit unsaved after a failed save so it can be retried", async () => {
+		renderTab("autoApprove")
+		await editWebFetch()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		answerSave(lastSaveRequestId(postMessage), { success: false, error: "storage unavailable" })
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	})
+
+	it("clears the unsaved flag once the host confirms", async () => {
+		renderTab("autoApprove")
+		await editWebFetch()
+
+		saveAndConfirm(postMessage)
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+	})
+})

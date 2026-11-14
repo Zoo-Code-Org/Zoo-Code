@@ -167,6 +167,24 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const sentState = useRef<typeof extensionState | undefined>(undefined)
 	const latestCachedState = useRef(cachedState)
 	latestCachedState.current = cachedState
+	// The web-fetch auto-approval value this view last loaded or saved. The sidebar and editor settings views share one
+	// store, so a cached value can be stale: the permission is only sent when the user changed it from this baseline,
+	// and an unrelated save never re-enables auto-approval that another view turned off.
+	const webFetchBaseline = useRef<boolean>(extensionState.alwaysAllowWebFetch ?? false)
+	// Set when a save that changed the permission failed: the host writes settings one at a time without rollback, so
+	// the changed value may already be stored. Until a save succeeds, every save sends the permission, even when the
+	// form value matches the baseline again.
+	const webFetchUnconfirmed = useRef(false)
+	// Advanced whenever the form is replaced from the host state (mode/profile refresh, import, discard). A save
+	// records the generation it was sent from, and its late answer is ignored after a replacement: the replacement
+	// already reset the baseline, and a stale answer must not move it away from what the form now shows.
+	const formGeneration = useRef(0)
+	const sentGeneration = useRef(0)
+	const resetWebFetchBaseline = useCallback((value: boolean | undefined) => {
+		formGeneration.current += 1
+		webFetchBaseline.current = value ?? false
+		webFetchUnconfirmed.current = false
+	}, [])
 
 	const {
 		alwaysAllowReadOnly,
@@ -183,6 +201,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		alwaysAllowMcp,
 		alwaysAllowModeSwitch,
 		alwaysAllowSubtasks,
+		alwaysAllowWebFetch,
 		alwaysAllowWrite,
 		alwaysAllowWriteOutsideWorkspace,
 		alwaysAllowWriteProtected,
@@ -253,10 +272,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		}
 
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+		resetWebFetchBaseline(extensionState.alwaysAllowWebFetch)
 		prevApiConfigName.current = currentApiConfigName
 		prevMode.current = mode
 		setChangeDetected(false)
-	}, [currentApiConfigName, mode, extensionState])
+	}, [currentApiConfigName, mode, extensionState, resetWebFetchBaseline])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -266,8 +286,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		handledSettingsImportedAt.current = settingsImportedAt
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+		resetWebFetchBaseline(extensionState.alwaysAllowWebFetch)
 		setChangeDetected(false)
-	}, [settingsImportedAt, extensionState])
+	}, [settingsImportedAt, extensionState, resetWebFetchBaseline])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
@@ -407,11 +428,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		(cachedState.dateFormat ?? "auto") !== (extensionState.dateFormat ?? "auto") ||
 		(cachedState.showRelativeTimes ?? true) !== (extensionState.showRelativeTimes ?? true)
 
+	const webFetchEdited = webFetchUnconfirmed.current || (alwaysAllowWebFetch ?? false) !== webFetchBaseline.current
+
 	const handleSubmit = () => {
 		if (isSettingValid) {
-			const saveId = displayChanged ? nextSaveRequestId() : undefined
+			// A web-fetch permission change also waits for the host's answer: a failed write must not look saved.
+			const saveId = displayChanged || webFetchEdited ? nextSaveRequestId() : undefined
 			if (saveId) {
 				sentState.current = cachedState
+				sentGeneration.current = formGeneration.current
 				setPendingSaveId(saveId)
 			}
 
@@ -432,6 +457,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					alwaysDenyUnapprovedCommands: alwaysDenyUnapprovedCommands ?? false,
 					alwaysAllowMcp,
 					alwaysAllowModeSwitch,
+					// Only sent when edited in this view (see `webFetchBaseline`); omitted keys are not written.
+					...(webFetchEdited ? { alwaysAllowWebFetch: alwaysAllowWebFetch ?? false } : {}),
 					allowedCommands: allowedCommands ?? [],
 					deniedCommands: deniedCommands ?? [],
 					// Note that we use `null` instead of `undefined` since `JSON.stringify`
@@ -504,8 +531,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
-			// With a time or date edit the flag is cleared when the host reports the save (see below). A failed save
-			// leaves the user's edits in place to retry.
+			// With a time, date or web-fetch edit the flag is cleared when the host reports the save (see below). A
+			// failed save leaves the user's edits in place to retry.
 			if (!saveId) setChangeDetected(false)
 		}
 	}
@@ -515,6 +542,17 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		const settle = (success: boolean) => {
 			setPendingSaveId(undefined)
+			// A save sent before the form was replaced cannot speak for the replaced form's baseline.
+			if (sentState.current && sentGeneration.current === formGeneration.current) {
+				const sentWebFetch = sentState.current.alwaysAllowWebFetch ?? false
+				if (success) {
+					webFetchBaseline.current = sentWebFetch
+					webFetchUnconfirmed.current = false
+				} else if (sentWebFetch !== webFetchBaseline.current) {
+					// The failed save may have stored the permission before it failed.
+					webFetchUnconfirmed.current = true
+				}
+			}
 			// An edit made while the save was in flight is not in what was sent: it stays unsaved.
 			if (success && latestCachedState.current === sentState.current) setChangeDetected(false)
 		}
@@ -552,12 +590,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			if (confirm) {
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
+				resetWebFetchBaseline(extensionState.alwaysAllowWebFetch)
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
 			// If confirm is false (Cancel), do nothing, dialog closes automatically
 		},
-		[extensionState], // Depend on extensionState to get the latest original state
+		[extensionState, resetWebFetchBaseline], // Depend on extensionState to get the latest original state
 	)
 
 	// Handle tab changes with unsaved changes check
@@ -889,6 +928,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								alwaysAllowMcp={alwaysAllowMcp}
 								alwaysAllowModeSwitch={alwaysAllowModeSwitch}
 								alwaysAllowSubtasks={alwaysAllowSubtasks}
+								alwaysAllowWebFetch={alwaysAllowWebFetch}
 								alwaysAllowExecute={alwaysAllowExecute}
 								destructiveCommandGuardEnabled={destructiveCommandGuardEnabled}
 								alwaysDenyUnapprovedCommands={alwaysDenyUnapprovedCommands}

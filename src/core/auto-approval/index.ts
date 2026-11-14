@@ -25,6 +25,7 @@ export type AutoApprovalState =
 	| "alwaysAllowMcp"
 	| "alwaysAllowModeSwitch"
 	| "alwaysAllowSubtasks"
+	| "alwaysAllowWebFetch"
 	| "alwaysAllowExecute"
 	| "alwaysAllowFollowupQuestions"
 
@@ -383,6 +384,12 @@ export async function checkAutoApproval({
 
 		if (["newTask", "finishTask"].includes(tool?.tool)) {
 			return state.alwaysAllowSubtasks === true ? { decision: "approve" } : { decision: "ask" }
+		}
+
+		// Outbound network fetches require explicit opt-in. Internal/private
+		// addresses are rejected by the tool before approval is requested.
+		if (tool.tool === "fetchWebContent") {
+			return state.alwaysAllowWebFetch === true ? { decision: "approve" } : { decision: "ask" }
 		}
 
 		const isOutsideWorkspace = !!tool.isOutsideWorkspace

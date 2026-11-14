@@ -2004,6 +2004,35 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	})
 })
 
+// The web fetch auto-approval toggle is a plain boolean with no normalization
+// branch, so it must round-trip through the generic updateSettings loop and be
+// returned by getStateToPostToWebview().
+describe("webviewMessageHandler - alwaysAllowWebFetch", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists an enabled web fetch auto-approval through updateSettings", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { alwaysAllowWebFetch: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysAllowWebFetch", true)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("persists a disabled web fetch auto-approval through updateSettings", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { alwaysAllowWebFetch: false },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysAllowWebFetch", false)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
 // A plain boolean needs no normalization branch in the updateSettings loop,
 // so this pins the generic persistence path: every polarity, including an
 // explicit unset (undefined), must reach ContextProxy verbatim rather than
