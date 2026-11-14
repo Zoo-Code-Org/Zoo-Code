@@ -538,6 +538,66 @@ function _stagingDir(dir: string): string {
 	return sd
 }
 
+async function _runIcacls(args: string[], execFileRunner?: typeof execFile): Promise<void> {
+	const runner = execFileRunner ?? execFile
+	await new Promise<void>((resolve, reject) => {
+		runner("icacls", args, { windowsHide: true }, (err) => (err ? reject(err) : resolve()))
+	})
+}
+
+/** Canonicalize *target*, treating only a vanished name as no answer. A real inspection
+ * failure - EACCES, EIO - is the caller's to report, never to answer with undefined. */
+async function _realpathUnlessGone(target: string): Promise<string | undefined> {
+	return fs.realpath(target).catch((error: unknown) => {
+		const code = getErrorCode(error)
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			return undefined
+		}
+		throw error
+	})
+}
+
+/** Remove a leftover copy, retrying once: a transient handle - an antivirus scanner or an
+ * indexer - blocks the first unlink on Windows, and ENOENT is the outcome the cleanup wanted.
+ * Answers null when the path is gone and the last error when it is not. */
+async function _removeBackupWithRetry(backupPath: string): Promise<unknown> {
+	let removalError: unknown = null
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await fs.unlink(backupPath)
+			removalError = null
+			break
+		} catch (cleanupError: unknown) {
+			if (getErrorCode(cleanupError) === "ENOENT") {
+				removalError = null
+				break
+			}
+			removalError = cleanupError
+		}
+	}
+	return removalError
+}
+
+/** The mode, group and presence of the publish target, captured once per write. Only a
+ * vanished target answers "nothing to carry"; any other stat failure is the caller's to raise. */
+function _captureTargetIdentity(targetPath: string): { mode: number | null; gid: number | undefined; exists: boolean } {
+	try {
+		const stats = fsSync.statSync(targetPath)
+		return { mode: stats.mode & 0o777, gid: typeof stats.gid === "number" ? stats.gid : undefined, exists: true }
+	} catch (error: unknown) {
+		if (getErrorCode(error) !== "ENOENT") throw error
+		return { mode: null, gid: undefined, exists: false }
+	}
+}
+/** Carry the captured identity onto the staging descriptor, on the open fd rather than on
+ * the path, so a read-only target does not make the open itself fail. */
+function _applyTargetIdentity(fd: number, mode: number, gid: number | undefined): void {
+	fsSync.fchmodSync(fd, mode)
+	if (gid !== undefined) {
+		_preserveGroup(fd, gid)
+	}
+}
+
 /** Save the DACL of *srcPath* to a dump file on Windows.
  * Returns null when the dump was written - the caller keeps it and restores it onto the
  * committed file at step 5 - and returns the runner's error when it was not, because the
@@ -545,13 +605,8 @@ function _stagingDir(dir: string): string {
  * refusing: "icacls ran and failed" and "icacls could not be started at all" are different
  * facts to act on. Never throws. */
 async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<unknown> {
-	const runner = execFileRunner ?? execFile
 	try {
-		await new Promise<void>((resolve, reject) => {
-			runner("icacls", [srcPath, "/save", dumpPath, "/T"], { windowsHide: true }, (err) =>
-				err ? reject(err) : resolve(),
-			)
-		})
+		await _runIcacls([srcPath, "/save", dumpPath, "/T"], execFileRunner)
 		return null
 	} catch (error: unknown) {
 		return error
@@ -560,13 +615,8 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Best-effort: content is already committed, so failure is non-fatal. */
 async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
-	const runner = execFileRunner ?? execFile
 	try {
-		await new Promise<void>((resolve, reject) => {
-			runner("icacls", [dirPath, "/restore", dumpPath], { windowsHide: true }, (err) =>
-				err ? reject(err) : resolve(),
-			)
-		})
+		await _runIcacls([dirPath, "/restore", dumpPath], execFileRunner)
 	} catch {
 		// best-effort; content already committed
 	}
@@ -736,16 +786,10 @@ export async function safeWriteText(
 		const authorized = _authorizedAncestorLocations(options)
 		if (authorized.length > 0) {
 			for (const created of createdAncestors) {
-				const createdReal = await fs.realpath(created).catch((error: unknown) => {
-					const code = getErrorCode(error)
-					// A name that vanished since the mkdir is reported by the ancestry recheck below, which
-					// also knows whether the caller authorized that name; only a real inspection failure is
-					// this write's to report here.
-					if (code === "ENOENT" || code === "ENOTDIR") {
-						return undefined
-					}
-					throw error
-				})
+				// A name that vanished since the mkdir is reported by the ancestry recheck below, which
+				// also knows whether the caller authorized that name; only a real inspection failure is
+				// this write's to report here.
+				const createdReal = await _realpathUnlessGone(created)
 				// Selected by the name, so a redirect of the created directory cannot move the
 				// answer to a shallower pin; the resolved directory is compared against the
 				// selection below rather than feeding it.
@@ -776,16 +820,10 @@ export async function safeWriteText(
 		const resolvedParent = path.resolve(dirPath)
 		const namedByCaller = authorized.some((pin) => pin.identityBacked && pin.dir === resolvedParent)
 		if (authorized.length > 0 && !namedByCaller) {
-			const parentReal = await fs.realpath(dirPath).catch((error: unknown) => {
-				const code = getErrorCode(error)
-				// A parent that vanished since the mkdir is reported by the ancestry recheck below, which
-				// knows whether the caller authorized that name; only a real inspection failure is this
-				// write's to report here.
-				if (code === "ENOENT" || code === "ENOTDIR") {
-					return undefined
-				}
-				throw error
-			})
+			// A parent that vanished since the mkdir is reported by the ancestry recheck below, which
+			// knows whether the caller authorized that name; only a real inspection failure is this
+			// write's to report here.
+			const parentReal = await _realpathUnlessGone(dirPath)
 			const pinned = _deepestAuthorizedLocation(authorized, parentReal ?? dirPath)
 			if (pinned === undefined) {
 				throw new AncestorReplacedError(dirPath, "resolves under nothing the caller authorized")
@@ -885,32 +923,16 @@ export async function safeWriteText(
 			// covers the legacy code pages Node cannot represent) are published
 			// unchanged.
 			const buffer = Buffer.from(content)
-			let targetMode = 0o644 // default for a fresh target
-			let targetGid: number | undefined
-			let targetExists = false
-			try {
-				const targetStats = fsSync.statSync(targetPath)
-				targetMode = targetStats.mode & 0o777
-				// The commit publishes this inode, so the group the target belongs to has to be carried onto
-				// the staging descriptor or the published file lands in whichever group this process runs in.
-				// A double that reports no gid reports no group to carry.
-				targetGid = typeof targetStats.gid === "number" ? targetStats.gid : undefined
-				targetExists = true
-			} catch (error: unknown) {
-				if (getErrorCode(error) !== "ENOENT") throw error
-				// target does not exist yet - keep the default
-			}
+			const identity = _captureTargetIdentity(targetPath)
+			const targetMode = identity.mode ?? 0o644 // default for a fresh target
 			// openSync's creation mode is narrowed by the process umask, so an
 			// existing 0o664 target would be published as 0o644 through the
 			// rename. Apply the existing target's exact mode on the fd, as the
 			// caller-staged branch does; a fresh target keeps the default mode.
 			const fd = fsSync.openSync(tempPath, "w", targetMode)
 			try {
-				if (targetExists) {
-					fsSync.fchmodSync(fd, targetMode)
-					if (targetGid !== undefined) {
-						_preserveGroup(fd, targetGid)
-					}
+				if (identity.exists) {
+					_applyTargetIdentity(fd, targetMode, identity.gid)
 				}
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
@@ -942,23 +964,11 @@ export async function safeWriteText(
 			// The mode is applied with fchmodSync on the open fd (AFTER openSync):
 			// chmodSync on the path before the open would make a read-only target
 			// (0o400/0o444) fail openSync(tempPath, "r+") with EACCES.
-			let targetMode: number | null = null
-			let targetGid: number | undefined
-			try {
-				const targetStats = fsSync.statSync(targetPath)
-				targetMode = targetStats.mode & 0o777
-				targetGid = typeof targetStats.gid === "number" ? targetStats.gid : undefined
-			} catch (error: unknown) {
-				if (getErrorCode(error) !== "ENOENT") throw error
-				// target does not exist yet - keep the temp's default mode
-			}
+			const identity = _captureTargetIdentity(targetPath)
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
-				if (targetMode !== null) {
-					fsSync.fchmodSync(fd, targetMode)
-					if (targetGid !== undefined) {
-						_preserveGroup(fd, targetGid)
-					}
+				if (identity.mode !== null) {
+					_applyTargetIdentity(fd, identity.mode, identity.gid)
 				}
 				fsSync.fsyncSync(fd)
 			} finally {
@@ -1036,13 +1046,7 @@ export async function safeWriteText(
 					// or EIO would otherwise be reported as a replaced ancestor, pointing
 					// the user at a security problem that is not there - mirror the stat
 					// call above, which maps only ENOENT and rethrows the rest.
-					const resolvedDir = await fs.realpath(expected.dir).catch((error: unknown) => {
-						const code = getErrorCode(error)
-						if (code === "ENOENT" || code === "ENOTDIR") {
-							return undefined
-						}
-						throw error
-					})
+					const resolvedDir = await _realpathUnlessGone(expected.dir)
 					// The location the caller authorized. A recorded resolvedPath is the spelling the
 					// caller walked - an alias ancestor resolves to something else by definition, and a
 					// stable alias must pass here; the (dev, ino) check above is what catches the alias
@@ -1229,22 +1233,9 @@ export async function safeWriteText(
 			// -- Step 6 (backup:true): delete backup on success -----------
 			if (releaseBackupOnSuccess && backupPath) {
 				const orphanedBackupPath = backupPath
-				let backupCleanupError: unknown = null
 				// A transient handle (antivirus scanner, indexer) can block the first unlink
 				// on Windows; one retry usually clears it.
-				for (let attempt = 0; attempt < 2; attempt++) {
-					try {
-						await fs.unlink(orphanedBackupPath)
-						backupCleanupError = null
-						break
-					} catch (cleanupError: unknown) {
-						if (getErrorCode(cleanupError) === "ENOENT") {
-							backupCleanupError = null
-							break
-						}
-						backupCleanupError = cleanupError
-					}
-				}
+				const backupCleanupError = await _removeBackupWithRetry(orphanedBackupPath)
 				backupPath = null
 				if (backupCleanupError !== null) {
 					// The content is published: reporting success here would abandon a stale
@@ -1280,23 +1271,7 @@ export async function safeWriteText(
 			// the commit left there - before the commit that is the pre-write content, and
 			// after it the published content. Either way the copy has served its purpose
 			// and must not be left beside the target where no caller can find it.
-			let removalError: unknown = null
-			for (let attempt = 0; attempt < 2; attempt++) {
-				try {
-					await fs.unlink(backupPath)
-					removalError = null
-					break
-				} catch (error: unknown) {
-					if (getErrorCode(error) === "ENOENT") {
-						// Already gone: that is exactly the outcome this cleanup wanted.
-						removalError = null
-						break
-					}
-					// Retry once: Windows reports EPERM for a file whose handle has not been
-					// released yet, which is the same failure the success-path cleanup retries.
-					removalError = error
-				}
-			}
+			const removalError = await _removeBackupWithRetry(backupPath)
 			if (removalError !== null) {
 				// The copy of the previous content is still on disk and only this function knew
 				// where. Reporting it is what keeps the original error the primary fact while
