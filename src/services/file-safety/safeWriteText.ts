@@ -103,6 +103,10 @@ function _stagingDir(dir: string): string {
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
 	// existing directory), so staged temp files are never group/world readable.
+	// That is the POSIX story only: Windows directory creation ignores this mode argument
+	// and chmodSync establishes no DACL, so on win32 what makes the staging directory
+	// private is the caller's _grantPrivateDaclWindows step, which runs before the first
+	// staged byte and reports rather than fails when icacls is unavailable.
 	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
 	try {
 		fsSync.chmodSync(sd, 0o700)
@@ -146,6 +150,36 @@ async function _restoreDaclWindows(
 		await new Promise<void>((resolve, reject) => {
 			runner("icacls", [dirPath, "/restore", dumpPath], { windowsHide: true }, (err) =>
 				err ? reject(err) : resolve(),
+			)
+		})
+		return true
+	} catch {
+		return false
+	}
+}
+
+/** Apply a restrictive Windows DACL to a freshly created staging directory.
+ * `icacls <dir> /inheritance:r /grant:r "<account>:(OI)(CI)F"` drops every inherited
+ * ACE and leaves one explicit ACE for the account running the write, so files created
+ * inside inherit only that account. Measured on a Windows host: the directory went
+ * from three inherited ACEs (SYSTEM, Administrators and the user) to the single
+ * explicit one, and a file written into it inherited only the user.
+ * Returns false instead of throwing: a machine without icacls, or without a resolvable
+ * account name in the environment, still saves the file, and the caller reports the
+ * leftover exposure through onWarning. */
+async function _grantPrivateDaclWindows(stagingDirPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+	const account = process.env.USERNAME ?? process.env.USER
+	if (!account) {
+		return false
+	}
+	const runner = execFileRunner ?? execFile
+	try {
+		await new Promise<void>((resolve, reject) => {
+			runner(
+				"icacls",
+				[stagingDirPath, "/inheritance:r", "/grant:r", `${account}:(OI)(CI)F`],
+				{ windowsHide: true },
+				(err) => (err ? reject(err) : resolve()),
 			)
 		})
 		return true
@@ -355,6 +389,35 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
+	// The step-2 DACL handling and the staging-directory hardening in step 1 both key
+	// off this value, and the hardening has to report through the same sink, so both are
+	// resolved before the staging directory is created.
+	const platform = options?.platform ?? process.platform
+	// Warning delivery must never abort the write: the notices below describe a
+	// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
+	// a logger that is mid-restart) must not turn that into a failed save.
+	const warn = (message: string) => {
+		const report = (label: string, error: unknown) => {
+			console.warn(
+				`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+		try {
+			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+			const result: unknown = sink(message)
+			// A sink may be async - TypeScript accepts a value-returning callback where
+			// a void one is expected. Awaiting it would let warning delivery delay a
+			// write that has already committed (and hang it if the sink never settles),
+			// while leaving the promise unhandled turns a rejection into an unhandled
+			// rejection, which under Node's default mode can end the process after a
+			// successful write. Attach a handler without awaiting.
+			if (result instanceof Promise) {
+				result.catch((error: unknown) => report("rejected", error))
+			}
+		} catch (error: unknown) {
+			report("failed", error)
+		}
+	}
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -367,6 +430,18 @@ export async function safeWriteText(
 			// extension host encodes a document with VS Code's own codec, which
 			// covers the legacy code pages Node cannot represent) are published
 			// unchanged.
+			// Windows: the platform's directory creation ignores mkdirSync's mode argument and
+			// chmodSync does not establish a private DACL, so a staging directory created
+			// inside a parent whose DACL admits other accounts holds the staged content readable
+			// by those accounts until the step-5 restore. Make the directory private before the
+			// first byte is written; stagingDir is non-null exactly on this branch.
+			if (platform === "win32" && stagingDir !== null) {
+				if (!(await _grantPrivateDaclWindows(stagingDir, options?.execFileRunner))) {
+					warn(
+						`Staged content in ${stagingDir} may be readable by other accounts: the staging directory's Windows DACL could not be made restrictive before the content was written.`,
+					)
+				}
+			}
 			const buffer = Buffer.from(content)
 			let targetMode = 0o644 // default for a fresh target
 			let targetExists = false
@@ -423,32 +498,6 @@ export async function safeWriteText(
 		}
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
-		const platform = options?.platform ?? process.platform
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
-		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -498,19 +547,41 @@ export async function safeWriteText(
 					// keeps the target present, so the step 4 rename is the only change to the
 					// canonical path. The copy is flushed so the retained content survives a crash.
 					try {
-						// Create the destination BEFORE any content exists at it, with the mode fixed
-						// at open time. fs.copyFile picks the destination mode itself (the platform
-						// creation mask subject to umask on some platforms, the source's mode - or its
-						// read-only attribute - on others), so letting it create the file would either
-						// leave a restrictive target's bytes briefly readable to others, or leave the
-						// copy unwritable so the fsync open below fails with EACCES. open() ignores its
-						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
-						// the chmod afterwards is what clears a copied read-only attribute on Windows
-						// and keeps a backup of a permissive file private.
+						// Create the destination BEFORE any content exists at it, with the mode fixed at
+						// open time, and copy the bytes through descriptors this code opened. fs.copyFile
+						// picks the destination's mode itself (the platform creation mask subject to umask
+						// on some platforms) and, on POSIX, re-applies the SOURCE's mode to the file it
+						// writes: a copy through it would widen this private 0o600 seed to the target's
+						// permissions for the whole copy window - the previous content readable to every
+						// account the target never admitted - and on Windows it carries the source's
+						// read-only attribute onto the copy. Writing into the descriptor opened below keeps
+						// the mode this code chose from the first byte to the last, so nothing has to be
+						// chmodded afterwards.
 						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						fsSync.closeSync(seedFd)
-						await fs.copyFile(targetPath, backupPath)
-						await fs.chmod(backupPath, 0o600)
+						try {
+							const sourceFd = fsSync.openSync(targetPath, "r")
+							try {
+								const chunk = Buffer.allocUnsafe(64 * 1024)
+								let readOffset = 0
+								for (;;) {
+									const read = fsSync.readSync(sourceFd, chunk, 0, chunk.length, readOffset)
+									if (read === 0) {
+										break
+									}
+									// writeSync can report a short write: publishing a truncated backup would
+									// hand recovery a copy that is not a complete previous state.
+									let written = 0
+									while (written < read) {
+										written += fsSync.writeSync(seedFd, chunk, written, read - written)
+									}
+									readOffset += read
+								}
+							} finally {
+								fsSync.closeSync(sourceFd)
+							}
+						} finally {
+							fsSync.closeSync(seedFd)
+						}
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
 						// flag the staged temp file uses above.
 						const backupFd = fsSync.openSync(backupPath, "r+")
