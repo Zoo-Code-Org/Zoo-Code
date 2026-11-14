@@ -380,7 +380,19 @@ function _authorizedAncestorLocations(options?: SafeWriteTextOptions): Authorize
 /** True when *target* is *dir* itself or under it on the same spelling. */
 function _isInside(dir: string, target: string): boolean {
 	const rel = path.relative(dir, target)
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
+	// A relative answer that comes back absolute is on another root - another drive on
+	// Windows - and no descendant of *dir* spells itself that way.
+	if (path.isAbsolute(rel)) {
+		return false
+	}
+	// Only a traversal segment on its own leaves *dir*. A name that merely begins with two
+	// dots, the way a directory named ..cache does, is an ordinary child of *dir*, and the
+	// blanket test above refused descendants the caller had pinned by its own name. The first
+	// segment is taken the way the platform that produced this path divides segments: both
+	// spellings of the separator divide them on Windows, only the slash divides them
+	// elsewhere. An empty first segment is *dir* itself, which is inside it.
+	const firstSegment = rel.split(path.sep === "\\" ? /[\\/]/ : path.sep)[0]
+	return firstSegment !== ".."
 }
 
 /** The deepest pinned location that contains *target*, if the caller pinned one. */
@@ -391,6 +403,36 @@ function _deepestAuthorizedLocation(locations: AuthorizedLocation[], target: str
 			_isInside(candidate.location, target) &&
 			(!deepest || candidate.location.length > deepest.location.length)
 		) {
+			deepest = candidate
+		}
+	}
+	return deepest
+}
+
+/** The deepest location the caller pinned that contains the *name* at *target*.
+ *
+ * Selection here is by the spelling the caller authorized, never by where the thing on
+ * disk happens to resolve to. For a pin built from expectedResolvedPath those are the same
+ * string. For an identity pin the caller walked a name, so the name is the comparison, and
+ * where the caller walked through a symlink alias it recorded the location that alias
+ * resolved to, which stands for the same decision and is compared as well. What the
+ * resolved path of *target* is reserved for is the containment check the caller's decision
+ * feeds: a selection that used it would let a directory created under a deep pin move
+ * itself under a shallower one by becoming a link, and pass the check that was supposed to
+ * catch exactly that.
+ */
+function _deepestPinnedDirectory(locations: AuthorizedLocation[], target: string): AuthorizedLocation | undefined {
+	let deepest: AuthorizedLocation | undefined
+	for (const candidate of locations) {
+		// Either spelling is the caller's own decision: the name it walked, or the location
+		// it recorded that name resolving to when it walked through a symlink alias. A
+		// path-form pin has no separate spelling, so its two fields are the same string.
+		const underTheNamedSpelling = _isInside(candidate.dir, target)
+		const underTheAuthorizedLocation = _isInside(candidate.location, target)
+		if (!underTheNamedSpelling && !underTheAuthorizedLocation) {
+			continue
+		}
+		if (!deepest || candidate.dir.length > deepest.dir.length) {
 			deepest = candidate
 		}
 	}
@@ -673,10 +715,14 @@ export async function safeWriteText(
 	// caller never walked - because it was not there when the caller authorized - can be a link
 	// by the time mkdir reaches it, so the parent this write created sits outside the authorized
 	// chain while still being reported as this write's parent, and the fsync chain alone would
-	// then sync and publish through it. Compare each created directory with the deepest location
-	// the caller pinned; a created directory under nothing the caller pinned has left the
-	// authorized chain by construction. A caller that pinned no location has nothing to compare
-	// against and keeps its current behaviour.
+	// then sync and publish through it. Pick the location the caller pinned by the NAME each
+	// created directory carries - never by where that name happens to resolve to - and only
+	// then compare the resolved directory against it. A created directory under nothing the
+	// caller pinned has left the authorized chain by construction, and so has one that resolves
+	// out of the location its own name selected, which is the bypass a resolved-path selection
+	// hid: a created directory under a deep pin that becomes a link into a shallower pin's
+	// grounds passed the check meant to catch it. A caller that pinned no location has nothing
+	// to compare against and keeps its current behaviour.
 	if (createdAncestors.length > 0) {
 		const authorized = _authorizedAncestorLocations(options)
 		if (authorized.length > 0) {
@@ -691,7 +737,10 @@ export async function safeWriteText(
 					}
 					throw error
 				})
-				const pinned = _deepestAuthorizedLocation(authorized, createdReal ?? created)
+				// Selected by the name, so a redirect of the created directory cannot move the
+				// answer to a shallower pin; the resolved directory is compared against the
+				// selection below rather than feeding it.
+				const pinned = _deepestPinnedDirectory(authorized, created)
 				if (pinned === undefined) {
 					throw new AncestorReplacedError(created, "was created under nothing the caller authorized")
 				}

@@ -2131,7 +2131,9 @@ describe("asks landed at the refreshed 2357 footing", () => {
 				expectedAncestorIdentities: pin(pinned),
 			})
 			await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
-			await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+			// The pin covers the name mkdir reported, so the refusal now lands on the containment
+			// check that compares the resolved directory against the selected location.
+			await expect(promise).rejects.toThrow(/outside the authorized location/)
 			expect(fs.rename).not.toHaveBeenCalled()
 			expect(fs.link).not.toHaveBeenCalled()
 		})
@@ -2147,6 +2149,92 @@ describe("asks landed at the refreshed 2357 footing", () => {
 		it("leaves the created chain alone when the caller pinned no location", async () => {
 			const { target } = _scenario(true)
 			const promise = safeWriteText(target, "data", { platform: "linux" })
+			await expect(promise).resolves.toBeUndefined()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		})
+		it("publishes when a created directory merely has a name that begins with two dots under the pinned location", async () => {
+			// A directory named ..cache is an ordinary child of the location the caller pinned. The
+			// containment predicate read every name beginning with two dots as a walk out of the pin,
+			// so this write was refused with AncestorReplacedError before anything was staged, even
+			// though the pin the caller handed in covers it by its own name.
+			const pinned = path.resolve("/ws")
+			const created = path.join(pinned, "..cache")
+			const target = path.join(created, "new", "target.txt")
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === target) throw enoent()
+				// Nothing on this chain moved: the name carrying two leading dots is the only thing
+				// that separates this scenario from the one above.
+				return s
+			})
+			// The outermost directory mkdir created, in the spelling Node answers with.
+			vi.mocked(fs.mkdir).mockImplementation(async () => created)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: pin(pinned),
+			})
+			await expect(promise).resolves.toBeUndefined()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		})
+		it("refuses to publish when a created directory resolves under a shallower pin than the name it was created under", async () => {
+			// Two ancestor pins, /ws and /ws/a. mkdir reports creating /ws/a/new, and the link is
+			// planted only when mkdir answers, so the name the chain carries is still the one the
+			// caller walked while the directory it resolves to now sits under the shallower pin.
+			// A pin selected by the resolved path finds /ws, whose containment check the redirected
+			// directory passes, so the write publishes through grounds the caller never authorized
+			// for that name.
+			const shallow = path.resolve("/ws")
+			const deep = path.resolve("/ws/a")
+			const created = path.join(deep, "new")
+			const redirected = path.join(shallow, "other", "new")
+			const target = path.join(created, "target.txt")
+			let linkPlanted = false
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === target || (s === created && !linkPlanted)) throw enoent()
+				return s === created ? redirected : s
+			})
+			vi.mocked(fs.mkdir).mockImplementation(async () => {
+				linkPlanted = true
+				return created
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: [
+					{ dir: shallow, dev: 1n, ino: 100n, resolvedPath: shallow },
+					{ dir: deep, dev: 1n, ino: 100n, resolvedPath: deep },
+				],
+			})
+			await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+			await expect(promise).rejects.toThrow(/outside the authorized location/)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.link).not.toHaveBeenCalled()
+		})
+		it("publishes when the created chain sits under the location a pinned alias resolved to", async () => {
+			// The control on selecting by name. A caller that authorized a chain THROUGH an alias
+			// records the alias spelling as dir and the location that alias resolves to as
+			// resolvedPath, and mkdir answers on the location side. Selecting by dir alone would find
+			// no pin for this chain and refuse a write whose ancestry never moved.
+			const aliasDir = path.resolve("/ws/alias")
+			const authorizedLocation = path.resolve("/ws/real")
+			const created = path.join(authorizedLocation, "new")
+			const target = path.join(created, "target.txt")
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === target) throw enoent()
+				return path.resolve(s) === aliasDir ? authorizedLocation : s
+			})
+			vi.mocked(fs.mkdir).mockImplementation(async () => created)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: [{ dir: aliasDir, dev: 1n, ino: 100n, resolvedPath: authorizedLocation }],
+			})
 			await expect(promise).resolves.toBeUndefined()
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
 		})
@@ -2281,7 +2369,9 @@ describe("created root in the extended-length namespace", () => {
 				expectedAncestorIdentities: pin,
 			})
 			await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
-			await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+			// Selection is by the name the created chain carries, and the pin covers that name, so the
+			// refusal lands on the containment check rather than on the absence of any pin.
+			await expect(promise).rejects.toThrow(/outside the authorized location/)
 			expect(fs.rename).not.toHaveBeenCalled()
 			expect(fs.link).not.toHaveBeenCalled()
 		},
