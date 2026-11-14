@@ -2125,6 +2125,157 @@ describe("ReadFileTool", () => {
 				expect(calledVersion).toBe(`1:2:300:4000000000:5000000000`)
 				expect(readStarted).toBe(true)
 			})
+
+			it("a truncated slice read is recorded as an incomplete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("line 1\nline 2\nline 3\nline 4\nline 5"))
+				// A view of the file, not the file: lines 2-3 of 5.
+				mockedReadWithSlice.mockReturnValue({
+					content: "2 | line 2\n3 | line 3",
+					returnedLines: 2,
+					totalLines: 5,
+					wasTruncated: true,
+					includedRanges: [[2, 3]],
+				})
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(
+					{ path: "existing.ts", mode: "slice", offset: 2, limit: 2 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
+
+				// The read still succeeded and still reports its view of the file.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("line 2"))
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledPath).toBe(path.resolve("/test/workspace", "existing.ts"))
+				expect(calledComplete).toBe(false)
+				// What the S4 guard reads: a view must not carry full-file authority.
+				expect(reg.get(calledPath)?.complete).toBe(false)
+			})
+
+			it("a read that returned every line is recorded as a complete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("line 1\nline 2"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | line 1\n2 | line 2",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					includedRanges: [[1, 2]],
+				})
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(true)
+				expect(reg.get(calledPath)?.complete).toBe(true)
+			})
+
+			it("a legacy read whose line ranges leave lines out is recorded as an incomplete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockImplementation(async () => "line 1\nline 2\nline 3\nline 4\nline 5")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts", lineRanges: [{ start: 2, end: 3 }] }],
+					_legacyFormat: true,
+				}
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("2 | line 2"))
+				expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.not.stringContaining("line 5"))
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledPath).toBe(path.resolve("/test/workspace", "legacy.ts"))
+				expect(calledComplete).toBe(false)
+				expect(reg.get(calledPath)?.complete).toBe(false)
+			})
+
+			it("a legacy read that covered every line is recorded as a complete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockImplementation(async () => "line 1\nline 2")
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | line 1\n2 | line 2",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					includedRanges: [[1, 2]],
+				})
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(true)
+				expect(reg.get(calledPath)?.complete).toBe(true)
+			})
+
+			it("a legacy read whose ranges together cover the file is recorded as a complete observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockImplementation(async () => "line 1\nline 2\nline 3\nline 4\nline 5")
+
+				// Out of order and overlapping, yet every line is in the view the model got.
+				const legacyParams: LegacyReadFileParams = {
+					files: [
+						{
+							path: "legacy.ts",
+							lineRanges: [
+								{ start: 3, end: 5 },
+								{ start: 1, end: 3 },
+							],
+						},
+					],
+					_legacyFormat: true,
+				}
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(true)
+				expect(reg.get(path.resolve("/test/workspace", "legacy.ts"))?.complete).toBe(true)
+			})
 		})
 	})
 })

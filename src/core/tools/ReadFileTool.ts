@@ -23,7 +23,11 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { getReadablePath } from "../../utils/path"
 import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
-import { readWithIndentation, readWithSlice } from "../../integrations/misc/indentation-reader"
+import {
+	readWithIndentation,
+	readWithSlice,
+	type IndentationReadResult,
+} from "../../integrations/misc/indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
 
@@ -221,11 +225,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					const version = await computeVersionToken(fullPath).catch(() => undefined)
 					const buffer = await fs.readFile(fullPath)
 					const fileContent = buffer.toString("utf-8")
-					const result = this.processTextFile(fileContent, entry)
+					const { output: result, complete: readComplete } = this.processTextFile(fileContent, entry)
 
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
-					observeReadVersion(task, fullPath, version)
+					observeReadVersion(task, fullPath, version, readComplete)
 
 					updateFileResult(relPath, {
 						nativeContent: `File: ${relPath}\n${result}`,
@@ -273,7 +277,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	/**
 	 * Process a text file according to the requested mode.
 	 */
-	private processTextFile(content: string, entry: InternalFileEntry): string {
+	private processTextFile(content: string, entry: InternalFileEntry): { output: string; complete: boolean } {
 		const mode = entry.mode || "slice"
 
 		if (mode === "indentation") {
@@ -306,7 +310,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output += `\n\nIncluded ranges: ${rangeStr} (total: ${result.totalLines} lines)`
 			}
 
-			return output
+			return { output, complete: readCoversWholeFile(result) }
 		}
 
 		// Slice mode (default): simple offset/limit reading
@@ -333,7 +337,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			output = "Note: File is empty"
 		}
 
-		return output
+		return { output, complete: readCoversWholeFile(result) }
 	}
 
 	/**
@@ -783,6 +787,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 				// Handle line ranges if specified
 				let content: string
+				let readComplete: boolean
 				if (entry.lineRanges && entry.lineRanges.length > 0) {
 					const lines = rawContent.split("\n")
 					const selectedLines: string[] = []
@@ -797,10 +802,12 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 						}
 					}
 					content = selectedLines.join("\n")
+					readComplete = lineRangesCoverWholeFile(entry.lineRanges, lines.length)
 				} else {
 					// Read with default limits using slice mode
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
+					readComplete = readCoversWholeFile(result)
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
 					}
@@ -811,7 +818,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// Track file in context
 				await task.fileContextTracker.trackFileContext(relPath, "read_tool")
 
-				observeReadVersion(task, fullPath, version)
+				observeReadVersion(task, fullPath, version, readComplete)
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
@@ -840,11 +847,63 @@ export const readFileTool = new ReadFileTool()
  * the content the model saw, and a guard built on it would green-light a stale write.
  * The conservative direction is the one chosen here: a mutation during the read yields
  * a token that mismatches and blocks the guarded write.
+ *
+ * Completeness travels with the observation: callers pass whether the read that produced
+ * this token returned the whole file or only a view of it, so a slice, ranged or truncated
+ * read cannot later be mistaken for authority over a full-file replacement.
  */
-function observeReadVersion(task: Task, fullPath: string, version: string | undefined): void {
+function observeReadVersion(task: Task, fullPath: string, version: string | undefined, complete: boolean): void {
 	if (version) {
-		task.observationRegistry.observe(fullPath, version)
+		task.observationRegistry.observe(fullPath, version, complete)
 	} else {
 		task.observationRegistry.forget(fullPath)
 	}
+}
+
+/**
+ * Whether a slice or indentation read returned every line of the file.
+ *
+ * Completeness is what the S4 guarded-write needs: a truncated, ranged or offset read
+ * shows the model a view of the file, and an observation built on a view must not authorize
+ * a full-file replacement. A single range covering lines 1..totalLines and no truncation is
+ * the only shape that says the whole file came back; an empty file counts as whole because
+ * there was nothing left out.
+ */
+function readCoversWholeFile(result: IndentationReadResult): boolean {
+	if (result.totalLines === 0) {
+		return true
+	}
+	if (result.wasTruncated) {
+		return false
+	}
+	if (result.includedRanges.length !== 1) {
+		return false
+	}
+	const [start, end] = result.includedRanges[0]
+	return start === 1 && end === result.totalLines
+}
+
+/**
+ * Whether explicit 1-based line ranges together cover every line of the file.
+ *
+ * The legacy read path lets a caller name its own ranges, so coverage is measured on the
+ * ranges rather than on a slice result: overlapping or unordered ranges still count, and a
+ * range clipped by the end of the file counts only for the lines that actually exist.
+ */
+function lineRangesCoverWholeFile(ranges: LineRange[], totalLines: number): boolean {
+	if (totalLines === 0) {
+		return true
+	}
+	const covered = new Set<number>()
+	for (const range of ranges) {
+		const start = Math.max(1, range.start)
+		const end = Math.min(totalLines, range.end)
+		for (let line = start; line <= end; line++) {
+			covered.add(line)
+		}
+		if (covered.size === totalLines) {
+			return true
+		}
+	}
+	return covered.size === totalLines
 }
