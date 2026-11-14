@@ -644,11 +644,6 @@
 			"count": 55
 		}
 	},
-	"core/prompts/sections/__tests__/system-info.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 14
