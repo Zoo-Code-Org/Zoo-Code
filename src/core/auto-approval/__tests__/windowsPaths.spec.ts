@@ -30,6 +30,126 @@ describe("matching on Windows", () => {
 	const matches = (filePath: string, patterns: string[], cwd: string | undefined = WINDOWS_CWD) =>
 		matcher().isFileMatchedByPatterns({ filePath, cwd, patterns, homeDir: WINDOWS_HOME })
 
+	it.each([undefined, "/ws", "\\ws", "//server/share/ws", "\\\\server\\share\\ws"])(
+		"preserves cross-volume wildcard exclusions and their order with workspace %s",
+		(cwd) => {
+			const input = { filePath: "C:/x/.env", cwd, homeDir: WINDOWS_HOME }
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["C:/**", "!/**/.env"] })).toBe(false)
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["!/**/.env", "C:/**"] })).toBe(true)
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["C:/**", "!/**/.env", "C:/x/.env"] })).toBe(
+				true,
+			)
+			expect(
+				matcher().isFileMatchedByPatterns({
+					...input,
+					filePath: "C:/x/notes.md",
+					patterns: ["C:/**", "!/**/.env"],
+				}),
+			).toBe(true)
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["/**"] })).toBe(false)
+		},
+	)
+
+	it.each([
+		{
+			scenario: "a known workspace drive keeps the exclusion on that drive",
+			cwd: "D:/ws",
+			filePath: "C:/x/.env",
+			patterns: ["C:/**", "!/**/.env"],
+			allowed: true,
+		},
+		{
+			scenario: "a known workspace drive still excludes its own files",
+			cwd: "D:/ws",
+			filePath: "D:/x/.env",
+			patterns: ["D:/**", "!/**/.env"],
+			allowed: false,
+		},
+		{
+			scenario: "a drive-relative workspace preserves exclusions on explicit grants",
+			cwd: "C:",
+			filePath: "C:/x/.env",
+			patterns: ["C:/**", "!/**/.env"],
+			allowed: false,
+		},
+		{
+			scenario: "a rooted exclusion cannot address the internal UNC prefix",
+			cwd: undefined,
+			filePath: "//server/share/x/.env",
+			patterns: ["//server/share/**", "!/UNC/**/.env"],
+			allowed: true,
+		},
+		{
+			scenario: "a rooted exclusion cannot address the internal ROOT prefix",
+			cwd: undefined,
+			filePath: "/x/.env",
+			patterns: ["/**", "!/ROOT/**/.env"],
+			allowed: true,
+		},
+		{
+			scenario: "an explicit UNC exclusion stays separate from drives",
+			cwd: undefined,
+			filePath: "C:/x/.env",
+			patterns: ["C:/**", "!//C/x/.env"],
+			allowed: true,
+		},
+		{
+			scenario: "an explicit drive exclusion still blocks that drive",
+			cwd: "//server/share/ws",
+			filePath: "C:/x/.env",
+			patterns: ["C:/**", "!C:/x/.env"],
+			allowed: false,
+		},
+		{
+			scenario: "an explicit drive exclusion does not block a different drive",
+			cwd: "//server/share/ws",
+			filePath: "D:/x/.env",
+			patterns: ["D:/**", "!C:/x/.env"],
+			allowed: true,
+		},
+		{
+			scenario: "backslash exclusions preserve cross-volume restrictions",
+			cwd: "\\\\server\\share\\ws",
+			filePath: "C:\\x\\.env",
+			patterns: ["C:\\**", "!\\**\\.env"],
+			allowed: false,
+		},
+	])("preserves exclusion scope: $scenario", ({ cwd, filePath, patterns, allowed }) => {
+		expect(matcher().isFileMatchedByPatterns({ cwd, filePath, patterns })).toBe(allowed)
+	})
+
+	it("checks cross-volume exclusions against an equivalent drive path for a UNC candidate", () => {
+		expect(
+			matcher().isFileMatchedByPatterns({
+				cwd: "//server/share/Project",
+				canonicalCwd: "C:/Storage/Project",
+				filePath: "//server/share/Project/docs/.env",
+				patterns: ["docs/**", "!/C/Storage/**/.env"],
+			}),
+		).toBe(false)
+	})
+
+	it.each(["//server/sh[a]re/project", "\\\\server\\sh[a]re\\project"])(
+		"keeps an inherited UNC volume literal in rooted grants and exclusions: %s",
+		(cwd) => {
+			expect(matches("//server/sh[a]re/docs/notes.md", ["/docs/**"], cwd)).toBe(true)
+			expect(matches("\\\\server\\sh[a]re\\docs\\notes.md", ["/docs/**"], cwd)).toBe(true)
+			expect(matches("//server/share/docs/notes.md", ["/docs/**"], cwd)).toBe(false)
+			expect(matches("//server/shaare/docs/notes.md", ["/docs/**"], cwd)).toBe(false)
+			expect(matches("docs/private.md", ["docs/**", "!/project/docs/private.md"], cwd)).toBe(false)
+			expect(matches("docs/notes.md", ["docs/**", "!/project/docs/private.md"], cwd)).toBe(true)
+		},
+	)
+
+	it.each(["//server/sh[a]re/docs/**", "\\\\server\\sh[a]re\\docs\\**"])(
+		"preserves user-authored globs in an explicit UNC pattern: %s",
+		(pattern) => {
+			expect(matches("//server/share/docs/notes.md", [pattern])).toBe(true)
+			expect(matches("//server/sh[a]re/docs/notes.md", [pattern])).toBe(false)
+			expect(matches("//server/other/docs/notes.md", [pattern])).toBe(false)
+		},
+	)
+
 	it("keeps share-rooted paths separate from the internal UNC namespace", () => {
 		const cwd = "\\\\server\\share\\project"
 		const rooted = "/UNC/server/share/project/docs/**"

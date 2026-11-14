@@ -328,7 +328,9 @@ function toMatcherPatternWithStrategy(
 	}
 
 	if (isAbsolutePath(normalized, isWindows)) {
-		return `${negation}${strategy.toMatcherAbsolutePath(normalized, workspaceVolume)}`
+		// Only the inherited volume is a literal filesystem name; the user's
+		// absolute pattern can still contain globs, including an explicit UNC share.
+		return `${negation}${strategy.toMatcherAbsolutePath(normalized, escapePatternLiteral(workspaceVolume))}`
 	}
 
 	if (!cwd || isDriveRelativePath(workspacePosix, isWindows)) {
@@ -450,25 +452,39 @@ export function isFileMatchedByPatterns({
 
 	const workspaceRoot = WorkspaceRootCanonicalizer.forStrategy(cwd, canonicalCwd, strategy)
 	const candidates = workspaceRoot.equivalentPaths(`/${candidate}`).map(toRootRelativePath)
-	const matcherPatterns = patterns
-		.map((pattern) => toMatcherPatternWithStrategy(pattern, cwd, isWindows, homeDir, strategy))
-		.filter((pattern): pattern is string => !!pattern)
-
-	if (!matcherPatterns.length) {
-		return false
-	}
+	// Before UNC/unknown-root namespaces were introduced, rooted exclusions in
+	// a workspace without a drive also matched drive paths (e.g. !/**/.env).
+	// Preserve that restriction only for drives, never for the internal UNC/ROOT
+	// prefixes, which must not be addressable by a user's rooted path.
+	const driveCandidates =
+		isWindows && !DRIVE_PREFIX.test(pathsepsToPosix(cwd ?? "", isWindows))
+			? candidates.filter((value) => /^[a-zA-Z]\//.test(value))
+			: []
 
 	try {
 		let matched = false
-		for (const pattern of matcherPatterns) {
+		for (const rawPattern of patterns) {
+			const pattern = toMatcherPatternWithStrategy(rawPattern, cwd, isWindows, homeDir, strategy)
+			if (!pattern) continue
+
 			const negated = pattern.startsWith("!")
-			const matcher = ignore({ ignoreCase: isWindows }).add([
-				negated ? pattern.slice(1) : pattern,
-				MATCH_DIRECTORIES_ONLY_PATTERN,
-			])
+			const alternatives = [{ pattern: negated ? pattern.slice(1) : pattern, candidates }]
+			if (negated && driveCandidates.length) {
+				const rootedExclusion = pathsepsToPosix(rawPattern.slice(1), isWindows)
+				if (rootedExclusion.startsWith("/") && !rootedExclusion.startsWith("//")) {
+					alternatives.push({ pattern: rootedExclusion, candidates: driveCandidates })
+				}
+			}
 			// Apply each rule to both spellings BEFORE advancing to the next rule.
 			// OR-ing two complete matchers would let one spelling bypass an exclusion.
-			if (candidates.some((value) => matcher.ignores(value))) matched = !negated
+			if (
+				alternatives.some(({ pattern, candidates }) => {
+					const matcher = ignore({ ignoreCase: isWindows }).add([pattern, MATCH_DIRECTORIES_ONLY_PATTERN])
+					return candidates.some((value) => matcher.ignores(value))
+				})
+			) {
+				matched = !negated
+			}
 		}
 		return matched
 	} catch (error) {
