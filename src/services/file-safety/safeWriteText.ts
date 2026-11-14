@@ -359,7 +359,7 @@ function _syncDirectory(dir: string): void {
 }
 
 /** Where the caller said a directory was, taken from the pins it handed in. */
-type AuthorizedLocation = { dir: string; location: string }
+type AuthorizedLocation = { dir: string; location: string; identityBacked: boolean }
 
 function _authorizedAncestorLocations(options?: SafeWriteTextOptions): AuthorizedLocation[] {
 	const locations: AuthorizedLocation[] = []
@@ -367,11 +367,12 @@ function _authorizedAncestorLocations(options?: SafeWriteTextOptions): Authorize
 		locations.push({
 			dir: path.resolve(identity.dir),
 			location: path.resolve(identity.resolvedPath ?? identity.dir),
+			identityBacked: true,
 		})
 	}
 	if (options?.expectedResolvedPath) {
 		const pinnedDir = path.dirname(path.resolve(options.expectedResolvedPath))
-		locations.push({ dir: pinnedDir, location: pinnedDir })
+		locations.push({ dir: pinnedDir, location: pinnedDir, identityBacked: false })
 	}
 	return locations
 }
@@ -709,12 +710,13 @@ export async function safeWriteText(
 		// and passes. The effective parent is checked the way the created chain is checked, so a
 		// parent that resolves under nothing the caller pinned is refused before anything is staged.
 		const authorized = _authorizedAncestorLocations(options)
-		// A parent the caller named itself belongs to the ancestry recheck below: that check holds the
-		// identity and the resolution the caller authorized against, and it reports a moved or re-pointed
-		// pin in those terms. Only a parent no pin names -- the case the loop above would have judged had
-		// anything been created -- is this branch's to judge.
+		// A parent the caller named by identity belongs to the ancestry recheck below: that check
+		// holds the (dev, ino) pair and the resolution the caller authorized against, and it reports
+		// a moved or re-pointed pin in those terms. A pin built from expectedResolvedPath carries no
+		// identity, so that recheck has nothing to compare for it and this branch must judge the
+		// parent it names: only identity-backed pins count as named here.
 		const resolvedParent = path.resolve(dirPath)
-		const namedByCaller = authorized.some((pin) => pin.dir === resolvedParent)
+		const namedByCaller = authorized.some((pin) => pin.identityBacked && pin.dir === resolvedParent)
 		if (authorized.length > 0 && !namedByCaller) {
 			const parentReal = await fs.realpath(dirPath).catch((error: unknown) => {
 				const code = getErrorCode(error)

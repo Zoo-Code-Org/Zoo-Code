@@ -2349,4 +2349,15 @@ describe("effective parent validated when mkdir created nothing", () => {
 		).resolves.toBeUndefined()
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
 	})
+	it("refuses to publish when only the path form of the name pin is given and its parent resolves outside", async () => {
+		_scenario(true, false)
+		const promise = safeWriteText(target, "data", {
+			platform: "linux",
+			expectedResolvedPath: target,
+		})
+		await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+		await expect(promise).rejects.toThrow(/nothing the caller authorized/)
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+	})
 })
